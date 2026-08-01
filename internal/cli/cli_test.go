@@ -21,6 +21,17 @@ func run(t *testing.T, args ...string) (stdout, stderr string, code int) {
 	return out.String(), errOut.String(), code
 }
 
+// runWithSchema is [run] against a committed schema dump.
+//
+// These tests exercise the command line, not the database, so they compile a
+// dump rather than starting a container. Reading a real Postgres is covered by
+// the docker-tagged suite; making every CLI test pay for a container would put
+// a minute between a typo and finding out about it.
+func runWithSchema(t *testing.T, root string, args ...string) (stdout, stderr string, code int) {
+	t.Helper()
+	return run(t, append(args, "--schema", filepath.Join(root, "schema.json"))...)
+}
+
 // project writes a minimal but complete project and returns its root.
 func newProject(t *testing.T) string {
 	t.Helper()
@@ -30,7 +41,7 @@ func newProject(t *testing.T) string {
   name: demo
   module: example.com/demo
 `)
-	write(t, filepath.Join(root, ".rig", "schema.json"), todoSchema)
+	write(t, filepath.Join(root, "schema.json"), todoSchema)
 	write(t, filepath.Join(root, "services", "todo", "todo.yaml"), `table: todo
 comment: A single thing someone means to get done.
 columns:
@@ -67,7 +78,7 @@ func TestValidateCleanProject(t *testing.T) {
 	t.Parallel()
 
 	root := newProject(t)
-	_, stderr, code := run(t, "validate", "-C", root)
+	_, stderr, code := runWithSchema(t, root, "validate", "-C", root)
 
 	if code != 0 {
 		t.Fatalf("exit %d, want 0:\n%s", code, stderr)
@@ -91,7 +102,7 @@ columns:
     commnt: Short description of the task.
 `)
 
-	_, stderr, code := run(t, "validate", "-C", root)
+	_, stderr, code := runWithSchema(t, root, "validate", "-C", root)
 	if code == 0 {
 		t.Fatal("a mistyped key should fail validation")
 	}
@@ -122,12 +133,12 @@ validate:
   missing_comment: off
 `)
 
-	_, stderr, code := run(t, "validate", "-C", root)
+	_, stderr, code := runWithSchema(t, root, "validate", "-C", root)
 	if code != 0 {
 		t.Fatalf("warnings alone should not fail:\n%s", stderr)
 	}
 
-	_, stderr, code = run(t, "validate", "-C", root, "--strict")
+	_, stderr, code = runWithSchema(t, root, "validate", "-C", root, "--strict")
 	if code == 0 {
 		t.Fatalf("--strict should fail on warnings:\n%s", stderr)
 	}
@@ -149,7 +160,7 @@ func TestIRWritesACanonicalDocument(t *testing.T) {
 	t.Parallel()
 
 	root := newProject(t)
-	stdout, stderr, code := run(t, "ir", "-C", root)
+	stdout, stderr, code := runWithSchema(t, root, "ir", "-C", root)
 	if code != 0 {
 		t.Fatalf("exit %d:\n%s", code, stderr)
 	}
@@ -167,7 +178,7 @@ func TestIRWritesACanonicalDocument(t *testing.T) {
 
 	// Running twice must produce identical bytes, or a committed document
 	// becomes a source of spurious diffs.
-	again, _, _ := run(t, "ir", "-C", root)
+	again, _, _ := runWithSchema(t, root, "ir", "-C", root)
 	if again != stdout {
 		t.Error("two runs produced different documents")
 	}
@@ -179,7 +190,7 @@ func TestIRWritesToAFile(t *testing.T) {
 	root := newProject(t)
 	out := filepath.Join(root, "ir.json")
 
-	_, stderr, code := run(t, "ir", "-C", root, "-o", out)
+	_, stderr, code := runWithSchema(t, root, "ir", "-C", root, "-o", out)
 	if code != 0 {
 		t.Fatalf("exit %d:\n%s", code, stderr)
 	}
@@ -203,7 +214,7 @@ columns:
     comment: This column was dropped by a migration.
 `)
 
-	stdout, stderr, code := run(t, "ir", "-C", root)
+	stdout, stderr, code := runWithSchema(t, root, "ir", "-C", root)
 	if code == 0 {
 		t.Fatal("a stale column reference should fail")
 	}
@@ -224,7 +235,7 @@ func TestIRSchemaOnly(t *testing.T) {
 	t.Parallel()
 
 	root := newProject(t)
-	stdout, _, code := run(t, "ir", "-C", root, "--schema-only")
+	stdout, _, code := runWithSchema(t, root, "ir", "-C", root, "--schema-only")
 	if code != 0 {
 		t.Fatal("schema-only should succeed")
 	}
@@ -319,12 +330,12 @@ columns:
     commnt: oops
 `)
 
-	_, stderr, _ := run(t, "validate", "-C", root, "--format", "github")
+	_, stderr, _ := runWithSchema(t, root, "validate", "-C", root, "--format", "github")
 	if !strings.HasPrefix(strings.TrimSpace(stderr), "::error ") {
 		t.Errorf("github format should emit workflow commands:\n%s", stderr)
 	}
 
-	_, stderr, _ = run(t, "validate", "-C", root, "--format", "json")
+	_, stderr, _ = runWithSchema(t, root, "validate", "-C", root, "--format", "json")
 	var payload struct {
 		Diagnostics []map[string]any `json:"diagnostics"`
 		Errors      int              `json:"errors"`
@@ -336,7 +347,7 @@ columns:
 		t.Errorf("unexpected payload: %+v", payload)
 	}
 
-	_, stderr, code := run(t, "validate", "-C", root, "--format", "xml")
+	_, stderr, code := runWithSchema(t, root, "validate", "-C", root, "--format", "xml")
 	if code == 0 {
 		t.Error("an unknown format should be rejected")
 	}
@@ -345,21 +356,16 @@ columns:
 	}
 }
 
-func TestNoSchemaSourceExplainsItself(t *testing.T) {
+func TestMissingSchemaDumpExplainsItself(t *testing.T) {
 	t.Parallel()
 
-	root := t.TempDir()
-	write(t, filepath.Join(root, "rig.yaml"), `project:
-  name: demo
-  module: example.com/demo
-`)
-
-	_, stderr, code := run(t, "validate", "-C", root)
+	root := newProject(t)
+	_, stderr, code := run(t, "validate", "-C", root, "--schema", filepath.Join(root, "nope.json"))
 	if code == 0 {
-		t.Fatal("there is no schema to compile")
+		t.Fatal("there is no such dump")
 	}
-	if !strings.Contains(stderr, "--schema") {
-		t.Errorf("the message should say how to supply one:\n%s", stderr)
+	if !strings.Contains(stderr, "nope.json") {
+		t.Errorf("the message should name the file it could not read:\n%s", stderr)
 	}
 }
 
@@ -367,7 +373,7 @@ func TestExplicitConfigPath(t *testing.T) {
 	t.Parallel()
 
 	root := newProject(t)
-	_, stderr, code := run(t, "validate", "--config", filepath.Join(root, "rig.yaml"))
+	_, stderr, code := runWithSchema(t, root, "validate", "--config", filepath.Join(root, "rig.yaml"))
 	if code != 0 {
 		t.Fatalf("an explicit config path should work from anywhere:\n%s", stderr)
 	}

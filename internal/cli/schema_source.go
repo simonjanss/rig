@@ -2,8 +2,8 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 
@@ -11,28 +11,18 @@ import (
 	"github.com/simonjanss/rig/pkg/ir"
 )
 
-// errNoSchemaSource explains the one thing M0 cannot do yet.
-var errNoSchemaSource = errors.New(
-	"no schema available: pass --schema with a dump written by `rig ir --schema-only`.\n" +
-		"Reading the schema from a live database is not wired up yet")
-
 // resolveSchema finds the schema to compile.
 //
-// Introspection is the only impure part of the pipeline and lands in the next
-// milestone. Until then a dump stands in — which is not a workaround so much as
-// the same seam the compiler's own tests use, and will keep using afterwards.
-func resolveSchema(p *project.Project, schemaPath string) (ir.Schema, error) {
+// A dump named explicitly wins, because that is the whole point of naming it:
+// it lets the compiler be exercised against a schema captured earlier, with no
+// database in the loop. Otherwise rig migrates and reads the real thing, which
+// is the only way to be sure the document describes the system the migrations
+// actually produce.
+func (e *env) resolveSchema(ctx context.Context, p *project.Project, schemaPath string) (ir.Schema, error) {
 	if schemaPath != "" {
 		return readSchemaFile(schemaPath)
 	}
-
-	// A dump committed alongside the project is picked up automatically, which
-	// makes the whole command line usable before introspection exists.
-	if def := p.Path(".rig/schema.json"); fileExists(def) {
-		return readSchemaFile(def)
-	}
-
-	return ir.Schema{}, errNoSchemaSource
+	return e.readSchema(ctx, p)
 }
 
 func fileExists(path string) bool {

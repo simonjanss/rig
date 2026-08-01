@@ -212,7 +212,7 @@ func applyColumnConfig(
 		cc, configured := cfg.Columns[col.Name]
 
 		if !configured {
-			if !isManagedColumn(t.Name, col.Name) {
+			if !IsManagedColumn(t.Name, col.Name) {
 				diags.AddSeverity(diag.CodeUnmentionedColumn, opt.UnmentionedColumn,
 					anchorForTable(loaded, t.Name, "columns"),
 					"column %s.%s is not mentioned in its table configuration", t.Name, col.Name)

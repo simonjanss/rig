@@ -93,12 +93,18 @@ func newRoot(e *env) *cobra.Command {
 	root.PersistentFlags().StringVar(&e.configPath, "config", "", "path to rig.yaml (default: search upwards)")
 	root.PersistentFlags().StringVar(&format, "format", "text", "diagnostic format: text, json or github")
 	root.PersistentFlags().BoolVar(&noColor, "no-color", false, "disable colored output")
+	root.PersistentFlags().StringVar(&containerRuntime, "container-bin", "",
+		"container engine to use (default: docker, then podman)")
 
 	root.AddCommand(
 		newValidateCmd(e),
 		newIRCmd(e),
 		newSchemaCmd(e),
 		newCodesCmd(e),
+		newDBCmd(e),
+		newInitCmd(e),
+		newMigrationCmd(e),
+		newSyncCmd(e),
 	)
 
 	return root

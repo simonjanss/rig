@@ -108,7 +108,7 @@ var (
 
 	CodeUnknownTable = newCode("RIG3102", SeverityError,
 		"A configuration file names a table that no longer exists.",
-		"Delete the file, or run `rig sync --prune`.")
+		"Delete the file. `rig sync` reports it but will not remove it: it may hold endpoint definitions worth keeping.")
 
 	CodeUnknownEnumValue = newCode("RIG3103", SeverityError,
 		"The configuration names an enum label that no longer exists.",

@@ -21,6 +21,10 @@ test:
 test-docker:
 	$(GO) test -tags docker ./...
 
+## update-schema: rewrite the introspection golden from a real Postgres
+update-schema:
+	$(GO) test -tags docker ./internal/introspect/ -update
+
 ## update-golden: rewrite golden files from current behavior
 update-golden:
 	$(GO) test ./internal/compile/... ./internal/gen/... -update

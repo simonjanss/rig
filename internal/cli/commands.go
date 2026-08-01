@@ -28,7 +28,7 @@ func newValidateCmd(e *env) *cobra.Command {
 				return e.report(&diags)
 			}
 
-			schema, err := resolveSchema(p, schemaPath)
+			schema, err := e.resolveSchema(cmd.Context(), p, schemaPath)
 			if err != nil {
 				return err
 			}
@@ -55,7 +55,7 @@ func newValidateCmd(e *env) *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVar(&schemaPath, "schema", "", "read the schema from a dump instead of the database")
+	cmd.Flags().StringVar(&schemaPath, "schema", "", "compile a schema dump instead of reading the database")
 	cmd.Flags().BoolVar(&strict, "strict", false, "treat warnings as failures")
 	return cmd
 }
@@ -79,7 +79,7 @@ func newIRCmd(e *env) *cobra.Command {
 				return e.report(&diags)
 			}
 
-			schema, err := resolveSchema(p, schemaPath)
+			schema, err := e.resolveSchema(cmd.Context(), p, schemaPath)
 			if err != nil {
 				return err
 			}
@@ -110,7 +110,7 @@ func newIRCmd(e *env) *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVar(&schemaPath, "schema", "", "read the schema from a dump instead of the database")
+	cmd.Flags().StringVar(&schemaPath, "schema", "", "compile a schema dump instead of reading the database")
 	cmd.Flags().StringVarP(&outPath, "output", "o", "", "write to a file instead of standard output")
 	cmd.Flags().BoolVar(&schemaOnly, "schema-only", false, "print the normalized schema rather than the whole document")
 	return cmd

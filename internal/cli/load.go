@@ -88,3 +88,19 @@ func (e *env) writeOutput(path string, content []byte) error {
 	fmt.Fprintf(e.errOut, "wrote %s\n", path)
 	return nil
 }
+
+// mustProject loads the project, reporting and failing when it cannot.
+//
+// Commands that cannot do anything useful without a project use this instead of
+// threading diagnostics through, since the only diagnostic possible at that
+// point is "there is no project here".
+func (e *env) mustProject() (*project.Project, error) {
+	p, diags := e.loadProject()
+	if p == nil {
+		return nil, e.report(&diags)
+	}
+	if err := e.report(&diags); err != nil {
+		return nil, err
+	}
+	return p, nil
+}

@@ -298,7 +298,7 @@ func checkComments(t *ir.Table, loaded *tableconf.Loaded, sev diag.Severity) dia
 		return diags
 	}
 
-	if strings.TrimSpace(t.Comment) == "" {
+	if !documented(t.Comment) {
 		diags.AddSeverity(diag.CodeMissingTableComment, sev, at(loaded, t, "comment"),
 			"table %q has no comment; describe what it is for in its `comment:` key", t.Name)
 	}
@@ -309,13 +309,32 @@ func checkComments(t *ir.Table, loaded *tableconf.Loaded, sev diag.Severity) dia
 		if c.CommentSource == ir.CommentSourceAuto {
 			continue
 		}
-		if strings.TrimSpace(c.Comment) == "" {
+		if !documented(c.Comment) {
 			diags.AddSeverity(diag.CodeMissingColumnComment, sev, at(loaded, t, "columns", c.Name, "comment"),
 				"column %s.%s has no comment", t.Name, c.Name)
 		}
 	}
 
 	return diags
+}
+
+// documented reports whether a comment says anything.
+//
+// A placeholder left over from a scaffold is not documentation, and treating it
+// as though it were would make the rule satisfiable by ignoring it — which is
+// the same as not having the rule.
+func documented(comment string) bool {
+	c := strings.TrimSpace(comment)
+	if c == "" {
+		return false
+	}
+	upper := strings.ToUpper(c)
+	for _, placeholder := range []string{"TODO", "FIXME", "XXX"} {
+		if strings.HasPrefix(upper, placeholder) {
+			return false
+		}
+	}
+	return true
 }
 
 // checkIndexes catches the two index mistakes that hurt most in practice.
@@ -380,7 +399,7 @@ func checkColumnNaming(t *ir.Table, loaded *tableconf.Loaded, boolSev, tsSev, da
 				t.Name, c.Name, strings.Join(booleanPrefixes, ", "))
 		}
 
-		if tsSev != "" && !isManagedColumn(t.Name, c.Name) {
+		if tsSev != "" && !IsManagedColumn(t.Name, c.Name) {
 			endsAt := strings.HasSuffix(c.Name, "_at")
 			switch {
 			case isTimestampType(c) && !endsAt:

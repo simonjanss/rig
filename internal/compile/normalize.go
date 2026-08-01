@@ -211,7 +211,7 @@ func classifyLinkTable(t *ir.Table, byName map[string]*ir.Table) *ir.LinkTable {
 		if c.Name == left.Name || c.Name == right.Name {
 			continue
 		}
-		if isManagedColumn(t.Name, c.Name) {
+		if IsManagedColumn(t.Name, c.Name) {
 			continue
 		}
 		return nil

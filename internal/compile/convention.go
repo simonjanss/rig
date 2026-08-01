@@ -42,9 +42,10 @@ func SnapshotFromIDColumn(table string) string { return "snapshot_from_" + table
 // SnapshotFromAtColumn records the source row's version identity at copy time.
 func SnapshotFromAtColumn(table string) string { return "snapshot_from_" + table + "_at" }
 
-// managedColumns are set by the framework rather than by a client. They never
-// appear in a create or update input, and they are not configurable.
-func isManagedColumn(table, name string) bool {
+// IsManagedColumn reports whether a column is set by the framework rather than
+// by a client. Such columns never appear in a create or update input, and they
+// are not configurable, so `rig sync` leaves them out of the files it writes.
+func IsManagedColumn(table, name string) bool {
 	switch name {
 	case ColID, ColTenantID,
 		ColCreatedAt, ColCreatedBy,

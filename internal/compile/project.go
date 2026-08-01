@@ -197,7 +197,7 @@ func projectField(t *ir.Table, c *ir.Column, n *naming.Namer, enumTypeNames map[
 
 	// A column rig writes itself, or that the database computes, is readable
 	// and never writable.
-	managed := isManagedColumn(t.Name, c.Name)
+	managed := IsManagedColumn(t.Name, c.Name)
 	f.ReadOnly = managed || !c.Writable()
 
 	rf := ir.ResourceField{Field: f}
