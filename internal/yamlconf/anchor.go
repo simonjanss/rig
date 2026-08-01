@@ -1,10 +1,19 @@
-package tableconf
+// Package yamlconf loads YAML configuration and keeps track of where every key
+// came from.
+//
+// Both of rig's configuration formats — the project file and the per-table
+// files — are validated against a JSON Schema generated from their Go structs,
+// and both report problems at the exact line and column of the offending key.
+// That machinery lives here so the two cannot drift apart in how strictly they
+// read a file or how precisely they report a mistake.
+package yamlconf
 
 import (
 	"strconv"
 	"strings"
 
 	"github.com/goccy/go-yaml/ast"
+
 	"github.com/simonjanss/rig/internal/diag"
 )
 
@@ -12,7 +21,7 @@ import (
 // key that declares it.
 //
 // Paths use the shape "columns.title.comment" for mappings and
-// "endpoints.0.name" for sequences, which is also how validation errors report
+// "endpoints.0.name" for sequences, which is also how schema violations report
 // their location, so the two line up without translation.
 type Index struct {
 	file      string
@@ -57,6 +66,16 @@ func (ix *Index) At(path string) diag.Anchor {
 	return diag.Anchor{File: ix.file, Line: 1, Column: 1, Path: path}
 }
 
+// Has reports whether the exact path appears in the file. Callers use it to
+// tell "set to the zero value" from "not set at all".
+func (ix *Index) Has(path string) bool {
+	if ix == nil {
+		return false
+	}
+	_, ok := ix.positions[path]
+	return ok
+}
+
 // Join builds a path from segments, skipping empty ones.
 func Join(segments ...string) string {
 	parts := make([]string, 0, len(segments))
@@ -68,8 +87,8 @@ func Join(segments ...string) string {
 	return strings.Join(parts, ".")
 }
 
-// buildIndex walks a parsed document and records where every key sits.
-func buildIndex(file string, doc ast.Node) *Index {
+// BuildIndex walks a parsed document and records where every key sits.
+func BuildIndex(file string, doc ast.Node) *Index {
 	ix := &Index{file: file, positions: make(map[string]diag.Anchor)}
 	ix.walk(doc, "")
 	return ix
@@ -114,7 +133,7 @@ func (ix *Index) walk(n ast.Node, path string) {
 	case *ast.SequenceNode:
 		for i, item := range v.Values {
 			p := Join(path, strconv.Itoa(i))
-			ix.record(p, item)
+			ix.record(p, startNode(item))
 			ix.walk(item, p)
 		}
 
@@ -141,14 +160,27 @@ func (ix *Index) walkPair(pair *ast.MappingValueNode, path string) {
 	ix.walk(pair.Value, p)
 }
 
+// startNode finds the token a reader would call the beginning of a node. A
+// mapping's own token is its colon, which is a strange place for a cursor to
+// land; its first key is what someone scanning the file actually looks at.
+func startNode(n ast.Node) ast.Node {
+	switch v := n.(type) {
+	case *ast.MappingNode:
+		if len(v.Values) > 0 {
+			return startNode(v.Values[0])
+		}
+	case *ast.MappingValueNode:
+		if v.Key != nil {
+			return startNode(v.Key)
+		}
+	}
+	return n
+}
+
 func keyName(n ast.Node) string {
 	switch k := n.(type) {
 	case *ast.StringNode:
 		return k.Value
-	case *ast.IntegerNode:
-		return k.GetToken().Value
-	case *ast.BoolNode:
-		return k.GetToken().Value
 	default:
 		if tok := n.GetToken(); tok != nil {
 			return tok.Value

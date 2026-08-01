@@ -91,8 +91,8 @@ var (
 		"")
 
 	CodeConfigInvalid = newCode("RIG3002", SeverityError,
-		"A configuration file does not match the table schema.",
-		"Run `rig schema table` and point your editor at it for completion and inline errors.")
+		"A configuration file does not match its schema.",
+		"Run `rig schema` to write the schema files, then point your editor at them for completion and inline errors.")
 
 	CodeConfigFile = newCode("RIG3003", SeverityError,
 		"A configuration file is misplaced, unreadable, or duplicated.",

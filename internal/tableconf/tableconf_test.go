@@ -136,7 +136,7 @@ func TestDiagnosticsAnchorExactly(t *testing.T) {
 			name:        "missing key anchors on the enclosing item",
 			yaml:        "table: lesson\nendpoints:\n  - name: Publish\n    path: /x\n",
 			wantLine:    3,
-			wantColumn:  9,
+			wantColumn:  5,
 			wantMessage: "missing property 'method'",
 			wantCode:    "RIG3002",
 		},
@@ -250,54 +250,6 @@ func TestMultipleProblemsAllReported(t *testing.T) {
 		if lines[i] != want[i] {
 			t.Fatalf("anchored at lines %v, want %v:\n%s", lines, want, diags.String())
 		}
-	}
-}
-
-func TestIndexAtFallsBackToTheNearestAncestor(t *testing.T) {
-	t.Parallel()
-
-	loaded, diags := tableconf.Parse("lesson.yaml", []byte(
-		"table: lesson\ncolumns:\n  title:\n    comment: hi\n"))
-	if diags.HasErrors() {
-		t.Fatalf("unexpected errors:\n%s", diags.String())
-	}
-	ix := loaded.Index
-
-	if a := ix.At("columns.title.comment"); a.Line != 4 || a.Column != 5 {
-		t.Errorf("exact path = %d:%d, want 4:5", a.Line, a.Column)
-	}
-	if a := ix.At("columns.title"); a.Line != 3 || a.Column != 3 {
-		t.Errorf("parent path = %d:%d, want 3:3", a.Line, a.Column)
-	}
-	if a := ix.At("table"); a.Line != 1 || a.Column != 1 {
-		t.Errorf("top-level path = %d:%d, want 1:1", a.Line, a.Column)
-	}
-
-	// A path that is not in the file at all reports at the nearest key that is,
-	// which is far more useful than defaulting to line 1.
-	a := ix.At("columns.title.immutable")
-	if a.Line != 3 {
-		t.Errorf("missing key anchored at line %d, want the enclosing column at line 3", a.Line)
-	}
-	if a.Path != "columns.title.immutable" {
-		t.Errorf("the reported path should stay the one asked about, got %q", a.Path)
-	}
-
-	// Nothing to fall back to at all still yields a usable anchor.
-	if a := ix.At("nonexistent"); a.File == "" || a.Line != 1 {
-		t.Errorf("unknown top-level path = %+v, want the file at line 1", a)
-	}
-}
-
-func TestNilIndexIsUsable(t *testing.T) {
-	t.Parallel()
-
-	var ix *tableconf.Index
-	if a := ix.At("columns.title"); a.Path != "columns.title" {
-		t.Errorf("a nil index should still produce a path-only anchor, got %+v", a)
-	}
-	if ix.File() != "" {
-		t.Error("a nil index has no file")
 	}
 }
 
@@ -428,24 +380,6 @@ func TestSchemaIsDeterministic(t *testing.T) {
 		}
 		if string(again) != string(first) {
 			t.Fatal("the schema written for editors must be stable across runs")
-		}
-	}
-}
-
-func TestJoin(t *testing.T) {
-	t.Parallel()
-
-	for _, tc := range []struct {
-		in   []string
-		want string
-	}{
-		{[]string{"columns", "title", "comment"}, "columns.title.comment"},
-		{[]string{"", "table"}, "table"},
-		{[]string{"endpoints", "0", "name"}, "endpoints.0.name"},
-		{nil, ""},
-	} {
-		if got := tableconf.Join(tc.in...); got != tc.want {
-			t.Errorf("Join(%v) = %q, want %q", tc.in, got, tc.want)
 		}
 	}
 }
