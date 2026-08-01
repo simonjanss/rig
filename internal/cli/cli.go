@@ -14,6 +14,11 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/simonjanss/rig/internal/diag"
+
+	// The built-in generators register themselves. Importing them here rather
+	// than from the command means there is no way to build a rig that has a
+	// command line but no generators behind it.
+	_ "github.com/simonjanss/rig/internal/gen/allgen"
 )
 
 // Version is stamped at build time.
@@ -105,6 +110,9 @@ func newRoot(e *env) *cobra.Command {
 		newInitCmd(e),
 		newMigrationCmd(e),
 		newSyncCmd(e),
+		newGenerateCmd(e),
+		newCheckCmd(e),
+		newGeneratorsCmd(e),
 	)
 
 	return root

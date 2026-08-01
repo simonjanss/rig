@@ -15,6 +15,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	goruntime "runtime"
 	"strings"
 	"testing"
 )
@@ -194,6 +195,81 @@ DROP TYPE team_tier;
 		}
 	})
 
+	step(t, "generate", func() {
+		appendTo(t, filepath.Join(root, "rig.yaml"),
+			"\ngenerators:\n  - name: persist-go\n    out_dir: internal/store\n    options:\n      package: store\n")
+
+		_, stderr, code := run(t, "generate", "-C", root)
+		if code != 0 {
+			t.Fatalf("generate failed:\n%s", stderr)
+		}
+		for _, want := range []string{"team.gen.go", "team_repository.gen.go", "store.gen.go"} {
+			if !strings.Contains(stderr, want) {
+				t.Errorf("expected %s to be written:\n%s", want, stderr)
+			}
+		}
+	})
+
+	step(t, "check is clean right after generating", func() {
+		_, stderr, code := run(t, "check", "-C", root)
+		if code != 0 {
+			t.Fatalf("check should pass immediately after generate:\n%s", stderr)
+		}
+	})
+
+	step(t, "a hand edit to generated code is refused", func() {
+		generated := filepath.Join(root, "internal", "store", "team.gen.go")
+		appendTo(t, generated, "\n// someone edited this\n")
+
+		if _, stderr, code := run(t, "check", "-C", root); code == 0 {
+			t.Fatalf("check should notice the edit:\n%s", stderr)
+		}
+
+		_, stderr, code := run(t, "generate", "-C", root)
+		if code == 0 {
+			t.Fatal("generate should refuse to discard a hand edit")
+		}
+		if !strings.Contains(stderr, "--force") {
+			t.Errorf("the refusal should say how to proceed:\n%s", stderr)
+		}
+		// Nothing is written when anything conflicts.
+		if !strings.Contains(read(t, generated), "someone edited this") {
+			t.Error("the edit was overwritten despite the refusal")
+		}
+
+		if _, stderr, code := run(t, "generate", "-C", root, "--force"); code != 0 {
+			t.Fatalf("--force should overwrite:\n%s", stderr)
+		}
+		if strings.Contains(read(t, generated), "someone edited this") {
+			t.Error("--force did not overwrite")
+		}
+	})
+
+	step(t, "generated code compiles", func() {
+		writeFile(t, filepath.Join(root, "go.mod"), `module example.com/e2e
+
+go 1.25.0
+
+require (
+	github.com/google/uuid v1.6.0
+	github.com/jackc/pgx/v5 v5.10.0
+	github.com/simonjanss/rig/runtime v0.0.0
+)
+
+replace github.com/simonjanss/rig/runtime => `+runtimeDir(t)+`
+`)
+		env := append(os.Environ(), "GOWORK=off", "GOFLAGS=-mod=mod")
+		if out, err := goRun(root, env, "mod", "tidy"); err != nil {
+			t.Fatalf("go mod tidy:\n%s", out)
+		}
+		if out, err := goRun(root, env, "build", "./..."); err != nil {
+			t.Fatalf("the generated project does not compile:\n%s", out)
+		}
+		if out, err := goRun(root, env, "vet", "./..."); err != nil {
+			t.Fatalf("the generated project does not vet cleanly:\n%s", out)
+		}
+	})
+
 	step(t, "db reset rebuilds from the migrations", func() {
 		_, stderr, code := run(t, "db", "reset", "-C", root)
 		if code != 0 {
@@ -204,6 +280,28 @@ DROP TYPE team_tier;
 			t.Fatalf("ir after reset failed:\n%s", stderr)
 		}
 	})
+}
+
+// runtimeDir locates the runtime module so the generated project can replace
+// it, checking this working copy rather than whatever is published.
+func runtimeDir(t *testing.T) string {
+	t.Helper()
+
+	_, file, _, ok := goruntime.Caller(0)
+	if !ok {
+		t.Fatal("cannot locate the runtime module")
+	}
+	root := filepath.Dir(filepath.Dir(filepath.Dir(file)))
+	return filepath.Join(root, "runtime")
+}
+
+func goRun(dir string, env []string, args ...string) (string, error) {
+	cmd := exec.Command("go", args...)
+	cmd.Dir = dir
+	cmd.Env = env
+
+	out, err := cmd.CombinedOutput()
+	return strings.TrimSpace(string(out)), err
 }
 
 func removeContainer(t *testing.T, name string) {

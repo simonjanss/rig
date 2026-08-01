@@ -1,0 +1,108 @@
+package gentest
+
+import (
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
+	"strings"
+	"testing"
+
+	"github.com/simonjanss/rig/pkg/gen"
+)
+
+// MustCompile writes the artifacts into a throwaway module and builds them.
+//
+// Golden files prove the output has not changed; they say nothing about whether
+// it is valid Go. A generator can emit a file that formats cleanly, matches its
+// golden exactly, and refers to a method that does not exist — and nothing else
+// in the suite would notice. This is the check that does.
+//
+// The module replaces rig/runtime with the local copy, so a change to the
+// runtime and a change to the generator are checked against each other rather
+// than against whatever is published.
+func MustCompile(t *testing.T, artifacts []gen.Artifact, pkg string) {
+	t.Helper()
+
+	if testing.Short() {
+		t.Skip("skipping compile check in short mode")
+	}
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("no go toolchain on PATH")
+	}
+
+	dir := t.TempDir()
+	pkgDir := filepath.Join(dir, pkg)
+	if err := os.MkdirAll(pkgDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, a := range artifacts {
+		path := filepath.Join(pkgDir, filepath.Base(a.Path))
+		if err := os.WriteFile(path, a.Content, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	runtimeDir := runtimeModuleDir(t)
+	gomod := fmt.Sprintf(`module rigtest
+
+go 1.25.0
+
+require (
+	github.com/google/uuid v1.6.0
+	github.com/jackc/pgx/v5 v5.10.0
+	github.com/simonjanss/rig/runtime v0.0.0
+)
+
+replace github.com/simonjanss/rig/runtime => %s
+`, runtimeDir)
+
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte(gomod), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// GOFLAGS=-mod=mod lets the toolchain resolve from the module cache, which
+	// is warm because the repository itself depends on these. GOWORK=off keeps
+	// rig's own workspace from capturing the throwaway module.
+	env := append(os.Environ(), "GOWORK=off", "GOFLAGS=-mod=mod")
+
+	if out, err := runIn(dir, env, "go", "mod", "tidy"); err != nil {
+		t.Fatalf("go mod tidy on the generated module:\n%s", out)
+	}
+	if out, err := runIn(dir, env, "go", "build", "./..."); err != nil {
+		t.Fatalf("the generated code does not compile:\n%s", out)
+	}
+	if out, err := runIn(dir, env, "go", "vet", "./..."); err != nil {
+		t.Fatalf("the generated code does not vet cleanly:\n%s", out)
+	}
+}
+
+func runIn(dir string, env []string, name string, args ...string) (string, error) {
+	cmd := exec.Command(name, args...)
+	cmd.Dir = dir
+	cmd.Env = env
+
+	out, err := cmd.CombinedOutput()
+	return strings.TrimSpace(string(out)), err
+}
+
+// runtimeModuleDir locates the runtime module relative to this source file, so
+// the check works wherever the repository is cloned.
+func runtimeModuleDir(t *testing.T) string {
+	t.Helper()
+
+	_, file, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("cannot locate the runtime module")
+	}
+	// .../internal/gen/gentest/compile.go -> repository root
+	root := filepath.Dir(filepath.Dir(filepath.Dir(filepath.Dir(file))))
+	dir := filepath.Join(root, "runtime")
+
+	if _, err := os.Stat(filepath.Join(dir, "go.mod")); err != nil {
+		t.Fatalf("no runtime module at %s: %v", dir, err)
+	}
+	return dir
+}

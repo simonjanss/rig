@@ -1,0 +1,170 @@
+// Package gen defines what a generator is and how rig runs one.
+//
+// A generator is a pure function from the frozen document to a set of files.
+// Purity is the whole design: because a generator produces its output in memory
+// rather than writing as it goes, `rig check` can run every generator and
+// compare the result to disk without a single special case per generator, and
+// two runs over the same document can be diffed to prove nothing changed.
+//
+// Generators register themselves. Adding one touches exactly one place — its
+// own init — rather than a switch, a config struct, and a diff function that
+// all have to be kept in step.
+package gen
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"io/fs"
+	"maps"
+	"slices"
+	"sync"
+
+	"github.com/simonjanss/rig/pkg/ir"
+)
+
+// WriteMode says who owns a generated file.
+type WriteMode int
+
+const (
+	// Overwrite is rewritten on every run. Such a file is gitignored, excluded
+	// from linting, and never edited by hand.
+	Overwrite WriteMode = iota
+
+	// CreateOnce is written once at its final name and never touched again.
+	//
+	// There is no rename step: a scaffold that needs a second command before it
+	// is usable is a papercut, and the manifest remembers what was written well
+	// enough to leave it alone.
+	CreateOnce
+)
+
+func (m WriteMode) String() string {
+	if m == CreateOnce {
+		return "create-once"
+	}
+	return "overwrite"
+}
+
+// Artifact is one file a generator produced.
+//
+// The content is fully materialized rather than streamed. That is what makes a
+// generator testable without a filesystem and `check` possible without running
+// a second, parallel implementation of every generator.
+type Artifact struct {
+	// Path is relative to the generator's output directory.
+	Path string
+	// Content is the complete file.
+	Content []byte
+	Mode    WriteMode
+	// Perm defaults to 0644 when zero.
+	Perm fs.FileMode
+}
+
+// Options are what a generator is configured with.
+type Options struct {
+	// OutDir is where the artifacts go, resolved to an absolute path.
+	OutDir string
+	// Raw is this generator's own options block from rig.yaml.
+	Raw map[string]any
+}
+
+// Decode reads the options block into a typed struct.
+//
+// Unknown keys are an error: a mistyped option that is silently ignored looks
+// configured and behaves as though it is not, which is the worst of both.
+func Decode[T any](o Options) (T, error) {
+	var out T
+	if len(o.Raw) == 0 {
+		return out, nil
+	}
+
+	raw, err := json.Marshal(o.Raw)
+	if err != nil {
+		return out, fmt.Errorf("read options: %w", err)
+	}
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&out); err != nil {
+		return out, fmt.Errorf("read options: %w", err)
+	}
+	return out, nil
+}
+
+// Generator turns a document into files.
+type Generator interface {
+	// Name is the registry key, and what rig.yaml refers to.
+	Name() string
+	// Description is one line, shown by `rig generators`.
+	Description() string
+	// Version changes when the output format changes, so a stale manifest can
+	// be recognized as stale.
+	Version() string
+
+	// Generate must be pure: the same document and options must always produce
+	// byte-identical artifacts. No filesystem, no clock, no network, and no
+	// iteration over a map without sorting it first.
+	Generate(ctx context.Context, doc *ir.Document, opts Options) ([]Artifact, error)
+}
+
+// Registry holds the known generators.
+type Registry struct {
+	mu     sync.RWMutex
+	byName map[string]Generator
+}
+
+// NewRegistry builds an empty registry.
+func NewRegistry() *Registry { return &Registry{byName: make(map[string]Generator)} }
+
+// Default is the registry the CLI uses. Built-in generators add themselves to
+// it from their own init.
+var Default = NewRegistry()
+
+// Register adds a generator to the default registry.
+//
+// A duplicate name panics at init rather than failing later: two generators
+// answering to one name is a build mistake, and finding out at startup beats
+// finding out from whichever one happened to register second.
+func Register(g Generator) { Default.MustRegister(g) }
+
+// MustRegister adds a generator, panicking on a duplicate name.
+func (r *Registry) MustRegister(g Generator) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	name := g.Name()
+	if _, dup := r.byName[name]; dup {
+		panic("gen: duplicate generator " + name)
+	}
+	r.byName[name] = g
+}
+
+// Get returns a generator by name.
+func (r *Registry) Get(name string) (Generator, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	g, ok := r.byName[name]
+	return g, ok
+}
+
+// Names returns every registered generator, sorted.
+func (r *Registry) Names() []string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	return slices.Sorted(maps.Keys(r.byName))
+}
+
+// All returns every registered generator, ordered by name.
+func (r *Registry) All() []Generator {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	out := make([]Generator, 0, len(r.byName))
+	for _, name := range slices.Sorted(maps.Keys(r.byName)) {
+		out = append(out, r.byName[name])
+	}
+	return out
+}
