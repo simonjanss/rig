@@ -1,0 +1,282 @@
+package diag
+
+import (
+	"cmp"
+	"slices"
+)
+
+// Code identifies a class of problem. Codes are stable: a reader who has seen
+// RIG3101 once should recognize it forever, and CI can suppress or promote a
+// specific one without pattern-matching on message text.
+//
+// Every code carries its own documentation, so there is no separate table to
+// fall out of sync with the constants.
+type Code struct {
+	// ID is the stable identifier, for example "RIG3101".
+	ID string
+	// Severity is what the code reports at unless a rule overrides it. Rules
+	// whose severity comes from the project configuration pass it explicitly.
+	Severity Severity
+	// Summary is a one-line description of the problem class, used by the
+	// generated documentation and by `rig codes`.
+	Summary string
+	// Hint, when set, is attached to every diagnostic with this code and tells
+	// the reader what to do about it.
+	Hint string
+}
+
+var registry = map[string]Code{}
+
+// newCode registers a code. Registering the same ID twice panics at init, which
+// makes a copy-pasted code a build-time failure rather than a confusing report.
+func newCode(id string, sev Severity, summary, hint string) Code {
+	if _, dup := registry[id]; dup {
+		panic("diag: duplicate diagnostic code " + id)
+	}
+	c := Code{ID: id, Severity: sev, Summary: summary, Hint: hint}
+	registry[id] = c
+	return c
+}
+
+// Codes returns every registered code, ordered by ID.
+func Codes() []Code {
+	out := make([]Code, 0, len(registry))
+	for _, c := range registry {
+		out = append(out, c)
+	}
+	slices.SortFunc(out, func(a, b Code) int { return cmp.Compare(a.ID, b.ID) })
+	return out
+}
+
+// LookupCode returns the code with the given ID.
+func LookupCode(id string) (Code, bool) {
+	c, ok := registry[id]
+	return c, ok
+}
+
+// Reading the database: RIG1xxx.
+var (
+	CodeUnmappableType = newCode("RIG1001", SeverityError,
+		"A column's Postgres type has no mapping to a Go type.",
+		"Use a supported type, or add a domain over one.")
+
+	CodeEnumWithoutValues = newCode("RIG1002", SeverityError,
+		"A Postgres enum type has no labels.",
+		"")
+
+	CodeUnsupportedRelation = newCode("RIG1003", SeverityWarning,
+		"A relation was skipped because rig cannot project it.",
+		"")
+)
+
+// Projecting the API surface: RIG2xxx.
+var (
+	CodeNameCollision = newCode("RIG2001", SeverityError,
+		"Two tables or columns project to the same API name.",
+		"Rename one of them with the `resource:` or `field:` key.")
+
+	CodeUnpluralizable = newCode("RIG2002", SeverityError,
+		"A table name has no derivable plural.",
+		"Set `plural:` on the table, or add an entry to `naming.plurals`.")
+
+	CodeReservedName = newCode("RIG2003", SeverityError,
+		"A projected name collides with one rig reserves.",
+		"Rename the field with the `field:` key.")
+)
+
+// Applying the table configuration: RIG3xxx.
+var (
+	CodeUnmentionedColumn = newCode("RIG3100", SeverityWarning,
+		"A column exists in the database but is not mentioned in the table configuration.",
+		"Run `rig sync` to add it, then replace the placeholder comment.")
+
+	CodeUnknownColumn = newCode("RIG3101", SeverityError,
+		"The configuration names a column that no longer exists.",
+		"Remove the entry, or run `rig sync --prune`.")
+
+	CodeUnknownTable = newCode("RIG3102", SeverityError,
+		"A configuration file names a table that no longer exists.",
+		"Delete the file, or run `rig sync --prune`.")
+
+	CodeUnknownEnumValue = newCode("RIG3103", SeverityError,
+		"The configuration names an enum label that no longer exists.",
+		"Remove the entry, or run `rig sync --prune`.")
+
+	CodeUnmentionedEnumValue = newCode("RIG3104", SeverityWarning,
+		"An enum label is not described in the table configuration.",
+		"Run `rig sync` to add it.")
+
+	CodeUnknownEnum = newCode("RIG3105", SeverityError,
+		"The configuration names an enum type that no longer exists.",
+		"")
+
+	CodeUnknownRelation = newCode("RIG3106", SeverityError,
+		"The configuration names a relation that does not exist.",
+		"")
+
+	CodeDuplicateFieldName = newCode("RIG3201", SeverityError,
+		"Two columns are exposed under the same API field name.",
+		"Change one of the `field:` keys.")
+
+	CodeExcludeBreaksCreate = newCode("RIG3210", SeverityError,
+		"Excluding this column would make the resource impossible to create.",
+		"Give the column a default, make it nullable, or drop the Create operation.")
+
+	CodeImmutableUnwritable = newCode("RIG3211", SeverityError,
+		"`immutable` was set on a column that can never be written anyway.",
+		"Remove the key: generated and identity columns are already read-only.")
+
+	CodeUnknownBodyObject = newCode("RIG3220", SeverityError,
+		"A custom endpoint references an object that does not exist.",
+		"")
+
+	CodeInvalidEndpoint = newCode("RIG3221", SeverityError,
+		"A custom endpoint is malformed.",
+		"")
+
+	CodeInvalidFormat = newCode("RIG3230", SeverityError,
+		"A column declares a format its type cannot carry.",
+		"Formats apply to String columns only.")
+
+	CodeInvalidOperation = newCode("RIG3240", SeverityError,
+		"An operation is not valid here.",
+		"")
+
+	CodeOperationUnsupported = newCode("RIG3241", SeverityError,
+		"An operation was requested that the table cannot support.",
+		"")
+)
+
+// Expanding CRUD, filters, and defaults: RIG4xxx.
+var (
+	CodeEndpointShadowed = newCode("RIG4001", SeverityInfo,
+		"A hand-written endpoint replaces the generated one of the same name.",
+		"")
+)
+
+// Structural validation: RIG5xxx. These are always errors — the generators
+// cannot produce correct code without them.
+var (
+	CodeMissingPrimaryKey = newCode("RIG5001", SeverityError,
+		"A table has no primary key.",
+		"Every table rig exposes needs `id uuid primary key`.")
+
+	CodePrimaryKeyShape = newCode("RIG5002", SeverityError,
+		"A table's primary key is not a single `id uuid` column.",
+		"Rename the column to `id`, or exclude the table from the API.")
+
+	CodeSnapshotTriplePartial = newCode("RIG5010", SeverityError,
+		"A table has some but not all of the snapshot columns.",
+		"A snapshotable table needs version_type, snapshot_from_<table>_id and snapshot_from_<table>_at, or none of them.")
+
+	CodeSnapshotColumnType = newCode("RIG5011", SeverityError,
+		"A snapshot column has the wrong type.",
+		"")
+
+	CodeSnapshotEnumValues = newCode("RIG5012", SeverityError,
+		"The version_type enum is missing a required label.",
+		"It must contain both 'Original' and 'Snapshot'.")
+
+	CodeSnapshotIgnoreUnavailable = newCode("RIG5013", SeverityError,
+		"`snapshot_ignore` was set on a table that keeps no snapshots.",
+		"Remove the key, or add the snapshot columns to the table.")
+
+	CodeSnapshotIgnoreReserved = newCode("RIG5014", SeverityError,
+		"`snapshot_ignore` was set on a snapshot bookkeeping column.",
+		"")
+
+	CodeAuditColumnShape = newCode("RIG5020", SeverityError,
+		"An audit column has the wrong type.",
+		"Audit actor columns must be `uuid` and nullable; audit timestamps must be `timestamptz`.")
+
+	CodeRestoreWindowRequired = newCode("RIG5030", SeverityError,
+		"A soft-deletable table does not declare `restore_window_days`.",
+		"Add `restore_window_days:` with the number of days a deleted row stays restorable.")
+
+	CodeRestoreWindowForbidden = newCode("RIG5031", SeverityError,
+		"`restore_window_days` was set on a table that is not soft-deletable.",
+		"Remove the key, or add a nullable `deleted_at timestamptz` column.")
+
+	CodeRestoreWindowInvalid = newCode("RIG5032", SeverityError,
+		"`restore_window_days` must be a positive number of days.",
+		"")
+
+	CodeEnumNullabilityMixed = newCode("RIG5040", SeverityError,
+		"An enum type is nullable in one column and not in another.",
+		"Generated enum handling needs one answer per type.")
+
+	CodeOrderByUnknown = newCode("RIG5050", SeverityError,
+		"`order_by` names a column that does not exist.",
+		"")
+
+	CodeLinkTableShape = newCode("RIG5060", SeverityError,
+		"A join table's primary key is not exactly its two foreign-key columns.",
+		"")
+
+	CodeTenantColumnShape = newCode("RIG5070", SeverityError,
+		"The tenant column has the wrong type.",
+		"`tenant_id` must be `uuid not null`.")
+
+	CodeUnresolvedType = newCode("RIG5080", SeverityError,
+		"A field references a type that is not declared anywhere.",
+		"")
+)
+
+// Convention validation: RIG6xxx. Severity comes from the `validate` block of
+// the project configuration; the value here is the default.
+var (
+	CodeMissingTableComment = newCode("RIG6001", SeverityError,
+		"A table has no comment.",
+		"Describe what the table is for in its configuration's `comment:` key.")
+
+	CodeMissingColumnComment = newCode("RIG6002", SeverityError,
+		"A column has no comment.",
+		"Describe the column in its `comment:` key.")
+
+	CodeForeignKeyNotIndexed = newCode("RIG6010", SeverityError,
+		"A foreign-key column is not covered by an index.",
+		"Add an index; unindexed foreign keys make joins and cascading lookups slow.")
+
+	CodeTenantIndexNotLeading = newCode("RIG6011", SeverityError,
+		"No index leads with the tenant column.",
+		"Every generated query filters by tenant, so an index leading with it is the difference between a seek and a scan.")
+
+	CodeBooleanPrefix = newCode("RIG6020", SeverityWarning,
+		"A boolean column does not read as a predicate.",
+		"Prefix it with is_, has_, can_, should_, was_ or allow_.")
+
+	CodeTimestampSuffix = newCode("RIG6021", SeverityWarning,
+		"A timestamp column's name does not end in _at, or an _at column is not a timestamp.",
+		"")
+
+	CodeDateSuffix = newCode("RIG6022", SeverityWarning,
+		"A date column's name does not end in _date, or a _date column is not a date.",
+		"")
+
+	CodeForeignKeyNaming = newCode("RIG6030", SeverityWarning,
+		"A foreign-key column is not named after the table it references.",
+		"Name it <target>_id, or <qualifier>_<target>_id.")
+
+	CodeCascadeDelete = newCode("RIG6040", SeverityError,
+		"A foreign key declares ON DELETE CASCADE.",
+		"Delete through the service layer instead, so hooks, audit entries and snapshots are not bypassed.")
+
+	CodeMigrationFilename = newCode("RIG6050", SeverityError,
+		"A migration file is not named NNNNN_snake_case.sql.",
+		"")
+
+	CodeMigrationDuplicate = newCode("RIG6051", SeverityError,
+		"Two migrations share the same numeric prefix.",
+		"")
+)
+
+// Internal consistency: RIG9xxx. These report a bug in rig, not in the project.
+var (
+	CodeColumnRefMismatch = newCode("RIG9001", SeverityError,
+		"A field's column reference disagrees with the schema it points at.",
+		"This is a bug in rig. Please report it with the schema that triggered it.")
+
+	CodeInternal = newCode("RIG9002", SeverityError,
+		"An internal invariant was violated.",
+		"This is a bug in rig. Please report it with the schema that triggered it.")
+)

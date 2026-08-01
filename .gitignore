@@ -1,0 +1,17 @@
+# Binaries
+/bin/
+/dist/
+rig
+
+# Go
+*.test
+*.out
+coverage.*
+
+# Editors / OS
+.DS_Store
+.idea/
+.vscode/
+
+# Workspace sum file is machine-specific noise; the per-module go.sum files are authoritative.
+go.work.sum
