@@ -1,0 +1,5 @@
+table: fixture
+comment: A scheduled contest between two teams.
+columns:
+  kickoff_at:
+    comment: When the contest starts.

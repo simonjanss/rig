@@ -84,8 +84,20 @@ var (
 		"Rename the field with the `field:` key.")
 )
 
-// Applying the table configuration: RIG3xxx.
+// Reading the table configuration: RIG3xxx.
 var (
+	CodeConfigSyntax = newCode("RIG3001", SeverityError,
+		"A configuration file is not valid YAML.",
+		"")
+
+	CodeConfigInvalid = newCode("RIG3002", SeverityError,
+		"A configuration file does not match the table schema.",
+		"Run `rig schema table` and point your editor at it for completion and inline errors.")
+
+	CodeConfigFile = newCode("RIG3003", SeverityError,
+		"A configuration file is misplaced, unreadable, or duplicated.",
+		"")
+
 	CodeUnmentionedColumn = newCode("RIG3100", SeverityWarning,
 		"A column exists in the database but is not mentioned in the table configuration.",
 		"Run `rig sync` to add it, then replace the placeholder comment.")
