@@ -1,0 +1,14 @@
+table: article
+comment: A piece of writing published to readers.
+
+columns:
+  headline:
+    comment: The title shown in listings.
+  # This column was renamed to `body` by a migration; the entry was left behind.
+  content:
+    comment: The article text.
+  published:
+    comment: Whether readers can see the article.
+  body:
+    comment: The article text.
+    snapshot_ignore: true

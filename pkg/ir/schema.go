@@ -156,6 +156,11 @@ type Check struct {
 
 // LinkTable describes a pure many-to-many join table.
 type LinkTable struct {
+	// Table is the join table itself. It is carried here because a relation
+	// derived from a join table is otherwise unable to name the thing it
+	// travels through, and that name is how configuration refers to it.
+	Table string `json:"table"`
+
 	LeftTable   string `json:"left_table"`
 	LeftColumn  string `json:"left_column"`
 	RightTable  string `json:"right_table"`

@@ -1,0 +1,13 @@
+table: fixture
+comment: A scheduled contest between two teams.
+columns:
+  home_team_id:
+    field: HomeTeamID
+    comment: The team playing at home.
+    immutable: true
+  away_team_id:
+    field: AwayTeamID
+    comment: The team playing away.
+    immutable: true
+  kickoff_at:
+    comment: When the contest starts.

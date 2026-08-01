@@ -391,7 +391,13 @@ type Endpoint struct {
 
 	Request   EndpointRequest    `json:"request"`
 	Responses []EndpointResponse `json:"responses"`
-	Impl      EndpointImpl       `json:"impl"`
+	// Errors are the standard failure statuses this endpoint can return. They
+	// are listed as bare codes rather than as full responses because every one
+	// of them has the same body — the Error object — and spelling that out on
+	// every endpoint would triple the size of the document without adding a
+	// fact. Generators pair each code with the matching ErrorCode value.
+	Errors []int        `json:"errors,omitempty"`
+	Impl   EndpointImpl `json:"impl"`
 }
 
 // EndpointRequest is everything a client sends.

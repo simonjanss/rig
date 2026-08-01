@@ -1,0 +1,76 @@
+table: lesson
+comment: A single scheduled teaching occasion.
+
+operations: [Create, Get, List, Search, Update, Delete]
+order_by: [-starts_at, id]
+restore_window_days: 30
+
+columns:
+  title:
+    comment: Human-readable name shown in the timetable.
+  notes:
+    comment: Free-text notes kept alongside the lesson.
+    snapshot_ignore: true
+  status:
+    comment: Lifecycle state of the lesson.
+    operations: [Read, Update]
+  manager_email:
+    field: ManagerEmailAddress
+    comment: Address that notifications about this lesson are sent to.
+    format: EmailAddress
+  starts_at:
+    comment: When the lesson begins.
+    immutable: true
+  capacity:
+    comment: Maximum number of participants, or null for no limit.
+  price:
+    comment: Amount charged per participant.
+  tags:
+    comment: Free-form labels used for grouping.
+  row_version:
+    comment: Optimistic-concurrency counter maintained by the database.
+    exclude: true
+  search_vector:
+    comment: Denormalized text used by full-text search.
+
+enums:
+  lesson_status:
+    name: LessonStatus
+    description: Lifecycle state of a lesson.
+    values:
+      planned:
+        name: Planned
+        description: Created but not yet started.
+      in_progress:
+        name: InProgress
+        description: Currently being taught.
+      completed:
+        name: Completed
+        description: Finished; grades may now be entered.
+  lesson_version_type:
+    name: LessonVersionType
+    description: Whether a row is the live lesson or a snapshot of a previous version.
+
+endpoints:
+  - name: Publish
+    method: POST
+    path: /{id}/_publish
+    summary: Publish the lesson to its participants.
+    permission: lesson.publish
+    request:
+      path_params:
+        - name: ID
+          type: UUID
+          description: The lesson to publish.
+      body:
+        - name: NotifyGuardians
+          type: Bool
+          default: "true"
+          description: Whether guardians are notified as well.
+    responses:
+      - status: 200
+        body_object: Lesson
+        description: The published lesson.
+      - status: 409
+        body_object: Error
+        description: The lesson was not in the Planned state.

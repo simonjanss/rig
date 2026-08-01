@@ -1,0 +1,93 @@
+// Package compile turns a Postgres schema and its table configuration into the
+// frozen document every generator reads.
+//
+// The pipeline is a sequence of pure functions. Introspection — the one impure
+// step — happens elsewhere and hands its result in by value, so the whole
+// compiler runs from a JSON fixture with no database and no container. That is
+// what makes the bulk of rig's test suite finish in under a second, and it is
+// the reason [Compile] takes a schema rather than a connection.
+//
+// Every stage appends to one diagnostic list rather than returning on the first
+// problem, so a developer who has made five mistakes learns about all five from
+// one run.
+package compile
+
+import (
+	"github.com/simonjanss/rig/internal/diag"
+	"github.com/simonjanss/rig/internal/naming"
+	"github.com/simonjanss/rig/internal/project"
+	"github.com/simonjanss/rig/internal/tableconf"
+	"github.com/simonjanss/rig/pkg/ir"
+)
+
+// Options carry everything the pure stages need from the project.
+type Options struct {
+	// Project supplies naming, layout, API shape, and rule severities.
+	Project *project.Project
+	// Tool identifies the rig version in the produced document.
+	Tool string
+	// IgnoreTables are never projected; migration bookkeeping lives here.
+	IgnoreTables []string
+}
+
+// Compile runs every stage after introspection.
+//
+// A document is always returned, even when validation failed. It is marked
+// invalid and generators refuse to run against it, but it can still be
+// inspected — which is what lets `rig sync` repair a project that does not yet
+// validate. Refusing to produce anything would make a broken project harder to
+// fix than it needs to be.
+func Compile(raw ir.Schema, set *tableconf.Set, opt Options) (*ir.Document, diag.List) {
+	var diags diag.List
+
+	p := opt.Project
+	n := p.Namer()
+	cfg := p.Config
+
+	schema, d := Normalize(raw, NormalizeOptions{
+		IgnoreTables: append([]string{cfg.Migrations.Table}, opt.IgnoreTables...),
+	})
+	diags.Append(d)
+
+	api, d := Project(schema, ProjectOptions{
+		Name:        cfg.API.Name,
+		Version:     cfg.API.Version,
+		Description: cfg.API.Description,
+		BasePath:    cfg.API.BasePath,
+		Namer:       n,
+	})
+	diags.Append(d)
+
+	api, schema, d = ApplyConfig(api, schema, set, ConfigOptions{
+		Namer:             n,
+		UnmentionedColumn: p.Severity(cfg.Validate.UnmentionedColumn, diag.CodeUnmentionedColumn),
+	})
+	diags.Append(d)
+
+	api, d = Expand(api, ExpandOptions{
+		Namer:        n,
+		SearchMethod: string(cfg.API.SearchMethod),
+		BasePath:     cfg.API.BasePath,
+	})
+	diags.Append(d)
+
+	doc, d := Freeze(api, schema, Meta{Tool: opt.Tool})
+	diags.Append(d)
+
+	diags.Append(Validate(doc, set, p))
+
+	// Validation runs after freezing, so the flag has to be refreshed with what
+	// it found.
+	doc.Valid = !diags.HasErrors()
+
+	return doc, diags
+}
+
+// namerOrDefault keeps the stages usable on their own, in tests and in tools
+// that drive one of them directly.
+func namerOrDefault(n *naming.Namer) *naming.Namer {
+	if n != nil {
+		return n
+	}
+	return naming.New(naming.Config{})
+}

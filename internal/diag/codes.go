@@ -221,10 +221,6 @@ var (
 		"`order_by` names a column that does not exist.",
 		"")
 
-	CodeLinkTableShape = newCode("RIG5060", SeverityError,
-		"A join table's primary key is not exactly its two foreign-key columns.",
-		"")
-
 	CodeTenantColumnShape = newCode("RIG5070", SeverityError,
 		"The tenant column has the wrong type.",
 		"`tenant_id` must be `uuid not null`.")

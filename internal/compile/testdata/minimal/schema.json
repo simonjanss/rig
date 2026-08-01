@@ -1,0 +1,26 @@
+{
+  "name": "public",
+  "tables": [
+    {
+      "name": "todo",
+      "comment": "",
+      "kind": "Base",
+      "columns": [
+        { "name": "id", "sql_type": "uuid", "udt_name": "uuid", "nullable": false, "ordinal": 1, "is_primary_key": true },
+        { "name": "tenant_id", "sql_type": "uuid", "udt_name": "uuid", "nullable": false, "ordinal": 2 },
+        { "name": "created_at", "sql_type": "timestamptz", "udt_name": "timestamptz", "nullable": false, "ordinal": 3 },
+        { "name": "updated_at", "sql_type": "timestamptz", "udt_name": "timestamptz", "nullable": true, "ordinal": 4 },
+        { "name": "title", "sql_type": "text", "udt_name": "text", "nullable": false, "ordinal": 5 },
+        { "name": "notes", "sql_type": "text", "udt_name": "text", "nullable": true, "ordinal": 6 },
+        { "name": "is_done", "sql_type": "bool", "udt_name": "bool", "nullable": false, "ordinal": 7, "has_default": true, "default": "false" },
+        { "name": "due_date", "sql_type": "date", "udt_name": "date", "nullable": true, "ordinal": 8 }
+      ],
+      "primary_key": ["id"],
+      "indexes": [
+        { "name": "todo_pkey", "columns": ["id"], "unique": true, "method": "btree" },
+        { "name": "todo_tenant_created_idx", "columns": ["tenant_id", "created_at"], "method": "btree" }
+      ]
+    }
+  ],
+  "enums": []
+}

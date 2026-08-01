@@ -1,0 +1,9 @@
+table: team
+comment: A group of players that competes as a unit.
+columns:
+  name:
+    comment: Display name of the team.
+relations:
+  team_player:
+    name: Players
+    embed: true

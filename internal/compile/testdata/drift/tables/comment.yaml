@@ -1,0 +1,2 @@
+table: comment
+comment: This table was dropped by a migration but its configuration remains.

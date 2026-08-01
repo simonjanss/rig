@@ -1,0 +1,89 @@
+{
+  "name": "public",
+  "tables": [
+    {
+      "name": "team",
+      "kind": "Base",
+      "columns": [
+        { "name": "id", "sql_type": "uuid", "udt_name": "uuid", "nullable": false, "ordinal": 1, "is_primary_key": true },
+        { "name": "tenant_id", "sql_type": "uuid", "udt_name": "uuid", "nullable": false, "ordinal": 2 },
+        { "name": "created_at", "sql_type": "timestamptz", "udt_name": "timestamptz", "nullable": false, "ordinal": 3 },
+        { "name": "name", "sql_type": "text", "udt_name": "text", "nullable": false, "ordinal": 4 }
+      ],
+      "primary_key": ["id"],
+      "indexes": [
+        { "name": "team_pkey", "columns": ["id"], "unique": true, "method": "btree" },
+        { "name": "team_tenant_idx", "columns": ["tenant_id"], "method": "btree" }
+      ]
+    },
+    {
+      "name": "player",
+      "kind": "Base",
+      "columns": [
+        { "name": "id", "sql_type": "uuid", "udt_name": "uuid", "nullable": false, "ordinal": 1, "is_primary_key": true },
+        { "name": "tenant_id", "sql_type": "uuid", "udt_name": "uuid", "nullable": false, "ordinal": 2 },
+        { "name": "created_at", "sql_type": "timestamptz", "udt_name": "timestamptz", "nullable": false, "ordinal": 3 },
+        { "name": "full_name", "sql_type": "text", "udt_name": "text", "nullable": false, "ordinal": 4 }
+      ],
+      "primary_key": ["id"],
+      "indexes": [
+        { "name": "player_pkey", "columns": ["id"], "unique": true, "method": "btree" },
+        { "name": "player_tenant_idx", "columns": ["tenant_id"], "method": "btree" }
+      ]
+    },
+    {
+      "name": "fixture",
+      "kind": "Base",
+      "columns": [
+        { "name": "id", "sql_type": "uuid", "udt_name": "uuid", "nullable": false, "ordinal": 1, "is_primary_key": true },
+        { "name": "tenant_id", "sql_type": "uuid", "udt_name": "uuid", "nullable": false, "ordinal": 2 },
+        { "name": "created_at", "sql_type": "timestamptz", "udt_name": "timestamptz", "nullable": false, "ordinal": 3 },
+        {
+          "name": "home_team_id", "sql_type": "uuid", "udt_name": "uuid", "nullable": false, "ordinal": 4,
+          "foreign_key": { "table": "team", "column": "id" }
+        },
+        {
+          "name": "away_team_id", "sql_type": "uuid", "udt_name": "uuid", "nullable": false, "ordinal": 5,
+          "foreign_key": { "table": "team", "column": "id" }
+        },
+        { "name": "kickoff_at", "sql_type": "timestamptz", "udt_name": "timestamptz", "nullable": false, "ordinal": 6 }
+      ],
+      "primary_key": ["id"],
+      "foreign_keys": [
+        { "name": "fixture_home_fk", "columns": ["home_team_id"], "foreign_table": "team", "foreign_columns": ["id"] },
+        { "name": "fixture_away_fk", "columns": ["away_team_id"], "foreign_table": "team", "foreign_columns": ["id"] }
+      ],
+      "indexes": [
+        { "name": "fixture_pkey", "columns": ["id"], "unique": true, "method": "btree" },
+        { "name": "fixture_tenant_idx", "columns": ["tenant_id", "kickoff_at"], "method": "btree" },
+        { "name": "fixture_home_idx", "columns": ["home_team_id"], "method": "btree" },
+        { "name": "fixture_away_idx", "columns": ["away_team_id"], "method": "btree" }
+      ]
+    },
+    {
+      "name": "team_player",
+      "kind": "Base",
+      "columns": [
+        {
+          "name": "team_id", "sql_type": "uuid", "udt_name": "uuid", "nullable": false, "ordinal": 1, "is_primary_key": true,
+          "foreign_key": { "table": "team", "column": "id" }
+        },
+        {
+          "name": "player_id", "sql_type": "uuid", "udt_name": "uuid", "nullable": false, "ordinal": 2, "is_primary_key": true,
+          "foreign_key": { "table": "player", "column": "id" }
+        },
+        { "name": "created_at", "sql_type": "timestamptz", "udt_name": "timestamptz", "nullable": false, "ordinal": 3 }
+      ],
+      "primary_key": ["team_id", "player_id"],
+      "foreign_keys": [
+        { "name": "team_player_team_fk", "columns": ["team_id"], "foreign_table": "team", "foreign_columns": ["id"] },
+        { "name": "team_player_player_fk", "columns": ["player_id"], "foreign_table": "player", "foreign_columns": ["id"] }
+      ],
+      "indexes": [
+        { "name": "team_player_pkey", "columns": ["team_id", "player_id"], "unique": true, "method": "btree" },
+        { "name": "team_player_player_idx", "columns": ["player_id"], "method": "btree" }
+      ]
+    }
+  ],
+  "enums": []
+}
