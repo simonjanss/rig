@@ -92,7 +92,7 @@ func ApplyConfig(api ir.API, schema ir.Schema, set *tableconf.Set, opt ConfigOpt
 		}
 
 		res := outAPI.Resources[ri]
-		updated, d := applyTableConfig(loaded, t, res, n, opt)
+		updated, d := applyTableConfig(loaded, t, res, n, opt, set.Failed(t.Name))
 		diags.Append(d)
 		outAPI.Resources[ri] = updated
 	}
@@ -106,6 +106,7 @@ func applyTableConfig(
 	res ir.Resource,
 	n *naming.Namer,
 	opt ConfigOptions,
+	unreadable bool,
 ) (ir.Resource, diag.List) {
 	var diags diag.List
 
@@ -158,6 +159,12 @@ func applyTableConfig(
 			diags.Append(d)
 			out.Storage.DefaultOrder = order
 		}
+	}
+
+	if unreadable {
+		// Its intent is unknown, so there is nothing to merge and nothing
+		// useful to say about what it failed to mention.
+		return out, diags
 	}
 
 	diags.Append(applyColumnConfig(loaded, t, &out, cfg, n, opt))

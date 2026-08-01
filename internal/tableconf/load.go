@@ -48,10 +48,37 @@ func (l *Loaded) At(segments ...string) diag.Anchor {
 type Set struct {
 	byTable map[string]*Loaded
 	order   []string
+	failed  map[string]bool
 }
 
 // NewSet builds an empty set.
-func NewSet() *Set { return &Set{byTable: make(map[string]*Loaded)} }
+func NewSet() *Set {
+	return &Set{
+		byTable: make(map[string]*Loaded),
+		failed:  make(map[string]bool),
+	}
+}
+
+// MarkFailed records that a table's configuration could not be read.
+func (s *Set) MarkFailed(table string) {
+	if s.failed == nil {
+		s.failed = make(map[string]bool)
+	}
+	s.failed[table] = true
+}
+
+// Failed reports whether a table's configuration exists but could not be read.
+//
+// Such a table is not unconfigured — its intent is simply unknown, and that is
+// a different thing. Rules that ask what the configuration says must stay quiet
+// about it, or one mistyped key buries itself under a diagnostic for every
+// column in the table.
+func (s *Set) Failed(table string) bool {
+	if s == nil {
+		return false
+	}
+	return s.failed[table]
+}
 
 // Add records a loaded file.
 func (s *Set) Add(l *Loaded) {
@@ -122,6 +149,9 @@ func LoadDir(paths []string) (*Set, diag.List) {
 		loaded, d := Load(p)
 		diags.Append(d)
 		if loaded == nil {
+			// The file exists but could not be read. Recording the table it was
+			// meant to configure keeps every downstream rule from piling on.
+			set.MarkFailed(stem(p))
 			continue
 		}
 

@@ -33,16 +33,25 @@ func Validate(doc *ir.Document, set *tableconf.Set, p *project.Project) diag.Lis
 		loaded := set.Get(t.Name)
 		res := doc.ResourceForTable(t.Name)
 
+		// A table whose configuration could not be read has an unknown intent.
+		// Rules that ask what it says would all fire at once and bury the one
+		// diagnostic that matters, so they are skipped until it parses.
+		unreadable := set.Failed(t.Name)
+
 		// Structural.
 		diags.Append(checkPrimaryKey(t, res, loaded))
 		diags.Append(checkTenantColumn(t, loaded))
 		diags.Append(checkAuditColumns(t, loaded))
 		diags.Append(checkSnapshotColumns(doc, t, loaded))
-		diags.Append(checkRestoreWindow(t, res, loaded))
-		diags.Append(checkSnapshotIgnore(t, res, loaded))
+		if !unreadable {
+			diags.Append(checkRestoreWindow(t, res, loaded))
+			diags.Append(checkSnapshotIgnore(t, res, loaded))
+		}
 
 		// Convention.
-		diags.Append(checkComments(t, loaded, sev(v.MissingComment, diag.CodeMissingTableComment)))
+		if !unreadable {
+			diags.Append(checkComments(t, loaded, sev(v.MissingComment, diag.CodeMissingTableComment)))
+		}
 		diags.Append(checkIndexes(t, loaded,
 			sev(v.ForeignKeyNotIndexed, diag.CodeForeignKeyNotIndexed),
 			sev(v.TenantIndexLeading, diag.CodeTenantIndexNotLeading)))
