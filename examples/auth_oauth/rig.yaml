@@ -2,8 +2,8 @@
 version: 1
 
 project:
-  name: "oauth"
-  module: "github.com/simonjanss/rig/examples/oauth"
+  name: "auth_oauth"
+  module: "github.com/simonjanss/rig/examples/auth_oauth"
 
 
 # Every table gets a configuration file. `rig sync` creates and updates them.
@@ -46,7 +46,7 @@ generators:
     out_dir: internal/store
     options:
       package: store
-      model_import: github.com/simonjanss/rig/examples/oauth/internal/model
+      model_import: github.com/simonjanss/rig/examples/auth_oauth/internal/model
 
   # Wire types, the interface your service layer implements, and a
   # working default implementation of every operation.
@@ -54,9 +54,9 @@ generators:
     out_dir: internal/api
     options:
       package: api
-      model_import: github.com/simonjanss/rig/examples/oauth/internal/model
-      store_import: github.com/simonjanss/rig/examples/oauth/internal/store
-      api_import: github.com/simonjanss/rig/examples/oauth/internal/api
+      model_import: github.com/simonjanss/rig/examples/auth_oauth/internal/model
+      store_import: github.com/simonjanss/rig/examples/auth_oauth/internal/store
+      api_import: github.com/simonjanss/rig/examples/auth_oauth/internal/api
       # Where your service layer goes. Written once, then yours.
       stub_dir: services/{table}
 
@@ -65,7 +65,7 @@ generators:
     out_dir: internal/api
     options:
       package: api
-      model_import: github.com/simonjanss/rig/examples/oauth/internal/model
+      model_import: github.com/simonjanss/rig/examples/auth_oauth/internal/model
 
   # Live-sync shape endpoints. It writes nothing until a table asks
   # for one with `electric: {enabled: true}`, so leaving it here costs
@@ -75,6 +75,6 @@ generators:
     options:
       package: electric
       electric_url: http://localhost:3000
-      shape_import: github.com/simonjanss/rig/examples/oauth/internal/electric
+      shape_import: github.com/simonjanss/rig/examples/auth_oauth/internal/electric
       # Where your extra scoping goes. Written once, then yours.
       stub_dir: services/{table}

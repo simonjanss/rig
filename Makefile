@@ -1,8 +1,8 @@
 .DEFAULT_GOAL := help
 
 GO       ?= go
-MODULES  := . ./runtime ./auth ./migrate ./examples/todo ./examples/fantasyfootball ./examples/auth ./examples/oauth
-EXAMPLES := todo fantasyfootball auth oauth
+MODULES  := . ./runtime ./auth ./migrate ./examples/todo ./examples/fantasyfootball ./examples/auth ./examples/auth_oauth
+EXAMPLES := todo fantasyfootball auth auth_oauth
 
 # A module with no packages yet — auth, until M4 lands — is skipped rather than
 # treated as a failure, so `make test` says something useful during the build-out.

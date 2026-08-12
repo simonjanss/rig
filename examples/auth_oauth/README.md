@@ -1,4 +1,4 @@
-# examples/oauth
+# examples/auth_oauth
 
 Signing in with a provider, at a tenant the **host** decided.
 

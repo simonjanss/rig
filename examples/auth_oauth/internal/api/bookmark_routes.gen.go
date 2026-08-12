@@ -7,7 +7,7 @@ package api
 import (
 	"net/http"
 
-	"github.com/simonjanss/rig/examples/oauth/internal/model"
+	"github.com/simonjanss/rig/examples/auth_oauth/internal/model"
 )
 
 // registerBookmark mounts Bookmark's routes.

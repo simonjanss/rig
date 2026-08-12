@@ -11,7 +11,7 @@ import (
 
 	"github.com/google/uuid"
 	pgx "github.com/jackc/pgx/v5"
-	"github.com/simonjanss/rig/examples/oauth/internal/model"
+	"github.com/simonjanss/rig/examples/auth_oauth/internal/model"
 	"github.com/simonjanss/rig/runtime/dbhook"
 	"github.com/simonjanss/rig/runtime/dbx"
 	"github.com/simonjanss/rig/runtime/query"
