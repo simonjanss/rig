@@ -279,7 +279,7 @@ func TestPartTablesMatchTheMigrations(t *testing.T) {
 }
 
 // A part is only managed once its migration is there, so a project with an
-// account table nobody scaffolded keeps getting a model and a repository for it.
+// rig_account table nobody scaffolded keeps getting a model and a repository for it.
 func TestOnlyAppliedPartsAreManaged(t *testing.T) {
 	t.Parallel()
 
@@ -291,7 +291,7 @@ func TestOnlyAppliedPartsAreManaged(t *testing.T) {
 	if !slices.Equal(got, scaffold.PartTables("tenancy")) {
 		t.Errorf("Managed = %v, want just the tenancy tables", got)
 	}
-	if slices.Contains(got, "api_key") {
+	if slices.Contains(got, "rig_api_key") {
 		t.Error("a part that was skipped should not be claimed")
 	}
 

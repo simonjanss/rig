@@ -254,9 +254,9 @@ func TestAKeyCannotWriteATableThatWouldNotRecordIt(t *testing.T) {
 		t.Helper()
 		doc := gentest.LoadDocument(t, filepath.Join("testdata", "lifecycle.ir.json"))
 		// The guard only appears in a project that has keys at all: without an
-		// api_key table no request can arrive with one, and a check for something
+		// rig_api_key table no request can arrive with one, and a check for something
 		// that cannot happen is noise in everybody's repository.
-		doc.Schema.Tables = append(doc.Schema.Tables, ir.Table{Name: "api_key"})
+		doc.Schema.Tables = append(doc.Schema.Tables, ir.Table{Name: "rig_api_key"})
 		// The document indexes itself lazily and caches it, so a table added
 		// after a lookup would be invisible.
 		doc.Reindex()

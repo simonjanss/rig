@@ -89,7 +89,7 @@ func (g *Generator) Generate(_ context.Context, doc *ir.Document, opts gen.Optio
 	for i := range doc.API.Resources {
 		res := &doc.API.Resources[i]
 		// A table can be worth generating persistence for and not worth
-		// exposing. account_token is the example: a REST interface for the
+		// exposing. rig_account_token is the example: a REST interface for the
 		// session table is not a feature.
 		if res.Unexposed {
 			continue

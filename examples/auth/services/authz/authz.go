@@ -212,16 +212,16 @@ func Grants(pool *pgxpool.Pool) func(context.Context, uuid.UUID, uuid.UUID) ([]s
 		// the join goes through role rather than starting at permission.
 		rows, err := pool.Query(ctx, `
 			SELECT
-				account.role::text,
+				rig_account.role::text,
 				coalesce(array_remove(array_agg(DISTINCT role.key), NULL), '{}'),
 				coalesce(array_remove(array_agg(DISTINCT permission.key), NULL), '{}')
-			FROM account
-			LEFT JOIN account_role ON account_role.account_id = account.id
+			FROM rig_account
+			LEFT JOIN account_role ON account_role.account_id = rig_account.id
 			LEFT JOIN role ON role.id = account_role.role_id AND role.tenant_id = $1
 			LEFT JOIN role_permission ON role_permission.role_id = role.id
 			LEFT JOIN permission ON permission.id = role_permission.permission_id
-			WHERE account.tenant_id = $1 AND account.id = $2 AND account.deleted_at IS NULL
-			GROUP BY account.role`, tenantID, accountID)
+			WHERE rig_account.tenant_id = $1 AND rig_account.id = $2 AND rig_account.deleted_at IS NULL
+			GROUP BY rig_account.role`, tenantID, accountID)
 		if err != nil {
 			return nil, nil, fmt.Errorf("tenant: resolve grants: %w", err)
 		}

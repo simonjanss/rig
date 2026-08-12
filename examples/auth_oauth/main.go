@@ -268,7 +268,7 @@ func tenantFromHost(pool *pgxpool.Pool) func(*http.Request) (uuid.UUID, error) {
 
 		var id uuid.UUID
 		err := pool.QueryRow(r.Context(),
-			`SELECT id FROM tenant WHERE lower(slug) = $1 AND deleted_at IS NULL AND is_active`,
+			`SELECT id FROM rig_tenant WHERE lower(slug) = $1 AND deleted_at IS NULL AND is_active`,
 			slug).Scan(&id)
 		switch {
 		case errors.Is(err, pgx.ErrNoRows):
@@ -410,7 +410,7 @@ func seed(ctx context.Context, pool *pgxpool.Pool) error {
 		// The unique index is on lower(slug) and partial, so ON CONFLICT has to
 		// name the same expression and predicate to match it.
 		if _, err := pool.Exec(ctx, `
-			INSERT INTO tenant (id, created_at, name, slug, is_active)
+			INSERT INTO rig_tenant (id, created_at, name, slug, is_active)
 			VALUES ($1, now(), $2, $3, true)
 			ON CONFLICT (lower(slug)) WHERE deleted_at IS NULL DO NOTHING`,
 			uuid.New(), name, slug); err != nil {
@@ -420,7 +420,7 @@ func seed(ctx context.Context, pool *pgxpool.Pool) error {
 
 	var acme uuid.UUID
 	if err := pool.QueryRow(ctx,
-		`SELECT id FROM tenant WHERE lower(slug) = $1 AND deleted_at IS NULL`,
+		`SELECT id FROM rig_tenant WHERE lower(slug) = $1 AND deleted_at IS NULL`,
 		acmeSlug).Scan(&acme); err != nil {
 		return fmt.Errorf("find %s: %w", acmeSlug, err)
 	}
@@ -430,10 +430,10 @@ func seed(ctx context.Context, pool *pgxpool.Pool) error {
 	// branch.
 	identityID := uuid.New()
 	err := pool.QueryRow(ctx,
-		`SELECT id FROM identity WHERE lower(email_address) = lower($1)`, SeedEmail).Scan(&identityID)
+		`SELECT id FROM rig_identity WHERE lower(email_address) = lower($1)`, SeedEmail).Scan(&identityID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		if _, err := pool.Exec(ctx, `
-			INSERT INTO identity (id, created_at, email_address, display_name, is_active)
+			INSERT INTO rig_identity (id, created_at, email_address, display_name, is_active)
 			VALUES ($1, now(), $2, 'Ada', true)`, identityID, SeedEmail); err != nil {
 			return fmt.Errorf("identity: %w", err)
 		}
@@ -442,7 +442,7 @@ func seed(ctx context.Context, pool *pgxpool.Pool) error {
 	}
 
 	if _, err := pool.Exec(ctx, `
-		INSERT INTO account (id, tenant_id, identity_id, created_at, email_address,
+		INSERT INTO rig_account (id, tenant_id, identity_id, created_at, email_address,
 		                     display_name, role, is_active)
 		VALUES ($1, $2, $3, now(), $4, 'Ada', 'Owner', true)
 		ON CONFLICT (tenant_id, identity_id) WHERE deleted_at IS NULL DO NOTHING`,

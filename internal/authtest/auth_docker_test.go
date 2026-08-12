@@ -212,7 +212,7 @@ func setup(t *testing.T) *harness {
 	h.stores = authpg.New(pool)
 
 	if _, err := pool.Exec(ctx,
-		`INSERT INTO tenant (id, name, slug) VALUES ($1, $2, $3)`,
+		`INSERT INTO rig_tenant (id, name, slug) VALUES ($1, $2, $3)`,
 		h.tenant, "Test", h.tenant.String()); err != nil {
 		t.Fatal(err)
 	}
@@ -222,12 +222,12 @@ func setup(t *testing.T) *harness {
 	// who they are in this tenant.
 	h.identity, h.account = uuid.New(), uuid.New()
 	if _, err := pool.Exec(ctx, `
-		INSERT INTO identity (id, email_address, display_name)
+		INSERT INTO rig_identity (id, email_address, display_name)
 		VALUES ($1, $2, $3)`, h.identity, h.email, "Sam"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := pool.Exec(ctx, `
-		INSERT INTO account (id, tenant_id, identity_id, email_address, display_name)
+		INSERT INTO rig_account (id, tenant_id, identity_id, email_address, display_name)
 		VALUES ($1, $2, $3, $4, $5)`,
 		h.account, h.tenant, h.identity, h.email, "Sam"); err != nil {
 		t.Fatal(err)
@@ -249,7 +249,7 @@ func setup(t *testing.T) *harness {
 		t.Fatal(err)
 	}
 
-	// The real counter, reading the real auth_log. This is the part no
+	// The real counter, reading the real rig_auth_log. This is the part no
 	// in-memory test can check: the SQL that turns a trail into a limit.
 	limiter := throttle.New(throttle.NewPostgres(pool, throttle.DefaultPostgresConfig()))
 
@@ -454,7 +454,7 @@ func (h *harness) events(t *testing.T, event string) int {
 
 	var n int
 	if err := h.pool.QueryRow(context.Background(),
-		`SELECT count(*) FROM auth_log WHERE tenant_id = $1 AND event = $2`,
+		`SELECT count(*) FROM rig_auth_log WHERE tenant_id = $1 AND event = $2`,
 		h.tenant, event).Scan(&n); err != nil {
 		t.Fatal(err)
 	}
@@ -472,7 +472,7 @@ func TestLoginAndSession(t *testing.T) {
 	// The session is rows, not a signed blob, so it can be counted.
 	var tokens int
 	if err := h.pool.QueryRow(context.Background(),
-		`SELECT count(*) FROM account_token WHERE root_token_id = $1`, p.SessionID).Scan(&tokens); err != nil {
+		`SELECT count(*) FROM rig_account_token WHERE root_token_id = $1`, p.SessionID).Scan(&tokens); err != nil {
 		t.Fatal(err)
 	}
 	if tokens != 2 {
@@ -532,7 +532,7 @@ func TestReplayRevokesTheFamily(t *testing.T) {
 	// And it is recorded in the rows, not only in the log.
 	var live int
 	if err := h.pool.QueryRow(context.Background(),
-		`SELECT count(*) FROM account_token WHERE root_token_id = $1 AND revoked_at IS NULL`,
+		`SELECT count(*) FROM rig_account_token WHERE root_token_id = $1 AND revoked_at IS NULL`,
 		first.SessionID).Scan(&live); err != nil {
 		t.Fatal(err)
 	}
@@ -586,7 +586,7 @@ func TestConcurrentRefreshesConverge(t *testing.T) {
 	}
 }
 
-// The rate limiter reading the real auth_log. This is the SQL no in-memory test
+// The rate limiter reading the real rig_auth_log. This is the SQL no in-memory test
 // exercises: the window, the join, and the clearing event.
 func TestLockoutOverRealSQL(t *testing.T) {
 	h := setup(t)
@@ -668,7 +668,7 @@ func TestPasswordResetOverRealSQL(t *testing.T) {
 	}
 	var consumed int
 	if err := h.pool.QueryRow(context.Background(),
-		`SELECT count(*) FROM identity_verification WHERE identity_id = $1 AND consumed_at IS NOT NULL`,
+		`SELECT count(*) FROM rig_identity_verification WHERE identity_id = $1 AND consumed_at IS NOT NULL`,
 		h.identity).Scan(&consumed); err != nil {
 		t.Fatal(err)
 	}
@@ -712,7 +712,7 @@ func TestAPIKeysOverRealSQL(t *testing.T) {
 		allow  []string
 	)
 	if err := h.pool.QueryRow(ctx,
-		`SELECT scopes, cidr_allow_list::text[] FROM api_key WHERE id = $1`,
+		`SELECT scopes, cidr_allow_list::text[] FROM rig_api_key WHERE id = $1`,
 		created.Key.ID).Scan(&scopes, &allow); err != nil {
 		t.Fatal(err)
 	}
@@ -726,7 +726,7 @@ func TestAPIKeysOverRealSQL(t *testing.T) {
 	// The secret is not recoverable from anything stored.
 	var stored string
 	if err := h.pool.QueryRow(ctx,
-		`SELECT encode(secret_hash, 'hex') FROM api_key WHERE id = $1`, created.Key.ID).Scan(&stored); err != nil {
+		`SELECT encode(secret_hash, 'hex') FROM rig_api_key WHERE id = $1`, created.Key.ID).Scan(&stored); err != nil {
 		t.Fatal(err)
 	}
 	if strings.Contains(created.Secret, stored) || strings.Contains(stored, created.Secret) {
@@ -829,12 +829,12 @@ func TestImpersonationOverRealSQL(t *testing.T) {
 	target, targetIdentity := uuid.New(), uuid.New()
 	address := "robin-" + target.String()[:8] + "@example.com"
 	if _, err := h.pool.Exec(ctx, `
-		INSERT INTO identity (id, email_address, display_name)
+		INSERT INTO rig_identity (id, email_address, display_name)
 		VALUES ($1, $2, $3)`, targetIdentity, address, "Robin"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := h.pool.Exec(ctx, `
-		INSERT INTO account (id, tenant_id, identity_id, email_address, display_name)
+		INSERT INTO rig_account (id, tenant_id, identity_id, email_address, display_name)
 		VALUES ($1, $2, $3, $4, $5)`,
 		target, h.tenant, targetIdentity, address, "Robin"); err != nil {
 		t.Fatal(err)
@@ -1032,7 +1032,7 @@ func TestOAuthIdentitiesOverRealSQL(t *testing.T) {
 
 	var verified *time.Time
 	if err := h.pool.QueryRow(ctx,
-		`SELECT email_verified_at FROM identity WHERE id = $1`,
+		`SELECT email_verified_at FROM rig_identity WHERE id = $1`,
 		provisioned.IdentityID).Scan(&verified); err != nil {
 		t.Fatal(err)
 	}
@@ -1064,7 +1064,7 @@ func TestOAuthIdentitiesOverRealSQL(t *testing.T) {
 
 	var identity uuid.UUID
 	if err := h.pool.QueryRow(ctx,
-		`SELECT identity_id FROM account WHERE id = $1`, joined).Scan(&identity); err != nil {
+		`SELECT identity_id FROM rig_account WHERE id = $1`, joined).Scan(&identity); err != nil {
 		t.Fatal(err)
 	}
 	if identity != provisioned.IdentityID {
@@ -1086,19 +1086,19 @@ func TestOnePersonInTwoTenantsOverRealSQL(t *testing.T) {
 	// address is globally unique, and inserting one would be refused.
 	second := uuid.New()
 	if _, err := h.pool.Exec(ctx,
-		`INSERT INTO tenant (id, name, slug) VALUES ($1, $2, $3)`,
+		`INSERT INTO rig_tenant (id, name, slug) VALUES ($1, $2, $3)`,
 		second, "Other", second.String()); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := h.pool.Exec(ctx, `
-		INSERT INTO identity (id, email_address, display_name) VALUES ($1, $2, $3)`,
+		INSERT INTO rig_identity (id, email_address, display_name) VALUES ($1, $2, $3)`,
 		uuid.New(), h.email, "An impostor"); err == nil {
 		t.Error("a second person with the same address should be refused by the database")
 	}
 
 	elsewhereAccount := uuid.New()
 	if _, err := h.pool.Exec(ctx, `
-		INSERT INTO account (id, tenant_id, identity_id, email_address, display_name, role)
+		INSERT INTO rig_account (id, tenant_id, identity_id, email_address, display_name, role)
 		VALUES ($1, $2, $3, $4, $5, 'Basic')`,
 		elsewhereAccount, second, h.identity, h.email, "Sam elsewhere"); err != nil {
 		t.Fatal(err)
@@ -1107,7 +1107,7 @@ func TestOnePersonInTwoTenantsOverRealSQL(t *testing.T) {
 	// The role is per account, so the same person is an Owner here and Basic
 	// there. This is the thing the old model could not express at all.
 	if _, err := h.pool.Exec(ctx,
-		`UPDATE account SET role = 'Owner' WHERE id = $1`, h.account); err != nil {
+		`UPDATE rig_account SET role = 'Owner' WHERE id = $1`, h.account); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1142,7 +1142,7 @@ func TestOnePersonInTwoTenantsOverRealSQL(t *testing.T) {
 	// A second account for the same person in the same tenant is refused by the
 	// partial unique index, not by anything in Go.
 	if _, err := h.pool.Exec(ctx, `
-		INSERT INTO account (id, tenant_id, identity_id, email_address, display_name)
+		INSERT INTO rig_account (id, tenant_id, identity_id, email_address, display_name)
 		VALUES ($1, $2, $3, $4, $5)`,
 		uuid.New(), second, h.identity, h.email, "Twice"); err == nil {
 		t.Error("joining the same tenant twice should be refused by the database")
@@ -1322,7 +1322,7 @@ func TestASessionPayloadRoundTripsThroughPostgres(t *testing.T) {
 
 	var isNull bool
 	if err := h.pool.QueryRow(ctx,
-		`SELECT payload IS NULL FROM account_token WHERE id = $1`,
+		`SELECT payload IS NULL FROM rig_account_token WHERE id = $1`,
 		plain.Access.TokenID).Scan(&isNull); err != nil {
 		t.Fatal(err)
 	}
@@ -1698,7 +1698,7 @@ func TestTheTwoAPIKeyPermissions(t *testing.T) {
 		// would make this test pass for the wrong reason.
 		service := uuid.New()
 		if _, err := h.pool.Exec(context.Background(), `
-			INSERT INTO account (id, tenant_id, created_at, kind, role, email_address,
+			INSERT INTO rig_account (id, tenant_id, created_at, kind, role, email_address,
 			                     display_name, is_active)
 			VALUES ($1, $2, now(), 'Service', 'Basic', $3, 'Nightly', true)`,
 			service, h.tenant, "nightly-"+service.String()[:8]+"@example.com"); err != nil {
@@ -1786,7 +1786,7 @@ func TestTheTenantHooks(t *testing.T) {
 		// worse than no rule at all.
 		var made int
 		if err := h.pool.QueryRow(ctx,
-			`SELECT count(*) FROM tenant WHERE name = 'Nope'`).Scan(&made); err != nil {
+			`SELECT count(*) FROM rig_tenant WHERE name = 'Nope'`).Scan(&made); err != nil {
 			t.Fatal(err)
 		}
 		if made != 0 {
@@ -1827,7 +1827,7 @@ func TestTheTenantHooks(t *testing.T) {
 		// What the hook wrote into the draft is what landed in the row.
 		var domains []string
 		if err := h.pool.QueryRow(ctx,
-			`SELECT allowed_email_domains FROM tenant WHERE name = 'Capitalised'`).Scan(&domains); err != nil {
+			`SELECT allowed_email_domains FROM rig_tenant WHERE name = 'Capitalised'`).Scan(&domains); err != nil {
 			t.Fatal(err)
 		}
 		if len(domains) != 1 || domains[0] != "rig.app" {
@@ -1850,7 +1850,7 @@ func TestTheTenantHooks(t *testing.T) {
 				}
 				var n int
 				if err := tx.QueryRow(ctx,
-					`SELECT count(*) FROM account WHERE tenant_id = $1`, made.TenantID).Scan(&n); err != nil {
+					`SELECT count(*) FROM rig_account WHERE tenant_id = $1`, made.TenantID).Scan(&n); err != nil {
 					return err
 				}
 				if n != 1 {
@@ -1882,7 +1882,7 @@ func TestTheTenantHooks(t *testing.T) {
 		}
 		var left int
 		if err := h.pool.QueryRow(ctx,
-			`SELECT count(*) FROM tenant WHERE name = 'Doomed'`).Scan(&left); err != nil {
+			`SELECT count(*) FROM rig_tenant WHERE name = 'Doomed'`).Scan(&left); err != nil {
 			t.Fatal(err)
 		}
 		if left != 0 {
@@ -1903,7 +1903,7 @@ func TestTheTenantHooks(t *testing.T) {
 		}
 
 		var slugs []string
-		rows, err := h.pool.Query(ctx, `SELECT slug FROM tenant WHERE name = 'Acme'`)
+		rows, err := h.pool.Query(ctx, `SELECT slug FROM rig_tenant WHERE name = 'Acme'`)
 		if err != nil {
 			t.Fatal(err)
 		}

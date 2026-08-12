@@ -26,7 +26,7 @@ type Postgres struct {
 // kind to a column, and an application that logs something rig did not think of
 // should be able to rate-limit on it.
 type PostgresConfig struct {
-	// Table is the log table, for example "auth_log".
+	// Table is the log table, for example "rig_auth_log".
 	Table string
 	// EventColumn holds the event name.
 	EventColumn string
@@ -45,7 +45,7 @@ type PostgresConfig struct {
 // DefaultPostgresConfig is the shape `rig setup-project` scaffolds.
 func DefaultPostgresConfig() PostgresConfig {
 	return PostgresConfig{
-		Table:       "auth_log",
+		Table:       "rig_auth_log",
 		EventColumn: "event",
 		AtColumn:    "created_at",
 		Match: map[string]string{

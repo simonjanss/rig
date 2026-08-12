@@ -11,8 +11,8 @@ package scaffold
 func tenancyConfigs() []tableConfig {
 	return []tableConfig{
 		{
-			table: "tenant",
-			content: config("tenant", schemaRef,
+			table: "rig_tenant",
+			content: config("rig_tenant", "Tenant", schemaRef,
 				`# Tenants are not tenant-scoped, so the generated queries have nothing to
 # filter by and a generated CRUD interface would be an administrative
 # back door. Manage them from a service you write.
@@ -21,8 +21,8 @@ expose: false`,
 			),
 		},
 		{
-			table: "identity",
-			content: config("identity", schemaRef,
+			table: "rig_identity",
+			content: config("rig_identity", "Identity", schemaRef,
 				`# An identity is global, so it has no tenant_id and the generated queries
 # have nothing to scope by. Reaching one over HTTP would mean reading a
 # person who works at another customer, so nothing here is exposed: the
@@ -32,14 +32,14 @@ expose: false`,
 			),
 		},
 		{
-			table:   "identity_credential",
-			content: config("identity_credential", schemaRef, notExposed),
+			table:   "rig_identity_credential",
+			content: config("rig_identity_credential", "IdentityCredential", schemaRef, notExposed),
 		},
 		{
-			table: "identity_verification",
-			content: config("identity_verification", schemaRef, notExposed,
+			table: "rig_identity_verification",
+			content: config("rig_identity_verification", "IdentityVerification", schemaRef, notExposed,
 				`enums:
-  identity_verification_kind:
+  rig_identity_verification_kind:
     name: IdentityVerificationKind
     description: What a single-use link is for.
     values:
@@ -55,8 +55,8 @@ expose: false`,
 			),
 		},
 		{
-			table: "account",
-			content: config("account", schemaRef,
+			table: "rig_account",
+			content: config("rig_account", "Account", schemaRef,
 				`# Everything but Create. An account created through plain CRUD would have
 # no identity behind it and no invitation sent, so joining a tenant is an
 # auth endpoint rather than a POST anyone can make.
@@ -87,7 +87,7 @@ operations: [Get, List, Search, Update, Delete]`,
     # write over: the account package falls back to UTC when it cannot load one.
     operations: [Read, Create, Update]`,
 				`enums:
-  account_kind:
+  rig_account_kind:
     name: AccountKind
     description: What an account is.
     values:
@@ -97,7 +97,7 @@ operations: [Get, List, Search, Update, Delete]`,
       Service:
         name: Service
         description: What an integration's key acts as. It has no identity, so there is nothing to sign in with.
-  account_role_level:
+  rig_account_role_level:
     name: AccountRoleLevel
     description: The coarse level an account holds in one tenant.
     values:
@@ -118,10 +118,10 @@ operations: [Get, List, Search, Update, Delete]`,
 func sessionConfigs() []tableConfig {
 	return []tableConfig{
 		{
-			table: "account_token",
-			content: config("account_token", schemaRef, notExposed,
+			table: "rig_account_token",
+			content: config("rig_account_token", "AccountToken", schemaRef, notExposed,
 				`enums:
-  account_token_kind:
+  rig_account_token_kind:
     name: AccountTokenKind
     description: What a token is for.
     values:
@@ -131,7 +131,7 @@ func sessionConfigs() []tableConfig {
       Access:
         name: Access
         description: Authenticates a request, and is short-lived because it travels.
-  account_token_client:
+  rig_account_token_client:
     name: AccountTokenClient
     description: What kind of thing holds a session.
     values:
@@ -147,18 +147,18 @@ func sessionConfigs() []tableConfig {
 			),
 		},
 		{
-			table:   "identity_session",
-			content: config("identity_session", schemaRef, notExposed),
+			table:   "rig_identity_session",
+			content: config("rig_identity_session", "IdentitySession", schemaRef, notExposed),
 		},
 		{
-			table: "auth_log",
-			content: config("auth_log", schemaRef,
+			table: "rig_auth_log",
+			content: config("rig_auth_log", "AuthLog", schemaRef,
 				`# Read-only. Entries are written by the auth package as things happen; an
 # audit trail anybody can post to is not an audit trail.
 operations: [Get, List, Search]`,
 				`order_by: [-created_at, id]`,
 				`enums:
-  auth_event:
+  rig_auth_event:
     name: AuthEvent
     description: What happened.
     values:
@@ -228,7 +228,7 @@ operations: [Get, List, Search]`,
       TenantSwitched:
         name: TenantSwitched
         description: Somebody moved to another tenant they belong to, which issues a session for that tenant's account.
-  auth_outcome:
+  rig_auth_outcome:
     name: AuthOutcome
     description: Whether an attempt worked.
     values:
@@ -246,14 +246,14 @@ operations: [Get, List, Search]`,
 func apiKeyConfigs() []tableConfig {
 	return []tableConfig{
 		{
-			table: "api_key",
-			content: config("api_key", schemaRef,
+			table: "rig_api_key",
+			content: config("rig_api_key", "APIKey", schemaRef,
 				`# Keys are minted and revoked through /auth/api-keys, not through CRUD.
 # The secret exists only in the response that created it, and a generic
 # POST could not return it.
 expose: false`,
 				`enums:
-  api_key_kind:
+  rig_api_key_kind:
     name: APIKeyKind
     description: Who a key acts as.
     values:
@@ -271,13 +271,13 @@ expose: false`,
 func oauthConfigs() []tableConfig {
 	return []tableConfig{
 		{
-			table: "identity_oauth",
-			content: config("identity_oauth", schemaRef,
+			table: "rig_identity_oauth",
+			content: config("rig_identity_oauth", "IdentityOAuth", schemaRef,
 				`# Linking and unlinking go through the OAuth flow, which has to talk to the
 # provider. A row created directly would claim an identity nobody verified.
 expose: false`,
 				`enums:
-  oauth_provider:
+  rig_oauth_provider:
     name: OAuthProvider
     description: An external identity provider.
     values:

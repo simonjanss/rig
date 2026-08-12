@@ -448,9 +448,9 @@ func invitationID(t *testing.T, pool *pgxpool.Pool, email string) string {
 
 	var id uuid.UUID
 	if err := pool.QueryRow(context.Background(), `
-		SELECT v.id FROM identity_verification v
-		  JOIN identity ON identity.id = v.identity_id
-		 WHERE lower(identity.email_address) = lower($1)
+		SELECT v.id FROM rig_identity_verification v
+		  JOIN rig_identity ON rig_identity.id = v.identity_id
+		 WHERE lower(rig_identity.email_address) = lower($1)
 		   AND v.kind = 'Invitation' AND v.consumed_at IS NULL AND v.revoked_at IS NULL
 		 ORDER BY v.created_at DESC LIMIT 1`, email).Scan(&id); err != nil {
 		t.Fatalf("find the invitation for %s: %v", email, err)
@@ -464,7 +464,7 @@ func tenantOf(t *testing.T, pool *pgxpool.Pool, name string) uuid.UUID {
 
 	var id uuid.UUID
 	if err := pool.QueryRow(context.Background(),
-		`SELECT id FROM tenant WHERE name = $1`, name).Scan(&id); err != nil {
+		`SELECT id FROM rig_tenant WHERE name = $1`, name).Scan(&id); err != nil {
 		t.Fatalf("find tenant %q: %v", name, err)
 	}
 	return id

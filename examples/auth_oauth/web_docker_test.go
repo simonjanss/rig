@@ -103,9 +103,9 @@ func TestSigningInWithAProvider(t *testing.T) {
 		// And the account landed in Beta rather than anywhere else.
 		var tenants []string
 		rows, err := ui.pool.Query(context.Background(), `
-			SELECT t.slug FROM account a
-			JOIN tenant t ON t.id = a.tenant_id
-			JOIN identity i ON i.id = a.identity_id
+			SELECT t.slug FROM rig_account a
+			JOIN rig_tenant t ON t.id = a.tenant_id
+			JOIN rig_identity i ON i.id = a.identity_id
 			WHERE lower(i.email_address) = lower($1)`, stranger)
 		if err != nil {
 			t.Fatal(err)
@@ -276,8 +276,8 @@ func TestWhatASessionCanRead(t *testing.T) {
 	// One identity behind both accounts.
 	var identities int
 	if err := ui.pool.QueryRow(context.Background(), `
-		SELECT count(DISTINCT a.identity_id) FROM account a
-		JOIN identity i ON i.id = a.identity_id
+		SELECT count(DISTINCT a.identity_id) FROM rig_account a
+		JOIN rig_identity i ON i.id = a.identity_id
 		WHERE lower(i.email_address) = lower($1)`, address).Scan(&identities); err != nil {
 		t.Fatal(err)
 	}

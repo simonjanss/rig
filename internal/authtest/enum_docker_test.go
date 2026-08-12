@@ -26,7 +26,7 @@ func TestEveryAuthEventIsInTheEnum(t *testing.T) {
 	rows, err := pool.Query(context.Background(), `
 		SELECT enumlabel FROM pg_enum
 		  JOIN pg_type ON pg_type.oid = pg_enum.enumtypid
-		 WHERE pg_type.typname = 'auth_event'`)
+		 WHERE pg_type.typname = 'rig_auth_event'`)
 	if err != nil {
 		t.Fatal(err)
 	}

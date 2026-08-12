@@ -20,7 +20,7 @@ application: one `note` table, so that there is something to protect.
 
 The order is deliberate: tenants, people and accounts, then **API keys**, then
 sessions, roles and provider links. Keys come second because everything after
-them can then record which key changed a row — including `identity` and `account`
+them can then record which key changed a row — including `rig_identity` and `rig_account`
 themselves, and the session and log tables, which name the key a request arrived
 with where they are created rather than by altering themselves afterwards.
 
@@ -200,10 +200,12 @@ None of those 27,604 lines were ever called: the auth package reaches its tables
 through its own queries, so a projected model and repository beside them were a
 second door onto the same rows and a second thing to read.
 
-rig knows which tables are the foundation's from **your own migration files** —
-`00001_rig_tenancy.sql` and its siblings — not from the table names. A project
-with an `account` table nobody scaffolded is an ordinary table and still gets a
-model, a repository and an API like any other.
+Every table the foundation creates is named `rig_…`, so a `\dt` says which
+tables arrived with it and which are yours. rig knows which are the foundation's
+from **your own migration files** — `00001_rig_tenancy.sql` and its siblings —
+not from the names, so a project with a `rig_account` table nobody scaffolded is
+an ordinary table and still gets a model, a repository and an API like any
+other.
 
 They are still ordinary tables in every other respect. They follow the same
 column conventions, `rig sync` can read them, and `rig validate` holds them to
@@ -215,24 +217,26 @@ and a freshly set-up project validates clean.
 An administration screen listing the people in a tenant is a fair thing to want:
 
 ```bash
-rig setup-project --expose account   # writes services/account/account.yaml
+rig setup-project --expose rig_account   # writes services/rig_account/rig_account.yaml
 ```
 
 ```yaml
 # rig.yaml
 auth:
-  expose: [account]
+  expose: [rig_account]
 ```
 
 That table is then projected like any other — model, repository, routes — and its
-neighbours stay out. The scaffolded configuration keeps `account` free of a
-`Create`, because an account created through plain CRUD would have no identity
-behind it and no invitation sent.
+neighbours stay out. The physical name keeps its prefix and the API does not: the
+scaffolded configuration asks for `resource: Account`, so what arrives is
+`Account` on `/api/v1/accounts`. It also keeps the table free of a `Create`,
+because an account created through plain CRUD would have no identity behind it
+and no invitation sent.
 
 `auth.own: true` goes further and generates for all of it, for a project that has
 forked the migrations and stopped importing `rig/auth`. It is a one-way door in
 practice: a generated repository does not enforce what the auth package enforces,
-so a password reaching `identity_credential` through one is a password nobody
+so a password reaching `rig_identity_credential` through one is a password nobody
 hashed.
 
 ## One person, many tenants
@@ -242,15 +246,15 @@ where most schemas have one:
 
 | table | scope | holds |
 |---|---|---|
-| `identity` | global | the address, the password, the linked providers. Who somebody *is*. |
-| `account` | one tenant | their role there, their display name there, whether they are still there. Who they are *here*. |
+| `rig_identity` | global | the address, the password, the linked providers. Who somebody *is*. |
+| `rig_account` | one tenant | their role there, their display name there, whether they are still there. Who they are *here*. |
 
 Somebody who works at two of your customers is one identity and two accounts, and
 signs in to both with one password. They can be an `Owner` in one and `Basic` in
 the other, which the single-table version cannot express at all.
 
 The reason it is split this way round — rather than making membership a join table
-and leaving `account` global — is that `account` keeps its `tenant_id`. Every
+and leaving `rig_account` global — is that `rig_account` keeps its `tenant_id`. Every
 generated query is still scoped automatically, `created_by_account_id` still
 points at a row belonging to exactly one tenant, and `Claims{TenantID, AccountID}`
 is unchanged. Nothing downstream has to remember anything. The global half is
@@ -259,9 +263,9 @@ tenant-scoped one.
 
 ```sql
 -- the person, once
-INSERT INTO identity (id, email_address, display_name) VALUES (…, 'ada@example.com', 'Ada');
+INSERT INTO rig_identity (id, email_address, display_name) VALUES (…, 'ada@example.com', 'Ada');
 -- and an account per tenant they work in
-INSERT INTO account (id, tenant_id, identity_id, email_address, display_name, role)
+INSERT INTO rig_account (id, tenant_id, identity_id, email_address, display_name, role)
 VALUES (…, :first,  :ada, 'ada@example.com', 'Ada', 'Owner'),
        (…, :second, :ada, 'ada@example.com', 'Ada', 'Basic');
 ```
@@ -338,7 +342,7 @@ A personal key must act as the account that created it, and both the manager and
 the database say so — `api_key_personal_is_its_own` is a CHECK, so an insert that
 goes around the manager is refused too.
 
-`api_key` has no generated repository, like the rest of the foundation: keys are minted through
+`rig_api_key` has no generated repository, like the rest of the foundation: keys are minted through
 `/auth/api-keys`, because the secret exists only in the response that creates it
 and a generic POST could not return it.
 
@@ -381,8 +385,8 @@ repository rather than checked in a handler — the repository is the floor ever
 write stands on, so a custom endpoint reaching for the writer passes through it
 too.
 
-The foundation holds itself to it. `api_key` is created directly after the
-accounts it acts as, which is what lets `account` carry the key columns as well —
+The foundation holds itself to it. `rig_api_key` is created directly after the
+accounts it acts as, which is what lets `rig_account` carry the key columns as well —
 so an integration can provision accounts, and the change says which credential
 did it. Nothing `setup-project` writes refuses a key.
 
@@ -428,10 +432,10 @@ apart is why this is not a POST on a table.
 
 ## Allowed email domains
 
-`tenant.allowed_email_domains` is a `text[]`, empty by default:
+`rig_tenant.allowed_email_domains` is a `text[]`, empty by default:
 
 ```sql
-UPDATE tenant SET allowed_email_domains = ARRAY['example.com'] WHERE id = …;
+UPDATE rig_tenant SET allowed_email_domains = ARRAY['example.com'] WHERE id = …;
 ```
 
 Empty allows any address, which is right for a tenant that is not one company.
@@ -468,7 +472,7 @@ different thing to fix from a 401.
 
 ## Rate limits
 
-Counted over `auth_log` with a sliding window rather than in memory, so two
+Counted over `rig_auth_log` with a sliding window rather than in memory, so two
 replicas cannot disagree and a restart does not clear somebody's lockout. Six
 wrong passwords for one address and the next attempt is a **429** with
 `Retry-After` — including for the *correct* password, because the lockout is

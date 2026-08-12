@@ -38,20 +38,20 @@ type ProjectInfo struct {
 // rig generates nothing for the tables `rig setup-project` created, because
 // their Go types, their stores and their endpoints already exist in the
 // rig/auth module. A project is recognised as having them by its own migration
-// files, so a table called `account` that nobody scaffolded is an ordinary
+// files, so a table called `rig_account` that nobody scaffolded is an ordinary
 // table and keeps getting a model and a repository like any other.
 type Auth struct {
 	// Expose names foundation tables to generate for anyway.
 	//
 	// It adds the model, the repository and whatever API the table's
 	// configuration asks for — for an administration screen listing the people
-	// in a tenant, most often. `rig setup-project --expose account` writes the
+	// in a tenant, most often. `rig setup-project --expose rig_account` writes the
 	// configuration to go with it.
 	//
 	// It changes nothing about authentication: the auth package still reaches
 	// these tables through its own queries, and a generated repository beside
 	// them is a second door into the same rows, which is exactly why the
-	// scaffolded configuration keeps `account` free of a Create.
+	// scaffolded configuration keeps `rig_account` free of a Create.
 	Expose []string `yaml:"expose,omitempty" json:"expose,omitempty" jsonschema_description:"Foundation tables to generate a model, repository, and API for anyway."`
 
 	// Own treats the foundation as ordinary tables and generates for all of it.

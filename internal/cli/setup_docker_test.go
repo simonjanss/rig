@@ -51,7 +51,7 @@ func TestSetupProject(t *testing.T) {
 		for _, want := range []string{
 			"00001_rig_tenancy.sql",
 			// Keys before sessions: everything after them can record which key
-			// changed a row, including the account table itself.
+			// changed a row, including rig_account itself.
 			"00002_rig_apikeys.sql",
 			"00003_rig_sessions.sql",
 			"00004_rig_oauth.sql",
@@ -128,9 +128,9 @@ func TestSetupProject(t *testing.T) {
 			}
 		}
 
-		// Nor are the enum types those tables use: auth_event and the rest are
-		// already Go constants in the auth module.
-		for _, enum := range []string{"auth_event", "account_kind", "oauth_provider"} {
+		// Nor are the enum types those tables use: rig_auth_event and the rest
+		// are already Go constants in the auth module.
+		for _, enum := range []string{"rig_auth_event", "rig_account_kind", "rig_oauth_provider"} {
 			path := filepath.Join("internal", "model", enum+".gen.go")
 			if _, err := os.Stat(filepath.Join(root, path)); err == nil {
 				t.Errorf("%s belongs to an unprojected table and should not exist", path)
@@ -139,12 +139,14 @@ func TestSetupProject(t *testing.T) {
 	})
 
 	// And the escape hatch, for an application that wants an administration
-	// screen listing the people in a tenant after all.
+	// screen listing the people in a tenant after all. The physical name carries
+	// the prefix; the resource the scaffolded configuration asks for does not, so
+	// what arrives is Account on /api/v1/accounts.
 	step(t, "a table can be exposed", func() {
-		if _, stderr, code := run(t, "setup-project", "-C", root, "--expose", "account"); code != 0 {
+		if _, stderr, code := run(t, "setup-project", "-C", root, "--expose", "rig_account"); code != 0 {
 			t.Fatalf("--expose failed:\n%s", stderr)
 		}
-		appendTo(t, filepath.Join(root, "rig.yaml"), "\nauth:\n  expose: [account]\n")
+		appendTo(t, filepath.Join(root, "rig.yaml"), "\nauth:\n  expose: [rig_account]\n")
 
 		if _, stderr, code := run(t, "generate", "-C", root); code != 0 {
 			t.Fatalf("generate after exposing failed:\n%s", stderr)
@@ -161,7 +163,7 @@ func TestSetupProject(t *testing.T) {
 
 		// Its neighbours stay out: exposing one table is exposing one table.
 		if _, err := os.Stat(filepath.Join(root, "internal", "store", "api_key_repository.gen.go")); err == nil {
-			t.Error("exposing account should not have brought api_key with it")
+			t.Error("exposing rig_account should not have brought rig_api_key with it")
 		}
 	})
 

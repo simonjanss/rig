@@ -197,7 +197,7 @@ func TestATokenIsScopedToItsTenant(t *testing.T) {
 	first := api.seed(t)
 
 	second := uuid.New()
-	api.exec(t, `INSERT INTO tenant (id, created_at, name, slug, is_active)
+	api.exec(t, `INSERT INTO rig_tenant (id, created_at, name, slug, is_active)
 		VALUES ($1, now(), 'Other', $2, true)`, second, "other-"+second.String()[:8])
 
 	// The same person, joining the second tenant. No second identity and no
@@ -206,7 +206,7 @@ func TestATokenIsScopedToItsTenant(t *testing.T) {
 
 	var seeded uuid.UUID
 	if err := api.pool.QueryRow(context.Background(),
-		`SELECT identity_id FROM account WHERE id = $1`,
+		`SELECT identity_id FROM rig_account WHERE id = $1`,
 		api.accountID(t, first, SeedEmail)).Scan(&seeded); err != nil {
 		t.Fatal(err)
 	}
@@ -350,7 +350,7 @@ func (s *server) accountID(t *testing.T, tenant uuid.UUID, email string) uuid.UU
 	t.Helper()
 	var id uuid.UUID
 	if err := s.pool.QueryRow(context.Background(),
-		`SELECT id FROM account WHERE tenant_id = $1 AND lower(email_address) = lower($2)`,
+		`SELECT id FROM rig_account WHERE tenant_id = $1 AND lower(email_address) = lower($2)`,
 		tenant, email).Scan(&id); err != nil {
 		t.Fatal(err)
 	}
@@ -368,7 +368,7 @@ func (s *server) mintLike(t *testing.T, tenant, like uuid.UUID, name string) str
 		by     *uuid.UUID
 	)
 	if err := s.pool.QueryRow(context.Background(),
-		`SELECT account_id, scopes, created_by_account_id FROM api_key WHERE id = $1`,
+		`SELECT account_id, scopes, created_by_account_id FROM rig_api_key WHERE id = $1`,
 		like).Scan(&actsAs, &scopes, &by); err != nil {
 		t.Fatal(err)
 	}
@@ -405,14 +405,14 @@ func (s *server) addPerson(t *testing.T, tenant uuid.UUID, email, name string) (
 	// The address may already be somebody: a test that puts the same person in
 	// two tenants is exactly what this model is for.
 	err := s.pool.QueryRow(ctx,
-		`SELECT id FROM identity WHERE lower(email_address) = lower($1)`, email).Scan(&identityID)
+		`SELECT id FROM rig_identity WHERE lower(email_address) = lower($1)`, email).Scan(&identityID)
 	if err != nil {
-		s.exec(t, `INSERT INTO identity (id, created_at, email_address, display_name, is_active)
+		s.exec(t, `INSERT INTO rig_identity (id, created_at, email_address, display_name, is_active)
 			VALUES ($1, now(), $2, $3, true)`, identityID, email, name)
 	}
 
 	s.exec(t, `
-		INSERT INTO account (id, tenant_id, identity_id, created_at, email_address,
+		INSERT INTO rig_account (id, tenant_id, identity_id, created_at, email_address,
 		                     display_name, is_active)
 		VALUES ($1, $2, $3, now(), $4, $5, true)`,
 		accountID, tenant, identityID, email, name)
@@ -465,7 +465,7 @@ func (s *server) setPassword(t *testing.T, email, plain string) {
 
 	var id uuid.UUID
 	if err := s.pool.QueryRow(context.Background(),
-		`SELECT id FROM identity WHERE lower(email_address) = lower($1)`, email).Scan(&id); err != nil {
+		`SELECT id FROM rig_identity WHERE lower(email_address) = lower($1)`, email).Scan(&id); err != nil {
 		t.Fatalf("find %s: %v", email, err)
 	}
 
@@ -564,7 +564,7 @@ func TestTheTwoKindsOfAPIKey(t *testing.T) {
 
 	var ada uuid.UUID
 	if err := api.pool.QueryRow(context.Background(),
-		`SELECT id FROM account WHERE tenant_id = $1 AND lower(email_address) = $2`,
+		`SELECT id FROM rig_account WHERE tenant_id = $1 AND lower(email_address) = $2`,
 		tenant, SeedEmail).Scan(&ada); err != nil {
 		t.Fatal(err)
 	}
@@ -581,10 +581,10 @@ func TestTheTwoKindsOfAPIKey(t *testing.T) {
 		// By name: other tests in this package mint keys of their own, and "the
 		// integration key" stops being a single row the moment they do.
 		if err := api.pool.QueryRow(context.Background(), `
-			SELECT api_key.kind::text, account.kind::text, api_key.account_id,
-			       api_key.created_by_account_id
-			  FROM api_key JOIN account ON account.id = api_key.account_id
-			 WHERE api_key.tenant_id = $1 AND api_key.name = 'Nightly import'`,
+			SELECT rig_api_key.kind::text, rig_account.kind::text, rig_api_key.account_id,
+			       rig_api_key.created_by_account_id
+			  FROM rig_api_key JOIN rig_account ON rig_account.id = rig_api_key.account_id
+			 WHERE rig_api_key.tenant_id = $1 AND rig_api_key.name = 'Nightly import'`,
 			tenant).Scan(&kind, &accountKind, &actsAs, &mintedBy); err != nil {
 			t.Fatal(err)
 		}
@@ -659,7 +659,7 @@ func TestTheTwoKindsOfAPIKey(t *testing.T) {
 		// The same insert straight past the manager still fails, which is the
 		// point of having it in both places.
 		_, direct := api.pool.Exec(context.Background(), `
-			INSERT INTO api_key (id, tenant_id, account_id, created_by_account_id, kind,
+			INSERT INTO rig_api_key (id, tenant_id, account_id, created_by_account_id, kind,
 			                     name, key_id, secret_hash)
 			VALUES ($1, $2, $3, $4, 'Personal', 'Sneaky', $5, '\x00')`,
 			uuid.New(), tenant, other, ada, "sneaky-"+other.String()[:8])
@@ -678,14 +678,14 @@ func TestAServiceAccountCannotSignIn(t *testing.T) {
 	address := "service-" + uuid.New().String()[:8] + "@example.com"
 	id := uuid.New()
 	api.exec(t, `
-		INSERT INTO account (id, tenant_id, created_at, kind, email_address, display_name, is_active)
+		INSERT INTO rig_account (id, tenant_id, created_at, kind, email_address, display_name, is_active)
 		VALUES ($1, $2, now(), 'Service', $3, 'A machine', true)`, id, tenant, address)
 
 	// There is no password to set: a service account has no identity, so there
 	// is nothing for a credential to hang off. The address resolves to nobody.
 	var exists bool
 	if err := api.pool.QueryRow(context.Background(),
-		`SELECT exists (SELECT 1 FROM identity WHERE lower(email_address) = lower($1))`,
+		`SELECT exists (SELECT 1 FROM rig_identity WHERE lower(email_address) = lower($1))`,
 		address).Scan(&exists); err != nil {
 		t.Fatal(err)
 	}
@@ -756,7 +756,7 @@ func TestAWriteRecordsTheKeyItCameThrough(t *testing.T) {
 		service uuid.UUID
 	)
 	if err := api.pool.QueryRow(context.Background(), `
-		SELECT id, account_id FROM api_key
+		SELECT id, account_id FROM rig_api_key
 		 WHERE tenant_id = $1 AND name = 'Nightly import'`, tenant).Scan(&keyID, &service); err != nil {
 		t.Fatal(err)
 	}
@@ -765,7 +765,7 @@ func TestAWriteRecordsTheKeyItCameThrough(t *testing.T) {
 	// question the account cannot answer.
 	var ada uuid.UUID
 	if err := api.pool.QueryRow(context.Background(),
-		`SELECT id FROM account WHERE tenant_id = $1 AND lower(email_address) = $2`,
+		`SELECT id FROM rig_account WHERE tenant_id = $1 AND lower(email_address) = $2`,
 		tenant, SeedEmail).Scan(&ada); err != nil {
 		t.Fatal(err)
 	}
@@ -832,7 +832,7 @@ func TestProvisioningAnAccount(t *testing.T) {
 	// integration creating people — an HR sync, an SSO provisioner.
 	var keyID uuid.UUID
 	if err := api.pool.QueryRow(context.Background(),
-		`SELECT id FROM api_key WHERE tenant_id = $1 AND name = 'Nightly import'`,
+		`SELECT id FROM rig_api_key WHERE tenant_id = $1 AND name = 'Nightly import'`,
 		tenant).Scan(&keyID); err != nil {
 		t.Fatal(err)
 	}
@@ -866,10 +866,10 @@ func TestProvisioningAnAccount(t *testing.T) {
 			hasCredential    bool
 		)
 		if err := api.pool.QueryRow(context.Background(), `
-			SELECT account.created_by_account_id, account.created_by_api_key_id,
-			       EXISTS (SELECT 1 FROM identity_credential
-			                WHERE identity_id = account.identity_id)
-			  FROM account WHERE id = $1`, got.ID).Scan(&byAccount, &byKey, &hasCredential); err != nil {
+			SELECT rig_account.created_by_account_id, rig_account.created_by_api_key_id,
+			       EXISTS (SELECT 1 FROM rig_identity_credential
+			                WHERE identity_id = rig_account.identity_id)
+			  FROM rig_account WHERE id = $1`, got.ID).Scan(&byAccount, &byKey, &hasCredential); err != nil {
 			t.Fatal(err)
 		}
 		if byKey == nil || *byKey == uuid.Nil {
@@ -1005,7 +1005,7 @@ func TestAScopedReadIsNarrowUntilItIsWidened(t *testing.T) {
 	t.Run("the integration's key holds it and sees the tenant", func(t *testing.T) {
 		var keyID uuid.UUID
 		if err := api.pool.QueryRow(context.Background(),
-			`SELECT id FROM api_key WHERE tenant_id = $1 AND name = 'Nightly import'`,
+			`SELECT id FROM rig_api_key WHERE tenant_id = $1 AND name = 'Nightly import'`,
 			tenant).Scan(&keyID); err != nil {
 			t.Fatal(err)
 		}

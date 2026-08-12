@@ -6,24 +6,24 @@
 -- this is the application.
 CREATE TABLE note (
     id                      uuid PRIMARY KEY,
-    tenant_id               uuid NOT NULL REFERENCES tenant (id),
+    tenant_id               uuid NOT NULL REFERENCES rig_tenant (id),
 
     title                   text NOT NULL,
     body                    text,
 
     created_at              timestamptz NOT NULL DEFAULT now(),
-    created_by_account_id   uuid REFERENCES account (id),
+    created_by_account_id   uuid REFERENCES rig_account (id),
     updated_at              timestamptz,
-    updated_by_account_id   uuid REFERENCES account (id),
+    updated_by_account_id   uuid REFERENCES rig_account (id),
     deleted_at              timestamptz,
-    deleted_by_account_id   uuid REFERENCES account (id),
+    deleted_by_account_id   uuid REFERENCES rig_account (id),
 
     -- Beside the account columns, not instead of them. The account says whose
     -- change it was — a service account when an integration did it — and these
     -- say which credential it came through, which is the one you revoke.
-    created_by_api_key_id   uuid REFERENCES api_key (id),
-    updated_by_api_key_id   uuid REFERENCES api_key (id),
-    deleted_by_api_key_id   uuid REFERENCES api_key (id)
+    created_by_api_key_id   uuid REFERENCES rig_api_key (id),
+    updated_by_api_key_id   uuid REFERENCES rig_api_key (id),
+    deleted_by_api_key_id   uuid REFERENCES rig_api_key (id)
 );
 
 COMMENT ON TABLE note IS 'Something somebody wrote down.';

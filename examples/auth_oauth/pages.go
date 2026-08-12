@@ -214,7 +214,7 @@ func (p *pages) tenantName(r *http.Request) (string, bool) {
 
 	var name string
 	if err := p.pool.QueryRow(context.Background(),
-		`SELECT name FROM tenant WHERE lower(slug) = $1 AND deleted_at IS NULL AND is_active`,
+		`SELECT name FROM rig_tenant WHERE lower(slug) = $1 AND deleted_at IS NULL AND is_active`,
 		slug).Scan(&name); err != nil {
 		return "", false
 	}

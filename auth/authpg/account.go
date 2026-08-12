@@ -38,14 +38,14 @@ const accountColumns = `id, tenant_id, identity_id, kind, role, email_address, d
 // than a scan, and it agrees with what the database will enforce on insert.
 func (s *AccountStore) FindIdentityByEmail(ctx context.Context, lowercased string) (*account.Identity, error) {
 	return s.oneIdentity(ctx, `
-		SELECT `+identityColumns+` FROM identity
+		SELECT `+identityColumns+` FROM rig_identity
 		WHERE lower(email_address) = $1 AND deleted_at IS NULL`, lowercased)
 }
 
 // FindIdentityByID implements [account.Store].
 func (s *AccountStore) FindIdentityByID(ctx context.Context, id uuid.UUID) (*account.Identity, error) {
 	return s.oneIdentity(ctx, `
-		SELECT `+identityColumns+` FROM identity
+		SELECT `+identityColumns+` FROM rig_identity
 		WHERE id = $1 AND deleted_at IS NULL`, id)
 }
 
@@ -72,7 +72,7 @@ func (s *AccountStore) oneIdentity(ctx context.Context, sql string, args ...any)
 // InsertIdentity implements [account.Store].
 func (s *AccountStore) InsertIdentity(ctx context.Context, i *account.Identity) error {
 	_, err := conn(ctx, s.db).Exec(ctx, `
-		INSERT INTO identity (id, created_at, created_by_account_id, created_by_api_key_id,
+		INSERT INTO rig_identity (id, created_at, created_by_account_id, created_by_api_key_id,
 		                      email_address, display_name, is_active)
 		VALUES ($1, now(), $2, $3, $4, $5, $6)`,
 		i.ID, i.CreatedBy, i.CreatedByKey, i.EmailAddress, i.DisplayName, i.IsActive)
@@ -85,7 +85,7 @@ func (s *AccountStore) InsertIdentity(ctx context.Context, i *account.Identity) 
 // MarkIdentityVerified implements [account.Store].
 func (s *AccountStore) MarkIdentityVerified(ctx context.Context, identityID uuid.UUID, at time.Time) error {
 	_, err := conn(ctx, s.db).Exec(ctx, `
-		UPDATE identity SET email_verified_at = $2, updated_at = $2 WHERE id = $1`,
+		UPDATE rig_identity SET email_verified_at = $2, updated_at = $2 WHERE id = $1`,
 		identityID, at)
 	if err != nil {
 		return fmt.Errorf("authpg: mark verified: %w", err)
@@ -100,7 +100,7 @@ func (s *AccountStore) MarkIdentityVerified(ctx context.Context, identityID uuid
 // an API key has both an account and a key to record, and a seed has neither.
 func (s *AccountStore) Insert(ctx context.Context, a *account.Account) error {
 	_, err := conn(ctx, s.db).Exec(ctx, `
-		INSERT INTO account (id, tenant_id, identity_id, created_at, created_by_account_id,
+		INSERT INTO rig_account (id, tenant_id, identity_id, created_at, created_by_account_id,
 		                     created_by_api_key_id, kind, role, email_address,
 		                     display_name, time_zone, is_active)
 		VALUES ($1, $2, $3, now(), $4, $5, $6, $7, $8, $9, $10, $11)`,
@@ -116,7 +116,7 @@ func (s *AccountStore) Insert(ctx context.Context, a *account.Account) error {
 func (s *AccountStore) TenantDomains(ctx context.Context, tenantID uuid.UUID) ([]string, error) {
 	var domains []string
 	err := conn(ctx, s.db).QueryRow(ctx,
-		`SELECT allowed_email_domains FROM tenant WHERE id = $1 AND deleted_at IS NULL`,
+		`SELECT allowed_email_domains FROM rig_tenant WHERE id = $1 AND deleted_at IS NULL`,
 		tenantID).Scan(&domains)
 	switch {
 	case errors.Is(err, pgx.ErrNoRows):
@@ -133,14 +133,14 @@ func (s *AccountStore) TenantDomains(ctx context.Context, tenantID uuid.UUID) ([
 // FindByID implements [account.Store].
 func (s *AccountStore) FindByID(ctx context.Context, tenantID, id uuid.UUID) (*account.Account, error) {
 	return s.oneAccount(ctx, `
-		SELECT `+accountColumns+` FROM account
+		SELECT `+accountColumns+` FROM rig_account
 		WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL`, tenantID, id)
 }
 
 // AccountForIdentity implements [account.Store].
 func (s *AccountStore) AccountForIdentity(ctx context.Context, tenantID, identityID uuid.UUID) (*account.Account, error) {
 	return s.oneAccount(ctx, `
-		SELECT `+accountColumns+` FROM account
+		SELECT `+accountColumns+` FROM rig_account
 		WHERE tenant_id = $1 AND identity_id = $2 AND deleted_at IS NULL`,
 		tenantID, identityID)
 }
@@ -153,7 +153,7 @@ func (s *AccountStore) AccountForIdentity(ctx context.Context, tenantID, identit
 // every session a person has.
 func (s *AccountStore) AccountsForIdentity(ctx context.Context, identityID uuid.UUID) ([]*account.Account, error) {
 	rows, err := conn(ctx, s.db).Query(ctx, `
-		SELECT `+accountColumns+` FROM account
+		SELECT `+accountColumns+` FROM rig_account
 		WHERE identity_id = $1 AND deleted_at IS NULL
 		ORDER BY created_at`, identityID)
 	if err != nil {
@@ -180,14 +180,15 @@ func (s *AccountStore) AccountsForIdentity(ctx context.Context, identityID uuid.
 // something that no longer exists is not somewhere anybody can go.
 func (s *AccountStore) TenantsForIdentity(ctx context.Context, identityID uuid.UUID) ([]account.Membership, error) {
 	rows, err := conn(ctx, s.db).Query(ctx, `
-		SELECT tenant.id, tenant.name, tenant.slug, account.id, account.role, account.is_active
-		  FROM account
-		  JOIN tenant ON tenant.id = account.tenant_id
-		 WHERE account.identity_id = $1
-		   AND account.deleted_at IS NULL
-		   AND tenant.deleted_at IS NULL
-		   AND tenant.is_active
-		 ORDER BY tenant.name`, identityID)
+		SELECT rig_tenant.id, rig_tenant.name, rig_tenant.slug,
+		       rig_account.id, rig_account.role, rig_account.is_active
+		  FROM rig_account
+		  JOIN rig_tenant ON rig_tenant.id = rig_account.tenant_id
+		 WHERE rig_account.identity_id = $1
+		   AND rig_account.deleted_at IS NULL
+		   AND rig_tenant.deleted_at IS NULL
+		   AND rig_tenant.is_active
+		 ORDER BY rig_tenant.name`, identityID)
 	if err != nil {
 		return nil, fmt.Errorf("authpg: read tenants: %w", err)
 	}
@@ -237,7 +238,7 @@ func scanAccount(rows pgx.Rows) (*account.Account, error) {
 func (s *AccountStore) Credential(ctx context.Context, identityID uuid.UUID) (*account.Credential, error) {
 	rows, err := conn(ctx, s.db).Query(ctx, `
 		SELECT id, identity_id, password_hash, algorithm, params, created_at, updated_at
-		FROM identity_credential WHERE identity_id = $1`, identityID)
+		FROM rig_identity_credential WHERE identity_id = $1`, identityID)
 	if err != nil {
 		return nil, fmt.Errorf("authpg: read credential: %w", err)
 	}
@@ -277,7 +278,7 @@ func (s *AccountStore) SaveCredential(ctx context.Context, c *account.Credential
 	}
 
 	_, err = conn(ctx, s.db).Exec(ctx, `
-		INSERT INTO identity_credential
+		INSERT INTO rig_identity_credential
 			(id, identity_id, password_hash, algorithm, params, created_at)
 		VALUES ($1, $2, $3, $4, $5, $6)
 		ON CONFLICT (identity_id) DO UPDATE SET
@@ -295,7 +296,7 @@ func (s *AccountStore) SaveCredential(ctx context.Context, c *account.Credential
 // CreateVerification implements [account.Store].
 func (s *AccountStore) CreateVerification(ctx context.Context, v *account.Verification) error {
 	_, err := conn(ctx, s.db).Exec(ctx, `
-		INSERT INTO identity_verification
+		INSERT INTO rig_identity_verification
 			(id, identity_id, invited_to_tenant_id, kind, token_hash, created_at, expires_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7)`,
 		v.ID, v.IdentityID, v.InvitedToTenantID, string(v.Kind), v.TokenHash,
@@ -313,20 +314,20 @@ func (s *AccountStore) CreateVerification(ctx context.Context, v *account.Verifi
 // interface listing invitations wants to say who, not which token hash.
 func (s *AccountStore) PendingInvitations(ctx context.Context, tenantID uuid.UUID) ([]account.Invitation, error) {
 	rows, err := conn(ctx, s.db).Query(ctx, `
-		SELECT v.id, v.identity_id, account.id, v.invited_to_tenant_id, tenant.name,
-		       identity.email_address, identity.display_name, account.role,
+		SELECT v.id, v.identity_id, rig_account.id, v.invited_to_tenant_id, rig_tenant.name,
+		       rig_identity.email_address, rig_identity.display_name, rig_account.role,
 		       v.created_at, v.expires_at
-		  FROM identity_verification v
-		  JOIN identity ON identity.id = v.identity_id
-		  JOIN tenant   ON tenant.id = v.invited_to_tenant_id
-		  JOIN account  ON account.identity_id = v.identity_id
-		                AND account.tenant_id = v.invited_to_tenant_id
+		  FROM rig_identity_verification v
+		  JOIN rig_identity ON rig_identity.id = v.identity_id
+		  JOIN rig_tenant   ON rig_tenant.id = v.invited_to_tenant_id
+		  JOIN rig_account  ON rig_account.identity_id = v.identity_id
+		                    AND rig_account.tenant_id = v.invited_to_tenant_id
 		 WHERE v.invited_to_tenant_id = $1
 		   AND v.kind = 'Invitation'
 		   AND v.consumed_at IS NULL
 		   AND v.revoked_at IS NULL
 		   AND v.expires_at > now()
-		   AND account.deleted_at IS NULL
+		   AND rig_account.deleted_at IS NULL
 		 ORDER BY v.created_at DESC`, tenantID)
 	if err != nil {
 		return nil, fmt.Errorf("authpg: read invitations: %w", err)
@@ -355,7 +356,7 @@ func (s *AccountStore) PendingInvitations(ctx context.Context, tenantID uuid.UUI
 // the two statements affects a row.
 func (s *AccountStore) RevokeVerification(ctx context.Context, id uuid.UUID, at time.Time) (bool, error) {
 	tag, err := conn(ctx, s.db).Exec(ctx, `
-		UPDATE identity_verification SET revoked_at = $2
+		UPDATE rig_identity_verification SET revoked_at = $2
 		WHERE id = $1 AND consumed_at IS NULL AND revoked_at IS NULL`, id, at)
 	if err != nil {
 		return false, fmt.Errorf("authpg: revoke verification: %w", err)
@@ -370,7 +371,7 @@ func (s *AccountStore) RevokeVerification(ctx context.Context, id uuid.UUID, at 
 // away from being undone.
 func (s *AccountStore) SoftDeleteAccount(ctx context.Context, in account.DeleteAccountInput) error {
 	_, err := conn(ctx, s.db).Exec(ctx, `
-		UPDATE account
+		UPDATE rig_account
 		   SET deleted_at = $3, deleted_by_account_id = $4, deleted_by_api_key_id = $5
 		 WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL`,
 		in.TenantID, in.AccountID, in.At, in.ByAccountID, in.ByAPIKeyID)
@@ -394,7 +395,7 @@ func (s *AccountStore) verification(ctx context.Context, where string, arg any) 
 	rows, err := conn(ctx, s.db).Query(ctx, `
 		SELECT id, identity_id, invited_to_tenant_id, kind, token_hash,
 		       created_at, expires_at, consumed_at, revoked_at
-		FROM identity_verification WHERE `+where, arg)
+		FROM rig_identity_verification WHERE `+where, arg)
 	if err != nil {
 		return nil, fmt.Errorf("authpg: read verification: %w", err)
 	}
@@ -427,7 +428,7 @@ func (s *AccountStore) verification(ctx context.Context, where string, arg any) 
 // exactly one of them affects a row.
 func (s *AccountStore) ConsumeVerification(ctx context.Context, id uuid.UUID, at time.Time) (bool, error) {
 	tag, err := conn(ctx, s.db).Exec(ctx, `
-		UPDATE identity_verification SET consumed_at = $2
+		UPDATE rig_identity_verification SET consumed_at = $2
 		WHERE id = $1 AND consumed_at IS NULL`, id, at)
 	if err != nil {
 		return false, fmt.Errorf("authpg: consume verification: %w", err)
@@ -448,20 +449,20 @@ func (s *AccountStore) InTx(ctx context.Context, fn func(ctx context.Context) er
 // tenant they are not in yet.
 func (s *AccountStore) InvitationsForIdentity(ctx context.Context, identityID uuid.UUID) ([]account.Invitation, error) {
 	rows, err := conn(ctx, s.db).Query(ctx, `
-		SELECT v.id, v.identity_id, account.id, v.invited_to_tenant_id, tenant.name,
-		       identity.email_address, identity.display_name, account.role,
+		SELECT v.id, v.identity_id, rig_account.id, v.invited_to_tenant_id, rig_tenant.name,
+		       rig_identity.email_address, rig_identity.display_name, rig_account.role,
 		       v.created_at, v.expires_at
-		  FROM identity_verification v
-		  JOIN identity ON identity.id = v.identity_id
-		  JOIN tenant   ON tenant.id = v.invited_to_tenant_id
-		  JOIN account  ON account.identity_id = v.identity_id
-		                AND account.tenant_id = v.invited_to_tenant_id
+		  FROM rig_identity_verification v
+		  JOIN rig_identity ON rig_identity.id = v.identity_id
+		  JOIN rig_tenant   ON rig_tenant.id = v.invited_to_tenant_id
+		  JOIN rig_account  ON rig_account.identity_id = v.identity_id
+		                    AND rig_account.tenant_id = v.invited_to_tenant_id
 		 WHERE v.identity_id = $1
 		   AND v.kind = 'Invitation'
 		   AND v.consumed_at IS NULL
 		   AND v.revoked_at IS NULL
 		   AND v.expires_at > now()
-		   AND account.deleted_at IS NULL
+		   AND rig_account.deleted_at IS NULL
 		 ORDER BY v.created_at DESC`, identityID)
 	if err != nil {
 		return nil, fmt.Errorf("authpg: read invitations for identity: %w", err)
@@ -494,7 +495,7 @@ func (s *AccountStore) InsertTenant(ctx context.Context, t *account.Tenant) erro
 	}
 
 	_, err := conn(ctx, s.db).Exec(ctx, `
-		INSERT INTO tenant (id, created_at, name, slug, is_active, allowed_email_domains)
+		INSERT INTO rig_tenant (id, created_at, name, slug, is_active, allowed_email_domains)
 		VALUES ($1, now(), $2, $3, $4, $5)`,
 		t.ID, t.Name, t.Slug, t.IsActive, domains)
 	if err != nil {

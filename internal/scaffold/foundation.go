@@ -85,7 +85,7 @@ func Foundation(opt FoundationOptions) []File {
 
 		// The migration is written once. The configuration is a separate
 		// question: exposing a table is something an application decides later,
-		// long after the migration landed, so `--expose account` on a project
+		// long after the migration landed, so `--expose rig_account` on a project
 		// that already has the foundation has to write that one file rather than
 		// finding the part done and doing nothing.
 		if !alreadyApplied(opt.Existing, part) {
@@ -127,6 +127,10 @@ func alreadyApplied(existing []string, part string) bool {
 
 // PartTables are the tables a part creates.
 //
+// Every name carries the `rig_` prefix the migrations create them under, so a
+// project can tell at a glance which tables arrived with the foundation and is
+// free to have an `account` or a `tenant` of its own.
+//
 // Written out rather than parsed from the SQL, so that adding a table to the
 // foundation is a decision somebody makes here as well — a heuristic would
 // quietly start or stop treating one as the auth module's, and which side of
@@ -135,15 +139,15 @@ func PartTables(part string) []string {
 	switch part {
 	case PartTenancy:
 		return []string{
-			"tenant", "identity", "identity_credential", "identity_verification",
-			"account",
+			"rig_tenant", "rig_identity", "rig_identity_credential",
+			"rig_identity_verification", "rig_account",
 		}
 	case PartAPIKeys:
-		return []string{"api_key"}
+		return []string{"rig_api_key"}
 	case PartSessions:
-		return []string{"account_token", "auth_log", "identity_session"}
+		return []string{"rig_account_token", "rig_auth_log", "rig_identity_session"}
 	case PartOAuth:
-		return []string{"identity_oauth"}
+		return []string{"rig_identity_oauth"}
 	default:
 		return nil
 	}
@@ -163,7 +167,7 @@ func Tables() []string {
 // The evidence is the migration files: a part rig wrote is named for itself, so
 // a project that ran `setup-project` says so in its own migrations directory.
 // That matters because the answer decides whether rig generates a model and a
-// repository for a table — and a project with an `account` table of its own,
+// repository for a table — and a project with a `rig_account` table of its own,
 // which nobody scaffolded, must keep getting them.
 func Managed(existing []string) []string {
 	var out []string
@@ -183,7 +187,7 @@ func Requires(part string) []string {
 	case PartSessions:
 		// Sessions and the log name the key a request arrived with, and they
 		// declare those columns where the tables are created rather than by
-		// altering them afterwards — so api_key has to exist by then. Keeping
+		// altering them afterwards — so rig_api_key has to exist by then. Keeping
 		// them separable would mean two shapes of the same table, and the
 		// keys are two hundred lines of the foundation nobody regrets having.
 		return []string{PartTenancy, PartAPIKeys}
@@ -221,13 +225,20 @@ func foundationPart(name string) part {
 
 // config renders a table configuration file.
 //
+// The resource name is written out rather than derived, because the physical
+// name carries the `rig_` prefix and the API name should not: the prefix is
+// there so a project can tell its own tables from the foundation's in psql, and
+// a client has no business knowing which library created a table. Without it an
+// exposed table would arrive as RigAccount on /rig-accounts.
+//
 // Column comments are not repeated here: the migrations carry COMMENT ON for
 // every one of them, so they arrive through introspection. Saying them twice
 // would mean two places to edit and one place to forget.
-func config(table, schemaDepth string, body ...string) string {
+func config(table, resource, schemaDepth string, body ...string) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "# yaml-language-server: $schema=%s\n", schemaDepth)
 	fmt.Fprintf(&b, "table: %s\n", table)
+	fmt.Fprintf(&b, "resource: %s\n", resource)
 	for _, s := range body {
 		b.WriteString("\n")
 		b.WriteString(strings.TrimRight(s, "\n"))

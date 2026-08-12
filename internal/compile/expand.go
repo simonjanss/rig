@@ -123,14 +123,14 @@ func expandResource(res ir.Resource, n *naming.Namer, opt ExpandOptions, exposed
 	//
 	// An unexposed table gets one too — it still has a repository, and that
 	// repository still lists. Nothing routes to it, so nothing in the document
-	// references it, which is what keeps account_token out of the OpenAPI.
+	// references it, which is what keeps rig_account_token out of the OpenAPI.
 	if res.Storage != nil {
 		objects = append(objects, filterObjects(res, readable, wire, exposed)...)
 	}
 
 	// An unexposed table has a model and a repository and no API at all, so
 	// there is no wire shape to name and nothing to route. Generating them
-	// anyway would put account_token in the OpenAPI document.
+	// anyway would put rig_account_token in the OpenAPI document.
 	if res.Unexposed {
 		return out, objects, diags
 	}
