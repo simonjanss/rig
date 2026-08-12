@@ -41,5 +41,7 @@ for complete applications built with rig.
 | `internal/compile` | the pure compile pipeline |
 | `runtime/` | a separate module, imported by generated code |
 | `auth/` | a separate module: sessions, OAuth, API keys, RBAC |
+| `migrate/` | a separate module: apply the project's migrations from its own binary |
 
-A generated application depends on `rig/runtime` (and optionally `rig/auth`) — never on the CLI.
+A generated application depends on `rig/runtime` (and optionally `rig/auth` and
+`rig/migrate`) — never on the CLI.

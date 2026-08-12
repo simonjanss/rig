@@ -2,168 +2,277 @@ package patch_test
 
 import (
 	"encoding/json"
+	"errors"
 	"testing"
 
 	"github.com/simonjanss/rig/runtime/patch"
 )
 
-// body is what an update request decodes into: a field the client omitted must
-// be distinguishable from one they set to null.
+// body is the shape a generated update input has: one field of each kind.
 type body struct {
-	Title patch.Patch[string] `json:"title"`
-	Notes patch.Patch[string] `json:"notes"`
-	Count patch.Patch[int]    `json:"count"`
+	Title patch.Optional[string] `json:"title"` // a NOT NULL column
+	Notes patch.Nullable[string] `json:"notes"` // a nullable column
 }
 
-func TestThreeStates(t *testing.T) {
+// The zero value is absent, which is what makes this work with encoding/json at
+// all: UnmarshalJSON is only called for keys that are present, so a field
+// nobody mentioned is never touched.
+func TestAnOmittedFieldIsAbsent(t *testing.T) {
 	t.Parallel()
 
 	var b body
-	if err := json.Unmarshal([]byte(`{"title":"hello","notes":null}`), &b); err != nil {
+	if err := json.Unmarshal([]byte(`{}`), &b); err != nil {
 		t.Fatal(err)
 	}
 
-	// Set.
-	if v, ok := b.Title.Get(); !ok || v != "hello" {
-		t.Errorf("Title.Get() = %q, %v", v, ok)
+	if !b.Title.IsAbsent() {
+		t.Error("an omitted Optional should be absent")
 	}
-	if !b.Title.IsSet() || b.Title.IsNull() || b.Title.IsAbsent() {
-		t.Error("Title should read as set")
+	if !b.Notes.IsAbsent() {
+		t.Error("an omitted Nullable should be absent")
 	}
-
-	// Null.
-	if _, ok := b.Notes.Get(); ok {
-		t.Error("Notes is null, so there is no value")
-	}
-	if !b.Notes.IsNull() || b.Notes.IsAbsent() {
-		t.Error("Notes should read as null, not absent")
-	}
-
-	// Absent. This is the one a pointer cannot express, and the reason the
-	// type exists.
-	if !b.Count.IsAbsent() || b.Count.IsNull() || b.Count.IsSet() {
-		t.Error("Count should read as absent")
+	if b.Notes.Touched() {
+		t.Error("an omitted field was not mentioned")
 	}
 }
 
-// Touched is what a repository asks when deciding which columns to write.
-func TestTouched(t *testing.T) {
+func TestAValueIsSet(t *testing.T) {
 	t.Parallel()
 
 	var b body
-	if err := json.Unmarshal([]byte(`{"title":"x","notes":null}`), &b); err != nil {
+	if err := json.Unmarshal([]byte(`{"title":"Write it","notes":"soon"}`), &b); err != nil {
 		t.Fatal(err)
 	}
 
-	if !b.Title.Touched() {
-		t.Error("a set field was touched")
+	if v, ok := b.Title.Get(); !ok || v != "Write it" {
+		t.Errorf("title = %q, %v", v, ok)
+	}
+	if v, ok := b.Notes.Get(); !ok || v != "soon" {
+		t.Errorf("notes = %q, %v", v, ok)
+	}
+	if b.Notes.IsNull() {
+		t.Error("a value is not null")
+	}
+}
+
+// The distinction the whole package exists for.
+func TestNullClearsANullableField(t *testing.T) {
+	t.Parallel()
+
+	var b body
+	if err := json.Unmarshal([]byte(`{"notes":null}`), &b); err != nil {
+		t.Fatal(err)
+	}
+
+	if !b.Notes.IsNull() {
+		t.Fatal("an explicit null should be null, not absent")
+	}
+	if b.Notes.IsAbsent() {
+		t.Error("an explicit null was mentioned")
 	}
 	if !b.Notes.Touched() {
-		t.Error("clearing a field is still touching it")
+		t.Error("a repository needs to know this column was mentioned")
 	}
-	if b.Count.Touched() {
-		t.Error("an omitted field was not touched")
+	if _, ok := b.Notes.Get(); ok {
+		t.Error("there is no value to get")
+	}
+	if b.Notes.Ptr() != nil {
+		t.Error("a null should reach the driver as a nil pointer")
+	}
+}
+
+// A NOT NULL column cannot be cleared, so a client that tries is told rather
+// than quietly ignored. This is the one null that has to be caught at runtime,
+// because it arrives over the wire; the Go API cannot express it at all.
+func TestNullIsRefusedForAnOptionalField(t *testing.T) {
+	t.Parallel()
+
+	var b body
+	err := json.Unmarshal([]byte(`{"title":null}`), &b)
+	if err == nil {
+		t.Fatal("null for a NOT NULL column should be refused")
+	}
+
+	var refused patch.ErrNullNotAllowed
+	if !errors.As(err, &refused) {
+		t.Errorf("err = %#v, want ErrNullNotAllowed so the decoder can name the field", err)
+	}
+	// And nothing was recorded, so a caller cannot act on a half-decoded value.
+	if !b.Title.IsAbsent() {
+		t.Error("a refused field should not have been set")
 	}
 }
 
 func TestConstructors(t *testing.T) {
 	t.Parallel()
 
-	if v, ok := patch.Set("x").Get(); !ok || v != "x" {
-		t.Errorf("Set = %q, %v", v, ok)
-	}
-	if !patch.Null[string]().IsNull() {
-		t.Error("Null should be null")
+	if v, ok := patch.NewOptional("x").Get(); !ok || v != "x" {
+		t.Errorf("NewOptional = %q, %v", v, ok)
 	}
 	if !patch.Absent[string]().IsAbsent() {
 		t.Error("Absent should be absent")
 	}
 
-	// The zero value is absent, which is what makes the JSON behavior work
-	// without any cooperation from the surrounding struct.
-	var zero patch.Patch[string]
-	if !zero.IsAbsent() {
-		t.Error("the zero value should be absent")
+	if v, ok := patch.NewNullable("x").Get(); !ok || v != "x" {
+		t.Errorf("NewNullable = %q, %v", v, ok)
+	}
+	if !patch.Null[string]().IsNull() {
+		t.Error("Null should be null")
+	}
+	if !patch.Unspecified[string]().IsAbsent() {
+		t.Error("Unspecified should be absent")
+	}
+}
+
+// FromPtr is how the previous row's value — which the model holds as *T —
+// becomes an input, which is what merging a partial update needs.
+func TestFromPtrRoundTrips(t *testing.T) {
+	t.Parallel()
+
+	value := "kept"
+	set := patch.FromPtr(&value)
+	if v, ok := set.Get(); !ok || v != "kept" {
+		t.Errorf("FromPtr(&v) = %q, %v", v, ok)
+	}
+	if got := set.Ptr(); got == nil || *got != "kept" {
+		t.Errorf("Ptr() = %v", got)
+	}
+
+	cleared := patch.FromPtr[string](nil)
+	if !cleared.IsNull() {
+		t.Error("FromPtr(nil) should clear")
+	}
+	if cleared.Ptr() != nil {
+		t.Error("Ptr() of a cleared value should be nil")
 	}
 }
 
 func TestOr(t *testing.T) {
 	t.Parallel()
 
-	if got := patch.Set(7).Or(3); got != 7 {
-		t.Errorf("Or on a set value = %d", got)
+	if got := patch.Absent[string]().Or("fallback"); got != "fallback" {
+		t.Errorf("got %q", got)
 	}
-	if got := patch.Null[int]().Or(3); got != 3 {
-		t.Errorf("Or on null = %d", got)
+	if got := patch.NewOptional("given").Or("fallback"); got != "given" {
+		t.Errorf("got %q", got)
 	}
-	if got := patch.Absent[int]().Or(3); got != 3 {
-		t.Errorf("Or on absent = %d", got)
+	// Both absent and null fall back: neither carries a value.
+	if got := patch.Null[string]().Or("fallback"); got != "fallback" {
+		t.Errorf("got %q", got)
+	}
+	if got := patch.NewNullable("given").Or("fallback"); got != "given" {
+		t.Errorf("got %q", got)
 	}
 }
 
 func TestMarshal(t *testing.T) {
 	t.Parallel()
 
-	out, err := json.Marshal(struct {
-		A patch.Patch[string] `json:"a"`
-		B patch.Patch[string] `json:"b"`
-		C patch.Patch[string] `json:"c"`
-	}{
-		A: patch.Set("x"),
-		B: patch.Null[string](),
-	})
+	b := body{Title: patch.NewOptional("Write it"), Notes: patch.Null[string]()}
+
+	out, err := json.Marshal(b)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(out) != `{"a":"x","b":null,"c":null}` {
-		t.Errorf("marshal = %s", out)
+	if want := `{"title":"Write it","notes":null}`; string(out) != want {
+		t.Errorf("got %s\nwant %s", out, want)
 	}
 }
 
-func TestNestedTypes(t *testing.T) {
+// A round trip has to preserve which of the three states a nullable field was
+// in, or an echoed request means something different from the one sent.
+func TestNullableRoundTrips(t *testing.T) {
 	t.Parallel()
 
-	type inner struct {
-		N int `json:"n"`
-	}
-	var b struct {
-		V patch.Patch[inner]    `json:"v"`
-		S patch.Patch[[]string] `json:"s"`
-	}
+	for _, in := range []string{`{"notes":"y"}`, `{"notes":null}`, `{}`} {
+		var first body
+		if err := json.Unmarshal([]byte(in), &first); err != nil {
+			t.Fatalf("%s: %v", in, err)
+		}
 
-	if err := json.Unmarshal([]byte(`{"v":{"n":3},"s":["a","b"]}`), &b); err != nil {
-		t.Fatal(err)
-	}
-	if v, ok := b.V.Get(); !ok || v.N != 3 {
-		t.Errorf("nested struct = %+v, %v", v, ok)
-	}
-	if s, ok := b.S.Get(); !ok || len(s) != 2 {
-		t.Errorf("slice = %v, %v", s, ok)
-	}
-}
+		encoded, err := json.Marshal(struct {
+			Notes patch.Nullable[string] `json:"notes"`
+		}{first.Notes})
+		if err != nil {
+			t.Fatal(err)
+		}
 
-func TestUnmarshalRejectsTheWrongType(t *testing.T) {
-	t.Parallel()
+		var second struct {
+			Notes patch.Nullable[string] `json:"notes"`
+		}
+		if err := json.Unmarshal(encoded, &second); err != nil {
+			t.Fatal(err)
+		}
 
-	var b body
-	if err := json.Unmarshal([]byte(`{"count":"not a number"}`), &b); err == nil {
-		t.Fatal("a type mismatch should be an error")
+		// Absent encodes as null, because a struct field cannot be omitted
+		// from the outside — so absent becomes null on the way back. Anything
+		// carrying a value has to survive exactly.
+		if first.Notes.IsSet() && first.Notes.String() != second.Notes.String() {
+			t.Errorf("%s: notes became %s", in, second.Notes.String())
+		}
 	}
 }
 
 func TestString(t *testing.T) {
 	t.Parallel()
 
-	for _, tc := range []struct {
-		p    patch.Patch[int]
-		want string
-	}{
-		{patch.Set(3), "3"},
-		{patch.Null[int](), "null"},
-		{patch.Absent[int](), "absent"},
+	for _, tc := range []struct{ got, want string }{
+		{patch.Absent[int]().String(), "absent"},
+		{patch.NewOptional(7).String(), "7"},
+		{patch.Unspecified[int]().String(), "absent"},
+		{patch.Null[int]().String(), "null"},
+		{patch.NewNullable(7).String(), "7"},
 	} {
-		if got := tc.p.String(); got != tc.want {
-			t.Errorf("String() = %q, want %q", got, tc.want)
+		if tc.got != tc.want {
+			t.Errorf("got %q, want %q", tc.got, tc.want)
 		}
+	}
+}
+
+// A malformed value is a decoding error, not a silent absence.
+func TestABadValueIsAnError(t *testing.T) {
+	t.Parallel()
+
+	var b body
+	if err := json.Unmarshal([]byte(`{"title":42}`), &b); err == nil {
+		t.Error("a number for a string field should fail")
+	}
+	if err := json.Unmarshal([]byte(`{"notes":42}`), &b); err == nil {
+		t.Error("a number for a string field should fail")
+	}
+}
+
+// A nullable array column is held as a plain slice rather than a pointer to
+// one, so the pointer form has nothing to take the address of. This is the
+// version of FromPtr for that case, and it is what turns a previous row's value
+// back into an input when a snapshot is replayed.
+func TestFromSlice(t *testing.T) {
+	t.Parallel()
+
+	var absent []string
+	if got := patch.FromSlice(absent); !got.IsNull() {
+		t.Errorf("a nil slice should clear the column, got %+v", got)
+	}
+
+	// An empty slice is a value. A column set to {} is not a column set to
+	// NULL, and confusing the two would quietly change the row.
+	empty := patch.FromSlice([]string{})
+	if empty.IsNull() {
+		t.Error("an empty slice is a value, not a clear")
+	}
+	if v, ok := empty.Get(); !ok || len(v) != 0 {
+		t.Errorf("Get = %v, %v", v, ok)
+	}
+
+	full := patch.FromSlice([]string{"a", "b"})
+	v, ok := full.Get()
+	if !ok || len(v) != 2 || v[0] != "a" {
+		t.Errorf("Get = %v, %v", v, ok)
+	}
+
+	// Same three states as every other Nullable, so a repository writing one
+	// needs no special case.
+	if !full.Touched() || !empty.Touched() || !patch.FromSlice(absent).Touched() {
+		t.Error("all three are things the caller asked for")
 	}
 }

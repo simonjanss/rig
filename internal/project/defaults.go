@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/simonjanss/rig/internal/diag"
+	"github.com/simonjanss/rig/migrate"
 )
 
 // Defaults every project inherits. They are the shape `rig init` writes, so a
@@ -26,8 +27,12 @@ const (
 	DefaultDBPass   = "rig"
 	DefaultDBSchema = "public"
 
-	DefaultMigrationsDir   = "migrations"
-	DefaultMigrationsTable = "rig_migrations"
+	DefaultMigrationsDir = "migrations"
+
+	// DefaultMigrationsTable is rig/migrate's, not a copy of it: `rig db up`
+	// and a binary migrating itself have to read the same bookkeeping, and two
+	// constants that happen to match today would not.
+	DefaultMigrationsTable = migrate.DefaultTable
 
 	DefaultJSONCase = "camel"
 )
@@ -50,6 +55,12 @@ func (p *Project) applyDefaults() {
 	c.API.BasePath = "/" + strings.Trim(c.API.BasePath, "/")
 	if c.API.SearchMethod == "" {
 		c.API.SearchMethod = DefaultSearchMethod
+	}
+	if c.API.Permissions == "" {
+		// Derived by default, so an endpoint nobody thought about is refused
+		// rather than open. Turning it off is a line in rig.yaml, and being
+		// unprotected should be the thing somebody wrote down.
+		c.API.Permissions = PermissionsDerived
 	}
 
 	setDefault(&c.OpenAPI.Version, DefaultOpenAPI)
@@ -84,13 +95,17 @@ func setDefault(field *string, value string) {
 
 // DatabaseURL is the connection string for this project.
 //
-// An explicit URL wins; otherwise one is built for the throwaway container.
+// An explicit URL wins; otherwise one is built for the throwaway container, with
+// the session time zone pinned to UTC — see [dockerdb.Config.URL] for why that
+// matters and what it does not affect. A URL somebody wrote themselves is left
+// exactly as written: quietly appending a parameter to a connection string is a
+// good way to break one that already carries its own.
 func (p *Project) DatabaseURL() string {
 	d := p.Config.Database
 	if d.URL != "" {
 		return d.URL
 	}
-	return fmt.Sprintf("postgres://%s:%s@localhost:%d/%s?sslmode=disable",
+	return fmt.Sprintf("postgres://%s:%s@localhost:%d/%s?sslmode=disable&TimeZone=UTC",
 		url.QueryEscape(d.User), url.QueryEscape(d.Password), d.Port, d.Name)
 }
 

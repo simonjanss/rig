@@ -3,5 +3,10 @@ go 1.25.7
 use (
 	.
 	./auth
+	./examples/auth
+	./examples/fantasyfootball
+	./examples/oauth
+	./examples/todo
+	./migrate
 	./runtime
 )

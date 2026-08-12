@@ -7,6 +7,7 @@ import (
 
 	"github.com/simonjanss/rig/internal/diag"
 	"github.com/simonjanss/rig/internal/naming"
+	"github.com/simonjanss/rig/internal/pgtypes"
 	"github.com/simonjanss/rig/internal/tableconf"
 	"github.com/simonjanss/rig/pkg/ir"
 )
@@ -17,6 +18,12 @@ type ConfigOptions struct {
 	// UnmentionedColumn is the severity for a column the database has and the
 	// configuration does not mention. Empty reports nothing.
 	UnmentionedColumn diag.Severity
+	// Ignored are tables the database has and this document deliberately does
+	// not, so a configuration file naming one can be told apart from a file
+	// naming a table that was renamed or dropped. The two need different advice,
+	// and "no such table" would send somebody looking for a migration that is
+	// not the problem.
+	Ignored []string
 }
 
 // ApplyConfig merges the per-table YAML onto the projected API.
@@ -72,17 +79,28 @@ func ApplyConfig(api ir.API, schema ir.Schema, set *tableconf.Set, opt ConfigOpt
 	// dropped something and the configuration was left behind.
 	for _, table := range set.Tables() {
 		loaded := set.Get(table)
-		if _, ok := tableIndex[table]; !ok {
-			diags.Add(diag.CodeUnknownTable, loaded.At("table"),
-				"no table named %q exists in the database", table)
+		if _, ok := tableIndex[table]; ok {
+			continue
 		}
+		if slices.Contains(opt.Ignored, table) {
+			diags.Add(diag.CodeForeignTable, loaded.At("table"),
+				"%q belongs to the rig/auth module, so rig generates nothing from "+
+					"this file", table)
+			continue
+		}
+		diags.Add(diag.CodeUnknownTable, loaded.At("table"),
+			"no table named %q exists in the database", table)
 	}
+
+	// An enum's Go name can be changed in configuration, and every field that
+	// referred to the derived one has to move with it.
+	renamed := map[string]string{}
 
 	for i := range outSchema.Tables {
 		t := &outSchema.Tables[i]
 		loaded := set.Get(t.Name)
 
-		diags.Append(applyEnumConfig(loaded, outAPI.Enums, enumIndex))
+		diags.Append(applyEnumConfig(loaded, outAPI.Enums, enumIndex, renamed))
 
 		ri, hasResource := resourceForTable[t.Name]
 		if !hasResource {
@@ -97,7 +115,63 @@ func ApplyConfig(api ir.API, schema ir.Schema, set *tableconf.Set, opt ConfigOpt
 		outAPI.Resources[ri] = updated
 	}
 
+	retypeEnums(&outAPI, renamed)
+
 	return outAPI, outSchema, diags
+}
+
+// retypeEnums points every field at an enum's configured name.
+//
+// Renaming an enum and leaving its references behind produces a document whose
+// fields have a type nothing declares, which surfaces two stages later as an
+// unresolvable type rather than as the rename it was. Doing it here, once, over
+// the whole API, is what keeps a rename to one line of configuration.
+func retypeEnums(api *ir.API, renamed map[string]string) {
+	if len(renamed) == 0 {
+		return
+	}
+
+	retype := func(f *ir.Field) {
+		to, ok := renamed[f.Type]
+		if !ok {
+			return
+		}
+		f.Type = to
+		// The Go type is the same name behind whatever pointer or slice the
+		// column's nullability added, so only the name part moves.
+		if name := typeNameOf(f.GoType); name != "" {
+			f.GoType = strings.Replace(f.GoType, name, to, 1)
+		}
+	}
+
+	for i := range api.Objects {
+		for j := range api.Objects[i].Fields {
+			retype(&api.Objects[i].Fields[j])
+		}
+	}
+	for i := range api.Resources {
+		r := &api.Resources[i]
+		for j := range r.Fields {
+			retype(&r.Fields[j].Field)
+		}
+		for j := range r.Endpoints {
+			e := &r.Endpoints[j]
+			for k := range e.Request.PathParams {
+				retype(&e.Request.PathParams[k])
+			}
+			for k := range e.Request.QueryParams {
+				retype(&e.Request.QueryParams[k])
+			}
+			for k := range e.Request.BodyParams {
+				retype(&e.Request.BodyParams[k])
+			}
+		}
+	}
+}
+
+// typeNameOf strips the pointer and slice markers from a Go type.
+func typeNameOf(goType string) string {
+	return strings.TrimLeft(goType, "*[]")
 }
 
 func applyTableConfig(
@@ -146,10 +220,18 @@ func applyTableConfig(
 	if len(cfg.Operations) > 0 {
 		out.Operations = slices.Clone(cfg.Operations)
 	}
+	if len(cfg.Public) > 0 {
+		out.Public = slices.Clone(cfg.Public)
+	}
+	if cfg.Expose != nil && !*cfg.Expose {
+		// The model and the repository still come out; only the API stays
+		// quiet. Clearing the operations too is what makes that true for every
+		// generator without each of them having to remember.
+		out.Unexposed = true
+		out.Operations = nil
+	}
 
 	if out.Storage != nil {
-		out.Storage.AuditLog = cfg.AuditEnabled()
-
 		if cfg.RestoreWindowDays != nil && out.Storage.SoftDelete != nil {
 			out.Storage.SoftDelete.RestoreWindowDays = *cfg.RestoreWindowDays
 		}
@@ -167,6 +249,7 @@ func applyTableConfig(
 		return out, diags
 	}
 
+	diags.Append(applyAccessConfig(loaded, &out, cfg))
 	diags.Append(applyColumnConfig(loaded, t, &out, cfg, n, opt))
 	diags.Append(applyRelationConfig(loaded, &out, cfg))
 	diags.Append(applyElectricConfig(loaded, &out, cfg, n))
@@ -363,7 +446,7 @@ func parseOrderBy(loaded *tableconf.Loaded, t *ir.Table, order []string) ([]ir.O
 	return out, diags
 }
 
-func applyEnumConfig(loaded *tableconf.Loaded, enums []ir.Enum, enumIndex map[string]int) diag.List {
+func applyEnumConfig(loaded *tableconf.Loaded, enums []ir.Enum, enumIndex map[string]int, renamed map[string]string) diag.List {
 	var diags diag.List
 	if loaded == nil {
 		return diags
@@ -378,7 +461,8 @@ func applyEnumConfig(loaded *tableconf.Loaded, enums []ir.Enum, enumIndex map[st
 		}
 
 		e := &enums[ei]
-		if ec.Name != "" {
+		if ec.Name != "" && ec.Name != e.Name {
+			renamed[e.Name] = ec.Name
 			e.Name = ec.Name
 		}
 		if ec.Description != "" {
@@ -451,6 +535,52 @@ func applyRelationConfig(loaded *tableconf.Loaded, res *ir.Resource, cfg tableco
 		res.Storage.Relations[ri].Embed = rc.Embed
 	}
 
+	return diags
+}
+
+// applyAccessConfig resolves the column an owner-scoped read filters on.
+//
+// The column is not configurable. It is the created-by audit column, which every
+// generated write already stamps — so what a read narrows to and what a write
+// records are the same fact, and there is no way to point the filter at a column
+// nothing maintains.
+func applyAccessConfig(loaded *tableconf.Loaded, res *ir.Resource, cfg tableconf.File) diag.List {
+	var diags diag.List
+	if cfg.Access == nil {
+		return diags
+	}
+
+	at := loaded.At("access", "scope")
+	switch cfg.Access.Scope {
+	case "", accessScopeTenant:
+		return diags
+	case accessScopeOwn:
+	default:
+		diags.Add(diag.CodeConfigInvalid, at,
+			"access.scope must be %q or %q, not %q",
+			accessScopeTenant, accessScopeOwn, cfg.Access.Scope)
+		return diags
+	}
+
+	if res.Storage == nil {
+		diags.Add(diag.CodeConfigInvalid, at,
+			"access.scope: own needs a table to filter, and %s is not stored as one", res.Name)
+		return diags
+	}
+	if res.Storage.Audit == nil || res.Storage.Audit.CreatedBy == nil {
+		diags.Add(diag.CodeConfigInvalid, at,
+			"access.scope: own filters on who created a row, so %s needs a created_by_account_id column",
+			res.Storage.Table)
+		return diags
+	}
+	// The column is nullable by convention, and has to be: a row created by a
+	// migration or by a service has no account behind it. Such a row is then
+	// invisible to a narrow read, which is the correct answer and a surprising
+	// one. It is not a diagnostic, because it would fire on every owner-scoped
+	// table and a warning nobody can act on is one everybody learns to skip; the
+	// generated repository says it where somebody reading the query will see it.
+	owner := *res.Storage.Audit.CreatedBy
+	res.Storage.Owner = &owner
 	return diags
 }
 
@@ -527,6 +657,9 @@ func applyEndpointConfig(loaded *tableconf.Loaded, res *ir.Resource, cfg tableco
 			Summary:     ec.Summary,
 			Description: ec.Description,
 			Permission:  ec.Permission,
+			// The table's public list is the other way to say this, and it is
+			// resolved in one place during expansion rather than here as well.
+			Public: ec.Public,
 			Impl: ir.EndpointImpl{
 				Kind:          ir.EndpointCustom,
 				ServiceMethod: ec.Name,
@@ -553,6 +686,14 @@ func applyEndpointConfig(loaded *tableconf.Loaded, res *ir.Resource, cfg tableco
 		}
 		if len(e.Request.PathParams) > 0 {
 			e.Errors = append(e.Errors, 404)
+		}
+		for j, p := range e.Request.QueryParams {
+			if p.Wire == ir.ScopeParam {
+				diags.Add(diag.CodeReservedName,
+					loaded.At("endpoints", strconv.Itoa(i), "request", "query_params", strconv.Itoa(j), "name"),
+					"%q is reserved: it is how a caller widens a read past its own rows, so an endpoint cannot mean something else by it",
+					ir.ScopeParam)
+			}
 		}
 
 		for _, rc := range ec.Responses {
@@ -604,9 +745,29 @@ func convertParams(params []tableconf.Param, n *naming.Namer) []ir.Field {
 		if p.Optional {
 			f.Modifiers = append(f.Modifiers, ir.ModifierNullable)
 		}
+		f.GoType = paramGoType(f)
 		out = append(out, f)
 	}
 	return out
+}
+
+// paramGoType renders a declared parameter's Go type.
+//
+// A name that is not a primitive is an enum or object declared elsewhere, and
+// its Go type is the name itself. Resolution of whether that name exists at all
+// happens at freeze; guessing here would report the same mistake twice.
+func paramGoType(f ir.Field) string {
+	base := f.Type
+	if m, ok := pgtypes.Primitive(f.Type); ok {
+		base = m.GoType
+	}
+	if f.IsArray() {
+		return "[]" + base
+	}
+	if f.IsNullable() {
+		return pointerTo(base)
+	}
+	return base
 }
 
 // anchorForTable points at a key in a table's configuration.

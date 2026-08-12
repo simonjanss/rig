@@ -75,7 +75,35 @@ func Normalize(raw ir.Schema, opt NormalizeOptions) (ir.Schema, diag.List) {
 		out.Tables[i].LinkTable = classifyLinkTable(&out.Tables[i], byName)
 	}
 
+	out.Enums = usedEnums(out)
+
 	return out, diags
+}
+
+// usedEnums drops the enum types no remaining column refers to.
+//
+// A Go type for an enum exists so that a field can have it. When the only tables
+// that used one have been left out — the authentication foundation's, whose Go
+// constants live in the rig/auth module already — the type would be generated
+// for nobody to hold, which is the duplication that leaving those tables out was
+// meant to avoid.
+func usedEnums(schema ir.Schema) []ir.PgEnum {
+	used := make(map[string]bool)
+	for i := range schema.Tables {
+		for _, c := range schema.Tables[i].Columns {
+			if c.EnumType != "" {
+				used[c.EnumType] = true
+			}
+		}
+	}
+
+	out := make([]ir.PgEnum, 0, len(schema.Enums))
+	for _, e := range schema.Enums {
+		if used[e.Name] {
+			out = append(out, e)
+		}
+	}
+	return out
 }
 
 func normalizeTable(t ir.Table, enumNames map[string]bool) (ir.Table, diag.List) {

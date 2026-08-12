@@ -24,6 +24,27 @@ import (
 // than against whatever is published.
 func MustCompile(t *testing.T, artifacts []gen.Artifact, pkg string) {
 	t.Helper()
+	MustCompileAll(t, Package{Dir: pkg, Artifacts: artifacts})
+}
+
+// Package is one directory in the throwaway module.
+//
+// Dir is relative to the module root, so a package at "store" is imported as
+// "rigtest/store". Artifacts land in it by base name: the layout inside the
+// module is what the test asks for, not what the generator happened to choose,
+// because that is what lets one test compile several generators together.
+type Package struct {
+	Dir       string
+	Artifacts []gen.Artifact
+}
+
+// MustCompileAll builds several packages together.
+//
+// The layers only make sense against each other — the API layer calls the
+// repository, the stub embeds the default service — so compiling one in
+// isolation would miss exactly the mismatches worth catching.
+func MustCompileAll(t *testing.T, pkgs ...Package) {
+	t.Helper()
 
 	if testing.Short() {
 		t.Skip("skipping compile check in short mode")
@@ -33,15 +54,16 @@ func MustCompile(t *testing.T, artifacts []gen.Artifact, pkg string) {
 	}
 
 	dir := t.TempDir()
-	pkgDir := filepath.Join(dir, pkg)
-	if err := os.MkdirAll(pkgDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-
-	for _, a := range artifacts {
-		path := filepath.Join(pkgDir, filepath.Base(a.Path))
-		if err := os.WriteFile(path, a.Content, 0o644); err != nil {
+	for _, p := range pkgs {
+		pkgDir := filepath.Join(dir, filepath.FromSlash(p.Dir))
+		if err := os.MkdirAll(pkgDir, 0o755); err != nil {
 			t.Fatal(err)
+		}
+		for _, a := range p.Artifacts {
+			path := filepath.Join(pkgDir, filepath.Base(a.Path))
+			if err := os.WriteFile(path, a.Content, 0o644); err != nil {
+				t.Fatal(err)
+			}
 		}
 	}
 
@@ -65,7 +87,7 @@ replace github.com/simonjanss/rig/runtime => %s
 
 	// GOFLAGS=-mod=mod lets the toolchain resolve from the module cache, which
 	// is warm because the repository itself depends on these. GOWORK=off keeps
-	// rig's own workspace from capturing the throwaway module.
+	// rig's own tenant from capturing the throwaway module.
 	env := append(os.Environ(), "GOWORK=off", "GOFLAGS=-mod=mod")
 
 	if out, err := runIn(dir, env, "go", "mod", "tidy"); err != nil {

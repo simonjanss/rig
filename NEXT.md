@@ -1,0 +1,857 @@
+# rig — where things stand, and what is left
+
+Working notes, not documentation. The approved plan is at
+`~/.claude/plans/dazzling-purring-flame.md`; this file records what actually got
+built, where it departed from that plan, and what is still to come.
+
+---
+
+## Done: M0 through M5
+
+| | |
+|---|---|
+| **M0** | `pkg/ir`, `internal/tableconf`, `internal/diag`, the pure compile stages, `rig ir` / `schema` / `validate`, golden corpus |
+| **M1** | `internal/dockerdb`, `internal/introspect`, `rig init` / `migration new` / `db *` / `sync` |
+| **M2** | `pkg/gen`, `runtime/{patch,query,readopt,rigerr,tenancy,dbx,dbhook}`, `persist-go`, `rig generate` / `check` / `generators` |
+| **M3** | `service-go`, `server-go`, `examples/todo` serving end to end |
+| **M4** | `runtime/throttle`, `auth/{password,session,apikey,account,authlog,authhttp,authpg,oauth}`, `rig setup-project` |
+| **M5** | `runtime/electric`, the `electric` generator, live sync verified against a real ElectricSQL container |
+| **M5.5** | `model-go`, `patch.Optional` / `patch.Nullable`, `…Input` types with normalize and validate, the conversions deleted |
+| **M5.6** | Typed per-input errors answered as 422, `runtime/dbhook` lifecycle hooks declared per service, the audit log removed, `runtime/serve`, `rig/migrate` |
+
+Next:
+
+- **M5.7** — the API revision: clients say what they were built against, so the
+  logs can say how old the oldest one still calling is. (Was M5.6; the number
+  moved when the model layer's second round took it.)
+
+### Modules
+
+```
+.               github.com/simonjanss/rig          CLI, compiler, generators
+runtime/        github.com/simonjanss/rig/runtime  imported by generated code
+auth/           github.com/simonjanss/rig/auth     sessions, oauth, api keys
+migrate/        github.com/simonjanss/rig/migrate  a binary migrates itself
+examples/todo/  a real project, built in CI
+```
+
+The root module now requires `auth` and `runtime` with local replaces, so the
+Docker suites in `internal/authtest` and `internal/electrictest` can drive them.
+
+### Generators registered
+
+`model-go`, `persist-go`, `service-go`, `server-go`, `electric`. All five are
+scaffolded by `rig init`; `electric` emits nothing until a table opts in.
+`model-go` is listed first because the other three import what it writes.
+
+### Test surface
+
+- `make test` — no Docker, sub-second per package
+- `make vet`
+- `go test -tags docker ./...` — introspection, the CLI loop, `setup-project`,
+  the auth foundation, live sync, and the repository's hooks
+- `make examples` — regenerate, `rig check`, build, run the example's own suite
+
+---
+
+## Departures from the plan so far
+
+Worth a look before going further; each was a deliberate call and each is
+reversible.
+
+1. **The `UNIQUE (parent_token_id, kind)` index is gone.** It cannot coexist
+   with a rotation leeway: one child per parent means a retry inside the window
+   cannot be served at all. Reuse detection rests on `rotated_at` instead, which
+   `MarkRotated` pins to the first use with `WHERE rotated_at IS NULL`.
+
+2. **`LoginAttempted` is in the enum and rig never writes it.** Every attempt
+   produces exactly one row — `LoginSucceeded` or `LoginFailed`. Half the writes
+   on the hottest auth path, and strictly more informative per row.
+
+3. **`auth/authpg` was not in the plan.** The auth packages take interfaces, and
+   without this every project writes four hundred lines of SQL against a schema
+   rig itself designed. The interfaces are still there for anyone who diverged.
+
+4. **`expose: false` was added to the table configuration.** A table that keeps
+   its model and repository and gets no API. `identity`, `identity_credential`,
+   `account_token`, and `api_key` use it.
+
+5. **The `electric` generator emits into its own package**, not alongside the API
+   layer, so a project can have live sync without the HTTP generator.
+
+6. **A self-referencing foreign key is exempt from the FK naming rule.**
+   `root_token_id` says more than `root_account_token_id` would.
+
+7. **`Patch[T]` is gone, replaced by `Optional[T]` and `Nullable[T]`.** The plan
+   had one wrapper for every update field and answered `Null()` on a NOT NULL
+   column with a 400 at validation. Two wrappers give each column exactly the
+   states it has, so that request cannot be written down at all. An explicit
+   `null` arriving over the wire for an `Optional[T]` field is still a 400, but
+   it now comes out of `UnmarshalJSON` naming the field.
+
+8. **There is no `api.Lesson` and no `LessonCreateBody`.** The plan's API layer
+   had its own copy of the entity and its own wire bodies, with `toLesson` in
+   between. Both sides now speak `model.Lesson`, and a handler decodes straight
+   into `model.LessonCreateInput`. The copy loop was a transcription whose only
+   possible deviation was a missing field.
+
+9. **The repository normalizes and validates.** `Create` runs `Normalize` then
+   `Validate`; `Update` runs `Normalize` before the transaction and
+   `Validate(prev)` inside it, against the row it already loads for the
+   snapshot. A service that forgets to call either cannot write an invalid row.
+
+10. **The audit log is gone, and snapshots are the history.** `runtime/audit`,
+    the `audit` and `audit_value` tables, the `audit:` table-config key, and the
+    per-column change entries the repositories wrote are all removed. The audit
+    *columns* stay and are still stamped. Two mechanisms for "what happened to
+    this row" is one too many, and the one that keeps whole rows answers more
+    questions than the one that keeps rendered strings.
+
+11. **A write takes an envelope, not an input.** `repo.Create(ctx, in)` became
+    `repo.Create(ctx, dbhook.Create[…]{Input, Validator, Hooks})`. The plan had
+    hooks living in `runtime/dbx` as a vague line item; this is what they turned
+    into, and putting them in the same value as the input is what makes them run
+    in the same transaction as the write.
+
+12. **Create and update are validated by different types, and each travels
+    with its operation.** `<Res>Validator` became `<Res>CreateValidator` and
+    `<Res>UpdateValidator`, each with one entry per field *that operation* can
+    set, and each lives on the hook set for that operation —
+    `Hooks.Create.Validator`, `Hooks.Update.Validator` — rather than beside it
+    on the contract. A write is handed one value and cannot be given the other
+    operation's rules. One shared type meant an update
+    running a rule for an immutable column, against a value the update could
+    not have changed — and no way to say a thing about creating that does not
+    apply to changing. The lifecycle fixture has both asymmetries: `starts_at`
+    is settable once and has a hook only on create, `status` is not settable at
+    creation and has one only on update.
+
+13. **A service is handed a contract.** The plan had a default service you
+    embedded and nothing else. It now takes a `<Res>Contract` — the validator,
+    the hooks, and the custom endpoints — because a rule that was never
+    attached is a rule that does not run, and a zero-valued field says nothing
+    at the call site. Custom endpoints moved into it as an interface, so the
+    plan's compile-time guarantee about them survives the move.
+
+14. **Validation answers with a struct shaped like the request.** A failed
+    create returns a `*LessonCreateInputError` whose members are the input's
+    members, each holding the problem with that field or nothing. It reaches the
+    client as the `fields` member of the 422 body. The plan had one message and
+    a status; a client cannot highlight a field from a sentence.
+
+    The `FieldError` inside carries no field name — the member it hangs off is
+    the field, and a second copy is a second place to be wrong — and instead of
+    prose alone it carries a `FieldCode` from a fixed set: CannotBeEmpty,
+    CannotBeNull, TooLong, TooShort, OutOfRange, InvalidValue, AlreadyExists,
+    NotFound, NotAllowed. Taken from what meitner's errors package settled on.
+    A client switches on the code once; the message says the specifics. The
+    whole `FieldErrors` accumulator went with it: validation now writes
+    straight into the typed struct.
+
+    `FieldError` and `FieldCode` live in `rigerr`, not in the generated model.
+    Nothing about them is per project — the same nine codes and the same two
+    members — so generating them into every model would be nine copies of one
+    decision. The model still owns the struct that *arranges* them, which is
+    the part that differs per input.
+
+    A loose `FieldError` — one that reached the HTTP layer as the whole answer
+    rather than attached to a field — implements `ErrorCode` as Internal, on
+    purpose. It says what was wrong without saying what it was about, so it can
+    only have come from somewhere with no field to attach it to, and a 422 with
+    an empty body would blame the caller for a mistake in the service. It was
+    already a 500 by default; now it is one deliberately, with the reason in
+    the code.
+
+    A hook returning something that is **not** a field error is a rule that
+    could not be run, not a rule that failed — a lookup that could not reach
+    another service. `rigerr.AsFieldError` is the boundary, and
+    `rigerr.Wrap(err, "validate title")` is what happens on the other side of
+    it: context added, the code kept if the error already had one, Internal if
+    it did not. A rule that refuses with a Conflict is still a 409 once the
+    layer above has said which rule it was; a bare error is a 500, because
+    telling the caller their title is "connection refused" would be a lie about
+    whose fault it is.
+
+---
+
+## M5.5 — the model layer (shipped)
+
+What was built, and the decisions behind it. Kept because the reasoning is not
+visible from the code.
+
+### The problem it solved
+
+`persist-go` emitted `store.Lesson`, `service-go` emitted `api.Lesson` with the
+same fields, and `toLesson(*store.Lesson) *api.Lesson` copied one into the
+other. Two definitions of one entity and a copy between them: a field missing
+from the copy is a field that silently stops being returned.
+
+### The layout now
+
+```
+internal/model/     Lesson, LessonPriority, LessonQuery and its param structs,
+                    LessonCreateInput / UpdateInput / DeleteInput / RestoreInput,
+                    Normalize, Merged, Validate, ValidatorContext, Validator
+internal/store/     LessonRepository and its pgx implementation
+internal/api/       the Request envelope, the service interface, the default
+                    implementation, routing
+services/lesson/    yours
+```
+
+Enums live in `model` — they were referenced from both sides, and
+`store.LessonStatus` in an API response is the wrong package on the wrong layer.
+A field that is not readable carries `json:"-"`: the repository scans it, the
+wire never sees it, one struct and one tag. `LessonQuery` is in `model` too,
+because the service builds queries; rendering it to SQL stayed in `store` as a
+function over it.
+
+### Normalize, Merged, Validate
+
+Taken from `meitner/platform/backend/intern/services/documentation`, with one
+correction. meitner merges the previous row *into* the input, so every field is
+defined before any validator runs. rig cannot: the repository builds its UPDATE
+from which patches were touched, so merging in would turn every update into a
+write of every column, and two requests changing different fields of one row
+would clobber each other.
+
+So `Merged(prev)` returns the intended end state as a separate value. Validation
+runs against that; the input keeps its patches. A cross-field rule — "ends after
+starts" when only `ends` was sent — is answerable, and the UPDATE still touches
+one column.
+
+Generated `Validate` covers what the schema knows: NOT NULL, length from
+`varchar(n)`, enum membership. `Normalize` covers what the schema implies: trim
+strings, parse an enum label case-insensitively, apply the column default on
+create. Everything else is a per-field hook on the `Validator` struct, which a
+service fills in at construction.
+
+### Two wrapper types
+
+Create inputs are plain — a `CreateInput` with no `Title` and one with `""` are
+the same value, so generated validation says "cannot be empty" where meitner
+would say "cannot be undefined". For a NOT NULL column both are errors anyway,
+so the difference is in the message.
+
+Update inputs distinguish nullability at the type level:
+
+```go
+type LessonUpdateInput struct {
+    Title  patch.Optional[string]        // NOT NULL: absent | set
+    Notes  patch.Nullable[string]        // nullable: absent | null | set
+}
+```
+
+`Patch[Nullable[T]]` was considered and rejected: four states for a column with
+three, two of them meaning the same thing, and two unwraps to read a value.
+
+The compiler now enforces what a runtime check used to. It also simplified the
+repository — a NOT NULL column's update needs no null guard, because the type
+cannot hold one:
+
+```go
+if in.Notes.Touched() { … values = append(values, in.Notes.Ptr()) }  // nullable
+if v, ok := in.Title.Get(); ok { … values = append(values, v) }      // not null
+```
+
+### `internal/gen/genutil`
+
+Rendering a field's Go type had been written three times and the copies had
+begun to disagree about enums. It is one function now, taking a `func() string`
+for the model qualifier so a file whose types are all builtin does not end up
+with an unused import.
+
+---
+
+## M5.6 — validation, hooks, and the audit log (shipped)
+
+### The audit log is gone
+
+`runtime/audit`, the `audit` and `audit_value` tables, the `audit:` key, the
+`AuditLog` field in the IR, and the change entries every repository wrote.
+Snapshots keep the history instead: a whole row per version, which answers
+"what did this look like on Tuesday" as well as "what changed", where a table
+of rendered before-and-after strings only ever answered the second.
+
+The audit *columns* stay. They are one write on a row that was being written
+anyway, and tenancy and soft delete both read them.
+
+One thing fell out of it: an update that changes no column now takes no
+snapshot either. It never wrote an audit row before, for the same reason, and a
+history full of copies of an unchanged row is a history nobody can read.
+
+### Validation answers with the shape of the request
+
+```go
+type LessonCreateInputError struct {
+    Title  *FieldError `json:"title,omitempty"`
+    Notes  *FieldError `json:"notes,omitempty"`
+    …
+    Rest   *FieldError `json:"rest,omitempty"`
+}
+```
+
+One member per member of the input, nil when that field was fine. `Validate`
+returns it, the HTTP layer puts it in the `fields` member of the 422 body, and
+a client attaches each message to the control it belongs to instead of parsing
+one sentence for field names.
+
+Two small additions to `runtime/rigerr` carry it: `Coder`, so an error can name
+its own code and be returned as itself rather than wrapped in prose, and
+`FieldReporter`, which is how `DefaultErrorMapper` finds the structure.
+
+`Rest` exists because a hook can report a problem that belongs to no field, and
+dropping it would mean refusing a request for a reason the answer never
+mentions.
+
+### Hooks
+
+`runtime/dbhook` holds four envelopes — Create, Update, Delete, Restore — each
+carrying the input, the validator where there is one, and the callbacks.
+
+```go
+repo.Create(ctx, dbhook.Create[model.LessonCreateInput, model.Lesson]{
+    Input:     in,
+    Validator: s.Validator,
+    Hooks:     s.Hooks.Create,
+})
+```
+
+Before and After run inside the write's transaction, so returning an error
+undoes the write — which is the whole reason they are here rather than in the
+caller. AfterCommit runs once the **outermost** transaction has committed:
+`dbx.AfterCommit` registers it, and the `InTx` that actually began the
+transaction runs the queue after the commit, each recovered. A repository call
+nested in a larger unit of work therefore does not announce anything until that
+unit lands.
+
+`dbx.InTxIf` is the other half: a create is a single statement, and opening a
+transaction around it costs two round trips to protect nothing. It opens one
+only when a hook needs to be able to undo the write.
+
+### The contract
+
+`NewDefaultLessonService(repo, contract)`. `LessonContract` is what the service
+layer owes the resource — the validator, the hooks, and the custom endpoints —
+`DefaultLessonService` keeps it unexported, and there is no way to build a
+service without saying what it is. An empty `LessonContract` is a fine answer,
+it is just an answer somebody wrote.
+
+Custom endpoints are part of it rather than methods the service happens to
+have, and they arrive as an **interface**, not function fields:
+
+```go
+type LessonEndpoints interface {
+    Publish(ctx context.Context, r Request[LessonPublishPath, struct{}, LessonPublishBody]) (*model.Lesson, error)
+}
+```
+
+That is the whole reason for the shape. Declaring an endpoint in the table
+configuration adds a method to the set, and the service that no longer
+implements it stops building — where a nil function field would have been a 500
+on a route that worked the day before. The default now answers those routes by
+handing them over, so a resource whose endpoints are all written needs no method
+of its own, and the constructor panics on a nil set rather than letting every
+one of them fail at runtime.
+
+The stub writes a `contract()` method listing **every** validator field and
+every hook slot, nil included, the way meitner's `documentationCreateValidator`
+does. Go does not require an exhaustive literal; spelling it out is what makes
+adding a column show up as a field nobody filled in, rather than as nothing at
+all.
+
+`contract()` hangs off a second, unexported `service` type that the exported
+`Service` holds:
+
+```go
+type Service struct {
+    api.DefaultLessonService
+    svc *service
+}
+
+func New(repo store.LessonRepository) *Service {
+    s := &service{repo: repo}
+
+    return &Service{
+        DefaultLessonService: api.NewDefaultLessonService(repo, s.contract()),
+        svc:                  s,
+    }
+}
+```
+
+A named field, not an embed: the default answers every custom endpoint by
+handing it over, and `*service` implements the same set, so two promoted
+methods of one name would make the selector ambiguous — which is a compile
+error at the interface check, found the moment it was tried.
+
+Two types because the default implementation is handed the rules while it is
+being built, so something has to hold them before there is a `Service` to hold
+— and building it in two phases, or threading each dependency through a
+function signature, were both worse. The unexported half turns out to be the
+better half anyway: a rule written against `*service` cannot call back into the
+API surface it is part of, and a validator that called `Create` would be an
+infinite loop found in production rather than at compile time.
+
+The alternative considered was dropping the default service entirely and having
+the stub carry a real body per operation, which is what meitner does. It was
+turned down for one reason: everything the stub writes is `CreateOnce`, so a
+generator fix — a pagination bug, a new lifecycle guard — would never reach a
+project that already exists.
+
+### `runtime/serve`
+
+A dependency with a shutdown of its own is registered where it is built:
+`Mount` now takes a `*serve.App` — the pool, the logger, `Drain` and `Close` —
+instead of a bare pool. `Drain` runs when readiness turns false and before the
+server stops accepting, which is where a queue consumer belongs: it should stop
+fetching while the server is still finishing what it has. `Close` runs after the
+last request, in reverse registration order, before the pool closes, and runs
+even when startup failed halfway. `ShutdownTimeout` became `MaxShutdown`: one
+budget for the whole sequence rather than one per phase, stated rather than
+derived, because it is the number that goes in
+`terminationGracePeriodSeconds` and nobody will re-add the parts by hand twice.
+The parts are checked against it before the server listens — a step given
+thirty seconds inside a twenty-second maximum can never finish, and an actual
+shutdown is the worst time to find that out. `CloseWithin` and `DrainWithin`
+give a single step a smaller limit on top of that, and a step is abandoned when
+its deadline passes rather than waited for — a hook that ignores its context
+would otherwise hold the process open until something outside killed it, and
+take every step after it down too. The abandoned goroutine leaks, which is the
+better of the two outcomes in a process that is about to stop existing.
+
+**Both ends are bounded and both are stated.** `MaxStartup` (default 60s) covers
+opening the pool, the `Migrate` hook and `mount`; the budget is released the
+moment the server listens, since a deadline that outlived the boot would shut
+the server down when it passed. Each phase runs the same way a shutdown step
+does — in a goroutine, abandoned when the budget goes — so a mount function
+that dials something slow and ignores its context produces an error naming the
+phase rather than a process that is neither serving nor failing. `ConnectTimeout`
+stays as the inner, more specific bound so "the database" and "startup" are
+different messages; its default yields to a shorter `MaxStartup` rather than
+requiring a second field to be lowered with it, while a value somebody actually
+wrote that does not fit is refused.
+
+**Logged and returned, and the two are not the same job.** A step logs its own
+failure where it happens, because a later step that hangs past the budget
+leaves the process to be killed from outside and the returned error then
+reaches nobody — the log line is the record that survives. The error is still
+returned, because `Run` is a library and the caller owns the policy. What
+`Main` does with it is the third decision: a teardown failure comes back
+wrapped in a `*ShutdownError`, `serve.Unclean` reports whether that is *all*
+that went wrong, and if so the process exits 0 with one line saying it did not
+stop cleanly. A server that served for a week and then failed to close an
+exporter has done its job; exiting non-zero would mark an ordinary rollout as a
+crashed container in every dashboard that counts them. A startup failure joined
+with a failed teardown is still a startup failure, and still exits 1.
+
+
+`main.go` was forty lines of pool, server, signals and shutdown that every
+project would copy and one of them would get subtly wrong — a pool nobody pings
+so a bad password surfaces on the first request, a server with no header
+timeout, a SIGTERM that drops what is in flight.
+
+```go
+func main() {
+    serve.Main(serve.Config{
+        DatabaseURL: cmp.Or(os.Getenv("DATABASE_URL"), localDSN),
+        Addr:        cmp.Or(os.Getenv("ADDR"), "127.0.0.1:8080"),
+        HealthPath:  "/healthz",
+    }, func(_ context.Context, pool *pgxpool.Pool) (http.Handler, error) {
+        return newMux(store.New(pool, store.Config{})), nil
+    })
+}
+```
+
+`Run` is the same thing with the process left to the caller. Every timeout has
+a default and none of them is zero; a negative one means "no limit", so zero
+can keep meaning "I did not say". The shutdown derives from
+`context.WithoutCancel`, because deriving it from the context that just got
+cancelled would give requests in flight no time at all.
+
+**Two probes, not one.** The first cut had a single `HealthPath` that pinged the
+database, which is a readiness check wearing a liveness name — point a
+Kubernetes liveness probe at it and one slow database restarts every replica at
+once. So:
+
+- `LivenessPath` never touches a dependency. Answering at all is the answer.
+- `ReadinessPath` pings the pool, runs an optional `Ready` hook, and returns 503
+  from the moment a shutdown begins.
+- `DrainDelay` keeps the server answering after readiness turns false, because
+  removing an instance from a load balancer is not instant and requests sent
+  during that window would otherwise arrive at a server that has stopped
+  accepting them.
+
+Both are opt-in: a path that always answers 200 is worse than no path.
+
+The example's `main.go` moved to its root, and `go run ./cmd/server` became
+`go run .`.
+
+### The example uses all of it
+
+`examples/todo/notify` is the dependency that is not the database: a batching
+notifier, started in the mount function, drained before the server stops and
+closed after it. It is fed by `Create.AfterCommit`, which nothing exercised
+until now — and which is the only hook a write may be announced from, since
+`Before` and `After` both run where a rollback can still take the row away.
+
+Its own tests are ordinary and fast: draining stops it recording without
+flushing, closing writes what is left, a message recorded after the drain is
+dropped. The Docker suite adds the end that needs a database — that the hook
+fired for a committed create and said nothing for a refused one.
+
+### Where middleware goes, and who makes the mux
+
+`Mount` returns a handler, and that is the extension point for anything
+cross-cutting. `serve.App` does not own a mux: that would pin the server to one
+router type and make the return value meaningless.
+
+`api.Register` **does** make the mux now — `Register(h Handlers) *http.ServeMux`
+— which reverses what I first argued. The argument against it was that a caller
+might want to register into a mux it already has, or use a router that is not
+`http.ServeMux`. The second was simply wrong: the signature has always been
+concretely `*http.ServeMux`, so that was never possible. The first survives only
+as an extra nested mux, and returning the concrete type rather than an opaque
+handler means adding routes afterwards is still one `Handle` call. There is
+nothing for the caller to decide about the mux — the patterns are absolute and
+already carry the base path — so making it is the generator's job.
+
+The electric generator's `Register` still takes one, which is the composition:
+the API makes the mux, the shape endpoints go on it.
+
+Cross-cutting concerns then read in the order they run:
+
+```go
+return otelhttp.NewHandler(logRequests(mux), "todo"), nil
+```
+
+The probes are answered outside whatever comes back, which is the part worth
+having decided: a liveness check every second should not be a traced request, a
+line in the request log, or a row in a latency histogram.
+
+Both mechanisms stay, with the line between them stated: `api.Server.PreHooks`
+for what only needs the request — the example's log line, written inline in the
+struct field — and a wrapper for what has to see the response, which is what
+tracing is.
+
+The mount function is written inline at the call to `serve.Main`, so main.go
+reads as one thing. The cost is that a test cannot reach it: `newHandler` in the
+example's suite is a second copy of the wiring, and says so in its comment.
+`api.Register` is the part that matters and it is the same call in both.
+
+### Migrations, and where they run
+
+`rig db up` was the only way to apply them, which is a development tool — it
+wants Docker and cobra — and a deployment that installs a development tool to
+move its schema is running whatever version that machine happens to have.
+
+So: a fourth module, `rig/migrate`, wrapping the same goose the CLI uses.
+`internal/dockerdb.Migrate` now calls it, so there is one reader of the files
+and `rig db up` cannot drift from what production applies. It is a module of
+its own rather than `runtime/migrate` because Go requires at the module level:
+goose would otherwise be in the go.mod of every generated application,
+including the ones that migrate some other way.
+
+```go
+//go:embed migrations/*.sql
+var migrations embed.FS
+
+applied, err := migrate.Up(ctx, migrate.FromPool(pool), migrations, migrate.Options{})
+```
+
+`FromPool` bridges pgx to database/sql, so the migration runs with the
+credentials and settings the application itself is using. An advisory lock is
+on by default: several replicas starting together is the normal case, and one
+of them should apply while the rest wait and find nothing to do. There is a
+Docker test with four concurrent runners asserting exactly one application.
+
+`serve` gained three things for it. `Config.Migrate` runs after the pool opens
+and before the server listens. `serve.Once` opens the pool, runs one function
+and closes it. And `Config.Tasks` makes a subcommand out of any of them:
+
+```go
+Tasks: map[string]serve.Task{
+    "migrate": migrate.Apply(migrations, migrate.Options{Log: os.Stdout}),
+},
+```
+
+`Main` dispatches on the first non-flag argument, so `todo migrate` runs the
+task and exits and `todo -addr :9000` still serves. A leading argument that
+names nothing is refused with the list of what the binary does know — a typo in
+a deployment script should exit, not quietly serve without having migrated.
+
+`migrate.Apply` is the other half: `Up` as a one-argument function, borrowing
+the pool and handing the handle back, so the three lines every project would
+write the same way — including the deferred close that is easy to leave out —
+are written once.
+
+`migrate.Require` is the third option and what the example's server uses: it
+checks `Pending` and refuses to start when the database is behind, without
+being the thing that changes it.
+
+**Which of the three to use is a real decision, and the argument for it lives
+in `migrate`'s package documentation** rather than here — the four things that
+make boot-time migration worse at more than one replica (the app's role needing
+DDL rights, replicas queueing on the advisory lock past their startup budget, a
+bad migration crash-looping the fleet instead of failing a job, and every
+restart re-running it), and the one thing nobody should do, which is migrating
+beside a server that is already answering. `serve.Config.Migrate` and the
+example both point at it instead of restating it.
+
+**Not done:** `rig init` still does not write a `main.go`. It cannot yet — the
+api package it would import does not exist until `generate` runs — so a
+scaffolded one would have to be commented out, and a half-written main is
+exactly the kind of file that rots.
+
+### Also
+
+`model-go` had no test file; it has one now. The enum parser's doc comment
+claimed it accepted "InProgress" for `in_progress`, which `strings.ToLower`
+does not do — the comment now says what the code does. `rig init` never gave
+`server-go` its `model_import`, so every newly initialised project failed at
+`generate`; the CLI's Docker suite caught it.
+
+---
+
+## M5.7 — the API revision
+
+**Goal.** Every generated client says what it was built against, the server puts
+that on the request context, and a log line can answer "how old are the clients
+still calling this?" — which is the question you have to answer before you can
+remove anything.
+
+### The date has to mean something
+
+The obvious implementation is a build timestamp, and it is the wrong one: it
+changes on every regeneration, so two clients built a month apart against an
+unchanged API look a month apart when they are identical. The number would be
+noise within a week.
+
+What is worth knowing is **when the API surface last changed**. rig can compute
+that, because it already hashes the document:
+
+- `rig generate` compares `Document.Hash()` against the last recorded one.
+- Different → record today's date with the new hash. Same → keep the old date.
+- The recorded pair lives in `.rig/revision.json`, committed, so it survives a
+  clean checkout and shows up in `git log` as a record of when the API moved.
+
+```json
+{ "revision": "2026-08-01", "hash": "sha256:1f3a…" }
+```
+
+Generators stay pure: `rig generate` reads the file and passes the revision in,
+so the same document and the same options still produce the same bytes, and
+`rig check` the next morning does not fail because the date moved.
+
+> One trap worth writing down now: the revision cannot be part of what gets
+> hashed, or setting it changes the hash, which changes the revision. The hash
+> is taken over the document with the revision cleared.
+
+### Naming
+
+`api.version` already means `v1` — the path segment. A second thing called
+version, holding a date, would be a permanent source of confusion.
+
+So: **revision**. Header `API-Revision`, constant `api.Revision`, config
+`api.revision_header`, file `.rig/revision.json`. One word, one meaning. Say if
+you would rather have Version and I will use it everywhere instead.
+
+### The plumbing
+
+**Compiler.** `ir.API` gains `Revision string`, set at freeze from `Meta`.
+
+**`server-go`.** Reads the header in `prepare` and puts it on the context that
+already carries the request id and the route:
+
+```go
+type RequestContext struct {
+    RequestID  string
+    Method     string
+    Path       string
+    Route      string
+    RemoteAddr string
+    UserAgent  string
+
+    // ClientRevision is what the caller says it was built against, empty when
+    // it did not say. A hand-rolled client or a curl will not say, and that is
+    // a normal thing for a caller to be.
+    ClientRevision string
+}
+
+// Revision is what this server was generated from.
+const Revision = "2026-08-01"
+
+// Stale reports how far behind the caller is, and false when it did not say
+// or the two match.
+func (rc RequestContext) Stale() (time.Duration, bool)
+```
+
+rig does not log it — rig has no logger. It puts it where the application's
+logging hook, its error mapper, and every service method can already reach it.
+
+**Response.** The server sets `API-Revision` on the way out too, so a client can
+notice it is behind without anyone building a discovery endpoint.
+
+**`ts-client`.** Sends the header on every request, with the revision baked in
+at generation, and exposes it as an export so an application can log its own.
+
+**`openapi`.** Documents the header as an optional request parameter, and puts
+the revision in `info.version`.
+
+### It must never fail a request
+
+A missing header is an unknown client, not an error. A malformed one is the
+same. This is telemetry, and telemetry that can 400 is an outage waiting for a
+bad deploy.
+
+The one exception is opt-in, and it is the reason for the whole feature:
+
+```go
+api.Server{
+    // Refuse anything built before this. Empty, the default, refuses nothing.
+    MinRevision: "2026-01-01",
+}
+```
+
+That is the endgame — you removed a field, you waited, the logs said nobody old
+was left, and now you close the door. Off until somebody decides to.
+
+### Open question
+
+Should a client that sends no revision at all be distinguishable in the logs
+from one that sends an unparseable one? They are different failures — an old
+SDK that predates the header versus something sending nonsense — and telling
+them apart costs one more field on `RequestContext`. I lean yes, one field,
+`ClientRevisionInvalid bool`.
+
+---
+
+## M6 — `openapi`
+
+**Goal.** An OpenAPI document from the same IR, so it cannot describe an API
+that does not exist.
+
+**Shape.**
+
+- `internal/gen/openapigen`, generator name `openapi`.
+- `pb33f/libopenapi` to build and render. Not text templates: a document
+  assembled from strings is a document that eventually stops parsing.
+- Options: `formats: [json, yaml]`, `version: "3.1" | "3.2"`, `out_dir: docs`.
+- One `components/schemas` entry per `ir.Object` and per `ir.Enum`. The filter
+  shapes are objects too, so `Search` documents itself.
+- Every endpoint's `Errors []int` becomes a response referencing the shared
+  `Error` schema. That is why the IR stores bare codes.
+- `Endpoint.Pattern` is the path, unchanged. The router, this document, and the
+  TypeScript client read the same field.
+
+**The QUERY problem.** OpenAPI 3.1 has no `query` field on a path item.
+
+- Under `"3.1"`: document the `POST /_search` alias, and note in the operation's
+  description that `QUERY` on the collection path is the primary form.
+- Under `"3.2"`: emit the `query` operation directly.
+- Default `"3.1"` until 3.2 tooling is common. `openapi.version` in `rig.yaml`.
+
+**Open question for you.** Is the 3.1 fallback worth it, or should rig emit 3.2
+and let people who need 3.1 downgrade with a tool? The fallback is roughly
+forty lines and a permanent branch in the generator.
+
+**Verification.** Validate the emitted document in-process with libopenapi, and
+in CI with an external linter (`vacuum` or `spectral`). Golden files for the
+rendered JSON and YAML.
+
+---
+
+## M7 — `ts-client`
+
+**Goal.** A TypeScript client generated from the same document, so the types a
+front end holds are the types the server sends.
+
+**Shape.**
+
+- `internal/gen/tsclient`, generator name `ts-client`.
+- Options: `package_name`, `out_dir: web/src/api`.
+- Types from `ir.Object`; enums as `const` objects plus a union type, carrying
+  both the identifier and the wire value — a TypeScript `enum` cannot express
+  `InProgress = "in_progress"` without becoming a runtime import.
+- A `fetch` client, no dependencies. One method per endpoint, named from
+  `OperationID`.
+- `Patch` semantics on update calls: a field left out of the object is left
+  alone, `null` clears it. The type is `T | null | undefined` and the doc
+  comment says which is which.
+
+**The QUERY fallback.** Issue `QUERY`; on `405` or `501`, fall back to the
+`POST /_search` alias, remember that for the rest of the process, and never try
+`QUERY` again. One flag on the client instance.
+
+**Open questions for you.**
+
+- Runtime validation, or types only? Types only is smaller and honest about
+  what a compiler can prove; a `parse` step catches a server that lied. I lean
+  types only, with the response typed as what the document promises.
+- React Query / SWR helpers, or plain functions? Plain functions compose with
+  either; helpers save a file per resource in the projects that use them. I lean
+  plain, with the shape chosen so a `useQuery` wrapper is two lines.
+- Is `web/src/api` the right default, or should it be configurable per project
+  without a default at all?
+
+**Verification.** `tsc --noEmit` over the generated client in CI, plus a fetch
+test against the M3 server exercising the QUERY→POST fallback.
+
+---
+
+## M8 — docs, the second example, and the remaining polish
+
+**`examples/fantasyfootball`.** The full demo: many tables, relations, enums,
+soft delete, snapshots, custom endpoints, RBAC, OAuth sign-in, API keys, live
+sync, and a small TypeScript consumer. Built end to end in CI the way
+`examples/todo` is. This is the strongest regression test in the repository and
+also the biggest single piece of work left.
+
+**`docs/`.**
+
+```
+tutorial.md        build the todo app from an empty directory
+concepts.md        the three layers, what is generated, what you own
+schema.md          column conventions, soft delete, snapshots, audit, tenancy
+configuration.md   rig.yaml and per-table reference, generated from the JSON Schema
+generators.md      built-ins, options, writing your own
+auth.md            setup-project, sessions, rate limits, API keys, OAuth, RBAC
+electric.md        live sync
+```
+
+The configuration reference is generated from the same JSON Schema the validator
+uses, so it cannot describe keys that do not exist. The tutorial is verified by
+CI: a script builds `examples/todo` from an empty directory and diffs the result
+against what is committed.
+
+**Remaining smaller work.**
+
+- `rig sync --prune` — remove configuration for columns that no longer exist,
+  after showing them.
+- The `exec` generator — IR JSON on stdin, `[{path, content_base64, mode}]` on
+  stdout, so a third party does not have to compile their own binary.
+- `rig schema table --bind` — inject `propertyNames.enum` from the live database
+  so an editor autocompletes real column names.
+- Shell completion.
+- The remaining convention rules from the plan's validation list that are not
+  yet implemented.
+- A `README.md` worth reading. The current one is a stub.
+
+**Open question for you.** `examples/fantasyfootball` is most of M8 by weight.
+Is it worth building in full, or is a smaller second example — enough to
+exercise relations, snapshots, and RBAC together, without the TypeScript
+consumer — a better use of the time?
+
+---
+
+## Things I would fix if nobody asked for anything else
+
+- `internal/gen/servicego/servicego.go` still has an `elemType` helper that is
+  now used in exactly one place; it could move.
+- The `auth` module's `go.mod` carries a `replace` to `../runtime`. Harmless —
+  consumers ignore a dependency's replaces — but it will need a real version on
+  first publish.
+- `examples/todo` pins the database to port 55440 and `internal/*test` packages
+  each pin their own. There is no registry of which port belongs to which
+  suite, and the next one added will collide with something.
+- `throttle.Postgres.qualify` prefixes known column names by string replacement.
+  It is fed from a closed map rig owns, and it is still the least pleasant code
+  in the runtime.

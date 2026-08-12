@@ -61,6 +61,7 @@ func Compile(raw ir.Schema, set *tableconf.Set, opt Options) (*ir.Document, diag
 	api, schema, d = ApplyConfig(api, schema, set, ConfigOptions{
 		Namer:             n,
 		UnmentionedColumn: p.Severity(cfg.Validate.UnmentionedColumn, diag.CodeUnmentionedColumn),
+		Ignored:           opt.IgnoreTables,
 	})
 	diags.Append(d)
 
@@ -71,7 +72,7 @@ func Compile(raw ir.Schema, set *tableconf.Set, opt Options) (*ir.Document, diag
 	})
 	diags.Append(d)
 
-	doc, d := Freeze(api, schema, Meta{Tool: opt.Tool})
+	doc, d := Freeze(api, schema, Meta{Tool: opt.Tool, Permissions: cfg.API.Permissions})
 	diags.Append(d)
 
 	diags.Append(Validate(doc, set, p))

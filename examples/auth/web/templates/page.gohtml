@@ -1,0 +1,863 @@
+{{define "page"}}<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>auth — rig</title>
+<style>
+  /* No build step, no framework, no CDN. A demonstration that needs a network
+     to render is a demonstration that fails on a plane. */
+  :root {
+    color-scheme: light dark;
+    --bg: #fbfbfd; --panel: #fff; --ink: #14161a; --dim: #6b7280;
+    --line: #e5e7eb; --accent: #3b5bdb; --ok: #0f7b3f; --bad: #b42318;
+    --warn: #a16207; --code: #f6f7f9;
+    --shadow: 0 1px 2px rgb(16 24 40 / .05), 0 1px 3px rgb(16 24 40 / .06);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0d0f13; --panel: #14171d; --ink: #e8eaed; --dim: #9aa3af;
+      --line: #262b34; --accent: #8ba2ff; --ok: #4ade80; --bad: #f87171;
+      --warn: #fbbf24; --code: #0f1216; --shadow: none;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font: 14px/1.55 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  code, pre, .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+  header.top {
+    position: sticky; top: 0; z-index: 10;
+    background: color-mix(in srgb, var(--panel) 90%, transparent);
+    backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--line);
+    padding: .7rem 1.25rem;
+    display: flex; align-items: center; gap: 1rem; flex-wrap: wrap;
+  }
+  header.top .brand { font-weight: 600; letter-spacing: -.01em; }
+  header.top .brand span { color: var(--dim); font-weight: 400; }
+  header.top .spacer { flex: 1; }
+  header.top form { display: flex; gap: .35rem; align-items: center; }
+  .who { display: flex; align-items: center; gap: .5rem; }
+  .avatar {
+    width: 28px; height: 28px; border-radius: 50%; flex: 0 0 28px;
+    background: var(--accent); color: #fff;
+    display: grid; place-items: center; font-size: .75rem; font-weight: 600;
+    text-transform: uppercase;
+  }
+
+  nav.tabs {
+    border-bottom: 1px solid var(--line);
+    background: color-mix(in srgb, var(--panel) 55%, transparent);
+  }
+  .tabs-inner {
+    max-width: 96rem; margin: 0 auto; padding: 0 1.25rem;
+    display: flex; align-items: flex-end; gap: .25rem; flex-wrap: wrap;
+  }
+  .tabs-inner form { display: contents; }
+  .tab {
+    display: inline-flex; align-items: center; gap: .45rem;
+    width: auto; padding: .5rem .85rem; border: 0; border-radius: 0;
+    background: transparent; color: var(--dim); font-weight: 500;
+    border-bottom: 2px solid transparent; cursor: pointer;
+  }
+  .tab:hover { color: var(--ink); background: transparent; opacity: 1; }
+  .tab.current {
+    color: var(--ink); border-bottom-color: var(--accent); cursor: default;
+  }
+  .tab .role {
+    font-size: .68rem; font-weight: 400; text-transform: uppercase;
+    letter-spacing: .05em; color: var(--dim);
+    border: 1px solid var(--line); border-radius: 999px; padding: 0 .35rem;
+  }
+  .tabs-note { margin-left: auto; align-self: center; font-size: .74rem; color: var(--dim); }
+  @media (max-width: 60rem) { .tabs-note { display: none; } }
+
+  /* A segmented control inside a panel, not the header's tenant bar. */
+  .scopes { display: flex; align-items: center; gap: .25rem; margin: .6rem 0 0; }
+  .scope {
+    padding: .25rem .6rem; border: 1px solid var(--line); border-radius: 999px;
+    font-size: .78rem; color: var(--dim); text-decoration: none;
+  }
+  .scope:hover { color: var(--ink); }
+  .scope.current {
+    color: var(--ink); border-color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 12%, transparent);
+  }
+  .scope-param { margin-left: auto; font-size: .72rem; color: var(--dim); }
+
+  .wrap { max-width: 96rem; margin: 0 auto; padding: 1.25rem; }
+  .cols { display: grid; gap: 1.25rem; grid-template-columns: 1fr; align-items: start; }
+  @media (min-width: 80rem) { .cols { grid-template-columns: minmax(0,1fr) 29rem; } }
+  .stack { display: grid; gap: 1.25rem; align-items: start; min-width: 0; }
+  .two { display: grid; gap: 1.25rem; align-items: start; min-width: 0; }
+  @media (min-width: 54rem) { .two { grid-template-columns: 1fr 1fr; } }
+
+  .panel {
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 12px; box-shadow: var(--shadow); overflow: hidden; min-width: 0;
+  }
+  .panel > h2 {
+    margin: 0; padding: .7rem 1rem; border-bottom: 1px solid var(--line);
+    font-size: .72rem; text-transform: uppercase; letter-spacing: .07em;
+    color: var(--dim); display: flex; align-items: center; gap: .5rem;
+  }
+  .panel > h2 .count {
+    border: 1px solid var(--line); border-radius: 999px; padding: 0 .4rem;
+    font-size: .95em; letter-spacing: 0;
+  }
+  .panel > h2 .right { margin-left: auto; font-weight: 400; text-transform: none; letter-spacing: 0; }
+  .body { padding: 1rem; }
+  .note { color: var(--dim); font-size: .85rem; margin: 0 0 .85rem; }
+  .note code { font-size: .95em; background: var(--code); padding: .05rem .3rem; border-radius: 4px; }
+
+  label.field { display: block; margin-bottom: .6rem; }
+  label.field > span { display: block; font-size: .75rem; color: var(--dim); margin-bottom: .2rem; }
+  input, select, textarea, button {
+    font: inherit; color: inherit;
+    padding: .4rem .55rem; border: 1px solid var(--line);
+    border-radius: 7px; background: var(--panel); width: 100%;
+  }
+  textarea { resize: vertical; min-height: 3.2rem; }
+  input:focus, select:focus, textarea:focus {
+    outline: 2px solid color-mix(in srgb, var(--accent) 45%, transparent); outline-offset: 1px;
+  }
+  .row { display: flex; gap: .5rem; flex-wrap: wrap; align-items: flex-end; }
+  .row > * { flex: 1 1 8rem; }
+  .row > .narrow { flex: 0 0 9rem; }
+  button {
+    cursor: pointer; width: auto; background: var(--ink); color: var(--bg);
+    border-color: var(--ink); font-weight: 500; padding: .4rem .85rem;
+  }
+  button:hover { opacity: .88; }
+  button.ghost { background: transparent; color: var(--ink); border-color: var(--line); font-weight: 400; }
+  button.tiny { padding: .15rem .45rem; font-size: .78rem; }
+  button.danger { background: transparent; color: var(--bad); border-color: color-mix(in srgb, var(--bad) 35%, var(--line)); }
+  fieldset { border: 0; padding: 0; margin: 0 0 .6rem; }
+  fieldset legend { font-size: .75rem; color: var(--dim); padding: 0; margin-bottom: .3rem; }
+  .checks { display: flex; flex-wrap: wrap; gap: .35rem .8rem; }
+  .checks label { display: flex; align-items: center; gap: .3rem; font-size: .85rem; }
+  .checks input { width: auto; }
+
+  ul.rows { list-style: none; margin: 0; padding: 0; }
+  ul.rows > li { padding: .6rem 0; border-bottom: 1px solid var(--line); }
+  ul.rows > li:last-child { border-bottom: 0; padding-bottom: 0; }
+  ul.rows > li:first-child { padding-top: 0; }
+  .line { display: flex; align-items: baseline; gap: .5rem; flex-wrap: wrap; }
+  .line .grow { flex: 1 1 8rem; min-width: 0; }
+  .title { font-weight: 500; }
+  .dim { color: var(--dim); font-size: .82rem; }
+  .empty { color: var(--dim); padding: .4rem 0; font-size: .88rem; }
+
+  .tag {
+    display: inline-block; font-size: .7rem; padding: .05rem .4rem;
+    border: 1px solid var(--line); border-radius: 999px; color: var(--dim);
+    white-space: nowrap;
+  }
+  .tag.key { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 40%, var(--line)); }
+  .tag.me  { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); }
+  .tag.ok  { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 40%, var(--line)); }
+  .tag.bad { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 40%, var(--line)); }
+
+  .flash {
+    margin: 0 0 1.25rem; padding: .65rem .9rem; border-radius: 9px;
+    border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--line));
+    background: color-mix(in srgb, var(--accent) 7%, transparent);
+  }
+  .secret {
+    margin: 0 0 1.25rem; padding: .7rem .9rem; border-radius: 9px;
+    border: 1px solid color-mix(in srgb, var(--warn) 45%, var(--line));
+    background: color-mix(in srgb, var(--warn) 8%, transparent);
+  }
+  .secret code { display: block; margin-top: .35rem; word-break: break-all; font-size: .85rem; }
+
+  .trace { position: sticky; top: 4.2rem; }
+  .trace > .body { padding: 0; max-height: calc(100vh - 10rem); overflow: auto; }
+  details.call { border-bottom: 1px solid var(--line); }
+  details.call > summary {
+    padding: .5rem .8rem; cursor: pointer; display: flex; gap: .5rem;
+    align-items: center; font-size: .82rem; list-style: none;
+  }
+  details.call > summary::-webkit-details-marker { display: none; }
+  details.call[open] > summary { background: var(--code); }
+  .status { font-variant-numeric: tabular-nums; font-weight: 600; font-size: .78rem; }
+  .status.ok { color: var(--ok); }
+  .status.bad { color: var(--bad); }
+  .verb { color: var(--dim); font-size: .72rem; letter-spacing: .03em; }
+  .path { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  pre {
+    margin: 0; padding: .7rem .8rem; background: var(--code);
+    font-size: .76rem; line-height: 1.5; overflow-x: auto;
+    border-top: 1px solid var(--line); white-space: pre-wrap; word-break: break-word;
+  }
+  pre.curl { color: var(--accent); }
+  .hint { font-size: .72rem; color: var(--dim); padding: .5rem .8rem; margin: 0; border-bottom: 1px solid var(--line); }
+
+  ul.scenarios { list-style: none; margin: 0; padding: 0; font-size: .88rem; }
+  ul.scenarios li { padding: .3rem 0; color: var(--dim); }
+  ul.scenarios li b { color: var(--ink); font-weight: 500; }
+</style>
+</head>
+<body>
+
+<header class="top">
+  <div class="brand">rig <span>/ auth</span></div>
+  {{if .SignedIn}}
+    <div class="who">
+      <div class="avatar">{{initial .Me.DisplayName}}</div>
+      <div>
+        <div>{{.Me.DisplayName}}
+          <span class="tag">{{.Me.Role}}</span>
+          {{if .Me.Verified}}<span class="tag ok">verified</span>{{else}}<span class="tag">unverified</span>{{end}}
+        </div>
+        <div class="dim">{{.Me.Email}} · {{.Me.Tenant}}</div>
+      </div>
+    </div>
+  {{end}}
+  <div class="spacer"></div>
+  {{if .SignedIn}}
+    <form method="post" action="/ui/refresh"><button class="ghost">Rotate tokens</button></form>
+    <form method="post" action="/ui/logout"><button class="ghost">Sign out</button></form>
+  {{end}}
+</header>
+
+{{if .SignedIn}}
+<nav class="tabs" aria-label="Tenants">
+  <div class="tabs-inner">
+    {{range .Tenants}}
+      {{if .Current}}
+        <span class="tab current" aria-current="page">{{.TenantName}}<span class="role">{{.Role}}</span></span>
+      {{else}}
+        <form method="post" action="/ui/switch">
+          <input type="hidden" name="tenant" value="{{.TenantID}}">
+          <button class="tab">{{.TenantName}}<span class="role">{{.Role}}</span></button>
+        </form>
+      {{end}}
+    {{end}}
+    <span class="tabs-note">one password, {{len .Tenants}} tenant{{if ne (len .Tenants) 1}}s{{end}} — switching reissues a session for that account</span>
+  </div>
+</nav>
+{{end}}
+
+<div class="wrap">
+  {{if .Flash}}<p class="flash">{{.Flash}}</p>{{end}}
+  {{if .LastKey}}
+    <div class="secret">
+      <b>Copy this now.</b> Only its hash is stored, so this is the one moment the
+      secret exists. Paste it into an “as an API key” box below.
+      <code>{{.LastKey}}</code>
+    </div>
+  {{end}}
+
+  <div class="cols">
+    <div class="stack">
+    {{if .InThePicker}}
+      {{template "picker" .}}
+    {{else if not .SignedIn}}
+      {{template "welcome" .}}
+    {{else}}
+      <div class="two">
+        {{template "notes" .}}
+        {{template "keys" .}}
+      </div>
+      <div class="two">
+        {{template "people" .}}
+        {{template "invitations" .}}
+      </div>
+      <div class="two">
+        {{template "sessions" .}}
+        {{template "log" .}}
+      </div>
+    {{end}}
+    {{template "outbox" .}}
+    </div>
+    {{template "trace" .}}
+  </div>
+</div>
+
+</body>
+</html>
+{{end}}
+
+
+{{define "picker"}}
+<div class="panel">
+  <h2>Where do you want to be?
+    <span class="right dim">signed in, no tenant</span></h2>
+  <div class="body">
+    <p class="note">
+      This state could not exist before: a session names a tenant because every
+      generated query scopes by one, so claims with no tenant are claims that
+      cannot read anything. What you are holding instead is an
+      <b>identity session</b> — a different credential, with its own token prefix,
+      that proves who you are and scopes nothing. It reaches exactly four
+      endpoints, and none of them can see application data.
+    </p>
+
+    <h3>Invitations for you</h3>
+    <ul class="rows">
+      {{range .MyInvitations}}
+        <li>
+          <div class="line">
+            <span class="title grow">{{.TenantName}}</span>
+            <span class="tag">{{.Role}}</span>
+            <form method="post" action="/ui/join">
+              <input type="hidden" name="invitation" value="{{.ID}}">
+              <button>Join</button>
+            </form>
+          </div>
+          <div class="line dim">
+            <span>invited {{ago .CreatedAt}}</span>
+            <span>expires {{ago .ExpiresAt}}</span>
+          </div>
+        </li>
+      {{else}}
+        {{with index $.Refused "myInvitations"}}<li class="empty">Refused: {{.}}</li>
+        {{else}}<li class="empty">Nobody has invited you anywhere.</li>{{end}}
+      {{end}}
+    </ul>
+    <p class="note">
+      Joining sends the invitation's <em>identifier</em>, not the token that was
+      emailed. A token proves somebody reached the address; being signed in as the
+      person invited proves who they are, which is the stronger of the two — so a
+      listing can hand out identifiers and never tokens.
+    </p>
+
+    {{if .Tenants}}
+      <h3>Tenants you already belong to</h3>
+      <ul class="rows">
+        {{range .Tenants}}
+          <li class="line">
+            <span class="title grow">{{.TenantName}}</span>
+            <span class="tag">{{.Role}}</span>
+          </li>
+        {{end}}
+      </ul>
+      <p class="note">Sign in again to land in one of these.</p>
+    {{end}}
+
+    <h3>Or make one</h3>
+    <form method="post" action="/ui/tenants">
+      <label class="field"><span>Tenant name</span>
+        <input name="tenantName" required placeholder="Acme" autocomplete="off"></label>
+      <button>Create tenant</button>
+    </form>
+    <p class="note">
+      <code>POST /auth/tenants</code> exists only because this application set
+      <code>OnCreateTenant</code>. rig authenticates the request and issues the
+      session; what a new tenant <em>consists of</em> — the tenant row, the
+      Owner, the roles — is in
+      <code>services/tenant</code>, because that is a product decision with
+      several normal answers.
+    </p>
+
+    <form method="post" action="/ui/logout" style="margin-top:1rem">
+      <button class="ghost">Sign out</button>
+    </form>
+  </div>
+</div>
+{{end}}
+
+
+{{define "welcome"}}
+<div class="panel">
+  <h2>The whole authentication foundation, handed a pool</h2>
+  <div class="body">
+    <p class="note">
+      Every button here makes a real HTTP request to this application's own API,
+      with a real <code>Authorization</code> header. The transcript on the right is
+      what was actually sent — copy the <code>curl</code> and it does the same
+      thing from a terminal.
+    </p>
+    <ul class="scenarios">
+      <li><b>Create a tenant</b> — a tenant, an identity, an Owner account and a role, in one transaction.</li>
+      <li><b>Invite somebody</b> — a single-use link that sets a first password and confirms the address.</li>
+      <li><b>Be in two tenants</b> — one address, one password, two accounts, two roles.</li>
+      <li><b>Mint an API key</b> — write a note with it, and watch the row name the key it came through.</li>
+      <li><b>Read the trail</b> — every attempt, rotation and lockout lands in <code>auth_log</code>.</li>
+    </ul>
+  </div>
+</div>
+
+<div class="two">
+  <div class="panel">
+    <h2>Create a tenant</h2>
+    <div class="body">
+      <p class="note">
+        Both at once, which is the shape a single form has: become a person, and
+        get a tenant to be in. The <b>Create an account</b> panel below is the
+        same thing split in two — register, then look at your invitations and
+        decide.
+      </p>
+      <p class="note">
+        rig has no endpoint for the tenant half on its own.
+        <code>rig setup-project</code> creates no tenant, because “who may” is a
+        product question with several right answers — so it is forty lines in
+        <code>services/tenant</code>, reached here directly and through
+        <code>OnCreateTenant</code> from the picker.
+      </p>
+      <form method="post" action="/ui/signup">
+        <label class="field"><span>Tenant name</span>
+          <input name="tenantName" required placeholder="Acme" autocomplete="off"></label>
+        <div class="row">
+          <label class="field"><span>Your name</span>
+            <input name="name" placeholder="Ada" autocomplete="off"></label>
+          <label class="field"><span>Email address</span>
+            <input name="email" type="email" required placeholder="ada@acme.test" autocomplete="off"></label>
+        </div>
+        <label class="field"><span>Password — at least 12 characters</span>
+          <input name="password" type="password" required minlength="12" autocomplete="new-password"></label>
+        <button>Create tenant</button>
+      </form>
+    </div>
+  </div>
+
+  <div class="stack">
+    <div class="panel">
+      <h2>Create an account <span class="right dim">no tenant</span></h2>
+      <div class="body">
+        <p class="note">
+          A person and nothing else: no tenant, no tenant session, just proof of
+          who you are. What comes back is an <b>identity session</b> — a credential
+          with its own token prefix that names no tenant and cannot read
+          application data — and it lands you in the picker, where you either
+          accept an invitation or make a tenant.
+        </p>
+        <p class="note">
+          <code>POST /auth/register</code> exists only because this application set
+          <code>AllowRegistration</code>. Leave it off and the route is absent
+          rather than answering 403, which is what an invite-only product wants.
+        </p>
+        <form method="post" action="/ui/register">
+          <div class="row">
+            <label class="field"><span>Your name</span>
+              <input name="name" placeholder="Grace" autocomplete="off"></label>
+            <label class="field"><span>Email address</span>
+              <input name="email" type="email" required placeholder="grace@acme.test" autocomplete="off"></label>
+          </div>
+          <label class="field"><span>Password — at least 12 characters</span>
+            <input name="password" type="password" required minlength="12" autocomplete="new-password"></label>
+          <button>Create account</button>
+        </form>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>Sign in with a provider <span class="right dim">elsewhere</span></h2>
+      <div class="body">
+        <p class="note">
+          Not here. A provider sign-in has to know the tenant <em>before</em> the
+          redirect, because that is what the callback joins somebody to — and the
+          callback URL is registered with the provider and fixed, so it carries
+          nothing on the way back. A header does not survive it. A host does.
+        </p>
+        <p class="note">
+          So it belongs in a deployment that has a host per tenant, which is
+          <code>examples/oauth</code>: <code>acme.localhost</code> is one tenant,
+          <code>beta.localhost</code> is another, and the resolver is three lines.
+          Everything else about the flow — the sealed state cookie, PKCE, matching
+          on the provider's subject, refusing to link an unverified address — is the
+          same <code>auth/oauth</code> this example would have used.
+        </p>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>Sign in</h2>
+      <div class="body">
+        <p class="note">
+          An address and a password, and no tenant: nobody knows which
+          tenants an address belongs to until the password has been checked, so
+          asking first would ask a question you cannot answer. You land in one of
+          yours and the tabs reach the rest.
+        </p>
+        <form method="post" action="/ui/login">
+          <label class="field"><span>Email address</span>
+            <input name="email" type="email" required autocomplete="username"></label>
+          <label class="field"><span>Password</span>
+            <input name="password" type="password" required autocomplete="current-password"></label>
+          <button>Sign in</button>
+        </form>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>Accept an invitation</h2>
+      <div class="body">
+        <p class="note">
+          Unauthenticated, and with no tenant header: the link says which tenant
+          it is for. Redeeming it sets a first password, confirms the address and
+          returns a session — one round trip.
+        </p>
+        <form method="post" action="/ui/accept">
+          <label class="field"><span>Invitation token</span>
+            <input name="token" required placeholder="paste from the outbox below" autocomplete="off"></label>
+          <label class="field"><span>Choose a password — ignored if you already have one</span>
+            <input name="password" type="password" minlength="12" autocomplete="new-password"></label>
+          <button>Accept invitation</button>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+{{end}}
+
+
+{{define "notes"}}
+<div class="panel">
+  <h2>Notes <span class="count">{{len .Notes}}</span>
+    <span class="right dim">the application's one table</span></h2>
+  <div class="body">
+    <p class="note">
+      Writing needs <code>note.write</code>, checked in the service's own hook so
+      it holds for every way in. Paste a key below and the row records
+      <em>both</em> — the account it acted as, and the key it came through.
+    </p>
+
+    <p class="note">
+      The table declares <code>access: { scope: own }</code>, so a note is yours by
+      default. <code>?scope=all</code> widens that and is refused without
+      <code>note.read.all</code> — a 403, never a shorter list, because a caller
+      cannot tell "you may not see the rest" from "there is no rest".
+      Writing is narrow with no way to widen it: editing somebody else's note is a
+      404.
+    </p>
+
+    <nav class="scopes" aria-label="How wide to read">
+      <a href="/ui?scope=own" class="scope{{if eq .NoteScope "own"}} current{{end}}"
+         {{if eq .NoteScope "own"}}aria-current="page"{{end}}>Mine</a>
+      <a href="/ui?scope=all" class="scope{{if eq .NoteScope "all"}} current{{end}}"
+         {{if eq .NoteScope "all"}}aria-current="page"{{end}}>Everyone's</a>
+      <code class="scope-param">?scope={{.NoteScope}}</code>
+    </nav>
+    <form method="post" action="/ui/notes">
+      <label class="field"><span>Title</span>
+        <input name="title" required placeholder="Something worth remembering" autocomplete="off"></label>
+      <label class="field"><span>Body</span>
+        <textarea name="body" placeholder="optional"></textarea></label>
+      <label class="field"><span>As an API key — empty uses your session</span>
+        <input name="key" placeholder="rig_sk_…" autocomplete="off" class="mono"></label>
+      <button>Write note</button>
+    </form>
+
+    <ul class="rows" style="margin-top:1rem">
+      {{range .Notes}}
+        <li>
+          <div class="line">
+            <span class="title grow">{{.Title}}</span>
+            <span class="dim">{{ago .CreatedAt}}</span>
+          </div>
+          <div class="line dim">
+            {{if .ByWhom}}<span>by {{.ByWhom}}</span>{{else}}<span>by nobody recorded</span>{{end}}
+            {{if .ByWhat}}<span class="tag key">through {{.ByWhat}}</span>{{end}}
+          </div>
+        </li>
+      {{else}}
+        {{with index $.Refused "notes"}}<li class="empty">Refused: {{.}}</li>
+        {{else}}<li class="empty">No notes yet.</li>{{end}}
+      {{end}}
+    </ul>
+  </div>
+</div>
+{{end}}
+
+
+{{define "keys"}}
+<div class="panel">
+  <h2>API keys <span class="count">{{len .Keys}}</span></h2>
+  <div class="body">
+    <p class="note">
+      An <b>integration</b> key acts as a service account of its own, so removing
+      the person who made it does not stop the import. A <b>personal</b> key acts
+      as you, and can never reach more than you can: its permissions are
+      intersected with yours on every request.
+    </p>
+    <p class="note">
+      Which is why they need different permissions. Minting a personal key grants
+      nothing you do not already hold — <code>apikey.own</code>, which every member
+      has. A service key is a new account with scopes of its own, which is
+      authority creation — <code>apikey.manage</code>, which Owners and Admins
+      have.
+      {{if .Me.CanManageKeys}}You hold both, so both kinds are offered.
+      {{else if .Me.CanOwnKeys}}You hold <code>apikey.own</code>, so the integration
+      kind is not offered — and asking for one over HTTP is a 403 rather than a
+      form that quietly fails.
+      {{else}}You hold neither, so this panel is refused entirely.{{end}}
+    </p>
+    <form method="post" action="/ui/keys">
+      <div class="row">
+        <label class="field"><span>Name</span>
+          <input name="name" required placeholder="Nightly import" autocomplete="off"></label>
+        <label class="field narrow"><span>Kind</span>
+          <select name="kind">
+            {{if .Me.CanManageKeys}}<option value="Integration">Integration</option>{{end}}
+            <option value="Personal">Personal</option>
+          </select></label>
+      </div>
+      <fieldset>
+        <legend>Scopes — the same keys a role grants</legend>
+        <div class="checks">
+          <label><input type="checkbox" name="scope" value="note.write" checked> note.write</label>
+          <label><input type="checkbox" name="scope" value="account.provision"> account.provision</label>
+          <label><input type="checkbox" name="scope" value="apikey.manage"> apikey.manage</label>
+        </div>
+      </fieldset>
+      <button>Mint key</button>
+    </form>
+
+    <ul class="rows" style="margin-top:1rem">
+      {{range .Keys}}
+        <li>
+          <div class="line">
+            <span class="title grow">{{.Name}}</span>
+            <span class="tag">{{.Kind}}</span>
+            {{if .RevokedAt}}<span class="tag bad">revoked</span>{{else}}
+              <form method="post" action="/ui/keys/revoke" style="flex:0 0 auto;width:auto">
+                <input type="hidden" name="id" value="{{.ID}}">
+                <button class="tiny danger">Revoke</button>
+              </form>
+            {{end}}
+          </div>
+          <div class="line dim">
+            <span class="mono">{{.KeyID}}</span>
+            {{range sorted .Scopes}}<span class="tag">{{.}}</span>{{end}}
+            {{if .LastUsedAt}}<span>used {{ago .LastUsedAt}}</span>{{else}}<span>never used</span>{{end}}
+          </div>
+        </li>
+      {{else}}
+        {{with index $.Refused "keys"}}
+          <li class="empty">Refused: {{.}} — the coarse level on an account is not a
+            permission: <code>apikey.manage</code> has to be granted through a role,
+            and this is that check doing its job.</li>
+        {{else}}<li class="empty">No keys yet.</li>{{end}}
+      {{end}}
+    </ul>
+  </div>
+</div>
+{{end}}
+
+
+{{define "people"}}
+<div class="panel">
+  <h2>People here <span class="count">{{len .People}}</span>
+    <span class="right dim">read with SQL</span></h2>
+  <div class="body">
+    <p class="note">
+      <code>account</code> has no generated repository — the foundation belongs to
+      the <code>rig/auth</code> module — so this panel is a query.
+      <code>auth.expose: [account]</code> in <code>rig.yaml</code> is the other
+      answer, and gives it a REST resource with filters and paging.
+    </p>
+    <form method="post" action="/ui/invite">
+      <div class="row">
+        <label class="field"><span>Email address</span>
+          <input name="email" type="email" required placeholder="grace@acme.test" autocomplete="off"></label>
+        <label class="field narrow"><span>Role</span>
+          <select name="role">
+            <option value="Basic">Basic</option>
+            <option value="Admin">Admin</option>
+            <option value="Owner">Owner</option>
+          </select></label>
+      </div>
+      <label class="field"><span>Their name</span>
+        <input name="name" placeholder="Grace" autocomplete="off"></label>
+      <label class="field"><span>As an API key — needs <code>account.provision</code></span>
+        <input name="key" placeholder="rig_sk_… (optional)" autocomplete="off" class="mono"></label>
+      <button>Invite</button>
+    </form>
+
+    <ul class="rows" style="margin-top:1rem">
+      {{range .People}}
+        <li class="line">
+          <span class="grow">
+            <span class="title">{{.Name}}</span>
+            <span class="dim">{{.Email}}</span>
+          </span>
+          <span class="tag">{{.Role}}</span>
+          {{if eq .Kind "Service"}}<span class="tag key">service</span>{{end}}
+          {{if and (eq .Kind "Person") (not .Verified)}}<span class="tag">invited</span>{{end}}
+          {{if eq .AccountID $.Me.AccountID}}<span class="tag me">you</span>{{end}}
+        </li>
+      {{else}}
+        <li class="empty">Nobody yet.</li>
+      {{end}}
+    </ul>
+  </div>
+</div>
+{{end}}
+
+
+{{define "invitations"}}
+<div class="panel">
+  <h2>Pending invitations <span class="count">{{len .Invitations}}</span></h2>
+  <div class="body">
+    <p class="note">
+      Live means all four at once: minted, not accepted, not withdrawn, not
+      expired — so this comes from the database rather than from the outbox, which
+      only knows what it sent. Withdrawing one kills the link <em>and</em> removes
+      the account it made, because either half alone leaves something broken.
+    </p>
+    <ul class="rows">
+      {{range .Invitations}}
+        <li>
+          <div class="line">
+            <span class="grow">
+              <span class="title">{{.DisplayName}}</span>
+              <span class="dim">{{.EmailAddress}}</span>
+            </span>
+            <span class="tag">{{.Role}}</span>
+            <form method="post" action="/ui/invite/revoke" style="flex:0 0 auto;width:auto">
+              <input type="hidden" name="id" value="{{.ID}}">
+              <button class="tiny danger">Withdraw</button>
+            </form>
+          </div>
+          <div class="line dim">
+            <span>sent {{ago .CreatedAt}}</span>
+            <span>expires {{ago .ExpiresAt}}</span>
+          </div>
+        </li>
+      {{else}}
+        {{with index $.Refused "invitations"}}<li class="empty">Refused: {{.}}</li>
+        {{else}}<li class="empty">Nobody is waiting. Invite somebody beside this panel.</li>{{end}}
+      {{end}}
+    </ul>
+  </div>
+</div>
+{{end}}
+
+
+{{define "sessions"}}
+<div class="panel">
+  <h2>Active sessions <span class="count">{{len .Sessions}}</span></h2>
+  <div class="body">
+    <p class="note">
+      One row per token family. Every refresh rotates the pair, and replaying a
+      consumed refresh token outside a 30-second leeway revokes the whole family —
+      which turns a stolen token from a permanent problem into a
+      <code>TokenReuseDetected</code> entry.
+    </p>
+    <ul class="rows">
+      {{range .Sessions}}
+        <li>
+          <div class="line">
+            <span class="mono grow">{{shortstr (print .ID)}}</span>
+            <span class="tag">{{.Client}}</span>
+            {{if .Current}}<span class="tag me">this one</span>{{end}}
+          </div>
+          <div class="line dim">
+            <span>started {{ago .CreatedAt}}</span>
+            <span>used {{ago .LastUsedAt}}</span>
+            {{if .IPAddress}}<span class="mono">{{.IPAddress}}</span>{{end}}
+          </div>
+        </li>
+      {{else}}
+        {{with index $.Refused "sessions"}}<li class="empty">Refused: {{.}}</li>
+        {{else}}<li class="empty">No sessions.</li>{{end}}
+      {{end}}
+    </ul>
+    {{if .Me.Permissions}}
+      <p class="note" style="margin:1rem 0 0">
+        Your grants:
+        {{range sorted .Me.Roles}}<span class="tag">{{.}}</span> {{end}}
+        {{range sorted .Me.Permissions}}<span class="tag ok">{{.}}</span> {{end}}
+      </p>
+    {{end}}
+  </div>
+</div>
+{{end}}
+
+
+{{define "log"}}
+<div class="panel">
+  <h2>Auth log <span class="count">{{len .Log}}</span>
+    <span class="right dim">the audit trail and the rate-limit substrate</span></h2>
+  <div class="body">
+    <p class="note">
+      One table doing two jobs: what an operator reads after an incident, and what
+      the lockout counts. Six wrong passwords for one address and the next attempt
+      is a 429 — worth trying from the sign-in form.
+    </p>
+    <ul class="rows">
+      {{range .Log}}
+        <li class="line">
+          <span class="dim mono" style="flex:0 0 5rem">{{clock .At}}</span>
+          <span class="grow">
+            <span class="title">{{.Event}}</span>
+            {{if .Email}}<span class="dim">{{.Email}}</span>{{end}}
+          </span>
+          {{if .KeyRef}}<span class="tag key">{{.KeyRef}}</span>{{end}}
+          {{if eq .Outcome "Succeeded"}}<span class="tag ok">ok</span>{{else}}<span class="tag bad">failed</span>{{end}}
+        </li>
+      {{else}}
+        <li class="empty">Nothing yet.</li>
+      {{end}}
+    </ul>
+  </div>
+</div>
+{{end}}
+
+
+{{define "outbox"}}
+<div class="panel">
+  <h2>Outbox <span class="count">{{len .Outbox}}</span>
+    <span class="right dim">the mail this example would have sent</span></h2>
+  <div class="body">
+    <p class="note">
+      A <code>Notifier</code> delivers the single-use links the auth package mints.
+      Sending mail is not rig's business, so this one keeps the last few in memory —
+      which is exactly what a real notifier must never do, because a live
+      invitation is a credential for as long as it lives.
+      <br><br>
+      It only knows what it sent: a link here may already have been used or
+      withdrawn, because consuming one happens in the database and nothing tells a
+      notifier about it. <b>Pending invitations</b> is the list that knows.
+    </p>
+    <ul class="rows">
+      {{range .Outbox}}
+        <li>
+          <div class="line">
+            <span class="tag">{{.Kind}}</span>
+            <span class="grow">{{.To}}</span>
+            <span class="dim">{{ago .At}}</span>
+          </div>
+          <pre class="mono" style="margin-top:.4rem;border:1px solid var(--line);border-radius:6px">{{.Token}}</pre>
+        </li>
+      {{else}}
+        <li class="empty">Nothing sent yet — invite somebody.</li>
+      {{end}}
+    </ul>
+  </div>
+</div>
+{{end}}
+
+
+{{define "trace"}}
+<div class="panel trace">
+  <h2>Requests <span class="count">{{len .Trace}}</span>
+    <span class="right">
+      <form method="post" action="/ui/trace/clear" style="display:inline">
+        <button class="tiny ghost">Clear</button>
+      </form>
+    </span>
+  </h2>
+  <div class="body">
+    <p class="hint">Every call this interface made, newest first. Click one for the curl.</p>
+    {{range .Trace}}
+      <details class="call">
+        <summary>
+          <span class="status {{if .OK}}ok{{else}}bad{{end}}">{{.Status}}</span>
+          <span class="verb">{{.Method}}</span>
+          <span class="path mono">{{.Path}}</span>
+          <span class="tag{{if eq .Credential "api key"}} key{{end}}">{{.Credential}}</span>
+        </summary>
+        <pre class="curl">{{.Curl $.Base}}</pre>
+        {{if .Response}}<pre>{{.Pretty}}</pre>{{end}}
+      </details>
+    {{else}}
+      <p class="empty" style="padding:1rem">Nothing yet.</p>
+    {{end}}
+  </div>
+</div>
+{{end}}

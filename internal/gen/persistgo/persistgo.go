@@ -1,5 +1,10 @@
-// Package persistgo generates the persistence layer: models, typed queries, a
-// repository interface, and its pgx implementation.
+// Package persistgo generates the persistence layer: a repository interface and
+// its pgx implementation.
+//
+// The entity, its enums, its query types, and its inputs come from the model
+// package, which the API layer imports too. What is left here is everything
+// that is only true of a database: how a row is read, how a query becomes a
+// WHERE clause, and how a write is made safe.
 //
 // The generated repository is the floor the service layer stands on. Everything
 // it does that the service layer does not have to think about — scoping by
@@ -11,8 +16,8 @@ package persistgo
 import (
 	"context"
 	"fmt"
-	"strings"
 
+	"github.com/simonjanss/rig/internal/gen/genutil"
 	"github.com/simonjanss/rig/internal/gen/gobuf"
 	"github.com/simonjanss/rig/pkg/gen"
 	"github.com/simonjanss/rig/pkg/ir"
@@ -24,6 +29,9 @@ func init() { gen.Register(New()) }
 type Options struct {
 	// Package is the Go package the generated files declare.
 	Package string `json:"package"`
+	// ModelImport is the import path of the generated model package. It is
+	// required: a repository with no entity to scan into is not a repository.
+	ModelImport string `json:"model_import"`
 }
 
 // Generator emits the persistence layer.
@@ -37,14 +45,14 @@ func (*Generator) Name() string { return "persist-go" }
 
 // Description implements [gen.Generator].
 func (*Generator) Description() string {
-	return "Go models, typed queries, repository interface and pgx implementation"
+	return "the repository interface and its pgx implementation"
 }
 
 // Version implements [gen.Generator].
 func (*Generator) Version() string { return "1" }
 
 // runtimeModule is the import path generated code depends on.
-const runtimeModule = "github.com/simonjanss/rig/runtime"
+const runtimeModule = genutil.RuntimeModule
 
 // Generate implements [gen.Generator].
 func (g *Generator) Generate(_ context.Context, doc *ir.Document, opts gen.Options) ([]gen.Artifact, error) {
@@ -55,23 +63,13 @@ func (g *Generator) Generate(_ context.Context, doc *ir.Document, opts gen.Optio
 	if cfg.Package == "" {
 		cfg.Package = "store"
 	}
+	if cfg.ModelImport == "" {
+		return nil, fmt.Errorf("model_import is required: the repository scans into the model's types")
+	}
 
-	e := &emitter{doc: doc, pkg: cfg.Package}
+	e := &emitter{doc: doc, pkg: cfg.Package, modelImport: cfg.ModelImport}
 
 	var artifacts []gen.Artifact
-
-	for _, enum := range doc.API.Enums {
-		// ErrorCode belongs to the API layer; the persistence layer never
-		// stores one.
-		if enum.PgType == "" {
-			continue
-		}
-		art, err := e.enumFile(enum)
-		if err != nil {
-			return nil, err
-		}
-		artifacts = append(artifacts, art)
-	}
 
 	for i := range doc.API.Resources {
 		res := &doc.API.Resources[i]
@@ -79,19 +77,11 @@ func (g *Generator) Generate(_ context.Context, doc *ir.Document, opts gen.Optio
 			continue
 		}
 
-		model, err := e.modelFile(res)
-		if err != nil {
-			return nil, err
-		}
-		queries, err := e.queryFile(res)
-		if err != nil {
-			return nil, err
-		}
 		repo, err := e.repositoryFile(res)
 		if err != nil {
 			return nil, err
 		}
-		artifacts = append(artifacts, model, queries, repo)
+		artifacts = append(artifacts, repo)
 	}
 
 	store, err := e.storeFile()
@@ -105,8 +95,17 @@ func (g *Generator) Generate(_ context.Context, doc *ir.Document, opts gen.Optio
 
 // emitter carries what every file needs.
 type emitter struct {
-	doc *ir.Document
-	pkg string
+	doc         *ir.Document
+	pkg         string
+	modelImport string
+}
+
+// model imports the model package and returns its qualifier.
+func (e *emitter) model(b *gobuf.Buf) string { return b.Import(e.modelImport) }
+
+// entity is the model's name for a resource, qualified for use here.
+func (e *emitter) entity(b *gobuf.Buf, res *ir.Resource) string {
+	return e.model(b) + "." + res.Name
 }
 
 // table returns the table behind a resource.
@@ -115,88 +114,19 @@ func (e *emitter) table(res *ir.Resource) *ir.Table {
 }
 
 // storedFields are the resource's fields that map to a column, in column order.
-func storedFields(res *ir.Resource) []ir.ResourceField {
-	var out []ir.ResourceField
-	for _, f := range res.Fields {
-		if f.Column != nil {
-			out = append(out, f)
-		}
-	}
-	return out
-}
+func storedFields(res *ir.Resource) []ir.ResourceField { return genutil.StoredFields(res) }
 
 // writableFields are the fields a client supplies for one operation.
 func writableFields(res *ir.Resource, op string) []ir.ResourceField {
-	var out []ir.ResourceField
-	for _, f := range storedFields(res) {
-		if f.ReadOnly || !f.In(op) {
-			continue
-		}
-		if op == ir.FieldOpUpdate && f.Immutable {
-			continue
-		}
-		out = append(out, f)
-	}
-	return out
+	return genutil.WritableFields(res, op)
 }
 
-// goType renders a field's Go type, importing whatever it needs.
-//
-// The IR carries the type as source text — "*time.Time", "[]string" — so the
-// package qualifier has to be recognized and registered rather than parsed out
-// of a structured form.
+// goType renders a field's Go type, qualifying anything the model declares.
 func (e *emitter) goType(b *gobuf.Buf, f ir.Field) string {
-	t := f.GoType
-	if t == "" {
-		t = "any"
-	}
-
-	prefix := ""
-	for strings.HasPrefix(t, "*") || strings.HasPrefix(t, "[]") {
-		if strings.HasPrefix(t, "*") {
-			prefix += "*"
-			t = t[1:]
-			continue
-		}
-		prefix += "[]"
-		t = t[2:]
-	}
-
-	pkg, name, qualified := strings.Cut(t, ".")
-	if !qualified {
-		return prefix + t
-	}
-
-	importPath, known := runtimeImports[pkg]
-	if !known {
-		// An unrecognized qualifier is a named type from the application's own
-		// package, which needs no import.
-		return prefix + t
-	}
-	return prefix + b.Import(importPath) + "." + name
+	return genutil.GoType(b, f, func() string { return e.model(b) })
 }
-
-// runtimeImports maps the package qualifiers that appear in IR Go types to
-// their import paths.
-var runtimeImports = map[string]string{
-	"time":    "time",
-	"uuid":    "github.com/google/uuid",
-	"json":    "encoding/json",
-	"netip":   "net/netip",
-	"pgtype":  "github.com/jackc/pgx/v5/pgtype",
-	"patch":   runtimeModule + "/patch",
-	"query":   runtimeModule + "/query",
-	"tenancy": runtimeModule + "/tenancy",
-}
-
-// elemType strips one pointer from a type, for the element inside a slice.
-func elemType(t string) string { return strings.TrimPrefix(t, "*") }
 
 // artifact wraps a finished buffer.
 func artifact(path string, b *gobuf.Buf) (gen.Artifact, error) {
-	content, err := b.Bytes()
-	if err != nil {
-		return gen.Artifact{}, fmt.Errorf("%s: %w", path, err)
-	}
-	return gen.Artifact{Path: path, Content: content, Mode: gen.Overwrite}, nil
+	return genutil.Artifact(path, b, gen.Overwrite)
 }

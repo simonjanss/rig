@@ -408,6 +408,17 @@ func checkColumnNaming(t *ir.Table, loaded *tableconf.Loaded, boolSev, tsSev, da
 			case endsAt && !isTimestampType(c):
 				diags.AddSeverity(diag.CodeTimestampSuffix, tsSev, at,
 					"column %s.%s ends in _at but is %s, not a timestamp", t.Name, c.Name, c.SQLType)
+			case endsAt && !isInstantType(c):
+				// A name ending in _at claims the column records when something
+				// happened, and a bare timestamp cannot: it is a clock reading
+				// with no anchor, so two of them cannot be ordered across a
+				// daylight-saving change and one means different moments to two
+				// servers. A wall-clock value is a fine thing to store — a
+				// birthday, opening hours — under a name that does not promise an
+				// instant.
+				diags.AddSeverity(diag.CodeTimestampSuffix, tsSev, at,
+					"column %s.%s ends in _at but is %s; an instant must be `timestamptz`, "+
+						"which stores UTC and no zone", t.Name, c.Name, c.SQLType)
 			}
 		}
 
@@ -423,7 +434,13 @@ func checkColumnNaming(t *ir.Table, loaded *tableconf.Loaded, boolSev, tsSev, da
 			}
 		}
 
-		if fkSev != "" && c.ForeignKey != nil && !isAuditActorColumn(c.Name) {
+		// A self-referencing key is exempt. There is only one table it could
+		// point at, so parent_id and root_token_id say more than
+		// parent_account_token_id would, and the convention exists to make the
+		// target obvious rather than to make names long.
+		selfReference := c.ForeignKey != nil && c.ForeignKey.Table == t.Name
+
+		if fkSev != "" && c.ForeignKey != nil && !isAuditActorColumn(c.Name) && !selfReference {
 			want := c.ForeignKey.Table + "_id"
 			if c.Name != want && !strings.HasSuffix(c.Name, "_"+want) {
 				diags.AddSeverity(diag.CodeForeignKeyNaming, fkSev, at,
@@ -505,6 +522,22 @@ func checkCustomEndpoints(doc *ir.Document, set *tableconf.Set) diag.List {
 			loaded = set.Get(r.Storage.Table)
 		}
 
+		// A table that asked not to be exposed and then declared an endpoint
+		// has said two contradictory things, and the quiet resolution — the
+		// endpoint simply never being generated — is the worst one.
+		if r.Unexposed {
+			if len(r.Endpoints) > 0 {
+				diags.Add(diag.CodeUnexposedConflict, anchorForTable(loaded, tableOf(r), "expose"),
+					"%s is not exposed, so its %d endpoint(s) would never be served",
+					r.Name, len(r.Endpoints))
+			}
+			if r.Electric != nil {
+				diags.Add(diag.CodeUnexposedConflict, anchorForTable(loaded, tableOf(r), "expose"),
+					"%s is not exposed, so its live-sync endpoint would never be served", r.Name)
+			}
+			continue
+		}
+
 		for j := range r.Endpoints {
 			e := &r.Endpoints[j]
 			if e.Impl.Kind != ir.EndpointCustom {
@@ -565,4 +598,12 @@ func at(loaded *tableconf.Loaded, t *ir.Table, segments ...string) diag.Anchor {
 		return diag.At(t.Name)
 	}
 	return loaded.At(segments...)
+}
+
+// tableOf names a resource's table, or the resource itself when there is none.
+func tableOf(r *ir.Resource) string {
+	if r.Storage != nil {
+		return r.Storage.Table
+	}
+	return r.Name
 }

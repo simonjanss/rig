@@ -1,0 +1,34 @@
+table: todo
+comment: A single thing someone means to get done.
+
+columns:
+  title:
+    comment: Short description of the task.
+  notes:
+    comment: Longer free-text notes.
+  is_done:
+    comment: Whether the task has been completed.
+  due_date:
+    comment: Day the task is expected to be finished by.
+
+# `scope` is reserved even here, on a table that never asked to be owner-scoped:
+# a name that means one thing on most endpoints and something else on this one is
+# worse than a name that is simply taken.
+endpoints:
+  - name: Archive
+    method: POST
+    path: /{id}/_archive
+    summary: Archive the task.
+    request:
+      path_params:
+        - name: ID
+          type: UUID
+          description: The task to archive.
+      query_params:
+        - name: Scope
+          type: String
+          description: An endpoint trying to mean something else by a reserved name.
+    responses:
+      - status: 200
+        body_object: Todo
+        description: The archived task.

@@ -68,7 +68,17 @@ func errorObject(wire func(string) string) ir.Object {
 			{
 				Name: "RequestID", Wire: wire("RequestID"),
 				Type: ir.TypeString, TypeKind: ir.TypeKindPrimitive, GoType: "string",
+				Modifiers:   []string{ir.ModifierNullable},
 				Description: "Identifier of this request, for correlating with server logs.",
+			},
+			{
+				Name: "Fields", Wire: wire("Fields"),
+				Type: ir.TypeJSON, TypeKind: ir.TypeKindPrimitive, GoType: "any",
+				Modifiers: []string{ir.ModifierNullable},
+				Description: "Present when the failure was validation. It is shaped like " +
+					"the request body that failed — one member per field, holding the " +
+					"problem with that field — so a client can put each message beside " +
+					"the control it belongs to.",
 			},
 		},
 	}

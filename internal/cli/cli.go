@@ -108,6 +108,7 @@ func newRoot(e *env) *cobra.Command {
 		newCodesCmd(e),
 		newDBCmd(e),
 		newInitCmd(e),
+		newSetupProjectCmd(e),
 		newMigrationCmd(e),
 		newSyncCmd(e),
 		newGenerateCmd(e),

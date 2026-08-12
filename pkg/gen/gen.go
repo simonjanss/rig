@@ -66,6 +66,13 @@ type Artifact struct {
 type Options struct {
 	// OutDir is where the artifacts go, resolved to an absolute path.
 	OutDir string
+	// Root is the project root.
+	//
+	// Almost everything a generator writes belongs under OutDir. The exception
+	// is a hand-owned scaffold, which belongs where the developer works rather
+	// than beside the code it implements — so a generator that emits one needs
+	// to know where the project starts.
+	Root string
 	// Raw is this generator's own options block from rig.yaml.
 	Raw map[string]any
 }
@@ -105,6 +112,12 @@ type Generator interface {
 	// Generate must be pure: the same document and options must always produce
 	// byte-identical artifacts. No filesystem, no clock, no network, and no
 	// iteration over a map without sorting it first.
+	//
+	// Whatever the output format can say about a field, it says with the
+	// document's own words: ir.Field.Description is the single copy of the
+	// human-readable text, and an output that has somewhere to put one — a doc
+	// comment, an OpenAPI description, a JSDoc block — puts that one there
+	// rather than a paraphrase of it.
 	Generate(ctx context.Context, doc *ir.Document, opts Options) ([]Artifact, error)
 }
 

@@ -21,6 +21,15 @@ type Config struct {
 	// tooling and cross-tenant reporting, and for nothing a request handler
 	// should ever do.
 	SkipTenantScope bool
+	// SkipOwnerScope drops the "rows the caller created" filter, on a table that
+	// has one.
+	//
+	// The only option here that a request handler does set, and the direction is
+	// the reason it is safe to: the narrow read is what happens when nobody says
+	// anything, so a handler that forgets this returns too little rather than too
+	// much. Widening is the thing somebody had to ask for and hold a permission
+	// for.
+	SkipOwnerScope bool
 }
 
 // Option adjusts a read.
@@ -38,6 +47,9 @@ func WithSnapshots() Option { return func(c *Config) { c.IncludeSnapshots = true
 
 // WithoutTenantScope reads across every tenant.
 func WithoutTenantScope() Option { return func(c *Config) { c.SkipTenantScope = true } }
+
+// WithoutOwnerScope reads every row in the tenant, not only the caller's own.
+func WithoutOwnerScope() Option { return func(c *Config) { c.SkipOwnerScope = true } }
 
 // Apply resolves a set of options.
 //

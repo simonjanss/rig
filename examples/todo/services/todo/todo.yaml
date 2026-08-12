@@ -1,0 +1,77 @@
+# yaml-language-server: $schema=../../.rig/table.schema.json
+table: todo
+comment: One thing somebody means to do.
+
+# Days a soft-deleted row stays restorable.
+restore_window_days: 30
+
+# Newest first, then by identifier so the order is total and paging is stable.
+order_by: [-created_at, id]
+
+columns:
+  title:
+    comment: What needs doing, in a few words.
+  notes:
+    comment: Anything worth remembering that does not fit in the title.
+  is_done:
+    comment: Whether the task has been completed.
+  priority:
+    comment: How urgently the task wants attention.
+  due_at:
+    comment: When the task is due, or null if it never expires.
+
+enums:
+  todo_priority:
+    name: TodoPriority
+    description: How urgently a task wants attention.
+    values:
+      low:
+        name: Low
+        description: Worth doing eventually.
+      normal:
+        name: Normal
+        description: Worth doing soon. This is the default.
+      high:
+        name: High
+        description: Worth doing before anything else.
+  todo_version_type:
+    name: TodoVersionType
+    description: Whether a row is the live task or a copy of a previous version of it.
+    values:
+      Original:
+        name: Original
+        description: The live task. This is the only kind a read returns by default.
+      Snapshot:
+        name: Snapshot
+        description: An immutable copy of the task as it was before an update.
+
+# Endpoints beyond the generated CRUD set. rig has no default for one — that is
+# the point of declaring it — so the service layer implements it, and the build
+# fails until it does.
+endpoints:
+  - name: Complete
+    method: POST
+    path: /{id}/_complete
+    summary: Mark the task as done.
+    description: |
+      Completing a task that is already done is a conflict rather than a
+      no-op: two people ticking the same box should not both be told they
+      were the one who finished it.
+    request:
+      path_params:
+        - name: ID
+          type: UUID
+          description: The task to complete.
+      body:
+        - name: Note
+          type: String
+          optional: true
+          description: What was done, appended to the task's notes.
+    responses:
+      - status: 200
+        body_object: Todo
+        description: The completed task.
+      - status: 409
+        body_object: Error
+        description: The task was already done.
+

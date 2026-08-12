@@ -1,0 +1,79 @@
+# yaml-language-server: $schema=.rig/rig.schema.json
+version: 1
+
+project:
+  name: "fantasyfootball"
+  module: "github.com/simonjanss/rig/examples/fantasyfootball"
+
+api:
+  version: v1
+  base_path: /api/v1
+  # This example is about relations and filtering, not about who may read what,
+  # and it has no accounts to grant anything to. The default is `derived`.
+  permissions: none
+
+# A throwaway Postgres, created on demand. The port is explicit so this example
+# can run alongside the todo one without fighting over a port.
+database:
+  image: postgres:17-alpine
+  port: 55441
+
+# Every table gets a configuration file. `rig sync` creates and updates them.
+layout:
+  table_dir: services/{table}
+  config_file: "{table_dir}/{table}.yaml"
+
+# Convention rules. Each is off, warn, or error.
+validate:
+  unmentioned_column: warn
+  missing_comment: error
+  fk_needs_index: error
+  tenant_id_leading_index: error
+  boolean_prefix: warn
+
+generators:
+  # The entity, its enums, its query types, and its inputs. Both of the
+  # layers below import this one, so there is one definition of a row
+  # rather than a copy on each side and a conversion between them.
+  - name: model-go
+    out_dir: internal/model
+    options:
+      package: model
+
+  # The repository interface and its pgx implementation.
+  - name: persist-go
+    out_dir: internal/store
+    options:
+      package: store
+      model_import: github.com/simonjanss/rig/examples/fantasyfootball/internal/model
+
+  # Wire types, the interface your service layer implements, and a
+  # working default implementation of every operation.
+  - name: service-go
+    out_dir: internal/api
+    options:
+      package: api
+      model_import: github.com/simonjanss/rig/examples/fantasyfootball/internal/model
+      store_import: github.com/simonjanss/rig/examples/fantasyfootball/internal/store
+      api_import: github.com/simonjanss/rig/examples/fantasyfootball/internal/api
+      # Where your service layer goes. Written once, then yours.
+      stub_dir: services/{table}
+
+  # Routing and handlers.
+  - name: server-go
+    out_dir: internal/api
+    options:
+      package: api
+      model_import: github.com/simonjanss/rig/examples/fantasyfootball/internal/model
+
+  # Live-sync shape endpoints. It writes nothing until a table asks
+  # for one with `electric: {enabled: true}`, so leaving it here costs
+  # nothing and turning it on is one line in a table's configuration.
+  - name: electric
+    out_dir: internal/electric
+    options:
+      package: electric
+      electric_url: http://localhost:3000
+      shape_import: github.com/simonjanss/rig/examples/fantasyfootball/internal/electric
+      # Where your extra scoping goes. Written once, then yours.
+      stub_dir: services/{table}

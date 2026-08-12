@@ -318,3 +318,141 @@ func TestJoin(t *testing.T) {
 		}
 	}
 }
+
+// Anchors and aliases are ordinary YAML and turn up in hand-written config the
+// moment somebody has two columns with the same comment. The index has to see
+// through both, or a diagnostic on the reused block lands nowhere.
+func TestAnchorsAndAliasesAreSeenThrough(t *testing.T) {
+	t.Parallel()
+
+	ix := index(t, strings.Join([]string{
+		"entries:",
+		"  a: &shared",
+		"    note: hello",
+		"  b: *shared",
+		"",
+	}, "\n"))
+
+	// The anchored block is indexed at the key it was written under.
+	if a := ix.At("entries.a.note"); a.Line != 3 {
+		t.Errorf("entries.a.note anchored at line %d, want 3", a.Line)
+	}
+	// The alias has no keys of its own, so the nearest thing there is is the
+	// key that points at the shared block.
+	if a := ix.At("entries.b.note"); a.Line != 4 {
+		t.Errorf("entries.b.note anchored at line %d, want the alias at 4", a.Line)
+	}
+}
+
+// A file with one key parses as the pair itself rather than as a mapping
+// wrapping it, which is a different AST node and an easy one to miss.
+func TestAFileWithASingleKeyIsStillIndexed(t *testing.T) {
+	t.Parallel()
+
+	ix := index(t, "name: demo\n")
+
+	if !ix.Has("name") {
+		t.Error("the only key in the file should be in the index")
+	}
+	if a := ix.At("name"); a.Line != 1 || a.Column != 1 {
+		t.Errorf("name = %d:%d, want 1:1", a.Line, a.Column)
+	}
+}
+
+// A quoted key is the same key, and a key that looks like a number is still a
+// string in a map. Both have to produce the path a diagnostic will ask for.
+func TestKeysThatAreNotBarewordsStillGetTheirPath(t *testing.T) {
+	t.Parallel()
+
+	// An unquoted year is an integer node, not a string one, and a tagged
+	// value is a node wrapping the value rather than the value itself.
+	ix := index(t, "tags:\n  \"with space\": a\n  2026: b\n  plain: !!str c\n")
+
+	for _, path := range []string{"tags.with space", "tags.2026", "tags.plain"} {
+		if !ix.Has(path) {
+			t.Errorf("%q is not in the index", path)
+		}
+	}
+	if a := ix.At("tags.2026"); a.Line != 3 {
+		t.Errorf("tags.2026 anchored at line %d, want 3", a.Line)
+	}
+}
+
+// A leading document separator is what an editor's template writes, and a file
+// whose first document is empty must not read as an empty file.
+func TestALeadingDocumentSeparatorIsNotAnEmptyFile(t *testing.T) {
+	t.Parallel()
+
+	var got sample
+	_, ok, diags := newFormat().Decode("t.yaml", []byte("---\nname: demo\n"), &got)
+	if !ok {
+		t.Fatalf("rejected:\n%s", diags.String())
+	}
+	if got.Name != "demo" {
+		t.Errorf("name = %q", got.Name)
+	}
+}
+
+// A sequence item anchors on its first key rather than on the mapping's own
+// token, which is the colon — a strange place for a cursor to land.
+func TestASequenceItemAnchorsOnWhereAReaderWouldLook(t *testing.T) {
+	t.Parallel()
+
+	ix := index(t, "items:\n  - kind: a\n    size: 1\n  - kind: b\n")
+
+	if a := ix.At("items.0"); a.Line != 2 || a.Column != 5 {
+		t.Errorf("items.0 = %d:%d, want the first key at 2:5", a.Line, a.Column)
+	}
+	if a := ix.At("items.1"); a.Line != 4 {
+		t.Errorf("items.1 anchored at line %d, want 4", a.Line)
+	}
+	// And an index past the end falls back to the sequence's own key rather
+	// than to line 1.
+	if a := ix.At("items.9.kind"); a.Line != 1 {
+		t.Errorf("items.9.kind = %d, want the enclosing `items` at line 1", a.Line)
+	}
+}
+
+// The same key twice is a file where half of what somebody wrote is silently
+// discarded, and which half depends on the parser.
+func TestADuplicateKeyIsRefused(t *testing.T) {
+	t.Parallel()
+
+	var got sample
+	_, ok, diags := newFormat().Decode("t.yaml", []byte("name: one\nname: two\n"), &got)
+	if ok || !diags.HasErrors() {
+		t.Fatal("a duplicate key should not decode silently")
+	}
+}
+
+// The schema is generated once from the Go struct and used both to validate and
+// to feed an editor. A format whose struct cannot be reflected has to say so
+// through the same channel as everything else rather than panic.
+func TestSchemaCarriesItsOwnIdentity(t *testing.T) {
+	t.Parallel()
+
+	raw, err := newFormat().Schema()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var doc struct {
+		ID          string `json:"$id"`
+		Title       string `json:"title"`
+		Description string `json:"description"`
+	}
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		t.Fatal(err)
+	}
+	if doc.ID != "https://rig.dev/schema/test.v1.json" {
+		t.Errorf("$id = %q", doc.ID)
+	}
+	if doc.Title == "" || doc.Description == "" {
+		t.Errorf("the schema should document itself: %+v", doc)
+	}
+	// HTML escaping would turn every "&" in a description into "&", which
+	// is what a reader opening the file sees.
+	if strings.Contains(string(raw), `&`) {
+		t.Error("the schema should be written for a person to read")
+	}
+}

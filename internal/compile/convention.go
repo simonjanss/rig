@@ -25,6 +25,18 @@ const (
 	ColDeletedAt = "deleted_at"
 	ColDeletedBy = "deleted_by_account_id"
 
+	// The key columns say which credential a change came through, where the
+	// account columns say whose it was.
+	//
+	// They are worth having separately because an integration's account answers
+	// "who" with a service account that may be shared between several keys: the
+	// account tells you the import did it, and the key tells you which
+	// integration and which credential to revoke. A change made by a person
+	// signed in normally leaves them null.
+	ColCreatedByKey = "created_by_api_key_id"
+	ColUpdatedByKey = "updated_by_api_key_id"
+	ColDeletedByKey = "deleted_by_api_key_id"
+
 	// ColVersionType is one third of the snapshot triple.
 	ColVersionType = "version_type"
 )
@@ -51,6 +63,7 @@ func IsManagedColumn(table, name string) bool {
 		ColCreatedAt, ColCreatedBy,
 		ColUpdatedAt, ColUpdatedBy,
 		ColDeletedAt, ColDeletedBy,
+		ColCreatedByKey, ColUpdatedByKey, ColDeletedByKey,
 		ColVersionType:
 		return true
 	}
@@ -87,6 +100,23 @@ func isTimestampType(c *ir.Column) bool {
 	}
 }
 
+// isInstantType reports whether a column holds a moment rather than a reading of
+// a clock.
+//
+// Only timestamptz does. A bare timestamp is a wall-clock value with nothing to
+// anchor it: two of them cannot be ordered across a daylight-saving change, and
+// the same one means two different moments to two servers. That is a fine type
+// for a birthday or for opening hours, and the wrong one for anything that
+// happened.
+func isInstantType(c *ir.Column) bool {
+	switch strings.ToLower(c.SQLType) {
+	case "timestamptz", "timestamp with time zone":
+		return true
+	default:
+		return false
+	}
+}
+
 func isDateType(c *ir.Column) bool { return strings.ToLower(c.SQLType) == "date" }
 
 func isUUIDType(c *ir.Column) bool { return strings.ToLower(c.SQLType) == "uuid" }
@@ -110,6 +140,10 @@ type lifecycle struct {
 	UpdatedBy *ir.Column
 	DeletedAt *ir.Column
 	DeletedBy *ir.Column
+
+	CreatedByKey *ir.Column
+	UpdatedByKey *ir.Column
+	DeletedByKey *ir.Column
 
 	VersionType *ir.Column
 	SnapshotID  *ir.Column
@@ -139,34 +173,50 @@ func (l lifecycle) Snapshotable() bool { return l.SnapshotColumnsFound() == 3 }
 func (l lifecycle) HasAudit() bool {
 	return l.CreatedAt != nil || l.CreatedBy != nil ||
 		l.UpdatedAt != nil || l.UpdatedBy != nil ||
-		l.DeletedAt != nil || l.DeletedBy != nil
+		l.DeletedAt != nil || l.DeletedBy != nil ||
+		l.CreatedByKey != nil || l.UpdatedByKey != nil || l.DeletedByKey != nil
 }
 
 // scanLifecycle finds the convention columns on a table.
 func scanLifecycle(t *ir.Table) lifecycle {
 	return lifecycle{
-		Tenant:      t.Column(ColTenantID),
-		CreatedAt:   t.Column(ColCreatedAt),
-		CreatedBy:   t.Column(ColCreatedBy),
-		UpdatedAt:   t.Column(ColUpdatedAt),
-		UpdatedBy:   t.Column(ColUpdatedBy),
-		DeletedAt:   t.Column(ColDeletedAt),
-		DeletedBy:   t.Column(ColDeletedBy),
+		Tenant:    t.Column(ColTenantID),
+		CreatedAt: t.Column(ColCreatedAt),
+		CreatedBy: t.Column(ColCreatedBy),
+		UpdatedAt: t.Column(ColUpdatedAt),
+		UpdatedBy: t.Column(ColUpdatedBy),
+		DeletedAt: t.Column(ColDeletedAt),
+		DeletedBy: t.Column(ColDeletedBy),
+
+		CreatedByKey: t.Column(ColCreatedByKey),
+		UpdatedByKey: t.Column(ColUpdatedByKey),
+		DeletedByKey: t.Column(ColDeletedByKey),
+
 		VersionType: t.Column(ColVersionType),
 		SnapshotID:  t.Column(SnapshotFromIDColumn(t.Name)),
 		SnapshotAt:  t.Column(SnapshotFromAtColumn(t.Name)),
 	}
 }
 
-// auditActorColumns are the audit columns that reference an account.
+// auditActorColumns are the audit columns that reference an account or a key.
+//
+// Both are actors in the sense that matters here: they are stamped from the
+// claims rather than written by a caller, they are nullable because rig itself
+// acts without either during a migration, and neither is a relation worth
+// generating an endpoint around.
 func auditActorColumns() []string {
-	return []string{ColCreatedBy, ColUpdatedBy, ColDeletedBy}
+	return []string{
+		ColCreatedBy, ColUpdatedBy, ColDeletedBy,
+		ColCreatedByKey, ColUpdatedByKey, ColDeletedByKey,
+	}
 }
 
-// isAuditActorColumn reports whether a column names who performed an action.
+// isAuditActorColumn reports whether a column names who or what performed an
+// action.
 func isAuditActorColumn(name string) bool {
 	switch name {
-	case ColCreatedBy, ColUpdatedBy, ColDeletedBy:
+	case ColCreatedBy, ColUpdatedBy, ColDeletedBy,
+		ColCreatedByKey, ColUpdatedByKey, ColDeletedByKey:
 		return true
 	default:
 		return false

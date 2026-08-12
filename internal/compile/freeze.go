@@ -7,6 +7,7 @@ import (
 
 	"github.com/simonjanss/rig/internal/diag"
 	"github.com/simonjanss/rig/internal/naming"
+	"github.com/simonjanss/rig/internal/project"
 	"github.com/simonjanss/rig/pkg/ir"
 )
 
@@ -14,6 +15,10 @@ import (
 type Meta struct {
 	// Tool identifies the version of rig that generated it.
 	Tool string
+	// Permissions is whether authorization checks are derived. The zero value
+	// derives them, so a caller that forgets to pass it gets the protected shape
+	// rather than the open one.
+	Permissions project.PermissionMode
 }
 
 // Freeze produces the final document.
@@ -42,6 +47,7 @@ func Freeze(api ir.API, schema ir.Schema, meta Meta) (*ir.Document, diag.List) {
 
 	diags.Append(resolveTypes(doc))
 	diags.Append(computeRoutes(doc))
+	diags.Append(computePermissions(doc, meta.Permissions))
 	diags.Append(verifyColumnRefs(doc))
 
 	doc.Valid = !diags.HasErrors()

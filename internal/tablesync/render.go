@@ -2,6 +2,7 @@ package tablesync
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/simonjanss/rig/internal/compile"
@@ -101,6 +102,13 @@ func renderEnum(e *ir.PgEnum, n *naming.Namer, indent string) string {
 // quote wraps a scalar when YAML would otherwise misread it. A comment starting
 // with "TODO:" is the common case: the colon turns it into a mapping.
 func quote(s string) string {
+	// A newline cannot survive a plain or single-quoted scalar — YAML folds it
+	// into a space — and a Postgres comment is free text that regularly has
+	// one. Double quotes are the only form that can spell it.
+	if strings.ContainsAny(s, "\n\r\t") {
+		return strconv.Quote(s)
+	}
+
 	needsQuote := strings.ContainsAny(s, ":#{}[]&*!|>'\"%@`") ||
 		strings.HasPrefix(s, " ") ||
 		strings.HasSuffix(s, " ") ||

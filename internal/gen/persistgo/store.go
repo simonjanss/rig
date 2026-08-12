@@ -6,6 +6,151 @@ import (
 	"github.com/simonjanss/rig/pkg/ir"
 )
 
+// filterScopeType emits what a condition needs besides the filter itself.
+//
+// A filter is a tree, and rendering one is a walk: at each level the columns
+// belong to a different table, the caller is the same, and the depth is one
+// greater. Carrying that as a value is what lets a relation hand a changed copy
+// down without every builder taking four parameters.
+func (e *emitter) filterScopeType(b *gobuf.Buf) {
+	var (
+		queryPkg = b.Import(runtimeModule + "/query")
+		errPkg   = b.Import(runtimeModule + "/rigerr")
+		tenPkg   = b.Import(runtimeModule + "/tenancy")
+		strPkg   = b.Import("strconv")
+	)
+
+	b.Comment("MaxFilterDepth bounds how far a filter may reach across " +
+		"relations.\n\n" +
+		"The filter types are mutually recursive, so a client can nest one as " +
+		"deep as it likes, and each level is another correlated subquery. A bound " +
+		"is the difference between an expensive query somebody asked for and an " +
+		"arbitrarily expensive one they were allowed to.")
+	b.L("const MaxFilterDepth = 3")
+	b.NL()
+
+	b.Comment("filterScope is what rendering one level of a filter needs.")
+	b.L("type filterScope struct {")
+	b.L("claims %s.Claims", tenPkg)
+	b.Comment("as qualifies this level's columns. Inside a subquery two tables " +
+		"are in scope, and an unqualified name there resolves to whichever one " +
+		"happens to have it — a silent correlation to the wrong row rather than " +
+		"an error.")
+	b.L("as string")
+	b.Comment("link qualifies the join table of a many-to-many at this level.")
+	b.L("link  string")
+	b.L("depth int")
+	b.L("}")
+	b.NL()
+
+	b.Comment("newFilterScope starts at the table being read.")
+	b.L("func newFilterScope(claims %s.Claims, table string) filterScope {", tenPkg)
+	b.L("return filterScope{claims: claims, as: table}")
+	b.L("}")
+	b.NL()
+
+	b.Comment("ok refuses a filter nested deeper than this will render.")
+	b.L("func (s filterScope) ok() error {")
+	b.L("if s.depth > MaxFilterDepth {")
+	b.L("return %s.Invalid(\"a filter may reach across at most %%s relations\", %s.Itoa(MaxFilterDepth))",
+		errPkg, strPkg)
+	b.L("}")
+	b.L("return nil")
+	b.L("}")
+	b.NL()
+
+	b.Comment("at qualifies a condition with this level's alias.")
+	b.L("func (s filterScope) at(c %s.Cond) %s.Cond {", queryPkg, queryPkg)
+	b.L("c.Table = s.as")
+	b.L("return c")
+	b.L("}")
+	b.NL()
+
+	b.Comment("into opens the next level down, with aliases of its own so that a " +
+		"self-reference at two depths does not shadow itself.")
+	b.L("func (s filterScope) into() filterScope {")
+	b.L("d := s.depth + 1")
+	b.L("return filterScope{claims: s.claims, as: \"r\" + %s.Itoa(d), link: \"l\" + %s.Itoa(d), depth: d}",
+		strPkg, strPkg)
+	b.L("}")
+	b.NL()
+
+	b.Comment("belongsTo opens a subquery on the row this one points at.")
+	b.L("func (s filterScope) belongsTo(farTable, farColumn, localColumn string) (filterScope, string, string) {")
+	b.L("in := s.into()")
+	b.L("return in, farTable + \" \" + in.as, in.as + \".\" + farColumn + \" = \" + s.as + \".\" + localColumn")
+	b.L("}")
+	b.NL()
+
+	b.Comment("hasMany opens a subquery on the rows that point at this one.")
+	b.L("func (s filterScope) hasMany(farTable, farColumn, pk string) (filterScope, string, string) {")
+	b.L("in := s.into()")
+	b.L("return in, farTable + \" \" + in.as, in.as + \".\" + farColumn + \" = \" + s.as + \".\" + pk")
+	b.L("}")
+	b.NL()
+
+	b.Comment("throughLink opens a subquery on the far side of a join table.\n\n" +
+		"The condition is on the far resource and the link is only how you get " +
+		"there, which is why this is a chain rather than a table name.")
+	b.L("func (s filterScope) throughLink(linkTable, nearColumn, farTable, farColumn, pk string) (filterScope, string, string) {")
+	b.L("in := s.into()")
+	b.L("from := linkTable + \" \" + in.link +")
+	b.L("\" JOIN \" + farTable + \" \" + in.as +")
+	b.L("\" ON \" + in.as + \".id = \" + in.link + \".\" + farColumn")
+	b.L("return in, from, in.link + \".\" + nearColumn + \" = \" + s.as + \".\" + pk")
+	b.L("}")
+	b.NL()
+
+	b.Comment("tenant scopes a subquery to the caller's tenant.\n\n" +
+		"This is the predicate the whole design turns on. Without it a condition " +
+		"on a related table is answered from every tenant's rows: the caller " +
+		"cannot read the far row, but learns it exists from which of their own " +
+		"rows come back.")
+	b.L("func (s filterScope) tenant(column string) %s.Cond {", queryPkg)
+	b.L("return s.at(%s.Eq(column, s.claims.TenantID))", queryPkg)
+	b.L("}")
+	b.NL()
+
+	b.Comment("live excludes rows somebody retired, so a deleted row is not a way " +
+		"to find its neighbours.")
+	b.L("func (s filterScope) live(column string) %s.Cond {", queryPkg)
+	b.L("return s.at(%s.IsNull(column))", queryPkg)
+	b.L("}")
+	b.NL()
+
+	b.Comment("original excludes the history, which is never what a condition on " +
+		"a relation means.")
+	b.L("func (s filterScope) original(column string, value any) %s.Cond {", queryPkg)
+	b.L("return s.at(%s.Eq(column, value))", queryPkg)
+	b.L("}")
+	b.NL()
+
+	b.Comment("aliased is this scope under a different name, for the far side of a " +
+		"join.\n\n" +
+		"The alias space is separate from the one a subquery uses — o1 here, r1 " +
+		"there — because a join lives in the same statement as the conditions and " +
+		"a subquery that reused the name would resolve its own columns against it.")
+	b.L("func (s filterScope) aliased(alias string) filterScope {")
+	b.L("return filterScope{claims: s.claims, as: alias, depth: s.depth}")
+	b.L("}")
+	b.NL()
+
+	b.Comment("orderJoin reaches a related row so that its columns can be ordered " +
+		"by, and returns the scope its predicates belong to.\n\n" +
+		"LEFT rather than INNER, and that is the whole reason this is a join at " +
+		"all: it is here to read a value, not to decide anything. An inner join " +
+		"would drop every row whose foreign key is null, so asking for an order " +
+		"would quietly shorten the list.")
+	b.L("func (s filterScope) orderJoin(farTable, alias, farColumn, localColumn string) (filterScope, %s.Join) {",
+		queryPkg)
+	b.L("return s.aliased(alias), %s.Join{", queryPkg)
+	b.L("Table: farTable + \" \" + alias,")
+	b.L("On:    alias + \".\" + farColumn + \" = \" + s.as + \".\" + localColumn,")
+	b.L("}")
+	b.L("}")
+	b.NL()
+}
+
 // storeFile emits the object that holds the connection and hands out
 // repositories, plus the helpers every generated method shares.
 func (e *emitter) storeFile() (gen.Artifact, error) {
@@ -22,10 +167,9 @@ func (e *emitter) storeFile() (gen.Artifact, error) {
 
 func (e *emitter) storeType(b *gobuf.Buf) {
 	var (
-		poolPkg  = b.Import("github.com/jackc/pgx/v5/pgxpool")
-		dbxPkg   = b.Import(runtimeModule + "/dbx")
-		auditPkg = b.Import(runtimeModule + "/audit")
-		ctxPkg   = b.Import("context")
+		poolPkg = b.Import("github.com/jackc/pgx/v5/pgxpool")
+		dbxPkg  = b.Import(runtimeModule + "/dbx")
+		ctxPkg  = b.Import("context")
 	)
 
 	b.Comment("Pagination limits. A read without a limit is a production " +
@@ -36,17 +180,18 @@ func (e *emitter) storeType(b *gobuf.Buf) {
 	b.L(")")
 	b.NL()
 
-	b.Comment("Config is what a Store needs beyond a connection.")
-	b.L("type Config struct {")
-	b.L("// Audit receives the change log. Leave it nil to record nothing.")
-	b.L("Audit %s.Log", auditPkg)
-	b.L("}")
+	e.filterScopeType(b)
+
+	b.Comment("Config is what a Store needs beyond a connection.\n\n" +
+		"It is empty today. It is still taken, and taken by value, so that " +
+		"giving a store something to hold is a new field rather than a " +
+		"signature change every caller has to follow.")
+	b.L("type Config struct{}")
 	b.NL()
 
 	b.Comment("Store holds the connection pool and hands out repositories.")
 	b.L("type Store struct {")
-	b.L("pool  *%s.Pool", poolPkg)
-	b.L("audit %s.Log", auditPkg)
+	b.L("pool *%s.Pool", poolPkg)
 	b.NL()
 	for _, res := range e.resources() {
 		b.L("%s %sRepository", res.Plural, res.Name)
@@ -55,11 +200,10 @@ func (e *emitter) storeType(b *gobuf.Buf) {
 	b.NL()
 
 	b.Comment("New builds a store over a connection pool.")
-	b.L("func New(pool *%s.Pool, cfg Config) *Store {", poolPkg)
-	b.L("s := &Store{pool: pool, audit: cfg.Audit}")
-	b.L("if s.audit == nil { s.audit = %s.Noop{} }", auditPkg)
+	b.L("func New(pool *%s.Pool, _ Config) *Store {", poolPkg)
+	b.L("s := &Store{pool: pool}")
 	for _, res := range e.resources() {
-		b.L("s.%s = &%sRepo{db: s}", res.Plural, unexported(res.Name))
+		b.L("s.%s = &%s{db: s}", res.Plural, repoTypeName(res))
 	}
 	b.L("return s")
 	b.L("}")
@@ -102,24 +246,14 @@ func (e *emitter) resources() []*ir.Resource {
 	return out
 }
 
-func unexported(name string) string {
-	if name == "" {
-		return name
-	}
-	return string(name[0]|0x20) + name[1:]
-}
-
 // helpers emit the small shared functions the repositories call, so the same
 // four lines are not written into every method.
 func (e *emitter) helpers(b *gobuf.Buf) {
 	var (
-		strPkg     = b.Import("strings")
-		strcPkg    = b.Import("strconv")
-		fmtPkg     = b.Import("fmt")
-		reflectPkg = b.Import("reflect")
-		errPkg     = b.Import(runtimeModule + "/rigerr")
-		dbxPkg     = b.Import(runtimeModule + "/dbx")
-		auditPkg   = b.Import(runtimeModule + "/audit")
+		strPkg  = b.Import("strings")
+		strcPkg = b.Import("strconv")
+		errPkg  = b.Import(runtimeModule + "/rigerr")
+		dbxPkg  = b.Import(runtimeModule + "/dbx")
 	)
 
 	b.Comment("joinColumns renders a column list. The names come from generated " +
@@ -161,44 +295,6 @@ func (e *emitter) helpers(b *gobuf.Buf) {
 	b.L("default:")
 	b.L("return %s.Internal(err, \"write %%s\", table)", errPkg)
 	b.L("}")
-	b.L("}")
-	b.NL()
-
-	b.Comment("auditChange is one column's before and after, collected while an " +
-		"update builds its statement.")
-	b.L("type auditChange struct {")
-	b.L("Column string")
-	b.L("Type   string")
-	b.L("Old    *string")
-	b.L("New    *string")
-	b.L("}")
-	b.NL()
-
-	b.L("func auditValues(changes ...auditChange) []%s.Value {", auditPkg)
-	b.L("out := make([]%s.Value, 0, len(changes))", auditPkg)
-	b.L("for _, c := range changes {")
-	b.L("out = append(out, %s.Value{Column: c.Column, Type: c.Type, Old: c.Old, New: c.New})", auditPkg)
-	b.L("}")
-	b.L("return out")
-	b.L("}")
-	b.NL()
-
-	b.Comment("render turns a value into the string the audit log stores.\n\n" +
-		"Audit rows outlive the Go types that produced them, so a value nobody " +
-		"can read back is not a record of anything.")
-	b.L("func render(v any) *string {")
-	b.L("if v == nil { return nil }")
-	b.Comment("A nil *string arrives as a non-nil interface holding a nil pointer, " +
-		"so a plain nil check misses it and the audit row would record the text " +
-		"\"<nil>\" where it means no value at all.")
-	b.L("rv := %s.ValueOf(v)", reflectPkg)
-	b.L("switch rv.Kind() {")
-	b.L("case %s.Pointer, %s.Slice, %s.Map:", reflectPkg, reflectPkg, reflectPkg)
-	b.L("if rv.IsNil() { return nil }")
-	b.L("if rv.Kind() == %s.Pointer { v = rv.Elem().Interface() }", reflectPkg)
-	b.L("}")
-	b.L("s := %s.Sprintf(\"%%v\", v)", fmtPkg)
-	b.L("return &s")
 	b.L("}")
 	b.NL()
 }

@@ -1,6 +1,9 @@
 package ir
 
-import "slices"
+import (
+	"slices"
+	"strings"
+)
 
 // API is the projected layer: what clients see.
 type API struct {
@@ -13,6 +16,33 @@ type API struct {
 	Enums     []Enum     `json:"enums"`
 	Objects   []Object   `json:"objects"`
 	Resources []Resource `json:"resources"`
+
+	// Permissions is every permission this API's endpoints require, computed once
+	// at Freeze from the endpoints themselves.
+	//
+	// Derived once rather than by each consumer, for the same reason
+	// [Endpoint.Pattern] is: the handler's check, the catalogue written to the
+	// database, an administration screen and the grant an owner receives all have
+	// to mean the same thing, and three places deriving it is three places to
+	// drift.
+	Permissions []Permission `json:"permissions"`
+}
+
+// Permission is one thing a caller may be allowed to do.
+//
+// The key is what code checks and what a role grants. The name and description
+// are for the interface where somebody hands it out — they come from the
+// resource, so nobody writes them twice.
+type Permission struct {
+	Key         string `json:"key"`
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+
+	// Resource is the resource it was derived from, so a rename can be reported
+	// against something more useful than a string.
+	Resource string `json:"resource,omitempty"`
+	// Action is read, write, delete, or the name of a custom endpoint.
+	Action string `json:"action,omitempty"`
 }
 
 // Origin records why an object exists, so a generator can treat hand-declared
@@ -64,6 +94,17 @@ const (
 	ModifierArray    = "Array"
 )
 
+// ScopeParam is the query-string key that widens a read past the caller's own
+// rows.
+//
+// Here rather than in the compiler because both ends need it and neither should
+// have to know the other exists: the compiler reserves the name and projects the
+// parameter, and a generator has to recognise it to emit the check that
+// authorizes it. It matches
+// [github.com/simonjanss/rig/runtime/tenancy.ScopeParam], which is what a client
+// reads.
+const ScopeParam = "scope"
+
 // Operations a resource may support.
 const (
 	OpCreate = "Create"
@@ -72,6 +113,29 @@ const (
 	OpSearch = "Search"
 	OpUpdate = "Update"
 	OpDelete = "Delete"
+)
+
+// Operations a soft-deletable resource gets on top of the CRUD set.
+//
+// A deletion that stamps the row rather than removing it has somewhere the row
+// went and a way back from it, and neither is expressible as CRUD. Each follows
+// the operation it is a variety of: listing the trash is a listing, and
+// bringing a row back is a write.
+const (
+	OpListDeleted = "ListDeleted"
+	OpRestore     = "Restore"
+)
+
+// Operations a snapshotable resource gets on top of the CRUD set.
+//
+// They are not listed in a table's `operations:` — that is the CRUD set, and
+// these follow from the schema rather than from a choice. A table that keeps
+// its previous versions can be asked for them, and one whose rows can be
+// updated can be put back to one. Both are dropped along with the operation
+// they depend on: no Get, no history; no Update, nothing to revert with.
+const (
+	OpVersions = "Versions"
+	OpRevert   = "Revert"
 )
 
 // Operations a field may participate in. Read is implied by any of Get, List,
@@ -116,7 +180,21 @@ type Field struct {
 	// Name is the Go and TypeScript identifier, for example "ManagerEmailAddress".
 	Name string `json:"name"`
 	// Wire is the JSON key, for example "managerEmailAddress".
-	Wire        string `json:"wire"`
+	Wire string `json:"wire"`
+
+	// Description is the human-readable text for this field, and the only copy
+	// of it.
+	//
+	// Every generator that can carry a description must emit this one: a Go doc
+	// comment, an OpenAPI `description`, a TypeScript doc comment. It is written
+	// once — by the compiler, from the column comment or from the shape of the
+	// thing — precisely so that a rule explained on a filter field is the same
+	// sentence in the struct, in the schema, and in the client. A generator that
+	// paraphrases it, or leaves it out, is how three descriptions of one field
+	// start disagreeing.
+	//
+	// internal/gen/gentest.DescriptionsSurvive is the guard, and every generator
+	// with a place to put a description calls it.
 	Description string `json:"description,omitempty"`
 
 	// Type is a primitive name or the name of an enum, object, or resource.
@@ -150,6 +228,22 @@ func (f Field) IsNullable() bool { return slices.Contains(f.Modifiers, ModifierN
 
 // IsArray reports whether the field carries the Array modifier.
 func (f Field) IsArray() bool { return slices.Contains(f.Modifiers, ModifierArray) }
+
+// IsTextual reports whether the field is text a pattern can be matched against.
+//
+// Not every String field is. An inet or cidr column is a string on the wire and
+// is not text in Postgres, so LIKE against one is a type error rather than a
+// filter — and a list of addresses is not a pattern either.
+//
+// It lives here, on the IR, because the API layer and the persistence layer
+// both have to answer it the same way. The last time they each decided for
+// themselves, one generated a filter field the other had nowhere to put.
+func (f Field) IsTextual() bool {
+	return f.Type == TypeString && !f.IsArray() && baseGoTypeName(f.GoType) == "string"
+}
+
+// baseGoTypeName strips the pointer and slice markers from a Go type.
+func baseGoTypeName(goType string) string { return strings.TrimLeft(goType, "*[]") }
 
 // ScanStrategy tells the persistence generator how to move a value between Go
 // and pgx. It is derived from the SQL type once, in one place, rather than
@@ -194,9 +288,25 @@ type Resource struct {
 	PathSegment string `json:"path_segment"` // lessons
 	Description string `json:"description,omitempty"`
 
-	Operations []string        `json:"operations"`
-	Fields     []ResourceField `json:"fields"`
-	Endpoints  []Endpoint      `json:"endpoints"`
+	// Unexposed keeps a table out of the API while keeping its model and
+	// repository.
+	//
+	// The authentication foundation is why this exists. Sessions and API keys
+	// need generated persistence and must not have generated CRUD endpoints:
+	// nothing good comes of a REST interface for the token table. Saying so on
+	// the resource rather than deleting it is what lets the data layer stay
+	// generated while the API layer stays silent.
+	//
+	// It is negative so that the zero value is the ordinary case.
+	Unexposed bool `json:"unexposed,omitempty"`
+
+	Operations []string `json:"operations"`
+	// Public names the operations that answer without a credential, generated
+	// and custom alike. An endpoint carries the resolved flag; this is the
+	// declaration the endpoints are built from.
+	Public    []string        `json:"public,omitempty"`
+	Fields    []ResourceField `json:"fields"`
+	Endpoints []Endpoint      `json:"endpoints"`
 
 	// Storage is nil for a virtual resource with no table behind it.
 	Storage *ResourceStorage `json:"storage,omitempty"`
@@ -206,6 +316,9 @@ type Resource struct {
 
 // Supports reports whether the resource has the given operation.
 func (r *Resource) Supports(op string) bool { return slices.Contains(r.Operations, op) }
+
+// IsPublic reports whether an operation answers without a credential.
+func (r *Resource) IsPublic(op string) bool { return slices.Contains(r.Public, op) }
 
 // Endpoint returns the named endpoint, or nil.
 func (r *Resource) Endpoint(name string) *Endpoint {
@@ -247,6 +360,14 @@ type AuditColumns struct {
 	UpdatedBy *ColumnRef `json:"updated_by,omitempty"`
 	DeletedAt *ColumnRef `json:"deleted_at,omitempty"`
 	DeletedBy *ColumnRef `json:"deleted_by,omitempty"`
+
+	// The key columns record which API key a change came through, where the
+	// account columns record whose account it was. An integration's service
+	// account may be shared between several keys, so the pair together say both
+	// "the nightly import did this" and "through this credential".
+	CreatedByAPIKey *ColumnRef `json:"created_by_api_key,omitempty"`
+	UpdatedByAPIKey *ColumnRef `json:"updated_by_api_key,omitempty"`
+	DeletedByAPIKey *ColumnRef `json:"deleted_by_api_key,omitempty"`
 }
 
 // SoftDelete marks a table whose rows are retired by stamping a timestamp
@@ -254,6 +375,9 @@ type AuditColumns struct {
 type SoftDelete struct {
 	Column *ColumnRef `json:"column"`
 	Actor  *ColumnRef `json:"actor,omitempty"`
+	// ActorKey is the API key the deletion came through, when the table has a
+	// column for it. It is stamped beside Actor rather than instead of it.
+	ActorKey *ColumnRef `json:"actor_key,omitempty"`
 	// RestoreWindowDays bounds how long a deleted row stays restorable.
 	RestoreWindowDays int `json:"restore_window_days"`
 }
@@ -302,12 +426,18 @@ type ResourceStorage struct {
 	// Tenant is the column every generated query is scoped by.
 	Tenant *ColumnRef `json:"tenant,omitempty"`
 
+	// Owner is the column a read is narrowed by when the table asked for it —
+	// the account that created the row.
+	//
+	// Set only by `access: { scope: own }`, because it changes what a request
+	// answers with and that is not something to infer from a column being
+	// present. Plenty of tables record who created a row without meaning that
+	// nobody else may read it.
+	Owner *ColumnRef `json:"owner,omitempty"`
+
 	Audit      *AuditColumns `json:"audit,omitempty"`
 	SoftDelete *SoftDelete   `json:"soft_delete,omitempty"`
 	Snapshot   *Snapshot     `json:"snapshot,omitempty"`
-
-	// AuditLog enables per-column change logging for this table.
-	AuditLog bool `json:"audit_log"`
 
 	DefaultOrder []OrderTerm `json:"default_order,omitempty"`
 	Relations    []Relation  `json:"relations,omitempty"`
@@ -315,6 +445,10 @@ type ResourceStorage struct {
 	Sortable   []string `json:"sortable,omitempty"`
 	Filterable []string `json:"filterable,omitempty"`
 }
+
+// IsOwnerScoped reports whether a read of this resource defaults to the rows the
+// caller created.
+func (s *ResourceStorage) IsOwnerScoped() bool { return s != nil && s.Owner != nil }
 
 // IsSoftDeletable reports whether rows of this resource are retired rather than
 // removed.
@@ -385,9 +519,26 @@ type Endpoint struct {
 	AliasPatterns []string `json:"alias_patterns,omitempty"`
 
 	OperationID string `json:"operation_id"`
+	// Public answers without a credential.
+	//
+	// It means the endpoint does not require the claims lookup to succeed, not
+	// that the lookup is skipped: an application that resolves a tenant from
+	// the host rather than from a token still gets one, and a caller who does
+	// present a credential is still identified by it. What changes is that a
+	// caller who presents nothing is served instead of refused.
+	Public bool `json:"public,omitempty"`
+
 	// Permission is the RBAC key required to call this endpoint. Empty means a
 	// valid session is enough.
 	Permission string `json:"permission,omitempty"`
+
+	// WidePermission is the key required to pass ?scope=all, on a read of an
+	// owner-scoped resource. Empty everywhere else.
+	//
+	// Separate from Permission because they answer different questions and a
+	// caller can hold one without the other. Reading your own notes and reading
+	// everybody's are two grants, which is the whole point of the parameter.
+	WidePermission string `json:"wide_permission,omitempty"`
 
 	Request   EndpointRequest    `json:"request"`
 	Responses []EndpointResponse `json:"responses"`

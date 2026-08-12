@@ -1,0 +1,32 @@
+# yaml-language-server: $schema=../../.rig/table.schema.json
+table: player
+comment: Somebody a squad can pick.
+
+# Days a soft-deleted row stays restorable.
+restore_window_days: 30
+
+columns:
+  full_name:
+    comment: The name on the back of the shirt.
+  position:
+    comment: Where on the pitch the player lines up.
+  shirt_number:
+    comment: The squad number, or null if unassigned.
+
+enums:
+  player_position:
+    name: PlayerPosition
+    description: Where on the pitch a player lines up.
+    values:
+      goalkeeper:
+        name: Goalkeeper
+        description: Keeps goal; the only one allowed to handle the ball.
+      defender:
+        name: Defender
+        description: Plays at the back.
+      midfielder:
+        name: Midfielder
+        description: Plays between the lines.
+      forward:
+        name: Forward
+        description: Plays up front and is expected to score.

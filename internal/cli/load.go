@@ -4,11 +4,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 
 	"github.com/simonjanss/rig/internal/compile"
 	"github.com/simonjanss/rig/internal/diag"
 	"github.com/simonjanss/rig/internal/project"
+	"github.com/simonjanss/rig/internal/scaffold"
 	"github.com/simonjanss/rig/internal/tableconf"
 	"github.com/simonjanss/rig/pkg/ir"
 )
@@ -47,13 +49,55 @@ func compileFrom(p *project.Project, schema ir.Schema) (*ir.Document, diag.List)
 	set, d := loadTables(p)
 	diags.Append(d)
 
+	ignore, err := foundationTables(p)
+	if err != nil {
+		diags.Add(diag.CodeConfigFile, diag.Anchor{}, "%v", err)
+	}
+
 	doc, d := compile.Compile(schema, set, compile.Options{
-		Project: p,
-		Tool:    "rig " + Version,
+		Project:      p,
+		Tool:         "rig " + Version,
+		IgnoreTables: ignore,
 	})
 	diags.Append(d)
 
 	return doc, diags
+}
+
+// foundationTables are the tables rig generates nothing for.
+//
+// They are the authentication foundation's, and they are recognised by the
+// project's own migration files rather than by name alone: `account` is the
+// auth module's table in a project that scaffolded it, and an ordinary table in
+// a project that wrote its own. Guessing from the name would silently stop
+// generating a repository somebody depends on.
+func foundationTables(p *project.Project) ([]string, error) {
+	if p.Config.Auth.Own {
+		// The project has taken the schema over, so there is nothing to leave
+		// out and every rule applies to all of it.
+		return nil, nil
+	}
+
+	names, err := migrationNames(p.MigrationsDir())
+	if err != nil {
+		if os.IsNotExist(err) {
+			// No migrations directory means no foundation, which is the state of
+			// a project between `rig init` and its first migration.
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	var out []string
+	for _, table := range scaffold.Managed(names) {
+		// An exposed table is projected like any other: the point of the list is
+		// to get a model and a repository back.
+		if slices.Contains(p.Config.Auth.Expose, table) {
+			continue
+		}
+		out = append(out, table)
+	}
+	return out, nil
 }
 
 // readSchemaFile reads a schema dump.

@@ -2,6 +2,7 @@ package tableconf_test
 
 import (
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -31,10 +32,6 @@ func TestLoadValidFile(t *testing.T) {
 	if f.RestoreWindowDays == nil || *f.RestoreWindowDays != 30 {
 		t.Errorf("restore_window_days = %v", f.RestoreWindowDays)
 	}
-	if !f.AuditEnabled() {
-		t.Error("audit should be enabled")
-	}
-
 	fixture, ok := f.Columns["fixture_id"]
 	if !ok {
 		t.Fatal("fixture_id column missing")
@@ -83,23 +80,6 @@ func TestLoadValidFile(t *testing.T) {
 	}
 	if len(e.Responses) != 2 || e.Responses[1].Status != 409 {
 		t.Errorf("endpoint responses decoded wrong: %+v", e.Responses)
-	}
-}
-
-func TestAuditDefaultsOn(t *testing.T) {
-	t.Parallel()
-
-	loaded, diags := tableconf.Parse("t.yaml", []byte("table: t\n"))
-	if diags.HasErrors() {
-		t.Fatalf("unexpected errors:\n%s", diags.String())
-	}
-	if !loaded.File.AuditEnabled() {
-		t.Error("audit should default to on when unset")
-	}
-
-	off, _ := tableconf.Parse("t.yaml", []byte("table: t\naudit: false\n"))
-	if off.File.AuditEnabled() {
-		t.Error("audit: false should turn the log off")
 	}
 }
 
@@ -394,5 +374,168 @@ func TestDiagnosticsCarryTheirHint(t *testing.T) {
 	}
 	if all[0].Hint != diag.CodeConfigInvalid.Hint || all[0].Hint == "" {
 		t.Errorf("hint = %q, want the code's hint", all[0].Hint)
+	}
+}
+
+// A project's configuration is a directory of files, and each of these is a
+// mistake somebody makes on the way to a working one.
+func TestLoadDirRefusesTheWaysAProjectCanBeAmbiguous(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+
+	good := filepath.Join(dir, "lesson.yaml")
+	writeConfig(t, good, "table: lesson\ncomment: A lesson.\n")
+
+	// Named for one table, configuring another. The filename is how `rig sync`
+	// finds the file to update, so one of the two names would be ignored from
+	// then on.
+	misnamed := filepath.Join(dir, "player.yaml")
+	writeConfig(t, misnamed, "table: team\ncomment: A team.\n")
+
+	// A file that names no table at all.
+	anonymous := filepath.Join(dir, "anonymous.yaml")
+	writeConfig(t, anonymous, "comment: Something.\n")
+
+	set, diags := tableconf.LoadDir([]string{good, misnamed, anonymous})
+
+	if !diags.HasErrors() {
+		t.Fatal("two of those three files are mistakes")
+	}
+	if set.Get("lesson") == nil {
+		t.Error("the good file should still have loaded")
+	}
+	if set.Get("team") != nil {
+		t.Error("a misnamed file should not be used under the table it claims")
+	}
+
+	rendered := diags.String()
+	for _, want := range []string{"player.yaml", "anonymous.yaml"} {
+		if !strings.Contains(rendered, want) {
+			t.Errorf("the diagnostics should name %s:\n%s", want, rendered)
+		}
+	}
+}
+
+// Two files claiming one table is a project where half the configuration is
+// silently ignored, and which half depends on directory order.
+func TestTwoFilesCannotConfigureOneTable(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	first := filepath.Join(dir, "lesson.yaml")
+	second := filepath.Join(dir, "copy.yaml")
+	writeConfig(t, first, "table: lesson\ncomment: A lesson.\n")
+	writeConfig(t, second, "table: lesson\ncomment: The same lesson.\n")
+
+	_, diags := tableconf.LoadDir([]string{first, second})
+
+	if !diags.HasErrors() {
+		t.Fatal("a duplicate table should be refused")
+	}
+	if !strings.Contains(diags.String(), "already configured") {
+		t.Errorf("the diagnostic should say why:\n%s", diags.String())
+	}
+}
+
+// A file that cannot be read leaves the table's intent unknown, which is not
+// the same as unconfigured. Rules that ask what the configuration says have to
+// stay quiet, or one mistyped key buries itself under a diagnostic per column.
+func TestAnUnreadableFileMarksTheTableFailedRatherThanAbsent(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	broken := filepath.Join(dir, "lesson.yaml")
+	writeConfig(t, broken, "table: lesson\ncolumns: [this is not a mapping\n")
+
+	set, diags := tableconf.LoadDir([]string{broken})
+
+	if !diags.HasErrors() {
+		t.Fatal("a file that does not parse is an error")
+	}
+	if !set.Failed("lesson") {
+		t.Error("the table should be marked failed, so downstream rules stay quiet")
+	}
+	if set.Get("lesson") != nil {
+		t.Error("and it has no configuration to read")
+	}
+	if set.Failed("something-else") {
+		t.Error("only the table whose file failed")
+	}
+}
+
+// The zero set is what a project with no configuration at all has, and every
+// accessor is reached before anything has been loaded.
+func TestTheAccessorsTolerateNothingLoaded(t *testing.T) {
+	t.Parallel()
+
+	var none *tableconf.Set
+
+	if none.Len() != 0 || none.Tables() != nil || none.Get("lesson") != nil || none.Failed("lesson") {
+		t.Error("a nil set answers empty rather than panicking")
+	}
+
+	empty := tableconf.NewSet()
+	if empty.Len() != 0 {
+		t.Errorf("Len = %d", empty.Len())
+	}
+}
+
+// Load order is what the reporting follows, so it has to be the order the
+// files were given rather than a map's.
+func TestTablesKeepsLoadOrder(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	var paths []string
+	for _, table := range []string{"zebra", "apple", "mango"} {
+		path := filepath.Join(dir, table+".yaml")
+		writeConfig(t, path, "table: "+table+"\ncomment: A thing.\n")
+		paths = append(paths, path)
+	}
+
+	set, diags := tableconf.LoadDir(paths)
+	if diags.HasErrors() {
+		t.Fatalf("unexpected errors:\n%s", diags.String())
+	}
+
+	got := set.Tables()
+	want := []string{"zebra", "apple", "mango"}
+	if len(got) != 3 || got[0] != want[0] || got[1] != want[1] || got[2] != want[2] {
+		t.Errorf("Tables = %v, want %v", got, want)
+	}
+	if set.Len() != 3 {
+		t.Errorf("Len = %d", set.Len())
+	}
+}
+
+// An anchor for a key that is not in the file still has to point somewhere: a
+// diagnostic with no position is one nobody can act on.
+func TestAnAnchorForAMissingKeyStillNamesTheFile(t *testing.T) {
+	t.Parallel()
+
+	loaded, diags := tableconf.Parse("services/lesson/lesson.yaml",
+		[]byte("table: lesson\ncomment: A lesson.\n"))
+	if diags.HasErrors() {
+		t.Fatalf("unexpected errors:\n%s", diags.String())
+	}
+
+	at := loaded.At("columns", "nothing", "comment")
+	if at.File == "" {
+		t.Errorf("anchor = %+v, want it to name the file", at)
+	}
+
+	// And on a file that could not be loaded at all, the path is all there is.
+	var missing *tableconf.Loaded
+	if got := missing.At("table"); got.Path == "" {
+		t.Errorf("anchor = %+v, want it to name the key", got)
+	}
+}
+
+func writeConfig(t *testing.T, path, content string) {
+	t.Helper()
+
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
 	}
 }

@@ -1,0 +1,23 @@
+# yaml-language-server: $schema=../../.rig/table.schema.json
+table: note
+comment: Something somebody wrote down.
+
+# Days a soft-deleted row stays restorable.
+restore_window_days: 30
+
+# A note is private by default: you read the ones you wrote. `?scope=all` widens
+# that to the whole tenant, and is refused without the note.read.all
+# permission — which is what the integration's API key is minted with, and what
+# an ordinary member is not granted.
+#
+# It narrows writes too, and there is no widening for those: an owner-scoped
+# table refuses to change somebody else's row at all. Every generated write reads
+# the row first, so the narrow read is the write rule.
+access:
+  scope: own
+
+columns:
+  title:
+    comment: What the note is about, in a few words.
+  body:
+    comment: The note itself, or null while it is just a title.

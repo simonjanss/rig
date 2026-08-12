@@ -20,6 +20,10 @@ var autoComments = map[string]string{
 	ColDeletedAt: "When this row was soft-deleted. Null while the row is live.",
 	ColDeletedBy: "Account that soft-deleted this row, taken from the request's claims.",
 
+	ColCreatedByKey: "API key this row was created through, when it was an integration rather than a person.",
+	ColUpdatedByKey: "API key this row was last updated through, when it was an integration rather than a person.",
+	ColDeletedByKey: "API key this row was soft-deleted through, when it was an integration rather than a person.",
+
 	ColVersionType: "Whether this row is the live version or an immutable snapshot of a previous one.",
 }
 

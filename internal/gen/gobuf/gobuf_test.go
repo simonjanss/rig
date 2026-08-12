@@ -125,3 +125,77 @@ func TestBrokenSourceReportsItself(t *testing.T) {
 		t.Errorf("the source should be line-numbered:\n%v", err)
 	}
 }
+
+// A module's major version is part of its path but not its package name.
+// Taking the last segment would emit code referring to a package called v5.
+func TestAVersionedPathIsImportedUnderItsRealName(t *testing.T) {
+	t.Parallel()
+
+	b := gobuf.New("store")
+	for path, want := range map[string]string{
+		"github.com/jackc/pgx/v5": "pgx",
+		"github.com/google/uuid":  "uuid",
+		"time":                    "time",
+		// Only a v followed by digits is a version. A package genuinely called
+		// "video" is not one.
+		"example.com/x/video": "video",
+		"example.com/x/v":     "v",
+	} {
+		if got := b.Import(path); got != want {
+			t.Errorf("Import(%q) = %q, want %q", path, got, want)
+		}
+	}
+}
+
+// A file written once and then owned by a developer must not carry the banner:
+// editing it is the entire point, and tools that recognize the banner would
+// skip a file that is ordinary source.
+func TestAHandOwnedFileHasNoBanner(t *testing.T) {
+	t.Parallel()
+
+	b := gobuf.NewHandOwned("todo")
+	b.Doc("Package todo holds the business logic for todos.")
+	b.L("// Service is where the rules live.")
+	b.L("type Service struct{}")
+
+	out, err := b.Bytes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(out), "DO NOT EDIT") {
+		t.Errorf("a hand-owned file should not be marked generated:\n%s", out)
+	}
+	if !strings.Contains(string(out), "// Package todo holds") {
+		t.Errorf("the package comment is missing:\n%s", out)
+	}
+}
+
+// P builds a line in pieces, which is how a signature with a variable number of
+// parameters gets written without assembling a format string first.
+func TestPAndNLBuildALineByHand(t *testing.T) {
+	t.Parallel()
+
+	b := gobuf.New("store")
+	b.P("func Get(")
+	for i, arg := range []string{"ctx context.Context", "id uuid.UUID"} {
+		if i > 0 {
+			b.P(", ")
+		}
+		b.P("%s", arg)
+	}
+	b.L(") error { return nil }")
+	b.NL()
+	b.L("var _ = %s", gobuf.Quote(`a "quoted" string`))
+
+	out, err := b.Bytes()
+	if err != nil {
+		t.Fatalf("%v", err)
+	}
+	body := string(out)
+	if !strings.Contains(body, "func Get(ctx context.Context, id uuid.UUID) error") {
+		t.Errorf("the pieces did not join:\n%s", body)
+	}
+	if !strings.Contains(body, `"a \"quoted\" string"`) {
+		t.Errorf("Quote should produce a Go literal:\n%s", body)
+	}
+}

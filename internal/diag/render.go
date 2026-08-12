@@ -59,9 +59,13 @@ func Render(w io.Writer, l *List, f Format, opts RenderOptions) error {
 }
 
 // String renders the list as text without color, for error messages and tests.
+//
+// An empty list renders to nothing, the same way [Render] stays silent on a
+// clean run: an error message with two blank lines in it and nothing else is
+// worse than no message.
 func (l *List) String() string {
 	var b strings.Builder
-	_ = renderText(&b, l, RenderOptions{Hints: true})
+	_ = Render(&b, l, FormatText, RenderOptions{Hints: true})
 	return b.String()
 }
 

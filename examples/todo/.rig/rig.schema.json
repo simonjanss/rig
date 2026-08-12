@@ -1,0 +1,362 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rig.dev/schema/project.v1.json",
+  "$defs": {
+    "API": {
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Name of the API, used in documentation and generated type prefixes."
+        },
+        "version": {
+          "type": "string",
+          "description": "API version segment, for example v1."
+        },
+        "base_path": {
+          "type": "string",
+          "description": "Prefix every route sits under, for example /api/v1."
+        },
+        "description": {
+          "type": "string",
+          "description": "What this API is for."
+        },
+        "permissions": {
+          "type": "string",
+          "enum": [
+            "derived",
+            "none"
+          ],
+          "description": "Whether generated handlers check a permission derived from the resource and operation. Defaults to derived."
+        },
+        "search_method": {
+          "type": "string",
+          "enum": [
+            "query",
+            "post",
+            "both"
+          ],
+          "description": "How the Search operation is exposed. Defaults to both: QUERY with a POST alias."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
+    },
+    "Auth": {
+      "properties": {
+        "expose": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "description": "Foundation tables to generate a model, repository, and API for anyway."
+        },
+        "own": {
+          "type": "boolean",
+          "description": "Generate for every foundation table, for a project that has forked the schema and no longer imports rig/auth."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
+    },
+    "Database": {
+      "properties": {
+        "image": {
+          "type": "string",
+          "description": "Container image for the throwaway database."
+        },
+        "container_name": {
+          "type": "string",
+          "description": "Name of the throwaway container."
+        },
+        "port": {
+          "type": "integer",
+          "description": "Host port the throwaway database listens on."
+        },
+        "name": {
+          "type": "string",
+          "description": "Database name."
+        },
+        "user": {
+          "type": "string",
+          "description": "Database user."
+        },
+        "password": {
+          "type": "string",
+          "description": "Database password. This is a local throwaway database; do not put a real secret here."
+        },
+        "schema": {
+          "type": "string",
+          "description": "Postgres schema to read. Defaults to public."
+        },
+        "url": {
+          "type": "string",
+          "description": "Connection URL of an existing database. Set this to skip the throwaway container entirely."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
+    },
+    "Generator": {
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Registered generator name, for example persist-go."
+        },
+        "out_dir": {
+          "type": "string",
+          "description": "Output directory, relative to the project root."
+        },
+        "options": {
+          "type": "object",
+          "description": "Generator-specific options. Each generator publishes its own schema for this block."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "name"
+      ]
+    },
+    "Layout": {
+      "properties": {
+        "table_dir": {
+          "type": "string",
+          "description": "Directory for a table's configuration and service code. Templates: {table} {Table} {tables}."
+        },
+        "config_file": {
+          "type": "string",
+          "description": "Path to a table's configuration file. May reference {table_dir}."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
+    },
+    "Migrations": {
+      "properties": {
+        "dir": {
+          "type": "string",
+          "description": "Directory holding goose migration files."
+        },
+        "table": {
+          "type": "string",
+          "description": "Name of the migration bookkeeping table."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
+    },
+    "Naming": {
+      "properties": {
+        "json_case": {
+          "type": "string",
+          "enum": [
+            "camel",
+            "pascal",
+            "snake"
+          ],
+          "description": "Shape of generated JSON keys. Defaults to camel."
+        },
+        "initialisms": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "description": "Extra acronyms that stay uppercase in Go identifiers, for example SCB."
+        },
+        "plurals": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object",
+          "description": "Plural overrides keyed by table name, for the words English inflection gets wrong."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
+    },
+    "OpenAPI": {
+      "properties": {
+        "version": {
+          "type": "string",
+          "enum": [
+            "3.1",
+            "3.2"
+          ],
+          "description": "OpenAPI specification version. 3.1 documents the POST alias for Search; 3.2 emits QUERY natively."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
+    },
+    "ProjectInfo": {
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Short name of the application."
+        },
+        "module": {
+          "type": "string",
+          "description": "Go module path of the application, used to build generated import paths."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "name",
+        "module"
+      ]
+    },
+    "Validate": {
+      "properties": {
+        "unmentioned_column": {
+          "type": "string",
+          "enum": [
+            "off",
+            "warn",
+            "error"
+          ],
+          "description": "A column exists in the database but is not mentioned in its table configuration."
+        },
+        "missing_comment": {
+          "type": "string",
+          "enum": [
+            "off",
+            "warn",
+            "error"
+          ],
+          "description": "A table or column has no comment."
+        },
+        "fk_needs_index": {
+          "type": "string",
+          "enum": [
+            "off",
+            "warn",
+            "error"
+          ],
+          "description": "A foreign-key column is not covered by an index."
+        },
+        "tenant_id_leading_index": {
+          "type": "string",
+          "enum": [
+            "off",
+            "warn",
+            "error"
+          ],
+          "description": "No index leads with the tenant column."
+        },
+        "boolean_prefix": {
+          "type": "string",
+          "enum": [
+            "off",
+            "warn",
+            "error"
+          ],
+          "description": "A boolean column does not read as a predicate."
+        },
+        "timestamp_suffix": {
+          "type": "string",
+          "enum": [
+            "off",
+            "warn",
+            "error"
+          ],
+          "description": "A timestamp column is not named _at, or an _at column is not a timestamptz. A name ending in _at claims the column records when something happened, and only timestamptz can: a bare timestamp is a clock reading with nothing to anchor it."
+        },
+        "date_suffix": {
+          "type": "string",
+          "enum": [
+            "off",
+            "warn",
+            "error"
+          ],
+          "description": "A date column is not named _date, or a _date column is not a date."
+        },
+        "fk_naming": {
+          "type": "string",
+          "enum": [
+            "off",
+            "warn",
+            "error"
+          ],
+          "description": "A foreign-key column is not named after the table it references."
+        },
+        "cascade_delete": {
+          "type": "string",
+          "enum": [
+            "off",
+            "warn",
+            "error"
+          ],
+          "description": "A foreign key declares ON DELETE CASCADE."
+        },
+        "migration_filename": {
+          "type": "string",
+          "enum": [
+            "off",
+            "warn",
+            "error"
+          ],
+          "description": "A migration file is not named NNNNN_snake_case.sql."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
+    }
+  },
+  "properties": {
+    "version": {
+      "type": "integer",
+      "description": "Configuration format version."
+    },
+    "project": {
+      "$ref": "#/$defs/ProjectInfo",
+      "description": "Identity of the application being generated."
+    },
+    "layout": {
+      "$ref": "#/$defs/Layout",
+      "description": "Where table configuration and generated code live."
+    },
+    "api": {
+      "$ref": "#/$defs/API",
+      "description": "Shape of the generated HTTP API."
+    },
+    "openapi": {
+      "$ref": "#/$defs/OpenAPI",
+      "description": "OpenAPI document settings."
+    },
+    "database": {
+      "$ref": "#/$defs/Database",
+      "description": "Where to run migrations and read the schema from."
+    },
+    "migrations": {
+      "$ref": "#/$defs/Migrations",
+      "description": "Migration file location."
+    },
+    "auth": {
+      "$ref": "#/$defs/Auth",
+      "description": "How the authentication foundation's tables are treated."
+    },
+    "naming": {
+      "$ref": "#/$defs/Naming",
+      "description": "How database names become Go and JSON names."
+    },
+    "validate": {
+      "$ref": "#/$defs/Validate",
+      "description": "Severity of each configurable convention rule."
+    },
+    "generators": {
+      "items": {
+        "$ref": "#/$defs/Generator"
+      },
+      "type": "array",
+      "description": "Generators to run, in order."
+    }
+  },
+  "additionalProperties": false,
+  "type": "object",
+  "required": [
+    "project"
+  ],
+  "title": "rig project configuration",
+  "description": "Project-wide configuration: layout, database, naming, convention severities, and the generators to run."
+}

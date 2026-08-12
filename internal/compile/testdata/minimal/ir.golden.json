@@ -80,7 +80,21 @@
             "description": "Identifier of this request, for correlating with server logs.",
             "type": "String",
             "type_kind": "Primitive",
-            "go_type": "string"
+            "go_type": "string",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "Fields",
+            "wire": "fields",
+            "description": "Present when the failure was validation. It is shaped like the request body that failed — one member per field, holding the problem with that field — so a client can put each message beside the control it belongs to.",
+            "type": "JSON",
+            "type_kind": "Primitive",
+            "go_type": "any",
+            "modifiers": [
+              "Nullable"
+            ]
           }
         ],
         "origin": "Builtin"
@@ -431,17 +445,6 @@
             ]
           },
           {
-            "name": "TenantID",
-            "wire": "tenantId",
-            "description": "Tenant this row belongs to. Every query is scoped by it.",
-            "type": "UUID",
-            "type_kind": "Primitive",
-            "go_type": "[]uuid.UUID",
-            "modifiers": [
-              "Array"
-            ]
-          },
-          {
             "name": "CreatedAt",
             "wire": "createdAt",
             "description": "When this row was created. Set automatically and never changes.",
@@ -518,17 +521,6 @@
             "name": "ID",
             "wire": "id",
             "description": "Unique identifier for this row.",
-            "type": "UUID",
-            "type_kind": "Primitive",
-            "go_type": "*uuid.UUID",
-            "modifiers": [
-              "Nullable"
-            ]
-          },
-          {
-            "name": "TenantID",
-            "wire": "tenantId",
-            "description": "Tenant this row belongs to. Every query is scoped by it.",
             "type": "UUID",
             "type_kind": "Primitive",
             "go_type": "*uuid.UUID",
@@ -931,6 +923,7 @@
             "path": "",
             "pattern": "GET /api/v1/todos",
             "operation_id": "listTodos",
+            "permission": "todo.read",
             "request": {
               "query_params": [
                 {
@@ -982,6 +975,7 @@
             "path": "",
             "pattern": "POST /api/v1/todos",
             "operation_id": "createTodo",
+            "permission": "todo.write",
             "request": {
               "content_type": "application/json",
               "body_params": [
@@ -1088,6 +1082,7 @@
               "POST /api/v1/todos/_search"
             ],
             "operation_id": "searchTodos",
+            "permission": "todo.read",
             "request": {
               "content_type": "application/json",
               "query_params": [
@@ -1151,6 +1146,7 @@
             "path": "/{id}",
             "pattern": "DELETE /api/v1/todos/{id}",
             "operation_id": "deleteTodo",
+            "permission": "todo.delete",
             "request": {
               "path_params": [
                 {
@@ -1192,6 +1188,7 @@
             "path": "/{id}",
             "pattern": "GET /api/v1/todos/{id}",
             "operation_id": "getTodo",
+            "permission": "todo.read",
             "request": {
               "path_params": [
                 {
@@ -1235,6 +1232,7 @@
             "path": "/{id}",
             "pattern": "PATCH /api/v1/todos/{id}",
             "operation_id": "updateTodo",
+            "permission": "todo.write",
             "request": {
               "content_type": "application/json",
               "path_params": [
@@ -1371,7 +1369,6 @@
               "scan": "Timestamptz"
             }
           },
-          "audit_log": true,
           "default_order": [
             {
               "column": "created_at",
@@ -1402,6 +1399,29 @@
             "due_date"
           ]
         }
+      }
+    ],
+    "permissions": [
+      {
+        "key": "todo.delete",
+        "name": "Delete todos",
+        "description": "Delete todos — A single thing someone means to get done.",
+        "resource": "Todo",
+        "action": "delete"
+      },
+      {
+        "key": "todo.read",
+        "name": "Read todos",
+        "description": "Read todos — A single thing someone means to get done.",
+        "resource": "Todo",
+        "action": "read"
+      },
+      {
+        "key": "todo.write",
+        "name": "Write todos",
+        "description": "Create and change todos — A single thing someone means to get done.",
+        "resource": "Todo",
+        "action": "write"
       }
     ]
   },

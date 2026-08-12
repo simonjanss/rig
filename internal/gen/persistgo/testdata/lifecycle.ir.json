@@ -1,6 +1,6 @@
 {
   "ir_version": 1,
-  "generated_by": "rig dev",
+  "generated_by": "rig (test)",
   "api": {
     "name": "demo",
     "version": "v1",
@@ -117,7 +117,21 @@
             "description": "Identifier of this request, for correlating with server logs.",
             "type": "String",
             "type_kind": "Primitive",
-            "go_type": "string"
+            "go_type": "string",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "Fields",
+            "wire": "fields",
+            "description": "Present when the failure was validation. It is shaped like the request body that failed — one member per field, holding the problem with that field — so a client can put each message beside the control it belongs to.",
+            "type": "JSON",
+            "type_kind": "Primitive",
+            "go_type": "any",
+            "modifiers": [
+              "Nullable"
+            ]
           }
         ],
         "origin": "Builtin"
@@ -654,17 +668,6 @@
             ]
           },
           {
-            "name": "TenantID",
-            "wire": "tenantId",
-            "description": "Tenant this row belongs to. Every query is scoped by it.",
-            "type": "UUID",
-            "type_kind": "Primitive",
-            "go_type": "[]uuid.UUID",
-            "modifiers": [
-              "Array"
-            ]
-          },
-          {
             "name": "CreatedAt",
             "wire": "createdAt",
             "description": "When this row was created. Set automatically and never changes.",
@@ -863,17 +866,6 @@
             "name": "ID",
             "wire": "id",
             "description": "Unique identifier for this row.",
-            "type": "UUID",
-            "type_kind": "Primitive",
-            "go_type": "*uuid.UUID",
-            "modifiers": [
-              "Nullable"
-            ]
-          },
-          {
-            "name": "TenantID",
-            "wire": "tenantId",
-            "description": "Tenant this row belongs to. Every query is scoped by it.",
             "type": "UUID",
             "type_kind": "Primitive",
             "go_type": "*uuid.UUID",
@@ -1120,18 +1112,6 @@
             "format": "EmailAddress",
             "modifiers": [
               "Nullable"
-            ]
-          },
-          {
-            "name": "Tags",
-            "wire": "tags",
-            "description": "Free-form labels used for grouping.",
-            "type": "String",
-            "type_kind": "Primitive",
-            "go_type": "[]string",
-            "modifiers": [
-              "Nullable",
-              "Array"
             ]
           },
           {
@@ -1878,6 +1858,7 @@
             "path": "",
             "pattern": "GET /api/v1/lessons",
             "operation_id": "listLessons",
+            "permission": "lesson.read",
             "request": {
               "query_params": [
                 {
@@ -1929,6 +1910,7 @@
             "path": "",
             "pattern": "POST /api/v1/lessons",
             "operation_id": "createLesson",
+            "permission": "lesson.write",
             "request": {
               "content_type": "application/json",
               "body_params": [
@@ -2088,6 +2070,7 @@
               "POST /api/v1/lessons/_search"
             ],
             "operation_id": "searchLessons",
+            "permission": "lesson.read",
             "request": {
               "content_type": "application/json",
               "query_params": [
@@ -2145,6 +2128,59 @@
             }
           },
           {
+            "name": "ListDeleted",
+            "summary": "List retired Lessons.",
+            "description": "A deletion stamps the row rather than removing it, so this is what was deleted and can still be brought back. Only rows inside the 30-day restore window appear: past it a row is gone as far as anyone is concerned, so it is not in the trash either.",
+            "method": "GET",
+            "path": "/_deleted",
+            "pattern": "GET /api/v1/lessons/_deleted",
+            "operation_id": "listDeletedLessons",
+            "permission": "lesson.read",
+            "request": {
+              "query_params": [
+                {
+                  "name": "Limit",
+                  "wire": "limit",
+                  "description": "Maximum rows to return.",
+                  "type": "Int",
+                  "type_kind": "Primitive",
+                  "go_type": "int",
+                  "default": "50"
+                },
+                {
+                  "name": "Offset",
+                  "wire": "offset",
+                  "description": "Rows to skip before the first returned row.",
+                  "type": "Int",
+                  "type_kind": "Primitive",
+                  "go_type": "int",
+                  "default": "0"
+                }
+              ]
+            },
+            "responses": [
+              {
+                "status_code": 200,
+                "description": "A page of retired Lessons.",
+                "content_type": "application/json",
+                "body_object": "LessonListResponse"
+              }
+            ],
+            "errors": [
+              400,
+              401,
+              403,
+              429,
+              500
+            ],
+            "impl": {
+              "kind": "Generated",
+              "repo_method": "ListDeleted",
+              "service_method": "ListDeleted",
+              "handler_name": "ListDeletedLessons"
+            }
+          },
+          {
             "name": "Delete",
             "summary": "Delete a Lesson.",
             "description": "The row is retired by stamping a deletion time; it stops appearing in reads but can be restored within the retention window.",
@@ -2152,6 +2188,7 @@
             "path": "/{id}",
             "pattern": "DELETE /api/v1/lessons/{id}",
             "operation_id": "deleteLesson",
+            "permission": "lesson.delete",
             "request": {
               "path_params": [
                 {
@@ -2193,6 +2230,7 @@
             "path": "/{id}",
             "pattern": "GET /api/v1/lessons/{id}",
             "operation_id": "getLesson",
+            "permission": "lesson.read",
             "request": {
               "path_params": [
                 {
@@ -2236,6 +2274,7 @@
             "path": "/{id}",
             "pattern": "PATCH /api/v1/lessons/{id}",
             "operation_id": "updateLesson",
+            "permission": "lesson.write",
             "request": {
               "content_type": "application/json",
               "path_params": [
@@ -2411,7 +2450,8 @@
                   "wire": "id",
                   "description": "The lesson to publish.",
                   "type": "UUID",
-                  "type_kind": "Primitive"
+                  "type_kind": "Primitive",
+                  "go_type": "uuid.UUID"
                 }
               ],
               "body_params": [
@@ -2421,6 +2461,7 @@
                   "description": "Whether guardians are notified as well.",
                   "type": "Bool",
                   "type_kind": "Primitive",
+                  "go_type": "bool",
                   "default": "true"
                 }
               ]
@@ -2451,6 +2492,153 @@
               "kind": "Custom",
               "service_method": "Publish",
               "handler_name": "PublishLesson"
+            }
+          },
+          {
+            "name": "Restore",
+            "summary": "Bring a retired Lesson back.",
+            "description": "The deletion stamp is cleared and the row appears in reads again. It works for 30 days after the deletion; past that the row is no longer eligible and this answers 409.\n\nRestoring a row that was never deleted is not an error. It is already in the state the caller asked for, and answering otherwise would make a retry of a request whose response went missing look like a failure.\n\nThe request carries no fields. What to do when the world has moved on while the row was retired — a unique value taken by something created since — is the application's decision, and it is made in the restore hook: refuse, or change the row so that it fits.\n\nEvery rule then runs against whatever the hook settled on, not only the ones for fields it touched. The row was not live, so nothing about it has been checked against the world it is returning to.",
+            "method": "POST",
+            "path": "/{id}/_restore",
+            "pattern": "POST /api/v1/lessons/{id}/_restore",
+            "operation_id": "restoreLesson",
+            "permission": "lesson.write",
+            "request": {
+              "path_params": [
+                {
+                  "name": "ID",
+                  "wire": "id",
+                  "description": "Identifier of the Lesson.",
+                  "type": "UUID",
+                  "type_kind": "Primitive",
+                  "go_type": "uuid.UUID"
+                }
+              ]
+            },
+            "responses": [
+              {
+                "status_code": 200,
+                "description": "The restored Lesson.",
+                "content_type": "application/json",
+                "body_object": "Lesson"
+              }
+            ],
+            "errors": [
+              400,
+              401,
+              403,
+              404,
+              409,
+              422,
+              429,
+              500
+            ],
+            "impl": {
+              "kind": "Generated",
+              "repo_method": "Restore",
+              "service_method": "Restore",
+              "handler_name": "RestoreLesson"
+            }
+          },
+          {
+            "name": "Revert",
+            "summary": "Put a Lesson back to one of its previous versions.",
+            "description": "The version is replayed through the ordinary update path rather than written over the row, so the state being replaced is itself snapshotted first and every rule an update runs still runs. Reverting is undoable, and a value that would be refused now is still refused.",
+            "method": "POST",
+            "path": "/{id}/_revert",
+            "pattern": "POST /api/v1/lessons/{id}/_revert",
+            "operation_id": "revertLesson",
+            "permission": "lesson.write",
+            "request": {
+              "content_type": "application/json",
+              "path_params": [
+                {
+                  "name": "ID",
+                  "wire": "id",
+                  "description": "Identifier of the Lesson.",
+                  "type": "UUID",
+                  "type_kind": "Primitive",
+                  "go_type": "uuid.UUID"
+                }
+              ],
+              "body_params": [
+                {
+                  "name": "VersionID",
+                  "wire": "versionId",
+                  "description": "The version to put back, from the Lesson's history.",
+                  "type": "UUID",
+                  "type_kind": "Primitive",
+                  "go_type": "uuid.UUID"
+                }
+              ]
+            },
+            "responses": [
+              {
+                "status_code": 200,
+                "description": "The Lesson, as of the version replayed.",
+                "content_type": "application/json",
+                "body_object": "Lesson"
+              }
+            ],
+            "errors": [
+              400,
+              401,
+              403,
+              404,
+              409,
+              422,
+              429,
+              500
+            ],
+            "impl": {
+              "kind": "Generated",
+              "repo_method": "Revert",
+              "service_method": "Revert",
+              "handler_name": "RevertLesson"
+            }
+          },
+          {
+            "name": "Versions",
+            "summary": "List a Lesson's previous versions.",
+            "description": "Every update copies the row as it was before writing the change, so this is the row's history: newest first, and never the live row itself.\n\nThese do not appear in ordinary reads. A version answers Get by its own identifier, but it is filtered out of List and Search, so history does not turn up in a listing.",
+            "method": "GET",
+            "path": "/{id}/_versions",
+            "pattern": "GET /api/v1/lessons/{id}/_versions",
+            "operation_id": "versionsOfLesson",
+            "permission": "lesson.read",
+            "request": {
+              "path_params": [
+                {
+                  "name": "ID",
+                  "wire": "id",
+                  "description": "Identifier of the Lesson.",
+                  "type": "UUID",
+                  "type_kind": "Primitive",
+                  "go_type": "uuid.UUID"
+                }
+              ]
+            },
+            "responses": [
+              {
+                "status_code": 200,
+                "description": "The versions of the Lesson, newest first.",
+                "content_type": "application/json",
+                "body_object": "LessonListResponse"
+              }
+            ],
+            "errors": [
+              400,
+              401,
+              403,
+              404,
+              429,
+              500
+            ],
+            "impl": {
+              "kind": "Generated",
+              "repo_method": "ListSnapshots",
+              "service_method": "Versions",
+              "handler_name": "VersionsOfLesson"
             }
           }
         ],
@@ -2553,7 +2741,6 @@
               "notes"
             ]
           },
-          "audit_log": true,
           "default_order": [
             {
               "column": "starts_at",
@@ -2618,7 +2805,56 @@
             "row_version",
             "search_vector"
           ]
+        },
+        "electric": {
+          "auth": "tenant",
+          "path": "/electric/lesson",
+          "params": [
+            {
+              "name": "matchday",
+              "field": "Matchday",
+              "type": "Int",
+              "optional": true,
+              "description": "Restrict the shape to one matchday."
+            },
+            {
+              "name": "status",
+              "field": "Status",
+              "type": "String",
+              "description": "Only lessons in this state."
+            }
+          ]
         }
+      }
+    ],
+    "permissions": [
+      {
+        "key": "lesson.delete",
+        "name": "Delete lessons",
+        "description": "Delete lessons — A single scheduled teaching occasion.",
+        "resource": "Lesson",
+        "action": "delete"
+      },
+      {
+        "key": "lesson.publish",
+        "name": "Publish lesson",
+        "description": "Publish the lesson to its participants.",
+        "resource": "Lesson",
+        "action": "publish"
+      },
+      {
+        "key": "lesson.read",
+        "name": "Read lessons",
+        "description": "Read lessons — A single scheduled teaching occasion.",
+        "resource": "Lesson",
+        "action": "read"
+      },
+      {
+        "key": "lesson.write",
+        "name": "Write lessons",
+        "description": "Create and change lessons — A single scheduled teaching occasion.",
+        "resource": "Lesson",
+        "action": "write"
       }
     ]
   },

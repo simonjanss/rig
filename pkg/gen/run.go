@@ -51,15 +51,21 @@ func Run(ctx context.Context, r *Registry, doc *ir.Document, root string, specs 
 			outDir = filepath.Join(root, filepath.FromSlash(outDir))
 		}
 
-		artifacts, err := g.Generate(ctx, doc, Options{OutDir: outDir, Raw: spec.Options})
+		artifacts, err := g.Generate(ctx, doc, Options{OutDir: outDir, Root: root, Raw: spec.Options})
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", spec.Name, err)
 		}
 
 		// Paths are resolved once, here, so a generator only ever thinks in
-		// terms of names relative to its own output directory.
+		// terms of names relative to its own output directory. An absolute path
+		// is left alone: that is how a generator places a hand-owned scaffold
+		// somewhere other than beside its own output.
 		for i := range artifacts {
-			artifacts[i].Path = filepath.Join(outDir, filepath.FromSlash(artifacts[i].Path))
+			p := filepath.FromSlash(artifacts[i].Path)
+			if !filepath.IsAbs(p) {
+				p = filepath.Join(outDir, p)
+			}
+			artifacts[i].Path = p
 		}
 		slices.SortFunc(artifacts, func(a, b Artifact) int { return cmp.Compare(a.Path, b.Path) })
 

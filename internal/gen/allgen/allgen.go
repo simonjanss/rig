@@ -6,5 +6,9 @@
 package allgen
 
 import (
+	_ "github.com/simonjanss/rig/internal/gen/electricgo"
+	_ "github.com/simonjanss/rig/internal/gen/modelgo"
 	_ "github.com/simonjanss/rig/internal/gen/persistgo"
+	_ "github.com/simonjanss/rig/internal/gen/servergo"
+	_ "github.com/simonjanss/rig/internal/gen/servicego"
 )

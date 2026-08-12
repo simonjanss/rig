@@ -9,15 +9,14 @@ package store
 
 import (
 	"context"
-	"fmt"
-	"reflect"
 	"strconv"
 	"strings"
 
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/simonjanss/rig/runtime/audit"
 	"github.com/simonjanss/rig/runtime/dbx"
+	"github.com/simonjanss/rig/runtime/query"
 	"github.com/simonjanss/rig/runtime/rigerr"
+	"github.com/simonjanss/rig/runtime/tenancy"
 )
 
 // Pagination limits. A read without a limit is a production incident waiting
@@ -27,26 +26,137 @@ const (
 	MaxLimit     = 500
 )
 
-// Config is what a Store needs beyond a connection.
-type Config struct {
-	// Audit receives the change log. Leave it nil to record nothing.
-	Audit audit.Log
+// MaxFilterDepth bounds how far a filter may reach across relations.
+//
+// The filter types are mutually recursive, so a client can nest one as deep as
+// it likes, and each level is another correlated subquery. A bound is the
+// difference between an expensive query somebody asked for and an arbitrarily
+// expensive one they were allowed to.
+const MaxFilterDepth = 3
+
+// filterScope is what rendering one level of a filter needs.
+type filterScope struct {
+	claims tenancy.Claims
+	// as qualifies this level's columns. Inside a subquery two tables are in
+	// scope, and an unqualified name there resolves to whichever one happens to
+	// have it — a silent correlation to the wrong row rather than an error.
+	as string
+	// link qualifies the join table of a many-to-many at this level.
+	link  string
+	depth int
 }
+
+// newFilterScope starts at the table being read.
+func newFilterScope(claims tenancy.Claims, table string) filterScope {
+	return filterScope{claims: claims, as: table}
+}
+
+// ok refuses a filter nested deeper than this will render.
+func (s filterScope) ok() error {
+	if s.depth > MaxFilterDepth {
+		return rigerr.Invalid("a filter may reach across at most %s relations", strconv.Itoa(MaxFilterDepth))
+	}
+	return nil
+}
+
+// at qualifies a condition with this level's alias.
+func (s filterScope) at(c query.Cond) query.Cond {
+	c.Table = s.as
+	return c
+}
+
+// into opens the next level down, with aliases of its own so that a
+// self-reference at two depths does not shadow itself.
+func (s filterScope) into() filterScope {
+	d := s.depth + 1
+	return filterScope{claims: s.claims, as: "r" + strconv.Itoa(d), link: "l" + strconv.Itoa(d), depth: d}
+}
+
+// belongsTo opens a subquery on the row this one points at.
+func (s filterScope) belongsTo(farTable, farColumn, localColumn string) (filterScope, string, string) {
+	in := s.into()
+	return in, farTable + " " + in.as, in.as + "." + farColumn + " = " + s.as + "." + localColumn
+}
+
+// hasMany opens a subquery on the rows that point at this one.
+func (s filterScope) hasMany(farTable, farColumn, pk string) (filterScope, string, string) {
+	in := s.into()
+	return in, farTable + " " + in.as, in.as + "." + farColumn + " = " + s.as + "." + pk
+}
+
+// throughLink opens a subquery on the far side of a join table.
+//
+// The condition is on the far resource and the link is only how you get there,
+// which is why this is a chain rather than a table name.
+func (s filterScope) throughLink(linkTable, nearColumn, farTable, farColumn, pk string) (filterScope, string, string) {
+	in := s.into()
+	from := linkTable + " " + in.link +
+		" JOIN " + farTable + " " + in.as +
+		" ON " + in.as + ".id = " + in.link + "." + farColumn
+	return in, from, in.link + "." + nearColumn + " = " + s.as + "." + pk
+}
+
+// tenant scopes a subquery to the caller's tenant.
+//
+// This is the predicate the whole design turns on. Without it a condition on a
+// related table is answered from every tenant's rows: the caller cannot read
+// the far row, but learns it exists from which of their own rows come back.
+func (s filterScope) tenant(column string) query.Cond {
+	return s.at(query.Eq(column, s.claims.TenantID))
+}
+
+// live excludes rows somebody retired, so a deleted row is not a way to find
+// its neighbours.
+func (s filterScope) live(column string) query.Cond {
+	return s.at(query.IsNull(column))
+}
+
+// original excludes the history, which is never what a condition on a relation
+// means.
+func (s filterScope) original(column string, value any) query.Cond {
+	return s.at(query.Eq(column, value))
+}
+
+// aliased is this scope under a different name, for the far side of a join.
+//
+// The alias space is separate from the one a subquery uses — o1 here, r1
+// there — because a join lives in the same statement as the conditions and a
+// subquery that reused the name would resolve its own columns against it.
+func (s filterScope) aliased(alias string) filterScope {
+	return filterScope{claims: s.claims, as: alias, depth: s.depth}
+}
+
+// orderJoin reaches a related row so that its columns can be ordered by, and
+// returns the scope its predicates belong to.
+//
+// LEFT rather than INNER, and that is the whole reason this is a join at all:
+// it is here to read a value, not to decide anything. An inner join would drop
+// every row whose foreign key is null, so asking for an order would quietly
+// shorten the list.
+func (s filterScope) orderJoin(farTable, alias, farColumn, localColumn string) (filterScope, query.Join) {
+	return s.aliased(alias), query.Join{
+		Table: farTable + " " + alias,
+		On:    alias + "." + farColumn + " = " + s.as + "." + localColumn,
+	}
+}
+
+// Config is what a Store needs beyond a connection.
+//
+// It is empty today. It is still taken, and taken by value, so that giving a
+// store something to hold is a new field rather than a signature change every
+// caller has to follow.
+type Config struct{}
 
 // Store holds the connection pool and hands out repositories.
 type Store struct {
-	pool  *pgxpool.Pool
-	audit audit.Log
+	pool *pgxpool.Pool
 
 	Lessons LessonRepository
 }
 
 // New builds a store over a connection pool.
-func New(pool *pgxpool.Pool, cfg Config) *Store {
-	s := &Store{pool: pool, audit: cfg.Audit}
-	if s.audit == nil {
-		s.audit = audit.Noop{}
-	}
+func New(pool *pgxpool.Pool, _ Config) *Store {
+	s := &Store{pool: pool}
 	s.Lessons = &lessonRepo{db: s}
 	return s
 }
@@ -116,46 +226,4 @@ func writeError(err error, table string) error {
 	default:
 		return rigerr.Internal(err, "write %s", table)
 	}
-}
-
-// auditChange is one column's before and after, collected while an update
-// builds its statement.
-type auditChange struct {
-	Column string
-	Type   string
-	Old    *string
-	New    *string
-}
-
-func auditValues(changes ...auditChange) []audit.Value {
-	out := make([]audit.Value, 0, len(changes))
-	for _, c := range changes {
-		out = append(out, audit.Value{Column: c.Column, Type: c.Type, Old: c.Old, New: c.New})
-	}
-	return out
-}
-
-// render turns a value into the string the audit log stores.
-//
-// Audit rows outlive the Go types that produced them, so a value nobody can
-// read back is not a record of anything.
-func render(v any) *string {
-	if v == nil {
-		return nil
-	}
-	// A nil *string arrives as a non-nil interface holding a nil pointer, so a
-	// plain nil check misses it and the audit row would record the text "<nil>"
-	// where it means no value at all.
-	rv := reflect.ValueOf(v)
-	switch rv.Kind() {
-	case reflect.Pointer, reflect.Slice, reflect.Map:
-		if rv.IsNil() {
-			return nil
-		}
-		if rv.Kind() == reflect.Pointer {
-			v = rv.Elem().Interface()
-		}
-	}
-	s := fmt.Sprintf("%v", v)
-	return &s
 }

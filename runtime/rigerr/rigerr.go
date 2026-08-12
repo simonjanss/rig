@@ -110,6 +110,139 @@ func (e *Error) Wrap(err error) *Error {
 	return e
 }
 
+// FieldCode says what kind of thing was wrong with one field, for a client
+// that has to decide something rather than display something.
+//
+// The set is fixed and shared by every project, so a client switches on it
+// once. What varies goes in the message.
+type FieldCode string
+
+// The kinds of wrong a field can be.
+const (
+	// FieldCodeCannotBeEmpty means the field is required and was left blank.
+	FieldCodeCannotBeEmpty FieldCode = "CannotBeEmpty"
+	// FieldCodeCannotBeNull means the field was cleared and the column cannot
+	// hold null.
+	FieldCodeCannotBeNull FieldCode = "CannotBeNull"
+	// FieldCodeTooLong means longer than the column allows.
+	FieldCodeTooLong FieldCode = "TooLong"
+	// FieldCodeTooShort means shorter than the rule allows.
+	FieldCodeTooShort FieldCode = "TooShort"
+	// FieldCodeOutOfRange means outside the allowed range.
+	FieldCodeOutOfRange FieldCode = "OutOfRange"
+	// FieldCodeInvalidValue means not one of the values this field accepts.
+	FieldCodeInvalidValue FieldCode = "InvalidValue"
+	// FieldCodeAlreadyExists means another row has this value and it has to be
+	// unique.
+	FieldCodeAlreadyExists FieldCode = "AlreadyExists"
+	// FieldCodeNotFound means it names something that does not exist.
+	FieldCodeNotFound FieldCode = "NotFound"
+	// FieldCodeNotAllowed means a legal value, but not one this caller may
+	// set, or not from the state the row is in.
+	FieldCodeNotAllowed FieldCode = "NotAllowed"
+)
+
+// FieldError is one thing wrong with one field.
+//
+// It does not name the field. It is reached through the member of an input's
+// error struct that stands for that field, so the name is where the value is,
+// and there is no second copy of it to disagree.
+//
+// It lives here rather than being generated per project because none of it is
+// per project: the same nine codes and the same two members, so one definition
+// serves every model and every client.
+type FieldError struct {
+	Code    FieldCode `json:"code"`
+	Message string    `json:"message"`
+}
+
+// Error implements error, so a validation rule can return one directly.
+func (e *FieldError) Error() string { return string(e.Code) + ": " + e.Message }
+
+// ErrorCode implements [Coder], and says Internal on purpose.
+//
+// A field error means nothing on its own: it says what was wrong without
+// saying what it was wrong about. Reaching the HTTP layer as the whole answer
+// means one was returned from somewhere that has no field to attach it to — a
+// service method rather than a validation rule — and the client cannot act on
+// "CannotBeEmpty" with nothing to hang it off.
+//
+// So it is a 500 with the generic message, which is what any other bug is. The
+// alternative, a 422 with an empty body, would blame the caller for a mistake
+// in the service.
+func (e *FieldError) ErrorCode() Code { return CodeInternal }
+
+// NewFieldError builds one. A rule with nothing better to say than "no" uses
+// FieldCodeInvalidValue.
+func NewFieldError(code FieldCode, format string, args ...any) *FieldError {
+	return &FieldError{Code: code, Message: fmt.Sprintf(format, args...)}
+}
+
+// AsFieldError returns the field error an error carries, and whether it was
+// one at all.
+//
+// It is what separates a rule that failed from a rule that could not be run:
+// the first is about the caller's input and belongs in a 422 under the field it
+// names, the second is about the server and belongs nowhere near it.
+//
+// Named As rather than Is because it hands back the value, the way [errors.As]
+// does.
+func AsFieldError(err error) (*FieldError, bool) {
+	var field *FieldError
+	if errors.As(err, &field) {
+		return field, true
+	}
+	return nil, false
+}
+
+// Wrap adds context to an error, keeping whatever code it already carried.
+//
+// An error with no code becomes Internal, which is the honest answer for one
+// that never passed through this package: nobody decided what it means to a
+// client, so it is a server problem until somebody does. An error that does
+// carry a code keeps it — a rule that refused with a Conflict is still a
+// conflict once the layer above has said which rule it was.
+func Wrap(err error, format string, args ...any) error {
+	if err == nil {
+		return nil
+	}
+
+	message := fmt.Sprintf(format, args...)
+
+	var coded *Error
+	if errors.As(err, &coded) {
+		return &Error{Code: coded.Code, Message: message + ": " + coded.Message, Err: err}
+	}
+
+	var c Coder
+	if errors.As(err, &c) {
+		return &Error{Code: c.ErrorCode(), Message: message, Err: err}
+	}
+
+	return &Error{Code: CodeInternal, Message: message, Err: err}
+}
+
+// Coder is an error that names its own code.
+//
+// It exists for a failure that is more than a message — the generated
+// per-input validation errors implement it — so such an error can be returned
+// as itself rather than flattened into an [Error] carrying prose.
+type Coder interface {
+	error
+	ErrorCode() Code
+}
+
+// FieldReporter is an error that can say what was wrong with each field.
+//
+// ErrorFields returns a value shaped like the input it describes: one member
+// per field of the request, each holding the problem with that field or
+// nothing. A client can then attach every message to the control the person is
+// looking at, instead of parsing one sentence for field names.
+type FieldReporter interface {
+	error
+	ErrorFields() any
+}
+
 // CodeOf returns the code an error carries, or Internal when it carries none.
 //
 // An error that never passed through this package is a bug rather than a
@@ -120,7 +253,21 @@ func CodeOf(err error) Code {
 	if errors.As(err, &e) {
 		return e.Code
 	}
+
+	var c Coder
+	if errors.As(err, &c) {
+		return c.ErrorCode()
+	}
 	return CodeInternal
+}
+
+// FieldsOf returns the per-field detail an error carries, if it carries any.
+func FieldsOf(err error) (any, bool) {
+	var r FieldReporter
+	if errors.As(err, &r) {
+		return r.ErrorFields(), true
+	}
+	return nil, false
 }
 
 // StatusOf returns the HTTP status for an error.

@@ -14,7 +14,8 @@ func TestDefaults(t *testing.T) {
 		t.Fatal(err)
 	}
 	// The defaults are the safe ones, applied without being asked for.
-	if cfg.IncludeDeleted || cfg.OnlyDeleted || cfg.IncludeSnapshots || cfg.SkipTenantScope {
+	if cfg.IncludeDeleted || cfg.OnlyDeleted || cfg.IncludeSnapshots ||
+		cfg.SkipTenantScope || cfg.SkipOwnerScope {
 		t.Errorf("defaults should exclude everything: %+v", cfg)
 	}
 }
@@ -23,12 +24,13 @@ func TestOptions(t *testing.T) {
 	t.Parallel()
 
 	cfg, err := readopt.Apply([]readopt.Option{
-		readopt.WithDeleted(), readopt.WithSnapshots(), readopt.WithoutTenantScope(),
+		readopt.WithDeleted(), readopt.WithSnapshots(),
+		readopt.WithoutTenantScope(), readopt.WithoutOwnerScope(),
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !cfg.IncludeDeleted || !cfg.IncludeSnapshots || !cfg.SkipTenantScope {
+	if !cfg.IncludeDeleted || !cfg.IncludeSnapshots || !cfg.SkipTenantScope || !cfg.SkipOwnerScope {
 		t.Errorf("options were not applied: %+v", cfg)
 	}
 }

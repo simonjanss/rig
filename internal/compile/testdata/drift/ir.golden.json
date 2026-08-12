@@ -393,6 +393,17 @@
             "modifiers": [
               "Array"
             ]
+          },
+          {
+            "name": "Without",
+            "wire": "without",
+            "description": "Relations with no row matching the given conditions. An empty one asks for no related row at all.\n\nThis is where a negation belongs when what you mean is \"not\": it negates whether a matching related row exists, so a row with no related row at all satisfies it. The negative operators above negate the comparison instead and still require the related row to be there — \"no related row called X\" is here, \"a related row not called X\" is NotEquals.",
+            "type": "ArticleFilterWithout",
+            "type_kind": "Object",
+            "go_type": "*ArticleFilterWithout",
+            "modifiers": [
+              "Nullable"
+            ]
           }
         ],
         "origin": "Filter"
@@ -408,17 +419,6 @@
             "type": "UUID",
             "type_kind": "Primitive",
             "go_type": "[]uuid.UUID",
-            "modifiers": [
-              "Array"
-            ]
-          },
-          {
-            "name": "TenantID",
-            "wire": "tenantId",
-            "description": "Tenant this row belongs to. Every query is scoped by it.",
-            "type": "String",
-            "type_kind": "Primitive",
-            "go_type": "[]string",
             "modifiers": [
               "Array"
             ]
@@ -519,6 +519,17 @@
             "modifiers": [
               "Array"
             ]
+          },
+          {
+            "name": "Author",
+            "wire": "author",
+            "description": "Conditions on this row's Author.\n\nA row with no Author never matches, and that holds for the negative operators too: under NotEquals this asks whether the Author is there and differs, so a row without one fails that as well. To ask the other question — no matching Author, which a row with none satisfies — use Without.Author.",
+            "type": "AuthorFilterContains",
+            "type_kind": "Object",
+            "go_type": "*AuthorFilterContains",
+            "modifiers": [
+              "Nullable"
+            ]
           }
         ],
         "origin": "Filter"
@@ -534,17 +545,6 @@
             "type": "UUID",
             "type_kind": "Primitive",
             "go_type": "*uuid.UUID",
-            "modifiers": [
-              "Nullable"
-            ]
-          },
-          {
-            "name": "TenantID",
-            "wire": "tenantId",
-            "description": "Tenant this row belongs to. Every query is scoped by it.",
-            "type": "String",
-            "type_kind": "Primitive",
-            "go_type": "*string",
             "modifiers": [
               "Nullable"
             ]
@@ -645,6 +645,17 @@
             "modifiers": [
               "Nullable"
             ]
+          },
+          {
+            "name": "Author",
+            "wire": "author",
+            "description": "Conditions on this row's Author.\n\nA row with no Author never matches, and that holds for the negative operators too: under NotEquals this asks whether the Author is there and differs, so a row without one fails that as well. To ask the other question — no matching Author, which a row with none satisfies — use Without.Author.",
+            "type": "AuthorFilterEquals",
+            "type_kind": "Object",
+            "go_type": "*AuthorFilterEquals",
+            "modifiers": [
+              "Nullable"
+            ]
           }
         ],
         "origin": "Filter"
@@ -653,17 +664,6 @@
         "name": "ArticleFilterLike",
         "description": "Pattern conditions on Article text fields.",
         "fields": [
-          {
-            "name": "TenantID",
-            "wire": "tenantId",
-            "description": "Tenant this row belongs to. Every query is scoped by it.",
-            "type": "String",
-            "type_kind": "Primitive",
-            "go_type": "*string",
-            "modifiers": [
-              "Nullable"
-            ]
-          },
           {
             "name": "VersionType",
             "wire": "versionType",
@@ -693,6 +693,17 @@
             "type": "String",
             "type_kind": "Primitive",
             "go_type": "*string",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "Author",
+            "wire": "author",
+            "description": "Conditions on this row's Author.\n\nA row with no Author never matches, and that holds for the negative operators too: under NotEquals this asks whether the Author is there and differs, so a row without one fails that as well. To ask the other question — no matching Author, which a row with none satisfies — use Without.Author.",
+            "type": "AuthorFilterLike",
+            "type_kind": "Object",
+            "go_type": "*AuthorFilterLike",
             "modifiers": [
               "Nullable"
             ]
@@ -734,6 +745,17 @@
             "modifiers": [
               "Nullable"
             ]
+          },
+          {
+            "name": "Author",
+            "wire": "author",
+            "description": "Conditions on this row's Author.\n\nA row with no Author never matches, and that holds for the negative operators too: under NotEquals this asks whether the Author is there and differs, so a row without one fails that as well. To ask the other question — no matching Author, which a row with none satisfies — use Without.Author.",
+            "type": "AuthorFilterNull",
+            "type_kind": "Object",
+            "go_type": "*AuthorFilterNull",
+            "modifiers": [
+              "Nullable"
+            ]
           }
         ],
         "origin": "Filter"
@@ -770,6 +792,35 @@
             "type": "Timestamp",
             "type_kind": "Primitive",
             "go_type": "*time.Time",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "Author",
+            "wire": "author",
+            "description": "Conditions on this row's Author.\n\nA row with no Author never matches, and that holds for the negative operators too: under NotEquals this asks whether the Author is there and differs, so a row without one fails that as well. To ask the other question — no matching Author, which a row with none satisfies — use Without.Author.",
+            "type": "AuthorFilterRange",
+            "type_kind": "Object",
+            "go_type": "*AuthorFilterRange",
+            "modifiers": [
+              "Nullable"
+            ]
+          }
+        ],
+        "origin": "Filter"
+      },
+      {
+        "name": "ArticleFilterWithout",
+        "description": "Relations a Article must have no matching row for.",
+        "fields": [
+          {
+            "name": "Author",
+            "wire": "author",
+            "description": "Match rows with no Author satisfying these conditions, including rows that have none at all.\n\nThis negates the existence of the related row rather than the comparison, which is the whole difference from NotEquals.Author: that one needs the Author to be there and to differ, so a row without one fails it and satisfies this. An empty object asks for rows with no Author at all.",
+            "type": "AuthorFilter",
+            "type_kind": "Object",
+            "go_type": "*AuthorFilter",
             "modifiers": [
               "Nullable"
             ]
@@ -1025,6 +1076,17 @@
             "modifiers": [
               "Array"
             ]
+          },
+          {
+            "name": "Without",
+            "wire": "without",
+            "description": "Relations with no row matching the given conditions. An empty one asks for no related row at all.\n\nThis is where a negation belongs when what you mean is \"not\": it negates whether a matching related row exists, so a row with no related row at all satisfies it. The negative operators above negate the comparison instead and still require the related row to be there — \"no related row called X\" is here, \"a related row not called X\" is NotEquals.",
+            "type": "AuthorFilterWithout",
+            "type_kind": "Object",
+            "go_type": "*AuthorFilterWithout",
+            "modifiers": [
+              "Nullable"
+            ]
           }
         ],
         "origin": "Filter"
@@ -1037,17 +1099,6 @@
             "name": "ID",
             "wire": "id",
             "description": "Unique identifier for this row.",
-            "type": "UUID",
-            "type_kind": "Primitive",
-            "go_type": "[]uuid.UUID",
-            "modifiers": [
-              "Array"
-            ]
-          },
-          {
-            "name": "TenantID",
-            "wire": "tenantId",
-            "description": "Tenant this row belongs to. Every query is scoped by it.",
             "type": "UUID",
             "type_kind": "Primitive",
             "go_type": "[]uuid.UUID",
@@ -1075,6 +1126,17 @@
             "modifiers": [
               "Array"
             ]
+          },
+          {
+            "name": "Articles",
+            "wire": "articles",
+            "description": "Conditions on one of this row's Articles.\n\nEvery condition has to hold of the same one, not of the set between them.\n\nUnder the negative operators this asks whether one of them differs, which is not the same as none of them matching: a row can have one that matches and one that does not, satisfying the first and failing the second. Without.Articles asks the second.",
+            "type": "ArticleFilterContains",
+            "type_kind": "Object",
+            "go_type": "*ArticleFilterContains",
+            "modifiers": [
+              "Nullable"
+            ]
           }
         ],
         "origin": "Filter"
@@ -1095,17 +1157,6 @@
             ]
           },
           {
-            "name": "TenantID",
-            "wire": "tenantId",
-            "description": "Tenant this row belongs to. Every query is scoped by it.",
-            "type": "UUID",
-            "type_kind": "Primitive",
-            "go_type": "*uuid.UUID",
-            "modifiers": [
-              "Nullable"
-            ]
-          },
-          {
             "name": "CreatedAt",
             "wire": "createdAt",
             "description": "When this row was created. Set automatically and never changes.",
@@ -1122,6 +1173,17 @@
             "type": "String",
             "type_kind": "Primitive",
             "go_type": "*string",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "Articles",
+            "wire": "articles",
+            "description": "Conditions on one of this row's Articles.\n\nEvery condition has to hold of the same one, not of the set between them.\n\nUnder the negative operators this asks whether one of them differs, which is not the same as none of them matching: a row can have one that matches and one that does not, satisfying the first and failing the second. Without.Articles asks the second.",
+            "type": "ArticleFilterEquals",
+            "type_kind": "Object",
+            "go_type": "*ArticleFilterEquals",
             "modifiers": [
               "Nullable"
             ]
@@ -1142,6 +1204,17 @@
             "modifiers": [
               "Nullable"
             ]
+          },
+          {
+            "name": "Articles",
+            "wire": "articles",
+            "description": "Conditions on one of this row's Articles.\n\nEvery condition has to hold of the same one, not of the set between them.\n\nUnder the negative operators this asks whether one of them differs, which is not the same as none of them matching: a row can have one that matches and one that does not, satisfying the first and failing the second. Without.Articles asks the second.",
+            "type": "ArticleFilterLike",
+            "type_kind": "Object",
+            "go_type": "*ArticleFilterLike",
+            "modifiers": [
+              "Nullable"
+            ]
           }
         ],
         "origin": "Filter"
@@ -1149,7 +1222,19 @@
       {
         "name": "AuthorFilterNull",
         "description": "Presence conditions on nullable Author fields.",
-        "fields": null,
+        "fields": [
+          {
+            "name": "Articles",
+            "wire": "articles",
+            "description": "Conditions on one of this row's Articles.\n\nEvery condition has to hold of the same one, not of the set between them.\n\nUnder the negative operators this asks whether one of them differs, which is not the same as none of them matching: a row can have one that matches and one that does not, satisfying the first and failing the second. Without.Articles asks the second.",
+            "type": "ArticleFilterNull",
+            "type_kind": "Object",
+            "go_type": "*ArticleFilterNull",
+            "modifiers": [
+              "Nullable"
+            ]
+          }
+        ],
         "origin": "Filter"
       },
       {
@@ -1163,6 +1248,35 @@
             "type": "Timestamp",
             "type_kind": "Primitive",
             "go_type": "*time.Time",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "Articles",
+            "wire": "articles",
+            "description": "Conditions on one of this row's Articles.\n\nEvery condition has to hold of the same one, not of the set between them.\n\nUnder the negative operators this asks whether one of them differs, which is not the same as none of them matching: a row can have one that matches and one that does not, satisfying the first and failing the second. Without.Articles asks the second.",
+            "type": "ArticleFilterRange",
+            "type_kind": "Object",
+            "go_type": "*ArticleFilterRange",
+            "modifiers": [
+              "Nullable"
+            ]
+          }
+        ],
+        "origin": "Filter"
+      },
+      {
+        "name": "AuthorFilterWithout",
+        "description": "Relations a Author must have no matching row for.",
+        "fields": [
+          {
+            "name": "Articles",
+            "wire": "articles",
+            "description": "Match rows with no Articles satisfying these conditions, including rows with none at all.\n\nThis negates the existence of a matching row rather than the comparison, which is the whole difference from NotEquals.Articles: that one is satisfied by one of them differing, and a row can have one that differs and one that matches at the same time. An empty object asks for rows with no Articles at all.",
+            "type": "ArticleFilter",
+            "type_kind": "Object",
+            "go_type": "*ArticleFilter",
             "modifiers": [
               "Nullable"
             ]
@@ -1222,7 +1336,21 @@
             "description": "Identifier of this request, for correlating with server logs.",
             "type": "String",
             "type_kind": "Primitive",
-            "go_type": "string"
+            "go_type": "string",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "Fields",
+            "wire": "fields",
+            "description": "Present when the failure was validation. It is shaped like the request body that failed — one member per field, holding the problem with that field — so a client can put each message beside the control it belongs to.",
+            "type": "JSON",
+            "type_kind": "Primitive",
+            "go_type": "any",
+            "modifiers": [
+              "Nullable"
+            ]
           }
         ],
         "origin": "Builtin"
@@ -1504,6 +1632,7 @@
             "path": "",
             "pattern": "GET /api/v1/articles",
             "operation_id": "listArticles",
+            "permission": "article.read",
             "request": {
               "query_params": [
                 {
@@ -1555,6 +1684,7 @@
             "path": "",
             "pattern": "POST /api/v1/articles",
             "operation_id": "createArticle",
+            "permission": "article.write",
             "request": {
               "content_type": "application/json",
               "body_params": [
@@ -1673,6 +1803,7 @@
               "POST /api/v1/articles/_search"
             ],
             "operation_id": "searchArticles",
+            "permission": "article.read",
             "request": {
               "content_type": "application/json",
               "query_params": [
@@ -1730,6 +1861,59 @@
             }
           },
           {
+            "name": "ListDeleted",
+            "summary": "List retired Articles.",
+            "description": "A deletion stamps the row rather than removing it, so this is what was deleted and can still be brought back. Only rows inside the 0-day restore window appear: past it a row is gone as far as anyone is concerned, so it is not in the trash either.",
+            "method": "GET",
+            "path": "/_deleted",
+            "pattern": "GET /api/v1/articles/_deleted",
+            "operation_id": "listDeletedArticles",
+            "permission": "article.read",
+            "request": {
+              "query_params": [
+                {
+                  "name": "Limit",
+                  "wire": "limit",
+                  "description": "Maximum rows to return.",
+                  "type": "Int",
+                  "type_kind": "Primitive",
+                  "go_type": "int",
+                  "default": "50"
+                },
+                {
+                  "name": "Offset",
+                  "wire": "offset",
+                  "description": "Rows to skip before the first returned row.",
+                  "type": "Int",
+                  "type_kind": "Primitive",
+                  "go_type": "int",
+                  "default": "0"
+                }
+              ]
+            },
+            "responses": [
+              {
+                "status_code": 200,
+                "description": "A page of retired Articles.",
+                "content_type": "application/json",
+                "body_object": "ArticleListResponse"
+              }
+            ],
+            "errors": [
+              400,
+              401,
+              403,
+              429,
+              500
+            ],
+            "impl": {
+              "kind": "Generated",
+              "repo_method": "ListDeleted",
+              "service_method": "ListDeleted",
+              "handler_name": "ListDeletedArticles"
+            }
+          },
+          {
             "name": "Delete",
             "summary": "Delete a Article.",
             "description": "The row is retired by stamping a deletion time; it stops appearing in reads but can be restored within the retention window.",
@@ -1737,6 +1921,7 @@
             "path": "/{id}",
             "pattern": "DELETE /api/v1/articles/{id}",
             "operation_id": "deleteArticle",
+            "permission": "article.delete",
             "request": {
               "path_params": [
                 {
@@ -1778,6 +1963,7 @@
             "path": "/{id}",
             "pattern": "GET /api/v1/articles/{id}",
             "operation_id": "getArticle",
+            "permission": "article.read",
             "request": {
               "path_params": [
                 {
@@ -1821,6 +2007,7 @@
             "path": "/{id}",
             "pattern": "PATCH /api/v1/articles/{id}",
             "operation_id": "updateArticle",
+            "permission": "article.write",
             "request": {
               "content_type": "application/json",
               "path_params": [
@@ -1939,6 +2126,52 @@
               "service_method": "Update",
               "handler_name": "UpdateArticle"
             }
+          },
+          {
+            "name": "Restore",
+            "summary": "Bring a retired Article back.",
+            "description": "The deletion stamp is cleared and the row appears in reads again. It works for 0 days after the deletion; past that the row is no longer eligible and this answers 409.\n\nRestoring a row that was never deleted is not an error. It is already in the state the caller asked for, and answering otherwise would make a retry of a request whose response went missing look like a failure.\n\nThe request carries no fields. What to do when the world has moved on while the row was retired — a unique value taken by something created since — is the application's decision, and it is made in the restore hook: refuse, or change the row so that it fits.\n\nEvery rule then runs against whatever the hook settled on, not only the ones for fields it touched. The row was not live, so nothing about it has been checked against the world it is returning to.",
+            "method": "POST",
+            "path": "/{id}/_restore",
+            "pattern": "POST /api/v1/articles/{id}/_restore",
+            "operation_id": "restoreArticle",
+            "permission": "article.write",
+            "request": {
+              "path_params": [
+                {
+                  "name": "ID",
+                  "wire": "id",
+                  "description": "Identifier of the Article.",
+                  "type": "UUID",
+                  "type_kind": "Primitive",
+                  "go_type": "uuid.UUID"
+                }
+              ]
+            },
+            "responses": [
+              {
+                "status_code": 200,
+                "description": "The restored Article.",
+                "content_type": "application/json",
+                "body_object": "Article"
+              }
+            ],
+            "errors": [
+              400,
+              401,
+              403,
+              404,
+              409,
+              422,
+              429,
+              500
+            ],
+            "impl": {
+              "kind": "Generated",
+              "repo_method": "Restore",
+              "service_method": "Restore",
+              "handler_name": "RestoreArticle"
+            }
           }
         ],
         "storage": {
@@ -1986,7 +2219,6 @@
             },
             "restore_window_days": 0
           },
-          "audit_log": true,
           "default_order": [
             {
               "column": "created_at",
@@ -2132,6 +2364,7 @@
             "path": "",
             "pattern": "GET /api/v1/authors",
             "operation_id": "listAuthors",
+            "permission": "author.read",
             "request": {
               "query_params": [
                 {
@@ -2183,6 +2416,7 @@
             "path": "",
             "pattern": "POST /api/v1/authors",
             "operation_id": "createAuthor",
+            "permission": "author.write",
             "request": {
               "content_type": "application/json",
               "body_params": [
@@ -2236,6 +2470,7 @@
               "POST /api/v1/authors/_search"
             ],
             "operation_id": "searchAuthors",
+            "permission": "author.read",
             "request": {
               "content_type": "application/json",
               "query_params": [
@@ -2299,6 +2534,7 @@
             "path": "/{id}",
             "pattern": "DELETE /api/v1/authors/{id}",
             "operation_id": "deleteAuthor",
+            "permission": "author.delete",
             "request": {
               "path_params": [
                 {
@@ -2340,6 +2576,7 @@
             "path": "/{id}",
             "pattern": "GET /api/v1/authors/{id}",
             "operation_id": "getAuthor",
+            "permission": "author.read",
             "request": {
               "path_params": [
                 {
@@ -2383,6 +2620,7 @@
             "path": "/{id}",
             "pattern": "PATCH /api/v1/authors/{id}",
             "operation_id": "updateAuthor",
+            "permission": "author.write",
             "request": {
               "content_type": "application/json",
               "path_params": [
@@ -2459,7 +2697,6 @@
               "scan": "Timestamptz"
             }
           },
-          "audit_log": true,
           "default_order": [
             {
               "column": "created_at",
@@ -2491,6 +2728,50 @@
             "name"
           ]
         }
+      }
+    ],
+    "permissions": [
+      {
+        "key": "article.delete",
+        "name": "Delete articles",
+        "description": "Delete articles — A piece of writing published to readers.",
+        "resource": "Article",
+        "action": "delete"
+      },
+      {
+        "key": "article.read",
+        "name": "Read articles",
+        "description": "Read articles — A piece of writing published to readers.",
+        "resource": "Article",
+        "action": "read"
+      },
+      {
+        "key": "article.write",
+        "name": "Write articles",
+        "description": "Create and change articles — A piece of writing published to readers.",
+        "resource": "Article",
+        "action": "write"
+      },
+      {
+        "key": "author.delete",
+        "name": "Delete authors",
+        "description": "Delete authors.",
+        "resource": "Author",
+        "action": "delete"
+      },
+      {
+        "key": "author.read",
+        "name": "Read authors",
+        "description": "Read authors.",
+        "resource": "Author",
+        "action": "read"
+      },
+      {
+        "key": "author.write",
+        "name": "Write authors",
+        "description": "Create and change authors.",
+        "resource": "Author",
+        "action": "write"
       }
     ]
   },

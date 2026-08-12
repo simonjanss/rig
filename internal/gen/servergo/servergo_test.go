@@ -1,0 +1,441 @@
+package servergo_test
+
+import (
+	"flag"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/simonjanss/rig/internal/gen/gentest"
+	"github.com/simonjanss/rig/internal/gen/modelgo"
+	"github.com/simonjanss/rig/internal/gen/persistgo"
+	"github.com/simonjanss/rig/internal/gen/servergo"
+	"github.com/simonjanss/rig/internal/gen/servicego"
+	"github.com/simonjanss/rig/pkg/gen"
+)
+
+var update = flag.Bool("update", false, "rewrite the golden files")
+
+const fixture = "lifecycle.ir.json"
+
+func opts() gen.Options {
+	return gen.Options{OutDir: ".", Raw: map[string]any{
+		"package":      "api",
+		"model_import": "rigtest/model",
+	}}
+}
+
+func TestGolden(t *testing.T) {
+	t.Parallel()
+
+	doc := gentest.LoadDocument(t, filepath.Join("testdata", fixture))
+	artifacts := gentest.Run(t, servergo.New(), doc, opts())
+
+	gentest.Golden(t, filepath.Join("testdata", "lifecycle"), artifacts, *update)
+}
+
+func TestDeterministic(t *testing.T) {
+	t.Parallel()
+
+	doc := gentest.LoadDocument(t, filepath.Join("testdata", fixture))
+	gentest.Deterministic(t, servergo.New(), doc, opts())
+}
+
+// TestGeneratedCodeCompiles builds the whole stack, because the HTTP layer is
+// only correct relative to the service interfaces and wire types it calls.
+func TestGeneratedCodeCompiles(t *testing.T) {
+	t.Parallel()
+
+	doc := gentest.LoadDocument(t, filepath.Join("testdata", fixture))
+
+	api := gentest.Run(t, servicego.New(), doc, gen.Options{Raw: map[string]any{
+		"package": "api", "model_import": "rigtest/model", "store_import": "rigtest/store",
+	}})
+	api = append(api, gentest.Run(t, servergo.New(), doc, opts())...)
+
+	gentest.MustCompileAll(t,
+		gentest.Package{
+			Dir: "model",
+			Artifacts: gentest.Run(t, modelgo.New(), doc,
+				gen.Options{Raw: map[string]any{"package": "model"}}),
+		},
+		gentest.Package{
+			Dir: "store",
+			Artifacts: gentest.Run(t, persistgo.New(), doc, gen.Options{Raw: map[string]any{
+				"package": "store", "model_import": "rigtest/model",
+			}}),
+		},
+		gentest.Package{Dir: "api", Artifacts: api},
+	)
+}
+
+// Search is a read that carries a body, which GET cannot express and POST
+// misrepresents as a mutation.
+func TestSearchIsRoutedOnQueryWithAPostAlias(t *testing.T) {
+	t.Parallel()
+
+	doc := gentest.LoadDocument(t, filepath.Join("testdata", fixture))
+	src := find(t, gentest.Run(t, servergo.New(), doc, opts()), "lesson_routes.gen.go")
+
+	routes, ok := between(src, "func registerLesson(", "\n}")
+	if !ok {
+		t.Fatal("no registerLesson function")
+	}
+
+	for _, want := range []string{
+		`mux.HandleFunc("QUERY /api/v1/lessons", handleSearchLessons(s, svc))`,
+		`mux.HandleFunc("POST /api/v1/lessons/_search", handleSearchLessons(s, svc))`,
+	} {
+		if !strings.Contains(collapse(routes), collapse(want)) {
+			t.Errorf("missing route %s:\n%s", want, routes)
+		}
+	}
+
+	// Both routes have to reach the same code, or an intermediary that forces
+	// the fallback would change the answer.
+	if strings.Count(src, "func handleSearchLessons(") != 1 {
+		t.Error("the alias should share the handler, not duplicate it")
+	}
+}
+
+func TestEveryEndpointIsRouted(t *testing.T) {
+	t.Parallel()
+
+	doc := gentest.LoadDocument(t, filepath.Join("testdata", fixture))
+	src := collapse(find(t, gentest.Run(t, servergo.New(), doc, opts()), "lesson_routes.gen.go"))
+
+	for _, pattern := range []string{
+		"GET /api/v1/lessons",
+		"POST /api/v1/lessons",
+		"GET /api/v1/lessons/{id}",
+		"PATCH /api/v1/lessons/{id}",
+		"DELETE /api/v1/lessons/{id}",
+		"POST /api/v1/lessons/{id}/_publish",
+	} {
+		if !strings.Contains(src, `mux.HandleFunc("`+pattern+`"`) {
+			t.Errorf("%s is not routed", pattern)
+		}
+	}
+}
+
+// The registration struct is what turns "forgot to wire up a new table" from a
+// 404 nobody notices into a build failure.
+func TestHandlersHasAFieldPerResource(t *testing.T) {
+	t.Parallel()
+
+	doc := gentest.LoadDocument(t, filepath.Join("testdata", fixture))
+	src := find(t, gentest.Run(t, servergo.New(), doc, opts()), "server.gen.go")
+
+	handlers, ok := between(src, "type Handlers struct {", "\n}")
+	if !ok {
+		t.Fatal("no Handlers type")
+	}
+	if !strings.Contains(collapse(handlers), "Lesson LessonService") {
+		t.Errorf("Handlers should name every resource:\n%s", handlers)
+	}
+	if !strings.Contains(handlers, "Server Server") {
+		t.Errorf("Handlers should carry the shared behavior:\n%s", handlers)
+	}
+}
+
+// A server that cannot identify its caller cannot enforce tenancy, and every
+// generated query depends on it. Failing at startup beats leaking at runtime.
+func TestRegisterRefusesWithoutClaims(t *testing.T) {
+	t.Parallel()
+
+	doc := gentest.LoadDocument(t, filepath.Join("testdata", fixture))
+	src := find(t, gentest.Run(t, servergo.New(), doc, opts()), "server.gen.go")
+
+	register, ok := between(src, "func Register(", "\n}")
+	if !ok {
+		t.Fatal("no Register function")
+	}
+	if !strings.Contains(register, "panic(\"api.Register: set Server.Auth") {
+		t.Errorf("Register should refuse a server with no way to identify a caller:\n%s", register)
+	}
+}
+
+// Auth is one field that does two things, and the point of it is that neither
+// can be forgotten separately: the claims come from it and its routes go on the
+// same mux.
+func TestAuthWiresClaimsAndMountsItsRoutes(t *testing.T) {
+	t.Parallel()
+
+	doc := gentest.LoadDocument(t, filepath.Join("testdata", fixture))
+	src := find(t, gentest.Run(t, servergo.New(), doc, opts()), "server.gen.go")
+
+	// Declared, not imported. A field typed as the auth package's own would make
+	// a project with no authentication depend on argon2 and OAuth — so the check
+	// is on the import block, not the file: the doc comment names the auth module
+	// on purpose, to say what satisfies the interface.
+	imports, ok := between(src, "import (", "\n)")
+	if !ok {
+		t.Fatal("no import block")
+	}
+	if strings.Contains(imports, "simonjanss/rig/auth") {
+		t.Errorf("the generated server must not import the auth module:\n%s", imports)
+	}
+	iface, ok := between(src, "type Authenticator interface {", "\n}")
+	if !ok {
+		t.Fatal("no Authenticator interface")
+	}
+	for _, method := range []string{"Claims(*http.Request) (tenancy.Claims, error)", "Mount(*http.ServeMux)"} {
+		if !strings.Contains(collapse(iface), collapse(method)) {
+			t.Errorf("Authenticator is missing %s:\n%s", method, iface)
+		}
+	}
+
+	register, ok := between(src, "func Register(", "\n}")
+	if !ok {
+		t.Fatal("no Register function")
+	}
+	for _, want := range []string{
+		"h.Server.GetClaims = h.Server.Auth.Claims",
+		"h.Server.Auth.Mount(mux)",
+		// Two answers to "who is calling" is a startup panic, not a precedence
+		// rule: whichever lost would go on looking wired.
+		`panic("api.Register: set Server.Auth or Server.GetClaims, not both")`,
+	} {
+		if !strings.Contains(collapse(register), collapse(want)) {
+			t.Errorf("Register is missing:\n%s", want)
+		}
+	}
+}
+
+func TestHandlerDecodesEachSlot(t *testing.T) {
+	t.Parallel()
+
+	doc := gentest.LoadDocument(t, filepath.Join("testdata", fixture))
+	src := find(t, gentest.Run(t, servergo.New(), doc, opts()), "lesson_routes.gen.go")
+
+	update, ok := between(src, "func handleUpdateLesson(", "\nfunc ")
+	if !ok {
+		update, _ = between(src, "func handleUpdateLesson(", "\n}\n\n")
+	}
+	for _, want := range []string{
+		`pathUUID(r, "id")`,
+		"var body model.LessonUpdateInput",
+		"decodeBody(r, &body)",
+		"NewRequest(claims, path, struct{}{}, body, rc)",
+	} {
+		if !strings.Contains(collapse(update), collapse(want)) {
+			t.Errorf("Update should %s:\n%s", want, update)
+		}
+	}
+
+	list, _ := between(src, "func handleListLessons(", "\nfunc ")
+	if !strings.Contains(collapse(list), `queryInt(r, "limit", 50)`) {
+		t.Errorf("a pagination parameter should carry its default:\n%s", list)
+	}
+	if !strings.Contains(collapse(list), "NewRequest(claims, struct{}{}, query, struct{}{}, rc)") {
+		t.Errorf("an empty slot should be struct{}{}:\n%s", list)
+	}
+}
+
+func TestResponseStatusComesFromTheDocument(t *testing.T) {
+	t.Parallel()
+
+	doc := gentest.LoadDocument(t, filepath.Join("testdata", fixture))
+	src := collapse(find(t, gentest.Run(t, servergo.New(), doc, opts()), "lesson_routes.gen.go"))
+
+	if !strings.Contains(src, "writeJSON(w, http.StatusCreated, out)") {
+		t.Error("Create answers 201")
+	}
+	// Delete returns nothing, so it writes a status and no body rather than a
+	// null the client has to ignore.
+	if !strings.Contains(src, "w.WriteHeader(http.StatusNoContent)") {
+		t.Error("Delete answers 204 with no body")
+	}
+}
+
+// An internal failure's detail is exactly the kind of thing that leaks a table
+// name or a connection string.
+func TestInternalErrorsAreNotDetailed(t *testing.T) {
+	t.Parallel()
+
+	doc := gentest.LoadDocument(t, filepath.Join("testdata", fixture))
+	src := find(t, gentest.Run(t, servergo.New(), doc, opts()), "server.gen.go")
+
+	mapper, ok := between(src, "func DefaultErrorMapper(", "\n}")
+	if !ok {
+		t.Fatal("no DefaultErrorMapper")
+	}
+	if !strings.Contains(mapper, "rigerr.CodeInternal") || !strings.Contains(mapper, `"something went wrong"`) {
+		t.Errorf("an internal failure should not describe itself to the client:\n%s", mapper)
+	}
+	if !strings.Contains(mapper, "rc.RequestID") {
+		t.Errorf("the response should carry the identifier that finds the detail in the logs:\n%s", mapper)
+	}
+}
+
+func TestEmitsOnlyGeneratedFiles(t *testing.T) {
+	t.Parallel()
+
+	doc := gentest.LoadDocument(t, filepath.Join("testdata", fixture))
+
+	for _, a := range gentest.Run(t, servergo.New(), doc, opts()) {
+		if a.Mode != gen.Overwrite {
+			t.Errorf("%s: routing is derived from the schema, so it is never hand-owned", a.Path)
+		}
+		if !strings.HasSuffix(a.Path, ".gen.go") {
+			t.Errorf("%s should be named .gen.go", a.Path)
+		}
+	}
+}
+
+func find(t *testing.T, artifacts []gen.Artifact, name string) string {
+	t.Helper()
+	for _, a := range artifacts {
+		if filepath.Base(a.Path) == name {
+			return string(a.Content)
+		}
+	}
+	t.Fatalf("no artifact named %s", name)
+	return ""
+}
+
+func collapse(s string) string { return strings.Join(strings.Fields(s), " ") }
+
+func between(s, start, end string) (string, bool) {
+	i := strings.Index(s, start)
+	if i < 0 {
+		return "", false
+	}
+	rest := s[i+len(start):]
+	j := strings.Index(rest, end)
+	if j < 0 {
+		return "", false
+	}
+	return rest[:j], true
+}
+
+// A public endpoint does not require the claims lookup to succeed. It is a
+// different helper rather than a flag, so which one a handler runs is readable
+// in the handler.
+func TestAPublicEndpointUsesTheOtherPrepare(t *testing.T) {
+	t.Parallel()
+
+	doc := gentest.LoadDocument(t, filepath.Join("testdata", fixture))
+
+	// Nothing in the fixture is public, so the helper is not emitted at all: a
+	// dead function in every generated server is clutter, and one nothing calls
+	// is a setting nobody chose.
+	plain := gentest.Run(t, servergo.New(), doc, opts())
+	if strings.Contains(find(t, plain, "server.gen.go"), "func preparePublic(") {
+		t.Error("preparePublic should not be emitted when no endpoint is public")
+	}
+
+	for i := range doc.API.Resources[0].Endpoints {
+		if doc.API.Resources[0].Endpoints[i].Name == "Get" {
+			doc.API.Resources[0].Endpoints[i].Public = true
+		}
+	}
+	artifacts := gentest.Run(t, servergo.New(), doc, opts())
+
+	routes := find(t, artifacts, "lesson_routes.gen.go")
+	get, _ := between(routes, "func handleGetLesson(", "\n}\n")
+	if !strings.Contains(get, "preparePublic(s, w, r)") {
+		t.Errorf("a public endpoint should not require a credential:\n%s", get)
+	}
+
+	list, _ := between(routes, "func handleListLessons(", "\n}\n")
+	if !strings.Contains(list, "prepare(s, w, r)") {
+		t.Errorf("everything else still does:\n%s", list)
+	}
+
+	// The lookup still runs: an application that resolves a tenant from the
+	// host gets one, and a caller who presents a credential is identified by
+	// it. Only the refusal is dropped.
+	server := find(t, artifacts, "server.gen.go")
+	body, ok := between(server, "func resolve(", "\n}\n")
+	if !ok {
+		t.Fatalf("no resolve helper:\n%s", server)
+	}
+	if !strings.Contains(body, "s.GetClaims(r)") {
+		t.Errorf("the claims lookup should still run:\n%s", body)
+	}
+	if !strings.Contains(collapse(body), "if required { fail(s, w, r, rc, err)") {
+		t.Errorf("only the refusal is conditional:\n%s", body)
+	}
+}
+
+// TestTheScopeParameterIsParsedAndAuthorized covers the handler's two jobs, in
+// order: refuse a value that means nothing, then refuse a widening the caller does
+// not hold. Both before any query runs.
+func TestTheScopeParameterIsParsedAndAuthorized(t *testing.T) {
+	t.Parallel()
+
+	doc := gentest.LoadDocument(t, filepath.Join("testdata", "ownerscope.ir.json"))
+	artifacts := gentest.Run(t, servergo.New(), doc, opts())
+	src := collapse(find(t, artifacts, "memo_routes.gen.go"))
+
+	for _, want := range []string{
+		`scopeParam, err := tenancy.ParseScope(queryString(r, "scope", "own"))`,
+		`if err := tenancy.RequireScope(claims, scopeParam, "memo.read.all"); err != nil { fail(s, w, r, rc, err) return }`,
+		`query.Scope = scopeParam`,
+	} {
+		if !strings.Contains(src, want) {
+			t.Errorf("missing:\n%s", want)
+		}
+	}
+
+	// It reaches the reads and nothing else. A write on an owner-scoped table has
+	// no widening at all.
+	if n := strings.Count(src, "tenancy.RequireScope("); n != 4 {
+		t.Errorf("RequireScope appears %d times, want 4 (get, list, search, list-deleted)", n)
+	}
+}
+
+// TestTheWideCheckRunsBeforeTheBody guards the ordering. A caller who may not see
+// this much should not have its JSON diagnosed first, and a refusal should cost
+// nothing but the claims lookup.
+func TestTheWideCheckRunsBeforeTheBody(t *testing.T) {
+	t.Parallel()
+
+	doc := gentest.LoadDocument(t, filepath.Join("testdata", "ownerscope.ir.json"))
+	artifacts := gentest.Run(t, servergo.New(), doc, opts())
+	src := find(t, artifacts, "memo_routes.gen.go")
+
+	body, ok := between(src, "func handleSearchMemos(", "\n}\n")
+	if !ok {
+		t.Fatal("no Search handler")
+	}
+	scope := strings.Index(body, "tenancy.RequireScope(")
+	decode := strings.Index(body, "decodeBody(")
+	if scope < 0 || decode < 0 {
+		t.Fatalf("scope=%d decode=%d", scope, decode)
+	}
+	if scope > decode {
+		t.Error("the scope check runs after the body is decoded")
+	}
+}
+
+// TestOwnerScopedCodeCompiles builds the whole stack for a table that asked to be
+// read narrowly. The parameter's type crosses three generated packages — a query
+// struct in the API layer, a helper beside it, a read option in the store — and a
+// mismatch between any two of them is a compile error rather than a golden diff.
+func TestOwnerScopedCodeCompiles(t *testing.T) {
+	t.Parallel()
+
+	doc := gentest.LoadDocument(t, filepath.Join("testdata", "ownerscope.ir.json"))
+
+	api := gentest.Run(t, servicego.New(), doc, gen.Options{Raw: map[string]any{
+		"package": "api", "model_import": "rigtest/model", "store_import": "rigtest/store",
+	}})
+	api = append(api, gentest.Run(t, servergo.New(), doc, opts())...)
+
+	gentest.MustCompileAll(t,
+		gentest.Package{
+			Dir: "model",
+			Artifacts: gentest.Run(t, modelgo.New(), doc,
+				gen.Options{Raw: map[string]any{"package": "model"}}),
+		},
+		gentest.Package{
+			Dir: "store",
+			Artifacts: gentest.Run(t, persistgo.New(), doc, gen.Options{Raw: map[string]any{
+				"package": "store", "model_import": "rigtest/model",
+			}}),
+		},
+		gentest.Package{Dir: "api", Artifacts: api},
+	)
+}

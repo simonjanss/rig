@@ -110,6 +110,11 @@ var (
 		"A configuration file names a table that no longer exists.",
 		"Delete the file. `rig sync` reports it but will not remove it: it may hold endpoint definitions worth keeping.")
 
+	CodeForeignTable = newCode("RIG3107", SeverityError,
+		"A configuration file names a table another module owns.",
+		"Delete the file, or add the table to `auth.expose` in rig.yaml to have rig "+
+			"generate a model and a repository for it after all.")
+
 	CodeUnknownEnumValue = newCode("RIG3103", SeverityError,
 		"The configuration names an enum label that no longer exists.",
 		"Remove the entry, or run `rig sync --prune`.")
@@ -157,6 +162,10 @@ var (
 	CodeOperationUnsupported = newCode("RIG3241", SeverityError,
 		"An operation was requested that the table cannot support.",
 		"")
+
+	CodeUnexposedConflict = newCode("RIG3250", SeverityError,
+		"A table that is not exposed also asks for something only the API layer provides.",
+		"Remove `expose: false`, or remove the endpoints and live-sync configuration it cannot serve.")
 )
 
 // Expanding CRUD, filters, and defaults: RIG4xxx.
@@ -267,7 +276,7 @@ var (
 
 	CodeCascadeDelete = newCode("RIG6040", SeverityError,
 		"A foreign key declares ON DELETE CASCADE.",
-		"Delete through the service layer instead, so hooks, audit entries and snapshots are not bypassed.")
+		"Delete through the service layer instead, so hooks and snapshots are not bypassed.")
 
 	CodeMigrationFilename = newCode("RIG6050", SeverityError,
 		"A migration file is not named NNNNN_snake_case.sql.",

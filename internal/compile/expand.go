@@ -3,6 +3,7 @@ package compile
 import (
 	"slices"
 	"strconv"
+	"strings"
 
 	"github.com/simonjanss/rig/internal/diag"
 	"github.com/simonjanss/rig/internal/naming"
@@ -75,8 +76,18 @@ func Expand(api ir.API, opt ExpandOptions) (ir.API, diag.List) {
 		out.Objects = append(out.Objects, paginationObject(wire))
 	}
 
+	// Which resources a relation may point at. A filter is the wire shape, so a
+	// relation to a table the API does not expose is not one a client gets to
+	// ask about.
+	exposed := make(map[string]bool, len(api.Resources))
 	for _, res := range api.Resources {
-		expanded, objs, d := expandResource(res, n, opt)
+		if !res.Unexposed {
+			exposed[res.Name] = true
+		}
+	}
+
+	for _, res := range api.Resources {
+		expanded, objs, d := expandResource(res, n, opt, exposed)
 		diags.Append(d)
 
 		for _, o := range objs {
@@ -92,7 +103,7 @@ func Expand(api ir.API, opt ExpandOptions) (ir.API, diag.List) {
 
 // expandResource returns the resource with its generated endpoints, plus the
 // objects those endpoints refer to.
-func expandResource(res ir.Resource, n *naming.Namer, opt ExpandOptions) (ir.Resource, []ir.Object, diag.List) {
+func expandResource(res ir.Resource, n *naming.Namer, opt ExpandOptions, exposed map[string]bool) (ir.Resource, []ir.Object, diag.List) {
 	var diags diag.List
 	wire := func(s string) string { return n.JSON(s) }
 
@@ -104,6 +115,25 @@ func expandResource(res ir.Resource, n *naming.Namer, opt ExpandOptions) (ir.Res
 	var objects []ir.Object
 
 	readable := readableFields(res)
+
+	// The filter is not only Search's request body: it is how anything selects
+	// rows, so the model declares it and the repository takes it whether or not
+	// the API exposes a search. One shape, so what a client may ask for and what
+	// a repository can answer cannot come apart.
+	//
+	// An unexposed table gets one too — it still has a repository, and that
+	// repository still lists. Nothing routes to it, so nothing in the document
+	// references it, which is what keeps account_token out of the OpenAPI.
+	if res.Storage != nil {
+		objects = append(objects, filterObjects(res, readable, wire, exposed)...)
+	}
+
+	// An unexposed table has a model and a repository and no API at all, so
+	// there is no wire shape to name and nothing to route. Generating them
+	// anyway would put account_token in the OpenAPI document.
+	if res.Unexposed {
+		return out, objects, diags
+	}
 	objects = append(objects, ir.Object{
 		Name:        res.Name,
 		Description: res.Description,
@@ -111,8 +141,11 @@ func expandResource(res ir.Resource, n *naming.Namer, opt ExpandOptions) (ir.Res
 		Fields:      readable,
 	})
 
+	// The history is answered with the same envelope a list is, rather than a
+	// second shape for the same thing, so a resource with a history needs it
+	// even when nothing else lists.
 	listResponse := res.Name + "ListResponse"
-	if res.Supports(ir.OpList) || res.Supports(ir.OpSearch) {
+	if res.Supports(ir.OpList) || res.Supports(ir.OpSearch) || supportsVersions(res) {
 		objects = append(objects, ir.Object{
 			Name:        listResponse,
 			Description: "A page of " + res.Plural + ".",
@@ -133,24 +166,31 @@ func expandResource(res ir.Resource, n *naming.Namer, opt ExpandOptions) (ir.Res
 		})
 	}
 
-	if res.Supports(ir.OpSearch) {
-		objects = append(objects, filterObjects(res, readable, wire)...)
-	}
-
 	// Each generated endpoint is skipped when one of the same name already
 	// exists, so a hand-written endpoint always wins.
 	for _, gen := range []struct {
 		op    string
+		when  bool
 		build func() ir.Endpoint
 	}{
-		{ir.OpCreate, func() ir.Endpoint { return createEndpoint(res) }},
-		{ir.OpGet, func() ir.Endpoint { return getEndpoint(res, wire) }},
-		{ir.OpList, func() ir.Endpoint { return listEndpoint(res, listResponse, wire) }},
-		{ir.OpSearch, func() ir.Endpoint { return searchEndpoint(res, listResponse, opt.SearchMethod, wire) }},
-		{ir.OpUpdate, func() ir.Endpoint { return updateEndpoint(res, wire) }},
-		{ir.OpDelete, func() ir.Endpoint { return deleteEndpoint(res, wire) }},
+		{ir.OpCreate, res.Supports(ir.OpCreate), func() ir.Endpoint { return createEndpoint(res) }},
+		{ir.OpGet, res.Supports(ir.OpGet), func() ir.Endpoint { return getEndpoint(res, wire) }},
+		{ir.OpList, res.Supports(ir.OpList), func() ir.Endpoint { return listEndpoint(res, listResponse, wire) }},
+		{ir.OpSearch, res.Supports(ir.OpSearch), func() ir.Endpoint {
+			return searchEndpoint(res, listResponse, opt.SearchMethod, wire)
+		}},
+		{ir.OpUpdate, res.Supports(ir.OpUpdate), func() ir.Endpoint { return updateEndpoint(res, wire) }},
+		{ir.OpDelete, res.Supports(ir.OpDelete), func() ir.Endpoint { return deleteEndpoint(res, wire) }},
+		{ir.OpListDeleted, supportsListDeleted(res), func() ir.Endpoint {
+			return listDeletedEndpoint(res, listResponse, wire)
+		}},
+		{ir.OpRestore, supportsRestore(res), func() ir.Endpoint { return restoreEndpoint(res, wire) }},
+		{ir.OpVersions, supportsVersions(res), func() ir.Endpoint {
+			return versionsEndpoint(res, listResponse, wire)
+		}},
+		{ir.OpRevert, supportsRevert(res), func() ir.Endpoint { return revertEndpoint(res, wire) }},
 	} {
-		if !res.Supports(gen.op) {
+		if !gen.when {
 			continue
 		}
 		if existing := out.Endpoint(gen.op); existing != nil {
@@ -161,6 +201,28 @@ func expandResource(res ir.Resource, n *naming.Namer, opt ExpandOptions) (ir.Res
 		}
 		out.Endpoints = append(out.Endpoints, gen.build())
 	}
+
+	// The table's public list is resolved here, once, over everything the
+	// resource ended up with. A custom endpoint can also say so in its own
+	// block — that is already on the endpoint by now — and this is the other
+	// end of the same setting rather than a second one.
+	for _, name := range res.Public {
+		ep := out.Endpoint(name)
+		if ep == nil {
+			// A name matching nothing reads as "this is open" while meaning
+			// nothing at all, which is the worst way for a typo in a security
+			// setting to fail.
+			diags.Add(diag.CodeInvalidEndpoint, diag.At(res.Name+".public"),
+				"%s has no operation or endpoint named %q to make public", res.Name, name)
+			continue
+		}
+		ep.Public = true
+	}
+
+	// After the public list, because a public read gets no scope parameter: there
+	// is no caller to own anything, so "own" has no meaning and offering a
+	// parameter nothing can authorize would just be a 403 generator.
+	addScopeParam(&out)
 
 	return out, objects, diags
 }
@@ -191,6 +253,60 @@ func writableFields(res ir.Resource, op string) []ir.Field {
 		out = append(out, f.Field)
 	}
 	return out
+}
+
+// addScopeParam gives every generated read of an owner-scoped resource the
+// parameter that widens it.
+//
+// Only the generated reads. A custom endpoint decides for itself what it answers
+// with — that is why somebody wrote it — and quietly adding a parameter its
+// handler ignores would describe behaviour the code does not have.
+//
+// Writes get nothing. An owner-scoped table refuses to change a row the caller
+// did not create, full stop, and there is no parameter to say otherwise: every
+// generated write reads the row first, so the narrow read *is* the write rule. A
+// table that needs an integration to change rows across the tenant should not
+// declare itself owner-scoped.
+func addScopeParam(res *ir.Resource) {
+	if !res.Storage.IsOwnerScoped() {
+		return
+	}
+	wide := wideReadPermission(res.Storage.Table)
+
+	for i := range res.Endpoints {
+		ep := &res.Endpoints[i]
+		if ep.Impl.Kind != ir.EndpointGenerated || ep.Public {
+			continue
+		}
+		switch ep.Name {
+		case ir.OpGet, ir.OpList, ir.OpSearch, ir.OpListDeleted, ir.OpVersions:
+		default:
+			continue
+		}
+
+		ep.WidePermission = wide
+		ep.Request.QueryParams = append(ep.Request.QueryParams, scopeParam(res, wide))
+	}
+}
+
+// scopeParam is the reserved parameter, spelled the same on every endpoint of
+// every resource.
+//
+// Its wire name is not run through the project's naming rules the way a field's
+// is. It is one lowercase word in every casing anybody configures, and a
+// parameter the framework owns should not be something a client has to look up
+// per project.
+func scopeParam(res *ir.Resource, wide string) ir.Field {
+	return ir.Field{
+		Name: "Scope", Wire: ir.ScopeParam,
+		Type: ir.TypeString, TypeKind: ir.TypeKindPrimitive, GoType: "tenancy.Scope",
+		Default: accessScopeOwn,
+		Description: "How wide to read: " + accessScopeOwn + " for the " +
+			strings.ToLower(res.Plural) + " the caller created, which is the default, or " +
+			accessScopeAll + " for every one in the tenant. Asking for " + accessScopeAll +
+			" requires the " + wide + " permission and is refused without it, rather than " +
+			"quietly answering with fewer rows.",
+	}
 }
 
 func idParam(res ir.Resource, wire func(string) string) ir.Field {
@@ -343,6 +459,164 @@ func updateEndpoint(res ir.Resource, wire func(string) string) ir.Endpoint {
 		Impl: ir.EndpointImpl{
 			Kind: ir.EndpointGenerated, RepoMethod: "Update",
 			ServiceMethod: ir.OpUpdate, HandlerName: ir.OpUpdate + res.Name,
+		},
+	}
+}
+
+// supportsListDeleted reports whether the trash is exposed.
+//
+// It follows List rather than Delete: a deletion can be made by service code
+// that no route offers, so what decides here is whether listing rows is
+// something this resource does at all.
+func supportsListDeleted(res ir.Resource) bool {
+	return res.Storage.IsSoftDeletable() && res.Supports(ir.OpList)
+}
+
+// listDeletedEndpoint reads the rows that were retired.
+func listDeletedEndpoint(res ir.Resource, response string, wire func(string) string) ir.Endpoint {
+	window := res.Storage.SoftDelete.RestoreWindowDays
+
+	return ir.Endpoint{
+		Name:    ir.OpListDeleted,
+		Method:  "GET",
+		Path:    "/_deleted",
+		Summary: "List retired " + res.Plural + ".",
+		Description: "A deletion stamps the row rather than removing it, so this is what " +
+			"was deleted and can still be brought back. Only rows inside the " +
+			strconv.Itoa(window) + "-day restore window appear: past it a row is gone as far " +
+			"as anyone is concerned, so it is not in the trash either.",
+		Request: ir.EndpointRequest{QueryParams: paginationParams(wire)},
+		Responses: []ir.EndpointResponse{{
+			StatusCode: 200, ContentType: "application/json",
+			BodyObject: response, Description: "A page of retired " + res.Plural + ".",
+		}},
+		Errors: []int{400, 401, 403, 429, 500},
+		Impl: ir.EndpointImpl{
+			Kind: ir.EndpointGenerated, RepoMethod: "ListDeleted",
+			ServiceMethod: ir.OpListDeleted, HandlerName: ir.OpListDeleted + res.Plural,
+		},
+	}
+}
+
+// supportsRestore reports whether a retired row can be brought back.
+//
+// It follows Update: restoring is a write, and a resource that does not expose
+// writes must not gain one through the back door. A resource that exposes
+// Delete without Update is one where retiring a row is meant to be final.
+func supportsRestore(res ir.Resource) bool {
+	return res.Storage.IsSoftDeletable() && res.Supports(ir.OpUpdate)
+}
+
+// restoreEndpoint brings a retired row back.
+func restoreEndpoint(res ir.Resource, wire func(string) string) ir.Endpoint {
+	window := res.Storage.SoftDelete.RestoreWindowDays
+
+	return ir.Endpoint{
+		Name:    ir.OpRestore,
+		Method:  "POST",
+		Path:    "/{id}/_restore",
+		Summary: "Bring a retired " + res.Name + " back.",
+		Description: "The deletion stamp is cleared and the row appears in reads again. " +
+			"It works for " + strconv.Itoa(window) + " days after the deletion; past that " +
+			"the row is no longer eligible and this answers 409.\n\n" +
+			"Restoring a row that was never deleted is not an error. It is already in " +
+			"the state the caller asked for, and answering otherwise would make a " +
+			"retry of a request whose response went missing look like a failure.\n\n" +
+			"The request carries no fields. What to do when the world has moved on " +
+			"while the row was retired — a unique value taken by something created " +
+			"since — is the application's decision, and it is made in the restore " +
+			"hook: refuse, or change the row so that it fits.\n\n" +
+			"Every rule then runs against whatever the hook settled on, not only the " +
+			"ones for fields it touched. The row was not live, so nothing about it has " +
+			"been checked against the world it is returning to.",
+		Request: ir.EndpointRequest{PathParams: []ir.Field{idParam(res, wire)}},
+		Responses: []ir.EndpointResponse{{
+			StatusCode: 200, ContentType: "application/json",
+			BodyObject: res.Name, Description: "The restored " + res.Name + ".",
+		}},
+		Errors: []int{400, 401, 403, 404, 409, 422, 429, 500},
+		Impl: ir.EndpointImpl{
+			Kind: ir.EndpointGenerated, RepoMethod: "Restore",
+			ServiceMethod: ir.OpRestore, HandlerName: ir.OpRestore + res.Name,
+		},
+	}
+}
+
+// supportsVersions reports whether the history is exposed.
+//
+// A table that keeps its previous versions can be asked for them — but only
+// where the row itself can be read. Offering the history of something a client
+// cannot fetch would be an odd door to leave open.
+func supportsVersions(res ir.Resource) bool {
+	return res.Storage.IsSnapshotable() && res.Supports(ir.OpGet)
+}
+
+// supportsRevert reports whether a previous version can be put back.
+//
+// Reverting is an update — it goes through the same path, snapshots what it
+// replaces, and runs the same rules — so a resource that does not expose
+// updates does not expose this either. Otherwise it would be a second way to
+// write a row, with a different set of permissions and the same effect.
+func supportsRevert(res ir.Resource) bool {
+	return supportsVersions(res) && res.Supports(ir.OpUpdate)
+}
+
+// versionsEndpoint reads a row's history.
+func versionsEndpoint(res ir.Resource, response string, wire func(string) string) ir.Endpoint {
+	return ir.Endpoint{
+		Name:    ir.OpVersions,
+		Method:  "GET",
+		Path:    "/{id}/_versions",
+		Summary: "List a " + res.Name + "'s previous versions.",
+		Description: "Every update copies the row as it was before writing the change, so " +
+			"this is the row's history: newest first, and never the live row itself.\n\n" +
+			"These do not appear in ordinary reads. A version answers Get by its own " +
+			"identifier, but it is filtered out of List and Search, so history does not " +
+			"turn up in a listing.",
+		Request: ir.EndpointRequest{PathParams: []ir.Field{idParam(res, wire)}},
+		Responses: []ir.EndpointResponse{{
+			StatusCode: 200, ContentType: "application/json",
+			BodyObject: response, Description: "The versions of the " + res.Name + ", newest first.",
+		}},
+		Errors: []int{400, 401, 403, 404, 429, 500},
+		Impl: ir.EndpointImpl{
+			Kind: ir.EndpointGenerated, RepoMethod: "ListSnapshots",
+			ServiceMethod: ir.OpVersions, HandlerName: ir.OpVersions + "Of" + res.Name,
+		},
+	}
+}
+
+// revertEndpoint puts a previous version back.
+func revertEndpoint(res ir.Resource, wire func(string) string) ir.Endpoint {
+	return ir.Endpoint{
+		Name:    ir.OpRevert,
+		Method:  "POST",
+		Path:    "/{id}/_revert",
+		Summary: "Put a " + res.Name + " back to one of its previous versions.",
+		Description: "The version is replayed through the ordinary update path rather than " +
+			"written over the row, so the state being replaced is itself snapshotted " +
+			"first and every rule an update runs still runs. Reverting is undoable, and " +
+			"a value that would be refused now is still refused.",
+		Request: ir.EndpointRequest{
+			ContentType: "application/json",
+			PathParams:  []ir.Field{idParam(res, wire)},
+			BodyParams: []ir.Field{{
+				Name: "VersionID", Wire: wire("VersionID"),
+				Type: ir.TypeUUID, TypeKind: ir.TypeKindPrimitive, GoType: "uuid.UUID",
+				Description: "The version to put back, from the " + res.Name + "'s history.",
+			}},
+		},
+		Responses: []ir.EndpointResponse{{
+			StatusCode: 200, ContentType: "application/json",
+			BodyObject: res.Name, Description: "The " + res.Name + ", as of the version replayed.",
+		}},
+		// 404 covers a version that is not one of this row's, deliberately: a
+		// version identifier is a row identifier, and saying "that exists but
+		// is not yours" is telling the caller about somebody else's row.
+		Errors: []int{400, 401, 403, 404, 409, 422, 429, 500},
+		Impl: ir.EndpointImpl{
+			Kind: ir.EndpointGenerated, RepoMethod: "Revert",
+			ServiceMethod: ir.OpRevert, HandlerName: ir.OpRevert + res.Name,
 		},
 	}
 }

@@ -1,0 +1,11 @@
+# yaml-language-server: $schema=../../.rig/table.schema.json
+table: fixture
+comment: One match between two squads.
+
+columns:
+  home_team_id:
+    comment: The squad playing at home.
+  away_team_id:
+    comment: The squad playing away.
+  kickoff_at:
+    comment: When the match starts.

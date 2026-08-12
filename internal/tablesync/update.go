@@ -178,6 +178,14 @@ func syncEnums(
 		notes = append(notes, fmt.Sprintf("added %s values %s", e.Name, strings.Join(labels, ", ")))
 	}
 
+	if opt.Prune {
+		removed, err := pruneEnumValues(root, used, loaded)
+		if err != nil {
+			return nil, err
+		}
+		notes = append(notes, removed...)
+	}
+
 	if len(missing) > 0 {
 		var snippet strings.Builder
 		for _, e := range missing {
@@ -192,6 +200,48 @@ func syncEnums(
 			added = append(added, e.Name)
 		}
 		notes = append(notes, fmt.Sprintf("added enum %s", strings.Join(added, ", ")))
+	}
+
+	return notes, nil
+}
+
+// pruneEnumValues drops labels the database no longer has.
+//
+// The mirror of what pruning does to a dropped column, and needed for the same
+// reason: validation refuses a configuration that names a label nothing can
+// hold, so without this a renamed label leaves a project that `rig sync
+// --prune` cannot fix and somebody has to edit by hand.
+func pruneEnumValues(root *ast.MappingNode, used []*ir.PgEnum, loaded *tableconf.Loaded) ([]string, error) {
+	var notes []string
+
+	for _, e := range used {
+		configured, ok := loaded.File.Enums[e.Name]
+		if !ok {
+			continue
+		}
+
+		var dead []string
+		for label := range configured.Values {
+			if !e.HasValue(label) {
+				dead = append(dead, label)
+			}
+		}
+		if len(dead) == 0 {
+			continue
+		}
+		slices.Sort(dead)
+
+		values, err := findValue(root, "enums", e.Name)
+		if err != nil || values == nil {
+			continue
+		}
+		valuesNode, ok := values.(*ast.MappingNode)
+		if !ok {
+			continue
+		}
+		removeUnder(valuesNode, "values", dead)
+
+		notes = append(notes, fmt.Sprintf("removed %s values %s", e.Name, strings.Join(dead, ", ")))
 	}
 
 	return notes, nil
@@ -226,20 +276,33 @@ func appendUnderNode(parent ast.Node, key, snippet string) error {
 		}
 	}
 
-	target := findPair(m, key)
-	if target == nil {
-		pairs, err := parseSnippet("  " + key + ":\n" + indentSnippet(snippet, "  "))
-		if err != nil {
-			return err
-		}
-		m.Values = append(m.Values, pairs...)
-		return nil
+	if target := findPair(m, key); target != nil {
+		return appendToPair(target, snippet)
 	}
-	return appendToPair(target, indentSnippet(snippet, "  "))
+
+	// The key itself is new, so it goes in beside whatever else is in this
+	// mapping, and its entries one level further in.
+	indent := columnOf(m) - 1
+	pairs, err := parseSnippet(strings.Repeat(" ", indent) + key + ":\n" + reindent(snippet, indent+2))
+	if err != nil {
+		return err
+	}
+	m.Values = append(m.Values, pairs...)
+	return nil
 }
 
 func appendToPair(pair *ast.MappingValueNode, snippet string) error {
-	pairs, err := parseSnippet(snippet)
+	// Entries sit one level in from the key they hang under, and the printer
+	// lays a node out at the column its token carries. Working the indent out
+	// from the key is the only thing that holds at every depth: a fixed one is
+	// how an added enum label came out as a sibling of `values:` rather than
+	// underneath it.
+	indent := 2
+	if tok := pair.Key.GetToken(); tok != nil && tok.Position != nil {
+		indent = tok.Position.Column + 1
+	}
+
+	pairs, err := parseSnippet(reindent(snippet, indent))
 	if err != nil {
 		return err
 	}
@@ -256,6 +319,52 @@ func appendToPair(pair *ast.MappingValueNode, snippet string) error {
 		return fmt.Errorf("cannot add entries to a %T", pair.Value)
 	}
 	return nil
+}
+
+// columnOf is the column a mapping's keys sit at, 1-based.
+func columnOf(m *ast.MappingNode) int {
+	for _, pair := range m.Values {
+		if pair.Key == nil {
+			continue
+		}
+		if tok := pair.Key.GetToken(); tok != nil && tok.Position != nil {
+			return tok.Position.Column
+		}
+	}
+	return 1
+}
+
+// reindent re-lays a snippet at a given indentation, keeping its own structure.
+//
+// A snippet is rendered before anybody knows how deep it will be appended, and
+// the printer positions a node by the column its token carries — so the
+// snippet has to be parsed at the depth it will appear at, not at the depth it
+// was written at.
+func reindent(snippet string, indent int) string {
+	lines := strings.Split(strings.TrimRight(snippet, "\n"), "\n")
+
+	base := -1
+	for _, l := range lines {
+		if strings.TrimSpace(l) == "" {
+			continue
+		}
+		if n := len(l) - len(strings.TrimLeft(l, " ")); base < 0 || n < base {
+			base = n
+		}
+	}
+	if base < 0 {
+		return snippet
+	}
+
+	pad := strings.Repeat(" ", indent)
+	for i, l := range lines {
+		if strings.TrimSpace(l) == "" {
+			lines[i] = ""
+			continue
+		}
+		lines[i] = pad + l[base:]
+	}
+	return strings.Join(lines, "\n") + "\n"
 }
 
 // removeUnder deletes named entries from a mapping.
@@ -315,16 +424,6 @@ func keyOf(pair *ast.MappingValueNode) string {
 		return tok.Value
 	}
 	return ""
-}
-
-func indentSnippet(snippet, indent string) string {
-	lines := strings.Split(strings.TrimRight(snippet, "\n"), "\n")
-	for i, l := range lines {
-		if l != "" {
-			lines[i] = indent + l
-		}
-	}
-	return strings.Join(lines, "\n") + "\n"
 }
 
 func names(cols []*ir.Column) string {

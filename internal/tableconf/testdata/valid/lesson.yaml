@@ -7,7 +7,6 @@ comment: A single scheduled match slot for one fixture.
 operations: [Create, Get, List, Search, Update, Delete]
 order_by: [-starts_at, id]
 restore_window_days: 30
-audit: true
 
 columns:
   title:

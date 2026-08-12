@@ -51,6 +51,18 @@ enums:
     name: LessonVersionType
     description: Whether a row is the live lesson or a snapshot of a previous version.
 
+electric:
+  enabled: true
+  auth: tenant
+  params:
+    matchday:
+      type: Int
+      optional: true
+      description: Restrict the shape to one matchday.
+    status:
+      type: String
+      description: Only lessons in this state.
+
 endpoints:
   - name: Publish
     method: POST

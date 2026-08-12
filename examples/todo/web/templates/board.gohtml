@@ -1,0 +1,157 @@
+{{define "board"}}
+{{/*
+  One fragment for the whole board: the live rows, the trash, and the history
+  panel. Every action returns this, so a click never leaves half the page
+  describing a state that is no longer true — deleting a row has to empty it
+  from one list and add it to another, and this way that is one response.
+
+  Which row's history is open lives in a single hidden field that every action
+  includes, so acting on something does not close the panel you were reading.
+*/}}
+<input type="hidden" id="open-state" name="open" value="{{with .Open}}{{.ID}}{{end}}">
+<input type="hidden" id="trash-state" name="trash" value="{{if .TrashOpen}}1{{end}}">
+
+{{if .Flash}}<p class="flash {{.Level}}">{{.Flash}}</p>{{end}}
+
+<form class="new" hx-post="/ui/todos" hx-target="#board" hx-swap="innerHTML"
+      hx-include="#open-state, #trash-state">
+  <input type="text" name="title" placeholder="What needs doing?" required autocomplete="off">
+  <select name="priority">
+    {{range priorities}}<option value="{{.}}">{{.}}</option>{{end}}
+  </select>
+  <button type="submit">Add</button>
+</form>
+
+<div class="cols {{if .Open}}split{{end}}">
+  <div>
+    <h2>Live</h2>
+    <ul>
+      {{range .Live}}{{template "row" .}}{{end}}
+      {{if not .Live}}<li class="empty">Nothing to do.</li>{{end}}
+    </ul>
+
+    {{/*
+      The trash is folded away to start with, and expanding it is a request like
+      any other: the server decides what the page looks like, so a swap cannot
+      lose the state the way a details element left to the browser would.
+    */}}
+    <button class="disclose" hx-get="/ui/board" hx-target="#board" hx-swap="innerHTML"
+            hx-include="#open-state" hx-vals='{"trash": "{{if .TrashOpen}}{{else}}1{{end}}"}'
+            aria-expanded="{{if .TrashOpen}}true{{else}}false{{end}}">
+      <span class="chevron">{{if .TrashOpen}}▾{{else}}▸{{end}}</span>
+      <span class="label">Trash</span>
+      <span class="count">{{len .Trash}}</span>
+      {{if .TrashOpen}}<span class="muted">— deleted, still restorable</span>{{end}}
+    </button>
+
+    {{if .TrashOpen}}
+    <ul>
+      {{range .Trash}}{{template "trashRow" .}}{{end}}
+      {{if not .Trash}}<li class="empty">Empty — nothing has been deleted.</li>{{end}}
+    </ul>
+    {{end}}
+  </div>
+
+  {{with .Open}}
+  <div class="panel">
+    <div class="panel-head">
+      <h2>History</h2>
+      <a class="link" href="/">Close</a>
+    </div>
+    <p class="muted lede-sm">
+      Every update copies the row as it was before writing the change, so this is
+      {{.Title}} all the way back. Reverting undoes the change listed beside an
+      entry — and because a revert is itself an update, it can be reverted too.
+    </p>
+
+    <ol class="timeline">
+      {{range $.Timeline}}
+      <li class="{{if .Current}}now{{end}}">
+        <div class="stamp">
+          <time title="{{full .When}}">{{ago .When}}</time>
+          {{if .Current}}<span class="badge">current</span>{{end}}
+          {{if .First}}<span class="badge">as created</span>{{end}}
+        </div>
+
+        <div class="state">
+          <span class="title">{{.Row.Title}}</span>
+          <span class="muted">
+            {{.Row.Priority}}{{if .Row.IsDone}} · done{{end}}{{with .Row.Notes}} · {{.}}{{end}}
+          </span>
+        </div>
+
+        {{/*
+          What reverting to this entry would put back, which is the same thing as
+          what the update after it changed. An entry with nothing listed is where
+          the row started.
+        */}}
+        {{if .Undoes}}
+        <ul class="changes">
+          {{range .Undoes}}
+          <li>
+            <span class="field">{{.Field}}</span>
+            <span class="was">{{.From}}</span>
+            <span class="arrow">→</span>
+            <span class="now-val">{{.To}}</span>
+          </li>
+          {{end}}
+        </ul>
+        {{end}}
+
+        {{if not .Current}}
+        <form hx-post="/ui/todos/{{$.Open.ID}}/revert" hx-target="#board" hx-swap="innerHTML"
+              hx-include="#open-state, #trash-state">
+          <input type="hidden" name="versionId" value="{{.Row.ID}}">
+          <button type="submit">Revert to this</button>
+        </form>
+        {{end}}
+      </li>
+      {{end}}
+    </ol>
+
+    {{if eq (len $.Timeline) 1}}
+    <p class="empty">Nothing has changed it yet — edit the title and this fills up.</p>
+    {{end}}
+  </div>
+  {{end}}
+</div>
+{{end}}
+
+{{define "row"}}
+<li class="{{if .IsDone}}done{{end}}">
+  {{/*
+    Renaming is what creates a version, so the field is the demonstration. It
+    saves on change rather than behind a button, which is also why the version
+    history fills up as fast as it does.
+  */}}
+  <input type="text" name="title" value="{{.Title}}" class="grow" aria-label="Title"
+         hx-post="/ui/todos/{{.ID}}/title" hx-trigger="change" hx-target="#board"
+         hx-swap="innerHTML" hx-include="#open-state, #trash-state">
+  <span class="muted">{{.Priority}}{{if .UpdatedAt}} · edited {{when .UpdatedAt}}{{end}}</span>
+
+  {{if not .IsDone}}
+  <form hx-post="/ui/todos/{{.ID}}/complete" hx-target="#board" hx-swap="innerHTML"
+        hx-include="#open-state, #trash-state">
+    <button type="submit">Done</button>
+  </form>
+  {{end}}
+
+  <a class="link" href="/?open={{.ID}}">History</a>
+
+  <form hx-post="/ui/todos/{{.ID}}/delete" hx-target="#board" hx-swap="innerHTML"
+        hx-include="#open-state, #trash-state">
+    <button type="submit">Delete</button>
+  </form>
+</li>
+{{end}}
+
+{{define "trashRow"}}
+<li>
+  <span class="grow"><span class="title">{{.Title}}</span></span>
+  <span class="muted">deleted {{when .DeletedAt}}</span>
+  <form hx-post="/ui/todos/{{.ID}}/restore" hx-target="#board" hx-swap="innerHTML"
+        hx-include="#open-state, #trash-state">
+    <button type="submit">Restore</button>
+  </form>
+</li>
+{{end}}

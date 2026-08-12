@@ -17,6 +17,7 @@ type Config struct {
 	OpenAPI    OpenAPI     `yaml:"openapi,omitempty" json:"openapi,omitempty" jsonschema_description:"OpenAPI document settings."`
 	Database   Database    `yaml:"database,omitempty" json:"database,omitempty" jsonschema_description:"Where to run migrations and read the schema from."`
 	Migrations Migrations  `yaml:"migrations,omitempty" json:"migrations,omitempty" jsonschema_description:"Migration file location."`
+	Auth       Auth        `yaml:"auth,omitempty" json:"auth,omitempty" jsonschema_description:"How the authentication foundation's tables are treated."`
 	Naming     Naming      `yaml:"naming,omitempty" json:"naming,omitempty" jsonschema_description:"How database names become Go and JSON names."`
 	Validate   Validate    `yaml:"validate,omitempty" json:"validate,omitempty" jsonschema_description:"Severity of each configurable convention rule."`
 
@@ -29,6 +30,38 @@ type ProjectInfo struct {
 	// Module is the Go module path of the generated application. Generated
 	// imports are built from it.
 	Module string `yaml:"module" json:"module" jsonschema_description:"Go module path of the application, used to build generated import paths."`
+}
+
+// Auth says how the authentication foundation's tables are treated.
+//
+// The default needs no configuration and is what almost every project wants:
+// rig generates nothing for the tables `rig setup-project` created, because
+// their Go types, their stores and their endpoints already exist in the
+// rig/auth module. A project is recognised as having them by its own migration
+// files, so a table called `account` that nobody scaffolded is an ordinary
+// table and keeps getting a model and a repository like any other.
+type Auth struct {
+	// Expose names foundation tables to generate for anyway.
+	//
+	// It adds the model, the repository and whatever API the table's
+	// configuration asks for — for an administration screen listing the people
+	// in a tenant, most often. `rig setup-project --expose account` writes the
+	// configuration to go with it.
+	//
+	// It changes nothing about authentication: the auth package still reaches
+	// these tables through its own queries, and a generated repository beside
+	// them is a second door into the same rows, which is exactly why the
+	// scaffolded configuration keeps `account` free of a Create.
+	Expose []string `yaml:"expose,omitempty" json:"expose,omitempty" jsonschema_description:"Foundation tables to generate a model, repository, and API for anyway."`
+
+	// Own treats the foundation as ordinary tables and generates for all of it.
+	//
+	// For a project that has taken the schema over — forked the migrations,
+	// stopped importing rig/auth, and now maintains the tables itself. It is a
+	// one-way door in practice: the generated repositories will not enforce what
+	// the auth package enforces, so a password reaching a table through one of
+	// them is a password nobody hashed.
+	Own bool `yaml:"own,omitempty" json:"own,omitempty" jsonschema_description:"Generate for every foundation table, for a project that has forked the schema and no longer imports rig/auth."`
 }
 
 // Layout says where a table's configuration and code live.
@@ -56,12 +89,37 @@ const (
 	SearchBoth SearchMethod = "both"
 )
 
+// PermissionMode selects whether authorization checks are generated.
+type PermissionMode string
+
+const (
+	// PermissionsDerived is the default: one permission per resource and action,
+	// checked in the handler.
+	PermissionsDerived PermissionMode = "derived"
+	// PermissionsNone generates no checks. It is for a project that has no
+	// authorization — a demonstration, or an API behind something else that does
+	// the deciding.
+	PermissionsNone PermissionMode = "none"
+)
+
 // API configures the generated HTTP surface.
 type API struct {
 	Name        string `yaml:"name,omitempty" json:"name,omitempty" jsonschema_description:"Name of the API, used in documentation and generated type prefixes."`
 	Version     string `yaml:"version,omitempty" json:"version,omitempty" jsonschema_description:"API version segment, for example v1."`
 	BasePath    string `yaml:"base_path,omitempty" json:"base_path,omitempty" jsonschema_description:"Prefix every route sits under, for example /api/v1."`
 	Description string `yaml:"description,omitempty" json:"description,omitempty" jsonschema_description:"What this API is for."`
+	// Permissions decides whether generated handlers check one.
+	//
+	// derived, the default, gives every endpoint a permission taken from its
+	// resource and its operation — note.read, note.write, note.delete — and
+	// generates the check. An authenticated caller with no grants then reaches
+	// nothing, which is the right posture and a real behaviour change for a
+	// project that had none.
+	//
+	// none generates no checks, for a project with no authorization at all.
+	// `public:` on a resource or an endpoint is the per-endpoint escape hatch and
+	// works either way.
+	Permissions PermissionMode `yaml:"permissions,omitempty" json:"permissions,omitempty" jsonschema:"enum=derived,enum=none" jsonschema_description:"Whether generated handlers check a permission derived from the resource and operation. Defaults to derived."`
 
 	SearchMethod SearchMethod `yaml:"search_method,omitempty" json:"search_method,omitempty" jsonschema:"enum=query,enum=post,enum=both" jsonschema_description:"How the Search operation is exposed. Defaults to both: QUERY with a POST alias."`
 }
@@ -118,7 +176,7 @@ type Validate struct {
 	ForeignKeyNotIndexed string `yaml:"fk_needs_index,omitempty" json:"fk_needs_index,omitempty" jsonschema:"enum=off,enum=warn,enum=error" jsonschema_description:"A foreign-key column is not covered by an index."`
 	TenantIndexLeading   string `yaml:"tenant_id_leading_index,omitempty" json:"tenant_id_leading_index,omitempty" jsonschema:"enum=off,enum=warn,enum=error" jsonschema_description:"No index leads with the tenant column."`
 	BooleanPrefix        string `yaml:"boolean_prefix,omitempty" json:"boolean_prefix,omitempty" jsonschema:"enum=off,enum=warn,enum=error" jsonschema_description:"A boolean column does not read as a predicate."`
-	TimestampSuffix      string `yaml:"timestamp_suffix,omitempty" json:"timestamp_suffix,omitempty" jsonschema:"enum=off,enum=warn,enum=error" jsonschema_description:"A timestamp column is not named _at, or an _at column is not a timestamp."`
+	TimestampSuffix      string `yaml:"timestamp_suffix,omitempty" json:"timestamp_suffix,omitempty" jsonschema:"enum=off,enum=warn,enum=error" jsonschema_description:"A timestamp column is not named _at, or an _at column is not a timestamptz. A name ending in _at claims the column records when something happened, and only timestamptz can: a bare timestamp is a clock reading with nothing to anchor it."`
 	DateSuffix           string `yaml:"date_suffix,omitempty" json:"date_suffix,omitempty" jsonschema:"enum=off,enum=warn,enum=error" jsonschema_description:"A date column is not named _date, or a _date column is not a date."`
 	ForeignKeyNaming     string `yaml:"fk_naming,omitempty" json:"fk_naming,omitempty" jsonschema:"enum=off,enum=warn,enum=error" jsonschema_description:"A foreign-key column is not named after the table it references."`
 	CascadeDelete        string `yaml:"cascade_delete,omitempty" json:"cascade_delete,omitempty" jsonschema:"enum=off,enum=warn,enum=error" jsonschema_description:"A foreign key declares ON DELETE CASCADE."`

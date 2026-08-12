@@ -219,7 +219,6 @@ func projectStorage(
 	s := &ir.ResourceStorage{
 		Table:      t.Name,
 		PrimaryKey: slices.Clone(t.PrimaryKey),
-		AuditLog:   true,
 	}
 
 	if life.Tenant != nil {
@@ -234,13 +233,18 @@ func projectStorage(
 			UpdatedBy: columnRef(t, life.UpdatedBy),
 			DeletedAt: columnRef(t, life.DeletedAt),
 			DeletedBy: columnRef(t, life.DeletedBy),
+
+			CreatedByAPIKey: columnRef(t, life.CreatedByKey),
+			UpdatedByAPIKey: columnRef(t, life.UpdatedByKey),
+			DeletedByAPIKey: columnRef(t, life.DeletedByKey),
 		}
 	}
 
 	if life.SoftDeletable() {
 		s.SoftDelete = &ir.SoftDelete{
-			Column: columnRef(t, life.DeletedAt),
-			Actor:  columnRef(t, life.DeletedBy),
+			Column:   columnRef(t, life.DeletedAt),
+			Actor:    columnRef(t, life.DeletedBy),
+			ActorKey: columnRef(t, life.DeletedByKey),
 			// RestoreWindowDays comes from the configuration; validation
 			// insists on it for exactly these tables.
 		}

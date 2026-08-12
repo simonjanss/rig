@@ -1,6 +1,7 @@
 package query_test
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/simonjanss/rig/runtime/query"
@@ -208,5 +209,175 @@ func TestValuesAreAlwaysParameterized(t *testing.T) {
 	}
 	if len(args) != 1 || args[0] != malicious {
 		t.Errorf("the value should be a parameter, got %v", args)
+	}
+}
+
+func TestQualifiedColumns(t *testing.T) {
+	t.Parallel()
+
+	// Inside a subquery an unqualified name silently resolves to whichever
+	// scope has it, so a column meant to be the far side's can end up
+	// correlating to the outer row and quietly answering the wrong question.
+	got, _ := render(query.And(query.Cond{Table: "r1", Column: "name", Op: query.OpEq, Value: "x"}))
+	if want := "r1.name = $1"; got != want {
+		t.Errorf("%q, want %q", got, want)
+	}
+}
+
+func TestRelatedRendersACorrelatedSubquery(t *testing.T) {
+	t.Parallel()
+
+	// EXISTS rather than a join, because a join to a has-many multiplies the
+	// outer row and then the total a paginated list reports counts matches
+	// instead of rows.
+	got, args := render(query.And(query.Related(query.Exists{
+		From:  "team r1",
+		On:    "r1.id = fixture.home_team_id",
+		Where: query.And(query.Cond{Table: "r1", Column: "name", Op: query.OpEq, Value: "Rovers"}),
+	})))
+
+	want := "EXISTS (SELECT 1 FROM team r1 WHERE r1.id = fixture.home_team_id AND (r1.name = $1))"
+	if got != want {
+		t.Errorf("\n got %q\nwant %q", got, want)
+	}
+	if len(args) != 1 || args[0] != "Rovers" {
+		t.Errorf("the inner condition's value should be parameterized, got %v", args)
+	}
+}
+
+func TestRelatedWithoutAConditionIsJustExistence(t *testing.T) {
+	t.Parallel()
+
+	// An empty filter on the far side means "has one at all", which is a
+	// question worth asking, so the AND is dropped rather than rendered
+	// against an empty string.
+	got, _ := render(query.And(query.Related(query.Exists{
+		From: "player r1",
+		On:   "r1.team_id = team.id",
+	})))
+	if want := "EXISTS (SELECT 1 FROM player r1 WHERE r1.team_id = team.id)"; got != want {
+		t.Errorf("%q, want %q", got, want)
+	}
+}
+
+func TestRelatedCanBeNegated(t *testing.T) {
+	t.Parallel()
+
+	got, _ := render(query.And(query.Related(query.Exists{
+		From: "player r1",
+		On:   "r1.team_id = team.id",
+		Not:  true,
+	})))
+	if want := "NOT EXISTS (SELECT 1 FROM player r1 WHERE r1.team_id = team.id)"; got != want {
+		t.Errorf("%q, want %q", got, want)
+	}
+}
+
+func TestRelatedNestsAndKeepsPlaceholderOrder(t *testing.T) {
+	t.Parallel()
+
+	// Numbering follows render order, and a subquery renders in the middle of
+	// its parent group. If the inner condition took its number from anywhere
+	// but the shared Args, everything after it would read the wrong value.
+	inner := query.And(query.Related(query.Exists{
+		From:  "team r2",
+		On:    "r2.id = r1.team_id",
+		Where: query.And(query.Cond{Table: "r2", Column: "name", Op: query.OpEq, Value: "Rovers"}),
+	}))
+	got, args := render(query.And(
+		query.Eq("kickoff_at", "2026-08-03"),
+		query.Related(query.Exists{From: "player r1", On: "r1.fixture_id = fixture.id", Where: inner}),
+		query.Eq("id", 7),
+	))
+
+	want := "kickoff_at = $1 AND EXISTS (SELECT 1 FROM player r1 WHERE r1.fixture_id = fixture.id " +
+		"AND (EXISTS (SELECT 1 FROM team r2 WHERE r2.id = r1.team_id AND (r2.name = $2)))) AND id = $3"
+	if got != want {
+		t.Errorf("\n got %q\nwant %q", got, want)
+	}
+	if len(args) != 3 || args[1] != "Rovers" {
+		t.Errorf("args should be numbered in render order, got %v", args)
+	}
+}
+
+func TestAddKeepsASubquery(t *testing.T) {
+	t.Parallel()
+
+	// A subquery has no column, and the zero-condition skip is written in terms
+	// of the column. Dropping it here is the worst kind of failure: the query
+	// still runs and still returns rows, just not the ones that were asked for.
+	var g query.Group
+	g.Add(query.Related(query.Exists{From: "player r1", On: "r1.team_id = team.id"}))
+
+	if g.Empty() {
+		t.Fatal("a relation condition was dropped")
+	}
+	if got, _ := render(g); got != "EXISTS (SELECT 1 FROM player r1 WHERE r1.team_id = team.id)" {
+		t.Errorf("unexpected SQL: %q", got)
+	}
+}
+
+func TestOrderQualifiesItsColumn(t *testing.T) {
+	t.Parallel()
+
+	// A statement that joins has two of some column names, and Postgres is
+	// right to refuse an unqualified one.
+	got := query.OrderSQL([]query.Order{
+		{Table: "fixture", Column: "kickoff_at", Desc: true},
+		{Table: "o1", Column: "name"},
+	})
+	if want := " ORDER BY fixture.kickoff_at DESC, o1.name ASC"; got != want {
+		t.Errorf("%q, want %q", got, want)
+	}
+}
+
+func TestJoinScopesInsideTheOnClause(t *testing.T) {
+	t.Parallel()
+
+	// The predicate has to be part of the join condition. In the statement's
+	// WHERE it would be false for a row that matched nothing, discarding exactly
+	// the rows a left join was chosen to keep.
+	args := query.NewArgs()
+	got := query.JoinSQL([]query.Join{{
+		Table: "team o1",
+		On:    "o1.id = fixture.home_team_id",
+		Where: query.And(query.Cond{Table: "o1", Column: "tenant_id", Op: query.OpEq, Value: "t"}),
+	}}, args)
+
+	want := " LEFT JOIN team o1 ON o1.id = fixture.home_team_id AND (o1.tenant_id = $1)"
+	if got != want {
+		t.Errorf("\n got %q\nwant %q", got, want)
+	}
+	if len(args.Values()) != 1 {
+		t.Errorf("the scope value should be parameterized, got %v", args.Values())
+	}
+}
+
+func TestJoinsAreNumberedBeforeTheConditions(t *testing.T) {
+	t.Parallel()
+
+	// Placeholders are numbered in render order and a join stands earlier in the
+	// statement than the conditions do, so it has to be rendered first. Getting
+	// this backwards does not fail — it silently swaps two values.
+	args := query.NewArgs()
+	join := query.JoinSQL([]query.Join{{
+		Table: "team o1", On: "o1.id = fixture.home_team_id",
+		Where: query.And(query.Eq("tenant_id", "tenant")),
+	}}, args)
+	where := query.And(query.Eq("kickoff_at", "today")).SQL(args)
+
+	if !strings.Contains(join, "$1") || !strings.Contains(where, "$2") {
+		t.Errorf("join %q should hold $1 and where %q should hold $2", join, where)
+	}
+	if v := args.Values(); v[0] != "tenant" || v[1] != "today" {
+		t.Errorf("values are in the wrong order: %v", v)
+	}
+}
+
+func TestNoJoinsRendersNothing(t *testing.T) {
+	t.Parallel()
+
+	if got := query.JoinSQL(nil, query.NewArgs()); got != "" {
+		t.Errorf("%q, want empty", got)
 	}
 }

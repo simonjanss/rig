@@ -195,18 +195,44 @@ DROP TYPE team_tier;
 		}
 	})
 
+	// The generators come from what `rig init` wrote. A scaffold that produces
+	// a project which cannot generate is worth catching here rather than by the
+	// first person to follow the tutorial.
 	step(t, "generate", func() {
-		appendTo(t, filepath.Join(root, "rig.yaml"),
-			"\ngenerators:\n  - name: persist-go\n    out_dir: internal/store\n    options:\n      package: store\n")
-
 		_, stderr, code := run(t, "generate", "-C", root)
 		if code != 0 {
 			t.Fatalf("generate failed:\n%s", stderr)
 		}
-		for _, want := range []string{"team.gen.go", "team_repository.gen.go", "store.gen.go"} {
+		for _, want := range []string{
+			// The persistence layer.
+			"team.gen.go", "team_repository.gen.go", "store.gen.go",
+			// The API layer.
+			"api.gen.go", "team_service.gen.go",
+			// The HTTP layer.
+			"server.gen.go", "team_routes.gen.go",
+			// And the one file the developer owns.
+			filepath.Join("services", "team", "team.go"),
+		} {
 			if !strings.Contains(stderr, want) {
 				t.Errorf("expected %s to be written:\n%s", want, stderr)
 			}
+		}
+	})
+
+	// The stub is written once and then belongs to the developer: rig must not
+	// touch it again, whatever else changes.
+	step(t, "the service stub is not regenerated", func() {
+		stub := filepath.Join(root, "services", "team", "team.go")
+		appendTo(t, stub, "\n// a rule the developer added\n")
+
+		if _, stderr, code := run(t, "generate", "-C", root); code != 0 {
+			t.Fatalf("generate failed:\n%s", stderr)
+		}
+		if !strings.Contains(read(t, stub), "a rule the developer added") {
+			t.Error("rig overwrote a hand-owned file")
+		}
+		if strings.Contains(read(t, stub), "DO NOT EDIT") {
+			t.Error("a hand-owned file should not claim to be generated")
 		}
 	})
 
@@ -218,7 +244,7 @@ DROP TYPE team_tier;
 	})
 
 	step(t, "a hand edit to generated code is refused", func() {
-		generated := filepath.Join(root, "internal", "store", "team.gen.go")
+		generated := filepath.Join(root, "internal", "store", "team_repository.gen.go")
 		appendTo(t, generated, "\n// someone edited this\n")
 
 		if _, stderr, code := run(t, "check", "-C", root); code == 0 {

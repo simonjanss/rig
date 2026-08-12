@@ -232,13 +232,18 @@ func TestDatabaseURL(t *testing.T) {
 	if !p.UsesContainer() {
 		t.Error("with no url set, rig should manage the container")
 	}
-	want := "postgres://rig:rig@localhost:55432/rig?sslmode=disable"
+	// TimeZone is pinned so that ::date and date_trunc mean the same thing on
+	// every machine. A timestamptz stores an instant and no zone, so nothing
+	// about the data depends on it — only on how SQL reads a clock off it.
+	want := "postgres://rig:rig@localhost:55432/rig?sslmode=disable&TimeZone=UTC"
 	if got := p.DatabaseURL(); got != want {
 		t.Errorf("DatabaseURL = %q, want %q", got, want)
 	}
 
-	// An explicit URL is used as-is: that is how CI points at a service
-	// container rather than starting one.
+	// An explicit URL is used as-is, TimeZone and all: appending a parameter to
+	// a connection string somebody wrote is a good way to break one that already
+	// carries its own. That is how CI points at a service container rather than
+	// starting one.
 	explicit := minimal + "database:\n  url: postgres://ci@db:5432/app\n"
 	p2, _ := project.Parse("rig.yaml", []byte(explicit))
 	if p2.UsesContainer() {

@@ -39,6 +39,20 @@ type File struct {
 	// than a merge: additive semantics could not express removing one.
 	Operations []string `yaml:"operations,omitempty" json:"operations,omitempty" jsonschema:"enum=Create,enum=Get,enum=List,enum=Search,enum=Update,enum=Delete" jsonschema_description:"Operations to expose. Replaces the default set entirely."`
 
+	// Public names the operations that answer without a credential.
+	//
+	// Both generated operations and custom endpoints, by name, because they
+	// share one namespace: a custom endpoint called Get replaces the generated
+	// one. A custom endpoint can also say so in its own block, which is where
+	// everything else about it is declared.
+	Public []string `yaml:"public,omitempty" json:"public,omitempty" jsonschema_description:"Operations and endpoints that answer without a credential."`
+
+	// Expose controls whether the table appears in the API at all. Nil means
+	// yes. False keeps the model and the repository and generates no endpoints,
+	// which is what a table like account_token wants: the data layer is worth
+	// generating and a REST interface for it is not.
+	Expose *bool `yaml:"expose,omitempty" json:"expose,omitempty" jsonschema_description:"Expose this table through the API. Defaults to true. False still generates the model and repository."`
+
 	// OrderBy is the default ordering, most significant first. A leading minus
 	// sorts descending, for example "-starts_at".
 	OrderBy []string `yaml:"order_by,omitempty" json:"order_by,omitempty" jsonschema_description:"Default ordering by column name. Prefix with - for descending."`
@@ -47,9 +61,8 @@ type File struct {
 	// Required for a soft-deletable table and rejected on any other.
 	RestoreWindowDays *int `yaml:"restore_window_days,omitempty" json:"restore_window_days,omitempty" jsonschema_description:"Days a soft-deleted row stays restorable. Required when the table has deleted_at."`
 
-	// Audit turns the per-column change log on or off. Nil means on. Audit
-	// columns are populated either way; this governs only the log.
-	Audit *bool `yaml:"audit,omitempty" json:"audit,omitempty" jsonschema_description:"Write per-column change entries to the audit log. Defaults to true."`
+	// Access is how wide a read reaches by default.
+	Access *Access `yaml:"access,omitempty" json:"access,omitempty" jsonschema_description:"How wide a read of this table reaches by default."`
 
 	Columns   map[string]Column   `yaml:"columns,omitempty" json:"columns,omitempty" jsonschema_description:"Per-column configuration keyed by physical column name."`
 	Enums     map[string]Enum     `yaml:"enums,omitempty" json:"enums,omitempty" jsonschema_description:"Per-enum configuration keyed by Postgres enum type name."`
@@ -58,9 +71,6 @@ type File struct {
 	Electric  *Electric  `yaml:"electric,omitempty" json:"electric,omitempty" jsonschema_description:"Live-sync shape endpoint for this table."`
 	Endpoints []Endpoint `yaml:"endpoints,omitempty" json:"endpoints,omitempty" jsonschema_description:"Endpoints beyond the generated CRUD set."`
 }
-
-// AuditEnabled reports whether the change log is on, applying the default.
-func (f *File) AuditEnabled() bool { return f.Audit == nil || *f.Audit }
 
 // Column configures one column's appearance in the API.
 type Column struct {
@@ -126,6 +136,23 @@ type Relation struct {
 	Embed bool `yaml:"embed,omitempty" json:"embed,omitempty" jsonschema_description:"Include the related rows in read responses."`
 }
 
+// Access is how wide a read of a table reaches by default.
+//
+// Only the default. What a caller may ask for beyond it is a permission, and how
+// far the answer actually reaches is in the response — this is the floor, not the
+// ceiling.
+type Access struct {
+	// Scope is "tenant" (every row the tenant owns, the default) or "own" (the
+	// rows the caller created).
+	//
+	// "own" needs a created-by audit column, which is what it filters on. It
+	// narrows reads only: an owner-scoped table refuses to change somebody else's
+	// row outright, with no parameter to widen that, because a write is a
+	// different kind of decision from a read and one flag for both would be a bad
+	// answer to two questions.
+	Scope string `yaml:"scope,omitempty" json:"scope,omitempty" jsonschema:"enum=tenant,enum=own" jsonschema_description:"Default read width: tenant (every row) or own (rows the caller created)."`
+}
+
 // Electric configures a live-sync shape endpoint.
 //
 // The tenant and lifecycle predicates are built by rig. Declared params are
@@ -163,6 +190,11 @@ type Endpoint struct {
 
 	// Permission is the RBAC key required. Empty means a valid session is enough.
 	Permission string `yaml:"permission,omitempty" json:"permission,omitempty" jsonschema_description:"RBAC permission key required to call this endpoint."`
+
+	// Public answers without a credential. The table's `public:` list says the
+	// same thing from the other end; this is here so an endpoint declared in
+	// one block does not have half of itself in another.
+	Public bool `yaml:"public,omitempty" json:"public,omitempty" jsonschema_description:"Answer this endpoint without requiring a credential."`
 
 	Request   *EndpointRequest   `yaml:"request,omitempty" json:"request,omitempty" jsonschema_description:"What the client sends."`
 	Responses []EndpointResponse `yaml:"responses,omitempty" json:"responses,omitempty" jsonschema_description:"Every status this endpoint can return."`

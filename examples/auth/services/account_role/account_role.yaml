@@ -1,0 +1,17 @@
+# yaml-language-server: $schema=../../.rig/table.schema.json
+table: account_role
+comment: Which roles an account holds.
+
+# The application's own authorization model, not rig's — see migrations/00004.
+#
+# It has a key of its own where role_permission does not, and expose: false for
+# the same reason the others have it: nothing generated would be used, because
+# the only code that reads these tables is the one query in
+# services/tenant/grants.go.
+expose: false
+
+columns:
+  account_id:
+    comment: The account holding the role.
+  role_id:
+    comment: The role it holds.

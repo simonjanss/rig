@@ -8,11 +8,11 @@ import (
 	"io"
 	"io/fs"
 	"os"
+	"path/filepath"
 
-	"github.com/pressly/goose/v3"
-	"github.com/pressly/goose/v3/database"
+	"github.com/simonjanss/rig/migrate"
 
-	_ "github.com/jackc/pgx/v5/stdlib" // database/sql driver for goose
+	_ "github.com/jackc/pgx/v5/stdlib" // database/sql driver
 )
 
 // MigrateOptions describe a migration run.
@@ -28,12 +28,12 @@ type MigrateOptions struct {
 	Log io.Writer
 }
 
-// Migrate applies every pending migration.
+// Migrate applies every pending migration to the development database.
 //
-// goose is driven through its provider API rather than its package-level
-// functions. The globals would make two projects in one process — and every
-// parallel test — share a dialect and a table name, which is exactly the kind
-// of action-at-a-distance that makes a test suite flaky.
+// The work is rig/migrate, the same package an application embeds to migrate
+// itself in production. One implementation is the point: `rig db up` here and
+// the deployment there have to agree about what the schema is, and two readers
+// of the same files would eventually disagree about one of them.
 func Migrate(ctx context.Context, opt MigrateOptions) (applied int, err error) {
 	if err := ensureDir(opt.Dir); err != nil {
 		return 0, err
@@ -45,34 +45,19 @@ func Migrate(ctx context.Context, opt MigrateOptions) (applied int, err error) {
 	}
 	defer db.Close()
 
-	store, err := database.NewStore(database.DialectPostgres, opt.Table)
-	if err != nil {
-		return 0, fmt.Errorf("migration store: %w", err)
+	// The directory is addressed from its parent so that the name on disk is
+	// the name inside the filesystem, which is what an embedded one looks like.
+	parent, dir := filepath.Split(filepath.Clean(opt.Dir))
+	if parent == "" {
+		parent = "."
 	}
 
-	provider, err := goose.NewProvider("", db, os.DirFS(opt.Dir),
-		goose.WithStore(store),
-		goose.WithVerbose(opt.Log != nil),
-	)
-	if err != nil {
-		if errors.Is(err, goose.ErrNoMigrations) {
-			// An empty migration directory is a new project, not a failure.
-			return 0, nil
-		}
-		return 0, fmt.Errorf("read migrations from %s: %w", opt.Dir, err)
-	}
-
-	results, err := provider.Up(ctx)
-	if err != nil {
-		return len(results), fmt.Errorf("apply migrations: %w", err)
-	}
-
-	if opt.Log != nil && len(results) > 0 {
-		for _, r := range results {
-			fmt.Fprintf(opt.Log, "applied %s\n", r.Source.Path)
-		}
-	}
-	return len(results), nil
+	names, err := migrate.Up(ctx, db, os.DirFS(parent), migrate.Options{
+		Dir:   dir,
+		Table: opt.Table,
+		Log:   opt.Log,
+	})
+	return len(names), err
 }
 
 func ensureDir(dir string) error {

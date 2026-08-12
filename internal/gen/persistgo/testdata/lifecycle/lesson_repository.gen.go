@@ -7,12 +7,14 @@ package store
 import (
 	"context"
 	"fmt"
+	"rigtest/model"
 	"time"
 
 	"github.com/google/uuid"
 	pgx "github.com/jackc/pgx/v5"
-	"github.com/simonjanss/rig/runtime/audit"
+	"github.com/simonjanss/rig/runtime/dbhook"
 	"github.com/simonjanss/rig/runtime/dbx"
+	"github.com/simonjanss/rig/runtime/patch"
 	"github.com/simonjanss/rig/runtime/query"
 	"github.com/simonjanss/rig/runtime/readopt"
 	"github.com/simonjanss/rig/runtime/rigerr"
@@ -29,28 +31,625 @@ type LessonRepository interface {
 	// A lookup by primary key deliberately ignores the lifecycle filters: it
 	// returns the row whether it is live, deleted, or a snapshot, because a caller
 	// holding an identifier is usually asking about that exact row.
-	Get(ctx context.Context, id uuid.UUID, opts ...readopt.Option) (*Lesson, error)
+	Get(ctx context.Context, id uuid.UUID, opts ...readopt.Option) (*model.Lesson, error)
 
 	// List returns matching rows and the total ignoring pagination.
-	List(ctx context.Context, q LessonQuery, opts ...readopt.Option) ([]*Lesson, int64, error)
+	//
+	// The filter says which rows and the page says how many of them, in what
+	// order. They are separate arguments because they arrive separately: the
+	// filter is a request body, the page is two query parameters.
+	List(ctx context.Context, f model.LessonFilter, page model.LessonPage, opts ...readopt.Option) ([]*model.Lesson, int64, error)
 
 	// Create inserts a row, stamping the identifier, tenant and audit columns.
-	Create(ctx context.Context, in *LessonCreate) (*Lesson, error)
+	//
+	// It takes an envelope rather than the input alone: the rules that check the
+	// input and the callbacks that run around the write belong to the same unit of
+	// work as the write itself.
+	Create(ctx context.Context, in dbhook.Create[model.LessonCreateInput, model.Lesson]) (*model.Lesson, error)
 
 	// Update changes a row, writing a snapshot of the previous version first.
-	Update(ctx context.Context, id uuid.UUID, in *LessonUpdate) (*Lesson, error)
+	Update(ctx context.Context, id uuid.UUID, in dbhook.Update[model.LessonUpdateInput, model.Lesson]) (*model.Lesson, error)
 
 	// Delete retires a row by stamping its deletion time. It is idempotent.
-	Delete(ctx context.Context, in LessonDelete) error
+	Delete(ctx context.Context, in dbhook.Delete[model.LessonDeleteInput, model.Lesson]) error
 
 	// Restore brings a deleted row back, if it is still inside the window.
-	Restore(ctx context.Context, id uuid.UUID) (*Lesson, error)
+	//
+	// It takes the same input an update does, because the world may have moved on
+	// while the row was retired: a unique value can have been taken by something
+	// created since, and the only way back is to bring the row back under a
+	// different one. An empty input restores it as it was.
+	Restore(ctx context.Context, id uuid.UUID, in dbhook.Restore[model.LessonUpdateInput, model.Lesson]) (*model.Lesson, error)
 
 	// ListDeleted returns retired rows still inside the restore window.
-	ListDeleted(ctx context.Context, q LessonQuery) ([]*Lesson, int64, error)
+	ListDeleted(ctx context.Context, f model.LessonFilter, page model.LessonPage, opts ...readopt.Option) ([]*model.Lesson, int64, error)
 
 	// ListSnapshots returns a row's previous versions, newest first.
-	ListSnapshots(ctx context.Context, id uuid.UUID) ([]*Lesson, error)
+	ListSnapshots(ctx context.Context, id uuid.UUID) ([]*model.Lesson, error)
+
+	// Revert replays one of a row's previous versions onto it.
+	//
+	// The values come from the version and the hooks come from the caller, because
+	// a revert is an update: it goes through the same path, so the state it
+	// replaces is snapshotted first and every rule an update runs still runs.
+	// Writing the old values straight over the row would skip both, and a revert
+	// that cannot itself be reverted is not much of a safety net.
+	Revert(ctx context.Context, id, versionID uuid.UUID, hooks dbhook.UpdateHooks[model.LessonUpdateInput, model.Lesson]) (*model.Lesson, error)
+}
+
+// lessonGroup turns a filter into the condition tree the runtime renders.
+//
+// The scope carries what a condition needs besides the filter itself: who is
+// asking, which alias this level's columns belong to, and how deep the nesting
+// has gone. It is a value rather than three parameters because every relation
+// passes a changed copy of it down.
+func lessonGroup(f model.LessonFilter, sc filterScope) (query.Group, error) {
+	if err := sc.ok(); err != nil {
+		return query.Group{}, err
+	}
+
+	g := query.Group{Or: f.OrCondition}
+
+	if p := f.Equals; p != nil {
+		if p.ID != nil {
+			g.Add(sc.at(query.Eq("id", *p.ID)))
+		}
+		if p.CreatedAt != nil {
+			g.Add(sc.at(query.Eq("created_at", *p.CreatedAt)))
+		}
+		if p.CreatedByAccountID != nil {
+			g.Add(sc.at(query.Eq("created_by_account_id", p.CreatedByAccountID)))
+		}
+		if p.UpdatedAt != nil {
+			g.Add(sc.at(query.Eq("updated_at", p.UpdatedAt)))
+		}
+		if p.UpdatedByAccountID != nil {
+			g.Add(sc.at(query.Eq("updated_by_account_id", p.UpdatedByAccountID)))
+		}
+		if p.DeletedAt != nil {
+			g.Add(sc.at(query.Eq("deleted_at", p.DeletedAt)))
+		}
+		if p.DeletedByAccountID != nil {
+			g.Add(sc.at(query.Eq("deleted_by_account_id", p.DeletedByAccountID)))
+		}
+		if p.VersionType != nil {
+			g.Add(sc.at(query.Eq("version_type", *p.VersionType)))
+		}
+		if p.SnapshotFromLessonID != nil {
+			g.Add(sc.at(query.Eq("snapshot_from_lesson_id", p.SnapshotFromLessonID)))
+		}
+		if p.SnapshotFromLessonAt != nil {
+			g.Add(sc.at(query.Eq("snapshot_from_lesson_at", p.SnapshotFromLessonAt)))
+		}
+		if p.Title != nil {
+			g.Add(sc.at(query.Eq("title", *p.Title)))
+		}
+		if p.Notes != nil {
+			g.Add(sc.at(query.Eq("notes", p.Notes)))
+		}
+		if p.Status != nil {
+			g.Add(sc.at(query.Eq("status", *p.Status)))
+		}
+		if p.ManagerEmailAddress != nil {
+			g.Add(sc.at(query.Eq("manager_email", *p.ManagerEmailAddress)))
+		}
+		if p.StartsAt != nil {
+			g.Add(sc.at(query.Eq("starts_at", *p.StartsAt)))
+		}
+		if p.Capacity != nil {
+			g.Add(sc.at(query.Eq("capacity", p.Capacity)))
+		}
+		if p.Price != nil {
+			g.Add(sc.at(query.Eq("price", p.Price)))
+		}
+		if p.Tags != nil {
+			g.Add(sc.at(query.Eq("tags", p.Tags)))
+		}
+		if p.SearchVector != nil {
+			g.Add(sc.at(query.Eq("search_vector", p.SearchVector)))
+		}
+	}
+	if p := f.NotEquals; p != nil {
+		if p.ID != nil {
+			g.Add(sc.at(query.Ne("id", *p.ID)))
+		}
+		if p.CreatedAt != nil {
+			g.Add(sc.at(query.Ne("created_at", *p.CreatedAt)))
+		}
+		if p.CreatedByAccountID != nil {
+			g.Add(sc.at(query.Ne("created_by_account_id", p.CreatedByAccountID)))
+		}
+		if p.UpdatedAt != nil {
+			g.Add(sc.at(query.Ne("updated_at", p.UpdatedAt)))
+		}
+		if p.UpdatedByAccountID != nil {
+			g.Add(sc.at(query.Ne("updated_by_account_id", p.UpdatedByAccountID)))
+		}
+		if p.DeletedAt != nil {
+			g.Add(sc.at(query.Ne("deleted_at", p.DeletedAt)))
+		}
+		if p.DeletedByAccountID != nil {
+			g.Add(sc.at(query.Ne("deleted_by_account_id", p.DeletedByAccountID)))
+		}
+		if p.VersionType != nil {
+			g.Add(sc.at(query.Ne("version_type", *p.VersionType)))
+		}
+		if p.SnapshotFromLessonID != nil {
+			g.Add(sc.at(query.Ne("snapshot_from_lesson_id", p.SnapshotFromLessonID)))
+		}
+		if p.SnapshotFromLessonAt != nil {
+			g.Add(sc.at(query.Ne("snapshot_from_lesson_at", p.SnapshotFromLessonAt)))
+		}
+		if p.Title != nil {
+			g.Add(sc.at(query.Ne("title", *p.Title)))
+		}
+		if p.Notes != nil {
+			g.Add(sc.at(query.Ne("notes", p.Notes)))
+		}
+		if p.Status != nil {
+			g.Add(sc.at(query.Ne("status", *p.Status)))
+		}
+		if p.ManagerEmailAddress != nil {
+			g.Add(sc.at(query.Ne("manager_email", *p.ManagerEmailAddress)))
+		}
+		if p.StartsAt != nil {
+			g.Add(sc.at(query.Ne("starts_at", *p.StartsAt)))
+		}
+		if p.Capacity != nil {
+			g.Add(sc.at(query.Ne("capacity", p.Capacity)))
+		}
+		if p.Price != nil {
+			g.Add(sc.at(query.Ne("price", p.Price)))
+		}
+		if p.Tags != nil {
+			g.Add(sc.at(query.Ne("tags", p.Tags)))
+		}
+		if p.SearchVector != nil {
+			g.Add(sc.at(query.Ne("search_vector", p.SearchVector)))
+		}
+	}
+	if p := f.GreaterThan; p != nil {
+		if p.CreatedAt != nil {
+			g.Add(sc.at(query.Gt("created_at", *p.CreatedAt)))
+		}
+		if p.UpdatedAt != nil {
+			g.Add(sc.at(query.Gt("updated_at", p.UpdatedAt)))
+		}
+		if p.DeletedAt != nil {
+			g.Add(sc.at(query.Gt("deleted_at", p.DeletedAt)))
+		}
+		if p.SnapshotFromLessonAt != nil {
+			g.Add(sc.at(query.Gt("snapshot_from_lesson_at", p.SnapshotFromLessonAt)))
+		}
+		if p.StartsAt != nil {
+			g.Add(sc.at(query.Gt("starts_at", *p.StartsAt)))
+		}
+		if p.Capacity != nil {
+			g.Add(sc.at(query.Gt("capacity", p.Capacity)))
+		}
+		if p.Price != nil {
+			g.Add(sc.at(query.Gt("price", p.Price)))
+		}
+	}
+	if p := f.SmallerThan; p != nil {
+		if p.CreatedAt != nil {
+			g.Add(sc.at(query.Lt("created_at", *p.CreatedAt)))
+		}
+		if p.UpdatedAt != nil {
+			g.Add(sc.at(query.Lt("updated_at", p.UpdatedAt)))
+		}
+		if p.DeletedAt != nil {
+			g.Add(sc.at(query.Lt("deleted_at", p.DeletedAt)))
+		}
+		if p.SnapshotFromLessonAt != nil {
+			g.Add(sc.at(query.Lt("snapshot_from_lesson_at", p.SnapshotFromLessonAt)))
+		}
+		if p.StartsAt != nil {
+			g.Add(sc.at(query.Lt("starts_at", *p.StartsAt)))
+		}
+		if p.Capacity != nil {
+			g.Add(sc.at(query.Lt("capacity", p.Capacity)))
+		}
+		if p.Price != nil {
+			g.Add(sc.at(query.Lt("price", p.Price)))
+		}
+	}
+	if p := f.GreaterOrEqual; p != nil {
+		if p.CreatedAt != nil {
+			g.Add(sc.at(query.Gte("created_at", *p.CreatedAt)))
+		}
+		if p.UpdatedAt != nil {
+			g.Add(sc.at(query.Gte("updated_at", p.UpdatedAt)))
+		}
+		if p.DeletedAt != nil {
+			g.Add(sc.at(query.Gte("deleted_at", p.DeletedAt)))
+		}
+		if p.SnapshotFromLessonAt != nil {
+			g.Add(sc.at(query.Gte("snapshot_from_lesson_at", p.SnapshotFromLessonAt)))
+		}
+		if p.StartsAt != nil {
+			g.Add(sc.at(query.Gte("starts_at", *p.StartsAt)))
+		}
+		if p.Capacity != nil {
+			g.Add(sc.at(query.Gte("capacity", p.Capacity)))
+		}
+		if p.Price != nil {
+			g.Add(sc.at(query.Gte("price", p.Price)))
+		}
+	}
+	if p := f.SmallerOrEqual; p != nil {
+		if p.CreatedAt != nil {
+			g.Add(sc.at(query.Lte("created_at", *p.CreatedAt)))
+		}
+		if p.UpdatedAt != nil {
+			g.Add(sc.at(query.Lte("updated_at", p.UpdatedAt)))
+		}
+		if p.DeletedAt != nil {
+			g.Add(sc.at(query.Lte("deleted_at", p.DeletedAt)))
+		}
+		if p.SnapshotFromLessonAt != nil {
+			g.Add(sc.at(query.Lte("snapshot_from_lesson_at", p.SnapshotFromLessonAt)))
+		}
+		if p.StartsAt != nil {
+			g.Add(sc.at(query.Lte("starts_at", *p.StartsAt)))
+		}
+		if p.Capacity != nil {
+			g.Add(sc.at(query.Lte("capacity", p.Capacity)))
+		}
+		if p.Price != nil {
+			g.Add(sc.at(query.Lte("price", p.Price)))
+		}
+	}
+	if p := f.Contains; p != nil {
+		if len(p.ID) > 0 {
+			g.Add(sc.at(query.In("id", p.ID)))
+		}
+		if len(p.CreatedAt) > 0 {
+			g.Add(sc.at(query.In("created_at", p.CreatedAt)))
+		}
+		if len(p.CreatedByAccountID) > 0 {
+			g.Add(sc.at(query.In("created_by_account_id", p.CreatedByAccountID)))
+		}
+		if len(p.UpdatedAt) > 0 {
+			g.Add(sc.at(query.In("updated_at", p.UpdatedAt)))
+		}
+		if len(p.UpdatedByAccountID) > 0 {
+			g.Add(sc.at(query.In("updated_by_account_id", p.UpdatedByAccountID)))
+		}
+		if len(p.DeletedAt) > 0 {
+			g.Add(sc.at(query.In("deleted_at", p.DeletedAt)))
+		}
+		if len(p.DeletedByAccountID) > 0 {
+			g.Add(sc.at(query.In("deleted_by_account_id", p.DeletedByAccountID)))
+		}
+		if len(p.VersionType) > 0 {
+			g.Add(sc.at(query.In("version_type", p.VersionType)))
+		}
+		if len(p.SnapshotFromLessonID) > 0 {
+			g.Add(sc.at(query.In("snapshot_from_lesson_id", p.SnapshotFromLessonID)))
+		}
+		if len(p.SnapshotFromLessonAt) > 0 {
+			g.Add(sc.at(query.In("snapshot_from_lesson_at", p.SnapshotFromLessonAt)))
+		}
+		if len(p.Title) > 0 {
+			g.Add(sc.at(query.In("title", p.Title)))
+		}
+		if len(p.Notes) > 0 {
+			g.Add(sc.at(query.In("notes", p.Notes)))
+		}
+		if len(p.Status) > 0 {
+			g.Add(sc.at(query.In("status", p.Status)))
+		}
+		if len(p.ManagerEmailAddress) > 0 {
+			g.Add(sc.at(query.In("manager_email", p.ManagerEmailAddress)))
+		}
+		if len(p.StartsAt) > 0 {
+			g.Add(sc.at(query.In("starts_at", p.StartsAt)))
+		}
+		if len(p.Capacity) > 0 {
+			g.Add(sc.at(query.In("capacity", p.Capacity)))
+		}
+		if len(p.Price) > 0 {
+			g.Add(sc.at(query.In("price", p.Price)))
+		}
+		if len(p.SearchVector) > 0 {
+			g.Add(sc.at(query.In("search_vector", p.SearchVector)))
+		}
+	}
+	if p := f.NotContains; p != nil {
+		if len(p.ID) > 0 {
+			g.Add(sc.at(query.NotIn("id", p.ID)))
+		}
+		if len(p.CreatedAt) > 0 {
+			g.Add(sc.at(query.NotIn("created_at", p.CreatedAt)))
+		}
+		if len(p.CreatedByAccountID) > 0 {
+			g.Add(sc.at(query.NotIn("created_by_account_id", p.CreatedByAccountID)))
+		}
+		if len(p.UpdatedAt) > 0 {
+			g.Add(sc.at(query.NotIn("updated_at", p.UpdatedAt)))
+		}
+		if len(p.UpdatedByAccountID) > 0 {
+			g.Add(sc.at(query.NotIn("updated_by_account_id", p.UpdatedByAccountID)))
+		}
+		if len(p.DeletedAt) > 0 {
+			g.Add(sc.at(query.NotIn("deleted_at", p.DeletedAt)))
+		}
+		if len(p.DeletedByAccountID) > 0 {
+			g.Add(sc.at(query.NotIn("deleted_by_account_id", p.DeletedByAccountID)))
+		}
+		if len(p.VersionType) > 0 {
+			g.Add(sc.at(query.NotIn("version_type", p.VersionType)))
+		}
+		if len(p.SnapshotFromLessonID) > 0 {
+			g.Add(sc.at(query.NotIn("snapshot_from_lesson_id", p.SnapshotFromLessonID)))
+		}
+		if len(p.SnapshotFromLessonAt) > 0 {
+			g.Add(sc.at(query.NotIn("snapshot_from_lesson_at", p.SnapshotFromLessonAt)))
+		}
+		if len(p.Title) > 0 {
+			g.Add(sc.at(query.NotIn("title", p.Title)))
+		}
+		if len(p.Notes) > 0 {
+			g.Add(sc.at(query.NotIn("notes", p.Notes)))
+		}
+		if len(p.Status) > 0 {
+			g.Add(sc.at(query.NotIn("status", p.Status)))
+		}
+		if len(p.ManagerEmailAddress) > 0 {
+			g.Add(sc.at(query.NotIn("manager_email", p.ManagerEmailAddress)))
+		}
+		if len(p.StartsAt) > 0 {
+			g.Add(sc.at(query.NotIn("starts_at", p.StartsAt)))
+		}
+		if len(p.Capacity) > 0 {
+			g.Add(sc.at(query.NotIn("capacity", p.Capacity)))
+		}
+		if len(p.Price) > 0 {
+			g.Add(sc.at(query.NotIn("price", p.Price)))
+		}
+		if len(p.SearchVector) > 0 {
+			g.Add(sc.at(query.NotIn("search_vector", p.SearchVector)))
+		}
+	}
+	if p := f.Like; p != nil {
+		if p.Title != nil {
+			g.Add(sc.at(query.Like("title", *p.Title)))
+		}
+		if p.Notes != nil {
+			g.Add(sc.at(query.Like("notes", *p.Notes)))
+		}
+		if p.ManagerEmailAddress != nil {
+			g.Add(sc.at(query.Like("manager_email", *p.ManagerEmailAddress)))
+		}
+		if p.SearchVector != nil {
+			g.Add(sc.at(query.Like("search_vector", *p.SearchVector)))
+		}
+	}
+	if p := f.NotLike; p != nil {
+		if p.Title != nil {
+			g.Add(sc.at(query.NotLike("title", *p.Title)))
+		}
+		if p.Notes != nil {
+			g.Add(sc.at(query.NotLike("notes", *p.Notes)))
+		}
+		if p.ManagerEmailAddress != nil {
+			g.Add(sc.at(query.NotLike("manager_email", *p.ManagerEmailAddress)))
+		}
+		if p.SearchVector != nil {
+			g.Add(sc.at(query.NotLike("search_vector", *p.SearchVector)))
+		}
+	}
+	if p := f.Null; p != nil {
+		if p.CreatedByAccountID != nil {
+			if *p.CreatedByAccountID {
+				g.Add(sc.at(query.IsNull("created_by_account_id")))
+			} else {
+				g.Add(sc.at(query.NotNull("created_by_account_id")))
+			}
+		}
+		if p.UpdatedAt != nil {
+			if *p.UpdatedAt {
+				g.Add(sc.at(query.IsNull("updated_at")))
+			} else {
+				g.Add(sc.at(query.NotNull("updated_at")))
+			}
+		}
+		if p.UpdatedByAccountID != nil {
+			if *p.UpdatedByAccountID {
+				g.Add(sc.at(query.IsNull("updated_by_account_id")))
+			} else {
+				g.Add(sc.at(query.NotNull("updated_by_account_id")))
+			}
+		}
+		if p.DeletedAt != nil {
+			if *p.DeletedAt {
+				g.Add(sc.at(query.IsNull("deleted_at")))
+			} else {
+				g.Add(sc.at(query.NotNull("deleted_at")))
+			}
+		}
+		if p.DeletedByAccountID != nil {
+			if *p.DeletedByAccountID {
+				g.Add(sc.at(query.IsNull("deleted_by_account_id")))
+			} else {
+				g.Add(sc.at(query.NotNull("deleted_by_account_id")))
+			}
+		}
+		if p.SnapshotFromLessonID != nil {
+			if *p.SnapshotFromLessonID {
+				g.Add(sc.at(query.IsNull("snapshot_from_lesson_id")))
+			} else {
+				g.Add(sc.at(query.NotNull("snapshot_from_lesson_id")))
+			}
+		}
+		if p.SnapshotFromLessonAt != nil {
+			if *p.SnapshotFromLessonAt {
+				g.Add(sc.at(query.IsNull("snapshot_from_lesson_at")))
+			} else {
+				g.Add(sc.at(query.NotNull("snapshot_from_lesson_at")))
+			}
+		}
+		if p.Notes != nil {
+			if *p.Notes {
+				g.Add(sc.at(query.IsNull("notes")))
+			} else {
+				g.Add(sc.at(query.NotNull("notes")))
+			}
+		}
+		if p.Capacity != nil {
+			if *p.Capacity {
+				g.Add(sc.at(query.IsNull("capacity")))
+			} else {
+				g.Add(sc.at(query.NotNull("capacity")))
+			}
+		}
+		if p.Price != nil {
+			if *p.Price {
+				g.Add(sc.at(query.IsNull("price")))
+			} else {
+				g.Add(sc.at(query.NotNull("price")))
+			}
+		}
+		if p.Tags != nil {
+			if *p.Tags {
+				g.Add(sc.at(query.IsNull("tags")))
+			} else {
+				g.Add(sc.at(query.NotNull("tags")))
+			}
+		}
+		if p.SearchVector != nil {
+			if *p.SearchVector {
+				g.Add(sc.at(query.IsNull("search_vector")))
+			} else {
+				g.Add(sc.at(query.NotNull("search_vector")))
+			}
+		}
+	}
+	if p := f.NotNull; p != nil {
+		if p.CreatedByAccountID != nil {
+			if *p.CreatedByAccountID {
+				g.Add(sc.at(query.NotNull("created_by_account_id")))
+			} else {
+				g.Add(sc.at(query.IsNull("created_by_account_id")))
+			}
+		}
+		if p.UpdatedAt != nil {
+			if *p.UpdatedAt {
+				g.Add(sc.at(query.NotNull("updated_at")))
+			} else {
+				g.Add(sc.at(query.IsNull("updated_at")))
+			}
+		}
+		if p.UpdatedByAccountID != nil {
+			if *p.UpdatedByAccountID {
+				g.Add(sc.at(query.NotNull("updated_by_account_id")))
+			} else {
+				g.Add(sc.at(query.IsNull("updated_by_account_id")))
+			}
+		}
+		if p.DeletedAt != nil {
+			if *p.DeletedAt {
+				g.Add(sc.at(query.NotNull("deleted_at")))
+			} else {
+				g.Add(sc.at(query.IsNull("deleted_at")))
+			}
+		}
+		if p.DeletedByAccountID != nil {
+			if *p.DeletedByAccountID {
+				g.Add(sc.at(query.NotNull("deleted_by_account_id")))
+			} else {
+				g.Add(sc.at(query.IsNull("deleted_by_account_id")))
+			}
+		}
+		if p.SnapshotFromLessonID != nil {
+			if *p.SnapshotFromLessonID {
+				g.Add(sc.at(query.NotNull("snapshot_from_lesson_id")))
+			} else {
+				g.Add(sc.at(query.IsNull("snapshot_from_lesson_id")))
+			}
+		}
+		if p.SnapshotFromLessonAt != nil {
+			if *p.SnapshotFromLessonAt {
+				g.Add(sc.at(query.NotNull("snapshot_from_lesson_at")))
+			} else {
+				g.Add(sc.at(query.IsNull("snapshot_from_lesson_at")))
+			}
+		}
+		if p.Notes != nil {
+			if *p.Notes {
+				g.Add(sc.at(query.NotNull("notes")))
+			} else {
+				g.Add(sc.at(query.IsNull("notes")))
+			}
+		}
+		if p.Capacity != nil {
+			if *p.Capacity {
+				g.Add(sc.at(query.NotNull("capacity")))
+			} else {
+				g.Add(sc.at(query.IsNull("capacity")))
+			}
+		}
+		if p.Price != nil {
+			if *p.Price {
+				g.Add(sc.at(query.NotNull("price")))
+			} else {
+				g.Add(sc.at(query.IsNull("price")))
+			}
+		}
+		if p.Tags != nil {
+			if *p.Tags {
+				g.Add(sc.at(query.NotNull("tags")))
+			} else {
+				g.Add(sc.at(query.IsNull("tags")))
+			}
+		}
+		if p.SearchVector != nil {
+			if *p.SearchVector {
+				g.Add(sc.at(query.NotNull("search_vector")))
+			} else {
+				g.Add(sc.at(query.IsNull("search_vector")))
+			}
+		}
+	}
+
+	for _, n := range f.NestedFilters {
+		nested, err := lessonGroup(n, sc)
+		if err != nil {
+			return query.Group{}, err
+		}
+		g.Nest(nested)
+	}
+	return g, nil
+}
+
+// lessonSortable reports whether a column can be ordered by.
+func lessonSortable(column string) bool {
+	switch column {
+	case "id", "tenant_id", "created_at", "created_by_account_id", "updated_at", "updated_by_account_id", "deleted_at", "deleted_by_account_id", "version_type", "snapshot_from_lesson_id", "snapshot_from_lesson_at", "title", "notes", "status", "manager_email", "starts_at", "capacity", "price", "search_vector":
+		return true
+	}
+	return false
+}
+
+// lessonOrder converts the model's ordering terms into the runtime's.
+func lessonOrder(terms []model.LessonOrder, sc filterScope) ([]query.Order, []query.Join, error) {
+	if len(terms) == 0 {
+		return nil, nil, nil
+	}
+
+	out := make([]query.Order, 0, len(terms))
+
+	for _, t := range terms {
+		// A column this table cannot be ordered by is the caller's mistake, not a
+		// column name to paste into a statement.
+		if !lessonSortable(t.Column) {
+			return nil, nil, rigerr.Invalid("a Lesson cannot be ordered by %q", t.Column)
+		}
+		out = append(out, query.Order{Table: sc.as, Column: t.Column, Desc: t.Desc})
+	}
+
+	return out, nil, nil
 }
 
 type lessonRepo struct {
@@ -59,19 +658,24 @@ type lessonRepo struct {
 
 var _ LessonRepository = (*lessonRepo)(nil)
 
-const lessonRepoSelect = "id, tenant_id, created_at, created_by_account_id, updated_at, updated_by_account_id, deleted_at, deleted_by_account_id, version_type, snapshot_from_lesson_id, snapshot_from_lesson_at, title, notes, status, manager_email, starts_at, capacity, price, tags, row_version, search_vector"
+const lessonRepoSelect = "lesson.id, lesson.tenant_id, lesson.created_at, lesson.created_by_account_id, lesson.updated_at, lesson.updated_by_account_id, lesson.deleted_at, lesson.deleted_by_account_id, lesson.version_type, lesson.snapshot_from_lesson_id, lesson.snapshot_from_lesson_at, lesson.title, lesson.notes, lesson.status, lesson.manager_email, lesson.starts_at, lesson.capacity, lesson.price, lesson.tags, lesson.row_version, lesson.search_vector"
 
 // scanLesson reads one row in the order lessonRepoSelect lists.
-func scanLesson(row pgx.Row) (*Lesson, error) {
-	var m Lesson
+func scanLesson(row pgx.Row) (*model.Lesson, error) {
+	var m model.Lesson
 	if err := row.Scan(&m.ID, &m.TenantID, &m.CreatedAt, &m.CreatedByAccountID, &m.UpdatedAt, &m.UpdatedByAccountID, &m.DeletedAt, &m.DeletedByAccountID, &m.VersionType, &m.SnapshotFromLessonID, &m.SnapshotFromLessonAt, &m.Title, &m.Notes, &m.Status, &m.ManagerEmailAddress, &m.StartsAt, &m.Capacity, &m.Price, &m.Tags, new(any), &m.SearchVector); err != nil {
 		return nil, err
 	}
+	m.CreatedAt = dbx.UTC(m.CreatedAt)
+	m.UpdatedAt = dbx.UTCPtr(m.UpdatedAt)
+	m.DeletedAt = dbx.UTCPtr(m.DeletedAt)
+	m.SnapshotFromLessonAt = dbx.UTCPtr(m.SnapshotFromLessonAt)
+	m.StartsAt = dbx.UTC(m.StartsAt)
 	return &m, nil
 }
 
 // Get implements LessonRepository.
-func (r *lessonRepo) Get(ctx context.Context, id uuid.UUID, opts ...readopt.Option) (*Lesson, error) {
+func (r *lessonRepo) Get(ctx context.Context, id uuid.UUID, opts ...readopt.Option) (*model.Lesson, error) {
 	cfg, err := readopt.Apply(opts)
 	if err != nil {
 		return nil, err
@@ -101,12 +705,12 @@ func (r *lessonRepo) Get(ctx context.Context, id uuid.UUID, opts ...readopt.Opti
 }
 
 // List implements LessonRepository.
-func (r *lessonRepo) List(ctx context.Context, q LessonQuery, opts ...readopt.Option) ([]*Lesson, int64, error) {
-	return r.list(ctx, q, opts)
+func (r *lessonRepo) List(ctx context.Context, f model.LessonFilter, page model.LessonPage, opts ...readopt.Option) ([]*model.Lesson, int64, error) {
+	return r.list(ctx, f, page, opts)
 }
 
-// list is the body of every read that takes a query.
-func (r *lessonRepo) list(ctx context.Context, q LessonQuery, opts []readopt.Option) ([]*Lesson, int64, error) {
+// list is the body of every read that takes a filter.
+func (r *lessonRepo) list(ctx context.Context, f model.LessonFilter, page model.LessonPage, opts []readopt.Option) ([]*model.Lesson, int64, error) {
 	cfg, err := readopt.Apply(opts)
 	if err != nil {
 		return nil, 0, err
@@ -117,51 +721,75 @@ func (r *lessonRepo) list(ctx context.Context, q LessonQuery, opts []readopt.Opt
 		return nil, 0, err
 	}
 
-	args := query.NewArgs()
+	// One scope for the whole statement: it says who is asking, and it qualifies
+	// every column with the table it belongs to. The qualification is not
+	// decoration — an ordering that reaches a related table brings a second
+	// tenant_id into scope, and an unqualified one is then ambiguous.
+	sc := newFilterScope(claims, "lesson")
+
 	scope := query.Group{}
 	if !cfg.SkipTenantScope {
-		scope.Add(query.Eq("tenant_id", claims.TenantID))
+		scope.Add(sc.at(query.Eq("tenant_id", claims.TenantID)))
 	}
 	switch {
 	case cfg.OnlyDeleted:
-		scope.Add(query.NotNull("deleted_at"))
+		scope.Add(sc.at(query.NotNull("deleted_at")))
 		// A row past the restore window is gone as far as anyone is concerned, so it
 		// does not appear in the trash either.
-		scope.Add(query.Gte("deleted_at", LessonRestoreCutoff()))
+		scope.Add(sc.at(query.Gte("deleted_at", LessonRestoreCutoff())))
 	case !cfg.IncludeDeleted:
-		scope.Add(query.IsNull("deleted_at"))
+		scope.Add(sc.at(query.IsNull("deleted_at")))
 	}
 	if !cfg.IncludeSnapshots {
-		scope.Add(query.Eq("version_type", LessonVersionTypeOriginal))
+		scope.Add(sc.at(query.Eq("version_type", model.LessonVersionTypeOriginal)))
 	}
 
-	scope.Nest(q.group())
+	group, err := lessonGroup(f, sc)
+	if err != nil {
+		return nil, 0, err
+	}
+	scope.Nest(group)
 
+	// The count has its own arguments and no joins. A left join cannot change how
+	// many rows there are, and a statement must be given exactly the parameters
+	// its text refers to.
+	countArgs := query.NewArgs()
+	countWhere := scope.SQL(countArgs)
+	if countWhere != "" {
+		countWhere = " WHERE " + countWhere
+	}
+	countSQL := fmt.Sprintf("SELECT count(*) FROM lesson%s", countWhere)
+	var total int64
+	if err := r.db.conn().QueryRow(ctx, countSQL, countArgs.Values()...).Scan(&total); err != nil {
+		return nil, 0, rigerr.Internal(err, "count lesson")
+	}
+
+	order, joins, err := lessonOrder(page.OrderBy, sc)
+	if err != nil {
+		return nil, 0, err
+	}
+	if len(order) == 0 {
+		order = LessonDefaultOrder
+	}
+	window := query.Page{Limit: page.Limit, Offset: page.Offset}.Clamp(DefaultLimit, MaxLimit)
+
+	// The joins render first, because Postgres numbers placeholders in the order
+	// the statement mentions them and a join stands before the conditions do.
+	args := query.NewArgs()
+	joinSQL := query.JoinSQL(joins, args)
 	where := scope.SQL(args)
 	if where != "" {
 		where = " WHERE " + where
 	}
 
-	countSQL := fmt.Sprintf("SELECT count(*) FROM lesson%s", where)
-	var total int64
-	if err := r.db.conn().QueryRow(ctx, countSQL, args.Values()...).Scan(&total); err != nil {
-		return nil, 0, rigerr.Internal(err, "count lesson")
-	}
-
-	order := q.OrderBy
-	if len(order) == 0 {
-		order = LessonDefaultOrder
-	}
-	page := query.Page{Limit: q.Limit, Offset: q.Offset}.Clamp(DefaultLimit, MaxLimit)
-
-	listSQL := fmt.Sprintf("SELECT %s FROM lesson%s%s%s", lessonRepoSelect, where, query.OrderSQL(order), page.SQL(args))
+	listSQL := fmt.Sprintf("SELECT %s FROM lesson%s%s%s%s", lessonRepoSelect, joinSQL, where, query.OrderSQL(order), window.SQL(args))
 	rows, err := r.db.conn().Query(ctx, listSQL, args.Values()...)
 	if err != nil {
 		return nil, 0, rigerr.Internal(err, "list lesson")
 	}
 	defer rows.Close()
 
-	out := make([]*Lesson, 0, page.Limit)
+	out := make([]*model.Lesson, 0, window.Limit)
 	for rows.Next() {
 		m, err := scanLesson(rows)
 		if err != nil {
@@ -179,17 +807,42 @@ func (r *lessonRepo) list(ctx context.Context, q LessonQuery, opts []readopt.Opt
 //
 // It always ends with the primary key, so the order is total and a page
 // boundary cannot repeat or skip a row.
-var LessonDefaultOrder = []query.Order{{Column: "starts_at", Desc: true}, {Column: "id", Desc: false}}
+var LessonDefaultOrder = []query.Order{{Table: "lesson", Column: "starts_at", Desc: true}, {Table: "lesson", Column: "id", Desc: false}}
 
 // Create implements LessonRepository.
-func (r *lessonRepo) Create(ctx context.Context, in *LessonCreate) (*Lesson, error) {
-	if in == nil {
-		return nil, rigerr.BadRequest("no Lesson to create")
-	}
-
+func (r *lessonRepo) Create(ctx context.Context, in dbhook.Create[model.LessonCreateInput, model.Lesson]) (*model.Lesson, error) {
+	// Who is asking, first of all. A write from a request carrying no identity is
+	// refused here — before a rule runs, before a column notices — which is
+	// what lets every hook below take the claims as a value rather than something
+	// to look up and check.
 	claims, err := tenancy.FromContext(ctx)
 	if err != nil {
 		return nil, err
+	}
+	_ = claims
+
+	// Normalize then validate, before anything is written. A service that forgets
+	// to call these cannot write a row that would fail them, which is the only way
+	// a rule the schema declares is actually a rule.
+	in.Input.Normalize()
+	if err := in.Input.Validate(); err != nil {
+		return nil, err
+	}
+
+	// Then the rules the schema cannot express, if the service wrote any. They run
+	// before the transaction opens: a rule that reaches another service should not
+	// be holding a row lock while it waits.
+	//
+	// They run before the create hook rather than after it, which is the one place
+	// the order goes this way: an update validates inside the transaction that
+	// read the row, so its hook can run first and have what it sets judged. Here
+	// there is no row to read and no transaction yet, and opening one to hold
+	// across a rule that may call out to another service would be a worse trade
+	// than the one it buys.
+	if in.Hooks.Validator != nil {
+		if err := in.Hooks.Validator.RunCreate(ctx, claims, &in.Input); err != nil {
+			return nil, err
+		}
 	}
 
 	// A version 7 identifier sorts by creation time, so an index on the primary
@@ -200,34 +853,55 @@ func (r *lessonRepo) Create(ctx context.Context, in *LessonCreate) (*Lesson, err
 	}
 	now := time.Now().UTC()
 	_ = now
-	versionType := LessonVersionTypeOriginal
+	versionType := model.LessonVersionTypeOriginal
 
-	columns := []string{"id", "tenant_id", "created_at", "created_by_account_id", "version_type", "title", "notes", "manager_email", "starts_at", "capacity", "price", "tags"}
-	values := []any{id, claims.TenantID, now, claims.Actor(), versionType, in.Title, in.Notes, in.ManagerEmailAddress, in.StartsAt, in.Capacity, in.Price, in.Tags}
+	// A single INSERT is already atomic, so the transaction is opened only when a
+	// hook needs to be able to undo it. Two round trips is not a price to pay for
+	// nothing.
+	needsTx := in.Hooks.Before != nil || in.Hooks.After != nil
 
-	sql := fmt.Sprintf("INSERT INTO lesson (%s) VALUES (%s) RETURNING %s", joinColumns(columns), placeholders(len(values)), lessonRepoSelect)
+	var m *model.Lesson
+	err = dbx.InTxIf(ctx, r.db.pool, r.db.conn(), needsTx, func(ctx context.Context, tx dbx.Conn) error {
+		if in.Hooks.Before != nil {
+			if err := in.Hooks.Before(ctx, claims, &in.Input); err != nil {
+				return err
+			}
+		}
 
-	m, err := scanLesson(r.db.conn().QueryRow(ctx, sql, values...))
+		columns := []string{"id", "tenant_id", "created_at", "created_by_account_id", "version_type", "title", "notes", "manager_email", "starts_at", "capacity", "price", "tags"}
+		values := []any{id, claims.TenantID, now, claims.Actor(), versionType, in.Input.Title, in.Input.Notes, in.Input.ManagerEmailAddress, in.Input.StartsAt, in.Input.Capacity, in.Input.Price, in.Input.Tags}
+
+		sql := fmt.Sprintf("INSERT INTO lesson (%s) VALUES (%s) RETURNING %s", joinColumns(columns), placeholders(len(values)), lessonRepoSelect)
+
+		created, err := scanLesson(tx.QueryRow(ctx, sql, values...))
+		if err != nil {
+			return writeError(err, "lesson")
+		}
+		m = created
+
+		if in.Hooks.After != nil {
+			return in.Hooks.After(ctx, claims, m)
+		}
+		return nil
+	})
 	if err != nil {
-		return nil, writeError(err, "lesson")
+		return nil, err
 	}
 
-	_ = audit.Record(ctx, r.db.audit, audit.Entry{
-		TenantID:  claims.TenantID,
-		AccountID: claims.Actor(),
-		Operation: audit.OperationCreate,
-		Entity:    "lesson",
-		EntityID:  m.ID,
-		Values:    nil,
-	})
+	if in.Hooks.AfterCommit != nil {
+		// The claims are captured with the rest: the request may be over by the time
+		// this runs, and reaching into a context for them then is reaching into one
+		// that has been cancelled.
+		done, who := in.Hooks.AfterCommit, claims
+		dbx.AfterCommit(ctx, func() { done(ctx, who, m) })
+	}
+
 	return m, nil
 }
 
 // Update implements LessonRepository.
-func (r *lessonRepo) Update(ctx context.Context, id uuid.UUID, in *LessonUpdate) (*Lesson, error) {
-	if in == nil {
-		return nil, rigerr.BadRequest("no changes given")
-	}
+func (r *lessonRepo) Update(ctx context.Context, id uuid.UUID, in dbhook.Update[model.LessonUpdateInput, model.Lesson]) (*model.Lesson, error) {
+	in.Input.Normalize()
 
 	claims, err := tenancy.FromContext(ctx)
 	if err != nil {
@@ -235,12 +909,9 @@ func (r *lessonRepo) Update(ctx context.Context, id uuid.UUID, in *LessonUpdate)
 	}
 	_ = claims
 
-	var (
-		updated *Lesson
-		changes []auditChange
-	)
+	var updated, prev *model.Lesson
 	err = dbx.InTx(ctx, r.db.pool, func(ctx context.Context, tx dbx.Conn) error {
-		prev, err := r.Get(ctx, id)
+		prev, err = r.Get(ctx, id)
 		if err != nil {
 			return err
 		}
@@ -250,92 +921,83 @@ func (r *lessonRepo) Update(ctx context.Context, id uuid.UUID, in *LessonUpdate)
 		}
 		// A snapshot is a record of what was; changing one would make the history a
 		// lie.
-		if prev.VersionType != LessonVersionTypeOriginal {
+		if prev.VersionType != model.LessonVersionTypeOriginal {
 			return rigerr.Conflict("Lesson %s is a snapshot and cannot be changed", id)
 		}
 
-		if err := r.writeSnapshot(ctx, tx, prev); err != nil {
+		// The hook shapes the input, so a field it sets is a field that gets written
+		// — and one the rules below then judge. It runs first for exactly that
+		// reason: a hook that ran after validation could write a value nothing had
+		// checked.
+		if in.Hooks.Before != nil {
+			if err := in.Hooks.Before(ctx, claims, &in.Input, prev); err != nil {
+				return err
+			}
+		}
+
+		// Validation runs against the row this update would produce, not against the
+		// request — a rule about two fields needs both, and only one of them may
+		// have been sent. It happens inside the transaction that read prev, so nothing
+		// can change underneath it.
+		if err := in.Input.Validate(prev); err != nil {
 			return err
+		}
+
+		if in.Hooks.Validator != nil {
+			if err := in.Hooks.Validator.RunUpdate(ctx, claims, &in.Input, prev); err != nil {
+				return err
+			}
 		}
 
 		columns := []string{}
 		values := []any{}
+
+		if v, ok := in.Input.Title.Get(); ok {
+			columns = append(columns, "title")
+			values = append(values, v)
+		}
+		if in.Input.Notes.Touched() {
+			columns = append(columns, "notes")
+			values = append(values, in.Input.Notes.Ptr())
+		}
+		if v, ok := in.Input.Status.Get(); ok {
+			columns = append(columns, "status")
+			values = append(values, v)
+		}
+		if v, ok := in.Input.ManagerEmailAddress.Get(); ok {
+			columns = append(columns, "manager_email")
+			values = append(values, v)
+		}
+		if in.Input.Capacity.Touched() {
+			columns = append(columns, "capacity")
+			values = append(values, in.Input.Capacity.Ptr())
+		}
+		if in.Input.Price.Touched() {
+			columns = append(columns, "price")
+			values = append(values, in.Input.Price.Ptr())
+		}
+		if in.Input.Tags.Touched() {
+			columns = append(columns, "tags")
+			values = append(values, in.Input.Tags.Ptr())
+		}
+
+		if len(columns) == 0 {
+			// Nothing was asked for, so nothing happens — no stamp, and no snapshot
+			// either. An update that changes no column did not happen, and a history full
+			// of copies of an unchanged row is a history nobody can read.
+			updated = prev
+			return nil
+		}
+
+		// The copy is taken now that there is something to copy for.
+		if err := r.writeSnapshot(ctx, tx, prev); err != nil {
+			return err
+		}
+
 		columns = append(columns, "updated_at")
 		values = append(values, time.Now().UTC())
 		columns = append(columns, "updated_by_account_id")
 		values = append(values, claims.Actor())
-
-		changes = changes[:0]
-		if in.Title.Touched() {
-			columns = append(columns, "title")
-			v, ok := in.Title.Get()
-			if !ok {
-				return rigerr.Invalid("Title cannot be null")
-			}
-			values = append(values, v)
-			changes = append(changes, auditChange{Column: "title", Type: "String", Old: render(prev.Title), New: render(in.Title)})
-		}
-		if in.Notes.Touched() {
-			columns = append(columns, "notes")
-			if v, ok := in.Notes.Get(); ok {
-				values = append(values, v)
-			} else {
-				values = append(values, nil)
-			}
-			changes = append(changes, auditChange{Column: "notes", Type: "String", Old: render(prev.Notes), New: render(in.Notes)})
-		}
-		if in.Status.Touched() {
-			columns = append(columns, "status")
-			v, ok := in.Status.Get()
-			if !ok {
-				return rigerr.Invalid("Status cannot be null")
-			}
-			values = append(values, v)
-			changes = append(changes, auditChange{Column: "status", Type: "LessonStatus", Old: render(prev.Status), New: render(in.Status)})
-		}
-		if in.ManagerEmailAddress.Touched() {
-			columns = append(columns, "manager_email")
-			v, ok := in.ManagerEmailAddress.Get()
-			if !ok {
-				return rigerr.Invalid("ManagerEmailAddress cannot be null")
-			}
-			values = append(values, v)
-			changes = append(changes, auditChange{Column: "manager_email", Type: "String", Old: render(prev.ManagerEmailAddress), New: render(in.ManagerEmailAddress)})
-		}
-		if in.Capacity.Touched() {
-			columns = append(columns, "capacity")
-			if v, ok := in.Capacity.Get(); ok {
-				values = append(values, v)
-			} else {
-				values = append(values, nil)
-			}
-			changes = append(changes, auditChange{Column: "capacity", Type: "Int", Old: render(prev.Capacity), New: render(in.Capacity)})
-		}
-		if in.Price.Touched() {
-			columns = append(columns, "price")
-			if v, ok := in.Price.Get(); ok {
-				values = append(values, v)
-			} else {
-				values = append(values, nil)
-			}
-			changes = append(changes, auditChange{Column: "price", Type: "Decimal", Old: render(prev.Price), New: render(in.Price)})
-		}
-		if in.Tags.Touched() {
-			columns = append(columns, "tags")
-			if v, ok := in.Tags.Get(); ok {
-				values = append(values, v)
-			} else {
-				values = append(values, nil)
-			}
-			changes = append(changes, auditChange{Column: "tags", Type: "String", Old: render(prev.Tags), New: render(in.Tags)})
-		}
-
-		if len(changes) == 0 {
-			// Nothing was asked for, so nothing is written. An update that changes no
-			// columns should not bump the audit trail.
-			updated = prev
-			return nil
-		}
 
 		values = append(values, id)
 		sql := fmt.Sprintf("UPDATE lesson SET %s WHERE id = $%d RETURNING %s", assignments(columns), len(values), lessonRepoSelect)
@@ -344,20 +1006,24 @@ func (r *lessonRepo) Update(ctx context.Context, id uuid.UUID, in *LessonUpdate)
 		if err != nil {
 			return writeError(err, "lesson")
 		}
+
+		if in.Hooks.After != nil {
+			return in.Hooks.After(ctx, claims, updated, prev)
+		}
 		return nil
 	})
 	if err != nil {
 		return nil, err
 	}
 
-	_ = audit.Record(ctx, r.db.audit, audit.Entry{
-		TenantID:  claims.TenantID,
-		AccountID: claims.Actor(),
-		Operation: audit.OperationUpdate,
-		Entity:    "lesson",
-		EntityID:  updated.ID,
-		Values:    auditValues(changes...),
-	})
+	if in.Hooks.AfterCommit != nil {
+		// The claims are captured with the rest: the request may be over by the time
+		// this runs, and reaching into a context for them then is reaching into one
+		// that has been cancelled.
+		done, who := in.Hooks.AfterCommit, claims
+		dbx.AfterCommit(ctx, func() { done(ctx, who, updated, prev) })
+	}
+
 	return updated, nil
 }
 
@@ -366,7 +1032,7 @@ func (r *lessonRepo) Update(ctx context.Context, id uuid.UUID, in *LessonUpdate)
 // The copy records the source row's last-updated time rather than the moment
 // of copying: that identifies the version captured, which is what a reader of
 // the history is asking about.
-func (r *lessonRepo) writeSnapshot(ctx context.Context, tx dbx.Conn, prev *Lesson) error {
+func (r *lessonRepo) writeSnapshot(ctx context.Context, tx dbx.Conn, prev *model.Lesson) error {
 	snapshotID, err := uuid.NewV7()
 	if err != nil {
 		return rigerr.Internal(err, "generate an identifier")
@@ -378,7 +1044,7 @@ func (r *lessonRepo) writeSnapshot(ctx context.Context, tx dbx.Conn, prev *Lesso
 	}
 
 	columns := []string{"id", "tenant_id", "created_at", "created_by_account_id", "updated_at", "updated_by_account_id", "deleted_at", "deleted_by_account_id", "version_type", "snapshot_from_lesson_id", "snapshot_from_lesson_at", "title", "notes", "status", "manager_email", "starts_at", "capacity", "price", "tags"}
-	values := []any{snapshotID, prev.TenantID, prev.CreatedAt, prev.CreatedByAccountID, prev.UpdatedAt, prev.UpdatedByAccountID, prev.DeletedAt, prev.DeletedByAccountID, LessonVersionTypeSnapshot, prev.ID, sourceVersion, prev.Title, prev.Notes, prev.Status, prev.ManagerEmailAddress, prev.StartsAt, prev.Capacity, prev.Price, prev.Tags}
+	values := []any{snapshotID, prev.TenantID, prev.CreatedAt, prev.CreatedByAccountID, nil, prev.UpdatedByAccountID, nil, nil, model.LessonVersionTypeSnapshot, prev.ID, sourceVersion, prev.Title, prev.Notes, prev.Status, prev.ManagerEmailAddress, prev.StartsAt, prev.Capacity, prev.Price, prev.Tags}
 
 	sql := fmt.Sprintf("INSERT INTO lesson (%s) VALUES (%s)", joinColumns(columns), placeholders(len(values)))
 	if _, err := tx.Exec(ctx, sql, values...); err != nil {
@@ -388,41 +1054,46 @@ func (r *lessonRepo) writeSnapshot(ctx context.Context, tx dbx.Conn, prev *Lesso
 }
 
 // Delete implements LessonRepository.
-func (r *lessonRepo) Delete(ctx context.Context, in LessonDelete) error {
+func (r *lessonRepo) Delete(ctx context.Context, in dbhook.Delete[model.LessonDeleteInput, model.Lesson]) error {
 	claims, err := tenancy.FromContext(ctx)
 	if err != nil {
 		return err
 	}
 	_ = claims
 
-	return dbx.InTx(ctx, r.db.pool, func(ctx context.Context, tx dbx.Conn) error {
-		prev, err := r.Get(ctx, in.ID)
+	var prev *model.Lesson
+	err = dbx.InTx(ctx, r.db.pool, func(ctx context.Context, tx dbx.Conn) error {
+		prev, err = r.Get(ctx, in.Input.ID)
 		if err != nil {
 			return err
 		}
 
-		if in.Hard {
-			// The snapshots reference this row, so they go first.
-			if _, err := tx.Exec(ctx, "DELETE FROM lesson WHERE snapshot_from_lesson_id = $1", in.ID); err != nil {
-				return writeError(err, "lesson")
-			}
-			if _, err := tx.Exec(ctx, "DELETE FROM lesson WHERE id = $1", in.ID); err != nil {
-				return writeError(err, "lesson")
-			}
-			_ = audit.Record(ctx, r.db.audit, audit.Entry{
-				TenantID:  claims.TenantID,
-				AccountID: claims.Actor(),
-				Operation: audit.OperationDelete,
-				Entity:    "lesson",
-				EntityID:  prev.ID,
-				Values:    nil,
-			})
+		// Deleting an already-deleted row is not an error: the caller asked for it to
+		// be gone, and it is. Nothing happens, so no hook runs either — a hook that
+		// fires on a no-op is a notification about nothing.
+		if prev.DeletedAt != nil && !in.Input.Hard {
 			return nil
 		}
 
-		// Deleting an already-deleted row is not an error: the caller asked for it to
-		// be gone, and it is.
-		if prev.DeletedAt != nil {
+		if in.Hooks.Before != nil {
+			if err := in.Hooks.Before(ctx, claims, &in.Input, prev); err != nil {
+				return err
+			}
+		}
+
+		if in.Input.Hard {
+			// The snapshots reference this row, so they go first.
+			if _, err := tx.Exec(ctx, "DELETE FROM lesson WHERE snapshot_from_lesson_id = $1", in.Input.ID); err != nil {
+				return writeError(err, "lesson")
+			}
+			if _, err := tx.Exec(ctx, "DELETE FROM lesson WHERE id = $1", in.Input.ID); err != nil {
+				return writeError(err, "lesson")
+			}
+			if in.Hooks.After != nil {
+				if err := in.Hooks.After(ctx, claims, prev); err != nil {
+					return err
+				}
+			}
 			return nil
 		}
 
@@ -430,7 +1101,7 @@ func (r *lessonRepo) Delete(ctx context.Context, in LessonDelete) error {
 		values := []any{time.Now().UTC()}
 		columns = append(columns, "deleted_by_account_id")
 		values = append(values, claims.Actor())
-		values = append(values, in.ID)
+		values = append(values, in.Input.ID)
 
 		// The retirement is written directly rather than through Update, so it neither
 		// bumps updated_at nor takes a snapshot of a row nobody changed.
@@ -438,16 +1109,26 @@ func (r *lessonRepo) Delete(ctx context.Context, in LessonDelete) error {
 		if _, err := tx.Exec(ctx, sql, values...); err != nil {
 			return writeError(err, "lesson")
 		}
-		_ = audit.Record(ctx, r.db.audit, audit.Entry{
-			TenantID:  claims.TenantID,
-			AccountID: claims.Actor(),
-			Operation: audit.OperationDelete,
-			Entity:    "lesson",
-			EntityID:  prev.ID,
-			Values:    nil,
-		})
+		if in.Hooks.After != nil {
+			if err := in.Hooks.After(ctx, claims, prev); err != nil {
+				return err
+			}
+		}
 		return nil
 	})
+	if err != nil {
+		return err
+	}
+
+	if in.Hooks.AfterCommit != nil {
+		// The claims are captured with the rest: the request may be over by the time
+		// this runs, and reaching into a context for them then is reaching into one
+		// that has been cancelled.
+		done, who := in.Hooks.AfterCommit, claims
+		dbx.AfterCommit(ctx, func() { done(ctx, who, prev) })
+	}
+
+	return nil
 }
 
 // LessonRestoreCutoff is the moment before which a deleted row can no longer
@@ -457,16 +1138,16 @@ func LessonRestoreCutoff() time.Time {
 }
 
 // Restore implements LessonRepository.
-func (r *lessonRepo) Restore(ctx context.Context, id uuid.UUID) (*Lesson, error) {
+func (r *lessonRepo) Restore(ctx context.Context, id uuid.UUID, in dbhook.Restore[model.LessonUpdateInput, model.Lesson]) (*model.Lesson, error) {
 	claims, err := tenancy.FromContext(ctx)
 	if err != nil {
 		return nil, err
 	}
 	_ = claims
 
-	var restored *Lesson
+	var restored, prev *model.Lesson
 	err = dbx.InTx(ctx, r.db.pool, func(ctx context.Context, tx dbx.Conn) error {
-		prev, err := r.Get(ctx, id)
+		prev, err = r.Get(ctx, id)
 		if err != nil {
 			return err
 		}
@@ -482,10 +1163,69 @@ func (r *lessonRepo) Restore(ctx context.Context, id uuid.UUID) (*Lesson, error)
 			return rigerr.Conflict("Lesson %s was deleted more than 30 days ago and can no longer be restored", id)
 		}
 
+		// The request carried no fields, so this hook is where they come from. It is
+		// handed the row as it was retired and an empty input; setting a field on that
+		// input writes it as the row comes back, which is how a value the world has
+		// taken since gets changed on the way in. Returning an error refuses the
+		// restore instead.
+		if in.Hooks.Before != nil {
+			if err := in.Hooks.Before(ctx, claims, &in.Input, prev); err != nil {
+				return err
+			}
+		}
+
+		// Then every rule against whatever the hook settled on, not only the ones for
+		// fields it touched: the row was not live, so nothing about it has been
+		// checked against the world it is returning to.
+		if in.Hooks.Validator != nil {
+			if err := in.Hooks.Validator.RunRestore(ctx, claims, &in.Input, prev); err != nil {
+				return err
+			}
+		}
+
 		columns := []string{"deleted_at"}
 		values := []any{nil}
 		columns = append(columns, "deleted_by_account_id")
 		values = append(values, nil)
+
+		// Whatever the input changed goes in the same statement. No snapshot is taken:
+		// a snapshot has to be a copy of a live row — the CHECK constraint says so
+		// — and there was no live row to copy.
+		if v, ok := in.Input.Title.Get(); ok {
+			columns = append(columns, "title")
+			values = append(values, v)
+		}
+		if in.Input.Notes.Touched() {
+			columns = append(columns, "notes")
+			values = append(values, in.Input.Notes.Ptr())
+		}
+		if v, ok := in.Input.Status.Get(); ok {
+			columns = append(columns, "status")
+			values = append(values, v)
+		}
+		if v, ok := in.Input.ManagerEmailAddress.Get(); ok {
+			columns = append(columns, "manager_email")
+			values = append(values, v)
+		}
+		if in.Input.Capacity.Touched() {
+			columns = append(columns, "capacity")
+			values = append(values, in.Input.Capacity.Ptr())
+		}
+		if in.Input.Price.Touched() {
+			columns = append(columns, "price")
+			values = append(values, in.Input.Price.Ptr())
+		}
+		if in.Input.Tags.Touched() {
+			columns = append(columns, "tags")
+			values = append(values, in.Input.Tags.Ptr())
+		}
+
+		// The row changed, so it is stamped as changed. A restore that left the update
+		// columns alone would report the row as last touched before it was deleted.
+		columns = append(columns, "updated_at")
+		values = append(values, time.Now().UTC())
+		columns = append(columns, "updated_by_account_id")
+		values = append(values, claims.Actor())
 		values = append(values, id)
 
 		sql := fmt.Sprintf("UPDATE lesson SET %s WHERE id = $%d RETURNING %s", assignments(columns), len(values), lessonRepoSelect)
@@ -493,30 +1233,37 @@ func (r *lessonRepo) Restore(ctx context.Context, id uuid.UUID) (*Lesson, error)
 		if err != nil {
 			return writeError(err, "lesson")
 		}
+
+		if in.Hooks.After != nil {
+			return in.Hooks.After(ctx, claims, restored, prev)
+		}
 		return nil
 	})
 	if err != nil {
 		return nil, err
 	}
 
-	_ = audit.Record(ctx, r.db.audit, audit.Entry{
-		TenantID:  claims.TenantID,
-		AccountID: claims.Actor(),
-		Operation: audit.OperationRestore,
-		Entity:    "lesson",
-		EntityID:  restored.ID,
-		Values:    nil,
-	})
+	if in.Hooks.AfterCommit != nil {
+		// The claims are captured with the rest: the request may be over by the time
+		// this runs, and reaching into a context for them then is reaching into one
+		// that has been cancelled.
+		done, who := in.Hooks.AfterCommit, claims
+		dbx.AfterCommit(ctx, func() { done(ctx, who, restored, prev) })
+	}
+
 	return restored, nil
 }
 
 // ListDeleted returns retired rows still inside the restore window.
-func (r *lessonRepo) ListDeleted(ctx context.Context, q LessonQuery) ([]*Lesson, int64, error) {
-	return r.list(ctx, q, []readopt.Option{readopt.WithOnlyDeleted()})
+func (r *lessonRepo) ListDeleted(ctx context.Context, f model.LessonFilter, page model.LessonPage, opts ...readopt.Option) ([]*model.Lesson, int64, error) {
+	// The lifecycle option is forced and the caller's are kept: which rows the
+	// trash holds is not up for discussion, and how wide a view of it the caller
+	// gets still is.
+	return r.list(ctx, f, page, append([]readopt.Option{readopt.WithOnlyDeleted()}, opts...))
 }
 
 // ListSnapshots implements LessonRepository.
-func (r *lessonRepo) ListSnapshots(ctx context.Context, id uuid.UUID) ([]*Lesson, error) {
+func (r *lessonRepo) ListSnapshots(ctx context.Context, id uuid.UUID) ([]*model.Lesson, error) {
 	claims, err := tenancy.FromContext(ctx)
 	if err != nil {
 		return nil, err
@@ -529,7 +1276,7 @@ func (r *lessonRepo) ListSnapshots(ctx context.Context, id uuid.UUID) ([]*Lesson
 	}
 	defer rows.Close()
 
-	var out []*Lesson
+	var out []*model.Lesson
 	for rows.Next() {
 		m, err := scanLesson(rows)
 		if err != nil {
@@ -541,4 +1288,42 @@ func (r *lessonRepo) ListSnapshots(ctx context.Context, id uuid.UUID) ([]*Lesson
 		return nil, rigerr.Internal(err, "list snapshots of lesson")
 	}
 	return out, nil
+}
+
+// Revert implements LessonRepository.
+func (r *lessonRepo) Revert(ctx context.Context, id, versionID uuid.UUID, hooks dbhook.UpdateHooks[model.LessonUpdateInput, model.Lesson]) (*model.Lesson, error) {
+	var reverted *model.Lesson
+	err := dbx.InTx(ctx, r.db.pool, func(ctx context.Context, tx dbx.Conn) error {
+		version, err := r.Get(ctx, versionID)
+		if err != nil {
+			return err
+		}
+
+		// A version identifier is a row identifier, so it can name a live row or
+		// somebody else's history. Both answer the same way: naming a row that exists
+		// and is not yours should not be distinguishable from naming one that does
+		// not.
+		if version.VersionType != model.LessonVersionTypeSnapshot || version.SnapshotFromLessonID == nil || *version.SnapshotFromLessonID != id {
+			return rigerr.NotFound("Lesson %s has no version %s", id, versionID)
+		}
+
+		in := model.LessonUpdateInput{
+			Title:               patch.NewOptional(version.Title),
+			Status:              patch.NewOptional(version.Status),
+			ManagerEmailAddress: patch.NewOptional(version.ManagerEmailAddress),
+			Capacity:            patch.FromPtr(version.Capacity),
+			Price:               patch.FromPtr(version.Price),
+			Tags:                patch.FromSlice(version.Tags),
+		}
+
+		// Every field the version carried, including the ones that already match: what
+		// is being asked for is that state, not a diff against the current one.
+		reverted, err = r.Update(ctx, id, dbhook.Update[model.LessonUpdateInput, model.Lesson]{Input: in, Hooks: hooks})
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return reverted, nil
 }

@@ -380,3 +380,339 @@ func writeFile(t *testing.T, path, content string) {
 		t.Fatal(err)
 	}
 }
+
+// A new enum label appears in the database long before anybody names it, and
+// the whole point of sync is that the configuration catches up without losing
+// what was written by hand.
+func TestSyncAddsAnEnumValueAndTheWholeEnum(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	schema := teamSchema(t)
+
+	// A file that names the enum but not its newest label.
+	path := filepath.Join(root, "services", "team", "team.yaml")
+	writeFile(t, path, `table: team
+comment: A team.
+columns:
+  name:
+    comment: The team's name.
+  tier:
+    comment: How serious they are.
+enums:
+  team_tier:
+    name: TeamTier
+    values:
+      amateur:
+        name: Amateur
+        description: For fun.
+`)
+
+	set := load(t, root, "team")
+
+	changes, err := tablesync.Plan(schema, set, pathFor(root), tablesync.Options{Only: "team"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	change := changeFor(t, changes, "team")
+	if change.Kind != tablesync.ChangeUpdate {
+		t.Fatalf("kind = %s, want update", change.Kind)
+	}
+	if !strings.Contains(change.Content, "professional:") {
+		t.Errorf("the missing label should have been added:\n%s", change.Content)
+	}
+	// And what was written by hand is still there.
+	if !strings.Contains(change.Content, "For fun.") {
+		t.Errorf("an authored description should survive:\n%s", change.Content)
+	}
+	if !hasNote(change, "professional") {
+		t.Errorf("the change should say what it did: %v", change.Notes)
+	}
+
+	// And it lands under `values:` rather than beside it. The file is edited
+	// in place at whatever depth the block sits, and a label written at the
+	// wrong indentation is a file the loader then refuses.
+	writeFile(t, path, change.Content)
+	loaded := load(t, root, "team").Get("team")
+	if loaded == nil {
+		t.Fatalf("the result does not load:\n%s", change.Content)
+	}
+	if _, ok := loaded.File.Enums["team_tier"].Values["professional"]; !ok {
+		t.Errorf("the label is not where it was put:\n%s", change.Content)
+	}
+}
+
+// A file with no enums block at all needs the block as well as the values.
+func TestSyncAddsAMissingEnumsBlock(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	path := filepath.Join(root, "services", "team", "team.yaml")
+	writeFile(t, path, `table: team
+comment: A team.
+columns:
+  name:
+    comment: The team's name.
+  tier:
+    comment: How serious they are.
+`)
+
+	changes, err := tablesync.Plan(teamSchema(t), load(t, root, "team"), pathFor(root), tablesync.Options{Only: "team"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	change := changeFor(t, changes, "team")
+	if !strings.Contains(change.Content, "enums:") {
+		t.Errorf("the block should have been added:\n%s", change.Content)
+	}
+	for _, want := range []string{"team_tier:", "amateur:", "professional:"} {
+		if !strings.Contains(change.Content, want) {
+			t.Errorf("missing %s:\n%s", want, change.Content)
+		}
+	}
+
+	// Still valid YAML that the loader accepts, which is the only thing that
+	// makes an edit-in-place safe.
+	if _, diags := tableconf.Parse(path, []byte(change.Content)); diags.HasErrors() {
+		t.Errorf("the rewritten file does not parse:\n%s", diags.String())
+	}
+}
+
+// Pruning removes a label the database no longer has. Without it the config
+// keeps naming a value nothing can hold, and validation fails on every run.
+func TestPruneRemovesAnEnumValueThatIsGone(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	path := filepath.Join(root, "services", "team", "team.yaml")
+	writeFile(t, path, `table: team
+comment: A team.
+columns:
+  name:
+    comment: The team's name.
+  tier:
+    comment: How serious they are.
+enums:
+  team_tier:
+    name: TeamTier
+    values:
+      amateur:
+        name: Amateur
+      professional:
+        name: Professional
+      retired:
+        name: Retired
+`)
+
+	schema := teamSchema(t)
+
+	// Without pruning it is left alone: removing something is not something a
+	// sync does by default.
+	kept, err := tablesync.Plan(schema, load(t, root, "team"), pathFor(root),
+		tablesync.Options{Only: "team"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(kept) != 0 {
+		t.Errorf("nothing to add means nothing to do without --prune: %+v", kept)
+	}
+
+	pruned, err := tablesync.Plan(schema, load(t, root, "team"), pathFor(root),
+		tablesync.Options{Prune: true, Only: "team"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	change := changeFor(t, pruned, "team")
+	if strings.Contains(change.Content, "retired:") {
+		t.Errorf("the dead label should be gone:\n%s", change.Content)
+	}
+	if !strings.Contains(change.Content, "amateur:") || !strings.Contains(change.Content, "professional:") {
+		t.Errorf("the live ones should stay:\n%s", change.Content)
+	}
+	if !hasNote(change, "removed team_tier values retired") {
+		t.Errorf("the change should say what it removed: %v", change.Notes)
+	}
+
+	// Validation refuses a label nothing can hold, so what --prune leaves has
+	// to be a file that loads.
+	if _, diags := tableconf.Parse(path, []byte(change.Content)); diags.HasErrors() {
+		t.Errorf("the pruned file does not parse:\n%s", diags.String())
+	}
+}
+
+// Apply is the only part that touches the disk, and an orphan is the one change
+// it must not act on: the file may hold endpoint definitions that took real
+// work, and a sync is not authority to throw those away.
+func TestApplyWritesEverythingButAnOrphan(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	orphan := filepath.Join(root, "services", "gone", "gone.yaml")
+	writeFile(t, orphan, "table: gone\n")
+
+	created := filepath.Join(root, "services", "team", "team.yaml")
+
+	err := tablesync.Apply([]tablesync.Change{
+		{Kind: tablesync.ChangeCreate, Table: "team", Path: created, Content: "table: team\n"},
+		{Kind: tablesync.ChangeOrphan, Table: "gone", Path: orphan},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if got := read(t, created); got != "table: team\n" {
+		t.Errorf("the created file = %q", got)
+	}
+	if _, err := os.Stat(orphan); err != nil {
+		t.Error("an orphan is reported, not deleted")
+	}
+}
+
+func read(t *testing.T, path string) string {
+	t.Helper()
+
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(raw)
+}
+
+func load(t *testing.T, root string, tables ...string) *tableconf.Set {
+	t.Helper()
+
+	set := tableconf.NewSet()
+	for _, table := range tables {
+		path := filepath.Join(root, "services", table, table+".yaml")
+		loaded, diags := tableconf.Parse(path, []byte(read(t, path)))
+		if diags.HasErrors() {
+			t.Fatalf("%s does not parse:\n%s", path, diags.String())
+		}
+		set.Add(loaded)
+	}
+	return set
+}
+
+func hasNote(c tablesync.Change, substring string) bool {
+	for _, note := range c.Notes {
+		if strings.Contains(note, substring) {
+			return true
+		}
+	}
+	return false
+}
+
+// A block holding exactly one entry parses as the pair itself rather than as a
+// mapping wrapping it, which is a different AST node and the one an in-place
+// edit is most likely to get wrong.
+func TestSyncAddsToABlockWithASingleEntry(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	path := pathFor(root)("team")
+	writeFile(t, path, `table: team
+comment: A club.
+columns:
+  name: { comment: What the club is called. }
+enums:
+  team_tier:
+    values:
+      amateur: { description: Plays for fun. }
+`)
+
+	changes, err := tablesync.Plan(teamSchema(t), load(t, root, "team"), pathFor(root),
+		tablesync.Options{Only: "team"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	c := changeFor(t, changes, "team")
+	// The one that was there survives, and the ones that were not are added.
+	for _, want := range []string{"What the club is called.", "tier:", "professional:", "Plays for fun."} {
+		if !strings.Contains(c.Content, want) {
+			t.Errorf("missing %q:\n%s", want, c.Content)
+		}
+	}
+
+	writeFile(t, path, c.Content)
+	set := load(t, root, "team")
+	if set.Get("team") == nil {
+		t.Fatalf("the result does not load:\n%s", c.Content)
+	}
+	if got := set.Get("team").File.Columns["name"].Comment; got != "What the club is called." {
+		t.Errorf("the hand-written comment became %q", got)
+	}
+}
+
+// A quoted key is the same key. Adding a second entry beside one because the
+// first was written in quotes would be a duplicate the loader then rejects.
+func TestSyncRecognisesAQuotedKey(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	writeFile(t, pathFor(root)("team"), `table: team
+comment: A club.
+columns:
+  "name": { comment: What the club is called. }
+  'tier': { comment: How seriously they take it. }
+`)
+
+	changes, err := tablesync.Plan(teamSchema(t), load(t, root, "team"), pathFor(root),
+		tablesync.Options{Only: "team"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	c := changeFor(t, changes, "team")
+	if hasNote(c, "column") {
+		t.Errorf("a quoted key was treated as a missing column: %v\n%s", c.Notes, c.Content)
+	}
+	// And the file it produces still loads: a column added beside one that was
+	// only spelled differently is a duplicate key the loader then rejects.
+	writeFile(t, pathFor(root)("team"), c.Content)
+	if load(t, root, "team").Get("team") == nil {
+		t.Errorf("the result does not load:\n%s", c.Content)
+	}
+}
+
+// A comment with a colon, a quote, or a newline in it has to come back out of
+// the file as the same string. Postgres comments are free text and regularly
+// contain all three.
+func TestACommentIsQuotedWhenItHasToBe(t *testing.T) {
+	t.Parallel()
+
+	schema := teamSchema(t)
+	var table *ir.Table
+	for i := range schema.Tables {
+		if schema.Tables[i].Name == "team" {
+			table = &schema.Tables[i]
+		}
+	}
+	table.Comment = `A club: "the" club, or so they say.`
+	name := table.Column("name")
+	name.Comment, name.CommentSource = "Line one\nline two", ir.CommentSourceDatabase
+
+	root := t.TempDir()
+	changes, err := tablesync.Plan(schema, load(t, root), pathFor(root), tablesync.Options{Only: "team"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	c := changeFor(t, changes, "team")
+	writeFile(t, pathFor(root)("team"), c.Content)
+
+	set := load(t, root, "team")
+	file := set.Get("team")
+	if file == nil {
+		t.Fatalf("the result does not load:\n%s", c.Content)
+	}
+	if file.File.Comment != table.Comment {
+		t.Errorf("table comment = %q, want %q", file.File.Comment, table.Comment)
+	}
+	if got := file.File.Columns["name"].Comment; got != "Line one\nline two" {
+		t.Errorf("column comment = %q", got)
+	}
+}

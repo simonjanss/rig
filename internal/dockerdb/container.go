@@ -23,6 +23,10 @@ type Config struct {
 	Runtime   string // "" picks docker, then podman
 	Log       io.Writer
 	StartWait time.Duration
+
+	// Settings are extra server parameters, without the -c. Live sync needs
+	// wal_level=logical, which cannot be set after the server has started.
+	Settings []string
 }
 
 func (c Config) startWait() time.Duration {
@@ -33,8 +37,17 @@ func (c Config) startWait() time.Duration {
 }
 
 // URL is the connection string for the container.
+//
+// TimeZone is pinned rather than inherited. A timestamptz holds an instant and no
+// zone, so nothing about what is *stored* depends on this — but `::date`,
+// `date_trunc`, and an input string with no offset are all read in the session's
+// zone, so a daily aggregate silently buckets differently on a machine set to
+// Stockholm than on one set to UTC. Introspection and every generated repository
+// therefore agree on one answer, and it is the one that does not move twice a
+// year. pgx passes an unrecognised parameter through as a startup setting, so
+// this is all it takes.
 func (c Config) URL() string {
-	return fmt.Sprintf("postgres://%s:%s@127.0.0.1:%d/%s?sslmode=disable",
+	return fmt.Sprintf("postgres://%s:%s@127.0.0.1:%d/%s?sslmode=disable&TimeZone=UTC",
 		c.User, c.Password, c.Port, c.Database)
 }
 
@@ -198,21 +211,27 @@ func firstHostPort(bindings map[string][]portBinding) int {
 func (d *DB) create(ctx context.Context) error {
 	d.logf("creating container %s (%s) on port %d\n", d.cfg.Name, d.cfg.Image, d.cfg.Port)
 
-	_, err := d.runtime.Run(ctx,
+	args := []string{
 		"run", "--detach",
 		"--name", d.cfg.Name,
 		"--publish", fmt.Sprintf("127.0.0.1:%d:5432", d.cfg.Port),
-		"--env", "POSTGRES_DB="+d.cfg.Database,
-		"--env", "POSTGRES_USER="+d.cfg.User,
-		"--env", "POSTGRES_PASSWORD="+d.cfg.Password,
+		"--env", "POSTGRES_DB=" + d.cfg.Database,
+		"--env", "POSTGRES_USER=" + d.cfg.User,
+		"--env", "POSTGRES_PASSWORD=" + d.cfg.Password,
 		// Durability buys nothing here and costs a great deal: this database is
 		// rebuilt from migrations whenever anyone asks.
 		"--tmpfs", "/var/lib/postgresql/data",
-		d.cfg.Image,
+	}
+	args = append(args, d.cfg.Image,
 		"-c", "fsync=off",
 		"-c", "full_page_writes=off",
 		"-c", "synchronous_commit=off",
 	)
+	for _, setting := range d.cfg.Settings {
+		args = append(args, "-c", setting)
+	}
+
+	_, err := d.runtime.Run(ctx, args...)
 	if err != nil {
 		return fmt.Errorf("cannot start the database container: %w", err)
 	}

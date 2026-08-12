@@ -388,3 +388,462 @@ func write(t *testing.T, path, content string) {
 		t.Fatal(err)
 	}
 }
+
+// generatingProject is [newProject] with generators configured, so the write
+// half of the tool can be driven from a schema dump.
+func generatingProject(t *testing.T) string {
+	t.Helper()
+
+	root := newProject(t)
+	write(t, filepath.Join(root, "rig.yaml"), `project:
+  name: demo
+  module: example.com/demo
+generators:
+  - name: model-go
+    out_dir: internal/model
+    options: { package: model }
+  - name: persist-go
+    out_dir: internal/store
+    options: { package: store, model_import: example.com/demo/internal/model }
+`)
+	return root
+}
+
+// The loop the tool exists for: write the code, say what changed, and be quiet
+// the second time.
+func TestGenerateWritesTheCodeAndThenHasNothingToDo(t *testing.T) {
+	t.Parallel()
+
+	root := generatingProject(t)
+
+	_, stderr, code := runWithSchema(t, root, "generate", "-C", root)
+	if code != 0 {
+		t.Fatalf("generate failed:\n%s", stderr)
+	}
+	if !strings.Contains(stderr, "add") {
+		t.Errorf("the first run should report what it added:\n%s", stderr)
+	}
+
+	// The manifest is what makes the second run quiet and the stale check
+	// possible.
+	if _, err := os.Stat(filepath.Join(root, ".rig", "manifest.json")); err != nil {
+		t.Errorf("no manifest: %v", err)
+	}
+
+	_, stderr, code = runWithSchema(t, root, "generate", "-C", root)
+	if code != 0 {
+		t.Fatalf("the second run failed:\n%s", stderr)
+	}
+	if !strings.Contains(stderr, "up to date") {
+		t.Errorf("a run that changes nothing should say so:\n%s", stderr)
+	}
+
+	_, stderr, code = runWithSchema(t, root, "check", "-C", root)
+	if code != 0 {
+		t.Fatalf("check should pass on freshly generated code:\n%s", stderr)
+	}
+}
+
+// check is the CI gate. Committed generated code nobody regenerated is how a
+// schema change quietly stops matching the code that reads it.
+func TestCheckFailsWhenTheCodeIsBehind(t *testing.T) {
+	t.Parallel()
+
+	root := generatingProject(t)
+	if _, stderr, code := runWithSchema(t, root, "generate", "-C", root); code != 0 {
+		t.Fatalf("generate:\n%s", stderr)
+	}
+
+	if err := os.Remove(filepath.Join(root, "internal", "model", "todo.gen.go")); err != nil {
+		t.Fatal(err)
+	}
+
+	_, stderr, code := runWithSchema(t, root, "check", "-C", root)
+	if code == 0 {
+		t.Fatalf("check should have failed:\n%s", stderr)
+	}
+	if !strings.Contains(stderr, "rig generate") {
+		t.Errorf("the failure should say what to do about it:\n%s", stderr)
+	}
+	// And it writes nothing: it is a report, and a CI gate that fixes the thing
+	// it is gating is not a gate.
+	if _, err := os.Stat(filepath.Join(root, "internal", "model", "todo.gen.go")); !os.IsNotExist(err) {
+		t.Error("check should not have written the file back")
+	}
+}
+
+// A generated file somebody edited is not one to silently overwrite: the edit
+// is either a mistake worth knowing about or work worth keeping.
+func TestAHandEditedGeneratedFileNeedsForce(t *testing.T) {
+	t.Parallel()
+
+	root := generatingProject(t)
+	if _, stderr, code := runWithSchema(t, root, "generate", "-C", root); code != 0 {
+		t.Fatalf("generate:\n%s", stderr)
+	}
+
+	edited := filepath.Join(root, "internal", "model", "todo.gen.go")
+	raw, err := os.ReadFile(edited)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(edited, append(raw, []byte("\n// mine\n")...), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, stderr, code := runWithSchema(t, root, "generate", "-C", root)
+	if code == 0 {
+		t.Fatalf("generate should have refused:\n%s", stderr)
+	}
+
+	after, err := os.ReadFile(edited)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(after), "// mine") {
+		t.Error("the edit should still be there after a refusal")
+	}
+
+	if _, stderr, code := runWithSchema(t, root, "generate", "-C", root, "--force"); code != 0 {
+		t.Fatalf("--force:\n%s", stderr)
+	}
+	after, err = os.ReadFile(edited)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(after), "// mine") {
+		t.Error("--force is what says to overwrite it")
+	}
+}
+
+// A file no generator claims any more is reported rather than deleted, because
+// deleting a file the tool no longer understands is not a decision to make on
+// somebody's behalf without saying so.
+func TestAFileNoGeneratorProducesIsReportedThenPruned(t *testing.T) {
+	t.Parallel()
+
+	root := generatingProject(t)
+	if _, stderr, code := runWithSchema(t, root, "generate", "-C", root); code != 0 {
+		t.Fatalf("generate:\n%s", stderr)
+	}
+
+	orphan := filepath.Join(root, "internal", "store", "todo_repository.gen.go")
+	if _, err := os.Stat(orphan); err != nil {
+		t.Fatalf("the file this test is about was never written: %v", err)
+	}
+
+	// Drop the generator that produced it.
+	write(t, filepath.Join(root, "rig.yaml"), `project:
+  name: demo
+  module: example.com/demo
+generators:
+  - name: model-go
+    options: { package: model }
+`)
+
+	_, stderr, code := runWithSchema(t, root, "generate", "-C", root)
+	if code != 0 {
+		t.Fatalf("generate:\n%s", stderr)
+	}
+	if !strings.Contains(stderr, "--prune") {
+		t.Errorf("a stale file should be reported with the way to remove it:\n%s", stderr)
+	}
+	if _, err := os.Stat(orphan); err != nil {
+		t.Error("it should not have been deleted without being asked")
+	}
+
+	if _, stderr, code := runWithSchema(t, root, "generate", "-C", root, "--prune"); code != 0 {
+		t.Fatalf("--prune:\n%s", stderr)
+	}
+	if _, err := os.Stat(orphan); !os.IsNotExist(err) {
+		t.Error("--prune should have removed it")
+	}
+}
+
+// A name in --only that matches nothing is a typo, and running a subset of what
+// was asked for is worse than saying so.
+func TestOnlyNamesAGeneratorOrSaysWhatThereIs(t *testing.T) {
+	t.Parallel()
+
+	root := generatingProject(t)
+
+	_, stderr, code := runWithSchema(t, root, "generate", "-C", root, "--only", "model-go")
+	if code != 0 {
+		t.Fatalf("generate --only:\n%s", stderr)
+	}
+	if _, err := os.Stat(filepath.Join(root, "internal", "model", "todo.gen.go")); err != nil {
+		t.Errorf("the named generator should have run: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "internal", "store")); !os.IsNotExist(err) {
+		t.Error("the one that was not named should not have")
+	}
+
+	_, stderr, code = runWithSchema(t, root, "generate", "-C", root, "--only", "modelgo")
+	if code == 0 {
+		t.Fatal("a name that matches nothing should be an error")
+	}
+	if !strings.Contains(stderr, "model-go") {
+		t.Errorf("the error should list what is configured:\n%s", stderr)
+	}
+}
+
+// A project with nothing configured gets told how to configure something,
+// rather than "wrote 0 files".
+func TestAProjectWithNoGeneratorsIsToldSo(t *testing.T) {
+	t.Parallel()
+
+	root := newProject(t)
+
+	_, stderr, code := runWithSchema(t, root, "generate", "-C", root)
+	if code == 0 {
+		t.Fatal("generating nothing should not be a success")
+	}
+	if !strings.Contains(stderr, "generators:") || !strings.Contains(stderr, "rig generators") {
+		t.Errorf("the error should say what to add and how to see the options:\n%s", stderr)
+	}
+}
+
+func TestGeneratorsListsWhatRigKnowsAbout(t *testing.T) {
+	t.Parallel()
+
+	stdout, stderr, code := run(t, "generators")
+	if code != 0 {
+		t.Fatalf("generators:\n%s", stderr)
+	}
+	for _, name := range []string{"model-go", "persist-go", "server-go", "service-go", "electric"} {
+		if !strings.Contains(stdout, name) {
+			t.Errorf("%s is missing from the list:\n%s", name, stdout)
+		}
+	}
+}
+
+// init is the first thing anybody runs, so what it leaves behind has to be a
+// project the next command accepts.
+func TestInitWritesAProjectTheRestOfTheToolCanRead(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+
+	_, stderr, code := run(t, "init", root, "--module", "example.com/app")
+	if code != 0 {
+		t.Fatalf("init:\n%s", stderr)
+	}
+
+	for _, name := range []string{"rig.yaml", "AGENTS.md", ".rig/table.schema.json", ".rig/rig.schema.json"} {
+		if _, err := os.Stat(filepath.Join(root, filepath.FromSlash(name))); err != nil {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+
+	raw, err := os.ReadFile(filepath.Join(root, "rig.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), "example.com/app") {
+		t.Errorf("the module should be the one that was asked for:\n%s", raw)
+	}
+
+	// Nothing that already exists is overwritten: running init twice is what
+	// somebody does when they are not sure whether they ran it.
+	if err := os.WriteFile(filepath.Join(root, "AGENTS.md"), []byte("mine\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, stderr, code = run(t, "init", root)
+	if code != 0 {
+		t.Fatalf("the second init:\n%s", stderr)
+	}
+	if !strings.Contains(stderr, "already exists") {
+		t.Errorf("it should say what it kept:\n%s", stderr)
+	}
+	kept, err := os.ReadFile(filepath.Join(root, "AGENTS.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(kept) != "mine\n" {
+		t.Error("it kept nothing")
+	}
+}
+
+// The module path is a guess when nobody gives one, because a project that will
+// not initialize without it is a worse first impression than a line to edit.
+func TestInitGuessesAModuleFromTheDirectory(t *testing.T) {
+	t.Parallel()
+
+	root := filepath.Join(t.TempDir(), "fantasyfootball")
+
+	if _, stderr, code := run(t, "init", root); code != 0 {
+		t.Fatalf("init:\n%s", stderr)
+	}
+	raw, err := os.ReadFile(filepath.Join(root, "rig.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), "fantasyfootball") {
+		t.Errorf("the directory name should be the project name:\n%s", raw)
+	}
+}
+
+// goose applies migrations in name order, so the number is the ordering and a
+// duplicate one is two migrations that may run either way round.
+func TestMigrationNewNumbersFromWhatIsAlreadyThere(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	if _, stderr, code := run(t, "init", root); code != 0 {
+		t.Fatalf("init:\n%s", stderr)
+	}
+
+	if _, stderr, code := run(t, "-C", root, "migration", "new", "create_todo", "--table", "todo",
+		"--soft-delete", "--snapshot"); code != 0 {
+		t.Fatalf("migration new:\n%s", stderr)
+	}
+	if _, stderr, code := run(t, "-C", root, "migration", "new", "add_notes"); code != 0 {
+		t.Fatalf("the second migration:\n%s", stderr)
+	}
+
+	entries, err := os.ReadDir(filepath.Join(root, "migrations"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, e := range entries {
+		if strings.HasSuffix(e.Name(), ".sql") {
+			names = append(names, e.Name())
+		}
+	}
+	if len(names) != 2 {
+		t.Fatalf("migrations = %v, want two", names)
+	}
+	if !strings.HasPrefix(names[0], "00001_") || !strings.HasPrefix(names[1], "00002_") {
+		t.Errorf("migrations = %v, want them numbered in order", names)
+	}
+
+	first, err := os.ReadFile(filepath.Join(root, "migrations", names[0]))
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := string(first)
+	for _, want := range []string{"-- +goose Up", "-- +goose Down", "CREATE TABLE todo",
+		"deleted_at", "version_type", "snapshot_from_todo_id"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("the scaffolded migration is missing %q:\n%s", want, body)
+		}
+	}
+}
+
+// setup-project scaffolds real tables following the same conventions as
+// anybody's own, which is what makes `rig sync` and `rig generate` able to read
+// them at all.
+func TestSetupProjectScaffoldsTheFoundation(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	if _, stderr, code := run(t, "init", root); code != 0 {
+		t.Fatalf("init:\n%s", stderr)
+	}
+
+	// --dry-run writes nothing, which is the only way to see what it would do
+	// before letting it.
+	_, stderr, code := run(t, "-C", root, "setup-project", "--dry-run")
+	if code != 0 {
+		t.Fatalf("--dry-run:\n%s", stderr)
+	}
+	if !strings.Contains(stderr, "would create") {
+		t.Errorf("--dry-run should list the files:\n%s", stderr)
+	}
+	for _, e := range readDir(t, filepath.Join(root, "migrations")) {
+		if strings.HasSuffix(e, ".sql") {
+			t.Errorf("--dry-run wrote %s", e)
+		}
+	}
+
+	if _, stderr, code := run(t, "-C", root, "setup-project"); code != 0 {
+		t.Fatalf("setup-project:\n%s", stderr)
+	}
+	entries := readDir(t, filepath.Join(root, "migrations"))
+	if len(entries) == 0 {
+		t.Fatal("no migrations were written")
+	}
+
+	// Idempotent: it is run again by anybody who is not sure whether they ran it.
+	_, stderr, code = run(t, "-C", root, "setup-project")
+	if code != 0 {
+		t.Fatalf("the second run:\n%s", stderr)
+	}
+	if !strings.Contains(stderr, "already in place") {
+		t.Errorf("the second run should say there is nothing to do:\n%s", stderr)
+	}
+	again := readDir(t, filepath.Join(root, "migrations"))
+	if len(again) != len(entries) {
+		t.Errorf("%d migrations became %d", len(entries), len(again))
+	}
+}
+
+// Skipping a part something else depends on produces SQL that fails halfway
+// through `rig db up`, which is a worse way to find out than a message here.
+func TestSetupProjectRefusesASkipThatWouldNotApply(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	if _, stderr, code := run(t, "init", root); code != 0 {
+		t.Fatalf("init:\n%s", stderr)
+	}
+
+	_, stderr, code := run(t, "-C", root, "setup-project", "--skip", "tenancy")
+	if code == 0 {
+		t.Fatal("skipping what everything references should be refused")
+	}
+	if !strings.Contains(stderr, "tenancy") {
+		t.Errorf("the error should name it:\n%s", stderr)
+	}
+
+	if _, stderr, code := run(t, "-C", root, "setup-project", "--skip", "nonsense"); code == 0 {
+		t.Errorf("an unknown part should be refused:\n%s", stderr)
+	}
+
+	// A leaf part is fine to leave out.
+	if _, stderr, code := run(t, "-C", root, "setup-project", "--skip", "oauth", "--dry-run"); code != 0 {
+		t.Errorf("skipping a leaf:\n%s", stderr)
+	} else if strings.Contains(stderr, "oauth") {
+		t.Errorf("the skipped part should not be listed:\n%s", stderr)
+	}
+}
+
+// Every command that needs a project has to say the same thing when there is
+// not one, because "open /dev/null/rig.yaml: not a directory" helps nobody.
+func TestTheCommandsThatNeedAProjectSayWhenThereIsNone(t *testing.T) {
+	t.Parallel()
+
+	empty := t.TempDir()
+
+	for _, args := range [][]string{
+		{"generate"},
+		{"check"},
+		{"setup-project"},
+		{"migration", "new", "x"},
+	} {
+		_, stderr, code := run(t, append([]string{"-C", empty}, args...)...)
+		if code == 0 {
+			t.Errorf("%v: should have failed outside a project", args)
+			continue
+		}
+		if !strings.Contains(stderr, "rig.yaml") {
+			t.Errorf("%v: the error should name what is missing:\n%s", args, stderr)
+		}
+	}
+}
+
+// readDir lists the file names in a directory.
+func readDir(t *testing.T, dir string) []string {
+	t.Helper()
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	names := make([]string, 0, len(entries))
+	for _, e := range entries {
+		names = append(names, e.Name())
+	}
+	return names
+}

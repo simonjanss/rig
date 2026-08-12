@@ -153,6 +153,34 @@ func EnumMapping(goType string) Mapping {
 	}
 }
 
+// primitives maps an API primitive name back onto Go, for values declared in
+// configuration rather than derived from a column.
+//
+// It is the same decision as the table above, read the other way. A custom
+// endpoint's parameter names an IR type and has no Postgres column behind it,
+// so there is nothing to look up — but its Go type must still be the one the
+// rest of the generated code would have chosen for that primitive.
+var primitives = map[string]Mapping{
+	ir.TypeBool:      {IRType: ir.TypeBool, GoType: "bool", Scan: ir.ScanDirect, TSType: "boolean"},
+	ir.TypeBytes:     {IRType: ir.TypeBytes, GoType: "[]byte", Scan: ir.ScanDirect, TSType: "string", NilableGoType: true},
+	ir.TypeDate:      {IRType: ir.TypeDate, GoType: "time.Time", Import: ImportTime, Scan: ir.ScanDirect, TSType: "string"},
+	ir.TypeDecimal:   {IRType: ir.TypeDecimal, GoType: "pgtype.Numeric", Import: ImportDecimal, Scan: ir.ScanNumeric, TSType: "string"},
+	ir.TypeFloat64:   {IRType: ir.TypeFloat64, GoType: "float64", Scan: ir.ScanDirect, TSType: "number"},
+	ir.TypeInt:       {IRType: ir.TypeInt, GoType: "int", Scan: ir.ScanDirect, TSType: "number"},
+	ir.TypeInt64:     {IRType: ir.TypeInt64, GoType: "int64", Scan: ir.ScanDirect, TSType: "number"},
+	ir.TypeJSON:      {IRType: ir.TypeJSON, GoType: "json.RawMessage", Import: ImportJSON, Scan: ir.ScanJSONB, TSType: "unknown", NilableGoType: true},
+	ir.TypeString:    {IRType: ir.TypeString, GoType: "string", Scan: ir.ScanDirect, TSType: "string"},
+	ir.TypeTime:      {IRType: ir.TypeTime, GoType: "time.Time", Import: ImportTime, Scan: ir.ScanDirect, TSType: "string"},
+	ir.TypeTimestamp: {IRType: ir.TypeTimestamp, GoType: "time.Time", Import: ImportTime, Scan: ir.ScanTimestamptz, TSType: "string"},
+	ir.TypeUUID:      {IRType: ir.TypeUUID, GoType: "uuid.UUID", Import: ImportUUID, Scan: ir.ScanUUID, TSType: "string"},
+}
+
+// Primitive returns the mapping for an API primitive type name.
+func Primitive(irType string) (Mapping, bool) {
+	m, ok := primitives[irType]
+	return m, ok
+}
+
 // ArrayElementName returns the element type of an array type, and whether the
 // type is an array at all.
 func ArrayElementName(sqlType, udtName string) (string, bool) {

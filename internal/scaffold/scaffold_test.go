@@ -62,8 +62,10 @@ func TestProjectFiles(t *testing.T) {
 
 	cfg := byPath["rig.yaml"]
 	for _, want := range []string{
-		"name: fantasyfootball",
-		"module: github.com/you/ff",
+		// Quoted, so a project whose name is all digits — a directory named
+		// "2026" is where the name usually comes from — is still a string.
+		`name: "fantasyfootball"`,
+		`module: "github.com/you/ff"`,
 		"$schema=.rig/rig.schema.json",
 		"table_dir: services/{table}",
 	} {

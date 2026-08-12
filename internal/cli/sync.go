@@ -38,13 +38,22 @@ func newSyncCmd(e *env) *cobra.Command {
 				return err
 			}
 
+			// The same tables the compiler leaves out, left out here too. A
+			// configuration file for one would be a file describing a table rig
+			// generates nothing from, and the next `rig validate` would report it
+			// as belonging to the auth module.
+			ignore, err := foundationTables(p)
+			if err != nil {
+				return err
+			}
+
 			// Sync plans against the normalized schema, not the raw one. It
 			// needs the two things normalization works out: which columns are
 			// enums, and which tables are join tables. Without it, sync would
 			// miss every enum and write a configuration file for every join
 			// table — neither of which the compiler would ever read.
 			schema, _ := compile.Normalize(raw, compile.NormalizeOptions{
-				IgnoreTables: []string{p.Config.Migrations.Table},
+				IgnoreTables: append([]string{p.Config.Migrations.Table}, ignore...),
 			})
 
 			// Configuration is loaded but its diagnostics are held back: sync
