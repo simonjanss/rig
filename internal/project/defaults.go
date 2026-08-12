@@ -4,9 +4,16 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
+	"time"
 
+	"github.com/simonjanss/rig/auth"
+	"github.com/simonjanss/rig/auth/oauth"
+	"github.com/simonjanss/rig/auth/password"
+	"github.com/simonjanss/rig/auth/session"
 	"github.com/simonjanss/rig/internal/diag"
 	"github.com/simonjanss/rig/migrate"
+	"github.com/simonjanss/rig/pkg/ir"
+	"github.com/simonjanss/rig/runtime/throttle"
 )
 
 // Defaults every project inherits. They are the shape `rig init` writes, so a
@@ -35,6 +42,29 @@ const (
 	DefaultMigrationsTable = migrate.DefaultTable
 
 	DefaultJSONCase = "camel"
+
+	// DefaultTenantQuery is the parameter the query tenant source reads.
+	DefaultTenantQuery = "tenant"
+	// DefaultSigningKeyEnv is where the key that signs the OAuth state parameter
+	// is read from. It has no alternative source: it is a secret, so a variable
+	// is the only place it can come from and defaulting the name costs nothing.
+	DefaultSigningKeyEnv = "OAUTH_SIGNING_KEY"
+)
+
+// The authentication defaults are rig/auth's own rather than copies of them.
+// Two constants that happen to match today would not stay matching, and a
+// generated wiring that passed 10m while the module's default was something
+// else would be documenting a lifetime the server does not have.
+var (
+	DefaultAuthBasePath = auth.DefaultBasePath
+	DefaultTenantHeader = auth.TenantHeader
+
+	DefaultAccessTTL      = session.DefaultAccessTTL
+	DefaultRefreshTTL     = session.DefaultRefreshTTL
+	DefaultRememberTTL    = session.DefaultRememberTTL
+	DefaultRotationLeeway = session.DefaultRotationLeeway
+	DefaultIdentityTTL    = session.DefaultIdentityTTL
+	DefaultStateTTL       = oauth.DefaultStateTTL
 )
 
 func (p *Project) applyDefaults() {
@@ -85,11 +115,111 @@ func (p *Project) applyDefaults() {
 	setDefault(&c.Migrations.Table, DefaultMigrationsTable)
 
 	setDefault(&c.Naming.JSONCase, DefaultJSONCase)
+
+	p.applyAuthDefaults()
+}
+
+// applyAuthDefaults resolves every value the authentication block leaves out.
+//
+// It resolves them here rather than leaving zeros for rig/auth to fill in at
+// startup, because the point of configuring this in a file is that the numbers
+// can be read: the generated wiring passes what is written here, the emitted
+// specification documents it, and a client library reads the same lifetime the
+// server is enforcing. A zero that means "something else decides" would leave
+// three places to ask.
+//
+// Nothing is defaulted for a project with no authentication. An `auth:` block
+// that was never enabled should read as unfinished rather than as a full
+// configuration nobody mounted.
+func (p *Project) applyAuthDefaults() {
+	a := &p.Config.Auth
+	if !a.Enabled {
+		return
+	}
+
+	setDefault(&a.BasePath, DefaultAuthBasePath)
+	a.BasePath = "/" + strings.Trim(a.BasePath, "/")
+
+	if len(a.Tenant.From) == 0 {
+		a.Tenant.From = []string{string(ir.TenantFromHeader)}
+	}
+	// Only for the sources that are actually configured: a header name in the
+	// document that nothing reads reads as though something does.
+	if a.Tenant.Uses(ir.TenantFromHeader) {
+		setDefault(&a.Tenant.Header, DefaultTenantHeader)
+	}
+	if a.Tenant.Uses(ir.TenantFromQuery) {
+		setDefault(&a.Tenant.Query, DefaultTenantQuery)
+	}
+
+	setDuration(&a.Session.AccessTTL, DefaultAccessTTL)
+	setDuration(&a.Session.RefreshTTL, DefaultRefreshTTL)
+	setDuration(&a.Session.RememberTTL, DefaultRememberTTL)
+	setDuration(&a.Session.RotationLeeway, DefaultRotationLeeway)
+	setDuration(&a.Session.IdentityTTL, DefaultIdentityTTL)
+	// CacheTTL is left alone: zero is the documented default and means the token
+	// row is read on every request, which is what makes revocation immediate.
+
+	policy := password.DefaultPolicy()
+	if a.Password.MinLength == 0 {
+		a.Password.MinLength = policy.MinLength
+	}
+	if a.Password.MaxLength == 0 {
+		a.Password.MaxLength = policy.MaxLength
+	}
+
+	standard := throttle.Standard()
+	for _, pair := range []struct {
+		configured *AuthLimit
+		standard   throttle.Limit
+	}{
+		{&a.Limits.LoginByEmail, standard.LoginByEmail},
+		{&a.Limits.LoginByIP, standard.LoginByIP},
+		{&a.Limits.PasswordReset, standard.PasswordReset},
+		{&a.Limits.VerificationResend, standard.VerificationResend},
+		{&a.Limits.Refresh, standard.Refresh},
+		{&a.Limits.APIKeyFailures, standard.APIKeyFailures},
+	} {
+		if pair.configured.Max == 0 {
+			pair.configured.Max = pair.standard.Max
+		}
+		setDuration(&pair.configured.Window, pair.standard.Window)
+	}
+
+	if len(a.OAuth.Providers) == 0 {
+		// No providers, no provider routes, and nothing here to resolve. Leaving
+		// the block unfilled keeps "OAuth is not configured" recognisable rather
+		// than making it look configured with defaults.
+		return
+	}
+
+	setDefault(&a.OAuth.SigningKeyEnv, DefaultSigningKeyEnv)
+	setDuration(&a.OAuth.StateTTL, DefaultStateTTL)
+	// base_url_env is deliberately not defaulted. An origin has to be configured
+	// one way or the other, and inventing a variable name here would turn a
+	// missing origin from something rig reports into a startup failure.
+
+	for i := range a.OAuth.Providers {
+		pr := &a.OAuth.Providers[i]
+		pr.Name = strings.ToLower(strings.TrimSpace(pr.Name))
+		prefix := strings.ToUpper(pr.Name)
+		setDefault(&pr.ClientIDEnv, prefix+"_CLIENT_ID")
+		setDefault(&pr.ClientSecretEnv, prefix+"_CLIENT_SECRET")
+		if pr.Name == ir.ProviderMicrosoft {
+			setDefault(&pr.TenantEnv, "MICROSOFT_TENANT")
+		}
+	}
 }
 
 func setDefault(field *string, value string) {
 	if *field == "" {
 		*field = value
+	}
+}
+
+func setDuration(field *Duration, value time.Duration) {
+	if *field == 0 {
+		*field = Duration(value)
 	}
 }
 
@@ -142,6 +272,8 @@ func (p *Project) check() diag.List {
 		}
 		seen[g.Name] = i
 	}
+
+	diags.Append(p.checkAuth())
 
 	return diags
 }

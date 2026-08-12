@@ -18,6 +18,9 @@ type ProjectOptions struct {
 	Description string
 	BasePath    string
 	Namer       *naming.Namer
+	// Auth is the authentication foundation this API is served with, already
+	// resolved by the project configuration, or nil for a project with none.
+	Auth *ir.Auth
 }
 
 // Project turns a normalized schema into a naked API surface.
@@ -37,6 +40,7 @@ func Project(schema ir.Schema, opt ProjectOptions) (ir.API, diag.List) {
 		Version:     opt.Version,
 		Description: opt.Description,
 		BasePath:    opt.BasePath,
+		Auth:        opt.Auth,
 	}
 
 	// Enums come first so field types can name them.

@@ -16,6 +16,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/simonjanss/rig/auth/session"
+	"github.com/simonjanss/rig/examples/auth_oauth/internal/api"
 )
 
 // pages is the whole interface: one page signed out, one page signed in.
@@ -207,7 +208,7 @@ func (p *pages) call(r *http.Request, method, path, token, body string) (int, []
 }
 
 func (p *pages) tenantName(r *http.Request) (string, bool) {
-	slug := slugFor(r.Host)
+	slug := api.TenantSlug(r.Host)
 	if slug == "" {
 		return "", false
 	}

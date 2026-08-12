@@ -43,6 +43,53 @@
     },
     "Auth": {
       "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Whether this project authenticates its callers. The server-go generator writes the wiring only when it is set."
+        },
+        "base_path": {
+          "type": "string",
+          "description": "Prefix the authentication endpoints sit under. Defaults to /auth."
+        },
+        "tenant": {
+          "$ref": "#/$defs/AuthTenant",
+          "description": "How a request names the tenant it is for."
+        },
+        "session": {
+          "$ref": "#/$defs/AuthSession",
+          "description": "How long the credentials somebody holds stay valid."
+        },
+        "password": {
+          "$ref": "#/$defs/AuthPassword",
+          "description": "What a new password must satisfy."
+        },
+        "limits": {
+          "$ref": "#/$defs/AuthLimits",
+          "description": "Rate limits, counted in the database so replicas cannot disagree."
+        },
+        "allow_registration": {
+          "type": "boolean",
+          "description": "Mount the registration endpoint, where a stranger creates an account. Off means the route does not exist."
+        },
+        "allow_tenant_creation": {
+          "type": "boolean",
+          "description": "Mount the tenant-creation endpoint. Who may create one, and what else a new one needs, stay in Go."
+        },
+        "require_verified_email": {
+          "type": "boolean",
+          "description": "Refuse a sign-in until the address has been verified."
+        },
+        "trusted_proxies": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "description": "CIDR ranges whose X-Forwarded-For may be believed, for example 10.0.0.0/8. Empty trusts none of them."
+        },
+        "oauth": {
+          "$ref": "#/$defs/AuthOAuth",
+          "description": "Provider sign-in. No providers means the provider routes are not mounted."
+        },
         "expose": {
           "items": {
             "type": "string"
@@ -53,6 +100,213 @@
         "own": {
           "type": "boolean",
           "description": "Generate for every foundation table, for a project that has forked the schema and no longer imports rig/auth."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
+    },
+    "AuthLimit": {
+      "properties": {
+        "max": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "How many are allowed in one window."
+        },
+        "window": {
+          "$ref": "#/$defs/Duration",
+          "description": "How long the window is."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
+    },
+    "AuthLimits": {
+      "properties": {
+        "login_by_email": {
+          "$ref": "#/$defs/AuthLimit",
+          "description": "Failed sign-ins per address before the account is locked out. Defaults to 5 per 15m."
+        },
+        "login_by_ip": {
+          "$ref": "#/$defs/AuthLimit",
+          "description": "Failed sign-ins per source address. Looser than the per-address limit so an office behind one NAT does not trip it. Defaults to 50 per 15m."
+        },
+        "password_reset": {
+          "$ref": "#/$defs/AuthLimit",
+          "description": "Password-reset requests per address. Defaults to 5 per 1h."
+        },
+        "verification_resend": {
+          "$ref": "#/$defs/AuthLimit",
+          "description": "Verification mails per address. Defaults to 5 per 1h."
+        },
+        "refresh": {
+          "$ref": "#/$defs/AuthLimit",
+          "description": "Token rotations per session. A client refreshing this often is looping, not working. Defaults to 60 per 1m."
+        },
+        "api_key_failures": {
+          "$ref": "#/$defs/AuthLimit",
+          "description": "Failed API-key authentications per key. Defaults to 20 per 1m."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
+    },
+    "AuthOAuth": {
+      "properties": {
+        "base_url": {
+          "type": "string",
+          "description": "This application's own origin, for example https://app.example.com. The callback URL is built from it and a provider compares that exactly."
+        },
+        "base_url_env": {
+          "type": "string",
+          "description": "Environment variable that overrides base_url, for an origin that differs per deployment. Not defaulted: one of base_url and base_url_env has to be set."
+        },
+        "origin_from_host": {
+          "type": "boolean",
+          "description": "Derive the callback origin from each request's Host, for an application serving a tenant per subdomain. Every origin must be registered with the provider."
+        },
+        "signing_key_env": {
+          "type": "string",
+          "description": "Environment variable holding the key that signs the state parameter, at least 32 bytes. Defaults to OAUTH_SIGNING_KEY. Unset generates one per process, which breaks across replicas."
+        },
+        "state_ttl": {
+          "$ref": "#/$defs/Duration",
+          "description": "How long a sign-in round trip may take. Generous for a redirect, short enough that a stolen state is useless. Defaults to 10m."
+        },
+        "allow_provisioning": {
+          "type": "boolean",
+          "description": "Create an account the first time somebody signs in with a provider. Off means a provider sign-in only works for an address that already has one."
+        },
+        "allowed_return_to": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "description": "Origins or paths a finished sign-in may return to. Anything else is refused, which is what stops an open redirect."
+        },
+        "insecure": {
+          "type": "boolean",
+          "description": "Allow the state cookie over plain HTTP, for local development only. Never set this in a deployment."
+        },
+        "providers": {
+          "items": {
+            "$ref": "#/$defs/AuthProvider"
+          },
+          "type": "array",
+          "description": "Identity providers to offer. Empty mounts no provider routes."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
+    },
+    "AuthPassword": {
+      "properties": {
+        "min_length": {
+          "type": "integer",
+          "minimum": 8,
+          "description": "Minimum password length in characters. Defaults to 12."
+        },
+        "max_length": {
+          "type": "integer",
+          "description": "Maximum password length in characters. This bounds hashing work, not strength. Defaults to 1024."
+        },
+        "breach_check": {
+          "type": "boolean",
+          "description": "Reject passwords that appear in Have I Been Pwned. Only a hash prefix is sent, and the check fails open."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
+    },
+    "AuthProvider": {
+      "properties": {
+        "name": {
+          "type": "string",
+          "enum": [
+            "google",
+            "microsoft",
+            "github"
+          ],
+          "description": "Which provider. It is also the route segment: google is reached at \u003cbase_path\u003e/oauth/google/start."
+        },
+        "client_id_env": {
+          "type": "string",
+          "description": "Environment variable holding the client id. Defaults to \u003cPROVIDER\u003e_CLIENT_ID."
+        },
+        "client_secret_env": {
+          "type": "string",
+          "description": "Environment variable holding the client secret. Defaults to \u003cPROVIDER\u003e_CLIENT_SECRET."
+        },
+        "tenant_env": {
+          "type": "string",
+          "description": "Microsoft only: environment variable naming its directory. common accepts any account, a directory id restricts sign-in to one organization. Defaults to MICROSOFT_TENANT."
+        },
+        "required": {
+          "type": "boolean",
+          "description": "Fail startup when the credentials are absent. The default skips the provider instead, so one configuration works with or without them."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "name"
+      ]
+    },
+    "AuthSession": {
+      "properties": {
+        "access_ttl": {
+          "$ref": "#/$defs/Duration",
+          "description": "Lifetime of the access token, which travels on every request. Shorter is safer and refreshes more often. Defaults to 10m."
+        },
+        "refresh_ttl": {
+          "$ref": "#/$defs/Duration",
+          "description": "How long an ordinary session lasts. Defaults to 12h."
+        },
+        "remember_ttl": {
+          "$ref": "#/$defs/Duration",
+          "description": "How long a session lasts when somebody asked to stay signed in. Defaults to 30d."
+        },
+        "rotation_leeway": {
+          "$ref": "#/$defs/Duration",
+          "description": "How long a refresh token stays usable after it was exchanged, so a dropped response is a retry rather than a logout. Longer forgives more retries and widens the replay window. Defaults to 30s."
+        },
+        "identity_ttl": {
+          "$ref": "#/$defs/Duration",
+          "description": "Lifetime of the tenant-less credential held between signing in and picking a tenant. Defaults to 30m."
+        },
+        "cache_ttl": {
+          "$ref": "#/$defs/Duration",
+          "description": "Keep verified access tokens in memory for this long. Zero, the default, reads the row every time, which makes revocation immediate. Anything above a few seconds is a revoked session that keeps working."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
+    },
+    "AuthTenant": {
+      "properties": {
+        "from": {
+          "items": {
+            "type": "string",
+            "enum": [
+              "header",
+              "host",
+              "query",
+              "hook"
+            ]
+          },
+          "type": "array",
+          "description": "Sources to try in order; the first that names a tenant wins. Defaults to [header]."
+        },
+        "header": {
+          "type": "string",
+          "description": "Header the header source reads. Defaults to X-Tenant-Id."
+        },
+        "query": {
+          "type": "string",
+          "description": "Query parameter the query source reads. Defaults to tenant."
+        },
+        "default_slug_env": {
+          "type": "string",
+          "description": "Environment variable holding a tenant slug to fall back to when the host names none."
         }
       },
       "additionalProperties": false,
@@ -95,6 +349,16 @@
       },
       "additionalProperties": false,
       "type": "object"
+    },
+    "Duration": {
+      "type": "string",
+      "pattern": "^(0|(\\d+(\\.\\d+)?(ns|us|µs|ms|s|m|h|d))+)$",
+      "description": "A length of time: 250ms, 30s, 15m, 12h, 30d. Go's duration syntax, with d for days.",
+      "examples": [
+        "10m",
+        "12h",
+        "30d"
+      ]
     },
     "Generator": {
       "properties": {

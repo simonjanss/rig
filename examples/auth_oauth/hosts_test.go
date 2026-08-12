@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/simonjanss/rig/auth/oauth"
+	"github.com/simonjanss/rig/examples/auth_oauth/internal/api"
 )
 
 // Which tenant a host names, and which origins a provider has to be told about.
@@ -33,8 +34,8 @@ func TestWhichTenantAHostNames(t *testing.T) {
 		{host: "[::1]:8083", want: ""},
 	} {
 		t.Setenv("DEFAULT_TENANT", c.defaultTenant)
-		if got := slugFor(c.host); got != c.want {
-			t.Errorf("slugFor(%q) with DEFAULT_TENANT=%q = %q, want %q",
+		if got := api.TenantSlug(c.host); got != c.want {
+			t.Errorf("TenantSlug(%q) with DEFAULT_TENANT=%q = %q, want %q",
 				c.host, c.defaultTenant, got, c.want)
 		}
 	}

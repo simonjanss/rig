@@ -3,9 +3,14 @@
 Four credentials, one door, and a rule for which is which.
 
 Everything below is served by `rig/auth` over the tables `rig setup-project`
-wrote — every one of them named `rig_…`, so a project can tell them from its own. Nothing about it is generated, and nothing about it is yours to maintain —
-what *is* yours is three optional functions, listed under
-[What you decide](#what-you-decide).
+wrote — every one of them named `rig_…`, so a project can tell them from its own.
+Nothing about it is generated, and nothing about it is yours to maintain.
+
+What *is* yours is one block in `rig.yaml` — see
+[What you configure](#what-you-configure) — and the two or three functions a file
+cannot hold, under [What you decide](#what-you-decide). `rig generate` writes the
+assembly between them, into the same package as your routes and handlers, so the
+lifetimes the documentation quotes are the lifetimes the server enforces.
 
 ---
 
@@ -474,14 +479,18 @@ Decided in one place, which is what stops them drifting per endpoint.
 Counted over `rig_auth_log` with a sliding window. No Redis, no in-memory state,
 correct across replicas, and self-healing — counters age out.
 
-| limit | keyed on | default | cleared by a success |
-|---|---|---|---|
-| Failed login | `lower(email_address)` | 5 / 15 min → lockout | yes |
-| Failed login | IP address | 50 / 15 min | **no** |
-| Password reset request | `lower(email_address)` | 5 / hour | no |
-| Verification resend | account | 5 / hour | no |
-| Refresh | session root | 60 / min | no |
-| API key auth failures | `key_id` | 20 / min | yes |
+| limit | `auth.limits` key | keyed on | default | cleared by a success |
+|---|---|---|---|---|
+| Failed login | `login_by_email` | `lower(email_address)` | 5 / 15 min → lockout | yes |
+| Failed login | `login_by_ip` | IP address | 50 / 15 min | **no** |
+| Password reset request | `password_reset` | `lower(email_address)` | 5 / hour | no |
+| Verification resend | `verification_resend` | account | 5 / hour | no |
+| Refresh | `refresh` | session root | 60 / min | no |
+| API key auth failures | `api_key_failures` | `key_id` | 20 / min | yes |
+
+The configuration sets `max` and `window`. Which event a limit counts, and what
+clears it, stays rig's: a limit counting something else under the same name would
+not be the same limit.
 
 Two keys for login, deliberately: an email-only limit lets one attacker lock a
 victim out, and an IP-only limit lets a botnet spray. The IP limit is *not* cleared
@@ -496,48 +505,120 @@ exists.
 
 ---
 
+## What you configure
+
+Everything with a fixed answer is in `rig.yaml`, and that is not a stylistic
+preference: the reference documentation and the client libraries are generated
+from the same file, so a token lifetime written in a Go literal is a lifetime
+nothing else can read. A block that says `enabled: true` and nothing more is a
+working configuration.
+
+```yaml
+auth:
+  enabled: true            # nothing below it is read without this
+
+  base_path: /auth
+
+  # Where a request says which tenant it is for. Tried in order; the first that
+  # names one wins, and a request that names none is an ordinary answer.
+  #
+  #   header  a header, X-Tenant-Id by default
+  #   host    the leftmost label of the Host, looked up as a tenant slug
+  #   query   a query parameter, for a local demonstration
+  #   hook    your own resolver, passed to the generated wiring
+  tenant:
+    from: [host]
+    default_slug_env: DEFAULT_TENANT   # host only: the slug to fall back to
+
+  session:
+    access_ttl: 10m
+    refresh_ttl: 12h
+    remember_ttl: 30d
+    rotation_leeway: 30s
+    identity_ttl: 30m
+    cache_ttl: 0s
+
+  password:
+    min_length: 12
+    max_length: 1024
+    breach_check: false     # Have I Been Pwned, hash prefix only, fails open
+
+  # Whether the routes exist at all. Off means no route, rather than a 403 to
+  # something probeable.
+  allow_registration: false
+  allow_tenant_creation: false
+  require_verified_email: false
+
+  # Only the numbers. Which event each limit counts is rig's — see Rate limits.
+  limits:
+    login_by_email: {max: 5, window: 15m}
+    login_by_ip: {max: 50, window: 15m}
+
+  trusted_proxies: [10.0.0.0/8]        # empty believes no X-Forwarded-For
+
+  oauth:
+    base_url: https://app.example.com  # a provider compares this exactly
+    base_url_env: BASE_URL             # and the environment gets the last word
+    signing_key_env: OAUTH_SIGNING_KEY # >= 32 bytes, the same in every replica
+    state_ttl: 10m
+    allow_provisioning: false
+    allowed_return_to: [https://app.example.com]
+    providers:
+      - name: google                   # GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET
+      - name: microsoft
+        required: true                 # refuse to start without its credentials
+```
+
+A client secret is never in the file. The configuration names the environment
+variable and the generated code reads it, which is also what lets one binary
+offer Google in a deployment and nothing at all on a laptop: a provider whose
+pair is absent is skipped rather than mounted broken, unless it says `required`.
+
+There is no generator to add. `server-go` already writes your API package, and
+`rig generate` writes the assembly into it as one more file — `auth.gen.go`,
+beside the routes and the handlers. That is why an authentication failure is
+shaped like every other failure this API returns: the error mapper it reaches
+for is the same package's, with no import path in a configuration file to say
+where to find it.
+
+A project with no `auth:` block gets no such file, and so never depends on
+rig/auth — `examples/todo` serves a list of chores without pulling in argon2.
+
+---
+
 ## What you decide
 
-Three functions and two flags. Everything else has a default that works.
+What is left in Go is what a file cannot hold: a function, and a secret. Three
+functions, and each is optional until the configuration makes it necessary — the
+generated `Config` refuses at construction rather than failing on a request.
 
 ```go
-front, err := auth.New(auth.Config{
-    Pool: pool,
-
+front, err := api.New(pool, api.Hooks{
     // Who holds which permission. rig derives the keys from your schema and
     // generates the check; where the strings come from is yours. A role table, a
     // switch on the account's level, a claim on a federated token — every product
     // answers it differently, so rig ships no answer.
+    //
+    // Required when your handlers check one, which they do by default.
     Grants: myGrants(pool),
 
-    // Whether a stranger may sign themselves up. Off means the route does not
-    // exist, rather than answering 403 to something probeable.
-    AllowRegistration: true,
+    // Where a reset link, a verification link or an invitation goes. Nil sends
+    // none, and is refused outright when require_verified_email is set: a link
+    // nobody sends is an account nobody can ever use.
+    Notifier: mail,
 
-    // Whether POST /auth/tenants exists at all.
-    AllowTenantCreation: true,
-
-    // Sign-in through a provider. Leave Providers empty and the two routes are
-    // not mounted.
-    OAuth: auth.OAuth{
-        Providers:  []oauth.Provider{oauth.Google(id, secret)},
-        BaseURL:    "https://app.example.com",   // must match the provider exactly
-        SigningKey: signingKey,                  // >= 32 bytes
-        // Off by default: a provider authenticates anybody, so joining a tenant
-        // stays a decision.
-        AllowProvisioning: false,
-        AllowedReturnTo:   []string{"https://app.example.com"},
-        // Nil issues the same session a password login does.
-        OnSignIn: nil,
-    },
-
-    // And what a tenant is, beyond its row and its first account.
+    // What a tenant is beyond its row and its first account. The configuration
+    // says the endpoint exists; this says what it does.
     Tenants: account.TenantOptions{
         Allow:     func(ctx, by account.Creator) error { … },      // who may
         Validate:  func(ctx, *account.TenantDraft) error { … },    // what a name may be
         Slug:      func(name string, id uuid.UUID) string { … },
         OnCreated: func(ctx, made account.NewTenant) error { … },  // what else it needs
     },
+
+    // How a provider sign-in ends, for a browser that wants a cookie and a
+    // redirect rather than JSON. Nil issues the same session a password login does.
+    OAuth: api.OAuthHooks{OnSignIn: nil},
 })
 
 mux := api.Register(api.Handlers{
@@ -551,18 +632,32 @@ mux := api.Register(api.Handlers{
 roles safe: a tenant whose roles failed to seed is a tenant whose Owner can do
 nothing, and it rolls back with them.
 
+`api.Config` returns the same configuration without assembling it, for a
+project that needs one field this generator cannot express: take it, change that
+field, and call `auth.New` yourself rather than abandoning the generated wiring.
+
 ---
 
 ## Tuning
 
+Every one of these is a key under `auth:` in `rig.yaml`. The defaults are what
+you get by writing none of them.
+
 | | default | what it costs |
 |---|---|---|
-| `AccessTTL` | 10 min | Shorter is safer and refreshes more |
-| `RefreshTTL` / `RememberTTL` | 12 h / 30 d | How long a stolen refresh token is worth having |
-| `IdentitySessionTTL` | 30 min | How long somebody has to pick a tenant |
-| `RotationLeeway` | 30 s | Longer forgives more retries and widens the replay window |
-| `OAuth.StateTTL` | 10 min | How long a sign-in round trip may take. Generous for a redirect, short enough that a stolen state is useless. |
-| `CacheTTL` | `0` — off | Setting it trades immediate revocation for throughput. A revoked session keeps working for up to this long. Do not set it above a few seconds, and do not set it at all unless the read is measurably a problem. |
+| `session.access_ttl` | 10m | Shorter is safer and refreshes more |
+| `session.refresh_ttl` / `remember_ttl` | 12h / 30d | How long a stolen refresh token is worth having |
+| `session.identity_ttl` | 30m | How long somebody has to pick a tenant |
+| `session.rotation_leeway` | 30s | Longer forgives more retries and widens the replay window |
+| `session.cache_ttl` | `0s` — off | Setting it trades immediate revocation for throughput. A revoked session keeps working for up to this long. Do not set it above a few seconds, and do not set it at all unless the read is measurably a problem. |
+| `oauth.state_ttl` | 10m | How long a sign-in round trip may take. Generous for a redirect, short enough that a stolen state is useless. |
+| `password.min_length` | 12 | Length is what helps; composition rules push people toward `Password1!` |
+
+Durations are Go's syntax with `d` for days: `250ms`, `45s`, `15m`, `12h`, `30d`.
+
+rig refuses a combination that would behave as nobody intended — an access token
+that outlives its session, a "remember me" shorter than an ordinary session, a
+rotation leeway a consumed token never leaves — rather than adjusting it quietly.
 
 ---
 

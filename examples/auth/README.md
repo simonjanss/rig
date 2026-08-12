@@ -118,13 +118,30 @@ Replaying a consumed one outside a 30-second leeway revokes the whole family and
 writes a `TokenReuseDetected` entry, which turns a stolen token from a permanent
 problem into a detectable event.
 
-## Hand it a pool
+## Configure it, then hand it a pool
 
-The entire foundation is one call. This is all of the authentication code in
+The foundation's settings are one block in [rig.yaml](rig.yaml) — this example's
+whole block, and most of it is turning two routes on:
+
+```yaml
+auth:
+  enabled: true
+  allow_registration: true
+  allow_tenant_creation: true
+  tenant:
+    from: [query, header]
+```
+
+`rig generate` writes the assembly into `internal/api`, beside the routes and the
+handlers, and wiring it up is one call. This is all of the authentication code in
 [main.go](main.go):
 
 ```go
-front, err := auth.New(auth.Config{Pool: pool})
+front, err := api.New(pool, api.Hooks{
+	Grants:   authz.Grants(pool),   // who holds which permission
+	Notifier: mail,                 // where a reset or an invitation goes
+	Tenants:  account.TenantOptions{…},
+})
 if err != nil {
 	return nil, err
 }
@@ -149,18 +166,20 @@ and the tenant scoping the repositories enforce comes from the same claims.
 The defaults are the ones a project would have written anyway: `/auth` for the
 paths, the `X-Tenant-Id` header for the tenant, 10-minute access tokens, 12-hour
 sessions, 30 days for "remember me", a minimum password length of 12, and the
-documented rate limits. `auth.Config` carries the decisions an application
-actually has to make — where the tenant comes from, how long a session lasts, who
-sends the mail, which OAuth providers to offer. This example overrides one thing,
-so that an authentication failure looks like every other failure the API returns:
+documented rate limits. Every one of them is a key under `auth:` in rig.yaml —
+`rig schema project` lists them, and [docs/auth.md](../../docs/auth.md) says what
+each one costs. They live in the file rather than in a Go literal because the
+reference documentation and the client libraries are generated from it: a token
+lifetime written in code is a lifetime nothing else can read.
 
-```go
-OnError: func(w http.ResponseWriter, r *http.Request, err error) {
-	api.DefaultErrorMapper(w, r, api.RequestContext{…}, err)
-},
-```
+What stays in Go is what a file cannot hold — a function, and a secret. This
+example passes three functions and no secrets. Even the error mapper needs no
+saying: the wiring is generated into this API's own package, so an authentication
+failure goes through the same mapper as everything else and a 401 from the
+sign-in endpoint is shaped like a 401 from anywhere else.
 
-**The parts are still there.** `auth.New` holds no logic of its own — it
+**The parts are still there.** `api.New` calls `auth.New`, which holds no
+logic of its own — it
 assembles `authpg`, `session`, `account`, `apikey`, `authhttp` and `throttle`,
 every one of them exported and separately usable. `front.Parts()` returns what it
 built, for the things an endpoint cannot do for you: issuing a session after
@@ -491,8 +510,8 @@ about the address and not about whether this particular guess was right.
   in memory so the invitation flow can be demonstrated without a mail server.
   A live invitation is a credential for as long as it lives, so a real
   `Notifier` sends it and keeps nothing.
-- **Signing in with a provider is a different example.** It is one field —
-  `auth.Config{OAuth: auth.OAuth{Providers: […], BaseURL: …}}` — but a provider
+- **Signing in with a provider is a different example.** It is one block —
+  `auth.oauth.providers` in rig.yaml — but a provider
   sign-in has to know the tenant *before* the redirect, and the callback URL is
   registered with the provider and fixed, so only the host can carry it. That
   makes it a demonstration about deployment shape rather than about

@@ -40,9 +40,11 @@ Docker suites in `internal/authtest` and `internal/electrictest` can drive them.
 
 ### Generators registered
 
-`model-go`, `persist-go`, `service-go`, `server-go`, `electric`. All five are
-scaffolded by `rig init`; `electric` emits nothing until a table opts in.
-`model-go` is listed first because the other three import what it writes.
+`model-go`, `persist-go`, `service-go`, `server-go`, `electric`. All but
+`electric` are scaffolded by `rig init`, and `electric` emits nothing until a
+table opts in. `model-go` is listed first because the layers above import what it
+writes. The authentication wiring is not a generator of its own: `server-go`
+writes it into the API package for a project that has an `auth:` block.
 
 ### Test surface
 
@@ -724,6 +726,78 @@ them apart costs one more field on `RequestContext`. I lean yes, one field,
 
 ---
 
+## M5.8 — the auth block (shipped)
+
+**Goal.** Everything about authentication that has a fixed answer lives in
+`rig.yaml`, because the reference documentation and the client libraries are
+generated from that file. A token lifetime written in a Go literal is a lifetime
+nothing else can read.
+
+### What moved
+
+`auth:` in rig.yaml went from two keys about table generation to the whole
+configuration: `enabled`, `base_path`, the tenant sources, the session lifetimes
+including the rotation leeway and the verification cache, the password policy and
+the breach check, whether registration and tenant creation exist, the six rate
+limits, the trusted proxy ranges, and provider sign-in down to which environment
+variable holds each client secret.
+
+Durations are Go's syntax extended with `d` for days — `30d`, not `720h` — which
+is `ir.ParseDuration`, shared by the config reader and the document.
+
+Every value is **resolved when the configuration is read**, from rig/auth's own
+constants rather than copies of them. A zero in `ir.Auth` means somebody wrote a
+zero. That is what lets the emitted specification quote a number and have it be
+the number the server enforces.
+
+### Three gaps this closed
+
+`docs/auth.md` documented `RotationLeeway`, `CacheTTL` and `OAuth.StateTTL` as
+tunable, and `auth.Config` had no field for any of them: they were reachable only
+by assembling the parts by hand. They are fields now — `RotationLeeway`,
+`SessionCacheTTL`, `OAuth.StateTTL`.
+
+`auth.Config.SigningKey` also claimed a random key was generated when it was
+empty. `oauth.New` refuses anything under 32 bytes, and always did. The comment
+was wrong, not the code.
+
+### The wiring, in the generated server
+
+`server-go` writes one more file — `auth.gen.go`, in the same package as the
+routes and the handlers — for a project with an `auth:` block. A project without
+one gets no file, which is what keeps its API package, and its module, free of
+rig/auth: `examples/todo` serves a list of chores without depending on argon2.
+
+One package rather than two is what makes the error mapper free. The wiring
+calls this package's `DefaultErrorMapper` by name, so an authentication failure
+is shaped like every other failure without an import path in a configuration
+file to say where to find it, and there is no second package for a project to
+import and keep in step.
+
+The file is `Hooks`, `New` and `Config`, and Hooks has one field per function the
+configuration actually makes necessary. `Grants` appears as required when the
+schema derives permissions, `Tenant` only when `from:` names the hook source,
+`Tenants` only when tenant creation is on. Each is checked at construction: a nil
+`Grants` under derived permissions is an API where every endpoint answers 403,
+which looks like a policy decision rather than a mistake.
+
+Two things it generates rather than asks for, both previously hand-written in the
+examples: the tenant-from-host slug lookup, and provider construction from the
+environment.
+
+### What is still Go, and why
+
+A function, and a secret. `Grants`, `Notifier`, the tenant policy hooks,
+`OnSignIn`, and `OAuthHooks.ReturnTo` — that last one because an application with
+a tenant per subdomain has an origin per tenant, and a list in a file cannot name
+a tenant created this morning.
+
+Both examples shrank: `examples/auth`'s wiring is three hooks, and
+`examples/auth_oauth` lost its resolver, its slug function, its scheme helper and
+its provider construction — 90 lines that are now six lines of YAML.
+
+---
+
 ## M6 — `openapi`
 
 **Goal.** An OpenAPI document from the same IR, so it cannot describe an API
@@ -737,6 +811,10 @@ that does not exist.
 - Options: `formats: [json, yaml]`, `version: "3.1" | "3.2"`, `out_dir: docs`.
 - One `components/schemas` entry per `ir.Object` and per `ir.Enum`. The filter
   shapes are objects too, so `Search` documents itself.
+- `ir.API.Auth` is where the security scheme comes from: which endpoints exist
+  under the auth base path, and the lifetimes and rate limits to document. It is
+  resolved rather than optional, so the numbers in the specification are the ones
+  the server enforces — that is the reason the configuration lives in rig.yaml.
 - Every endpoint's `Errors []int` becomes a response referencing the shared
   `Error` schema. That is why the IR stores bare codes.
 - `Endpoint.Pattern` is the path, unchanged. The router, this document, and the
@@ -773,6 +851,9 @@ front end holds are the types the server sends.
   `InProgress = "in_progress"` without becoming a runtime import.
 - A `fetch` client, no dependencies. One method per endpoint, named from
   `OperationID`.
+- Refresh behaviour comes from `ir.API.Auth`: a client that knows the access
+  lifetime and the rotation leeway can refresh ahead of expiry instead of waiting
+  for a 401, and it knows those because they are in the document.
 - `Patch` semantics on update calls: a field left out of the object is left
   alone, `null` clears it. The type is `T | null | undefined` and the doc
   comment says which is which.

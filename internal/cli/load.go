@@ -53,6 +53,7 @@ func compileFrom(p *project.Project, schema ir.Schema) (*ir.Document, diag.List)
 	if err != nil {
 		diags.Add(diag.CodeConfigFile, diag.Anchor{}, "%v", err)
 	}
+	diags.Append(checkFoundationPresent(p))
 
 	doc, d := compile.Compile(schema, set, compile.Options{
 		Project:      p,
@@ -98,6 +99,36 @@ func foundationTables(p *project.Project) ([]string, error) {
 		out = append(out, table)
 	}
 	return out, nil
+}
+
+// checkFoundationPresent reports an enabled authentication block with nothing
+// behind it.
+//
+// `auth.enabled` says the endpoints are mounted and the tables are the auth
+// module's; a project that has not scaffolded them would compile, generate, and
+// then fail on its first request against tables that do not exist. Saying so
+// here costs one directory listing.
+func checkFoundationPresent(p *project.Project) diag.List {
+	var diags diag.List
+	if !p.Config.Auth.Enabled || p.Config.Auth.Own {
+		return diags
+	}
+
+	names, err := migrationNames(p.MigrationsDir())
+	if err != nil {
+		// A missing migrations directory is itself the answer, and any other read
+		// error has already been reported by foundationTables.
+		if !os.IsNotExist(err) {
+			return diags
+		}
+	}
+
+	if len(scaffold.Managed(names)) == 0 {
+		diags.Add(diag.CodeConfigInvalid, p.At("auth", "enabled"),
+			"auth.enabled is set but this project has no foundation migrations; "+
+				"run `rig setup-project`, or set auth.own if you maintain the tables yourself")
+	}
+	return diags
 }
 
 // readSchemaFile reads a schema dump.
