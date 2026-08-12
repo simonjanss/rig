@@ -6,7 +6,7 @@ package api
 
 import (
 	"github.com/google/uuid"
-	"github.com/simonjanss/rig/examples/oauth/internal/model"
+	"github.com/simonjanss/rig/examples/auth_oauth/internal/model"
 )
 
 // A page of Bookmarks.

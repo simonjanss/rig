@@ -4,8 +4,8 @@ use (
 	.
 	./auth
 	./examples/auth
+	./examples/auth_oauth
 	./examples/fantasyfootball
-	./examples/oauth
 	./examples/todo
 	./migrate
 	./runtime

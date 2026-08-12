@@ -378,7 +378,7 @@ the tenant's own host.
 Google and Microsoft also refuse plain `http` for anything but `localhost` and
 `127.0.0.1`, so a subdomain over plain http cannot be registered with either at all
 — which makes https the only shape a tenant-per-host deployment can use with them.
-`examples/oauth` documents both ways round it for local work.
+`examples/auth_oauth` documents both ways round it for local work.
 
 #### How it ends is yours
 
@@ -570,7 +570,7 @@ nothing, and it rolls back with them.
 
 - `examples/auth` — every flow above except the provider sign-in, driven from a
   browser, with a transcript panel showing the actual requests.
-- `examples/oauth` — the provider sign-in, and the deployment shape it needs: a
+- `examples/auth_oauth` — the provider sign-in, and the deployment shape it needs: a
   tenant per subdomain, so the host names the tenant a sign-in is for. It works
   with no credentials at all, because `services/idp` is a stand-in provider the
   example serves itself — and not a mock: single-use authorization codes, PKCE

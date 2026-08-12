@@ -3,9 +3,9 @@ package bookmark
 import (
 	"context"
 
-	"github.com/simonjanss/rig/examples/oauth/internal/api"
-	"github.com/simonjanss/rig/examples/oauth/internal/model"
-	"github.com/simonjanss/rig/examples/oauth/internal/store"
+	"github.com/simonjanss/rig/examples/auth_oauth/internal/api"
+	"github.com/simonjanss/rig/examples/auth_oauth/internal/model"
+	"github.com/simonjanss/rig/examples/auth_oauth/internal/store"
 	"github.com/simonjanss/rig/runtime/dbhook"
 )
 

@@ -441,7 +441,7 @@ and `mail.example.com` is the company.
 
 It is enforced wherever an account comes into existence, not just at this
 endpoint: **a first sign-in through an OAuth provider honours it too** — see
-[`examples/oauth`](../oauth). That one matters more than it looks — a provider will authenticate anybody with a Google account, so "sign
+[`examples/auth_oauth`](../auth_oauth). That one matters more than it looks — a provider will authenticate anybody with a Google account, so "sign
 in with Google" plus provisioning is an open door until something says which
 addresses belong here.
 
@@ -492,7 +492,7 @@ about the address and not about whether this particular guess was right.
   sign-in has to know the tenant *before* the redirect, and the callback URL is
   registered with the provider and fixed, so only the host can carry it. That
   makes it a demonstration about deployment shape rather than about
-  authentication, and it lives in [`examples/oauth`](../oauth), which serves a
+  authentication, and it lives in [`examples/auth_oauth`](../auth_oauth), which serves a
   tenant per subdomain.
 - **`permission:` in a table's YAML is not enforced yet.** The key is read into
   the IR and no generator consumes it, so the check has to be a hook today. That

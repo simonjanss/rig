@@ -8,8 +8,8 @@ import (
 	"context"
 
 	"github.com/google/uuid"
-	"github.com/simonjanss/rig/examples/oauth/internal/model"
-	"github.com/simonjanss/rig/examples/oauth/internal/store"
+	"github.com/simonjanss/rig/examples/auth_oauth/internal/model"
+	"github.com/simonjanss/rig/examples/auth_oauth/internal/store"
 	"github.com/simonjanss/rig/runtime/dbhook"
 	"github.com/simonjanss/rig/runtime/tenancy"
 )

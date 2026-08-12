@@ -1,4 +1,4 @@
-# oauth
+# auth_oauth
 
 Generated with [rig](https://github.com/simonjanss/rig).
 
