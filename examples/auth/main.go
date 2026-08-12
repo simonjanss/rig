@@ -301,7 +301,7 @@ func seed(ctx context.Context, pool *pgxpool.Pool) error {
 	// Idempotent, so `auth seed` twice is not an error: somebody trying the
 	// example should not have to know whether they have run it before.
 	if _, err := tx.Exec(ctx, `
-		INSERT INTO tenant (id, created_at, name, slug, is_active, allowed_email_domains)
+		INSERT INTO rig_tenant (id, created_at, name, slug, is_active, allowed_email_domains)
 		VALUES ($1, now(), 'Example', 'example', true, ARRAY['example.com'])
 		ON CONFLICT (id) DO UPDATE SET allowed_email_domains = excluded.allowed_email_domains`,
 		tenantID); err != nil {
@@ -317,13 +317,13 @@ func seed(ctx context.Context, pool *pgxpool.Pool) error {
 	// cannot be inferred from a partial index.
 	identityID := uuid.New()
 	err = tx.QueryRow(ctx, `
-		SELECT id FROM identity
+		SELECT id FROM rig_identity
 		 WHERE lower(email_address) = lower($1) AND deleted_at IS NULL`,
 		SeedEmail).Scan(&identityID)
 	switch {
 	case errors.Is(err, pgx.ErrNoRows):
 		if _, err := tx.Exec(ctx, `
-			INSERT INTO identity (id, created_at, email_address, display_name, is_active)
+			INSERT INTO rig_identity (id, created_at, email_address, display_name, is_active)
 			VALUES ($1, now(), $2, 'Ada', true)`,
 			identityID, SeedEmail); err != nil {
 			return fmt.Errorf("identity: %w", err)
@@ -333,13 +333,13 @@ func seed(ctx context.Context, pool *pgxpool.Pool) error {
 	}
 
 	err = tx.QueryRow(ctx, `
-		SELECT id FROM account
+		SELECT id FROM rig_account
 		 WHERE tenant_id = $1 AND identity_id = $2 AND deleted_at IS NULL`,
 		tenantID, identityID).Scan(&accountID)
 	switch {
 	case errors.Is(err, pgx.ErrNoRows):
 		if _, err := tx.Exec(ctx, `
-			INSERT INTO account (id, tenant_id, identity_id, created_at, email_address,
+			INSERT INTO rig_account (id, tenant_id, identity_id, created_at, email_address,
 			                     display_name, role, time_zone, is_active)
 			VALUES ($1, $2, $3, now(), $4, 'Ada', 'Owner', 'Europe/Stockholm', true)`,
 			accountID, tenantID, identityID, SeedEmail); err != nil {
@@ -442,7 +442,7 @@ func seedIntegration(ctx context.Context, pool *pgxpool.Pool, tenantID, byAccoun
 
 	serviceID := uuid.New()
 	err := pool.QueryRow(ctx, `
-		SELECT id FROM account
+		SELECT id FROM rig_account
 		 WHERE tenant_id = $1 AND lower(email_address) = lower($2) AND deleted_at IS NULL`,
 		tenantID, address).Scan(&serviceID)
 	switch {
@@ -452,7 +452,7 @@ func seedIntegration(ctx context.Context, pool *pgxpool.Pool, tenantID, byAccoun
 		// it to be. An address is still required — it is how somebody finds the
 		// thing in a list — but nothing will ever be sent to it.
 		if _, err := pool.Exec(ctx, `
-			INSERT INTO account (id, tenant_id, created_at, created_by_account_id,
+			INSERT INTO rig_account (id, tenant_id, created_at, created_by_account_id,
 			                     kind, role, email_address, display_name, is_active)
 			VALUES ($1, $2, now(), $3, 'Service', 'Basic', $4, 'Nightly import', true)`,
 			serviceID, tenantID, byAccountID, address); err != nil {
@@ -470,7 +470,7 @@ func seedIntegration(ctx context.Context, pool *pgxpool.Pool, tenantID, byAccoun
 		// last month's list and failing with a 403 nobody connects to a seed. A
 		// scope list is not a credential, so updating it in place costs nothing.
 		if _, err := pool.Exec(ctx,
-			`UPDATE api_key SET scopes = $2
+			`UPDATE rig_api_key SET scopes = $2
 			  WHERE account_id = $1 AND revoked_at IS NULL`,
 			serviceID, integrationScopes()); err != nil {
 			return fmt.Errorf("refresh integration scopes: %w", err)

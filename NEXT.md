@@ -73,8 +73,8 @@ reversible.
    rig itself designed. The interfaces are still there for anyone who diverged.
 
 4. **`expose: false` was added to the table configuration.** A table that keeps
-   its model and repository and gets no API. `identity`, `identity_credential`,
-   `account_token`, and `api_key` use it.
+   its model and repository and gets no API. `rig_identity`,
+   `rig_identity_credential`, `rig_account_token`, and `rig_api_key` use it.
 
 5. **The `electric` generator emits into its own package**, not alongside the API
    layer, so a project can have live sync without the HTTP generator.

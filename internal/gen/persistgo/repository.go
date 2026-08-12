@@ -153,7 +153,7 @@ func keyWritesAllowed(res *ir.Resource) bool {
 // calling itself, and the generated handler all pass through here. A check in the
 // router would cover the router.
 func (e *emitter) refuseKeyWrites(b *gobuf.Buf, res *ir.Resource, fail string) {
-	if keyWritesAllowed(res) || e.doc.Table("api_key") == nil {
+	if keyWritesAllowed(res) || e.doc.Table("rig_api_key") == nil {
 		return
 	}
 

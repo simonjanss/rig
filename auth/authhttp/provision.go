@@ -44,7 +44,7 @@ type accountView struct {
 
 // provision creates an account for somebody who has not got one.
 //
-// It is here rather than a POST on the account table because an account created
+// It is here rather than a POST on rig_account because an account created
 // by plain CRUD would have no credential and nobody would have been told it
 // exists. What this does instead is the part that is the same in every product:
 // check the address, honour the tenant's allowed domains, refuse a second

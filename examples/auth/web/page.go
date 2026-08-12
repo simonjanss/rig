@@ -415,13 +415,13 @@ func (h *Handler) attribute(d *data) {
 // list every customer's staff.
 func (h *Handler) people(ctx context.Context, tenantID uuid.UUID) []personView {
 	rows, err := h.pool.Query(ctx, `
-		SELECT account.id, account.email_address, account.display_name,
-		       account.role, account.kind, account.created_at,
-		       identity.email_verified_at IS NOT NULL
-		  FROM account
-		  LEFT JOIN identity ON identity.id = account.identity_id
-		 WHERE account.tenant_id = $1 AND account.deleted_at IS NULL
-		 ORDER BY account.created_at`, tenantID)
+		SELECT rig_account.id, rig_account.email_address, rig_account.display_name,
+		       rig_account.role, rig_account.kind, rig_account.created_at,
+		       rig_identity.email_verified_at IS NOT NULL
+		  FROM rig_account
+		  LEFT JOIN rig_identity ON rig_identity.id = rig_account.identity_id
+		 WHERE rig_account.tenant_id = $1 AND rig_account.deleted_at IS NULL
+		 ORDER BY rig_account.created_at`, tenantID)
 	if err != nil {
 		return nil
 	}
@@ -445,7 +445,7 @@ func (h *Handler) authLog(ctx context.Context, tenantID uuid.UUID) []logView {
 		SELECT created_at, event, outcome,
 		       coalesce(email_address, ''), coalesce(host(ip_address), ''),
 		       coalesce(api_key_ref, ''), coalesce(detail::text, '')
-		  FROM auth_log
+		  FROM rig_auth_log
 		 WHERE tenant_id = $1
 		 ORDER BY created_at DESC
 		 LIMIT 40`, tenantID)

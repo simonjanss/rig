@@ -3,7 +3,7 @@
 Four credentials, one door, and a rule for which is which.
 
 Everything below is served by `rig/auth` over the tables `rig setup-project`
-wrote. Nothing about it is generated, and nothing about it is yours to maintain —
+wrote — every one of them named `rig_…`, so a project can tell them from its own. Nothing about it is generated, and nothing about it is yours to maintain —
 what *is* yours is three optional functions, listed under
 [What you decide](#what-you-decide).
 
@@ -471,7 +471,7 @@ Decided in one place, which is what stops them drifting per endpoint.
 
 ## Rate limits
 
-Counted over `auth_log` with a sliding window. No Redis, no in-memory state,
+Counted over `rig_auth_log` with a sliding window. No Redis, no in-memory state,
 correct across replicas, and self-healing — counters age out.
 
 | limit | keyed on | default | cleared by a success |

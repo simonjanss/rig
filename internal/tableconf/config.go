@@ -49,7 +49,7 @@ type File struct {
 
 	// Expose controls whether the table appears in the API at all. Nil means
 	// yes. False keeps the model and the repository and generates no endpoints,
-	// which is what a table like account_token wants: the data layer is worth
+	// which is what a table like rig_account_token wants: the data layer is worth
 	// generating and a REST interface for it is not.
 	Expose *bool `yaml:"expose,omitempty" json:"expose,omitempty" jsonschema_description:"Expose this table through the API. Defaults to true. False still generates the model and repository."`
 

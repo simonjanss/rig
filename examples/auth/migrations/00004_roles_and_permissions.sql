@@ -38,7 +38,7 @@ COMMENT ON COLUMN permission.description IS 'What holding this permission lets s
 
 CREATE TABLE role (
     id                      uuid PRIMARY KEY,
-    tenant_id               uuid NOT NULL REFERENCES tenant (id),
+    tenant_id               uuid NOT NULL REFERENCES rig_tenant (id),
 
     created_at              timestamptz NOT NULL DEFAULT now(),
     updated_at              timestamptz,
@@ -79,7 +79,7 @@ COMMENT ON COLUMN role_permission.permission_id IS 'The permission it grants.';
 -- so rig sees an ordinary table, and an ordinary table is addressed by `id`.
 CREATE TABLE account_role (
     id                      uuid PRIMARY KEY,
-    account_id              uuid NOT NULL REFERENCES account (id),
+    account_id              uuid NOT NULL REFERENCES rig_account (id),
     role_id                 uuid NOT NULL REFERENCES role (id),
     UNIQUE (account_id, role_id)
 );

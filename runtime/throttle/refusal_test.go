@@ -189,8 +189,8 @@ func TestTheQueryQualifiesBothSidesOfAClearingLimit(t *testing.T) {
 	p := NewPostgres(nil, PostgresConfig{})
 
 	plain := p.sql("t.email_address = $1", Limit{Max: 5, Window: time.Minute})
-	if !strings.Contains(plain, "FROM auth_log t") {
-		t.Errorf("the default table should be auth_log:\n%s", plain)
+	if !strings.Contains(plain, "FROM rig_auth_log t") {
+		t.Errorf("the default table should be rig_auth_log:\n%s", plain)
 	}
 	if strings.Contains(plain, "greatest(") {
 		t.Errorf("a limit nothing clears needs no floor subquery:\n%s", plain)

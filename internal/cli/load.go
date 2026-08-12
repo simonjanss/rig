@@ -67,7 +67,7 @@ func compileFrom(p *project.Project, schema ir.Schema) (*ir.Document, diag.List)
 // foundationTables are the tables rig generates nothing for.
 //
 // They are the authentication foundation's, and they are recognised by the
-// project's own migration files rather than by name alone: `account` is the
+// project's own migration files rather than by name alone: `rig_account` is the
 // auth module's table in a project that scaffolded it, and an ordinary table in
 // a project that wrote its own. Guessing from the name would silently stop
 // generating a repository somebody depends on.

@@ -83,7 +83,7 @@ type JoinInput struct {
 // Store is the persistence a sign-in needs.
 //
 // An application implements it over the generated repositories for identity,
-// identity_oauth and account, all of which `rig setup-project` creates.
+// rig_identity_oauth and rig_account, all of which `rig setup-project` creates.
 //
 // The two halves are deliberately separate calls. Who somebody is, is global —
 // one address, one provider link — and whether they belong here is per tenant, so
@@ -319,7 +319,7 @@ func (h *Handler) redirectURI(r *http.Request, p Provider) string {
 //
 // Two questions in order, and the order is the point. Who is this — answered
 // globally, from the provider subject or the address. Then: do they belong to
-// this tenant — answered from the account table, and answered no unless
+// this tenant — answered from rig_account, and answered no unless
 // provisioning is on and the tenant's domains say otherwise.
 func (h *Handler) resolve(ctx context.Context, tenantID uuid.UUID, p Provider, profile Profile) (SignIn, error) {
 	if profile.Subject == "" {
@@ -396,7 +396,7 @@ func (h *Handler) identity(ctx context.Context, p Provider, profile Profile) (*L
 
 	// Nobody has this address anywhere. Creating the person is gated by the same
 	// switch that gates joining a tenant, because on its own it would be a way to
-	// fill the identity table from a sign-in page.
+	// fill rig_identity from a sign-in page.
 	if !h.cfg.AllowProvisioning {
 		return nil, rigerr.Forbidden("there is no account for this address")
 	}

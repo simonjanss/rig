@@ -8,15 +8,15 @@
 -- query ANDs in the tenant and the tenant came from the host.
 CREATE TABLE bookmark (
     id                      uuid PRIMARY KEY,
-    tenant_id               uuid NOT NULL REFERENCES tenant (id),
+    tenant_id               uuid NOT NULL REFERENCES rig_tenant (id),
 
     title                   text NOT NULL,
     url                     text NOT NULL,
 
     created_at              timestamptz NOT NULL DEFAULT now(),
-    created_by_account_id   uuid REFERENCES account (id),
+    created_by_account_id   uuid REFERENCES rig_account (id),
     updated_at              timestamptz,
-    updated_by_account_id   uuid REFERENCES account (id)
+    updated_by_account_id   uuid REFERENCES rig_account (id)
 );
 
 COMMENT ON TABLE  bookmark IS 'A link somebody saved.';

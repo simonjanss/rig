@@ -205,7 +205,7 @@ type Verification struct {
 	// RevokedAt is when the link was cancelled, which is not the same as used.
 	// An invitation somebody withdrew and one somebody accepted are different
 	// things to find in an audit trail, so the table keeps both — the same
-	// distinction account_token makes between a rotation and a revocation.
+	// distinction rig_account_token makes between a rotation and a revocation.
 	RevokedAt *time.Time
 }
 

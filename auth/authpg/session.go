@@ -13,7 +13,7 @@ import (
 	"github.com/simonjanss/rig/runtime/dbx"
 )
 
-// SessionStore keeps tokens in account_token.
+// SessionStore keeps tokens in rig_account_token.
 type SessionStore struct {
 	db dbx.Conn
 	tx dbx.Beginner
@@ -33,7 +33,7 @@ const tokenColumns = `id, tenant_id, account_id, kind, root_token_id, parent_tok
 // Insert implements [session.Store].
 func (s *SessionStore) Insert(ctx context.Context, t *session.Token) error {
 	_, err := conn(ctx, s.db).Exec(ctx, `
-		INSERT INTO account_token (`+tokenColumns+`)
+		INSERT INTO rig_account_token (`+tokenColumns+`)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)`,
 		t.ID, t.TenantID, t.AccountID, string(t.Kind), t.RootTokenID, t.ParentTokenID,
 		t.SecretHash, t.CreatedAt, t.ExpiresAt, t.RotatedAt, t.RevokedAt,
@@ -47,7 +47,7 @@ func (s *SessionStore) Insert(ctx context.Context, t *session.Token) error {
 
 // Find implements [session.Store].
 func (s *SessionStore) Find(ctx context.Context, id uuid.UUID) (*session.Token, error) {
-	return s.one(ctx, `SELECT `+tokenColumns+` FROM account_token WHERE id = $1`, id)
+	return s.one(ctx, `SELECT `+tokenColumns+` FROM rig_account_token WHERE id = $1`, id)
 }
 
 // Lock implements [session.Store].
@@ -56,7 +56,7 @@ func (s *SessionStore) Find(ctx context.Context, id uuid.UUID) (*session.Token, 
 // is a first use, a retry, or a replay, and writes — and two requests doing
 // that at once would both see an unconsumed token and both mint a child.
 func (s *SessionStore) Lock(ctx context.Context, id uuid.UUID) (*session.Token, error) {
-	return s.one(ctx, `SELECT `+tokenColumns+` FROM account_token WHERE id = $1 FOR UPDATE`, id)
+	return s.one(ctx, `SELECT `+tokenColumns+` FROM rig_account_token WHERE id = $1 FOR UPDATE`, id)
 }
 
 func (s *SessionStore) one(ctx context.Context, sql string, args ...any) (*session.Token, error) {
@@ -84,7 +84,7 @@ func (s *SessionStore) one(ctx context.Context, sql string, args ...any) (*sessi
 // twenty seconds would hold a thirty-second window open indefinitely.
 func (s *SessionStore) MarkRotated(ctx context.Context, id uuid.UUID, at time.Time) error {
 	_, err := conn(ctx, s.db).Exec(ctx,
-		`UPDATE account_token SET rotated_at = $2 WHERE id = $1 AND rotated_at IS NULL`, id, at)
+		`UPDATE rig_account_token SET rotated_at = $2 WHERE id = $1 AND rotated_at IS NULL`, id, at)
 	if err != nil {
 		return fmt.Errorf("authpg: mark rotated: %w", err)
 	}
@@ -94,7 +94,7 @@ func (s *SessionStore) MarkRotated(ctx context.Context, id uuid.UUID, at time.Ti
 // RevokeFamily implements [session.Store].
 func (s *SessionStore) RevokeFamily(ctx context.Context, rootID uuid.UUID, at time.Time) (int, error) {
 	tag, err := conn(ctx, s.db).Exec(ctx,
-		`UPDATE account_token SET revoked_at = $2 WHERE root_token_id = $1 AND revoked_at IS NULL`,
+		`UPDATE rig_account_token SET revoked_at = $2 WHERE root_token_id = $1 AND revoked_at IS NULL`,
 		rootID, at)
 	if err != nil {
 		return 0, fmt.Errorf("authpg: revoke family: %w", err)
@@ -114,11 +114,11 @@ func (s *SessionStore) Families(ctx context.Context, tenantID, accountID uuid.UU
 		       family.token_count
 		FROM (
 			SELECT root_token_id, max(created_at) AS last_used_at, count(*) AS token_count
-			FROM account_token
+			FROM rig_account_token
 			WHERE tenant_id = $1 AND account_id = $2
 			GROUP BY root_token_id
 		) AS family
-		JOIN account_token root ON root.id = family.root_token_id
+		JOIN rig_account_token root ON root.id = family.root_token_id
 		WHERE root.revoked_at IS NULL AND root.expires_at > now()
 		ORDER BY root.created_at DESC`, tenantID, accountID)
 	if err != nil {
@@ -218,7 +218,7 @@ const identitySessionColumns = `id, identity_id, secret_hash, created_at,
 // InsertIdentitySession implements [session.IdentityStore].
 func (s *SessionStore) InsertIdentitySession(ctx context.Context, in *session.Identity) error {
 	_, err := conn(ctx, s.db).Exec(ctx, `
-		INSERT INTO identity_session (`+identitySessionColumns+`)
+		INSERT INTO rig_identity_session (`+identitySessionColumns+`)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
 		in.ID, in.IdentityID, in.SecretHash, in.CreatedAt,
 		in.ExpiresAt, in.RevokedAt, addrValue(in.IPAddress), nullable(in.UserAgent))
@@ -231,7 +231,7 @@ func (s *SessionStore) InsertIdentitySession(ctx context.Context, in *session.Id
 // FindIdentitySession implements [session.IdentityStore].
 func (s *SessionStore) FindIdentitySession(ctx context.Context, id uuid.UUID) (*session.Identity, error) {
 	rows, err := conn(ctx, s.db).Query(ctx,
-		`SELECT `+identitySessionColumns+` FROM identity_session WHERE id = $1`, id)
+		`SELECT `+identitySessionColumns+` FROM rig_identity_session WHERE id = $1`, id)
 	if err != nil {
 		return nil, fmt.Errorf("authpg: read identity session: %w", err)
 	}
@@ -275,7 +275,7 @@ func (s *SessionStore) FindIdentitySession(ctx context.Context, id uuid.UUID) (*
 // that says when the session actually ended.
 func (s *SessionStore) RevokeIdentitySession(ctx context.Context, id uuid.UUID, at time.Time) error {
 	_, err := conn(ctx, s.db).Exec(ctx,
-		`UPDATE identity_session SET revoked_at = $2 WHERE id = $1 AND revoked_at IS NULL`, id, at)
+		`UPDATE rig_identity_session SET revoked_at = $2 WHERE id = $1 AND revoked_at IS NULL`, id, at)
 	if err != nil {
 		return fmt.Errorf("authpg: revoke identity session: %w", err)
 	}
@@ -285,7 +285,7 @@ func (s *SessionStore) RevokeIdentitySession(ctx context.Context, id uuid.UUID, 
 // RevokeIdentitySessionsFor implements [session.IdentityStore].
 func (s *SessionStore) RevokeIdentitySessionsFor(ctx context.Context, identityID uuid.UUID, at time.Time) (int, error) {
 	tag, err := conn(ctx, s.db).Exec(ctx,
-		`UPDATE identity_session SET revoked_at = $2
+		`UPDATE rig_identity_session SET revoked_at = $2
 		  WHERE identity_id = $1 AND revoked_at IS NULL`, identityID, at)
 	if err != nil {
 		return 0, fmt.Errorf("authpg: revoke identity sessions: %w", err)

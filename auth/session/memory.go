@@ -146,7 +146,7 @@ func (s *MemoryStore) InTx(ctx context.Context, fn func(ctx context.Context) err
 }
 
 // The identity-session half of the store. Separate maps because they are
-// separate credentials: an identity session is not a weaker account_token, and a
+// separate credentials: an identity session is not a weaker rig_account_token, and a
 // double that let one be found as the other would hide the mistake this design
 // exists to make impossible.
 

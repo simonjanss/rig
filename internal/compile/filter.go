@@ -217,8 +217,8 @@ func filterFields(base string, wire func(string) string) []ir.Field {
 // arbitrary depth can ask for an arbitrarily expensive query.
 //
 // A relation to a table the API does not expose is left out. The filter is the
-// wire shape, and a condition on account_token's columns is a description of
-// account_token published to anyone who can search accounts.
+// wire shape, and a condition on rig_account_token's columns is a description of
+// rig_account_token published to anyone who can search accounts.
 func relationFilterFields(res ir.Resource, wire func(string) string, exposed map[string]bool, suffix string, doc func(ir.Relation) string) []ir.Field {
 	if res.Storage == nil {
 		return nil

@@ -14,7 +14,7 @@ import (
 	"github.com/simonjanss/rig/runtime/dbx"
 )
 
-// APIKeyStore keeps machine credentials in api_key.
+// APIKeyStore keeps machine credentials in rig_api_key.
 type APIKeyStore struct{ db dbx.Conn }
 
 var _ apikey.Store = (*APIKeyStore)(nil)
@@ -25,7 +25,7 @@ const keyColumns = `id, tenant_id, account_id, kind, name, key_id, secret_hash, 
 // Insert implements [apikey.Store].
 func (s *APIKeyStore) Insert(ctx context.Context, k *apikey.Key) error {
 	_, err := conn(ctx, s.db).Exec(ctx, `
-		INSERT INTO api_key (`+keyColumns+`)
+		INSERT INTO rig_api_key (`+keyColumns+`)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
 		k.ID, k.TenantID, k.AccountID, k.Kind, k.Name, k.KeyID, k.SecretHash,
 		emptyStrings(k.Scopes), prefixStrings(k.CIDRAllowList),
@@ -38,12 +38,12 @@ func (s *APIKeyStore) Insert(ctx context.Context, k *apikey.Key) error {
 
 // ByKeyID implements [apikey.Store].
 func (s *APIKeyStore) ByKeyID(ctx context.Context, keyID string) (*apikey.Key, error) {
-	return s.one(ctx, `SELECT `+keyColumns+` FROM api_key WHERE key_id = $1`, keyID)
+	return s.one(ctx, `SELECT `+keyColumns+` FROM rig_api_key WHERE key_id = $1`, keyID)
 }
 
 // Find implements [apikey.Store].
 func (s *APIKeyStore) Find(ctx context.Context, tenantID, id uuid.UUID) (*apikey.Key, error) {
-	return s.one(ctx, `SELECT `+keyColumns+` FROM api_key WHERE tenant_id = $1 AND id = $2`,
+	return s.one(ctx, `SELECT `+keyColumns+` FROM rig_api_key WHERE tenant_id = $1 AND id = $2`,
 		tenantID, id)
 }
 
@@ -62,7 +62,7 @@ func (s *APIKeyStore) one(ctx context.Context, sql string, args ...any) (*apikey
 
 // TouchLastUsed implements [apikey.Store].
 func (s *APIKeyStore) TouchLastUsed(ctx context.Context, id uuid.UUID, at time.Time) error {
-	_, err := conn(ctx, s.db).Exec(ctx, `UPDATE api_key SET last_used_at = $2 WHERE id = $1`, id, at)
+	_, err := conn(ctx, s.db).Exec(ctx, `UPDATE rig_api_key SET last_used_at = $2 WHERE id = $1`, id, at)
 	if err != nil {
 		return fmt.Errorf("authpg: touch api key: %w", err)
 	}
@@ -72,7 +72,7 @@ func (s *APIKeyStore) TouchLastUsed(ctx context.Context, id uuid.UUID, at time.T
 // Revoke implements [apikey.Store].
 func (s *APIKeyStore) Revoke(ctx context.Context, tenantID, id uuid.UUID, at time.Time) error {
 	_, err := conn(ctx, s.db).Exec(ctx, `
-		UPDATE api_key SET revoked_at = $3
+		UPDATE rig_api_key SET revoked_at = $3
 		WHERE tenant_id = $1 AND id = $2 AND revoked_at IS NULL`, tenantID, id, at)
 	if err != nil {
 		return fmt.Errorf("authpg: revoke api key: %w", err)
@@ -83,7 +83,7 @@ func (s *APIKeyStore) Revoke(ctx context.Context, tenantID, id uuid.UUID, at tim
 // SetExpiry implements [apikey.Store].
 func (s *APIKeyStore) SetExpiry(ctx context.Context, tenantID, id uuid.UUID, at time.Time) error {
 	_, err := conn(ctx, s.db).Exec(ctx, `
-		UPDATE api_key SET expires_at = $3 WHERE tenant_id = $1 AND id = $2`, tenantID, id, at)
+		UPDATE rig_api_key SET expires_at = $3 WHERE tenant_id = $1 AND id = $2`, tenantID, id, at)
 	if err != nil {
 		return fmt.Errorf("authpg: set api key expiry: %w", err)
 	}
@@ -93,7 +93,7 @@ func (s *APIKeyStore) SetExpiry(ctx context.Context, tenantID, id uuid.UUID, at 
 // List implements [apikey.Store].
 func (s *APIKeyStore) List(ctx context.Context, tenantID uuid.UUID) ([]*apikey.Key, error) {
 	rows, err := conn(ctx, s.db).Query(ctx,
-		`SELECT `+keyColumns+` FROM api_key WHERE tenant_id = $1 ORDER BY created_at DESC`, tenantID)
+		`SELECT `+keyColumns+` FROM rig_api_key WHERE tenant_id = $1 ORDER BY created_at DESC`, tenantID)
 	if err != nil {
 		return nil, fmt.Errorf("authpg: list api keys: %w", err)
 	}
@@ -132,7 +132,7 @@ func scanKey(row scanner) (*apikey.Key, error) {
 	return &k, nil
 }
 
-// Log writes to auth_log.
+// Log writes to rig_auth_log.
 type Log struct{ db dbx.Conn }
 
 var _ authlog.Log = (*Log)(nil)
@@ -157,7 +157,7 @@ func (l *Log) Write(ctx context.Context, e authlog.Entry) {
 	// Deliberately not through conn(): an entry describing a failed attempt
 	// must survive the rollback of whatever transaction noticed it.
 	_, _ = l.db.Exec(ctx, `
-		INSERT INTO auth_log
+		INSERT INTO rig_auth_log
 			(id, tenant_id, created_at, event, outcome, account_id, api_key_id,
 			 email_address, api_key_ref, ip_address, user_agent, token_root_id, detail)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
