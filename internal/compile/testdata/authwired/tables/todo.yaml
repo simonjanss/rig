@@ -1,0 +1,12 @@
+table: todo
+comment: A single thing someone means to get done.
+
+columns:
+  title:
+    comment: Short description of the task.
+  notes:
+    comment: Longer free-text notes.
+  is_done:
+    comment: Whether the task has been completed.
+  due_date:
+    comment: Day the task is expected to be finished by.

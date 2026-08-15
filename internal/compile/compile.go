@@ -55,6 +55,7 @@ func Compile(raw ir.Schema, set *tableconf.Set, opt Options) (*ir.Document, diag
 		Description: cfg.API.Description,
 		BasePath:    cfg.API.BasePath,
 		Namer:       n,
+		Auth:        cfg.Auth.IR(),
 	})
 	diags.Append(d)
 

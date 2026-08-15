@@ -32,15 +32,68 @@ type ProjectInfo struct {
 	Module string `yaml:"module" json:"module" jsonschema_description:"Go module path of the application, used to build generated import paths."`
 }
 
-// Auth says how the authentication foundation's tables are treated.
+// Auth is the authentication foundation: whether this project has one, how it
+// behaves, and how its tables are treated.
 //
-// The default needs no configuration and is what almost every project wants:
+// Everything that is a fixed choice lives here rather than in a Go literal, and
+// that is the point of the block. The generated wiring, the emitted
+// specification and a client library all read the same numbers, so how long a
+// token lives is documented and typed rather than being a value one file happens
+// to pass. What is left for Go is what YAML cannot hold: a function, and a
+// secret.
+//
+// The table half needs no configuration and is what almost every project wants:
 // rig generates nothing for the tables `rig setup-project` created, because
 // their Go types, their stores and their endpoints already exist in the
 // rig/auth module. A project is recognised as having them by its own migration
 // files, so a table called `rig_account` that nobody scaffolded is an ordinary
 // table and keeps getting a model and a repository like any other.
 type Auth struct {
+	// Enabled says this project authenticates its callers.
+	//
+	// Off by default, and deliberately explicit: a project with an `auth:` block
+	// it never turned on is easier to spot than one that started mounting a
+	// sign-in endpoint because a file appeared. It is what makes `server-go`
+	// write the wiring at all, and everything else in this block is read only
+	// when it is set.
+	Enabled bool `yaml:"enabled,omitempty" json:"enabled,omitempty" jsonschema_description:"Whether this project authenticates its callers. The server-go generator writes the wiring only when it is set."`
+
+	// BasePath prefixes the endpoints. The provider routes sit under it, at
+	// <base>/oauth/{provider}/start.
+	BasePath string `yaml:"base_path,omitempty" json:"base_path,omitempty" jsonschema_description:"Prefix the authentication endpoints sit under. Defaults to /auth."`
+
+	Tenant   AuthTenant   `yaml:"tenant,omitempty" json:"tenant,omitempty" jsonschema_description:"How a request names the tenant it is for."`
+	Session  AuthSession  `yaml:"session,omitempty" json:"session,omitempty" jsonschema_description:"How long the credentials somebody holds stay valid."`
+	Password AuthPassword `yaml:"password,omitempty" json:"password,omitempty" jsonschema_description:"What a new password must satisfy."`
+	Limits   AuthLimits   `yaml:"limits,omitempty" json:"limits,omitempty" jsonschema_description:"Rate limits, counted in the database so replicas cannot disagree."`
+
+	// AllowRegistration mounts POST <base>/register, where a stranger creates an
+	// account with no tenant and lands in the tenant picker.
+	//
+	// Off by default. Whether anybody may sign themselves up is a product
+	// decision — invite-only and open registration are both ordinary — and off
+	// means the route does not exist rather than answering 403 to something
+	// probeable.
+	AllowRegistration bool `yaml:"allow_registration,omitempty" json:"allow_registration,omitempty" jsonschema_description:"Mount the registration endpoint, where a stranger creates an account. Off means the route does not exist."`
+
+	// AllowTenantCreation mounts POST <base>/tenants, where somebody signed in
+	// makes one and becomes its Owner. The policy — who may, what a name may be,
+	// what else a new tenant needs — stays in Go, because each of those is a
+	// function.
+	AllowTenantCreation bool `yaml:"allow_tenant_creation,omitempty" json:"allow_tenant_creation,omitempty" jsonschema_description:"Mount the tenant-creation endpoint. Who may create one, and what else a new one needs, stay in Go."`
+
+	// RequireVerifiedEmail refuses a sign-in until the address is verified.
+	RequireVerifiedEmail bool `yaml:"require_verified_email,omitempty" json:"require_verified_email,omitempty" jsonschema_description:"Refuse a sign-in until the address has been verified."`
+
+	// TrustedProxies are the networks whose X-Forwarded-For may be believed.
+	//
+	// Empty means none, and that is deliberate: an address read from a header a
+	// client controls is an address a client chooses, and a rate limit keyed on
+	// one is a rate limit an attacker walks around.
+	TrustedProxies []string `yaml:"trusted_proxies,omitempty" json:"trusted_proxies,omitempty" jsonschema_description:"CIDR ranges whose X-Forwarded-For may be believed, for example 10.0.0.0/8. Empty trusts none of them."`
+
+	OAuth AuthOAuth `yaml:"oauth,omitempty" json:"oauth,omitempty" jsonschema_description:"Provider sign-in. No providers means the provider routes are not mounted."`
+
 	// Expose names foundation tables to generate for anyway.
 	//
 	// It adds the model, the repository and whatever API the table's
@@ -62,6 +115,218 @@ type Auth struct {
 	// the auth package enforces, so a password reaching a table through one of
 	// them is a password nobody hashed.
 	Own bool `yaml:"own,omitempty" json:"own,omitempty" jsonschema_description:"Generate for every foundation table, for a project that has forked the schema and no longer imports rig/auth."`
+}
+
+// AuthTenant says how a request names the tenant it is for.
+//
+// It is asked only where the tenant cannot be known some other way: a sign-in, a
+// password reset, the start of a provider flow. Everything else takes its tenant
+// from the token, which is why getting this wrong shows up at the front door
+// rather than everywhere.
+type AuthTenant struct {
+	// From lists the sources to try, in order, and the first that names a tenant
+	// wins. Default: header.
+	//
+	// A request that names none is not an error — a single sign-in page cannot
+	// know which tenants an address belongs to before the password has been
+	// checked — so the sources are consulted and their silence is an answer.
+	//
+	//   header  a header, X-Tenant-Id by default
+	//   host    the leftmost label of the Host, looked up as a tenant slug
+	//   query   a query parameter, for a local demonstration
+	//   hook    the application's own resolver, handed to the generated wiring
+	//
+	// host is what a real deployment uses, and the only one that survives a
+	// provider redirect: a callback URL is registered with the provider and fixed,
+	// so it carries no header and no parameter of yours. A host does.
+	From []string `yaml:"from,omitempty" json:"from,omitempty" jsonschema:"enum=header,enum=host,enum=query,enum=hook" jsonschema_description:"Sources to try in order; the first that names a tenant wins. Defaults to [header]."`
+
+	// Header is what the header source reads. Default X-Tenant-Id.
+	Header string `yaml:"header,omitempty" json:"header,omitempty" jsonschema_description:"Header the header source reads. Defaults to X-Tenant-Id."`
+	// Query is what the query source reads. Default tenant.
+	Query string `yaml:"query,omitempty" json:"query,omitempty" jsonschema_description:"Query parameter the query source reads. Defaults to tenant."`
+
+	// DefaultSlugEnv names an environment variable holding the slug to fall back
+	// to when the host names no tenant.
+	//
+	// It exists for one real problem: Google and Microsoft will not register a
+	// plain-http redirect URI for anything but localhost, so the subdomain a
+	// host-based deployment is built around cannot be used on a laptop. Naming a
+	// tenant for the host that has no subdomain is what lets a real sign-in be
+	// tried there.
+	DefaultSlugEnv string `yaml:"default_slug_env,omitempty" json:"default_slug_env,omitempty" jsonschema_description:"Environment variable holding a tenant slug to fall back to when the host names none."`
+}
+
+// AuthSession is how long the things somebody holds stay good for.
+//
+// Every value is a trade rather than a preference, so each one says what it
+// costs. Zero means rig/auth's own default.
+type AuthSession struct {
+	// AccessTTL is the lifetime of the token that travels on every request.
+	// Shorter is safer and refreshes more often. Default 10m.
+	AccessTTL Duration `yaml:"access_ttl,omitempty" json:"access_ttl,omitempty" jsonschema_description:"Lifetime of the access token, which travels on every request. Shorter is safer and refreshes more often. Defaults to 10m."`
+	// RefreshTTL is how long an ordinary session lasts. Default 12h.
+	RefreshTTL Duration `yaml:"refresh_ttl,omitempty" json:"refresh_ttl,omitempty" jsonschema_description:"How long an ordinary session lasts. Defaults to 12h."`
+	// RememberTTL is how long one lasts when somebody asked to stay signed in.
+	// Default 30d.
+	RememberTTL Duration `yaml:"remember_ttl,omitempty" json:"remember_ttl,omitempty" jsonschema_description:"How long a session lasts when somebody asked to stay signed in. Defaults to 30d."`
+
+	// RotationLeeway is how long a refresh token stays usable after it has been
+	// exchanged. Default 30s.
+	//
+	// Without one, a dropped response is a logout: the client never received the
+	// new pair, retries with the old one, and has its whole family revoked for a
+	// network blip. Longer forgives more retries and widens the replay window.
+	RotationLeeway Duration `yaml:"rotation_leeway,omitempty" json:"rotation_leeway,omitempty" jsonschema_description:"How long a refresh token stays usable after it was exchanged, so a dropped response is a retry rather than a logout. Longer forgives more retries and widens the replay window. Defaults to 30s."`
+
+	// IdentityTTL is the lifetime of the tenant-less credential somebody holds
+	// between signing in and picking a tenant. Default 30m.
+	IdentityTTL Duration `yaml:"identity_ttl,omitempty" json:"identity_ttl,omitempty" jsonschema_description:"Lifetime of the tenant-less credential held between signing in and picking a tenant. Defaults to 30m."`
+
+	// CacheTTL keeps verified access tokens in memory. Zero, the default, reads
+	// the row every time, which is what makes revocation immediate.
+	//
+	// Setting it trades that for throughput: a revoked session keeps working for
+	// up to this long. Do not set it above a few seconds, and do not set it at
+	// all unless the read is measurably a problem.
+	CacheTTL Duration `yaml:"cache_ttl,omitempty" json:"cache_ttl,omitempty" jsonschema_description:"Keep verified access tokens in memory for this long. Zero, the default, reads the row every time, which makes revocation immediate. Anything above a few seconds is a revoked session that keeps working."`
+}
+
+// AuthPassword is what a new password must satisfy.
+//
+// There are no composition rules, and that is the recommendation rather than an
+// omission: demanding an uppercase letter, a digit and a symbol pushes people
+// toward Password1! and a sticky note. Length and a breach check are what help.
+type AuthPassword struct {
+	// MinLength is in characters, not bytes. Default 12.
+	MinLength int `yaml:"min_length,omitempty" json:"min_length,omitempty" jsonschema:"minimum=8" jsonschema_description:"Minimum password length in characters. Defaults to 12."`
+	// MaxLength bounds the work rather than the strength: argon2id over a
+	// ten-megabyte password is a denial of service anybody can send. Default 1024.
+	MaxLength int `yaml:"max_length,omitempty" json:"max_length,omitempty" jsonschema_description:"Maximum password length in characters. This bounds hashing work, not strength. Defaults to 1024."`
+
+	// BreachCheck rejects passwords known to have leaked, against Have I Been
+	// Pwned's range API.
+	//
+	// Off by default because it talks to a third party. The password never leaves
+	// the process — five hex digits of its SHA-1 do — and a checker that cannot
+	// reach its source fails open, because a third party's outage should not stop
+	// somebody changing their password.
+	BreachCheck bool `yaml:"breach_check,omitempty" json:"breach_check,omitempty" jsonschema_description:"Reject passwords that appear in Have I Been Pwned. Only a hash prefix is sent, and the check fails open."`
+}
+
+// AuthLimits are the rate limits. Zero in any of them means rig's own default.
+//
+// They are counted in the database rather than in memory, so two replicas cannot
+// disagree about how many times a password has been tried and a restart does not
+// clear somebody's lockout.
+type AuthLimits struct {
+	// LoginByEmail locks one account after a handful of wrong passwords.
+	// Default 5 per 15m, cleared by a success.
+	LoginByEmail AuthLimit `yaml:"login_by_email,omitempty" json:"login_by_email,omitempty" jsonschema_description:"Failed sign-ins per address before the account is locked out. Defaults to 5 per 15m."`
+	// LoginByIP throttles one source spraying many accounts. Default 50 per 15m.
+	//
+	// Deliberately looser than the address limit and deliberately not cleared by
+	// a success: an email-only limit lets an attacker lock a victim out on
+	// purpose, and an IP-only limit lets a botnet spray one password everywhere.
+	LoginByIP AuthLimit `yaml:"login_by_ip,omitempty" json:"login_by_ip,omitempty" jsonschema_description:"Failed sign-ins per source address. Looser than the per-address limit so an office behind one NAT does not trip it. Defaults to 50 per 15m."`
+
+	// PasswordReset bounds reset requests per address. Default 5 per 1h.
+	PasswordReset AuthLimit `yaml:"password_reset,omitempty" json:"password_reset,omitempty" jsonschema_description:"Password-reset requests per address. Defaults to 5 per 1h."`
+	// VerificationResend bounds verification mail per address. Default 5 per 1h.
+	VerificationResend AuthLimit `yaml:"verification_resend,omitempty" json:"verification_resend,omitempty" jsonschema_description:"Verification mails per address. Defaults to 5 per 1h."`
+	// Refresh bounds one session's rotations. Default 60 per 1m: a client
+	// refreshing sixty times a minute is looping, not working.
+	Refresh AuthLimit `yaml:"refresh,omitempty" json:"refresh,omitempty" jsonschema_description:"Token rotations per session. A client refreshing this often is looping, not working. Defaults to 60 per 1m."`
+	// APIKeyFailures bounds wrong keys per key. Default 20 per 1m.
+	APIKeyFailures AuthLimit `yaml:"api_key_failures,omitempty" json:"api_key_failures,omitempty" jsonschema_description:"Failed API-key authentications per key. Defaults to 20 per 1m."`
+}
+
+// AuthLimit is one limit: how many, and over how long. Either field left at zero
+// takes rig's default for that limit.
+type AuthLimit struct {
+	Max    int      `yaml:"max,omitempty" json:"max,omitempty" jsonschema:"minimum=1" jsonschema_description:"How many are allowed in one window."`
+	Window Duration `yaml:"window,omitempty" json:"window,omitempty" jsonschema_description:"How long the window is."`
+}
+
+// AuthOAuth is provider sign-in.
+//
+// An empty provider list mounts nothing, so this block costs nothing to leave in
+// place while a project decides.
+type AuthOAuth struct {
+	// BaseURL is this application's own origin. The callback URL is built from
+	// it, and a provider compares that exactly.
+	BaseURL string `yaml:"base_url,omitempty" json:"base_url,omitempty" jsonschema_description:"This application's own origin, for example https://app.example.com. The callback URL is built from it and a provider compares that exactly."`
+	// BaseURLEnv names an environment variable that overrides BaseURL, which is
+	// the ordinary case: the origin differs per deployment and the file does not.
+	BaseURLEnv string `yaml:"base_url_env,omitempty" json:"base_url_env,omitempty" jsonschema_description:"Environment variable that overrides base_url, for an origin that differs per deployment. Not defaulted: one of base_url and base_url_env has to be set."`
+	// OriginFromHost derives the origin per request from the Host instead.
+	//
+	// What an application serving a tenant per subdomain needs: the state cookie
+	// carrying the PKCE verifier is set on the host the sign-in started at, and a
+	// browser will not send it to a sibling subdomain — so the callback URL is per
+	// host, and every one of them is registered with the provider.
+	OriginFromHost bool `yaml:"origin_from_host,omitempty" json:"origin_from_host,omitempty" jsonschema_description:"Derive the callback origin from each request's Host, for an application serving a tenant per subdomain. Every origin must be registered with the provider."`
+
+	// SigningKeyEnv names the environment variable holding the key that signs the
+	// state parameter. Default OAUTH_SIGNING_KEY.
+	//
+	// A random key is generated when the variable is empty, which is fine for one
+	// process and wrong for several: a callback may arrive at a different replica
+	// than the one that started the flow.
+	SigningKeyEnv string `yaml:"signing_key_env,omitempty" json:"signing_key_env,omitempty" jsonschema_description:"Environment variable holding the key that signs the state parameter, at least 32 bytes. Defaults to OAUTH_SIGNING_KEY. Unset generates one per process, which breaks across replicas."`
+
+	// StateTTL bounds how long a sign-in round trip may take. Default 10m:
+	// generous for a redirect, short enough that a stolen state is useless.
+	StateTTL Duration `yaml:"state_ttl,omitempty" json:"state_ttl,omitempty" jsonschema_description:"How long a sign-in round trip may take. Generous for a redirect, short enough that a stolen state is useless. Defaults to 10m."`
+
+	// AllowProvisioning creates an account the first time somebody signs in with
+	// a provider.
+	//
+	// Off by default: a provider authenticates anybody, so joining a tenant stays
+	// a decision. Without it a provider sign-in works only for an address that
+	// already has an account.
+	AllowProvisioning bool `yaml:"allow_provisioning,omitempty" json:"allow_provisioning,omitempty" jsonschema_description:"Create an account the first time somebody signs in with a provider. Off means a provider sign-in only works for an address that already has one."`
+
+	// AllowedReturnTo bounds where a finished sign-in may land. An open redirect
+	// is the classic mistake here.
+	AllowedReturnTo []string `yaml:"allowed_return_to,omitempty" json:"allowed_return_to,omitempty" jsonschema_description:"Origins or paths a finished sign-in may return to. Anything else is refused, which is what stops an open redirect."`
+
+	// Insecure allows the state cookie over plain HTTP, for local development
+	// where a browser would refuse the __Host- prefixed one. Never anywhere real.
+	Insecure bool `yaml:"insecure,omitempty" json:"insecure,omitempty" jsonschema_description:"Allow the state cookie over plain HTTP, for local development only. Never set this in a deployment."`
+
+	// Providers are the identity providers to offer.
+	Providers []AuthProvider `yaml:"providers,omitempty" json:"providers,omitempty" jsonschema_description:"Identity providers to offer. Empty mounts no provider routes."`
+}
+
+// AuthProvider is one identity provider.
+//
+// Credentials are named, never carried: a client secret in rig.yaml is a client
+// secret in version control. The file says which environment variable holds it
+// and the generated code reads that, which is also what lets one binary offer
+// Google in production and nothing at all on a laptop.
+type AuthProvider struct {
+	// Name selects the provider, and is also the route segment: a provider called
+	// google is reached at <base>/oauth/google/start.
+	Name string `yaml:"name" json:"name" jsonschema:"enum=google,enum=microsoft,enum=github" jsonschema_description:"Which provider. It is also the route segment: google is reached at <base_path>/oauth/google/start."`
+
+	// ClientIDEnv and ClientSecretEnv default to the provider's name in upper
+	// case: GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET.
+	ClientIDEnv     string `yaml:"client_id_env,omitempty" json:"client_id_env,omitempty" jsonschema_description:"Environment variable holding the client id. Defaults to <PROVIDER>_CLIENT_ID."`
+	ClientSecretEnv string `yaml:"client_secret_env,omitempty" json:"client_secret_env,omitempty" jsonschema_description:"Environment variable holding the client secret. Defaults to <PROVIDER>_CLIENT_SECRET."`
+
+	// TenantEnv is Microsoft's own idea of a tenant, which has nothing to do with
+	// rig's: "common" accepts any account, "organizations" excludes personal
+	// ones, and a directory id restricts sign-in to one organization. Empty means
+	// common. Default MICROSOFT_TENANT.
+	TenantEnv string `yaml:"tenant_env,omitempty" json:"tenant_env,omitempty" jsonschema_description:"Microsoft only: environment variable naming its directory. common accepts any account, a directory id restricts sign-in to one organization. Defaults to MICROSOFT_TENANT."`
+
+	// Required fails startup when the credentials are absent.
+	//
+	// The default skips the provider instead, which is what makes one
+	// configuration work in both places: set the pair and the button appears, set
+	// nothing and it does not.
+	Required bool `yaml:"required,omitempty" json:"required,omitempty" jsonschema_description:"Fail startup when the credentials are absent. The default skips the provider instead, so one configuration works with or without them."`
 }
 
 // Layout says where a table's configuration and code live.

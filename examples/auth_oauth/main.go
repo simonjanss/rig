@@ -8,9 +8,16 @@
 // parameter does not survive it. A host does.
 //
 // So this example is served at a wildcard: acme.localhost:8083 is one tenant,
-// beta.localhost:8083 is another, and the tenant resolver is three lines. That is
+// beta.localhost:8083 is another, and the tenant resolver is two lines of
+// rig.yaml — `tenant: {from: [host]}`, which generates the slug lookup. That is
 // what a real deployment does, and it is why rig seals the tenant into the state
 // cookie at the start of a sign-in rather than resolving it twice.
+//
+// Everything else about the sign-in is in that file too: the per-host callback
+// origin, provisioning, the state cookie's settings, and which environment
+// variable holds each provider's credentials. What is left in this file is one
+// decision rig will not make — how a sign-in ends for a browser — and the
+// stand-in provider the example serves itself.
 //
 // examples/auth is the other half of this subject: sessions, invitations, API keys,
 // permissions, and a dashboard to see them in. This one is about who somebody is.
@@ -22,7 +29,6 @@ import (
 	"embed"
 	"errors"
 	"fmt"
-	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -41,7 +47,6 @@ import (
 	"github.com/simonjanss/rig/examples/auth_oauth/services/bookmark"
 	"github.com/simonjanss/rig/examples/auth_oauth/services/idp"
 	"github.com/simonjanss/rig/migrate"
-	"github.com/simonjanss/rig/runtime/rigerr"
 	"github.com/simonjanss/rig/runtime/serve"
 )
 
@@ -96,58 +101,62 @@ func main() {
 func newAPI(ctx context.Context, pool *pgxpool.Pool, base string) (http.Handler, error) {
 	repos := store.New(pool, store.Config{})
 
-	// Which providers this run offers, and — when it is the stand-in — the prop
-	// that answers for one.
+	// The origin this run answers at. It reaches the generated wiring through the
+	// environment, because that is what rig.yaml says reads it: `base_url_env`.
+	// One place decides, and a test on an ephemeral port can still say where it is.
+	if err := os.Setenv("BASE_URL", base); err != nil {
+		return nil, err
+	}
+
+	// Every address this application answers at: one per tenant. Two different
+	// things need the same list — a provider, which registers each as a redirect
+	// URI, and what bounds where a finished sign-in may land.
 	origins := tenantOrigins(base)
-	// The scheme every origin shares, read from the one that was configured. A
-	// callback URL is compared exactly, so a hardcoded http here would break the
-	// moment somebody ran this behind TLS — which the README tells them to do.
-	scheme := schemeOf(base)
-	live, demo := providers(origins)
+
+	// What this run offers. rig builds the three configured providers from the
+	// environment variables rig.yaml names; the stand-in is this example's own and
+	// appears only when no real credentials were set, so the example works the
+	// moment it is cloned.
+	//
+	// The prop is not a mock: single-use authorization codes, PKCE verified at the
+	// token endpoint, and a consent screen that lets you choose whether it says
+	// the address is verified.
+	live, err := api.ConfiguredProviders(api.OAuthHooks{})
+	if err != nil {
+		return nil, err
+	}
+	var (
+		demo  *idp.Server
+		extra []oauth.Provider
+	)
+	if len(live) == 0 {
+		// It registers the origins it will redirect back to, because a real
+		// provider does, and a stand-in that skipped the check would be teaching
+		// the wrong lesson.
+		demo = idp.New(origins...)
+		extra = []oauth.Provider{demo.Provider()}
+		live = extra
+	}
 	announce(live, origins)
 
 	// Declared before New because the sign-in hook closes over it: finishing a
 	// sign-in means issuing a session, and what issues one is what New returns.
 	// The closure only runs on a request, long after this line.
-	var (
-		front *auth.Auth
-		err   error
-	)
+	var front *auth.Auth
 
-	front, err = auth.New(auth.Config{
-		Pool: pool,
+	// Everything about tenancy and everything about the providers is in rig.yaml:
+	// the host lookup, the per-host callback origin, provisioning, the state
+	// cookie. What is left is the one decision rig will not make for a browser.
+	front, err = api.New(pool, api.Hooks{
+		OAuth: api.OAuthHooks{
+			// The stand-in, when it is in use. A real deployment passes none of
+			// these: the provider is somebody else's server.
+			Extra: extra,
 
-		// The three lines this example exists for.
-		//
-		// A real deployment writes exactly this and never thinks about tenancy
-		// again: every request carries its tenant in the one header no client can
-		// forge and every redirect preserves.
-		Tenant: tenantFromHost(pool),
-
-		OAuth: auth.OAuth{
-			Providers: live,
-			BaseURL:   base,
-
-			// A callback comes back to the host it started at.
-			//
-			// Not a nicety: the state cookie carrying the PKCE verifier is set on
-			// the host that started the sign-in, and a browser will not send it to
-			// a sibling subdomain. A callback that landed on the canonical host
-			// would arrive without it and be refused — so with a tenant per host,
-			// the callback URL is per host too, and every one of them is
-			// registered with the provider.
-			Origin: func(r *http.Request) string { return scheme + "://" + r.Host },
-
-			SigningKey: []byte(cmp.Or(os.Getenv("OAUTH_SIGNING_KEY"),
-				"a-development-signing-key-that-is-long-enough")),
-			// On, so a stranger with a provider account joins the tenant they
-			// signed in at. A business application leaves it off and a provider
-			// sign-in then only works for somebody already invited.
-			AllowProvisioning: true,
-			AllowedReturnTo:   tenantOrigins(base),
-			// Plain HTTP on localhost, so the __Host- cookie a browser would
-			// insist on is unavailable. Never set this anywhere real.
-			Insecure: true,
+			// One origin per tenant, and a tenant can be created this morning — so
+			// the set is not a list in a file. The configured entries are still
+			// there; these are added to them.
+			ReturnTo: origins,
 
 			// How a sign-in ends, which rig will not decide. A cookie and a
 			// redirect, because this is a server-rendered page; the default
@@ -215,14 +224,6 @@ func baseURL() string {
 	return "http://" + acmeSlug + ".localhost:" + cmp.Or(port, "8083")
 }
 
-// schemeOf is http or https, from the origin this run was given.
-func schemeOf(base string) string {
-	if u, err := url.Parse(base); err == nil && u.Scheme != "" {
-		return u.Scheme
-	}
-	return "http"
-}
-
 // tenantOrigins is every address this application answers at: one per tenant.
 //
 // Two different things need the same list — the provider, which registers each as
@@ -246,115 +247,6 @@ func tenantOrigins(base string) []string {
 	other := *u
 	other.Host = sibling
 	return []string{one, strings.TrimRight(other.String(), "/")}
-}
-
-// tenantFromHost is the resolver, and the point of the example.
-//
-// Three lines of lookup around slugFor, which is the whole of rig's tenancy
-// contract: answer which tenant a request is for, or answer that there is none.
-// A request with no tenant is an ordinary answer rather than an error — login and a
-// password reset are allowed to arrive without one, and everything else takes its
-// tenant from the token.
-//
-// A cache would be the obvious next thing: this is one indexed lookup per request
-// that names a tenant, and a slug does not change often. Left out because the
-// example is about where the answer comes from, not about how fast.
-func tenantFromHost(pool *pgxpool.Pool) func(*http.Request) (uuid.UUID, error) {
-	return func(r *http.Request) (uuid.UUID, error) {
-		slug := slugFor(r.Host)
-		if slug == "" {
-			return uuid.Nil, nil
-		}
-
-		var id uuid.UUID
-		err := pool.QueryRow(r.Context(),
-			`SELECT id FROM rig_tenant WHERE lower(slug) = $1 AND deleted_at IS NULL AND is_active`,
-			slug).Scan(&id)
-		switch {
-		case errors.Is(err, pgx.ErrNoRows):
-			// A host nobody is at. Answered as a bad request rather than as an
-			// empty tenant, because a typo in a subdomain should say so instead of
-			// quietly becoming "no tenant" and failing somewhere later.
-			return uuid.Nil, rigerr.BadRequest("no tenant is served at %s", slug)
-		case err != nil:
-			return uuid.Nil, rigerr.Internal(err, "resolve the tenant")
-		}
-		return id, nil
-	}
-}
-
-// slugFor is which tenant a host names: the leftmost label.
-// `acme.localhost:8083` is Acme, and `beta.localhost:8083` is Beta.
-//
-// One function, because two things ask — the tenant resolver rig calls, and the
-// page that names the tenant on screen — and a page disagreeing with the resolver
-// about which tenant a host is would be worse than either answer.
-//
-// DEFAULT_TENANT is the accommodation, and it is worth knowing why it exists.
-// Google and Microsoft register a redirect URI exactly, and neither accepts plain
-// http for anything but `localhost` or `127.0.0.1` — so `acme.localhost:8083`,
-// which is what this example is built around, cannot be registered with either of
-// them. Naming a tenant for the host that has no subdomain is what lets a real
-// sign-in be tried on a laptop: run at `http://localhost:8083` with
-// `DEFAULT_TENANT=acme`, and register that one origin. A deployment on https with a
-// wildcard record needs none of it.
-func slugFor(host string) string {
-	if h, _, found := strings.Cut(host, ":"); found {
-		host = h
-	}
-	// An address is not a name with a subdomain in front of it: the leading label
-	// of 127.0.0.1 is not a tenant.
-	if net.ParseIP(host) == nil {
-		if slug, rest, found := strings.Cut(host, "."); found && rest != "" && slug != "" {
-			return strings.ToLower(slug)
-		}
-	}
-	return strings.ToLower(strings.TrimSpace(os.Getenv("DEFAULT_TENANT")))
-}
-
-// providers is what this run offers, and the stand-in when nothing real is
-// configured.
-//
-// Credentials come from the environment because they are secrets and because they
-// are the reader's, not this repository's. Set a pair and that provider appears;
-// set none and the prop appears instead, so the example works the moment it is
-// cloned. Nothing else changes either way — same routes, same state cookie, same
-// subject matching, same refusal to link an unverified address. A provider is three
-// URLs and a way to read a profile.
-//
-// The second return is the stand-in, and it is nil when a real provider was
-// configured: a prop that kept serving beside Google would be a second way in that
-// nobody registered.
-func providers(origins []string) ([]oauth.Provider, *idp.Server) {
-	var out []oauth.Provider
-
-	// Google. The consent screen and the credentials are in the Google Cloud
-	// console; see the README for which redirect URIs to give it.
-	if id, secret := os.Getenv("GOOGLE_CLIENT_ID"), os.Getenv("GOOGLE_CLIENT_SECRET"); id != "" && secret != "" {
-		out = append(out, oauth.Google(id, secret))
-	}
-
-	// Microsoft. MICROSOFT_TENANT is Microsoft's own idea of a tenant and has
-	// nothing to do with rig's: "common" accepts any account, "organizations"
-	// excludes personal ones, and a directory id restricts sign-in to one
-	// organization. Empty means "common".
-	if id, secret := os.Getenv("MICROSOFT_CLIENT_ID"), os.Getenv("MICROSOFT_CLIENT_SECRET"); id != "" && secret != "" {
-		out = append(out, oauth.Microsoft(id, secret, os.Getenv("MICROSOFT_TENANT")))
-	}
-
-	if id, secret := os.Getenv("GITHUB_CLIENT_ID"), os.Getenv("GITHUB_CLIENT_SECRET"); id != "" && secret != "" {
-		out = append(out, oauth.GitHub(id, secret))
-	}
-
-	if len(out) > 0 {
-		return out, nil
-	}
-
-	// The prop. It registers the origins it will redirect back to, because a real
-	// provider does, and a stand-in that skipped the check would be teaching the
-	// wrong lesson.
-	demo := idp.New(origins...)
-	return []oauth.Provider{demo.Provider()}, demo
 }
 
 // announce prints what a reader has to do with a provider console.
@@ -389,7 +281,7 @@ func announce(live []oauth.Provider, origins []string) {
 // Derived rather than written down: the auth package owns the route, and a README
 // that spelled it out by hand would be wrong the day the base path changed.
 func callbackURL(origin string, p oauth.Provider) string {
-	return origin + auth.DefaultBasePath + "/oauth/" + strings.ToLower(p.Name) + "/callback"
+	return origin + api.BasePath + "/oauth/" + strings.ToLower(p.Name) + "/callback"
 }
 
 // The seed's fixed values, so the README and a test can name them.

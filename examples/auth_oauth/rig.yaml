@@ -24,6 +24,55 @@ api:
   # mean seeding roles nothing reads.
   permissions: none
 
+# The whole of this example's authentication, and the point of it: a tenant per
+# host, and a provider sign-in that survives the redirect.
+#
+# A provider sign-in has to know the tenant *before* the redirect, because that
+# is what the callback joins somebody to — and the callback URL is registered
+# with the provider and fixed, so it carries nothing an application could read on
+# the way back. A header does not survive it. A query parameter does not survive
+# it. A host does.
+auth:
+  enabled: true
+
+  tenant:
+    from: [host]
+    # Google and Microsoft will not register a plain-http redirect URI for
+    # anything but localhost, so `acme.localhost:8083` — which this example is
+    # built around — cannot be given to either. Naming a tenant for the host with
+    # no subdomain is what lets a real sign-in be tried on a laptop: run at
+    # http://localhost:8083 with DEFAULT_TENANT=acme and register that one origin.
+    default_slug_env: DEFAULT_TENANT
+
+  oauth:
+    # The origin a provider redirects back to, and the environment gets the last
+    # word: a test serves on an ephemeral port and has to be able to say so.
+    base_url: http://acme.localhost:8083
+    base_url_env: BASE_URL
+
+    # A callback comes back to the host it started at. The state cookie carrying
+    # the PKCE verifier is set on that host, and a browser will not send it to a
+    # sibling subdomain — so the callback URL is per host, and every one of them
+    # is registered with the provider.
+    origin_from_host: true
+
+    # On, so a stranger with a provider account joins the tenant they signed in
+    # at. A business application leaves it off and a provider sign-in then only
+    # works for somebody already invited.
+    allow_provisioning: true
+
+    # Plain HTTP on localhost, so the __Host- cookie a browser would insist on is
+    # unavailable. Never set this anywhere real.
+    insecure: true
+
+    # Credentials are named, not carried. Set a pair and that provider appears;
+    # set none and the stand-in in services/idp appears instead, which is what
+    # makes this example work the moment it is cloned.
+    providers:
+      - name: google
+      - name: microsoft
+      - name: github
+
 # Convention rules. Each is off, warn, or error.
 validate:
   unmentioned_column: warn
@@ -60,7 +109,10 @@ generators:
       # Where your service layer goes. Written once, then yours.
       stub_dir: services/{table}
 
-  # Routing and handlers.
+  # Routing and handlers — and, from the auth block above, the wiring beside
+  # them: the host lookup, the provider construction, and the state cookie's
+  # settings. One package, so the sign-in endpoint fails the way every other
+  # endpoint does.
   - name: server-go
     out_dir: internal/api
     options:

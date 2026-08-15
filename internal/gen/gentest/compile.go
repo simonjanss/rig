@@ -67,7 +67,9 @@ func MustCompileAll(t *testing.T, pkgs ...Package) {
 		}
 	}
 
-	runtimeDir := runtimeModuleDir(t)
+	// Both local modules are replaced, whether or not this particular set of
+	// artifacts imports them: a replace for a module nothing requires is inert,
+	// and `go mod tidy` sorts out which requirements are real.
 	gomod := fmt.Sprintf(`module rigtest
 
 go 1.25.0
@@ -79,7 +81,9 @@ require (
 )
 
 replace github.com/simonjanss/rig/runtime => %s
-`, runtimeDir)
+
+replace github.com/simonjanss/rig/auth => %s
+`, moduleDir(t, "runtime"), moduleDir(t, "auth"))
 
 	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte(gomod), 0o644); err != nil {
 		t.Fatal(err)
@@ -110,21 +114,21 @@ func runIn(dir string, env []string, name string, args ...string) (string, error
 	return strings.TrimSpace(string(out)), err
 }
 
-// runtimeModuleDir locates the runtime module relative to this source file, so
+// moduleDir locates one of rig's own modules relative to this source file, so
 // the check works wherever the repository is cloned.
-func runtimeModuleDir(t *testing.T) string {
+func moduleDir(t *testing.T, name string) string {
 	t.Helper()
 
 	_, file, _, ok := runtime.Caller(0)
 	if !ok {
-		t.Fatal("cannot locate the runtime module")
+		t.Fatalf("cannot locate the %s module", name)
 	}
 	// .../internal/gen/gentest/compile.go -> repository root
 	root := filepath.Dir(filepath.Dir(filepath.Dir(filepath.Dir(file))))
-	dir := filepath.Join(root, "runtime")
+	dir := filepath.Join(root, name)
 
 	if _, err := os.Stat(filepath.Join(dir, "go.mod")); err != nil {
-		t.Fatalf("no runtime module at %s: %v", dir, err)
+		t.Fatalf("no %s module at %s: %v", name, dir, err)
 	}
 	return dir
 }

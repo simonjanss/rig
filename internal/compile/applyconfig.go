@@ -55,6 +55,11 @@ func ApplyConfig(api ir.API, schema ir.Schema, set *tableconf.Set, opt ConfigOpt
 		Enums:       slices.Clone(api.Enums),
 		Objects:     slices.Clone(api.Objects),
 		Resources:   slices.Clone(api.Resources),
+		// Table configuration has nothing to say about authentication, so it is
+		// carried through untouched. It is named rather than left out because this
+		// copy is field by field, and a field nobody listed is a field silently
+		// dropped.
+		Auth: api.Auth,
 	}
 
 	tableIndex := make(map[string]int, len(outSchema.Tables))
