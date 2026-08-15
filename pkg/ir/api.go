@@ -17,6 +17,17 @@ type API struct {
 	Objects   []Object   `json:"objects"`
 	Resources []Resource `json:"resources"`
 
+	// Auth is the authentication foundation this API is served with, or nil for
+	// a project that has none.
+	//
+	// It is here rather than beside the schema because it is part of the surface:
+	// the endpoints it mounts, the permissions a caller has to hold, and how long
+	// a token a client is holding stays valid are all things a specification and a
+	// client library have to say. A generator reads it instead of asking the
+	// project what was configured, which is what keeps the wiring, the document
+	// and the client from each carrying their own copy of the answer.
+	Auth *Auth `json:"auth,omitempty"`
+
 	// Permissions is every permission this API's endpoints require, computed once
 	// at Freeze from the endpoints themselves.
 	//

@@ -51,7 +51,7 @@ Three sign-ins reach three different branches. The stand-in provider's consent
 screen lets you say what it will claim about you, which is how.
 
 1. **A stranger joins.** At `beta.localhost`, sign in as any new address. An
-   identity, an account in Beta, and a session — `AllowProvisioning` is on here.
+   identity, an account in Beta, and a session — `allow_provisioning` is on here.
    A business application leaves it off, and a provider sign-in then only works
    for somebody already invited.
 2. **An existing account is linked.** At `acme.localhost`, sign in as
@@ -65,19 +65,23 @@ every generated query ANDs in the tenant, and the tenant came from the host.
 
 ## The part worth copying
 
-Three lines of resolver, and one field:
+Six lines of [rig.yaml](rig.yaml), and no Go at all:
 
-```go
-// Which tenant this request is for. The leftmost label of the host.
-Tenant: tenantFromHost(pool),
-
-OAuth: auth.OAuth{
-	// And which origin a callback comes back to. The state cookie is host-only,
-	// so a sign-in that started at beta.localhost has to finish there.
-	Origin: func(r *http.Request) string { return "http://" + r.Host },
-	…
-}
+```yaml
+auth:
+  tenant:
+    # Which tenant a request is for: the leftmost label of the host.
+    from: [host]
+  oauth:
+    # And which origin a callback comes back to. The state cookie is host-only,
+    # so a sign-in that started at beta.localhost has to finish there.
+    origin_from_host: true
 ```
+
+`rig generate` writes both: the slug lookup against the `tenant` table, and the
+per-request origin. rig refuses `origin_from_host` without the host source, since
+deriving an origin per tenant while resolving the tenant some other way is a
+sign-in that lands on the wrong host.
 
 Everything else — the state cookie, PKCE, matching on the provider's subject
 rather than the address, refusing to link an unverified one — is `auth/oauth`, and
@@ -88,7 +92,8 @@ exactly, and few providers accept a wildcard. Every origin `Origin` can return h
 to be registered — which `services/idp` enforces too, because a stand-in that
 skipped it would be teaching the wrong lesson. A deployment with more subdomains
 than a console can hold keeps the callback on one canonical host instead, and has
-`OnSignIn` hand the finished session on to the tenant's own host.
+`OnSignIn` — the one hook this example keeps in Go — hand the finished session on
+to the tenant's own host.
 
 ## Using your own Google or Microsoft credentials
 
@@ -103,6 +108,11 @@ export MICROSOFT_CLIENT_ID=…         # Entra ID → App registrations
 export MICROSOFT_CLIENT_SECRET=…
 export MICROSOFT_TENANT=common       # or organizations, or a directory id
 ```
+
+Those variable names are not conventions this example invented: rig.yaml names
+them per provider, and the defaults are `<PROVIDER>_CLIENT_ID` and
+`<PROVIDER>_CLIENT_SECRET`. Point `client_id_env` somewhere else and the generated
+code reads that instead.
 
 `MICROSOFT_TENANT` is Microsoft's idea of a tenant and has nothing to do with
 rig's: `common` accepts any account, `organizations` excludes personal ones, and a

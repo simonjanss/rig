@@ -18,6 +18,12 @@
 // `auth.expose` in rig.yaml puts any of them back in the generated set for an
 // administration screen. Nothing about them is hidden; they are simply somebody
 // else's code.
+//
+// And the settings are not in this file. The `auth:` block in rig.yaml holds
+// every fixed choice — the lifetimes, the rotation leeway, the password policy,
+// the rate limits, which routes exist — because the reference documentation and
+// the client libraries are generated from that file. What is here is the three
+// functions a file cannot hold.
 package main
 
 import (
@@ -37,7 +43,6 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/simonjanss/rig/auth"
 	"github.com/simonjanss/rig/auth/account"
 	"github.com/simonjanss/rig/auth/apikey"
 	"github.com/simonjanss/rig/auth/authhttp"
@@ -106,55 +111,29 @@ func newAPI(ctx context.Context, pool *pgxpool.Pool) (http.Handler, error) {
 	// interface can show an invitation without a mail server standing by.
 	mail := outbox.New(20)
 
-	// The whole foundation, over the tables `rig setup-project` wrote. What it
-	// assembles — the stores, the session manager, the account service, the API
-	// keys, the rate limiter counted in the database — is all exported and all
-	// separately usable; this is the assembly, which is the same in every
-	// project and therefore not worth writing in any of them.
-	front, err := auth.New(auth.Config{
-		Pool:     pool,
+	// The whole foundation, over the tables `rig setup-project` wrote, wired from
+	// the auth block in rig.yaml.
+	//
+	// What it assembles — the stores, the session manager, the account service,
+	// the API keys, the rate limiter counted in the database — is all exported and
+	// all separately usable; this is the assembly, which is the same in every
+	// project and therefore generated rather than written in any of them.
+	//
+	// Everything with a fixed answer is in the file: the base path, the tenant
+	// sources, the token lifetimes and the rotation leeway, the password policy,
+	// the rate limits, and that registration and tenant creation are both open.
+	// What is left here is the part that is code.
+	front, err := api.New(pool, api.Hooks{
 		Notifier: mail,
-
-		// Which tenant a request is for.
-		//
-		// The default reads X-Tenant-Id, and that is enough for everything except a
-		// provider sign-in: a browser following a link cannot set a header, and the
-		// tenant has to be known *before* the redirect because it is what the
-		// callback joins somebody to.
-		//
-		// A real deployment answers this with the host — acme.example.com — and
-		// never thinks about it again. This example runs one process on localhost,
-		// so it reads the query string as well, which is what the provider buttons
-		// put there.
-		Tenant: func(r *http.Request) (uuid.UUID, error) {
-			if raw := r.URL.Query().Get("tenant"); raw != "" {
-				id, err := uuid.Parse(raw)
-				if err != nil {
-					return uuid.Nil, rigerr.BadRequest("tenant is not a valid identifier")
-				}
-				return id, nil
-			}
-			return auth.TenantFromHeader(r)
-		},
 
 		// The one thing rig asks an application to decide. It derives the
 		// permission keys from the schema and generates the check; who holds them
 		// is this function, which here reads the example's own role tables.
 		Grants: authz.Grants(pool),
 
-		// Anybody may sign themselves up, because this example's answer to "who
-		// may create a tenant" is also anybody. A product with an invite-only
-		// front door leaves this off and the route does not exist.
-		//
-		// Registering creates a person and nothing else: no tenant, no tenant
-		// session, just proof of who they are and a look at the invitations
-		// waiting for them.
-		AllowRegistration: true,
-
-		// The other half of the picker: making a tenant instead of joining one.
-		// rig writes the tenant, the first account and the slug; everything below
-		// is this application's policy.
-		AllowTenantCreation: true,
+		// What a tenant is beyond its row and its first account. rig.yaml says the
+		// endpoint exists; this says what it does. rig writes the tenant, the first
+		// account and the slug; everything below is this application's policy.
 		Tenants: account.TenantOptions{
 			// Who may. This example says anybody signed in, and the hook is here to
 			// show where a rule would go — a domain check is the usual one:
@@ -182,17 +161,10 @@ func newAPI(ctx context.Context, pool *pgxpool.Pool) (http.Handler, error) {
 				authhttp.PermissionManageAPIKeys, authhttp.PermissionOwnAPIKey)),
 		},
 
-		// So an authentication failure looks like every other failure this API
-		// returns. Everything else is a default: /auth for the paths, the
-		// X-Tenant-Id header for the tenant, 10-minute access tokens, 12-hour
-		// sessions, argon2id, and the documented rate limits.
-		OnError: func(w http.ResponseWriter, r *http.Request, err error) {
-			api.DefaultErrorMapper(w, r, api.RequestContext{
-				RequestID: r.Header.Get("X-Request-Id"),
-				Method:    r.Method,
-				Path:      r.URL.Path,
-			}, err)
-		},
+		// OnError is left out on purpose: the wiring is generated into this API's
+		// own package, so an authentication failure goes through the same error
+		// mapper as everything else and a 401 from the sign-in endpoint is shaped
+		// like a 401 from anywhere else.
 	})
 	if err != nil {
 		return nil, err
@@ -256,11 +228,13 @@ func newAPI(ctx context.Context, pool *pgxpool.Pool) (http.Handler, error) {
 // accountService builds the account service on its own, for the work that
 // happens outside a request: the seed, and a test that needs to set a password.
 //
-// Setting one directly is deliberately not a shortcut around anything — it is
-// the same argon2id hashing, the same length policy and the same auth_log entry
-// the endpoints go through.
+// It goes through the generated wiring rather than assembling a bare one, so a
+// password set here is held to the policy in rig.yaml and not to whatever the
+// module's default happens to be. Setting one directly is deliberately not a
+// shortcut around anything — it is the same argon2id hashing, the same length
+// policy and the same auth_log entry the endpoints go through.
 func accountService(pool *pgxpool.Pool) (*account.Service, error) {
-	front, err := auth.New(auth.Config{Pool: pool})
+	front, err := api.New(pool, api.Hooks{Grants: authz.Grants(pool)})
 	if err != nil {
 		return nil, err
 	}
@@ -480,7 +454,7 @@ func seedIntegration(ctx context.Context, pool *pgxpool.Pool, tenantID, byAccoun
 		return nil
 	}
 
-	front, err := auth.New(auth.Config{Pool: pool})
+	front, err := api.New(pool, api.Hooks{Grants: authz.Grants(pool)})
 	if err != nil {
 		return err
 	}

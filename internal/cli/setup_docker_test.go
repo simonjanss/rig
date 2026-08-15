@@ -64,8 +64,15 @@ func TestSetupProject(t *testing.T) {
 		// Migrations and nothing else. The tables belong to the rig/auth module,
 		// so a table configuration for one would ask rig to generate a model and
 		// a repository the project never calls.
-		if strings.Contains(stderr, ".yaml") {
-			t.Errorf("setup-project should write no table configuration:\n%s", stderr)
+		//
+		// The check is over what was written rather than over the whole output,
+		// which also names rig.yaml — that is where the block to turn on goes, and
+		// setup-project tells you about it without touching it.
+		for _, line := range strings.Split(stderr, "\n") {
+			line = strings.TrimSpace(line)
+			if strings.HasPrefix(line, "created") && strings.HasSuffix(line, ".yaml") {
+				t.Errorf("setup-project should write no table configuration:\n%s", stderr)
+			}
 		}
 	})
 

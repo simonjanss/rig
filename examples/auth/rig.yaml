@@ -9,6 +9,29 @@ api:
   version: v1
   base_path: /api/v1
 
+# The authentication foundation. Everything with a fixed answer is here rather
+# than in main.go, because the documentation and the client libraries are
+# generated from this file: a token lifetime written in a Go literal is a token
+# lifetime nothing else can read.
+#
+# What is left in main.go is the three things a file cannot hold — who holds a
+# permission, where mail goes, what a new tenant needs — and nothing else.
+auth:
+  enabled: true
+
+  # Anybody may sign themselves up, because this example's answer to "who may
+  # create a tenant" is also anybody. A product with an invite-only front door
+  # leaves both of these off and the routes do not exist.
+  allow_registration: true
+  allow_tenant_creation: true
+
+  # A browser following a provider link cannot set a header, and the tenant has
+  # to be known before the redirect, so this example reads the query string
+  # first and the header after. A real deployment answers with the host —
+  # acme.example.com — which is `from: [host]`; see examples/auth_oauth.
+  tenant:
+    from: [query, header]
+
 # A throwaway Postgres, created on demand. The port is explicit so this example
 # can run alongside the others.
 database:
@@ -56,7 +79,11 @@ generators:
       # Where your service layer goes. Written once, then yours.
       stub_dir: services/{table}
 
-  # Routing and handlers.
+  # Routing and handlers — and, because the auth block above is enabled, the
+  # authentication wiring beside them. It goes in this package rather than one
+  # of its own so a 401 from the sign-in endpoint is shaped by the same error
+  # mapper as a 401 from anywhere else. A project with no auth block gets no
+  # such file, and so never depends on rig/auth: see examples/todo.
   - name: server-go
     out_dir: internal/api
     options:

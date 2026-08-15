@@ -91,12 +91,18 @@ func newSetupProjectCmd(e *env) *cobra.Command {
 				return nil
 			}
 
-			fmt.Fprintf(e.errOut, "\nNext:\n"+
+			fmt.Fprintf(e.errOut, "\nNext, turn it on in rig.yaml:\n"+
+				"  auth:\n"+
+				"    enabled: true\n\n"+
+				"That block is where the lifetimes, the rate limits, the password policy and\n"+
+				"the sign-in providers live — `rig schema project` lists every key. The\n"+
+				"server-go generator writes the wiring into the API package it already\n"+
+				"generates, so there is no second generator to configure. Then:\n\n"+
 				"  rig db up        apply the migrations\n"+
 				"  rig validate     check it\n"+
-				"  rig generate     write the code for your own tables\n\n"+
-				"Then wire it up, which is one call:\n"+
-				"  front, err := auth.New(auth.Config{Pool: pool})\n")
+				"  rig generate     write your own tables, and the auth wiring\n\n"+
+				"and wiring it up is one call:\n"+
+				"  front, err := api.New(pool, api.Hooks{Grants: myGrants(pool)})\n")
 
 			if len(expose) > 0 {
 				fmt.Fprintf(e.errOut, "\nAdd this to rig.yaml, or the configuration "+

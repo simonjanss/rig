@@ -54,6 +54,7 @@ checked by the generated code. Do not write it again.
 
 | Pattern | Who owns it |
 |---|---|
+| `rig.yaml` | you — the project's whole configuration |
 | `migrations/*.sql` | you |
 | `services/<table>/<table>.yaml` | you, via `rig sync` |
 | `main.go` | you |

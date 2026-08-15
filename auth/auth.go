@@ -102,6 +102,21 @@ type Config struct {
 	RefreshTTL  time.Duration
 	RememberTTL time.Duration
 
+	// RotationLeeway is how long a refresh token stays usable after it has been
+	// exchanged. Zero is [session.DefaultRotationLeeway], thirty seconds.
+	//
+	// Without one, a dropped response is a logout: the client never received the
+	// new pair, retries with the old one, and has its whole family revoked for a
+	// network blip. See [session.Config.RotationLeeway].
+	RotationLeeway time.Duration
+
+	// SessionCacheTTL keeps verified access tokens in memory. Zero, the default,
+	// reads the row on every request, which is what makes revocation immediate.
+	//
+	// See [session.Config.CacheTTL], including why anything above a few seconds
+	// is a revoked session that keeps working.
+	SessionCacheTTL time.Duration
+
 	// Policy is the password policy. The zero value is a minimum length of 12
 	// and no composition rules, which is current advice.
 	Policy password.Policy
@@ -217,10 +232,18 @@ type OAuth struct {
 	// register.
 	Origin func(r *http.Request) string
 
-	// SigningKey signs the state parameter. A random one is generated when this
-	// is empty, which is fine for one process and wrong for several: a callback
-	// may arrive at a different replica than the one that started the flow.
+	// SigningKey signs the state parameter. Required, and at least 32 bytes —
+	// [oauth.New] refuses anything shorter.
+	//
+	// It has to be the same key in every replica: a callback may arrive at a
+	// different one than the one that started the flow, and a key invented per
+	// process is a sign-in that fails whenever a load balancer is doing its job.
 	SigningKey []byte
+
+	// StateTTL bounds how long a sign-in round trip may take. Zero is
+	// [oauth.DefaultStateTTL], ten minutes: generous for a redirect, short
+	// enough that a stolen state parameter is useless.
+	StateTTL time.Duration
 
 	// AllowProvisioning creates an account the first time somebody signs in
 	// with a provider. Without it a provider sign-in only works for an address
@@ -295,13 +318,15 @@ func New(cfg Config) (*Auth, error) {
 	}
 
 	sessions, err := session.New(session.Config{
-		Store:       stores.Sessions,
-		Log:         stores.Log,
-		AccessTTL:   cfg.AccessTTL,
-		RefreshTTL:  cfg.RefreshTTL,
-		RememberTTL: cfg.RememberTTL,
-		OnRotate:    cfg.OnSessionRefresh,
-		Now:         cfg.Now,
+		Store:          stores.Sessions,
+		Log:            stores.Log,
+		AccessTTL:      cfg.AccessTTL,
+		RefreshTTL:     cfg.RefreshTTL,
+		RememberTTL:    cfg.RememberTTL,
+		RotationLeeway: cfg.RotationLeeway,
+		CacheTTL:       cfg.SessionCacheTTL,
+		OnRotate:       cfg.OnSessionRefresh,
+		Now:            cfg.Now,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("auth: sessions: %w", err)
@@ -405,6 +430,7 @@ func New(cfg Config) (*Auth, error) {
 			// wildcard beside a literal, which is a surprise nobody asked for.
 			BasePath:          base + "/oauth",
 			SigningKey:        cfg.OAuth.SigningKey,
+			StateTTL:          cfg.OAuth.StateTTL,
 			Tenant:            tenant,
 			AllowedReturnTo:   cfg.OAuth.AllowedReturnTo,
 			AllowProvisioning: cfg.OAuth.AllowProvisioning,

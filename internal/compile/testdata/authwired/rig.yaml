@@ -1,0 +1,59 @@
+project:
+  name: authwired
+  module: example.com/authwired
+
+# Everything the auth block can say, so the compiled document carries every field
+# and the generator's golden output exercises every branch. A real project sets a
+# handful of these and inherits the rest.
+auth:
+  enabled: true
+  base_path: /auth
+
+  # A tenant per subdomain, with the application's own resolver behind it. The
+  # host is the only source that survives a provider redirect.
+  tenant:
+    from: [host, header, hook]
+    header: X-Tenant-Id
+    default_slug_env: DEFAULT_TENANT
+
+  session:
+    access_ttl: 5m
+    refresh_ttl: 8h
+    remember_ttl: 14d
+    rotation_leeway: 45s
+    identity_ttl: 20m
+    cache_ttl: 2s
+
+  password:
+    min_length: 14
+    max_length: 512
+    breach_check: true
+
+  allow_registration: true
+  allow_tenant_creation: true
+  require_verified_email: true
+
+  limits:
+    login_by_email: {max: 3, window: 10m}
+    login_by_ip: {max: 40, window: 15m}
+    password_reset: {max: 2, window: 1h}
+    refresh: {max: 30, window: 1m}
+
+  trusted_proxies: [10.0.0.0/8, 192.168.0.0/16]
+
+  oauth:
+    base_url: https://app.example.com
+    base_url_env: BASE_URL
+    origin_from_host: true
+    signing_key_env: OAUTH_SIGNING_KEY
+    state_ttl: 8m
+    allow_provisioning: true
+    allowed_return_to: [https://app.example.com, https://beta.example.com]
+    providers:
+      - name: google
+        required: true
+      - name: microsoft
+        tenant_env: WORK_DIRECTORY
+      - name: github
+        client_id_env: GH_APP_ID
+        client_secret_env: GH_APP_SECRET
