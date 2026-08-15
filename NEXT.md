@@ -24,6 +24,10 @@ Next:
 - **M5.7** — the API revision: clients say what they were built against, so the
   logs can say how old the oldest one still calling is. (Was M5.6; the number
   moved when the model layer's second round took it.)
+- **M5.8** — files: a `rig_file` table, a storage adapter, and an upload and a
+  download endpoint per file column, nested under the row that owns them. Before
+  M6 because it adds two error codes, and the code set is baked into an OpenAPI
+  document and a TypeScript union the moment those ship.
 
 ### Modules
 
@@ -721,6 +725,548 @@ from one that sends an unparseable one? They are different failures — an old
 SDK that predates the header versus something sending nonsense — and telling
 them apart costs one more field on `RequestContext`. I lean yes, one field,
 `ClientRevisionInvalid bool`.
+
+---
+
+## M5.8 — files
+
+**Goal.** Uploads and downloads that are tenant-scoped, permissioned per field,
+and reachable from a synced row — without a polymorphic attachment table, and
+without every project rewriting the same four hundred lines of multipart handling
+badly.
+
+Nothing about files exists today, and it is not a rejected non-goal either: the
+plan never contemplated it. What exists is a generated HTTP layer that cannot do
+it. `decodeBody` is JSON only, refuses unknown fields, and caps the body at a
+megabyte; `writeJSON` sets `application/json` and the status before anything
+reaches the wire. So an application that needs an avatar hand-writes the table,
+the tenancy, the storage and the streaming — which is the exact class of work rig
+exists to remove.
+
+### Why this comes before M6
+
+Not because `openapi` would document the endpoints — it would, but a
+hand-written module's routes never reach the IR, which is already true of every
+route `auth` mounts.
+
+The reason is `rigerr.Code`. The set is closed on purpose, and `compile`'s builtin
+`ErrorCode` enum mirrors it into every model, every schema M6 renders, and the
+union type M7 hands a front end. There is no 413 and no 415, so an upload that is
+too large or of the wrong type can only answer 400. Adding `TooLarge` and
+`UnsupportedMediaType` is golden churn today and a breaking change for every
+generated client the day after M7 ships. **Land the two codes first and alone**,
+so that diff is a diff somebody can read.
+
+### The column is the declaration
+
+A file attaches to one of your tables through a foreign key, and the column's name
+carries the role:
+
+```sql
+profile_image_file_id uuid references rig_file (id)
+```
+
+`<role>_file_id`, and everything else follows from it: the path segment
+`profile-image-file`, the endpoint names, the permission keys, the Go field. This
+is the same kind of fact as `deleted_at` meaning soft-deletable. The migration says
+what the thing is and the table configuration never gets a key that could disagree
+with it.
+
+Two things in the compiler have to move for that to work.
+
+**The foreign key naming rule has to exempt it.** `checkColumnConventions` wants
+`<target>_id`, and the target is `rig_file`, so today the only accepted names are
+`rig_file_id` and `profile_image_rig_file_id`. The second is horrible and the first
+allows one file per table. This is the third exemption, after audit actor columns
+and self-references, and it earns its place for the same reason they do: there is
+only one table the key could point at, so naming the role says more than naming the
+target.
+
+**Recognition has to read `Table.ForeignKeys`, not `Column.ForeignKey`.** The
+tenant-safe schema is `UNIQUE (tenant_id, id)` on `rig_file` and a composite key
+`(tenant_id, profile_image_file_id)` referencing it, which turns attaching another
+tenant's file into a constraint violation rather than something a hook has to
+remember — and generated `Validate` would never catch it, because it checks null,
+length and enum membership, not provenance. But `Column.ForeignKey` is denormalized
+for single-column keys only; composite constraints live on the table. Read the
+convenient field and rig fails to recognise precisely the shape it should be
+recommending.
+
+There is a third, quieter problem: `rig_file` is a managed table, so it is in
+`IgnoreTables` and `Normalize` drops it, which means there is no resource for a
+generator to name. Inject a builtin `File` object the way `Error` and `Pagination`
+are injected. That is a model type, an OpenAPI schema and a TypeScript type for
+free, without projecting a table nothing generates code for.
+
+### Two endpoints, under the row that owns them
+
+`Expand` synthesizes a set per file column, beside the CRUD it already synthesizes:
+
+```
+POST   /api/v1/profiles/{profileId}/profile-image-file
+GET    /api/v1/profiles/{profileId}/profile-image-file/{fileId}/{filename}
+DELETE /api/v1/profiles/{profileId}/profile-image-file
+```
+
+The segment is the resource's own `PathSegment`, plural, so these sit beside
+`/api/v1/profiles/{id}` instead of inventing a second shape for the same resource.
+
+**The nesting is the whole design.** It forces the handler to resolve the owning
+row through the generated repository before it touches a byte, and every generated
+read is tenant-scoped in SQL with no opt-out and narrowed further by
+`access: { scope: own }`. So you cannot upload to a profile you cannot see, you
+cannot download an image belonging to another tenant's profile, and an owner-scoped
+table's attachments are exactly as invisible as its rows. None of that is a new
+mechanism — it is the mechanism rig already has, reached by putting the file behind
+its owner. A flat `/api/v1/files/{id}` cannot do any of it without a second
+authorization model sitting beside the first.
+
+Permissions derive per field: `profile.profile_image_file.read` and `.write`, so
+"may edit a profile" and "may replace its picture" are separable grants. The
+catalogue grows by two keys per file column, and that is the feature rather than
+the cost.
+
+**`profile.write` does not imply `profile.profile_image_file.write`.** The tempting
+alternative makes the common case a single grant, and it means a role quietly gains
+the ability to replace an image the day somebody adds a file column to a table it
+could already edit. A permission that is implied is a permission nobody audits. The
+price is honest and should be said out loud: two more rows per file column in every
+grant table, and a role that may edit a profile which cannot touch its picture until
+someone says so.
+
+The filename in the download path is for the browser's save dialog and for cache
+busting. It is not the lookup — the file id is. Compare it against the stored name
+and answer 404 on a mismatch, and never let it near the storage key.
+
+### A gallery is a table
+
+A column holds one file, and most attachments are one file: a picture, a logo, a
+signed contract, an import. A gallery or an attachment list is many, and the wrong
+instinct here is to invent a second mechanism for it — an array column, a
+`files: { many: true }` key, a polymorphic attachment table with a `owner_type`
+discriminator. rig already has the answer, and it is the same answer it gives for
+every other one-to-many: **write the table.**
+
+```sql
+create table profile_attachment (
+    id                  uuid primary key default gen_random_uuid(),
+    tenant_id           uuid not null references rig_tenant (id),
+    profile_id          uuid not null references profile (id),
+    attachment_file_id  uuid not null,
+    caption             text,
+    position            integer not null default 0,
+    -- audit and soft-delete columns as usual
+    foreign key (tenant_id, attachment_file_id) references rig_file (tenant_id, id)
+);
+```
+
+That is an ordinary rig table and it gets everything an ordinary rig table gets. It
+is a resource at `/api/v1/profile-attachments`, filterable by `profileId` through
+the relation filtering that already exists, ordered by `position`, soft-deletable,
+snapshotted if you want it, and synced by Electric. And because the file column
+convention applies to *any* table rather than only to top-level ones, the row gets
+its own file endpoints for free:
+
+```
+POST /api/v1/profile-attachments/{id}/attachment-file
+GET  /api/v1/profile-attachments/{id}/attachment-file/{fileId}/{filename}
+```
+
+So the gallery is a list query, adding to it is a create, removing from it is a
+delete, reordering it is an update to `position`, and replacing one image is an
+upload to that row. Every one of those is a thing rig already generates. Captions,
+alt text, an uploader, a category — all just columns, which is exactly what a
+`many: true` key could never have given you.
+
+**One thing has to be added to make it work, though.** As described so far, adding a
+gallery item is two requests: create the row, then upload the bytes. That is bad in
+two specific ways. The file column can never be `not null`, because the row has to
+exist before the upload has anywhere to go. And a client that makes the first
+request and not the second leaves a caption with no picture — a junk row in a table
+rig has no business sweeping, because it is your table and rig cannot know the row
+is meaningless.
+
+So **the create endpoint of a table with a file column also accepts
+`multipart/form-data`**: a part named `json` carrying the row exactly as the JSON
+form would, and one part per file column named after the field.
+
+```
+POST /api/v1/profile-attachments
+Content-Type: multipart/form-data; boundary=…
+
+--…
+Content-Disposition: form-data; name="json"
+Content-Type: application/json
+
+{"profileId":"…","caption":"On the summit","position":3}
+--…
+Content-Disposition: form-data; name="attachmentFile"; filename="summit.jpg"
+Content-Type: image/jpeg
+
+…bytes…
+```
+
+One request, the row and its file committed together, and `not null` becomes
+expressible. The JSON form stays exactly as it is, for the case where the file is
+optional or its id is already known — so `ir.EndpointRequest.ContentType` has to
+become a list rather than a single string, because an endpoint can now honestly
+accept two. It is written by `Expand` and read by nobody today, so widening it costs
+one field and no behaviour.
+
+This is create only. Replacing a file on an existing row is what the nested upload
+endpoint is for, and an update that could also carry bytes would mean two ways to do
+the same thing with different transactional shapes.
+
+The same mechanism gives you sign-up-with-a-picture in one request, which the
+single-column form otherwise could not: `POST /api/v1/profiles` as multipart, with
+`profileImageFile` as a part.
+
+### You cannot reference a row you cannot read
+
+Writing the gallery down exposes a hole, and it is not a file hole.
+
+`POST /api/v1/profiles/{id}/profile-image-file` cannot be aimed at a profile you
+cannot see, because the handler resolves that profile through the generated
+repository first. `POST /api/v1/profile-attachments` is an ordinary create, gated by
+`profile_attachment.write`, and the `profileId` in its body is just a column value.
+The composite key stops it naming another tenant's profile. Nothing stops it naming
+*any* profile inside the tenant — including one an `access: { scope: own }` rule
+makes invisible to the caller. Attach a picture to a stranger's profile, then read it
+back through your own attachment row.
+
+**This is true of every child table rig generates today.** Files did not cause it;
+files made it visible, by putting a form that does the check right next to a form
+that does not. The answer is not to special-case tables with file columns, which
+would make one kind of table behave unlike every other one for reasons nobody could
+infer from the schema. The answer is to close it everywhere:
+
+> A generated write may not reference a row the caller could not have read.
+
+Concretely: every foreign key to an exposed resource, on create and on update, is
+checked before the write lands. Not a permission check — a *visibility* check, using
+the same predicates the target's own reads are built from.
+
+**It belongs in the repository**, beside `ownerFilter`, whose doc comment already
+makes the argument: it sits with the tenant filter rather than being layered on in
+the service "because this is the floor: a hook reaching for the repository, a custom
+endpoint, and the generated handler all pass through here, and a narrowing that only
+the generated read path applied would be a narrowing a custom endpoint silently
+drops." A reference check the service performs is a reference check a custom endpoint
+forgets. This is the same argument and it lands in the same place — next to the
+normalize and validate the repository already refuses to let a service skip.
+
+The predicate is one that already exists. `filterScope` renders tenancy, the live
+predicate and the relation joins; `Storage.Owner` is the column an owner-scoped read
+narrows by. So the check is a `SELECT 1 FROM profile WHERE id = $1` with that scope
+appended, inside the transaction that is open anyway, on a primary key. One indexed
+lookup per foreign key per write.
+
+**The failure is a field error, not a 403.** `FieldCode` already has `NotFound`, so
+the response is a 422 naming `profileId` — the same shape as any other bad input, and
+deliberately indistinguishable from a `profileId` that names nothing at all. A
+distinct "you may not reference that" would confirm the row exists, which is exactly
+what an owner-scoped table is trying not to say.
+
+Two boundaries worth stating plainly, because they are where somebody will expect
+more than this gives:
+
+- **Only foreign keys to exposed resources.** `rig_file`, `rig_account`, the audit
+  actor columns and anything else unexposed have no repository and no reader to
+  borrow a predicate from. `rig_file` is covered by the composite tenant key instead,
+  which is why that key is not optional.
+- **Only what the schema says.** Tenancy, owner scope, soft delete. It does not run
+  the target's `Read.Narrow` hooks, because running one table's application hooks
+  inside another table's write transaction is a re-entrancy problem nobody wants to
+  debug at two in the morning. Application policy stays in `Create.Before`, and the
+  docs should draw that line rather than implying the invariant covers everything.
+
+It also does not answer "may I add to a gallery I can only read". That is policy — a
+profile you can see is not necessarily a profile you may attach to — and it stays a
+hook. What the invariant guarantees is narrower and worth having on its own: no
+generated write can point at a row the caller was never allowed to know about.
+
+The happy consequence is that nested collection routes stop being a security question
+and become a question about URLs. `GET /api/v1/profiles/{id}/attachments` would read
+nicely and rig has no nested resources at all today, so it is a milestone of its own,
+and now it is one that can wait.
+
+### The URL is a column
+
+`rig_file` carries `url`, written at upload time by the handler that knows the
+resource, the row, the field, the file and the name. Electric syncs the row, the
+client reads `url` off it and renders it, and nothing had to make a request to
+discover where the bytes were.
+
+Two costs, both worth paying and both worth writing down.
+
+It is denormalized routing: rename a `path_segment` and every stored URL is stale,
+so that rename is a backfill migration. And it is not a capability — the URL is
+stable and unsigned, so possessing it grants nothing and the endpoint behind it
+still authorizes. That is deliberate, and it is the only reason syncing the URL is
+safe.
+
+> The storage key must never be in the shape. Same class of mistake as syncing a
+> password hash, which `runtime/electric` already warns about. Narrow
+> `Shape.Columns` to id, url, name, content type and size.
+
+It also means **downloads always flow through rig**. A presigned S3 URL would
+bypass the endpoint, and the endpoint is where the permission check lives, so
+`Signer` is an upload-only seam. The honest cost is bandwidth through the
+application, and a CDN that cannot sit in front without giving up per-endpoint
+permissions.
+
+### Which is why the download route takes a cookie
+
+A URL that is stable, unsigned and sitting in a synced row exists to be used
+directly — `<img src={file.url}>`, an `<a download>`, a `background-image`. None of
+those attach an `Authorization` header, and a bearer token is the only credential
+rig's auth understands. So the feature would arrive complete and immediately
+unusable for the case that motivated it.
+
+The alternatives are worse. Fetching the bytes with a token and handing the element
+an object URL works, but it means every image in an application is imperative code
+with a lifecycle, and it throws away the browser's cache. A short-lived token
+appended at render time cannot be the stored value, which is the same as not storing
+a URL at all.
+
+So: **`files.Config` gains an opt-in that accepts the session cookie on file GET
+routes.** `SameSite=Lax`, `HttpOnly`, `Secure`, and scoped to the download route
+only — not the upload, not the delete, not anything else rig serves. Claims resolve
+the same way afterwards; this changes where the token is read from, not what it
+means.
+
+> The reason it is GET-only is CSRF, and the reason it is opt-in is that an
+> application which never renders a file in a browser should not be carrying a
+> cookie path at all. Widening it past GET reintroduces exactly the problem the
+> bearer header exists to avoid, so the doc comment should say so in the place
+> somebody would go to widen it.
+
+### Where the bytes live
+
+`blob.Store` — `Put`, `Get`, `Stat`, `Delete` over `io.Reader` and
+`io.ReadCloser` — with `Signer` as a *separate* optional interface, so a backend
+that cannot mint URLs simply does not have the method rather than having one that
+returns an error.
+
+Two implementations: `blob.Memory`, which is for tests and `go run` and is not
+durable, and S3. The S3 SDK cannot go in `runtime` — that module depends on
+`google/uuid` and `pgx` and nothing else, and every generated application imports
+it — so the interface and `Memory` live in a new `files` module and the S3 adapter
+is a nested module beside it with its own `go.mod`. A disk implementation falls out
+of the same interface in an afternoon and is deliberately not shipped; memory and
+S3 are the two that answer "how do I test this" and "how do I run this".
+
+### `rig_file`
+
+Its own scaffold part, one migration, `rig_`-prefixed like everything else rig
+creates. Metadata only: id, tenant, storage key, url, file name, sniffed content
+type, declared content type, size, checksum, `uploaded_at`, the audit columns,
+`deleted_at`, and `UNIQUE (tenant_id, id)` so a referencing table can put the tenant
+inside its foreign key. No generated CRUD, for the reason the foundation already
+gives: a client that can POST a row with an arbitrary key and no bytes has found a
+way around the rules. Under this design there is no flat endpoint to generate
+anyway.
+
+**It is exposed read-only, though, because otherwise it cannot sync.** Validation
+refuses a live-sync endpoint on an unexposed resource — correctly, since an
+unexposed table that declares an endpoint has said two contradictory things — and
+`rig_file` is the row the URL lives on, so a client that cannot sync it cannot use
+the column that exists for it. So `rig_file` gets a real table configuration with
+`operations: [read]` and its columns narrowed to id, url, file name, content type
+and size. The storage key, the checksum and the tenant never leave the server, and
+there is no write path to find.
+
+The alternative was denormalizing the url onto every table that has a file column,
+which puts a second copy of the same string in every profile, every document and
+every message, and makes a rename a backfill across N tables instead of one.
+
+**The row and the bytes cannot be written together, so pick which leads and make
+the other reapable.** Insert with `uploaded_at NULL` and commit that alone, stream
+to the store, then — **in one transaction** — set size, checksum, url and
+`uploaded_at`, and write the owner: the column on an existing row, or the whole row
+when the create carried the bytes. A file row with no bytes is invisible, because
+every read filters `uploaded_at IS NOT NULL`, and reapable with one query. Bytes
+with no row need a bucket scan to find. Never the other way round. This is also the
+answer to where the checksum comes from: you cannot know it before `Put` returns.
+
+> The single transaction is what keeps the sweeper's two rules sufficient. Finalize
+> the file first and write the owner second and a crash between them leaves a file
+> that is uploaded and referenced by nothing — which neither rule catches, and which
+> would force the unreferenced-file reaper rejected below. Commit them together and
+> the only failure state is a pending row, which rule one already sweeps.
+
+**A file is immutable, and is never deleted because the thing referencing it
+changed.** A table with snapshots copies the whole row on every update, so after
+three picture changes the first file is referenced by three version rows. Deleting
+the old one on replace corrupts history. That leaves sweeping, with two rules and
+no third: abandoned uploads, and trash past the restore window. **No unreferenced
+file reaper** — finding those means enumerating every foreign key pointing at
+`rig_file`, and the failure mode of getting it wrong is deleting somebody's data.
+The bytes have to outlive the window too, or a `Restore` inside it succeeds and
+returns a row pointing at nothing.
+
+The sweeper is a `serve.Config.Tasks` entry, so it is a subcommand in a cron job
+rather than a goroutine racing itself in every replica. And the restore window lives
+in `files.Config` rather than a table configuration, because `rig_file` does not have
+one — an asymmetry with `restore_window_days` that is worth knowing about before
+somebody goes looking for the key.
+
+### What the generated server has to grow
+
+These endpoints are rig's own, like Create and Restore, which means
+`ir.EndpointRequest.ContentType` and `ir.EndpointResponse.ContentType` finally get
+read by something. They have been in the IR since M0, written as
+`application/json` by `Expand` and consumed by nobody. Now `Expand` writes
+`multipart/form-data` and `application/octet-stream`, and `server-go` grows three
+handler shapes: a multipart upload, a streaming download, and a create that
+dispatches on the request's content type between the JSON body it already decodes
+and a multipart form carrying the same JSON in one part.
+
+That last one is the only place a *pre-existing* endpoint changes, and it changes
+additively: a create with no `Content-Type: multipart/form-data` behaves exactly as
+it does today, byte for byte. Worth stating, because a generated create handler is
+the single most-exercised piece of code rig emits and this milestone should not be
+able to break it.
+
+Five things there have an obvious wrong answer:
+
+- `http.MaxBytesReader`, not `io.LimitReader`. The generated `decodeBody` truncates;
+  for JSON that surfaces as a syntax error, for bytes it is silent data loss.
+- `r.MultipartReader()`, not `r.ParseMultipartForm`, which spills a second copy of
+  every upload into `os.TempDir` inside a container with a small ephemeral disk.
+- Sniff the content type with `http.DetectContentType` and keep the client's claim
+  beside it; `Content-Disposition: attachment` unless the sniffed type is on a short
+  inline allowlist; `X-Content-Type-Options: nosniff`; RFC 5987 for a non-ASCII
+  name; and derive the storage key from the file's uuid, never from the supplied
+  one. `evil.html` uploaded as `text/html` and served from the API origin is stored
+  XSS, and it matters more here than usual because the URL is in a synced row and
+  will end up in an `<img>` or an `<a>` without anybody thinking about it.
+- Per-request deadlines through `http.NewResponseController`, not a new
+  `serve.Config` field. `ReadTimeout` and `WriteTimeout` are set once on the one
+  `http.Server`, so raising them for a 200 MB upload weakens every other route.
+  **`serve.Config` needs no new field** — worth saying, because `UploadTimeout` is
+  the tempting wrong answer.
+- `http.ServeContent` over a `blob.Store` reader that can seek, so the download route
+  answers conditional requests and ranges rather than only ever streaming the whole
+  thing. Without it a `<video>` cannot seek and a resumed download starts over, and
+  both are the kind of thing that gets discovered in production rather than in a
+  test. It is also why `Store` has `Stat` — size and modification time are what
+  `ServeContent` needs before it will do any of this.
+
+Uploads route through the service like everything else: `ProfileService` gains
+`UploadProfileImageFile` and `DownloadProfileImageFile`, `DefaultProfileService`
+implements both, and `ProfileHooks` gains a file lifecycle so an application can
+refuse a content type, cap a size, or start a derivative in `AfterCommit`. Nothing
+about files should be a reason to abandon the generated service and hand-write a
+handler.
+
+Rate limiting mostly falls out: `throttle.Postgres` can point at `rig_file` as its
+own log, and `DefaultErrorMapper` already turns a `throttle.Refusal` into the right
+`Retry-After`. What does not fall out is a byte quota — `throttle` counts events,
+and returning megabytes from something whose documentation says events is a lie
+inside an interface. Ship a per-account upload count and a hard per-file byte cap,
+and say out loud that rig does not do storage quotas.
+
+### What rig does not do here
+
+`bytea` stays supported and gains nothing. It works today — the type mapping is
+already there — and it is genuinely the right answer under a few tens of kilobytes
+for something always read with its row: a signature, an icon. It is wrong at size
+for concrete reasons: the repository selects every readable column, so listing fifty
+rows drags fifty payloads through the pool; every update copies the bytes into a
+snapshot; the JSON encoder base64s them, so there is no streaming, no range and no
+`ETag`; and the megabyte cap applies regardless. That is a scope, not a rejection.
+
+Also not here, each ruled out by something above rather than by taste: a flat files
+resource, presigned downloads, a CDN in front, image processing, virus scanning, and
+storage quotas. File handling is where products diverge hardest, and a framework
+that picks derivatives and retention policy for you is wrong for almost everybody.
+The metadata table and its tenancy is the part that is the same everywhere, and the
+part every project gets subtly wrong. That is the part rig takes.
+
+Binary bodies on *custom* endpoints stay out too. M5.8 reads `ContentType` for the
+endpoints rig synthesizes; it does not let a table's configuration declare one,
+because that means the service method stops receiving a decoded body in the general
+case — `Request[P, Q, B]` carrying an `io.Reader`, `writeJSON` becoming a branch, and
+a typed 422 with no fields to attach to. That is a coherent milestone of its own, and
+files is not its first consumer.
+
+> One note for M6: it must not claim `application/json` for an endpoint whose IR says
+> otherwise. Today it would, because every endpoint says JSON.
+
+### Verification
+
+The fast suite covers `blob.Memory` round-tripping, a key derived from the uuid so
+`../../etc/passwd` as a filename cannot escape, idempotent `Delete`, and range reads
+at the boundaries; `httptest` handlers proving the sniffed type beats the declared
+one, that `attachment` and `nosniff` are always set, that `MaxBytesReader` refuses
+rather than truncates, that multipart never spills to `os.TempDir`, and that a
+mismatched filename segment does not resolve; and `internal/compile` goldens for
+recognition through `Table.ForeignKeys`, the naming exemption, the builtin `File`
+object, the derived path segment, the two permission keys and the synthesized
+endpoints.
+
+The create handler needs its own row of tests, because it is the one existing thing
+this milestone touches: a JSON create on a table with a file column still behaves
+exactly as it did, a multipart create binds the `json` part through the same
+normalize-and-validate path so a 422 comes back with the same field errors, a
+multipart create missing a part for a `not null` file column fails as a field error
+rather than a 500, and an unknown part name is refused the way `DisallowUnknownFields`
+refuses an unknown key.
+
+The reference check needs a Docker test rather than a fast one, because the whole
+point of it is a predicate running in Postgres: an account creating a child row that
+names an owner-scoped parent belonging to somebody else gets a 422 on that field and
+not a 403, the same request naming a parent it does own succeeds, a soft-deleted
+parent is refused the same way a missing one is, and a foreign key to an unexposed
+table is not checked at all. Add one that asserts the failure is worded identically
+to naming a nonexistent id, since the entire security value is that a caller cannot
+tell those two apart.
+
+The Docker suite is a new `internal/filestest` alongside `internal/authtest`: upload,
+`uploaded_at IS NULL` mid-flight, completion, url written, checksum matching on the
+way back down, tenant B getting a 404 for tenant A's profile id, an owner-scoped
+profile's picture invisible to another account, the composite key refusing another
+tenant's file, soft delete and restore inside the window still downloading, and the
+sweeper reaping an abandoned upload and expired trash while reaping neither a live row
+nor one referenced only by a snapshot. That last case is the one that would otherwise
+delete data. Pick its port deliberately: there are already a dozen pinned by hand
+across the suites and no registry saying which belongs to which, so this is as good a
+moment as any to fix that.
+
+`examples/todo` gets both forms, or none of this has a regression test outside
+goldens: a single `cover_file_id` on the todo itself, which is the table that already
+has soft delete, snapshots and restore so the interaction comes for free, and a
+`todo_attachment` child table with a `not null` file column, which is the only way to
+prove the multipart create actually commits a row and its bytes together.
+
+Honest gap: S3 is unproven until the adapter module has its own container suite,
+MinIO or LocalStack. A fake `Signer` covers the handler and nothing else.
+
+### Open question for you
+
+**Is the reference check part of M5.8, or does it land first and alone?**
+
+It is not a file feature. It changes the write path of every generated repository
+that has a foreign key to an exposed resource, which is most of them, and it will
+move goldens in `persist-go` and every example. Folding it into M5.8 makes one diff
+that adds files and quietly rewrites how every create in the system validates —
+which is the kind of commit that gets approved because it is too big to read.
+
+There is also a real chance it breaks something on the way in. Any existing test that
+creates a child row while authenticated as somebody who cannot read the parent will
+start failing, and each of those is either a bug this found or a fixture that was
+sloppy. Finding out which is a job, and it is a job that has nothing to do with
+uploads.
+
+I lean landing it first and alone, the same way the two error codes do — three
+commits before any file code exists: the codes, the reference check, then M5.8 proper
+on top of a floor that already holds. The cost of that order is that the invariant
+ships with no feature to justify it in the changelog, and the reason it exists lives
+only here.
+
+The alternative is one milestone that tells a complete story, at the price of a diff
+nobody can review in one sitting. Say which you would rather have.
 
 ---
 
