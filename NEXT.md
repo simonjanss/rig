@@ -1119,9 +1119,11 @@ means.
 ### Where the bytes live
 
 `blob.Store` — `Put`, `Get`, `Stat`, `Delete` over `io.Reader` and
-`io.ReadCloser` — with `Signer` as a *separate* optional interface, so a backend
-that cannot mint URLs simply does not have the method rather than having one that
-returns an error.
+`io.ReadCloser` — with `Signer` and `Marker` as *separate* optional interfaces, so a
+backend that cannot mint URLs, or has nowhere to record that an object is deleted,
+simply does not have the method rather than having one that returns an error.
+`Marker` is what keeps the bucket's idea of a deletion in step with the database's,
+and it is worth reading below before implementing a backend.
 
 Two implementations: `blob.Memory`, which is for tests and `go run` and is not
 durable, and S3. The S3 SDK cannot go in `runtime` — that module depends on
@@ -1199,6 +1201,52 @@ rather than a goroutine racing itself in every replica. And the restore window l
 in `files.Config` rather than a table configuration, because `rig_file` does not have
 one — an asymmetry with `restore_window_days` that is worth knowing about before
 somebody goes looking for the key.
+
+### Deleting marks the object too
+
+As described so far a delete only touches Postgres. `deleted_at` is set, and the
+bytes sit in the bucket completely unaware for the length of the restore window,
+which is a month by default. That is wrong in three ways that only show up late.
+
+A retention policy that depends on a cron job staying healthy is not a retention
+policy. The bucket cannot answer "what here is deleted?" on its own, so a bucket
+audit, or a bucket restored from a snapshot beside a database restored from a
+different one, has no way to reconcile. And when somebody asks whether a file was
+deleted, the object is the thing they mean — the row is rig's bookkeeping.
+
+So `blob.Marker` joins `Signer` as a second optional interface: `Mark(ctx, key,
+state)`, where the state is live or deleted and carries the timestamp. S3 sets object
+tags, which is a separate cheap call that does not rewrite the object and which a
+bucket lifecycle rule can act on. `blob.Memory` keeps a flag so tests can assert it.
+A backend that has no such concept simply does not have the method, and for that one
+the sweeper is the only path — the same shape as `Signer`, for the same reason.
+
+**The row leads and the mark follows.** Set `deleted_at`, commit, then mark, and
+treat the mark as best-effort. A failed mark leaves a deleted row beside an unmarked
+object, which is the safe direction: the sweeper still knows from the row, and it
+re-marks anything it finds out of step on its next pass. The mark is a projection of
+the row and is always re-derivable from it. Doing it the other way round — mark
+first, commit second — produces an object tagged deleted that the database says is
+live, and nothing reconciles that back.
+
+Restore clears the mark, the same way and in the same direction.
+
+> **The trap is the lifecycle rule, and it deletes data.** The natural reason to want
+> the tag is so S3 can expire the object without rig. Set that expiry to seven days
+> while `files.restore_window` is thirty and a restore inside the window succeeds and
+> hands back a row pointing at nothing — the exact failure the sweeper's rules were
+> written to avoid, arriving through the bucket instead. The lifecycle rule has to
+> outlive the window, and rig cannot enforce a bucket policy it does not own.
+
+What rig can do is refuse to start. The S3 adapter reads the bucket's lifecycle
+configuration and fails a `serve.Config.Ready` check when an expiry is shorter than
+the configured window, so the mistake surfaces on the first deploy rather than a
+month later when somebody tries to undo a delete.
+
+Marking is for the window between a soft delete and its sweep, and nothing else. The
+hard delete is `Store.Delete`, when the sweeper gets there. And an owner replacing its
+picture marks nothing at all, because that file is not deleted — it is still what
+three snapshot rows point at.
 
 ### What the generated server has to grow
 
@@ -1323,6 +1371,13 @@ delete data. Pick its port deliberately: there are already a dozen pinned by han
 across the suites and no registry saying which belongs to which, so this is as good a
 moment as any to fix that.
 
+The mark needs its own cases in both suites, because it is the one part where two
+systems hold the same fact. Against `blob.Memory`: a delete marks, a restore unmarks,
+a mark that fails leaves the row deleted rather than rolling anything back, and the
+sweeper re-marks an object it finds live in the bucket and deleted in the table. And
+one that asserts a replaced picture is *not* marked, since that file is still what a
+snapshot points at and marking it would be the same data loss as deleting it.
+
 `examples/todo` gets both forms, or none of this has a regression test outside
 goldens: a single `cover_file_id` on the todo itself, which is the table that already
 has soft delete, snapshots and restore so the interaction comes for free, and a
@@ -1330,7 +1385,10 @@ has soft delete, snapshots and restore so the interaction comes for free, and a
 prove the multipart create actually commits a row and its bytes together.
 
 Honest gap: S3 is unproven until the adapter module has its own container suite,
-MinIO or LocalStack. A fake `Signer` covers the handler and nothing else.
+MinIO or LocalStack. A fake `Signer` covers the handler and nothing else, and the
+same is true of `Marker` — that object tagging works, and that the lifecycle
+readiness check reads a real bucket configuration and refuses a window it cannot
+honour, are both claims only that suite can make.
 
 ### Open question for you
 
