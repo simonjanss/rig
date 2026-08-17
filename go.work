@@ -8,5 +8,6 @@ use (
 	./examples/fantasyfootball
 	./examples/todo
 	./migrate
+	./rigclient
 	./runtime
 )
