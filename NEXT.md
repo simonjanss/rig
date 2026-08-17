@@ -19,6 +19,7 @@ built, where it departed from that plan, and what is still to come.
 | **M5.5** | `model-go`, `patch.Optional` / `patch.Nullable`, `…Input` types with normalize and validate, the conversions deleted |
 | **M5.6** | Typed per-input errors answered as 422, `runtime/dbhook` lifecycle hooks declared per service, the audit log removed, `runtime/serve`, `rig/migrate` |
 | **M5.8** | The whole authentication configuration moved into `rig.yaml`, resolved when it is read, and `server-go` writes the wiring |
+| **M5.10** | `go-client` and the `rigclient` module: a typed Go SDK generated from the same document the router is, plus `runtime/authwire` and `examples/sdk` |
 
 Next:
 
@@ -33,11 +34,13 @@ Next:
 ### Modules
 
 ```
-.               github.com/simonjanss/rig          CLI, compiler, generators
-runtime/        github.com/simonjanss/rig/runtime  imported by generated code
-auth/           github.com/simonjanss/rig/auth     sessions, oauth, api keys
-migrate/        github.com/simonjanss/rig/migrate  a binary migrates itself
+.               github.com/simonjanss/rig            CLI, compiler, generators
+runtime/        github.com/simonjanss/rig/runtime    imported by generated code
+auth/           github.com/simonjanss/rig/auth       sessions, oauth, api keys
+migrate/        github.com/simonjanss/rig/migrate    a binary migrates itself
+rigclient/      github.com/simonjanss/rig/rigclient  imported by a generated client
 examples/todo/  a real project, built in CI
+examples/sdk/   a program that calls two of them, through their generated clients
 ```
 
 The root module now requires `auth` and `runtime` with local replaces, so the
@@ -45,9 +48,10 @@ Docker suites in `internal/authtest` and `internal/electrictest` can drive them.
 
 ### Generators registered
 
-`model-go`, `persist-go`, `service-go`, `server-go`, `electric`. All but
-`electric` are scaffolded by `rig init`, and `electric` emits nothing until a
-table opts in. `model-go` is listed first because the layers above import what it
+`model-go`, `persist-go`, `service-go`, `server-go`, `electric`, `go-client`.
+All but `electric` and `go-client` are scaffolded by `rig init`; `electric`
+emits nothing until a table opts in, and `go-client` is opt-in because not every
+project wants a Go SDK of its own. `model-go` is listed first because the layers above import what it
 writes. The authentication wiring is not a generator of its own: `server-go`
 writes it into the API package for a project that has an `auth:` block.
 
@@ -1417,6 +1421,82 @@ nobody can review in one sitting. Say which you would rather have.
 
 ---
 
+## Done: M5.10 — `go-client`
+
+**What shipped.** A Go SDK generated from the document, in two halves.
+
+`rigclient/` is the hand-written half — one more module, depending on `runtime`
+and `uuid`. The transport (`Do`, `DoNoContent`, the typed `*Error`, the call
+options), the credentials (`StaticToken`, `APIKey`, and a `Session` that renews
+itself), the query encoders, the pagination iterator, and `Auth`: rig's own
+authentication endpoints, which are the same routes with the same bodies in every
+project that turns authentication on and so are not generated at all.
+
+`internal/gen/goclient` is the generator, registered as `go-client`. Options are
+`package`, `client_import` and `default_base_url`; everything else it needs is in
+the document. It emits the entity and its enums, the filters, the create and
+update inputs, each endpoint's own body and query, the shape a 422 arrives in,
+and one method per endpoint keyed on `Impl.ServiceMethod` — plus, where there is
+a `List`, an `All` that walks every page.
+
+`runtime/authwire` came out of the same work: the authentication request and
+response shapes used to live unexported inside `auth/authhttp`, so a client had
+to restate them. Now both ends import one definition, and `authhttp` fills in the
+same structs a client reads.
+
+**Decisions worth knowing about.**
+
+- **Three things are not restated.** Update inputs use `runtime/patch`, error
+  codes use `runtime/rigerr`, and the scope parameter uses `runtime/tenancy`.
+  Everything else — the entity, the filters, the page — is the client's own, so
+  an SDK does not drag the server's `internal/` packages behind it.
+- **`omitzero` on every update member, and `IsZero` on both patch wrappers.**
+  This was a real bug on the way in. `Optional.MarshalJSON` encodes absence as
+  `null`, because a marshaler cannot remove its own field — harmless while patch
+  types were only ever decoded, and on a client it would have meant a 400 on
+  every not-null column and a *silent clearing* of every nullable one. The tag is
+  what removes the field; the test that guards it asserts that an untouched
+  update marshals to `{}`.
+- **Query parameters are pointers.** `server-go` applies a parameter's default
+  only when it is absent, so a client that helpfully sent `limit=0` would be
+  asking for an empty page. Nil means not sent, and `rigclient.P` takes an
+  address in one expression.
+- **The QUERY fallback is the client's, once.** A search issues `QUERY`; on 405
+  or 501 it retries the `POST …/_search` alias, remembers that on the runtime,
+  and never tries `QUERY` again. Under `search_method: query` there is no alias
+  and the refusal is simply reported.
+- **Methods are grouped per resource** — `c.Todos.Complete(...)` — which is
+  symmetric with the server's own service methods. The `OperationID` is in each
+  doc comment so the router, this client, and the OpenAPI document to come can
+  still be cross-referenced.
+- **`API-Revision` is a seam, not a feature.** M5.7 has not shipped, so there is
+  nothing in the document to bake in; `Config.Revision` is sent when it is set,
+  and that is where the generated constant will go.
+
+**Where it is exercised.** `examples/todo` and `examples/auth` both generate one,
+into `./client` rather than `./internal/client` — a client exists to be imported
+by somebody else, and Go's internal rule would keep it out of exactly the code
+that wants it. Each has a `client_docker_test.go` driving the real server: the
+lifecycle and the one-field patch verified by re-reading the row for todo, and
+sign-in, refresh-ahead under a moved clock, tenant switching and API keys for
+auth. `examples/sdk` is the third example — not a rig project, just a program
+that calls the other two — with a database-free test pinning the three
+properties a caller depends on.
+
+**Loose ends.**
+
+- `examples/fantasyfootball` and `examples/auth_oauth` do not generate a client.
+  Nothing stops them; there was no question they would have answered.
+- The `.gitignore` pattern `rig` matched `cmd/rig` as well as the built binary,
+  which is why the command's own `main` was never committed. Anchored to `/rig`,
+  and `cmd/rig/main.go` is in the tree.
+- A `Decimal` column is `pgtype.Numeric` in the client as well as in the model,
+  so a project with one drags pgx into its SDK's dependency graph. `runtime`
+  already does, through `patch`, so it costs nothing today — but if `rigclient`
+  is ever cut loose from `runtime`, this is the field to reconsider.
+
+---
+
 ## M6 — `openapi`
 
 **Goal.** An OpenAPI document from the same IR, so it cannot describe an API
@@ -1480,6 +1560,12 @@ front end holds are the types the server sends.
 **The QUERY fallback.** Issue `QUERY`; on `405` or `501`, fall back to the
 `POST /_search` alias, remember that for the rest of the process, and never try
 `QUERY` again. One flag on the client instance.
+
+**Echo the Go client.** `go-client` shipped first (M5.10) and answered several
+of these already: methods grouped per resource, a fallback tried once and
+remembered per client instance, query parameters that are absent rather than
+zero, and a per-input shape for the 422 body. Differing from it needs a reason
+better than a different author.
 
 **Open questions for you.**
 
