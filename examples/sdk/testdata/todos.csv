@@ -1,0 +1,8 @@
+title,notes,priority,dueAt
+Write the tutorial,start from an empty directory,high,2026-09-01
+Fix the flaky test,,normal,
+Review the SDK pull request,two pairs of eyes,high,2026-08-20
+Renew the TLS certificate,expires in the autumn,normal,2026-10-14
+,this row forgot its title,high,
+Buy milk,,urgent,
+Take the bins out,every Tuesday,low,

@@ -7,10 +7,11 @@
 // else's program, so it is generated into ./client rather than ./internal, and
 // this program is that somebody else.
 //
-// Two demonstrations, one per subcommand:
+// Three demonstrations, one per subcommand:
 //
-//	go run . todo    # the whole lifecycle of a resource, no authentication
-//	go run . auth    # signing in, sessions, tenants and API keys
+//	go run . todo      # the whole lifecycle of a resource, no authentication
+//	go run . auth      # signing in, sessions, tenants and API keys
+//	go run . import    # a batch job: a CSV of todos, imported through the client
 //
 // Each needs the corresponding example running. From the repository root:
 //
@@ -52,6 +53,8 @@ func run() error {
 		return todoDemo(ctx, os.Args[2:])
 	case "auth":
 		return authDemo(ctx, os.Args[2:])
+	case "import":
+		return importDemo(ctx, os.Args[2:])
 	case "-h", "--help", "help":
 		usage()
 		return nil
@@ -71,6 +74,11 @@ func usage() {
   go run . auth [-base-url URL] [-email ADDRESS] [-password SECRET]
       Sign in, call as the session, mint an API key and call as that,
       against examples/auth.
+
+  go run . import [-file PATH] [-workers N] [-dry-run] [-skip-existing]
+      Import a CSV of todos: a bounded worker pool, a retry that knows
+      which failures are worth retrying, and a report naming the line
+      of every row that did not go in.
 `)
 }
 
@@ -87,6 +95,11 @@ func flags(name string, args []string, baseURL *string) *flag.FlagSet {
 // identifier the server logged it under; what is added here is the one thing the
 // error cannot know, which is that the server may simply not be running.
 func explain(err error) string {
+	var rows *importFailed
+	if errors.As(err, &rows) {
+		return rows.Error()
+	}
+
 	var e *rigclient.Error
 	if errors.As(err, &e) {
 		out := "the server refused the call: " + e.Error()

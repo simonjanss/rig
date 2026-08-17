@@ -1480,8 +1480,11 @@ that wants it. Each has a `client_docker_test.go` driving the real server: the
 lifecycle and the one-field patch verified by re-reading the row for todo, and
 sign-in, refresh-ahead under a moved clock, tenant switching and API keys for
 auth. `examples/sdk` is the third example — not a rig project, just a program
-that calls the other two — with a database-free test pinning the three
-properties a caller depends on.
+that calls the other two — with database-free tests pinning the three properties
+a caller depends on, and a third subcommand that is the case a client library
+actually gets used for: a CSV import, with a bounded worker pool, a retry that
+distinguishes the server asking for a moment from the row being wrong, and a
+report naming the line of everything that did not go in.
 
 **Loose ends.**
 

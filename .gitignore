@@ -5,6 +5,10 @@
 # matches cmd/rig, which is how the command's own main went untracked.
 /rig
 
+# A module whose only package is a main builds its binary into its own
+# directory, which `go build ./...` in examples/sdk does.
+/examples/sdk/sdk
+
 # Go
 *.test
 *.out
