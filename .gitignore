@@ -1,7 +1,9 @@
 # Binaries
 /bin/
 /dist/
-rig
+# The built binary at the repository root. Anchored: an unanchored "rig" also
+# matches cmd/rig, which is how the command's own main went untracked.
+/rig
 
 # Go
 *.test
