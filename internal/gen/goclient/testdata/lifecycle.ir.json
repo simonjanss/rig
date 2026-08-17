@@ -1,0 +1,3149 @@
+{
+  "ir_version": 1,
+  "generated_by": "rig (test)",
+  "api": {
+    "name": "demo",
+    "version": "v1",
+    "base_path": "/api/v1",
+    "enums": [
+      {
+        "name": "ErrorCode",
+        "description": "Machine-readable reason a request failed.",
+        "values": [
+          {
+            "name": "BadRequest",
+            "wire": "BadRequest",
+            "description": "The request was malformed or a parameter could not be parsed."
+          },
+          {
+            "name": "Unauthorized",
+            "wire": "Unauthorized",
+            "description": "No valid session or API key was presented."
+          },
+          {
+            "name": "Forbidden",
+            "wire": "Forbidden",
+            "description": "The caller is known but not permitted to do this."
+          },
+          {
+            "name": "NotFound",
+            "wire": "NotFound",
+            "description": "No such resource, or it belongs to another tenant."
+          },
+          {
+            "name": "Conflict",
+            "wire": "Conflict",
+            "description": "The request conflicts with the current state of the resource."
+          },
+          {
+            "name": "UnprocessableEntity",
+            "wire": "UnprocessableEntity",
+            "description": "The request was well-formed but failed validation."
+          },
+          {
+            "name": "RateLimited",
+            "wire": "RateLimited",
+            "description": "Too many requests. Retry after the interval in the Retry-After header."
+          },
+          {
+            "name": "Internal",
+            "wire": "Internal",
+            "description": "Something went wrong on the server."
+          }
+        ]
+      },
+      {
+        "name": "LessonStatus",
+        "description": "Lifecycle state of a lesson.",
+        "values": [
+          {
+            "name": "Planned",
+            "wire": "planned",
+            "description": "Created but not yet started."
+          },
+          {
+            "name": "InProgress",
+            "wire": "in_progress",
+            "description": "Currently being taught."
+          },
+          {
+            "name": "Completed",
+            "wire": "completed",
+            "description": "Finished; grades may now be entered."
+          }
+        ],
+        "pg_type": "lesson_status"
+      },
+      {
+        "name": "LessonVersionType",
+        "description": "Whether a row is the live lesson or a snapshot of a previous version.",
+        "values": [
+          {
+            "name": "Original",
+            "wire": "Original"
+          },
+          {
+            "name": "Snapshot",
+            "wire": "Snapshot"
+          }
+        ],
+        "pg_type": "lesson_version_type"
+      }
+    ],
+    "objects": [
+      {
+        "name": "Error",
+        "description": "Returned whenever a request fails.",
+        "fields": [
+          {
+            "name": "Code",
+            "wire": "code",
+            "description": "Machine-readable reason the request failed.",
+            "type": "ErrorCode",
+            "type_kind": "Enum",
+            "go_type": "ErrorCode"
+          },
+          {
+            "name": "Message",
+            "wire": "message",
+            "description": "Human-readable explanation. Not intended for clients to parse.",
+            "type": "String",
+            "type_kind": "Primitive",
+            "go_type": "string"
+          },
+          {
+            "name": "RequestID",
+            "wire": "requestId",
+            "description": "Identifier of this request, for correlating with server logs.",
+            "type": "String",
+            "type_kind": "Primitive",
+            "go_type": "string",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "Fields",
+            "wire": "fields",
+            "description": "Present when the failure was validation. It is shaped like the request body that failed — one member per field, holding the problem with that field — so a client can put each message beside the control it belongs to.",
+            "type": "JSON",
+            "type_kind": "Primitive",
+            "go_type": "any",
+            "modifiers": [
+              "Nullable"
+            ]
+          }
+        ],
+        "origin": "Builtin"
+      },
+      {
+        "name": "Lesson",
+        "description": "A single scheduled teaching occasion.",
+        "fields": [
+          {
+            "name": "ID",
+            "wire": "id",
+            "description": "Unique identifier for this row.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "uuid.UUID",
+            "read_only": true,
+            "column": {
+              "table": "lesson",
+              "name": "id",
+              "sql_type": "uuid",
+              "nullable": false,
+              "scan": "UUID"
+            }
+          },
+          {
+            "name": "TenantID",
+            "wire": "tenantId",
+            "description": "Tenant this row belongs to. Every query is scoped by it.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "uuid.UUID",
+            "read_only": true,
+            "column": {
+              "table": "lesson",
+              "name": "tenant_id",
+              "sql_type": "uuid",
+              "nullable": false,
+              "scan": "UUID"
+            }
+          },
+          {
+            "name": "CreatedAt",
+            "wire": "createdAt",
+            "description": "When this row was created. Set automatically and never changes.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "time.Time",
+            "read_only": true,
+            "column": {
+              "table": "lesson",
+              "name": "created_at",
+              "sql_type": "timestamptz",
+              "nullable": false,
+              "scan": "Timestamptz"
+            }
+          },
+          {
+            "name": "CreatedByAccountID",
+            "wire": "createdByAccountId",
+            "description": "Account that created this row, taken from the request's claims.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "*uuid.UUID",
+            "modifiers": [
+              "Nullable"
+            ],
+            "read_only": true,
+            "column": {
+              "table": "lesson",
+              "name": "created_by_account_id",
+              "sql_type": "uuid",
+              "nullable": true,
+              "scan": "UUID"
+            }
+          },
+          {
+            "name": "UpdatedAt",
+            "wire": "updatedAt",
+            "description": "When this row was last updated. Set automatically on every update.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "*time.Time",
+            "modifiers": [
+              "Nullable"
+            ],
+            "read_only": true,
+            "column": {
+              "table": "lesson",
+              "name": "updated_at",
+              "sql_type": "timestamptz",
+              "nullable": true,
+              "scan": "Timestamptz"
+            }
+          },
+          {
+            "name": "UpdatedByAccountID",
+            "wire": "updatedByAccountId",
+            "description": "Account that last updated this row, taken from the request's claims.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "*uuid.UUID",
+            "modifiers": [
+              "Nullable"
+            ],
+            "read_only": true,
+            "column": {
+              "table": "lesson",
+              "name": "updated_by_account_id",
+              "sql_type": "uuid",
+              "nullable": true,
+              "scan": "UUID"
+            }
+          },
+          {
+            "name": "DeletedAt",
+            "wire": "deletedAt",
+            "description": "When this row was soft-deleted. Null while the row is live.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "*time.Time",
+            "modifiers": [
+              "Nullable"
+            ],
+            "read_only": true,
+            "column": {
+              "table": "lesson",
+              "name": "deleted_at",
+              "sql_type": "timestamptz",
+              "nullable": true,
+              "scan": "Timestamptz"
+            }
+          },
+          {
+            "name": "DeletedByAccountID",
+            "wire": "deletedByAccountId",
+            "description": "Account that soft-deleted this row, taken from the request's claims.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "*uuid.UUID",
+            "modifiers": [
+              "Nullable"
+            ],
+            "read_only": true,
+            "column": {
+              "table": "lesson",
+              "name": "deleted_by_account_id",
+              "sql_type": "uuid",
+              "nullable": true,
+              "scan": "UUID"
+            }
+          },
+          {
+            "name": "VersionType",
+            "wire": "versionType",
+            "description": "Whether this row is the live version or an immutable snapshot of a previous one.",
+            "type": "LessonVersionType",
+            "type_kind": "Enum",
+            "go_type": "LessonVersionType",
+            "read_only": true,
+            "column": {
+              "table": "lesson",
+              "name": "version_type",
+              "sql_type": "lesson_version_type",
+              "nullable": false,
+              "scan": "EnumText"
+            }
+          },
+          {
+            "name": "SnapshotFromLessonID",
+            "wire": "snapshotFromLessonId",
+            "description": "The row this snapshot was copied from. Null on live rows.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "*uuid.UUID",
+            "modifiers": [
+              "Nullable"
+            ],
+            "read_only": true,
+            "column": {
+              "table": "lesson",
+              "name": "snapshot_from_lesson_id",
+              "sql_type": "uuid",
+              "nullable": true,
+              "scan": "UUID"
+            }
+          },
+          {
+            "name": "SnapshotFromLessonAt",
+            "wire": "snapshotFromLessonAt",
+            "description": "The source row's last-updated time at the moment this snapshot was taken. This identifies the version captured, not when the copy was made.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "*time.Time",
+            "modifiers": [
+              "Nullable"
+            ],
+            "read_only": true,
+            "column": {
+              "table": "lesson",
+              "name": "snapshot_from_lesson_at",
+              "sql_type": "timestamptz",
+              "nullable": true,
+              "scan": "Timestamptz"
+            }
+          },
+          {
+            "name": "Title",
+            "wire": "title",
+            "description": "Human-readable name shown in the timetable.",
+            "type": "String",
+            "type_kind": "Primitive",
+            "go_type": "string",
+            "column": {
+              "table": "lesson",
+              "name": "title",
+              "sql_type": "text",
+              "nullable": false,
+              "scan": "Direct"
+            }
+          },
+          {
+            "name": "Notes",
+            "wire": "notes",
+            "description": "Free-text notes kept alongside the lesson.",
+            "type": "String",
+            "type_kind": "Primitive",
+            "go_type": "*string",
+            "modifiers": [
+              "Nullable"
+            ],
+            "column": {
+              "table": "lesson",
+              "name": "notes",
+              "sql_type": "text",
+              "nullable": true,
+              "scan": "Direct"
+            }
+          },
+          {
+            "name": "Status",
+            "wire": "status",
+            "description": "Lifecycle state of the lesson.",
+            "type": "LessonStatus",
+            "type_kind": "Enum",
+            "go_type": "LessonStatus",
+            "column": {
+              "table": "lesson",
+              "name": "status",
+              "sql_type": "lesson_status",
+              "nullable": false,
+              "scan": "EnumText"
+            }
+          },
+          {
+            "name": "ManagerEmailAddress",
+            "wire": "managerEmailAddress",
+            "description": "Address that notifications about this lesson are sent to.",
+            "type": "String",
+            "type_kind": "Primitive",
+            "go_type": "string",
+            "format": "EmailAddress",
+            "column": {
+              "table": "lesson",
+              "name": "manager_email",
+              "sql_type": "text",
+              "nullable": false,
+              "scan": "Direct"
+            }
+          },
+          {
+            "name": "StartsAt",
+            "wire": "startsAt",
+            "description": "When the lesson begins.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "time.Time",
+            "immutable": true,
+            "column": {
+              "table": "lesson",
+              "name": "starts_at",
+              "sql_type": "timestamptz",
+              "nullable": false,
+              "scan": "Timestamptz"
+            }
+          },
+          {
+            "name": "Capacity",
+            "wire": "capacity",
+            "description": "Maximum number of participants, or null for no limit.",
+            "type": "Int",
+            "type_kind": "Primitive",
+            "go_type": "*int",
+            "modifiers": [
+              "Nullable"
+            ],
+            "column": {
+              "table": "lesson",
+              "name": "capacity",
+              "sql_type": "int4",
+              "nullable": true,
+              "scan": "Direct"
+            }
+          },
+          {
+            "name": "Price",
+            "wire": "price",
+            "description": "Amount charged per participant.",
+            "type": "Decimal",
+            "type_kind": "Primitive",
+            "go_type": "*pgtype.Numeric",
+            "modifiers": [
+              "Nullable"
+            ],
+            "column": {
+              "table": "lesson",
+              "name": "price",
+              "sql_type": "numeric",
+              "nullable": true,
+              "scan": "Numeric"
+            }
+          },
+          {
+            "name": "Tags",
+            "wire": "tags",
+            "description": "Free-form labels used for grouping.",
+            "type": "String",
+            "type_kind": "Primitive",
+            "go_type": "[]string",
+            "modifiers": [
+              "Array",
+              "Nullable"
+            ],
+            "column": {
+              "table": "lesson",
+              "name": "tags",
+              "sql_type": "text[]",
+              "nullable": true,
+              "scan": "Array"
+            }
+          },
+          {
+            "name": "SearchVector",
+            "wire": "searchVector",
+            "description": "Denormalized text used by full-text search.",
+            "type": "String",
+            "type_kind": "Primitive",
+            "go_type": "*string",
+            "modifiers": [
+              "Nullable"
+            ],
+            "read_only": true,
+            "column": {
+              "table": "lesson",
+              "name": "search_vector",
+              "sql_type": "text",
+              "nullable": true,
+              "scan": "Direct"
+            }
+          }
+        ],
+        "origin": "Projected"
+      },
+      {
+        "name": "LessonFilter",
+        "description": "Conditions a Lesson must satisfy to match a search.",
+        "fields": [
+          {
+            "name": "Equals",
+            "wire": "equals",
+            "description": "Fields that must equal the given value.",
+            "type": "LessonFilterEquals",
+            "type_kind": "Object",
+            "go_type": "*LessonFilterEquals",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "NotEquals",
+            "wire": "notEquals",
+            "description": "Fields that must not equal the given value.",
+            "type": "LessonFilterEquals",
+            "type_kind": "Object",
+            "go_type": "*LessonFilterEquals",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "GreaterThan",
+            "wire": "greaterThan",
+            "description": "Fields that must be greater than the given value.",
+            "type": "LessonFilterRange",
+            "type_kind": "Object",
+            "go_type": "*LessonFilterRange",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "SmallerThan",
+            "wire": "smallerThan",
+            "description": "Fields that must be less than the given value.",
+            "type": "LessonFilterRange",
+            "type_kind": "Object",
+            "go_type": "*LessonFilterRange",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "GreaterOrEqual",
+            "wire": "greaterOrEqual",
+            "description": "Fields that must be greater than or equal to the given value.",
+            "type": "LessonFilterRange",
+            "type_kind": "Object",
+            "go_type": "*LessonFilterRange",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "SmallerOrEqual",
+            "wire": "smallerOrEqual",
+            "description": "Fields that must be less than or equal to the given value.",
+            "type": "LessonFilterRange",
+            "type_kind": "Object",
+            "go_type": "*LessonFilterRange",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "Contains",
+            "wire": "contains",
+            "description": "Fields that must be one of the given values.",
+            "type": "LessonFilterContains",
+            "type_kind": "Object",
+            "go_type": "*LessonFilterContains",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "NotContains",
+            "wire": "notContains",
+            "description": "Fields that must not be one of the given values.",
+            "type": "LessonFilterContains",
+            "type_kind": "Object",
+            "go_type": "*LessonFilterContains",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "Like",
+            "wire": "like",
+            "description": "Text fields that must match the given pattern.",
+            "type": "LessonFilterLike",
+            "type_kind": "Object",
+            "go_type": "*LessonFilterLike",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "NotLike",
+            "wire": "notLike",
+            "description": "Text fields that must not match the given pattern.",
+            "type": "LessonFilterLike",
+            "type_kind": "Object",
+            "go_type": "*LessonFilterLike",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "Null",
+            "wire": "null",
+            "description": "Fields that must be null.",
+            "type": "LessonFilterNull",
+            "type_kind": "Object",
+            "go_type": "*LessonFilterNull",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "NotNull",
+            "wire": "notNull",
+            "description": "Fields that must not be null.",
+            "type": "LessonFilterNull",
+            "type_kind": "Object",
+            "go_type": "*LessonFilterNull",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "OrCondition",
+            "wire": "orCondition",
+            "description": "Combine this filter's conditions with OR instead of AND.",
+            "type": "Bool",
+            "type_kind": "Primitive",
+            "go_type": "bool"
+          },
+          {
+            "name": "NestedFilters",
+            "wire": "nestedFilters",
+            "description": "Sub-filters combined with this one, so that AND and OR can be mixed to any depth.",
+            "type": "LessonFilter",
+            "type_kind": "Object",
+            "go_type": "[]LessonFilter",
+            "modifiers": [
+              "Array"
+            ]
+          }
+        ],
+        "origin": "Filter"
+      },
+      {
+        "name": "LessonFilterContains",
+        "description": "Set-membership conditions on Lesson fields.",
+        "fields": [
+          {
+            "name": "ID",
+            "wire": "id",
+            "description": "Unique identifier for this row.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "[]uuid.UUID",
+            "modifiers": [
+              "Array"
+            ]
+          },
+          {
+            "name": "CreatedAt",
+            "wire": "createdAt",
+            "description": "When this row was created. Set automatically and never changes.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "[]time.Time",
+            "modifiers": [
+              "Array"
+            ]
+          },
+          {
+            "name": "CreatedByAccountID",
+            "wire": "createdByAccountId",
+            "description": "Account that created this row, taken from the request's claims.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "[]uuid.UUID",
+            "modifiers": [
+              "Array"
+            ]
+          },
+          {
+            "name": "UpdatedAt",
+            "wire": "updatedAt",
+            "description": "When this row was last updated. Set automatically on every update.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "[]time.Time",
+            "modifiers": [
+              "Array"
+            ]
+          },
+          {
+            "name": "UpdatedByAccountID",
+            "wire": "updatedByAccountId",
+            "description": "Account that last updated this row, taken from the request's claims.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "[]uuid.UUID",
+            "modifiers": [
+              "Array"
+            ]
+          },
+          {
+            "name": "DeletedAt",
+            "wire": "deletedAt",
+            "description": "When this row was soft-deleted. Null while the row is live.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "[]time.Time",
+            "modifiers": [
+              "Array"
+            ]
+          },
+          {
+            "name": "DeletedByAccountID",
+            "wire": "deletedByAccountId",
+            "description": "Account that soft-deleted this row, taken from the request's claims.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "[]uuid.UUID",
+            "modifiers": [
+              "Array"
+            ]
+          },
+          {
+            "name": "VersionType",
+            "wire": "versionType",
+            "description": "Whether this row is the live version or an immutable snapshot of a previous one.",
+            "type": "LessonVersionType",
+            "type_kind": "Enum",
+            "go_type": "[]LessonVersionType",
+            "modifiers": [
+              "Array"
+            ]
+          },
+          {
+            "name": "SnapshotFromLessonID",
+            "wire": "snapshotFromLessonId",
+            "description": "The row this snapshot was copied from. Null on live rows.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "[]uuid.UUID",
+            "modifiers": [
+              "Array"
+            ]
+          },
+          {
+            "name": "SnapshotFromLessonAt",
+            "wire": "snapshotFromLessonAt",
+            "description": "The source row's last-updated time at the moment this snapshot was taken. This identifies the version captured, not when the copy was made.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "[]time.Time",
+            "modifiers": [
+              "Array"
+            ]
+          },
+          {
+            "name": "Title",
+            "wire": "title",
+            "description": "Human-readable name shown in the timetable.",
+            "type": "String",
+            "type_kind": "Primitive",
+            "go_type": "[]string",
+            "modifiers": [
+              "Array"
+            ]
+          },
+          {
+            "name": "Notes",
+            "wire": "notes",
+            "description": "Free-text notes kept alongside the lesson.",
+            "type": "String",
+            "type_kind": "Primitive",
+            "go_type": "[]string",
+            "modifiers": [
+              "Array"
+            ]
+          },
+          {
+            "name": "Status",
+            "wire": "status",
+            "description": "Lifecycle state of the lesson.",
+            "type": "LessonStatus",
+            "type_kind": "Enum",
+            "go_type": "[]LessonStatus",
+            "modifiers": [
+              "Array"
+            ]
+          },
+          {
+            "name": "ManagerEmailAddress",
+            "wire": "managerEmailAddress",
+            "description": "Address that notifications about this lesson are sent to.",
+            "type": "String",
+            "type_kind": "Primitive",
+            "go_type": "[]string",
+            "format": "EmailAddress",
+            "modifiers": [
+              "Array"
+            ]
+          },
+          {
+            "name": "StartsAt",
+            "wire": "startsAt",
+            "description": "When the lesson begins.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "[]time.Time",
+            "modifiers": [
+              "Array"
+            ]
+          },
+          {
+            "name": "Capacity",
+            "wire": "capacity",
+            "description": "Maximum number of participants, or null for no limit.",
+            "type": "Int",
+            "type_kind": "Primitive",
+            "go_type": "[]int",
+            "modifiers": [
+              "Array"
+            ]
+          },
+          {
+            "name": "Price",
+            "wire": "price",
+            "description": "Amount charged per participant.",
+            "type": "Decimal",
+            "type_kind": "Primitive",
+            "go_type": "[]pgtype.Numeric",
+            "modifiers": [
+              "Array"
+            ]
+          },
+          {
+            "name": "SearchVector",
+            "wire": "searchVector",
+            "description": "Denormalized text used by full-text search.",
+            "type": "String",
+            "type_kind": "Primitive",
+            "go_type": "[]string",
+            "modifiers": [
+              "Array"
+            ]
+          }
+        ],
+        "origin": "Filter"
+      },
+      {
+        "name": "LessonFilterEquals",
+        "description": "Exact-match conditions on Lesson fields.",
+        "fields": [
+          {
+            "name": "ID",
+            "wire": "id",
+            "description": "Unique identifier for this row.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "*uuid.UUID",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "CreatedAt",
+            "wire": "createdAt",
+            "description": "When this row was created. Set automatically and never changes.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "*time.Time",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "CreatedByAccountID",
+            "wire": "createdByAccountId",
+            "description": "Account that created this row, taken from the request's claims.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "*uuid.UUID",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "UpdatedAt",
+            "wire": "updatedAt",
+            "description": "When this row was last updated. Set automatically on every update.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "*time.Time",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "UpdatedByAccountID",
+            "wire": "updatedByAccountId",
+            "description": "Account that last updated this row, taken from the request's claims.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "*uuid.UUID",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "DeletedAt",
+            "wire": "deletedAt",
+            "description": "When this row was soft-deleted. Null while the row is live.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "*time.Time",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "DeletedByAccountID",
+            "wire": "deletedByAccountId",
+            "description": "Account that soft-deleted this row, taken from the request's claims.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "*uuid.UUID",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "VersionType",
+            "wire": "versionType",
+            "description": "Whether this row is the live version or an immutable snapshot of a previous one.",
+            "type": "LessonVersionType",
+            "type_kind": "Enum",
+            "go_type": "*LessonVersionType",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "SnapshotFromLessonID",
+            "wire": "snapshotFromLessonId",
+            "description": "The row this snapshot was copied from. Null on live rows.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "*uuid.UUID",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "SnapshotFromLessonAt",
+            "wire": "snapshotFromLessonAt",
+            "description": "The source row's last-updated time at the moment this snapshot was taken. This identifies the version captured, not when the copy was made.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "*time.Time",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "Title",
+            "wire": "title",
+            "description": "Human-readable name shown in the timetable.",
+            "type": "String",
+            "type_kind": "Primitive",
+            "go_type": "*string",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "Notes",
+            "wire": "notes",
+            "description": "Free-text notes kept alongside the lesson.",
+            "type": "String",
+            "type_kind": "Primitive",
+            "go_type": "*string",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "Status",
+            "wire": "status",
+            "description": "Lifecycle state of the lesson.",
+            "type": "LessonStatus",
+            "type_kind": "Enum",
+            "go_type": "*LessonStatus",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "ManagerEmailAddress",
+            "wire": "managerEmailAddress",
+            "description": "Address that notifications about this lesson are sent to.",
+            "type": "String",
+            "type_kind": "Primitive",
+            "go_type": "*string",
+            "format": "EmailAddress",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "StartsAt",
+            "wire": "startsAt",
+            "description": "When the lesson begins.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "*time.Time",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "Capacity",
+            "wire": "capacity",
+            "description": "Maximum number of participants, or null for no limit.",
+            "type": "Int",
+            "type_kind": "Primitive",
+            "go_type": "*int",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "Price",
+            "wire": "price",
+            "description": "Amount charged per participant.",
+            "type": "Decimal",
+            "type_kind": "Primitive",
+            "go_type": "*pgtype.Numeric",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "Tags",
+            "wire": "tags",
+            "description": "Free-form labels used for grouping.",
+            "type": "String",
+            "type_kind": "Primitive",
+            "go_type": "[]string",
+            "modifiers": [
+              "Nullable",
+              "Array"
+            ]
+          },
+          {
+            "name": "SearchVector",
+            "wire": "searchVector",
+            "description": "Denormalized text used by full-text search.",
+            "type": "String",
+            "type_kind": "Primitive",
+            "go_type": "*string",
+            "modifiers": [
+              "Nullable"
+            ]
+          }
+        ],
+        "origin": "Filter"
+      },
+      {
+        "name": "LessonFilterLike",
+        "description": "Pattern conditions on Lesson text fields.",
+        "fields": [
+          {
+            "name": "Title",
+            "wire": "title",
+            "description": "Human-readable name shown in the timetable.",
+            "type": "String",
+            "type_kind": "Primitive",
+            "go_type": "*string",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "Notes",
+            "wire": "notes",
+            "description": "Free-text notes kept alongside the lesson.",
+            "type": "String",
+            "type_kind": "Primitive",
+            "go_type": "*string",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "ManagerEmailAddress",
+            "wire": "managerEmailAddress",
+            "description": "Address that notifications about this lesson are sent to.",
+            "type": "String",
+            "type_kind": "Primitive",
+            "go_type": "*string",
+            "format": "EmailAddress",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "SearchVector",
+            "wire": "searchVector",
+            "description": "Denormalized text used by full-text search.",
+            "type": "String",
+            "type_kind": "Primitive",
+            "go_type": "*string",
+            "modifiers": [
+              "Nullable"
+            ]
+          }
+        ],
+        "origin": "Filter"
+      },
+      {
+        "name": "LessonFilterNull",
+        "description": "Presence conditions on nullable Lesson fields.",
+        "fields": [
+          {
+            "name": "CreatedByAccountID",
+            "wire": "createdByAccountId",
+            "description": "Account that created this row, taken from the request's claims.",
+            "type": "Bool",
+            "type_kind": "Primitive",
+            "go_type": "*bool",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "UpdatedAt",
+            "wire": "updatedAt",
+            "description": "When this row was last updated. Set automatically on every update.",
+            "type": "Bool",
+            "type_kind": "Primitive",
+            "go_type": "*bool",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "UpdatedByAccountID",
+            "wire": "updatedByAccountId",
+            "description": "Account that last updated this row, taken from the request's claims.",
+            "type": "Bool",
+            "type_kind": "Primitive",
+            "go_type": "*bool",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "DeletedAt",
+            "wire": "deletedAt",
+            "description": "When this row was soft-deleted. Null while the row is live.",
+            "type": "Bool",
+            "type_kind": "Primitive",
+            "go_type": "*bool",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "DeletedByAccountID",
+            "wire": "deletedByAccountId",
+            "description": "Account that soft-deleted this row, taken from the request's claims.",
+            "type": "Bool",
+            "type_kind": "Primitive",
+            "go_type": "*bool",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "SnapshotFromLessonID",
+            "wire": "snapshotFromLessonId",
+            "description": "The row this snapshot was copied from. Null on live rows.",
+            "type": "Bool",
+            "type_kind": "Primitive",
+            "go_type": "*bool",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "SnapshotFromLessonAt",
+            "wire": "snapshotFromLessonAt",
+            "description": "The source row's last-updated time at the moment this snapshot was taken. This identifies the version captured, not when the copy was made.",
+            "type": "Bool",
+            "type_kind": "Primitive",
+            "go_type": "*bool",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "Notes",
+            "wire": "notes",
+            "description": "Free-text notes kept alongside the lesson.",
+            "type": "Bool",
+            "type_kind": "Primitive",
+            "go_type": "*bool",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "Capacity",
+            "wire": "capacity",
+            "description": "Maximum number of participants, or null for no limit.",
+            "type": "Bool",
+            "type_kind": "Primitive",
+            "go_type": "*bool",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "Price",
+            "wire": "price",
+            "description": "Amount charged per participant.",
+            "type": "Bool",
+            "type_kind": "Primitive",
+            "go_type": "*bool",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "Tags",
+            "wire": "tags",
+            "description": "Free-form labels used for grouping.",
+            "type": "Bool",
+            "type_kind": "Primitive",
+            "go_type": "*bool",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "SearchVector",
+            "wire": "searchVector",
+            "description": "Denormalized text used by full-text search.",
+            "type": "Bool",
+            "type_kind": "Primitive",
+            "go_type": "*bool",
+            "modifiers": [
+              "Nullable"
+            ]
+          }
+        ],
+        "origin": "Filter"
+      },
+      {
+        "name": "LessonFilterRange",
+        "description": "Ordering conditions on Lesson fields that can be compared.",
+        "fields": [
+          {
+            "name": "CreatedAt",
+            "wire": "createdAt",
+            "description": "When this row was created. Set automatically and never changes.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "*time.Time",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "UpdatedAt",
+            "wire": "updatedAt",
+            "description": "When this row was last updated. Set automatically on every update.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "*time.Time",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "DeletedAt",
+            "wire": "deletedAt",
+            "description": "When this row was soft-deleted. Null while the row is live.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "*time.Time",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "SnapshotFromLessonAt",
+            "wire": "snapshotFromLessonAt",
+            "description": "The source row's last-updated time at the moment this snapshot was taken. This identifies the version captured, not when the copy was made.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "*time.Time",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "StartsAt",
+            "wire": "startsAt",
+            "description": "When the lesson begins.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "*time.Time",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "Capacity",
+            "wire": "capacity",
+            "description": "Maximum number of participants, or null for no limit.",
+            "type": "Int",
+            "type_kind": "Primitive",
+            "go_type": "*int",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "Price",
+            "wire": "price",
+            "description": "Amount charged per participant.",
+            "type": "Decimal",
+            "type_kind": "Primitive",
+            "go_type": "*pgtype.Numeric",
+            "modifiers": [
+              "Nullable"
+            ]
+          }
+        ],
+        "origin": "Filter"
+      },
+      {
+        "name": "LessonListResponse",
+        "description": "A page of Lessons.",
+        "fields": [
+          {
+            "name": "Data",
+            "wire": "data",
+            "description": "The rows in this page.",
+            "type": "Lesson",
+            "type_kind": "Resource",
+            "go_type": "[]Lesson",
+            "modifiers": [
+              "Array"
+            ]
+          },
+          {
+            "name": "Pagination",
+            "wire": "pagination",
+            "description": "Where this page sits in the full result set.",
+            "type": "Pagination",
+            "type_kind": "Object",
+            "go_type": "Pagination"
+          }
+        ],
+        "origin": "Projected"
+      },
+      {
+        "name": "Pagination",
+        "description": "Where the returned page sits within the full result set.",
+        "fields": [
+          {
+            "name": "Offset",
+            "wire": "offset",
+            "description": "Number of rows skipped before this page.",
+            "type": "Int",
+            "type_kind": "Primitive",
+            "go_type": "int"
+          },
+          {
+            "name": "Limit",
+            "wire": "limit",
+            "description": "Maximum number of rows in this page.",
+            "type": "Int",
+            "type_kind": "Primitive",
+            "go_type": "int"
+          },
+          {
+            "name": "Total",
+            "wire": "total",
+            "description": "Total number of rows matching the query, ignoring pagination.",
+            "type": "Int64",
+            "type_kind": "Primitive",
+            "go_type": "int64"
+          }
+        ],
+        "origin": "Builtin"
+      }
+    ],
+    "resources": [
+      {
+        "name": "Lesson",
+        "plural": "Lessons",
+        "path_segment": "lessons",
+        "description": "A single scheduled teaching occasion.",
+        "operations": [
+          "Create",
+          "Get",
+          "List",
+          "Search",
+          "Update",
+          "Delete"
+        ],
+        "fields": [
+          {
+            "name": "ID",
+            "wire": "id",
+            "description": "Unique identifier for this row.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "uuid.UUID",
+            "read_only": true,
+            "column": {
+              "table": "lesson",
+              "name": "id",
+              "sql_type": "uuid",
+              "nullable": false,
+              "scan": "UUID"
+            },
+            "operations": [
+              "Read"
+            ]
+          },
+          {
+            "name": "TenantID",
+            "wire": "tenantId",
+            "description": "Tenant this row belongs to. Every query is scoped by it.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "uuid.UUID",
+            "read_only": true,
+            "column": {
+              "table": "lesson",
+              "name": "tenant_id",
+              "sql_type": "uuid",
+              "nullable": false,
+              "scan": "UUID"
+            },
+            "operations": [
+              "Read"
+            ]
+          },
+          {
+            "name": "CreatedAt",
+            "wire": "createdAt",
+            "description": "When this row was created. Set automatically and never changes.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "time.Time",
+            "read_only": true,
+            "column": {
+              "table": "lesson",
+              "name": "created_at",
+              "sql_type": "timestamptz",
+              "nullable": false,
+              "scan": "Timestamptz"
+            },
+            "operations": [
+              "Read"
+            ]
+          },
+          {
+            "name": "CreatedByAccountID",
+            "wire": "createdByAccountId",
+            "description": "Account that created this row, taken from the request's claims.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "*uuid.UUID",
+            "modifiers": [
+              "Nullable"
+            ],
+            "read_only": true,
+            "column": {
+              "table": "lesson",
+              "name": "created_by_account_id",
+              "sql_type": "uuid",
+              "nullable": true,
+              "scan": "UUID"
+            },
+            "operations": [
+              "Read"
+            ]
+          },
+          {
+            "name": "UpdatedAt",
+            "wire": "updatedAt",
+            "description": "When this row was last updated. Set automatically on every update.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "*time.Time",
+            "modifiers": [
+              "Nullable"
+            ],
+            "read_only": true,
+            "column": {
+              "table": "lesson",
+              "name": "updated_at",
+              "sql_type": "timestamptz",
+              "nullable": true,
+              "scan": "Timestamptz"
+            },
+            "operations": [
+              "Read"
+            ]
+          },
+          {
+            "name": "UpdatedByAccountID",
+            "wire": "updatedByAccountId",
+            "description": "Account that last updated this row, taken from the request's claims.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "*uuid.UUID",
+            "modifiers": [
+              "Nullable"
+            ],
+            "read_only": true,
+            "column": {
+              "table": "lesson",
+              "name": "updated_by_account_id",
+              "sql_type": "uuid",
+              "nullable": true,
+              "scan": "UUID"
+            },
+            "operations": [
+              "Read"
+            ]
+          },
+          {
+            "name": "DeletedAt",
+            "wire": "deletedAt",
+            "description": "When this row was soft-deleted. Null while the row is live.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "*time.Time",
+            "modifiers": [
+              "Nullable"
+            ],
+            "read_only": true,
+            "column": {
+              "table": "lesson",
+              "name": "deleted_at",
+              "sql_type": "timestamptz",
+              "nullable": true,
+              "scan": "Timestamptz"
+            },
+            "operations": [
+              "Read"
+            ]
+          },
+          {
+            "name": "DeletedByAccountID",
+            "wire": "deletedByAccountId",
+            "description": "Account that soft-deleted this row, taken from the request's claims.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "*uuid.UUID",
+            "modifiers": [
+              "Nullable"
+            ],
+            "read_only": true,
+            "column": {
+              "table": "lesson",
+              "name": "deleted_by_account_id",
+              "sql_type": "uuid",
+              "nullable": true,
+              "scan": "UUID"
+            },
+            "operations": [
+              "Read"
+            ]
+          },
+          {
+            "name": "VersionType",
+            "wire": "versionType",
+            "description": "Whether this row is the live version or an immutable snapshot of a previous one.",
+            "type": "LessonVersionType",
+            "type_kind": "Enum",
+            "go_type": "LessonVersionType",
+            "read_only": true,
+            "column": {
+              "table": "lesson",
+              "name": "version_type",
+              "sql_type": "lesson_version_type",
+              "nullable": false,
+              "scan": "EnumText"
+            },
+            "operations": [
+              "Read"
+            ]
+          },
+          {
+            "name": "SnapshotFromLessonID",
+            "wire": "snapshotFromLessonId",
+            "description": "The row this snapshot was copied from. Null on live rows.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "*uuid.UUID",
+            "modifiers": [
+              "Nullable"
+            ],
+            "read_only": true,
+            "column": {
+              "table": "lesson",
+              "name": "snapshot_from_lesson_id",
+              "sql_type": "uuid",
+              "nullable": true,
+              "scan": "UUID"
+            },
+            "operations": [
+              "Read"
+            ]
+          },
+          {
+            "name": "SnapshotFromLessonAt",
+            "wire": "snapshotFromLessonAt",
+            "description": "The source row's last-updated time at the moment this snapshot was taken. This identifies the version captured, not when the copy was made.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "*time.Time",
+            "modifiers": [
+              "Nullable"
+            ],
+            "read_only": true,
+            "column": {
+              "table": "lesson",
+              "name": "snapshot_from_lesson_at",
+              "sql_type": "timestamptz",
+              "nullable": true,
+              "scan": "Timestamptz"
+            },
+            "operations": [
+              "Read"
+            ]
+          },
+          {
+            "name": "Title",
+            "wire": "title",
+            "description": "Human-readable name shown in the timetable.",
+            "type": "String",
+            "type_kind": "Primitive",
+            "go_type": "string",
+            "column": {
+              "table": "lesson",
+              "name": "title",
+              "sql_type": "text",
+              "nullable": false,
+              "scan": "Direct"
+            },
+            "operations": [
+              "Read",
+              "Create",
+              "Update"
+            ]
+          },
+          {
+            "name": "Notes",
+            "wire": "notes",
+            "description": "Free-text notes kept alongside the lesson.",
+            "type": "String",
+            "type_kind": "Primitive",
+            "go_type": "*string",
+            "modifiers": [
+              "Nullable"
+            ],
+            "column": {
+              "table": "lesson",
+              "name": "notes",
+              "sql_type": "text",
+              "nullable": true,
+              "scan": "Direct"
+            },
+            "operations": [
+              "Read",
+              "Create",
+              "Update"
+            ]
+          },
+          {
+            "name": "Status",
+            "wire": "status",
+            "description": "Lifecycle state of the lesson.",
+            "type": "LessonStatus",
+            "type_kind": "Enum",
+            "go_type": "LessonStatus",
+            "column": {
+              "table": "lesson",
+              "name": "status",
+              "sql_type": "lesson_status",
+              "nullable": false,
+              "scan": "EnumText"
+            },
+            "operations": [
+              "Read",
+              "Update"
+            ]
+          },
+          {
+            "name": "ManagerEmailAddress",
+            "wire": "managerEmailAddress",
+            "description": "Address that notifications about this lesson are sent to.",
+            "type": "String",
+            "type_kind": "Primitive",
+            "go_type": "string",
+            "format": "EmailAddress",
+            "column": {
+              "table": "lesson",
+              "name": "manager_email",
+              "sql_type": "text",
+              "nullable": false,
+              "scan": "Direct"
+            },
+            "operations": [
+              "Read",
+              "Create",
+              "Update"
+            ]
+          },
+          {
+            "name": "StartsAt",
+            "wire": "startsAt",
+            "description": "When the lesson begins.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "time.Time",
+            "immutable": true,
+            "column": {
+              "table": "lesson",
+              "name": "starts_at",
+              "sql_type": "timestamptz",
+              "nullable": false,
+              "scan": "Timestamptz"
+            },
+            "operations": [
+              "Read",
+              "Create"
+            ]
+          },
+          {
+            "name": "Capacity",
+            "wire": "capacity",
+            "description": "Maximum number of participants, or null for no limit.",
+            "type": "Int",
+            "type_kind": "Primitive",
+            "go_type": "*int",
+            "modifiers": [
+              "Nullable"
+            ],
+            "column": {
+              "table": "lesson",
+              "name": "capacity",
+              "sql_type": "int4",
+              "nullable": true,
+              "scan": "Direct"
+            },
+            "operations": [
+              "Read",
+              "Create",
+              "Update"
+            ]
+          },
+          {
+            "name": "Price",
+            "wire": "price",
+            "description": "Amount charged per participant.",
+            "type": "Decimal",
+            "type_kind": "Primitive",
+            "go_type": "*pgtype.Numeric",
+            "modifiers": [
+              "Nullable"
+            ],
+            "column": {
+              "table": "lesson",
+              "name": "price",
+              "sql_type": "numeric",
+              "nullable": true,
+              "scan": "Numeric"
+            },
+            "operations": [
+              "Read",
+              "Create",
+              "Update"
+            ]
+          },
+          {
+            "name": "Tags",
+            "wire": "tags",
+            "description": "Free-form labels used for grouping.",
+            "type": "String",
+            "type_kind": "Primitive",
+            "go_type": "[]string",
+            "modifiers": [
+              "Array",
+              "Nullable"
+            ],
+            "column": {
+              "table": "lesson",
+              "name": "tags",
+              "sql_type": "text[]",
+              "nullable": true,
+              "scan": "Array"
+            },
+            "operations": [
+              "Read",
+              "Create",
+              "Update"
+            ]
+          },
+          {
+            "name": "SearchVector",
+            "wire": "searchVector",
+            "description": "Denormalized text used by full-text search.",
+            "type": "String",
+            "type_kind": "Primitive",
+            "go_type": "*string",
+            "modifiers": [
+              "Nullable"
+            ],
+            "read_only": true,
+            "column": {
+              "table": "lesson",
+              "name": "search_vector",
+              "sql_type": "text",
+              "nullable": true,
+              "scan": "Direct"
+            },
+            "operations": [
+              "Read"
+            ]
+          }
+        ],
+        "endpoints": [
+          {
+            "name": "List",
+            "summary": "List Lessons.",
+            "method": "GET",
+            "path": "",
+            "pattern": "GET /api/v1/lessons",
+            "operation_id": "listLessons",
+            "permission": "lesson.read",
+            "request": {
+              "query_params": [
+                {
+                  "name": "Limit",
+                  "wire": "limit",
+                  "description": "Maximum rows to return.",
+                  "type": "Int",
+                  "type_kind": "Primitive",
+                  "go_type": "int",
+                  "default": "50"
+                },
+                {
+                  "name": "Offset",
+                  "wire": "offset",
+                  "description": "Rows to skip before the first returned row.",
+                  "type": "Int",
+                  "type_kind": "Primitive",
+                  "go_type": "int",
+                  "default": "0"
+                }
+              ]
+            },
+            "responses": [
+              {
+                "status_code": 200,
+                "description": "A page of Lessons.",
+                "content_type": "application/json",
+                "body_object": "LessonListResponse"
+              }
+            ],
+            "errors": [
+              400,
+              401,
+              403,
+              429,
+              500
+            ],
+            "impl": {
+              "kind": "Generated",
+              "repo_method": "List",
+              "service_method": "List",
+              "handler_name": "ListLessons"
+            }
+          },
+          {
+            "name": "Create",
+            "summary": "Create a Lesson.",
+            "method": "POST",
+            "path": "",
+            "pattern": "POST /api/v1/lessons",
+            "operation_id": "createLesson",
+            "permission": "lesson.write",
+            "request": {
+              "content_type": "application/json",
+              "body_params": [
+                {
+                  "name": "Title",
+                  "wire": "title",
+                  "description": "Human-readable name shown in the timetable.",
+                  "type": "String",
+                  "type_kind": "Primitive",
+                  "go_type": "string",
+                  "column": {
+                    "table": "lesson",
+                    "name": "title",
+                    "sql_type": "text",
+                    "nullable": false,
+                    "scan": "Direct"
+                  }
+                },
+                {
+                  "name": "Notes",
+                  "wire": "notes",
+                  "description": "Free-text notes kept alongside the lesson.",
+                  "type": "String",
+                  "type_kind": "Primitive",
+                  "go_type": "*string",
+                  "modifiers": [
+                    "Nullable"
+                  ],
+                  "column": {
+                    "table": "lesson",
+                    "name": "notes",
+                    "sql_type": "text",
+                    "nullable": true,
+                    "scan": "Direct"
+                  }
+                },
+                {
+                  "name": "ManagerEmailAddress",
+                  "wire": "managerEmailAddress",
+                  "description": "Address that notifications about this lesson are sent to.",
+                  "type": "String",
+                  "type_kind": "Primitive",
+                  "go_type": "string",
+                  "format": "EmailAddress",
+                  "column": {
+                    "table": "lesson",
+                    "name": "manager_email",
+                    "sql_type": "text",
+                    "nullable": false,
+                    "scan": "Direct"
+                  }
+                },
+                {
+                  "name": "StartsAt",
+                  "wire": "startsAt",
+                  "description": "When the lesson begins.",
+                  "type": "Timestamp",
+                  "type_kind": "Primitive",
+                  "go_type": "time.Time",
+                  "immutable": true,
+                  "column": {
+                    "table": "lesson",
+                    "name": "starts_at",
+                    "sql_type": "timestamptz",
+                    "nullable": false,
+                    "scan": "Timestamptz"
+                  }
+                },
+                {
+                  "name": "Capacity",
+                  "wire": "capacity",
+                  "description": "Maximum number of participants, or null for no limit.",
+                  "type": "Int",
+                  "type_kind": "Primitive",
+                  "go_type": "*int",
+                  "modifiers": [
+                    "Nullable"
+                  ],
+                  "column": {
+                    "table": "lesson",
+                    "name": "capacity",
+                    "sql_type": "int4",
+                    "nullable": true,
+                    "scan": "Direct"
+                  }
+                },
+                {
+                  "name": "Price",
+                  "wire": "price",
+                  "description": "Amount charged per participant.",
+                  "type": "Decimal",
+                  "type_kind": "Primitive",
+                  "go_type": "*pgtype.Numeric",
+                  "modifiers": [
+                    "Nullable"
+                  ],
+                  "column": {
+                    "table": "lesson",
+                    "name": "price",
+                    "sql_type": "numeric",
+                    "nullable": true,
+                    "scan": "Numeric"
+                  }
+                },
+                {
+                  "name": "Tags",
+                  "wire": "tags",
+                  "description": "Free-form labels used for grouping.",
+                  "type": "String",
+                  "type_kind": "Primitive",
+                  "go_type": "[]string",
+                  "modifiers": [
+                    "Array",
+                    "Nullable"
+                  ],
+                  "column": {
+                    "table": "lesson",
+                    "name": "tags",
+                    "sql_type": "text[]",
+                    "nullable": true,
+                    "scan": "Array"
+                  }
+                }
+              ]
+            },
+            "responses": [
+              {
+                "status_code": 201,
+                "description": "The created Lesson.",
+                "content_type": "application/json",
+                "body_object": "Lesson"
+              }
+            ],
+            "errors": [
+              400,
+              401,
+              403,
+              409,
+              422,
+              429,
+              500
+            ],
+            "impl": {
+              "kind": "Generated",
+              "repo_method": "Create",
+              "service_method": "Create",
+              "handler_name": "CreateLesson"
+            }
+          },
+          {
+            "name": "Search",
+            "summary": "Search Lessons with filters.",
+            "method": "QUERY",
+            "path": "",
+            "pattern": "QUERY /api/v1/lessons",
+            "alias_patterns": [
+              "POST /api/v1/lessons/_search"
+            ],
+            "operation_id": "searchLessons",
+            "permission": "lesson.read",
+            "request": {
+              "content_type": "application/json",
+              "query_params": [
+                {
+                  "name": "Limit",
+                  "wire": "limit",
+                  "description": "Maximum rows to return.",
+                  "type": "Int",
+                  "type_kind": "Primitive",
+                  "go_type": "int",
+                  "default": "50"
+                },
+                {
+                  "name": "Offset",
+                  "wire": "offset",
+                  "description": "Rows to skip before the first returned row.",
+                  "type": "Int",
+                  "type_kind": "Primitive",
+                  "go_type": "int",
+                  "default": "0"
+                }
+              ],
+              "body_params": [
+                {
+                  "name": "Filter",
+                  "wire": "filter",
+                  "description": "Conditions rows must satisfy.",
+                  "type": "LessonFilter",
+                  "type_kind": "Object",
+                  "go_type": "LessonFilter"
+                }
+              ]
+            },
+            "responses": [
+              {
+                "status_code": 200,
+                "description": "A page of matching Lessons.",
+                "content_type": "application/json",
+                "body_object": "LessonListResponse"
+              }
+            ],
+            "errors": [
+              400,
+              401,
+              403,
+              422,
+              429,
+              500
+            ],
+            "impl": {
+              "kind": "Generated",
+              "repo_method": "List",
+              "service_method": "Search",
+              "handler_name": "SearchLessons"
+            }
+          },
+          {
+            "name": "ListDeleted",
+            "summary": "List retired Lessons.",
+            "description": "A deletion stamps the row rather than removing it, so this is what was deleted and can still be brought back. Only rows inside the 30-day restore window appear: past it a row is gone as far as anyone is concerned, so it is not in the trash either.",
+            "method": "GET",
+            "path": "/_deleted",
+            "pattern": "GET /api/v1/lessons/_deleted",
+            "operation_id": "listDeletedLessons",
+            "permission": "lesson.read",
+            "request": {
+              "query_params": [
+                {
+                  "name": "Limit",
+                  "wire": "limit",
+                  "description": "Maximum rows to return.",
+                  "type": "Int",
+                  "type_kind": "Primitive",
+                  "go_type": "int",
+                  "default": "50"
+                },
+                {
+                  "name": "Offset",
+                  "wire": "offset",
+                  "description": "Rows to skip before the first returned row.",
+                  "type": "Int",
+                  "type_kind": "Primitive",
+                  "go_type": "int",
+                  "default": "0"
+                }
+              ]
+            },
+            "responses": [
+              {
+                "status_code": 200,
+                "description": "A page of retired Lessons.",
+                "content_type": "application/json",
+                "body_object": "LessonListResponse"
+              }
+            ],
+            "errors": [
+              400,
+              401,
+              403,
+              429,
+              500
+            ],
+            "impl": {
+              "kind": "Generated",
+              "repo_method": "ListDeleted",
+              "service_method": "ListDeleted",
+              "handler_name": "ListDeletedLessons"
+            }
+          },
+          {
+            "name": "Delete",
+            "summary": "Delete a Lesson.",
+            "description": "The row is retired by stamping a deletion time; it stops appearing in reads but can be restored within the retention window.",
+            "method": "DELETE",
+            "path": "/{id}",
+            "pattern": "DELETE /api/v1/lessons/{id}",
+            "operation_id": "deleteLesson",
+            "permission": "lesson.delete",
+            "request": {
+              "path_params": [
+                {
+                  "name": "ID",
+                  "wire": "id",
+                  "description": "Identifier of the Lesson.",
+                  "type": "UUID",
+                  "type_kind": "Primitive",
+                  "go_type": "uuid.UUID"
+                }
+              ]
+            },
+            "responses": [
+              {
+                "status_code": 204,
+                "description": "The Lesson was deleted."
+              }
+            ],
+            "errors": [
+              400,
+              401,
+              403,
+              404,
+              409,
+              429,
+              500
+            ],
+            "impl": {
+              "kind": "Generated",
+              "repo_method": "Delete",
+              "service_method": "Delete",
+              "handler_name": "DeleteLesson"
+            }
+          },
+          {
+            "name": "Get",
+            "summary": "Fetch one Lesson by identifier.",
+            "method": "GET",
+            "path": "/{id}",
+            "pattern": "GET /api/v1/lessons/{id}",
+            "operation_id": "getLesson",
+            "permission": "lesson.read",
+            "request": {
+              "path_params": [
+                {
+                  "name": "ID",
+                  "wire": "id",
+                  "description": "Identifier of the Lesson.",
+                  "type": "UUID",
+                  "type_kind": "Primitive",
+                  "go_type": "uuid.UUID"
+                }
+              ]
+            },
+            "responses": [
+              {
+                "status_code": 200,
+                "description": "The requested Lesson.",
+                "content_type": "application/json",
+                "body_object": "Lesson"
+              }
+            ],
+            "errors": [
+              400,
+              401,
+              403,
+              404,
+              429,
+              500
+            ],
+            "impl": {
+              "kind": "Generated",
+              "repo_method": "Get",
+              "service_method": "Get",
+              "handler_name": "GetLesson"
+            }
+          },
+          {
+            "name": "Update",
+            "summary": "Update a Lesson.",
+            "description": "Only the fields present in the body are changed. A field set to null is cleared; a field left out is left alone.",
+            "method": "PATCH",
+            "path": "/{id}",
+            "pattern": "PATCH /api/v1/lessons/{id}",
+            "operation_id": "updateLesson",
+            "permission": "lesson.write",
+            "request": {
+              "content_type": "application/json",
+              "path_params": [
+                {
+                  "name": "ID",
+                  "wire": "id",
+                  "description": "Identifier of the Lesson.",
+                  "type": "UUID",
+                  "type_kind": "Primitive",
+                  "go_type": "uuid.UUID"
+                }
+              ],
+              "body_params": [
+                {
+                  "name": "Title",
+                  "wire": "title",
+                  "description": "Human-readable name shown in the timetable.",
+                  "type": "String",
+                  "type_kind": "Primitive",
+                  "go_type": "string",
+                  "column": {
+                    "table": "lesson",
+                    "name": "title",
+                    "sql_type": "text",
+                    "nullable": false,
+                    "scan": "Direct"
+                  }
+                },
+                {
+                  "name": "Notes",
+                  "wire": "notes",
+                  "description": "Free-text notes kept alongside the lesson.",
+                  "type": "String",
+                  "type_kind": "Primitive",
+                  "go_type": "*string",
+                  "modifiers": [
+                    "Nullable"
+                  ],
+                  "column": {
+                    "table": "lesson",
+                    "name": "notes",
+                    "sql_type": "text",
+                    "nullable": true,
+                    "scan": "Direct"
+                  }
+                },
+                {
+                  "name": "Status",
+                  "wire": "status",
+                  "description": "Lifecycle state of the lesson.",
+                  "type": "LessonStatus",
+                  "type_kind": "Enum",
+                  "go_type": "LessonStatus",
+                  "column": {
+                    "table": "lesson",
+                    "name": "status",
+                    "sql_type": "lesson_status",
+                    "nullable": false,
+                    "scan": "EnumText"
+                  }
+                },
+                {
+                  "name": "ManagerEmailAddress",
+                  "wire": "managerEmailAddress",
+                  "description": "Address that notifications about this lesson are sent to.",
+                  "type": "String",
+                  "type_kind": "Primitive",
+                  "go_type": "string",
+                  "format": "EmailAddress",
+                  "column": {
+                    "table": "lesson",
+                    "name": "manager_email",
+                    "sql_type": "text",
+                    "nullable": false,
+                    "scan": "Direct"
+                  }
+                },
+                {
+                  "name": "Capacity",
+                  "wire": "capacity",
+                  "description": "Maximum number of participants, or null for no limit.",
+                  "type": "Int",
+                  "type_kind": "Primitive",
+                  "go_type": "*int",
+                  "modifiers": [
+                    "Nullable"
+                  ],
+                  "column": {
+                    "table": "lesson",
+                    "name": "capacity",
+                    "sql_type": "int4",
+                    "nullable": true,
+                    "scan": "Direct"
+                  }
+                },
+                {
+                  "name": "Price",
+                  "wire": "price",
+                  "description": "Amount charged per participant.",
+                  "type": "Decimal",
+                  "type_kind": "Primitive",
+                  "go_type": "*pgtype.Numeric",
+                  "modifiers": [
+                    "Nullable"
+                  ],
+                  "column": {
+                    "table": "lesson",
+                    "name": "price",
+                    "sql_type": "numeric",
+                    "nullable": true,
+                    "scan": "Numeric"
+                  }
+                },
+                {
+                  "name": "Tags",
+                  "wire": "tags",
+                  "description": "Free-form labels used for grouping.",
+                  "type": "String",
+                  "type_kind": "Primitive",
+                  "go_type": "[]string",
+                  "modifiers": [
+                    "Array",
+                    "Nullable"
+                  ],
+                  "column": {
+                    "table": "lesson",
+                    "name": "tags",
+                    "sql_type": "text[]",
+                    "nullable": true,
+                    "scan": "Array"
+                  }
+                }
+              ]
+            },
+            "responses": [
+              {
+                "status_code": 200,
+                "description": "The updated Lesson.",
+                "content_type": "application/json",
+                "body_object": "Lesson"
+              }
+            ],
+            "errors": [
+              400,
+              401,
+              403,
+              404,
+              409,
+              422,
+              429,
+              500
+            ],
+            "impl": {
+              "kind": "Generated",
+              "repo_method": "Update",
+              "service_method": "Update",
+              "handler_name": "UpdateLesson"
+            }
+          },
+          {
+            "name": "Publish",
+            "summary": "Publish the lesson to its participants.",
+            "method": "POST",
+            "path": "/{id}/_publish",
+            "pattern": "POST /api/v1/lessons/{id}/_publish",
+            "operation_id": "publishLesson",
+            "permission": "lesson.publish",
+            "request": {
+              "content_type": "application/json",
+              "path_params": [
+                {
+                  "name": "ID",
+                  "wire": "id",
+                  "description": "The lesson to publish.",
+                  "type": "UUID",
+                  "type_kind": "Primitive",
+                  "go_type": "uuid.UUID"
+                }
+              ],
+              "body_params": [
+                {
+                  "name": "NotifyGuardians",
+                  "wire": "notifyGuardians",
+                  "description": "Whether guardians are notified as well.",
+                  "type": "Bool",
+                  "type_kind": "Primitive",
+                  "go_type": "bool",
+                  "default": "true"
+                }
+              ]
+            },
+            "responses": [
+              {
+                "status_code": 200,
+                "description": "The published lesson.",
+                "content_type": "application/json",
+                "body_object": "Lesson"
+              },
+              {
+                "status_code": 409,
+                "description": "The lesson was not in the Planned state.",
+                "content_type": "application/json",
+                "body_object": "Error"
+              }
+            ],
+            "errors": [
+              400,
+              401,
+              403,
+              404,
+              429,
+              500
+            ],
+            "impl": {
+              "kind": "Custom",
+              "service_method": "Publish",
+              "handler_name": "PublishLesson"
+            }
+          },
+          {
+            "name": "Restore",
+            "summary": "Bring a retired Lesson back.",
+            "description": "The deletion stamp is cleared and the row appears in reads again. It works for 30 days after the deletion; past that the row is no longer eligible and this answers 409.\n\nRestoring a row that was never deleted is not an error. It is already in the state the caller asked for, and answering otherwise would make a retry of a request whose response went missing look like a failure.\n\nThe request carries no fields. What to do when the world has moved on while the row was retired — a unique value taken by something created since — is the application's decision, and it is made in the restore hook: refuse, or change the row so that it fits.\n\nEvery rule then runs against whatever the hook settled on, not only the ones for fields it touched. The row was not live, so nothing about it has been checked against the world it is returning to.",
+            "method": "POST",
+            "path": "/{id}/_restore",
+            "pattern": "POST /api/v1/lessons/{id}/_restore",
+            "operation_id": "restoreLesson",
+            "permission": "lesson.write",
+            "request": {
+              "path_params": [
+                {
+                  "name": "ID",
+                  "wire": "id",
+                  "description": "Identifier of the Lesson.",
+                  "type": "UUID",
+                  "type_kind": "Primitive",
+                  "go_type": "uuid.UUID"
+                }
+              ]
+            },
+            "responses": [
+              {
+                "status_code": 200,
+                "description": "The restored Lesson.",
+                "content_type": "application/json",
+                "body_object": "Lesson"
+              }
+            ],
+            "errors": [
+              400,
+              401,
+              403,
+              404,
+              409,
+              422,
+              429,
+              500
+            ],
+            "impl": {
+              "kind": "Generated",
+              "repo_method": "Restore",
+              "service_method": "Restore",
+              "handler_name": "RestoreLesson"
+            }
+          },
+          {
+            "name": "Revert",
+            "summary": "Put a Lesson back to one of its previous versions.",
+            "description": "The version is replayed through the ordinary update path rather than written over the row, so the state being replaced is itself snapshotted first and every rule an update runs still runs. Reverting is undoable, and a value that would be refused now is still refused.",
+            "method": "POST",
+            "path": "/{id}/_revert",
+            "pattern": "POST /api/v1/lessons/{id}/_revert",
+            "operation_id": "revertLesson",
+            "permission": "lesson.write",
+            "request": {
+              "content_type": "application/json",
+              "path_params": [
+                {
+                  "name": "ID",
+                  "wire": "id",
+                  "description": "Identifier of the Lesson.",
+                  "type": "UUID",
+                  "type_kind": "Primitive",
+                  "go_type": "uuid.UUID"
+                }
+              ],
+              "body_params": [
+                {
+                  "name": "VersionID",
+                  "wire": "versionId",
+                  "description": "The version to put back, from the Lesson's history.",
+                  "type": "UUID",
+                  "type_kind": "Primitive",
+                  "go_type": "uuid.UUID"
+                }
+              ]
+            },
+            "responses": [
+              {
+                "status_code": 200,
+                "description": "The Lesson, as of the version replayed.",
+                "content_type": "application/json",
+                "body_object": "Lesson"
+              }
+            ],
+            "errors": [
+              400,
+              401,
+              403,
+              404,
+              409,
+              422,
+              429,
+              500
+            ],
+            "impl": {
+              "kind": "Generated",
+              "repo_method": "Revert",
+              "service_method": "Revert",
+              "handler_name": "RevertLesson"
+            }
+          },
+          {
+            "name": "Versions",
+            "summary": "List a Lesson's previous versions.",
+            "description": "Every update copies the row as it was before writing the change, so this is the row's history: newest first, and never the live row itself.\n\nThese do not appear in ordinary reads. A version answers Get by its own identifier, but it is filtered out of List and Search, so history does not turn up in a listing.",
+            "method": "GET",
+            "path": "/{id}/_versions",
+            "pattern": "GET /api/v1/lessons/{id}/_versions",
+            "operation_id": "versionsOfLesson",
+            "permission": "lesson.read",
+            "request": {
+              "path_params": [
+                {
+                  "name": "ID",
+                  "wire": "id",
+                  "description": "Identifier of the Lesson.",
+                  "type": "UUID",
+                  "type_kind": "Primitive",
+                  "go_type": "uuid.UUID"
+                }
+              ]
+            },
+            "responses": [
+              {
+                "status_code": 200,
+                "description": "The versions of the Lesson, newest first.",
+                "content_type": "application/json",
+                "body_object": "LessonListResponse"
+              }
+            ],
+            "errors": [
+              400,
+              401,
+              403,
+              404,
+              429,
+              500
+            ],
+            "impl": {
+              "kind": "Generated",
+              "repo_method": "ListSnapshots",
+              "service_method": "Versions",
+              "handler_name": "VersionsOfLesson"
+            }
+          }
+        ],
+        "storage": {
+          "table": "lesson",
+          "primary_key": [
+            "id"
+          ],
+          "tenant": {
+            "table": "lesson",
+            "name": "tenant_id",
+            "sql_type": "uuid",
+            "nullable": false,
+            "scan": "UUID"
+          },
+          "audit": {
+            "created_at": {
+              "table": "lesson",
+              "name": "created_at",
+              "sql_type": "timestamptz",
+              "nullable": false,
+              "scan": "Timestamptz"
+            },
+            "created_by": {
+              "table": "lesson",
+              "name": "created_by_account_id",
+              "sql_type": "uuid",
+              "nullable": true,
+              "scan": "UUID"
+            },
+            "updated_at": {
+              "table": "lesson",
+              "name": "updated_at",
+              "sql_type": "timestamptz",
+              "nullable": true,
+              "scan": "Timestamptz"
+            },
+            "updated_by": {
+              "table": "lesson",
+              "name": "updated_by_account_id",
+              "sql_type": "uuid",
+              "nullable": true,
+              "scan": "UUID"
+            },
+            "deleted_at": {
+              "table": "lesson",
+              "name": "deleted_at",
+              "sql_type": "timestamptz",
+              "nullable": true,
+              "scan": "Timestamptz"
+            },
+            "deleted_by": {
+              "table": "lesson",
+              "name": "deleted_by_account_id",
+              "sql_type": "uuid",
+              "nullable": true,
+              "scan": "UUID"
+            }
+          },
+          "soft_delete": {
+            "column": {
+              "table": "lesson",
+              "name": "deleted_at",
+              "sql_type": "timestamptz",
+              "nullable": true,
+              "scan": "Timestamptz"
+            },
+            "actor": {
+              "table": "lesson",
+              "name": "deleted_by_account_id",
+              "sql_type": "uuid",
+              "nullable": true,
+              "scan": "UUID"
+            },
+            "restore_window_days": 30
+          },
+          "snapshot": {
+            "version_type": {
+              "table": "lesson",
+              "name": "version_type",
+              "sql_type": "lesson_version_type",
+              "nullable": false,
+              "scan": "EnumText"
+            },
+            "from_id": {
+              "table": "lesson",
+              "name": "snapshot_from_lesson_id",
+              "sql_type": "uuid",
+              "nullable": true,
+              "scan": "UUID"
+            },
+            "from_at": {
+              "table": "lesson",
+              "name": "snapshot_from_lesson_at",
+              "sql_type": "timestamptz",
+              "nullable": true,
+              "scan": "Timestamptz"
+            },
+            "ignore_columns": [
+              "notes"
+            ]
+          },
+          "default_order": [
+            {
+              "column": "starts_at",
+              "desc": true
+            },
+            {
+              "column": "id"
+            }
+          ],
+          "relations": [
+            {
+              "name": "SnapshotFromLesson",
+              "kind": "BelongsTo",
+              "target": "Lesson",
+              "local_column": "snapshot_from_lesson_id",
+              "foreign_table": "lesson",
+              "foreign_column": "id"
+            }
+          ],
+          "sortable": [
+            "id",
+            "tenant_id",
+            "created_at",
+            "created_by_account_id",
+            "updated_at",
+            "updated_by_account_id",
+            "deleted_at",
+            "deleted_by_account_id",
+            "version_type",
+            "snapshot_from_lesson_id",
+            "snapshot_from_lesson_at",
+            "title",
+            "notes",
+            "status",
+            "manager_email",
+            "starts_at",
+            "capacity",
+            "price",
+            "tags",
+            "row_version"
+          ],
+          "filterable": [
+            "id",
+            "tenant_id",
+            "created_at",
+            "created_by_account_id",
+            "updated_at",
+            "updated_by_account_id",
+            "deleted_at",
+            "deleted_by_account_id",
+            "version_type",
+            "snapshot_from_lesson_id",
+            "snapshot_from_lesson_at",
+            "title",
+            "notes",
+            "status",
+            "manager_email",
+            "starts_at",
+            "capacity",
+            "price",
+            "tags",
+            "row_version",
+            "search_vector"
+          ]
+        },
+        "electric": {
+          "auth": "tenant",
+          "path": "/electric/lesson",
+          "params": [
+            {
+              "name": "matchday",
+              "field": "Matchday",
+              "type": "Int",
+              "optional": true,
+              "description": "Restrict the shape to one matchday."
+            },
+            {
+              "name": "status",
+              "field": "Status",
+              "type": "String",
+              "description": "Only lessons in this state."
+            }
+          ]
+        }
+      }
+    ],
+    "permissions": [
+      {
+        "key": "lesson.delete",
+        "name": "Delete lessons",
+        "description": "Delete lessons — A single scheduled teaching occasion.",
+        "resource": "Lesson",
+        "action": "delete"
+      },
+      {
+        "key": "lesson.publish",
+        "name": "Publish lesson",
+        "description": "Publish the lesson to its participants.",
+        "resource": "Lesson",
+        "action": "publish"
+      },
+      {
+        "key": "lesson.read",
+        "name": "Read lessons",
+        "description": "Read lessons — A single scheduled teaching occasion.",
+        "resource": "Lesson",
+        "action": "read"
+      },
+      {
+        "key": "lesson.write",
+        "name": "Write lessons",
+        "description": "Create and change lessons — A single scheduled teaching occasion.",
+        "resource": "Lesson",
+        "action": "write"
+      }
+    ]
+  },
+  "schema": {
+    "name": "public",
+    "tables": [
+      {
+        "name": "lesson",
+        "comment": "A single scheduled teaching occasion.",
+        "kind": "Base",
+        "columns": [
+          {
+            "name": "id",
+            "comment": "Unique identifier for this row.",
+            "comment_source": "auto",
+            "sql_type": "uuid",
+            "udt_name": "uuid",
+            "nullable": false,
+            "ordinal": 1,
+            "is_primary_key": true
+          },
+          {
+            "name": "tenant_id",
+            "comment": "Tenant this row belongs to. Every query is scoped by it.",
+            "comment_source": "auto",
+            "sql_type": "uuid",
+            "udt_name": "uuid",
+            "nullable": false,
+            "ordinal": 2
+          },
+          {
+            "name": "created_at",
+            "comment": "When this row was created. Set automatically and never changes.",
+            "comment_source": "auto",
+            "sql_type": "timestamptz",
+            "udt_name": "timestamptz",
+            "nullable": false,
+            "ordinal": 3
+          },
+          {
+            "name": "created_by_account_id",
+            "comment": "Account that created this row, taken from the request's claims.",
+            "comment_source": "auto",
+            "sql_type": "uuid",
+            "udt_name": "uuid",
+            "nullable": true,
+            "ordinal": 4
+          },
+          {
+            "name": "updated_at",
+            "comment": "When this row was last updated. Set automatically on every update.",
+            "comment_source": "auto",
+            "sql_type": "timestamptz",
+            "udt_name": "timestamptz",
+            "nullable": true,
+            "ordinal": 5
+          },
+          {
+            "name": "updated_by_account_id",
+            "comment": "Account that last updated this row, taken from the request's claims.",
+            "comment_source": "auto",
+            "sql_type": "uuid",
+            "udt_name": "uuid",
+            "nullable": true,
+            "ordinal": 6
+          },
+          {
+            "name": "deleted_at",
+            "comment": "When this row was soft-deleted. Null while the row is live.",
+            "comment_source": "auto",
+            "sql_type": "timestamptz",
+            "udt_name": "timestamptz",
+            "nullable": true,
+            "ordinal": 7
+          },
+          {
+            "name": "deleted_by_account_id",
+            "comment": "Account that soft-deleted this row, taken from the request's claims.",
+            "comment_source": "auto",
+            "sql_type": "uuid",
+            "udt_name": "uuid",
+            "nullable": true,
+            "ordinal": 8
+          },
+          {
+            "name": "version_type",
+            "comment": "Whether this row is the live version or an immutable snapshot of a previous one.",
+            "comment_source": "auto",
+            "sql_type": "lesson_version_type",
+            "udt_name": "lesson_version_type",
+            "nullable": false,
+            "ordinal": 9,
+            "enum_type": "lesson_version_type"
+          },
+          {
+            "name": "snapshot_from_lesson_id",
+            "comment": "The row this snapshot was copied from. Null on live rows.",
+            "comment_source": "auto",
+            "sql_type": "uuid",
+            "udt_name": "uuid",
+            "nullable": true,
+            "ordinal": 10,
+            "foreign_key": {
+              "table": "lesson",
+              "column": "id"
+            }
+          },
+          {
+            "name": "snapshot_from_lesson_at",
+            "comment": "The source row's last-updated time at the moment this snapshot was taken. This identifies the version captured, not when the copy was made.",
+            "comment_source": "auto",
+            "sql_type": "timestamptz",
+            "udt_name": "timestamptz",
+            "nullable": true,
+            "ordinal": 11
+          },
+          {
+            "name": "title",
+            "comment": "Human-readable name shown in the timetable.",
+            "comment_source": "config",
+            "sql_type": "text",
+            "udt_name": "text",
+            "nullable": false,
+            "ordinal": 12
+          },
+          {
+            "name": "notes",
+            "comment": "Free-text notes kept alongside the lesson.",
+            "comment_source": "config",
+            "sql_type": "text",
+            "udt_name": "text",
+            "nullable": true,
+            "ordinal": 13
+          },
+          {
+            "name": "status",
+            "comment": "Lifecycle state of the lesson.",
+            "comment_source": "config",
+            "sql_type": "lesson_status",
+            "udt_name": "lesson_status",
+            "nullable": false,
+            "ordinal": 14,
+            "enum_type": "lesson_status"
+          },
+          {
+            "name": "manager_email",
+            "comment": "Address that notifications about this lesson are sent to.",
+            "comment_source": "config",
+            "sql_type": "text",
+            "udt_name": "text",
+            "nullable": false,
+            "ordinal": 15
+          },
+          {
+            "name": "starts_at",
+            "comment": "When the lesson begins.",
+            "comment_source": "config",
+            "sql_type": "timestamptz",
+            "udt_name": "timestamptz",
+            "nullable": false,
+            "ordinal": 16
+          },
+          {
+            "name": "capacity",
+            "comment": "Maximum number of participants, or null for no limit.",
+            "comment_source": "config",
+            "sql_type": "int4",
+            "udt_name": "int4",
+            "nullable": true,
+            "ordinal": 17
+          },
+          {
+            "name": "price",
+            "comment": "Amount charged per participant.",
+            "comment_source": "config",
+            "sql_type": "numeric",
+            "udt_name": "numeric",
+            "nullable": true,
+            "numeric_precision": 10,
+            "numeric_scale": 2,
+            "ordinal": 18
+          },
+          {
+            "name": "tags",
+            "comment": "Free-form labels used for grouping.",
+            "comment_source": "config",
+            "sql_type": "text[]",
+            "udt_name": "_text",
+            "nullable": true,
+            "ordinal": 19,
+            "array_elem": "text"
+          },
+          {
+            "name": "row_version",
+            "comment": "Optimistic-concurrency counter maintained by the database.",
+            "comment_source": "config",
+            "sql_type": "int8",
+            "udt_name": "int8",
+            "nullable": false,
+            "has_default": true,
+            "default": "1",
+            "ordinal": 20
+          },
+          {
+            "name": "search_vector",
+            "comment": "Denormalized text used by full-text search.",
+            "comment_source": "config",
+            "sql_type": "text",
+            "udt_name": "text",
+            "nullable": true,
+            "generated": true,
+            "ordinal": 21
+          }
+        ],
+        "primary_key": [
+          "id"
+        ],
+        "indexes": [
+          {
+            "name": "lesson_pkey",
+            "columns": [
+              "id"
+            ],
+            "unique": true,
+            "method": "btree"
+          },
+          {
+            "name": "lesson_snapshot_idx",
+            "columns": [
+              "snapshot_from_lesson_id"
+            ],
+            "method": "btree"
+          },
+          {
+            "name": "lesson_tenant_starts_idx",
+            "columns": [
+              "tenant_id",
+              "starts_at"
+            ],
+            "method": "btree"
+          }
+        ],
+        "foreign_keys": [
+          {
+            "name": "lesson_snapshot_fk",
+            "columns": [
+              "snapshot_from_lesson_id"
+            ],
+            "foreign_table": "lesson",
+            "foreign_columns": [
+              "id"
+            ]
+          }
+        ],
+        "checks": [
+          {
+            "name": "lesson_version_type_check",
+            "expression": "((version_type = 'Original' AND snapshot_from_lesson_id IS NULL) OR (version_type = 'Snapshot' AND snapshot_from_lesson_id IS NOT NULL))"
+          }
+        ]
+      }
+    ],
+    "enums": [
+      {
+        "name": "lesson_status",
+        "values": [
+          {
+            "value": "planned"
+          },
+          {
+            "value": "in_progress"
+          },
+          {
+            "value": "completed"
+          }
+        ]
+      },
+      {
+        "name": "lesson_version_type",
+        "values": [
+          {
+            "value": "Original"
+          },
+          {
+            "value": "Snapshot"
+          }
+        ]
+      }
+    ]
+  },
+  "valid": true
+}
