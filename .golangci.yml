@@ -1,0 +1,69 @@
+# The linter configuration, shared by every module in the workspace:
+# golangci-lint searches upward from the directory it runs in, so one file at
+# the root covers `.`, `runtime`, `auth`, `migrate` and `rigclient`.
+#
+# The set is deliberately small. A check earns its place by catching something
+# a reviewer would have asked about anyway — a leaked response body, an error
+# compared with == across a wrap — not by having an opinion about layout.
+version: "2"
+
+run:
+  modules-download-mode: readonly
+  # Otherwise the suite that needs a container is invisible to every check, and
+  # `unused` reports the helpers that only it calls.
+  build-tags:
+    - docker
+
+linters:
+  # errcheck, govet, ineffassign, staticcheck, unused.
+  default: standard
+  enable:
+    - bodyclose      # an HTTP response body that is never closed leaks a connection
+    - errorlint      # errors compared or type-asserted through a wrap
+    - rowserrcheck   # rows.Err() after a range over rows
+    - sqlclosecheck  # rows and statements closed on every path
+    - nolintlint     # a //nolint has to say which linter, and why
+
+  settings:
+    nolintlint:
+      # A silenced check has to name what it silenced and say why. Without
+      # both, the comment outlives the reason and nobody dares remove it.
+      require-explanation: true
+      require-specific: true
+
+    staticcheck:
+      # The defaults, less two of the "quickfix" suggestions. QF1001 rewrites
+      # `!(c >= '0' && c <= '9')` — the clearest way to say "not a digit" — into
+      # its De Morgan twin, and QF1002 turns a `switch { case x == y: }` into a
+      # tagged switch even where the tag is one of several things being asked
+      # about. Both are opinions about how a condition reads.
+      checks:
+        - all
+        - -ST1000
+        - -ST1003
+        - -ST1016
+        - -ST1020
+        - -ST1021
+        - -ST1022
+        - -QF1001
+        - -QF1002
+
+  exclusions:
+    # Generated files are rewritten on every run, so a finding in one is a
+    # finding about the generator, and it belongs there.
+    generated: lax
+    presets:
+      # The long-standing default: a failed write to stdout, or a Close on
+      # something opened for reading, has nowhere useful to be reported.
+      - std-error-handling
+    rules:
+      # A test that ignores an error usually fails on the next line anyway, and
+      # the noise drowns the cases where it matters.
+      #
+      # bodyclose is excluded for a different reason: a test helper that returns
+      # a response closes it in t.Cleanup, and the linter cannot see that from
+      # the call site — every report so far has been about a body that is closed.
+      - path: _test\.go
+        linters:
+          - errcheck
+          - bodyclose

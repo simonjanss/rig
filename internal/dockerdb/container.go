@@ -27,6 +27,20 @@ type Config struct {
 	// Settings are extra server parameters, without the -c. Live sync needs
 	// wal_level=logical, which cannot be set after the server has started.
 	Settings []string
+
+	// Bind is the host address the port is published on. Empty means
+	// 127.0.0.1, which is the right answer for a database nobody else should
+	// reach. A test that puts another container in front of this one needs
+	// 0.0.0.0 instead: on Linux, a sibling container arrives over the bridge,
+	// and a loopback-only publish refuses it.
+	Bind string
+}
+
+func (c Config) bind() string {
+	if c.Bind != "" {
+		return c.Bind
+	}
+	return "127.0.0.1"
 }
 
 func (c Config) startWait() time.Duration {
@@ -214,7 +228,7 @@ func (d *DB) create(ctx context.Context) error {
 	args := []string{
 		"run", "--detach",
 		"--name", d.cfg.Name,
-		"--publish", fmt.Sprintf("127.0.0.1:%d:5432", d.cfg.Port),
+		"--publish", fmt.Sprintf("%s:%d:5432", d.cfg.bind(), d.cfg.Port),
 		"--env", "POSTGRES_DB=" + d.cfg.Database,
 		"--env", "POSTGRES_USER=" + d.cfg.User,
 		"--env", "POSTGRES_PASSWORD=" + d.cfg.Password,

@@ -434,19 +434,6 @@ func contains(haystack []string, needle string) bool {
 	return false
 }
 
-func between(s, start, end string) (string, bool) {
-	i := strings.Index(s, start)
-	if i < 0 {
-		return "", false
-	}
-	rest := s[i+len(start):]
-	j := strings.Index(rest, end)
-	if j < 0 {
-		return "", false
-	}
-	return rest[:j], true
-}
-
 // Every instant a repository hands back is in UTC, and "every" has to mean every:
 // pgx decodes a timestamptz into the host's zone, and it decodes the elements of
 // a timestamptz[] the same way.
