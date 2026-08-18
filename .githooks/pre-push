@@ -1,0 +1,45 @@
+#!/bin/sh
+# Run every check CI runs, before the push rather than after it. CI itself only
+# watches main now, so this hook is what stands between a branch and a red main.
+#
+# Installed by `make hooks`, which points core.hooksPath here. Skipped by
+# `git push --no-verify`.
+set -eu
+
+# Hooks run from an unspecified directory, and make needs the repository root.
+cd "$(git rev-parse --show-toplevel)"
+
+# git feeds one line per ref on stdin: <local ref> <local sha> <remote ref>
+# <remote sha>. An all-zero local sha means the ref is being deleted, and
+# deleting a branch cannot break a build. Read it all either way, so git is
+# never writing into a closed pipe.
+deleting_only=yes
+while read -r _local_ref local_sha _remote_ref _remote_sha; do
+	case "$local_sha" in
+	*[!0]*) deleting_only=no ;;
+	esac
+done
+
+if [ "$deleting_only" = yes ]; then
+	exit 0
+fi
+
+echo "pre-push: make check (Docker suite and examples included; this takes a few minutes)"
+
+if make check; then
+	exit 0
+fi
+
+cat >&2 <<'EOF'
+
+pre-push: a check failed, so nothing was pushed.
+
+  make check                  re-runs all of them
+  make fmt vet test           the usual fixes
+  git push --no-verify        pushes anyway
+
+If it was `deps` that failed, check the tree is clean first: it runs
+`go mod tidy` and then fails on anything that differs from what is committed,
+untracked files included, so it will report uncommitted work as a failure.
+EOF
+exit 1

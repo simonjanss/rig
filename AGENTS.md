@@ -2,15 +2,30 @@
 
 The checks, and which ones need Docker. `make help` lists every target.
 
-## Before committing
+## Before pushing
+
+```bash
+make hooks   # once per clone: installs the pre-push hook
+make check   # what that hook runs, and what CI runs
+```
+
+`make check` is every check in this file, cheapest first:
 
 ```bash
 make fmt-check   # gofmt; `make fmt` rewrites
 make vet
-make lint        # golangci-lint, pinned, installed into ./bin
+make build
 make test        # the fast suite
 make deps        # go mod tidy, then fail if anything changed
+make lint        # golangci-lint, pinned, installed into ./bin
+make vulncheck   # govulncheck, likewise
+make test-docker # needs Docker
+make examples    # needs Docker; a few minutes on its own
 ```
+
+So a push takes a few minutes and needs Docker or Podman running. That is the
+trade: CI no longer watches branches, so this is where a break gets caught.
+`git push --no-verify` skips the hook when you need it to.
 
 `make deps` fails on any `go.mod` or `go.sum` that differs from what is
 committed, untracked files included, so run it with the tree clean or it will
@@ -18,9 +33,9 @@ report your own work in progress back to you. When it does fire on a clean
 tree, `make tidy` produced the change: commit it.
 
 Each of these runs per module — the repository is a Go workspace, and `./...`
-names one module's packages and nothing else. There is no target that lints or
-tests "everything" in one invocation, and adding one would quietly skip nine
-modules out of ten.
+names one module's packages and nothing else. `make check` is a list of those
+per-module targets and nothing more: a target that ran `./...` once and called
+it "everything" would quietly skip nine modules out of ten.
 
 ## The ones that need Docker
 
@@ -54,6 +69,12 @@ that emitted it. When a golden file changes because the change was intended,
 
 ## CI
 
-`.github/workflows/rig.yaml` runs all of the above on every pull request and on
-every push to `main`. Nothing there is unique to CI: each job is one of the make
+`.github/workflows/rig.yaml` runs all of the above on every push to `main`, and
+on nothing else. Branches and pull requests are covered by the pre-push hook in
+`.githooks/`, which runs the same `make check` on the machine that wrote the
+commit — so a break is caught before the push rather than an hour later in a
+runner. Nothing in the workflow is unique to CI: each job is one of the make
 targets, so a check that fails there fails the same way locally.
+
+A red `main` therefore means the hook was skipped, or was never installed:
+`make hooks`.
