@@ -29,6 +29,11 @@ Next:
   download endpoint per file column, nested under the row that owns them. Before
   M6 because it adds two error codes, and the code set is baked into an OpenAPI
   document and a TypeScript union the moment those ship.
+- **M5.11** — the auth log and who is signed in: a read endpoint over
+  `rig_auth_log`, and `GET /auth/sessions` widened past the caller's own. The
+  events have been recorded since M4 and nothing has ever served them. (M5.10 is
+  `go-client`, on a branch; if that lands second this number moves, the way files
+  moved from M5.8.)
 
 ### Modules
 
@@ -1414,6 +1419,240 @@ only here.
 
 The alternative is one milestone that tells a complete story, at the price of a diff
 nobody can review in one sitting. Say which you would rather have.
+
+---
+
+## M5.11 — the auth log and who is signed in
+
+**Goal.** A tenant can read its own authentication trail and see every session
+open inside it, and a person can read their own, through endpoints rig serves
+rather than a query the application writes.
+
+`rig_auth_log` has been recording since M4 and it records nearly everything: 22
+events across sign-in, lockout, logout, refresh, token replay, key
+authentication, impersonation, invitation and tenant switch, written from about
+twenty call sites in `account`, `session`, `apikey` and `oauth`. **Nothing reads
+it.** There is no route for it in `authhttp`, and the only reader in the
+repository is a hand-written `SELECT … FROM rig_auth_log WHERE tenant_id = $1
+ORDER BY created_at DESC LIMIT 40` in the demo's web page, whose own comment
+says what the situation is: `auth.expose: [account, auth_log]` "would give them
+a REST resource with filters and paging, and this is the other answer — a query,
+in the application, for a page that needs one." Two answers, and neither of them
+is rig serving the thing rig collected.
+
+Sessions are half-served rather than unserved. `GET /auth/sessions` and
+`DELETE /auth/sessions/{id}` exist and both are yours only — `Sessions.List(ctx,
+tok.TenantID, tok.AccountID)`, with a deliberate 404 for anything that is not.
+So a session can be ended by the person holding it and by nobody else, which is
+the wrong answer the first time somebody leaves the company with a phone in
+their pocket.
+
+### `scope` is the whole design
+
+`runtime/tenancy/scope.go` already settled this argument for every generated
+resource, and its doc comment makes the case better than a restatement would:
+one endpoint that quietly returns different sets to different callers, or two
+endpoints where a client written against the narrow one silently keeps working
+when its credential is widened — "both hide the width of the answer."
+
+So this milestone adds **one** route and **widens two**, rather than growing an
+administrative surface beside the end-user one:
+
+```
+GET    /auth/audit                      your own events        no permission
+GET    /auth/audit?scope=all            the tenant's events    authlog.read.all
+GET    /auth/sessions?scope=all         every session open     session.read.all
+DELETE /auth/sessions/{id}?scope=all    end somebody else's    session.revoke.all
+```
+
+The self-service half falls out for nothing. `ScopeOwn` on the log is
+`account_id = $me`, which is "where have I signed in from, and did anything fail"
+— a screen every product eventually wants and which would otherwise be a second
+endpoint with a second shape and its own bugs.
+
+The alternative is `/auth/admin/*`, and it is worth naming because it is what
+most systems do. It would be the first split surface in a package that has
+deliberately kept one mux, one `Authorization` header and one `Claims` type, and
+it would need its own answer to the existence-oracle question — which `scope`
+answered once, loudly, for everything.
+
+Three keys join `authhttp.Permissions()`, beside `apikey.manage` and
+`account.impersonate`, so a reconcile picks them up without an application
+listing them.
+
+> **The widening is the permission, not the identifier.** `DELETE
+> /auth/sessions/{id}` answers 404 today for a session that is not yours, and it
+> must keep answering 404 for a caller who lacks `session.revoke.all` — the same
+> 404, for a real session and a made-up one alike. A 403 there would confirm the
+> session exists, which is the one thing the current handler's comment says it is
+> avoiding.
+
+### The reader is not the writer
+
+`authlog.Log` is `Write(ctx, Entry)` and returns nothing, on purpose: an entry
+describing a failed login must never fail the login, and `authpg` writes outside
+the caller's transaction so the row survives the rollback that noticed it. A
+reader cannot live under that contract. A query that could not reach the database
+has to say so, and a reader bolted onto `Log` would be one interface where half
+the methods report failure and half swallow it.
+
+So `authlog` gains a separate `Reader`, for the reason `authhttp`'s identity
+reader already gives about being separate from `Claims`: the two answer different
+questions, and "a function that could return either would eventually be used
+where only one of them is safe."
+
+`session.Store` gains a tenant-wide `Families` alongside the account one rather
+than a nullable account argument, for the same reason and with the same shape.
+`authpg` implements both.
+
+### Strictly `tenant_id = $1`, and the hole stays
+
+`rig_auth_log.tenant_id` is the one nullable tenant column in the foundation.
+The reason is in the migration: an attempt that resolved to no tenant is a real
+event and the one a rate limit needs most — somebody guessing an address nobody
+has, or signing in without naming a tenant.
+
+Those rows stay invisible to everybody. The query is `tenant_id = $1` and nothing
+else. The tempting widening is to match on the email address instead, so a tenant
+sees failed attempts against its people's addresses even when the tenant was
+never named — and it hands tenant A a record of tenant B's people typing their
+own addresses into a login form, keyed on an address that resolved to nobody.
+
+**The hole is narrower than it sounds and should be documented rather than
+closed.** `failLogin` stamps the tenant whenever there was one, so what a tenant
+cannot see is attempts that named no tenant at all and attempts against addresses
+with no account anywhere. That is exactly the population a single tenant has no
+standing to see, and the place to fix a global brute-force view is not a
+per-tenant endpoint.
+
+### The first paginated route in `authhttp`
+
+Every `/auth/*` list today returns a bare `{"data": […]}` — no limit, no offset,
+no total. `listAPIKeys` loads the tenant's keys and filters them in Go, and the
+comment justifying that says "a tenant's keys are a handful of rows," which is
+true of keys, invitations and tenants and is the reason the shape has survived.
+
+An auth log is millions of rows and cannot borrow the argument. So `/auth/audit`
+answers `{data, pagination}` with the numbers the generated endpoints already
+use — `DefaultLimit` 50 and `MaxLimit` 500 from `internal/compile/builtin.go`,
+clamped by `query.Page.Clamp`, whose own comment is the reason ("an unbounded
+list is a production incident waiting"). The other four stay exactly as they are.
+Two shapes in one package costs a sentence in the docs; paginating four endpoints
+that will never need it costs four handlers and four sets of tests.
+
+Filters are `accountId`, `event`, `outcome`, `since` and `until`.
+
+> **The indexes on this table are shaped for counting, not browsing**, and the
+> migration says so. `(tenant_id, created_at DESC)` covers the default page and
+> the `since`/`until` window. Filtering by event within a tenant scans that
+> tenant's slice, and the fix — `(tenant_id, event, created_at DESC)` — is a
+> write cost paid by every login on the hottest write path in the system, to make
+> a screen somebody opens twice a month faster. Ship the filter, say what it
+> costs, and add the index when a real log is big enough to argue for it.
+
+### Exposing the table is the other answer, and it stays
+
+`--expose rig_auth_log` already works: the scaffold ships a table configuration
+with `operations: [Get, List, Search]` and `order_by: [-created_at, id]`, and
+`TestEveryCreatedTableCanBeExposed` holds it there, because `--expose` that works
+for some of the foundation and silently writes nothing for the rest is worse than
+no `--expose` at all.
+
+That is not a contradiction with the migration's warning; it is the warning's
+subject. A generated reader filters by `tenant_id`, so it cannot see the
+tenant-less rows and has nowhere to explain that it cannot. The endpoint's whole
+job is that distinction — it excludes those rows deliberately and the
+documentation says so.
+
+**So both stay, and the difference between them is the point.** `--expose` is for
+a project that wants the log as an ordinary synced resource with the generated
+filters, and accepts a trail with a silent hole. The endpoint is for a project
+that wants the trail. Saying that plainly in `docs/auth.md` is cheaper than
+removing an option somebody is already using.
+
+### Retention
+
+Nothing prunes `rig_auth_log`, and exposing it is what makes that visible rather
+than what causes it. A `serve.Config.Tasks` entry, the shape M5.9's sweeper
+settled on, so it is a subcommand in a cron job rather than a goroutine racing
+itself in every replica.
+
+> **The trap is that this table is what the rate limiter counts.** A retention
+> window shorter than the longest limit window would clear a lockout by deleting
+> the rows it is counted from — a limiter that silently stops limiting, which is
+> the failure nobody notices until it is being exploited. The longest today is an
+> hour, so any sane window satisfies it, and that is precisely why somebody will
+> set it to fifteen minutes during an incident without knowing the constraint
+> exists. Refuse a window shorter than the longest configured limit at startup,
+> the way M5.9's S3 adapter refuses a bucket lifecycle shorter than the restore
+> window.
+
+### What rig does not do here
+
+- **No cross-tenant view.** That is `readopt.WithoutTenantScope()`, which is
+  already documented as being for administrative tooling and cross-tenant
+  reporting "and for nothing a request handler should ever do." A global view of
+  attempts that named no tenant is a real need and it is an operator's need, not
+  an endpoint's.
+- **No export, no webhook, no alerting, no anomaly detection.** The events are in
+  a Postgres table with seven indexes; a product that wants them in a SIEM reads
+  them out. Choosing a destination format would be wrong for everybody using a
+  different one, and a framework that ships half an alerting system ships the
+  half nobody can extend.
+- **No row-level audit for application tables.** That was removed in M5.6 and
+  snapshots replaced it, and this must not read as its return. This is
+  authentication only: what happened to a credential, never what happened to a
+  row.
+- **No IR entry, so M6 will not document these.** True of every route `auth`
+  mounts, and M5.9 already says so. Whether that stays true is the open question
+  below.
+
+### Verification
+
+The fast suite covers scope parsing and refusal, the page clamp at both bounds,
+filter rendering, and the one thing that is easy to get wrong when two interfaces
+sit in one package: that `Reader` returns its errors while `Log.Write` still
+swallows its own.
+
+`internal/authtest` covers what only a database can say. Tenant B sees none of
+tenant A's entries. A tenant-less row is invisible to both. `scope=own` returns
+the caller's and nothing else, and does not need a permission to do it.
+`scope=all` without the key is a 403 while an unknown session identifier is still
+a 404 — asserted side by side, since the whole point is that those two answers
+stay different for different reasons. An administrator revoking somebody else's
+session kills the family and writes a `Logout` naming who did it. And the
+retention task leaves anything inside the longest limit window alone, which is
+the case that would otherwise disable the lockout.
+
+`examples/auth/web/page.go` drops `authLog` and calls the endpoint, which is the
+regression test worth having: the endpoint either answers the question that query
+was written to answer or the page stops working.
+
+`docs/auth.md` gains rows in the endpoint table, the three permission keys, a
+paragraph on the tenant-less rows under what the log does not show, and a note in
+the status-code section that the 404-not-403 rule survives the widening.
+
+### Open question for you
+
+**Should the auth log reach the IR, or is `authhttp` its home for good?**
+
+Every route `auth` mounts is invisible to `openapi`, to `ts-client` and to
+`go-client`, and this one is the first where that is a real loss rather than a
+theoretical one: an audit screen is exactly the kind of thing somebody builds in
+TypeScript against a generated client. The fix is not exposing the table — that
+is the other answer, above, and it has the hole. It is teaching the IR about
+routes rig serves from a hand-written module, which would eventually pull all
+thirty `/auth/*` endpoints in with it.
+
+That is a milestone of its own and a large one. The question is only whether
+M5.11 should be built knowing it is coming — the response shape declared as an IR
+object even though nothing reads it yet, the way `EndpointRequest.ContentType`
+sat unread from M0 until files needed it — or built as an ordinary `authhttp`
+handler and converted later with everything else.
+
+I lean ordinary. A shape declared for a consumer that does not exist is a shape
+nobody can check, and the conversion is the same size either way. Say which you
+would rather have.
 
 ---
 
