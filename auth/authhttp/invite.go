@@ -2,29 +2,21 @@ package authhttp
 
 import (
 	"net/http"
-	"time"
 
 	"github.com/google/uuid"
 
 	"github.com/simonjanss/rig/auth/account"
+	"github.com/simonjanss/rig/runtime/authwire"
 	"github.com/simonjanss/rig/runtime/rigerr"
 	"github.com/simonjanss/rig/runtime/tenancy"
 )
-
-type acceptRequest struct {
-	Token string `json:"token"`
-	// Password is only read when the person has none yet. Somebody joining a
-	// second tenant already has one, and it is not this endpoint's business.
-	Password string `json:"password"`
-	Client   string `json:"client"`
-}
 
 // acceptInvitation redeems an invitation and answers with a session.
 //
 // No tenant header: the link says which tenant it is for, and letting a header
 // override that would be a way to join a tenant nobody invited you to.
 func (h *Handler) acceptInvitation(w http.ResponseWriter, r *http.Request) {
-	var in acceptRequest
+	var in authwire.AcceptRequest
 	if err := decode(r, &in); err != nil {
 		h.fail(w, r, err)
 		return
@@ -42,15 +34,6 @@ func (h *Handler) acceptInvitation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, pairOf(pair))
-}
-
-type invitationView struct {
-	ID           uuid.UUID `json:"id"`
-	EmailAddress string    `json:"emailAddress"`
-	DisplayName  string    `json:"displayName"`
-	Role         string    `json:"role"`
-	CreatedAt    time.Time `json:"createdAt"`
-	ExpiresAt    time.Time `json:"expiresAt"`
 }
 
 // listInvitations answers with the invitations into the caller's tenant that are
@@ -76,14 +59,14 @@ func (h *Handler) listInvitations(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	out := make([]invitationView, 0, len(pending))
+	out := make([]authwire.InvitationView, 0, len(pending))
 	for _, i := range pending {
-		out = append(out, invitationView{
+		out = append(out, authwire.InvitationView{
 			ID: i.ID, EmailAddress: i.EmailAddress, DisplayName: i.DisplayName,
 			Role: string(i.Role), CreatedAt: i.CreatedAt, ExpiresAt: i.ExpiresAt,
 		})
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": out})
+	writeJSON(w, http.StatusOK, authwire.List[authwire.InvitationView]{Data: out})
 }
 
 // revokeInvitation withdraws one.
@@ -116,17 +99,6 @@ func (h *Handler) revokeInvitation(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-type tenantView struct {
-	TenantID   uuid.UUID `json:"tenantId"`
-	TenantName string    `json:"tenantName"`
-	TenantSlug string    `json:"tenantSlug"`
-	AccountID  uuid.UUID `json:"accountId"`
-	Role       string    `json:"role"`
-	// Current marks the tenant this request was made in, so an interface can
-	// show where somebody is without comparing identifiers itself.
-	Current bool `json:"current"`
-}
-
 // listTenants answers with every tenant the caller belongs to.
 func (h *Handler) listTenants(w http.ResponseWriter, r *http.Request) {
 	claims, err := h.Claims(r)
@@ -141,15 +113,15 @@ func (h *Handler) listTenants(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	out := make([]tenantView, 0, len(spaces))
+	out := make([]authwire.TenantView, 0, len(spaces))
 	for _, s := range spaces {
-		out = append(out, tenantView{
+		out = append(out, authwire.TenantView{
 			TenantID: s.TenantID, TenantName: s.TenantName, TenantSlug: s.TenantSlug,
 			AccountID: s.AccountID, Role: string(s.Role),
 			Current: s.TenantID == claims.TenantID,
 		})
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": out})
+	writeJSON(w, http.StatusOK, authwire.List[authwire.TenantView]{Data: out})
 }
 
 // switchTenant issues a session for another tenant the caller belongs to.

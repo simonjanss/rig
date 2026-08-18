@@ -6,7 +6,9 @@ use (
 	./examples/auth
 	./examples/auth_oauth
 	./examples/fantasyfootball
+	./examples/sdk
 	./examples/todo
 	./migrate
+	./rigclient
 	./runtime
 )

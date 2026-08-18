@@ -20,13 +20,13 @@ import (
 	"net/http"
 	"net/netip"
 	"strings"
-	"time"
 
 	"github.com/google/uuid"
 
 	"github.com/simonjanss/rig/auth/account"
 	"github.com/simonjanss/rig/auth/apikey"
 	"github.com/simonjanss/rig/auth/session"
+	"github.com/simonjanss/rig/runtime/authwire"
 	"github.com/simonjanss/rig/runtime/rigerr"
 	"github.com/simonjanss/rig/runtime/tenancy"
 	"github.com/simonjanss/rig/runtime/throttle"
@@ -504,52 +504,17 @@ func clientOf(s string) session.Client {
 	}
 }
 
-// tokenPair is what every endpoint that starts or continues a session returns.
-type tokenPair struct {
-	AccessToken  string    `json:"accessToken,omitempty"`
-	RefreshToken string    `json:"refreshToken,omitempty"`
-	ExpiresAt    time.Time `json:"expiresAt,omitzero"`
-	// RefreshExpiresAt is when the session itself ends. A client needs both:
-	// one says when to refresh, the other says when to stop trying.
-	RefreshExpiresAt time.Time `json:"refreshExpiresAt,omitzero"`
-	SessionID        uuid.UUID `json:"sessionId,omitzero"`
-}
-
-// signInResponse is what a sign-in answers with.
-//
-// The pair is embedded rather than nested, so accessToken and the rest stay where
-// they have always been: a client written against the old shape keeps working, and
-// the new fields are additions it can ignore.
-//
-// The token fields are omitted entirely when there is no session — somebody who
-// belongs to no tenant yet. An empty accessToken would look like a token and
-// fail on first use; an absent one says what happened.
-type signInResponse struct {
-	tokenPair
-
-	// IdentityToken proves who somebody is and names no tenant. It is what
-	// the picker below runs on, and it is issued even alongside a session,
-	// because switching tenant later is the same flow.
-	IdentityToken     string    `json:"identityToken"`
-	IdentityExpiresAt time.Time `json:"identityExpiresAt"`
-
-	// Tenants is every one this person belongs to, so a client can draw the
-	// picker without a second call. Empty means they belong to none yet, which is
-	// an ordinary state and no longer a refusal.
-	Tenants []tenantView `json:"tenants"`
-}
-
-func signInOf(res account.SignInResult) signInResponse {
-	out := signInResponse{
+func signInOf(res account.SignInResult) authwire.SignInResponse {
+	out := authwire.SignInResponse{
 		IdentityToken:     res.Identity.Token,
 		IdentityExpiresAt: res.Identity.ExpiresAt,
-		Tenants:           make([]tenantView, 0, len(res.Tenants)),
+		Tenants:           make([]authwire.TenantView, 0, len(res.Tenants)),
 	}
 	if res.Session != nil {
-		out.tokenPair = pairOf(*res.Session)
+		out.TokenPair = pairOf(*res.Session)
 	}
 	for _, w := range res.Tenants {
-		out.Tenants = append(out.Tenants, tenantView{
+		out.Tenants = append(out.Tenants, authwire.TenantView{
 			TenantID: w.TenantID, TenantName: w.TenantName, TenantSlug: w.TenantSlug,
 			AccountID: w.AccountID, Role: string(w.Role),
 			// Which one the session landed in, so a picker can mark it without
@@ -560,8 +525,8 @@ func signInOf(res account.SignInResult) signInResponse {
 	return out
 }
 
-func pairOf(p session.Pair) tokenPair {
-	return tokenPair{
+func pairOf(p session.Pair) authwire.TokenPair {
+	return authwire.TokenPair{
 		AccessToken:      p.Access.Token,
 		RefreshToken:     p.Refresh.Token,
 		ExpiresAt:        p.Access.ExpiresAt,

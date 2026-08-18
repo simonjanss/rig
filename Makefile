@@ -1,7 +1,7 @@
 .DEFAULT_GOAL := help
 
 GO       ?= go
-MODULES  := . ./runtime ./auth ./migrate ./examples/todo ./examples/fantasyfootball ./examples/auth ./examples/auth_oauth
+MODULES  := . ./runtime ./auth ./migrate ./rigclient ./examples/todo ./examples/fantasyfootball ./examples/auth ./examples/auth_oauth ./examples/sdk
 EXAMPLES := todo fantasyfootball auth auth_oauth
 
 # A module with no packages yet — auth, until M4 lands — is skipped rather than

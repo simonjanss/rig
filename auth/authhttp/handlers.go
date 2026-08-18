@@ -4,7 +4,6 @@ import (
 	"net/http"
 	"net/netip"
 	"strings"
-	"time"
 
 	"github.com/google/uuid"
 
@@ -12,16 +11,10 @@ import (
 	"github.com/simonjanss/rig/auth/apikey"
 	"github.com/simonjanss/rig/auth/oauth"
 	"github.com/simonjanss/rig/auth/session"
+	"github.com/simonjanss/rig/runtime/authwire"
 	"github.com/simonjanss/rig/runtime/rigerr"
 	"github.com/simonjanss/rig/runtime/tenancy"
 )
-
-type loginRequest struct {
-	EmailAddress string `json:"emailAddress"`
-	Password     string `json:"password"`
-	Remember     bool   `json:"remember"`
-	Client       string `json:"client"`
-}
 
 func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 	tenantID, err := h.cfg.Tenant(r)
@@ -30,7 +23,7 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var in loginRequest
+	var in authwire.LoginRequest
 	if err := decode(r, &in); err != nil {
 		h.fail(w, r, err)
 		return
@@ -66,17 +59,13 @@ func (h *Handler) logout(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-type refreshRequest struct {
-	RefreshToken string `json:"refreshToken"`
-}
-
 // refresh takes the token in the body rather than the header.
 //
 // It is not the credential for anything else, and putting it in an
 // Authorization header is how it ends up in an access log next to a hundred
 // access tokens that expire in ten minutes.
 func (h *Handler) refresh(w http.ResponseWriter, r *http.Request) {
-	var in refreshRequest
+	var in authwire.RefreshRequest
 	if err := decode(r, &in); err != nil {
 		h.fail(w, r, err)
 		return
@@ -88,10 +77,6 @@ func (h *Handler) refresh(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, pairOf(pair))
-}
-
-type resetRequest struct {
-	EmailAddress string `json:"emailAddress"`
 }
 
 // requestReset always answers 202.
@@ -106,7 +91,7 @@ func (h *Handler) requestReset(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var in resetRequest
+	var in authwire.ResetRequest
 	if err := decode(r, &in); err != nil {
 		h.fail(w, r, err)
 		return
@@ -121,13 +106,8 @@ func (h *Handler) requestReset(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusAccepted)
 }
 
-type confirmResetRequest struct {
-	Token       string `json:"token"`
-	NewPassword string `json:"newPassword"`
-}
-
 func (h *Handler) confirmReset(w http.ResponseWriter, r *http.Request) {
-	var in confirmResetRequest
+	var in authwire.ConfirmResetRequest
 	if err := decode(r, &in); err != nil {
 		h.fail(w, r, err)
 		return
@@ -140,11 +120,6 @@ func (h *Handler) confirmReset(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-type changePasswordRequest struct {
-	CurrentPassword string `json:"currentPassword"`
-	NewPassword     string `json:"newPassword"`
-}
-
 // changePassword returns a fresh pair, because it revoked the caller's own.
 func (h *Handler) changePassword(w http.ResponseWriter, r *http.Request) {
 	claims, err := h.Claims(r)
@@ -153,7 +128,7 @@ func (h *Handler) changePassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var in changePasswordRequest
+	var in authwire.ChangePasswordRequest
 	if err := decode(r, &in); err != nil {
 		h.fail(w, r, err)
 		return
@@ -174,12 +149,8 @@ func (h *Handler) changePassword(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, pairOf(pair))
 }
 
-type verifyEmailRequest struct {
-	Token string `json:"token"`
-}
-
 func (h *Handler) verifyEmail(w http.ResponseWriter, r *http.Request) {
-	var in verifyEmailRequest
+	var in authwire.VerifyEmailRequest
 	if err := decode(r, &in); err != nil {
 		h.fail(w, r, err)
 		return
@@ -227,20 +198,6 @@ func (h *Handler) SignIn(w http.ResponseWriter, r *http.Request, in oauth.SignIn
 	return nil
 }
 
-type sessionView struct {
-	ID         uuid.UUID `json:"id"`
-	CreatedAt  time.Time `json:"createdAt"`
-	LastUsedAt time.Time `json:"lastUsedAt"`
-	ExpiresAt  time.Time `json:"expiresAt"`
-	IPAddress  string    `json:"ipAddress,omitempty"`
-	UserAgent  string    `json:"userAgent,omitempty"`
-	Client     string    `json:"client"`
-	// Current marks the session making this request, so an interface can label
-	// it rather than inviting somebody to revoke the tab they are looking at
-	// without warning.
-	Current bool `json:"current"`
-}
-
 func (h *Handler) listSessions(w http.ResponseWriter, r *http.Request) {
 	tok, err := h.Session(r)
 	if err != nil {
@@ -254,9 +211,9 @@ func (h *Handler) listSessions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	out := make([]sessionView, 0, len(families))
+	out := make([]authwire.SessionView, 0, len(families))
 	for _, f := range families {
-		out = append(out, sessionView{
+		out = append(out, authwire.SessionView{
 			ID:         f.Root.ID,
 			CreatedAt:  f.Root.CreatedAt,
 			LastUsedAt: f.LastUsedAt,
@@ -267,7 +224,7 @@ func (h *Handler) listSessions(w http.ResponseWriter, r *http.Request) {
 			Current:    f.Root.ID == tok.RootTokenID,
 		})
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": out})
+	writeJSON(w, http.StatusOK, authwire.List[authwire.SessionView]{Data: out})
 }
 
 func (h *Handler) revokeSession(w http.ResponseWriter, r *http.Request) {
@@ -309,10 +266,6 @@ func (h *Handler) revokeSession(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-type impersonateRequest struct {
-	AccountID uuid.UUID `json:"accountId"`
-}
-
 func (h *Handler) impersonate(w http.ResponseWriter, r *http.Request) {
 	claims, err := h.Claims(r)
 	if err != nil {
@@ -332,7 +285,7 @@ func (h *Handler) impersonate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var in impersonateRequest
+	var in authwire.ImpersonateRequest
 	if err := decode(r, &in); err != nil {
 		h.fail(w, r, err)
 		return
@@ -365,24 +318,8 @@ func (h *Handler) endImpersonation(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-type apiKeyView struct {
-	ID    uuid.UUID `json:"id"`
-	Name  string    `json:"name"`
-	KeyID string    `json:"keyId"`
-	// Kind is Integration or Personal. A client cannot tell them apart without
-	// it, and they behave differently enough that an administration screen
-	// showing a list of keys has to say which is which.
-	Kind          string     `json:"kind"`
-	Scopes        []string   `json:"scopes"`
-	CIDRAllowList []string   `json:"cidrAllowList,omitempty"`
-	CreatedAt     time.Time  `json:"createdAt"`
-	ExpiresAt     *time.Time `json:"expiresAt,omitempty"`
-	LastUsedAt    *time.Time `json:"lastUsedAt,omitempty"`
-	RevokedAt     *time.Time `json:"revokedAt,omitempty"`
-}
-
-func viewOf(k *apikey.Key) apiKeyView {
-	v := apiKeyView{
+func viewOf(k *apikey.Key) authwire.APIKeyView {
+	v := authwire.APIKeyView{
 		ID: k.ID, Name: k.Name, KeyID: k.KeyID, Kind: string(k.Kind),
 		Scopes:     k.Scopes,
 		CreatedAt:  k.CreatedAt,
@@ -397,23 +334,6 @@ func viewOf(k *apikey.Key) apiKeyView {
 		v.CIDRAllowList = append(v.CIDRAllowList, p.String())
 	}
 	return v
-}
-
-type createKeyRequest struct {
-	Name          string     `json:"name"`
-	Scopes        []string   `json:"scopes"`
-	CIDRAllowList []string   `json:"cidrAllowList"`
-	ExpiresAt     *time.Time `json:"expiresAt"`
-	// Kind is Integration or Personal, and defaults to Integration.
-	//
-	// A personal key acts as its creator, so it cannot name a service account —
-	// the manager refuses that combination and so does a CHECK on the table. An
-	// integration key is the default because it is the one whose writes stay
-	// attributable after the person who set it up has left.
-	Kind string `json:"kind"`
-	// ServiceAccountID is who the key acts as. It defaults to the caller, which
-	// is the common case and the one that keeps the writes attributable.
-	ServiceAccountID *uuid.UUID `json:"serviceAccountId"`
 }
 
 // kindOf reads the kind a caller asked for.
@@ -431,21 +351,13 @@ func kindOf(s string) (apikey.Kind, error) {
 	}
 }
 
-// createKey is the only response that will ever contain the secret.
-type createKeyResponse struct {
-	Key apiKeyView `json:"key"`
-	// Secret is shown exactly once. Nothing stored can produce it again, which
-	// is what makes storing only a hash safe.
-	Secret string `json:"secret"`
-}
-
 func (h *Handler) createAPIKey(w http.ResponseWriter, r *http.Request) {
 	claims, err := h.Claims(r)
 	if err != nil {
 		h.fail(w, r, err)
 		return
 	}
-	var in createKeyRequest
+	var in authwire.CreateKeyRequest
 	if err := decode(r, &in); err != nil {
 		h.fail(w, r, err)
 		return
@@ -515,7 +427,8 @@ func (h *Handler) createAPIKey(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, createKeyResponse{Key: viewOf(minted.Key), Secret: minted.Secret})
+	writeJSON(w, http.StatusCreated,
+		authwire.CreateKeyResponse{Key: viewOf(minted.Key), Secret: minted.Secret})
 }
 
 // listAPIKeys answers with the tenant's keys, or with the caller's own.
@@ -542,14 +455,14 @@ func (h *Handler) listAPIKeys(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	out := make([]apiKeyView, 0, len(keys))
+	out := make([]authwire.APIKeyView, 0, len(keys))
 	for _, k := range keys {
 		if !all && k.AccountID != claims.AccountID {
 			continue
 		}
 		out = append(out, viewOf(k))
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": out})
+	writeJSON(w, http.StatusOK, authwire.List[authwire.APIKeyView]{Data: out})
 }
 
 // revokeAPIKey kills one, if it is the caller's or the caller administers keys.
