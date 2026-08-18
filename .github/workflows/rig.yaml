@@ -1,15 +1,15 @@
 name: rig
 
 on:
-  pull_request:
   push:
     branches: [main]
 
-# A push to a pull request replaces the run it superseded. A push to main does
-# not: every commit on main is a commit somebody may later bisect to.
+# A branch is covered before it gets here, by the pre-push hook `make hooks`
+# installs. What is left is main, and no run of it is ever superseded: every
+# commit on main is a commit somebody may later bisect to.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  cancel-in-progress: false
 
 permissions:
   contents: read

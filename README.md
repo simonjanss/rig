@@ -31,6 +31,9 @@ rig generate   # 4. compile to one IR, fan out to generators
 Early development. See [docs/](docs/) for the tutorial and reference, and [examples/](examples/)
 for complete applications built with rig.
 
+Working on rig itself: run `make hooks` once after cloning, to install the
+pre-push hook that runs the checks. [AGENTS.md](AGENTS.md) has the rest.
+
 ## Layout
 
 | Path | What |

@@ -32,6 +32,19 @@ eachcore = @for m in $(CORE_MODULES); do \
 help:
 	@grep -E '^## ' $(MAKEFILE_LIST) | sed 's/^## //' | awk -F': ' '{printf "  \033[36m%-16s\033[0m %s\n", $$1, $$2}'
 
+## check: every check CI runs, cheapest first
+##        This is what the pre-push hook runs. The last two need Docker, and
+##        `deps` rewrites go.mod/go.sum before comparing, so run it on a clean
+##        tree or it will report your own work in progress back to you.
+check: fmt-check vet build test deps lint vulncheck test-docker examples
+
+## hooks: install the repository's git hooks into this clone
+##        Cloning does not bring hooks with it, so this is opt-in and has to be
+##        run once per clone.
+hooks:
+	@git config core.hooksPath .githooks
+	@echo "hooks installed; 'git push --no-verify' skips them"
+
 ## build: build the rig binary into ./bin
 build:
 	$(GO) build -o bin/rig ./cmd/rig
@@ -116,4 +129,4 @@ vulncheck:
 	@GOBIN=$(CURDIR)/bin $(GO) install golang.org/x/vuln/cmd/govulncheck@$(GOVULNCHECK_VERSION)
 	$(eachcore) $(CURDIR)/bin/govulncheck ./...) || exit 1; done
 
-.PHONY: help build test test-docker examples update-schema update-golden vet fmt fmt-check tidy deps lint vulncheck
+.PHONY: help check hooks build test test-docker examples update-schema update-golden vet fmt fmt-check tidy deps lint vulncheck
