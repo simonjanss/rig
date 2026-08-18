@@ -277,16 +277,6 @@ func (e *emitter) methodSignatureQualified(b *gobuf.Buf, res *ir.Resource, ep *i
 	return ep.Impl.ServiceMethod + "(ctx " + ctxPkg() + ".Context, r " + request + ") " + ret
 }
 
-// firstGenerated is the resource's first generated endpoint, or nil.
-func firstGenerated(res *ir.Resource) *ir.Endpoint {
-	for i := range res.Endpoints {
-		if res.Endpoints[i].Impl.Kind == ir.EndpointGenerated {
-			return &res.Endpoints[i]
-		}
-	}
-	return nil
-}
-
 // expand fills the layout placeholders in a stub directory template.
 func (e *emitter) expand(tmpl string, res *ir.Resource) string {
 	table := res.Storage.Table

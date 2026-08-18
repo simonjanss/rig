@@ -121,11 +121,6 @@ func writableFields(res *ir.Resource, op string) []ir.ResourceField {
 	return genutil.WritableFields(res, op)
 }
 
-// goType renders a field's Go type, qualifying anything the model declares.
-func (e *emitter) goType(b *gobuf.Buf, f ir.Field) string {
-	return genutil.GoType(b, f, func() string { return e.model(b) })
-}
-
 // artifact wraps a finished buffer.
 func artifact(path string, b *gobuf.Buf) (gen.Artifact, error) {
 	return genutil.Artifact(path, b, gen.Overwrite)

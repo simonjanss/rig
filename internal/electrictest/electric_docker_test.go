@@ -19,6 +19,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os/exec"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -57,6 +58,15 @@ func environment(t *testing.T) (*pgxpool.Pool, string) {
 	return pool, syncURL
 }
 
+// hostBind is the address the database publishes on: every interface where a
+// sibling container has to reach it, and loopback where it does not.
+func hostBind() string {
+	if runtime.GOOS == "linux" {
+		return "0.0.0.0"
+	}
+	return "127.0.0.1"
+}
+
 func start() (*pgxpool.Pool, string, error) {
 	ctx := context.Background()
 
@@ -70,6 +80,11 @@ func start() (*pgxpool.Pool, string, error) {
 		// cannot be turned on after the server has started.
 		Settings:  []string{"wal_level=logical"},
 		StartWait: startWait,
+		// The sync service is a second container, and on Linux it reaches this
+		// one over the bridge rather than through the host's loopback. Docker
+		// Desktop routes host.docker.internal to the VM's host either way, which
+		// is why publishing on loopback is enough on a Mac and not on CI.
+		Bind: hostBind(),
 	}
 	if _, err := dockerdb.Start(ctx, cfg); err != nil {
 		return nil, "", err
@@ -94,7 +109,7 @@ func start() (*pgxpool.Pool, string, error) {
 		"electricsql/electric:1.6.9",
 	).CombinedOutput()
 	if err != nil {
-		return nil, "", fmt.Errorf("start the sync service: %v\n%s", err, out)
+		return nil, "", fmt.Errorf("start the sync service: %w\n%s", err, out)
 	}
 
 	url := fmt.Sprintf("http://127.0.0.1:%d", syncPort)

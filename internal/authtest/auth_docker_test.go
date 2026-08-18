@@ -185,12 +185,6 @@ func (n *notifier) SendInvitation(_ context.Context, _ *account.Identity, _ *acc
 	return nil
 }
 
-func (n *notifier) inviteToken() string {
-	n.mu.Lock()
-	defer n.mu.Unlock()
-	return n.invite
-}
-
 func (n *notifier) resetToken() string {
 	n.mu.Lock()
 	defer n.mu.Unlock()
