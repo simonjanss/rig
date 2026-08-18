@@ -70,7 +70,8 @@ func (e *emitter) updateInput(b *gobuf.Buf, res *ir.Resource) {
 		if f.Description != "" {
 			b.Comment(f.Description)
 		}
-		b.L("%s %s `json:%s`", f.Name, e.wrapperType(b, f, patchPkg), gobuf.Quote(f.Wire))
+		b.L("%s %s `json:%s`", f.Name,
+			genutil.PatchType(patchPkg, f.Field, e.goType(b, f.Field)), gobuf.Quote(f.Wire))
 	}
 	b.L("}")
 	b.NL()
@@ -79,15 +80,6 @@ func (e *emitter) updateInput(b *gobuf.Buf, res *ir.Resource) {
 	e.merged(b, res, fields)
 	e.inputError(b, res, "Update", fields)
 	e.updateValidate(b, res, fields)
-}
-
-// wrapperType picks the update wrapper a column's nullability calls for.
-func (e *emitter) wrapperType(b *gobuf.Buf, f ir.ResourceField, patchPkg string) string {
-	kind := "Optional"
-	if f.IsNullable() {
-		kind = "Nullable"
-	}
-	return patchPkg + "." + kind + "[" + genutil.ElemType(e.goType(b, f.Field)) + "]"
 }
 
 // deleteInput emits the delete and restore requests.

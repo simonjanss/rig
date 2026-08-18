@@ -19,7 +19,7 @@ func TestEveryBuiltInIsRegistered(t *testing.T) {
 	}
 	slices.Sort(registered)
 
-	want := []string{"electric", "model-go", "persist-go", "server-go", "service-go"}
+	want := []string{"electric", "go-client", "model-go", "persist-go", "server-go", "service-go"}
 	if !slices.Equal(registered, want) {
 		t.Errorf("registered = %v, want %v", registered, want)
 	}

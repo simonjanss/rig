@@ -67,8 +67,8 @@ func MustCompileAll(t *testing.T, pkgs ...Package) {
 		}
 	}
 
-	// Both local modules are replaced, whether or not this particular set of
-	// artifacts imports them: a replace for a module nothing requires is inert,
+	// Every local module is replaced, whether or not this particular set of
+	// artifacts imports it: a replace for a module nothing requires is inert,
 	// and `go mod tidy` sorts out which requirements are real.
 	gomod := fmt.Sprintf(`module rigtest
 
@@ -83,7 +83,9 @@ require (
 replace github.com/simonjanss/rig/runtime => %s
 
 replace github.com/simonjanss/rig/auth => %s
-`, moduleDir(t, "runtime"), moduleDir(t, "auth"))
+
+replace github.com/simonjanss/rig/rigclient => %s
+`, moduleDir(t, "runtime"), moduleDir(t, "auth"), moduleDir(t, "rigclient"))
 
 	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte(gomod), 0o644); err != nil {
 		t.Fatal(err)

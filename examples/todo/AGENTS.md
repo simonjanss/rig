@@ -61,6 +61,10 @@ checked by the generated code. Do not write it again.
 | `services/<table>/<table>.go` | you |
 | `*.gen.go`, `*.gen.ts` | rig — rewritten on every run, never edit |
 
+`client/` is generated too, and is the one generated directory not under
+`internal/`: it is the Go SDK for this API, and it exists to be imported by
+somebody else's program. `examples/sdk` is that somebody.
+
 ## Migrations
 
     rig db up          development: a throwaway Postgres, migrated
