@@ -1,4 +1,4 @@
-go 1.25.7
+go 1.26.6
 
 use (
 	.
@@ -6,7 +6,9 @@ use (
 	./examples/auth
 	./examples/auth_oauth
 	./examples/fantasyfootball
+	./examples/sdk
 	./examples/todo
 	./migrate
+	./rigclient
 	./runtime
 )

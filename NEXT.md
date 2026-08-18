@@ -19,6 +19,7 @@ built, where it departed from that plan, and what is still to come.
 | **M5.5** | `model-go`, `patch.Optional` / `patch.Nullable`, `…Input` types with normalize and validate, the conversions deleted |
 | **M5.6** | Typed per-input errors answered as 422, `runtime/dbhook` lifecycle hooks declared per service, the audit log removed, `runtime/serve`, `rig/migrate` |
 | **M5.8** | The whole authentication configuration moved into `rig.yaml`, resolved when it is read, and `server-go` writes the wiring |
+| **M5.10** | `go-client` and the `rigclient` module: a typed Go SDK generated from the same document the router is, plus `runtime/authwire` and `examples/sdk` |
 
 Next:
 
@@ -29,20 +30,25 @@ Next:
   download endpoint per file column, nested under the row that owns them. Before
   M6 because it adds two error codes, and the code set is baked into an OpenAPI
   document and a TypeScript union the moment those ship.
-- **M5.11** — the auth log and who is signed in: a read endpoint over
+- **M5.11** — referential actions: a table that points at a row gets a function call
+  when that row is deleted, inside the same transaction, and can refuse it. The other
+  half of the sentence RIG6040 already started. (Was M5.10; `go-client` shipped into
+  the number while this was being written.)
+- **M5.12** — the auth log and who is signed in: a read endpoint over
   `rig_auth_log`, and `GET /auth/sessions` widened past the caller's own. The
-  events have been recorded since M4 and nothing has ever served them. (M5.10 is
-  `go-client`, on a branch; if that lands second this number moves, the way files
-  moved from M5.8.)
+  events have been recorded since M4 and nothing has ever served them. (Was
+  M5.11; referential actions had already taken it.)
 
 ### Modules
 
 ```
-.               github.com/simonjanss/rig          CLI, compiler, generators
-runtime/        github.com/simonjanss/rig/runtime  imported by generated code
-auth/           github.com/simonjanss/rig/auth     sessions, oauth, api keys
-migrate/        github.com/simonjanss/rig/migrate  a binary migrates itself
+.               github.com/simonjanss/rig            CLI, compiler, generators
+runtime/        github.com/simonjanss/rig/runtime    imported by generated code
+auth/           github.com/simonjanss/rig/auth       sessions, oauth, api keys
+migrate/        github.com/simonjanss/rig/migrate    a binary migrates itself
+rigclient/      github.com/simonjanss/rig/rigclient  imported by a generated client
 examples/todo/  a real project, built in CI
+examples/sdk/   a program that calls two of them, through their generated clients
 ```
 
 The root module now requires `auth` and `runtime` with local replaces, so the
@@ -50,9 +56,10 @@ Docker suites in `internal/authtest` and `internal/electrictest` can drive them.
 
 ### Generators registered
 
-`model-go`, `persist-go`, `service-go`, `server-go`, `electric`. All but
-`electric` are scaffolded by `rig init`, and `electric` emits nothing until a
-table opts in. `model-go` is listed first because the layers above import what it
+`model-go`, `persist-go`, `service-go`, `server-go`, `electric`, `go-client`.
+All but `electric` and `go-client` are scaffolded by `rig init`; `electric`
+emits nothing until a table opts in, and `go-client` is opt-in because not every
+project wants a Go SDK of its own. `model-go` is listed first because the layers above import what it
 writes. The authentication wiring is not a generator of its own: `server-go`
 writes it into the API package for a project that has an `auth:` block.
 
@@ -1422,7 +1429,378 @@ nobody can review in one sitting. Say which you would rather have.
 
 ---
 
-## M5.11 — the auth log and who is signed in
+## Done: M5.10 — `go-client`
+
+**What shipped.** A Go SDK generated from the document, in two halves.
+
+`rigclient/` is the hand-written half — one more module, depending on `runtime`
+and `uuid`. The transport (`Do`, `DoNoContent`, the typed `*Error`, the call
+options), the credentials (`StaticToken`, `APIKey`, and a `Session` that renews
+itself), the query encoders, the pagination iterator, and `Auth`: rig's own
+authentication endpoints, which are the same routes with the same bodies in every
+project that turns authentication on and so are not generated at all.
+
+`internal/gen/goclient` is the generator, registered as `go-client`. Options are
+`package`, `client_import` and `default_base_url`; everything else it needs is in
+the document. It emits the entity and its enums, the filters, the create and
+update inputs, each endpoint's own body and query, the shape a 422 arrives in,
+and one method per endpoint keyed on `Impl.ServiceMethod` — plus, where there is
+a `List`, an `All` that walks every page.
+
+`runtime/authwire` came out of the same work: the authentication request and
+response shapes used to live unexported inside `auth/authhttp`, so a client had
+to restate them. Now both ends import one definition, and `authhttp` fills in the
+same structs a client reads.
+
+**Decisions worth knowing about.**
+
+- **Three things are not restated.** Update inputs use `runtime/patch`, error
+  codes use `runtime/rigerr`, and the scope parameter uses `runtime/tenancy`.
+  Everything else — the entity, the filters, the page — is the client's own, so
+  an SDK does not drag the server's `internal/` packages behind it.
+- **`omitzero` on every update member, and `IsZero` on both patch wrappers.**
+  This was a real bug on the way in. `Optional.MarshalJSON` encodes absence as
+  `null`, because a marshaler cannot remove its own field — harmless while patch
+  types were only ever decoded, and on a client it would have meant a 400 on
+  every not-null column and a *silent clearing* of every nullable one. The tag is
+  what removes the field; the test that guards it asserts that an untouched
+  update marshals to `{}`.
+- **Query parameters are pointers.** `server-go` applies a parameter's default
+  only when it is absent, so a client that helpfully sent `limit=0` would be
+  asking for an empty page. Nil means not sent, and `rigclient.P` takes an
+  address in one expression.
+- **The QUERY fallback is the client's, once.** A search issues `QUERY`; on 405
+  or 501 it retries the `POST …/_search` alias, remembers that on the runtime,
+  and never tries `QUERY` again. Under `search_method: query` there is no alias
+  and the refusal is simply reported.
+- **Methods are grouped per resource** — `c.Todos.Complete(...)` — which is
+  symmetric with the server's own service methods. The `OperationID` is in each
+  doc comment so the router, this client, and the OpenAPI document to come can
+  still be cross-referenced.
+- **`API-Revision` is a seam, not a feature.** M5.7 has not shipped, so there is
+  nothing in the document to bake in; `Config.Revision` is sent when it is set,
+  and that is where the generated constant will go.
+
+**Where it is exercised.** `examples/todo` and `examples/auth` both generate one,
+into `./client` rather than `./internal/client` — a client exists to be imported
+by somebody else, and Go's internal rule would keep it out of exactly the code
+that wants it. Each has a `client_docker_test.go` driving the real server: the
+lifecycle and the one-field patch verified by re-reading the row for todo, and
+sign-in, refresh-ahead under a moved clock, tenant switching and API keys for
+auth. `examples/sdk` is the third example — not a rig project, just a program
+that calls the other two — with database-free tests pinning the three properties
+a caller depends on, and a third subcommand that is the case a client library
+actually gets used for: a CSV import, with a bounded worker pool, a retry that
+distinguishes the server asking for a moment from the row being wrong, and a
+report naming the line of everything that did not go in.
+
+**Loose ends.**
+
+- `examples/fantasyfootball` and `examples/auth_oauth` do not generate a client.
+  Nothing stops them; there was no question they would have answered.
+- The `.gitignore` pattern `rig` matched `cmd/rig` as well as the built binary,
+  which is why the command's own `main` was never committed. Anchored to `/rig`,
+  and `cmd/rig/main.go` is in the tree.
+- A `Decimal` column is `pgtype.Numeric` in the client as well as in the model,
+  so a project with one drags pgx into its SDK's dependency graph. `runtime`
+  already does, through `patch`, so it costs nothing today — but if `rigclient`
+  is ever cut loose from `runtime`, this is the field to reconsider.
+
+---
+
+## M5.11 — referential actions
+
+**Goal.** When a row is deleted, every table pointing at it gets a function call —
+inside the same transaction, before the row goes and again after it is committed — so
+a child can refuse the delete, clean itself up, or do nothing, in code it wrote.
+
+### rig already wrote the argument and never finished the sentence
+
+`checkCascades` refuses `ON DELETE CASCADE` outright, RIG6040, error by default:
+
+> A cascade deletes rows behind the service layer's back: no hooks run, no audit
+> entries are written, and soft-deletable children are hard-deleted regardless.
+> Deleting through the service is slower and correct.
+
+Every word of that is true, and there is nothing on the other side of "instead".
+Deleting through the service means deleting one table, because that is all a
+generated `Delete` touches. So every scaffold and example foreign key is plain, a
+parent with children raises `23503`, and generated `writeError` turns it into
+`rigerr.Conflict("a related row is missing or still in use")` — a 409 that names no
+table, no relation and no field, for a condition the schema knew about at compile
+time.
+
+The result is that the correct answer today is to hand-write it: a `Delete.Before`
+hook that reaches for a repository it was never given, or a raw `DELETE` that skips
+the very hooks RIG6040 exists to protect. Both are the class of work rig removes
+everywhere else.
+
+### Most of the machinery is already here
+
+**The transaction is.** `dbx.InTx` reuses a `pgx.Tx` already on the context and does
+not commit it — that is the documented reason it exists. A child repository's
+`Delete` called from inside a parent's `Delete` already joins the parent's
+transaction and already commits with it. Nothing has to be built for "in the same
+transaction"; it is the property nesting was designed for.
+
+**The after-commit queue is.** `dbx.AfterCommit` appends to a `*pending` on the
+context and only the outermost `InTx` drains it. So a child's `AfterCommit` hook
+already fires exactly once, after the parent commits, in the right order, with the
+claims captured. The half of this request that is "inform the other services
+afterwards" is finished code.
+
+**The relations are.** `projectRelations` already walks every table looking for a
+foreign key pointing back, and emits `ir.RelationHasMany` with the foreign table and
+column, disambiguated when a child points twice. `ResourceStorage.Relations` carries
+them. Today the only consumer is `sc.hasMany(...)` inside filter subqueries — the
+compiler knows the shape of every parent-child edge and no write has ever read it.
+
+**The veto is.** `DeleteHooks.Before` runs inside the transaction and an error from
+it aborts. A child that may not be deleted for a reason only the application knows
+is already expressible; it just has no way to be consulted, because nothing calls it.
+
+**What is missing is the call.** Every piece above is a mechanism waiting for
+somebody to use it. `projectRelations` knows that `player` points at `team`, `InTx`
+would carry a `player` write inside a `team` delete, `AfterCommit` would fire the
+follow-up in the right place, and `Before` would let the application refuse — and no
+line of generated code ever puts those four together, because nothing tells a child
+that its parent is going away.
+
+### The declaration is a function, not a key
+
+The tempting shape is an enum on the relation — `on_delete: restrict | cascade |
+set_null | ignore` — and it should be rejected before anybody builds it. Those four
+words are a vocabulary, and a vocabulary can only ever cover the cases whoever wrote it
+thought of. `set_null` cannot say "null it, unless it was the last one, in which case
+archive the row". `cascade` cannot say "delete the drafts and reassign the published
+ones". Every application has a clause like that, and the moment one appears the key is
+worth nothing and the work is hand-written anyway — next to a configuration line that
+now lies about what happens.
+
+Which is also to say the enum is not one feature, it is four, and each of them is three
+lines of code somebody could have written themselves if rig had simply told them the
+delete was happening. **So rig tells them, and that is the whole milestone.** A child
+declares a function; the parent's delete calls it.
+
+```go
+// services/player/player.go
+func (s *service) Hooks() api.PlayerHooks {
+	return api.PlayerHooks{
+		Delete: dbhook.DeleteHooks[…]{Before: s.beforeDelete},
+
+		// One field per foreign key this table has to another resource.
+		Parents: api.PlayerParentHooks{
+			TeamDeleting: s.teamDeleting,
+			TeamDeleted:  s.teamDeleted,
+		},
+	}
+}
+
+// Runs inside the transaction that is deleting the team, before the team row
+// is touched. Returning an error refuses the delete and rolls back everything
+// the other children already did.
+func (s *service) teamDeleting(ctx context.Context, claims tenancy.Claims,
+	team *model.Team, del model.TeamDeleteInput) error {
+
+	return s.repo.ClearTeam(ctx, team.ID)   // …or delete them. Or refuse. Your call.
+}
+```
+
+The three cases the enum was for are now the three obvious bodies of that function: an
+update that nulls the column, a loop calling the child's own `Delete`, and a `return
+rigerr.Conflict(...)`. None of them needed a keyword, and the fourth case — the one with
+the clause in it — is the same function with an `if` in it.
+
+`Deleting` rather than `Deleted` because it runs before the row is gone and can still
+say no. `TeamDeleted` is the other half the request asked for: it runs after the commit,
+through the `AfterCommit` queue that already exists, best-effort, for the cache eviction
+and the search index and the email — the things that must not be able to fail a delete
+that already happened.
+
+`del` is passed rather than dropped because `TeamDeleteInput.Hard` is the difference
+between a soft delete the parent can undo and a permanent one, and a child that nulls a
+link on the first has destroyed the only record of what to re-link on a restore. That is
+the trap the `set_null` key would have walked straight into, and handing the child the
+input is how it becomes visible instead of surprising.
+
+### The registry is the outbox, and the parent never sees the child
+
+The parent's repository does not need a `PlayerRepository`. **It needs the closure, and
+the closure already carries the repository it closed over.** That is the part that makes
+this small: the reach problem above evaporates, because nothing has to be injected
+backwards. Each service registers its parent hooks where it is already wired —
+`XRules.Bind(XWriter)` is that moment — and `Delete` runs whatever is registered against
+its own table.
+
+The list is compiler-generated and typed, one entry per `HasMany` the IR already
+derives — not a map assembled at startup, so it cannot depend on the order somebody
+happened to construct services in. A parent delete is then five steps:
+
+1. the parent's own `Delete.Before`, exactly as today;
+2. every registered `<Parent>Deleting`, in the order below;
+3. the parent row, exactly as it is deleted today;
+4. the parent's own `Delete.After`, still inside the transaction;
+5. every `<Parent>Deleted` queued onto `dbx.AfterCommit`, in the same order as step 2,
+   firing once after the outermost transaction commits.
+
+The parent's own veto comes first on purpose. "This team may not be deleted while the
+season is open" is the cheapest and most specific rule in the building, and it should not
+require running every child's cleanup before it gets to say so.
+
+A child that deletes its own rows by calling its own `Delete` triggers *their* children
+the same way, so depth is just the call stack and recursion falls out rather than being
+designed. What does have to be designed is the guard: a visited set keyed by table and id,
+and a depth cap in the shape of the `MaxFilterDepth` the filter builder already has, so a
+cycle in the schema terminates instead of exhausting the stack.
+
+### The order of siblings is a fact the compiler can already derive
+
+Depth takes care of itself. Siblings do not: `player` and `fixture` both point at `team`,
+and something has to decide which one hears about the delete first.
+
+**It does not matter for correctness.** Everything is in one transaction, so any hook
+returning an error unwinds every hook before it, and no ordering can leave the database
+half-done. It matters for exactly two things, and both are worth naming because they are
+the reason somebody will file a bug:
+
+- **What one sibling can see of another.** If `fixture`'s hook counts the team's players,
+  it gets a different answer depending on whether `player`'s hook has already run.
+- **Which error the caller gets** when two siblings would both refuse. Whatever the order
+  is, it has to be the same on every request and on every process, or the same delete
+  answers differently on Tuesday.
+
+Alphabetical would satisfy the second and nothing else, and "your hooks run in alphabetical
+order" is the kind of rule that is technically documented and never once anticipated.
+
+**So order the siblings by their own foreign keys.** If `fixture` references `player`, then
+`fixture` hears about the team's deletion before `player` does — referencing tables before
+referenced ones, which is the same order the rows themselves would have to go in. The
+compiler has that graph already; it is the same edges `projectRelations` walks to build the
+`HasMany` list in the first place. Topologically sorted, ties broken by the IR's order so
+the result is stable.
+
+That default is right for the case that actually recurs, and it costs no configuration. A
+cycle among the siblings has no topological order, so fall back to IR order and say so in a
+diagnostic rather than silently picking one.
+
+**When the derived order is wrong, the parent overrides it**, because the parent is the only
+place that can see all its children at once:
+
+```yaml
+# services/team/team.yaml
+on_delete:
+  order: [fixture, player]   # anything unlisted runs after, in the derived order
+```
+
+Note what is and is not in that file. The parent states the *sequence*, which is a fact
+about the relationships between its children and belongs to no single one of them. It does
+not state the *action* — that is still a function on the child, and the parent has no
+opinion about it. The two things the enum was conflating come apart cleanly here, and only
+one of them turns out to be configuration.
+
+There is deliberately no hook point between step 3 and step 4 — after the row is gone but
+still inside the transaction. A child with a non-null foreign key cannot still be pointing
+at the parent by then or the write would have failed, so anything it had to do it did in
+`Deleting`, and anything it can do afterwards it can do in `Deleted`. Adding the third point
+would mean a hook whose only legal actions are the ones the other two already cover.
+
+**Implementing nothing is a supported answer and stays the default.** A table that
+declares no parent hooks behaves exactly as it does today: the foreign key refuses, `23503`
+becomes a 409, and nothing about existing projects moves. The improvement available for
+free is the message — the parent knows which relations it has, so a refusal can name the
+one that blocked it instead of saying "a related row is missing or still in use".
+
+### Where it cannot reach
+
+Same boundary M5.9's reference check draws, for the same reason: a table with no resource
+has no hooks to declare and no service to declare them in. rig cannot notify it and should
+not pretend to. `rig_file`, `rig_account` and the audit actor columns are all on that side
+of the line, and their foreign keys keep behaving exactly as the schema says.
+
+The rule is one sentence: **rig calls the tables it generates a service for.**
+
+### What it costs, honestly
+
+One function call per relation per delete — not one per child row. That is the reason to
+hand the child the parent rather than each of its own rows: nulling ten thousand links is
+one `UPDATE` the child writes itself, and rig has no business turning it into ten thousand
+statements on the child's behalf.
+
+The cost that is real is the one the child chooses. A `teamDeleting` that loops calling its
+own `Delete` to get each row's hooks and snapshots is as slow as the number of rows, and
+that is the correct price for what it bought. rig should say so where the function is
+scaffolded, since the fast version and the correct version are both one line and they do
+not look different.
+
+### RIG6040 stays, and gains nothing
+
+Nothing here makes `ON DELETE CASCADE` acceptable; it makes the alternative exist, which is
+what the rule's own comment has been promising. And because the alternative is a function
+rather than a configuration key, there is no second place for the same decision to live and
+no new contradiction to detect — which is a small argument for functions over keys all by
+itself.
+
+### Verification
+
+The fast suite can prove most of this. `dbhook` and `dbx` are testable against a stub
+`Conn`: that a registered `Deleting` runs before the parent row is written, that returning
+an error from one aborts the transaction and unwinds what an earlier one already did, that a
+nested `Delete` does not commit early, and that every `Deleted` lands on the `AfterCommit`
+queue and drains exactly once when the outermost transaction commits.
+
+`internal/compile` goldens for the generated `XParentHooks` struct — one field pair per
+foreign key to an exposed resource, and none for a foreign key to `rig_file` or an audit
+column — and, separately, for the derived sibling order, which is the part with an
+algorithm in it: the topological sort, the IR-order tie-break, the `on_delete.order`
+override, and a deliberate sibling cycle asserting the diagnostic rather than a silently
+chosen order.
+
+`examples/fantasyfootball` is the fixture worth using for both. `fixture` points at `team`
+twice, so its golden proves the `foreignKeyQualifier` disambiguation already in
+`projectRelations` produces two distinct hook names rather than a collision — and `fixture`
+also points at `player`, so deleting a team is a real three-table sort rather than a
+one-element list that would pass under any implementation.
+
+The Docker suite is where it has to be real: a child that refuses and leaves the parent
+present, a child that nulls a link and a parent delete that then succeeds, two levels of
+child, a cycle that terminates, and a soft parent delete whose child correctly read
+`del.Hard` and did the reversible thing. Also the case with no hooks at all, asserting the
+`23503` path still answers a 409 — that one is the regression test for every project that
+does not want this feature.
+
+Honest gap: nothing here tests that the *scaffold* teaches the difference between the fast
+body and the correct one, and that is the part most likely to be got wrong in the field.
+
+### Open questions for you
+
+**Is the parent row enough, or does the child want its own rows?** I lean the parent — it is
+one call, the child knows how to find its rows, and the alternative is rig doing a query on
+the child's behalf that the child may not want. The counter is that "for each of my rows
+affected by this" is what people actually write, and every one of them will write the same
+`SELECT` first.
+
+**Is the derived sibling order worth it, or should the parent just always say?** The
+topological sort is right, and it is also invisible: reading a project tells you nothing
+about what order its hooks run in unless you go and build the graph in your head. The
+alternative is requiring `on_delete.order` on any parent with more than one child — noisier,
+but the sequence is then written down where somebody debugging it will look. I lean derived,
+with `rig ir` able to print the resolved order, so the answer exists somewhere you can ask
+for it rather than in nobody's head.
+
+**Should `Deleting` also fire for a restore?** A child that nulled a link on a hard delete
+has nothing to undo, but a child that archived rows might want the symmetric call. I lean no
+for now — `Restore` is already the one path that deliberately does not walk anything — but
+it is the obvious next request and it is worth deciding before the hook names are baked into
+generated code.
+
+**And is this one milestone or two?** The registry is small precisely because closures carry
+their own repositories, so I no longer think this needs the dependency-injection change I
+would have proposed for a declarative cascade. If that holds up in the first hour of
+implementation, it is one milestone. If it does not, the registry lands first and alone.
+
+---
+
+## M5.12 — the auth log and who is signed in
 
 **Goal.** A tenant can read its own authentication trail and see every session
 open inside it, and a person can read their own, through endpoints rig serves
@@ -1527,10 +1905,11 @@ per-tenant endpoint.
 
 ### The first paginated route in `authhttp`
 
-Every `/auth/*` list today returns a bare `{"data": […]}` — no limit, no offset,
-no total. `listAPIKeys` loads the tenant's keys and filters them in Go, and the
-comment justifying that says "a tenant's keys are a handful of rows," which is
-true of keys, invitations and tenants and is the reason the shape has survived.
+Every `/auth/*` list answers `authwire.List[T]`, which is `{"data": […]}` and
+nothing else — no limit, no offset, no total. `listAPIKeys` loads the tenant's
+keys and filters them in Go, and the comment justifying that says "a tenant's
+keys are a handful of rows," which is true of keys, invitations and tenants and
+is the reason the shape has survived.
 
 An auth log is millions of rows and cannot borrow the argument. So `/auth/audit`
 answers `{data, pagination}` with the numbers the generated endpoints already
@@ -1539,6 +1918,11 @@ clamped by `query.Page.Clamp`, whose own comment is the reason ("an unbounded
 list is a production incident waiting"). The other four stay exactly as they are.
 Two shapes in one package costs a sentence in the docs; paginating four endpoints
 that will never need it costs four handlers and four sets of tests.
+
+M5.10 makes this cheaper than it would have been. `authwire` is where the shape
+goes, beside `List[T]`, and `rigclient.Paginate` already walks a `{data,
+pagination}` read to its end — so the Go client's method for this is an iterator
+on the first day rather than a loop every caller writes.
 
 Filters are `accountId`, `event`, `outcome`, `since` and `until`.
 
@@ -1637,15 +2021,21 @@ the status-code section that the 404-not-403 rule survives the widening.
 **Should the auth log reach the IR, or is `authhttp` its home for good?**
 
 Every route `auth` mounts is invisible to `openapi`, to `ts-client` and to
-`go-client`, and this one is the first where that is a real loss rather than a
-theoretical one: an audit screen is exactly the kind of thing somebody builds in
-TypeScript against a generated client. The fix is not exposing the table — that
-is the other answer, above, and it has the hole. It is teaching the IR about
-routes rig serves from a hand-written module, which would eventually pull all
-thirty `/auth/*` endpoints in with it.
+`go-client`, and M5.10 put a number on what that costs: `rigclient/auth.go` is
+460 hand-written lines mirroring `authhttp` method for method, because those
+routes "are the same routes with the same bodies in every project that turns
+authentication on and so are not generated at all." Adding an endpoint here means
+adding a thirty-first method there by hand, and this is the first one where that
+is a real loss rather than a bookkeeping one: an audit screen is exactly the kind
+of thing somebody builds against a generated client.
+
+The fix is not exposing the table — that is the other answer, above, and it has
+the hole. It is teaching the IR about routes rig serves from a hand-written
+module, which would eventually pull all thirty `/auth/*` endpoints in with it and
+delete most of that file.
 
 That is a milestone of its own and a large one. The question is only whether
-M5.11 should be built knowing it is coming — the response shape declared as an IR
+M5.12 should be built knowing it is coming — the response shape declared as an IR
 object even though nothing reads it yet, the way `EndpointRequest.ContentType`
 sat unread from M0 until files needed it — or built as an ordinary `authhttp`
 handler and converted later with everything else.
@@ -1719,6 +2109,12 @@ front end holds are the types the server sends.
 **The QUERY fallback.** Issue `QUERY`; on `405` or `501`, fall back to the
 `POST /_search` alias, remember that for the rest of the process, and never try
 `QUERY` again. One flag on the client instance.
+
+**Echo the Go client.** `go-client` shipped first (M5.10) and answered several
+of these already: methods grouped per resource, a fallback tried once and
+remembered per client instance, query parameters that are absent rather than
+zero, and a per-input shape for the 422 body. Differing from it needs a reason
+better than a different author.
 
 **Open questions for you.**
 

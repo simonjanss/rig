@@ -10,6 +10,7 @@ package genutil
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/simonjanss/rig/internal/gen/gobuf"
 	"github.com/simonjanss/rig/pkg/gen"
@@ -77,6 +78,64 @@ func GoType(b *gobuf.Buf, f ir.Field, modelPkg func() string) string {
 
 // ElemType strips one pointer, for the value inside a wrapper.
 func ElemType(t string) string { return strings.TrimPrefix(t, "*") }
+
+// PatchType picks the update wrapper a column's nullability calls for, around an
+// element type the caller has already rendered.
+//
+// Which wrapper a column gets is not a matter of taste: a client sending
+// patch.Nullable where the server decodes patch.Optional is a null the server
+// refuses, and the two ends have to agree. So the model generator and the client
+// generator ask the same function rather than each deciding.
+func PatchType(patchPkg string, f ir.Field, elem string) string {
+	kind := "Optional"
+	if f.IsNullable() {
+		kind = "Nullable"
+	}
+	return patchPkg + "." + kind + "[" + ElemType(elem) + "]"
+}
+
+// GoDuration renders a duration as Go source a person can check against the
+// configuration file.
+//
+// 30 * 24 * time.Hour rather than 2592000000000000: somebody reading the
+// generated wiring has to be able to see that it says thirty days, because the
+// whole point of configuring this in a file is that the number is reviewable.
+func GoDuration(b *gobuf.Buf, d ir.Duration) string {
+	v := d.Duration()
+	if v == 0 {
+		return "0"
+	}
+
+	timePkg := b.Import("time")
+
+	var terms []string
+	for _, unit := range []struct {
+		expr string
+		size time.Duration
+	}{
+		{"24*" + timePkg + ".Hour", 24 * time.Hour},
+		{timePkg + ".Hour", time.Hour},
+		{timePkg + ".Minute", time.Minute},
+		{timePkg + ".Second", time.Second},
+		{timePkg + ".Millisecond", time.Millisecond},
+		{timePkg + ".Microsecond", time.Microsecond},
+		{timePkg + ".Nanosecond", time.Nanosecond},
+	} {
+		n := v / unit.size
+		if n == 0 {
+			continue
+		}
+		v -= n * unit.size
+
+		if n == 1 && !strings.HasPrefix(unit.expr, "24*") {
+			terms = append(terms, unit.expr)
+			continue
+		}
+		terms = append(terms, fmt.Sprintf("%d*%s", n, unit.expr))
+	}
+
+	return strings.Join(terms, " + ")
+}
 
 // Describe falls back to a generated sentence when there is no comment, so
 // every exported type carries documentation even before anyone writes any.

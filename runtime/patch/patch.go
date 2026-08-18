@@ -68,6 +68,16 @@ func (o Optional[T]) IsAbsent() bool { return !o.present }
 // IsSet reports whether the field carries a value.
 func (o Optional[T]) IsSet() bool { return o.present }
 
+// IsZero implements the check encoding/json's `omitzero` tag makes, so that a
+// struct field holding an absent value is left out of the encoded object
+// entirely.
+//
+// That matters for anything that sends an update rather than receiving one — the
+// generated Go client, or a test building a request by hand. MarshalJSON below
+// has to encode absence as null, because a marshaler cannot remove its own field;
+// `omitzero` is the only thing that can, and this is what it asks.
+func (o Optional[T]) IsZero() bool { return !o.present }
+
 // ErrNullNotAllowed is returned when a client sends null for a column that
 // cannot hold one.
 //
@@ -203,6 +213,15 @@ func (n Nullable[T]) IsSet() bool { return n.present && !n.null }
 // a value or cleared. It is the question a repository asks when deciding which
 // columns belong in an UPDATE.
 func (n Nullable[T]) Touched() bool { return n.present }
+
+// IsZero implements the check encoding/json's `omitzero` tag makes, so that a
+// struct field holding an absent value is left out of the encoded object
+// entirely.
+//
+// An explicit null is not zero, and that is the whole distinction: a client that
+// cleared a column has to put null on the wire, and one that said nothing about
+// it has to put nothing. See [Optional.IsZero].
+func (n Nullable[T]) IsZero() bool { return !n.present }
 
 // UnmarshalJSON implements [json.Unmarshaler].
 func (n *Nullable[T]) UnmarshalJSON(data []byte) error {

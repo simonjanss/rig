@@ -69,6 +69,21 @@ generators:
       package: api
       model_import: github.com/simonjanss/rig/examples/todo/internal/model
 
+  # A typed Go client for this API: the wire types, and one method per
+  # endpoint. It is generated from the same document the router is, so
+  # the two cannot disagree about a path or the name of a key.
+  #
+  # Not internal/, deliberately: a client is for somebody else's program,
+  # and Go's internal rule would keep it out of exactly the code that
+  # wants it. See examples/sdk.
+  - name: go-client
+    out_dir: client
+    options:
+      package: client
+      # Where this example runs, so a demo can build a client without
+      # naming the server. A real project leaves it out.
+      default_base_url: http://localhost:8080
+
   # Live-sync shape endpoints. It writes nothing until a table asks
   # for one with `electric: {enabled: true}`, so leaving it here costs
   # nothing and turning it on is one line in a table's configuration.

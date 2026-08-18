@@ -701,14 +701,6 @@ type insertColumn struct {
 	Expr   string
 }
 
-// stampsFromClaims reports whether an insert takes anything from the caller's
-// identity — the tenant it belongs to, or the account that created it.
-func (e *emitter) stampsFromClaims(res *ir.Resource) bool {
-	s := res.Storage
-	return s.Tenant != nil ||
-		(s.Audit != nil && (s.Audit.CreatedBy != nil || s.Audit.CreatedByAPIKey != nil))
-}
-
 func (e *emitter) createMethod(b *gobuf.Buf, res *ir.Resource, typeName string) {
 	entity := e.entity(b, res)
 

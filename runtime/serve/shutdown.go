@@ -22,7 +22,10 @@ func (e *ShutdownError) Unwrap() error { return e.Err }
 func Unclean(err error) bool { return err != nil && onlyShutdown(err) }
 
 func onlyShutdown(err error) bool {
-	switch e := err.(type) {
+	// The switch walks the tree itself, one node at a time, which is the whole
+	// point: errors.As answers "is there a ShutdownError anywhere in here", and
+	// the question is whether there is anything else.
+	switch e := err.(type) { //nolint:errorlint // this walks the wrapping itself
 	case *ShutdownError:
 		return true
 	case interface{ Unwrap() []error }:

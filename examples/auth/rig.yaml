@@ -90,6 +90,15 @@ generators:
       package: api
       model_import: github.com/simonjanss/rig/examples/auth/internal/model
 
+  # A typed Go client for this API. Because this project has an auth
+  # block, it also gets the profile the client reads: the base path and
+  # the token lifetimes the server actually enforces, so a session can
+  # refresh ahead of expiry instead of waiting to be refused.
+  - name: go-client
+    out_dir: client
+    options:
+      package: client
+
   # Live-sync shape endpoints. It writes nothing until a table asks
   # for one with `electric: {enabled: true}`, so leaving it here costs
   # nothing and turning it on is one line in a table's configuration.

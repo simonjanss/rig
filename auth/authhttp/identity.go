@@ -3,12 +3,12 @@ package authhttp
 import (
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/google/uuid"
 
 	"github.com/simonjanss/rig/auth/account"
 	"github.com/simonjanss/rig/auth/session"
+	"github.com/simonjanss/rig/runtime/authwire"
 	"github.com/simonjanss/rig/runtime/rigerr"
 )
 
@@ -42,12 +42,6 @@ func (h *Handler) identity(r *http.Request) (*session.Identity, error) {
 	return h.cfg.Identities.Verify(r.Context(), presented)
 }
 
-type registerRequest struct {
-	EmailAddress string `json:"emailAddress"`
-	DisplayName  string `json:"displayName"`
-	Password     string `json:"password"`
-}
-
 // register creates a person with no tenant.
 //
 // Mounted only when the application allowed it. Whether a stranger may create an
@@ -55,7 +49,7 @@ type registerRequest struct {
 // a product with an invite-only front door and one with public sign-up are both
 // ordinary, and they need different code.
 func (h *Handler) register(w http.ResponseWriter, r *http.Request) {
-	var in registerRequest
+	var in authwire.RegisterRequest
 	if err := decode(r, &in); err != nil {
 		h.fail(w, r, err)
 		return
@@ -73,17 +67,6 @@ func (h *Handler) register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, signInOf(res))
-}
-
-type invitationToMeView struct {
-	ID uuid.UUID `json:"id"`
-	// TenantName is the part that means anything to somebody who has not been
-	// there. The identifier is for the accept call.
-	TenantID   uuid.UUID `json:"tenantId"`
-	TenantName string    `json:"tenantName"`
-	Role       string    `json:"role"`
-	CreatedAt  time.Time `json:"createdAt"`
-	ExpiresAt  time.Time `json:"expiresAt"`
 }
 
 // myInvitations lists the invitations waiting for the caller, in every tenant.
@@ -109,14 +92,14 @@ func (h *Handler) myInvitations(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	out := make([]invitationToMeView, 0, len(invites))
+	out := make([]authwire.InvitationToMeView, 0, len(invites))
 	for _, i := range invites {
-		out = append(out, invitationToMeView{
+		out = append(out, authwire.InvitationToMeView{
 			ID: i.ID, TenantID: i.TenantID, TenantName: i.TenantName,
 			Role: string(i.Role), CreatedAt: i.CreatedAt, ExpiresAt: i.ExpiresAt,
 		})
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": out})
+	writeJSON(w, http.StatusOK, authwire.List[authwire.InvitationToMeView]{Data: out})
 }
 
 // myTenants lists the tenants the caller belongs to.
@@ -136,16 +119,16 @@ func (h *Handler) myTenants(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	out := make([]tenantView, 0, len(spaces))
+	out := make([]authwire.TenantView, 0, len(spaces))
 	for _, s := range spaces {
-		out = append(out, tenantView{
+		out = append(out, authwire.TenantView{
 			TenantID: s.TenantID, TenantName: s.TenantName, TenantSlug: s.TenantSlug,
 			AccountID: s.AccountID, Role: string(s.Role),
 			// Nothing is current: the caller is not in a tenant, which is the
 			// reason they are asking.
 		})
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": out})
+	writeJSON(w, http.StatusOK, authwire.List[authwire.TenantView]{Data: out})
 }
 
 // endIdentitySession signs somebody out of the picker.
@@ -170,11 +153,6 @@ func (h *Handler) endIdentitySession(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-type acceptAsMeRequest struct {
-	InvitationID uuid.UUID `json:"invitationId"`
-	Client       string    `json:"client"`
-}
-
 // acceptFromThePicker joins the tenant an invitation names.
 //
 // It answers with a full sign-in body, so the client swaps the credential it was
@@ -188,7 +166,7 @@ func (h *Handler) acceptFromThePicker(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var in acceptAsMeRequest
+	var in authwire.AcceptAsMeRequest
 	if err := decode(r, &in); err != nil {
 		h.fail(w, r, err)
 		return
@@ -207,11 +185,6 @@ func (h *Handler) acceptFromThePicker(w http.ResponseWriter, r *http.Request) {
 	h.answerWithTenant(w, r, who.IdentityID, pair)
 }
 
-type createTenantRequest struct {
-	Name   string `json:"name"`
-	Client string `json:"client"`
-}
-
 // createTenant makes one and signs the caller into it.
 //
 // The work is [account.Service.CreateTenant]: the tenant row, the first account
@@ -224,7 +197,7 @@ func (h *Handler) createTenant(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var in createTenantRequest
+	var in authwire.CreateTenantRequest
 	if err := decode(r, &in); err != nil {
 		h.fail(w, r, err)
 		return
@@ -281,12 +254,12 @@ func (h *Handler) answerWithTenant(
 		return
 	}
 
-	out := signInResponse{
-		tokenPair: pairOf(pair),
-		Tenants:   make([]tenantView, 0, len(spaces)),
+	out := authwire.SignInResponse{
+		TokenPair: pairOf(pair),
+		Tenants:   make([]authwire.TenantView, 0, len(spaces)),
 	}
 	for _, s := range spaces {
-		out.Tenants = append(out.Tenants, tenantView{
+		out.Tenants = append(out.Tenants, authwire.TenantView{
 			TenantID: s.TenantID, TenantName: s.TenantName, TenantSlug: s.TenantSlug,
 			AccountID: s.AccountID, Role: string(s.Role),
 			Current: s.TenantID == tok.TenantID,

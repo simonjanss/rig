@@ -1,6 +1,6 @@
 module github.com/simonjanss/rig/examples/fantasyfootball
 
-go 1.25.7
+go 1.26.6
 
 require (
 	github.com/google/uuid v1.6.0

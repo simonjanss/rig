@@ -4,43 +4,10 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/google/uuid"
-
 	"github.com/simonjanss/rig/auth/account"
+	"github.com/simonjanss/rig/runtime/authwire"
 	"github.com/simonjanss/rig/runtime/tenancy"
 )
-
-// provisionRequest is the body of POST /auth/accounts.
-type provisionRequest struct {
-	EmailAddress string `json:"emailAddress"`
-	DisplayName  string `json:"displayName"`
-
-	// Kind and Role are optional: a person and Basic unless the caller says
-	// otherwise. They are strings on the wire so that a client sends the same
-	// words the database stores.
-	Kind string `json:"kind"`
-	Role string `json:"role"`
-
-	TimeZone string `json:"timeZone"`
-
-	// Invite sends a verification link so the person can set a password. It is
-	// a request rather than the default, because provisioning during an import
-	// of four thousand employees should not send four thousand emails.
-	Invite bool `json:"invite"`
-}
-
-// accountView is what comes back. It is deliberately not the whole row: an
-// account's audit trail is administration, and this answers "it exists now".
-type accountView struct {
-	ID           uuid.UUID `json:"id"`
-	TenantID     uuid.UUID `json:"tenantId"`
-	EmailAddress string    `json:"emailAddress"`
-	DisplayName  string    `json:"displayName"`
-	Kind         string    `json:"kind"`
-	Role         string    `json:"role"`
-	TimeZone     string    `json:"timeZone,omitempty"`
-	CreatedAt    time.Time `json:"createdAt"`
-}
 
 // provision creates an account for somebody who has not got one.
 //
@@ -65,7 +32,7 @@ func (h *Handler) provision(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var in provisionRequest
+	var in authwire.ProvisionRequest
 	if err := decode(r, &in); err != nil {
 		h.fail(w, r, err)
 		return
@@ -89,7 +56,7 @@ func (h *Handler) provision(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusCreated, accountView{
+	writeJSON(w, http.StatusCreated, authwire.AccountView{
 		ID:           acct.ID,
 		TenantID:     acct.TenantID,
 		EmailAddress: acct.EmailAddress,

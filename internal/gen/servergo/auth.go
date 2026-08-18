@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/simonjanss/rig/internal/gen/genutil"
 	"github.com/simonjanss/rig/internal/gen/gobuf"
 	"github.com/simonjanss/rig/pkg/gen"
 	"github.com/simonjanss/rig/pkg/ir"
@@ -421,15 +422,15 @@ func (e *authEmitter) configFunc(b *gobuf.Buf) {
 	}
 
 	b.NL()
-	b.L("AccessTTL: %s,", goDuration(b, a.Session.AccessTTL))
-	b.L("RefreshTTL: %s,", goDuration(b, a.Session.RefreshTTL))
-	b.L("RememberTTL: %s,", goDuration(b, a.Session.RememberTTL))
-	b.L("RotationLeeway: %s,", goDuration(b, a.Session.RotationLeeway))
-	b.L("IdentitySessionTTL: %s,", goDuration(b, a.Session.IdentityTTL))
+	b.L("AccessTTL: %s,", genutil.GoDuration(b, a.Session.AccessTTL))
+	b.L("RefreshTTL: %s,", genutil.GoDuration(b, a.Session.RefreshTTL))
+	b.L("RememberTTL: %s,", genutil.GoDuration(b, a.Session.RememberTTL))
+	b.L("RotationLeeway: %s,", genutil.GoDuration(b, a.Session.RotationLeeway))
+	b.L("IdentitySessionTTL: %s,", genutil.GoDuration(b, a.Session.IdentityTTL))
 	if a.Session.CacheTTL > 0 {
 		b.L("// Verified access tokens are cached, so a revoked session keeps working")
 		b.L("// for up to this long.")
-		b.L("SessionCacheTTL: %s,", goDuration(b, a.Session.CacheTTL))
+		b.L("SessionCacheTTL: %s,", genutil.GoDuration(b, a.Session.CacheTTL))
 	}
 	b.NL()
 
@@ -525,7 +526,7 @@ func (e *authEmitter) oauthConfig(b *gobuf.Buf, fail string) {
 	if o.SigningKeyEnv != "" {
 		b.L("SigningKey: key,")
 	}
-	b.L("StateTTL: %s,", goDuration(b, o.StateTTL))
+	b.L("StateTTL: %s,", genutil.GoDuration(b, o.StateTTL))
 	b.L("AllowProvisioning: %t,", o.AllowProvisioning)
 	b.P("AllowedReturnTo: append([]string{")
 	for i, r := range o.AllowedReturnTo {
@@ -733,7 +734,7 @@ func (e *authEmitter) limitsFunc(b *gobuf.Buf) {
 		{"APIKeyFailures", l.APIKeyFailures},
 	} {
 		b.L("d.%s.Max, d.%s.Window = %d, %s",
-			pair.field, pair.field, pair.limit.Max, goDuration(b, pair.limit.Window))
+			pair.field, pair.field, pair.limit.Max, genutil.GoDuration(b, pair.limit.Window))
 	}
 	b.L("return d")
 	b.L("}")
