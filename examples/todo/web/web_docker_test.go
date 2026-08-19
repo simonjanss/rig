@@ -17,6 +17,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/simonjanss/rig/examples/todo/internal/api"
 	"github.com/simonjanss/rig/examples/todo/internal/store"
 	"github.com/simonjanss/rig/examples/todo/services/todo"
 	"github.com/simonjanss/rig/examples/todo/web"
@@ -236,7 +237,8 @@ func newUI(t *testing.T) *client {
 	t.Cleanup(pool.Close)
 
 	repos := store.New(pool, store.Config{})
-	svc := todo.New(repos.Todos, quiet{}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	svc := todo.New(repos.Todos, api.NewFiles(pool), quiet{},
+		slog.New(slog.NewTextHandler(io.Discard, nil)))
 
 	// A tenant of its own, so one run's rows are invisible to the next and two
 	// clients in one test are two tenants.

@@ -149,7 +149,7 @@ func TestTheRequestContextTravelsOnTheContext(t *testing.T) {
 				return ctx
 			},
 		},
-		Todo: todo.New(store.New(pool, store.Config{}).Todos, nil, nil),
+		Todo: todo.New(store.New(pool, store.Config{}).Todos, api.NewFiles(pool), nil, nil),
 	})
 
 	srv := httptest.NewServer(handler)
@@ -242,6 +242,6 @@ func TestMinRevisionClosesTheDoor(t *testing.T) {
 func handlerWithMinRevision(pool *pgxpool.Pool, min apirev.Revision) http.Handler {
 	return api.Register(api.Handlers{
 		Server: api.Server{GetClaims: headerClaims, MinRevision: min},
-		Todo:   todo.New(store.New(pool, store.Config{}).Todos, nil, nil),
+		Todo:   todo.New(store.New(pool, store.Config{}).Todos, api.NewFiles(pool), nil, nil),
 	})
 }

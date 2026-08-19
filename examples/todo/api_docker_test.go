@@ -32,6 +32,7 @@ import (
 	"github.com/simonjanss/rig/examples/todo/internal/model"
 	"github.com/simonjanss/rig/examples/todo/internal/store"
 	"github.com/simonjanss/rig/examples/todo/services/todo"
+	todo_attachment "github.com/simonjanss/rig/examples/todo/services/todo_attachment"
 	"github.com/simonjanss/rig/runtime/dbhook"
 	"github.com/simonjanss/rig/runtime/rigerr"
 	"github.com/simonjanss/rig/runtime/tenancy"
@@ -358,9 +359,16 @@ func newServer(t *testing.T) (*httptest.Server, uuid.UUID) {
 // and not the other is what this trades away; api.Register is the part that
 // matters and it is the same call in both.
 func newHandler(pool *pgxpool.Pool, notifier todo.Notifier) http.Handler {
+	repos := store.New(pool, store.Config{})
+	// The same file service main.go builds, from the same `files:` block. The
+	// backend is memory, so uploads live as long as this process does — which is
+	// exactly as long as a test needs them.
+	files := api.NewFiles(pool)
+
 	return api.Register(api.Handlers{
-		Server: api.Server{GetClaims: headerClaims},
-		Todo:   todo.New(store.New(pool, store.Config{}).Todos, notifier, nil),
+		Server:         api.Server{GetClaims: headerClaims},
+		Todo:           todo.New(repos.Todos, files, notifier, nil),
+		TodoAttachment: todo_attachment.New(repos.TodoAttachments, files),
 	})
 }
 
@@ -1082,6 +1090,7 @@ func newScopedHandler(
 			},
 			Endpoints: svc,
 		},
+		api.NewFiles(pool),
 	)
 
 	return api.Register(api.Handlers{

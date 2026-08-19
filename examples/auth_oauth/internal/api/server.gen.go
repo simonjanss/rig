@@ -291,8 +291,17 @@ func writeJSON(w http.ResponseWriter, status int, body any) {
 // for something it will not get, and telling it so beats silently ignoring
 // half the request.
 func decodeBody(r *http.Request, into any) error {
-	body := io.LimitReader(r.Body, maxBodyBytes)
-	dec := json.NewDecoder(body)
+	return decodeReader(r.Body, into)
+}
+
+// decodeReader is the decode itself, separated from the request so that a body
+// arriving as one part of a form goes through exactly the same one.
+//
+// That sharing is the point rather than a tidiness: a multipart create and a
+// JSON create have to refuse the same keys and produce the same field errors,
+// and two decoders would eventually differ about one of them.
+func decodeReader(r io.Reader, into any) error {
+	dec := json.NewDecoder(io.LimitReader(r, maxBodyBytes))
 	dec.DisallowUnknownFields()
 
 	if err := dec.Decode(into); err != nil {
