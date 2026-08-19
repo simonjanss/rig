@@ -47,6 +47,16 @@
             "description": "Too many requests. Retry after the interval in the Retry-After header."
           },
           {
+            "name": "TooLarge",
+            "wire": "TooLarge",
+            "description": "The request body is larger than this endpoint accepts."
+          },
+          {
+            "name": "UnsupportedMediaType",
+            "wire": "UnsupportedMediaType",
+            "description": "The body's content type is not one this endpoint accepts."
+          },
+          {
             "name": "UpgradeRequired",
             "wire": "UpgradeRequired",
             "description": "The client was built against an API revision this server no longer serves."
