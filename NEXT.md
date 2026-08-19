@@ -28,10 +28,9 @@ Next:
   download endpoint per file column, nested under the row that owns them. Before
   M6 because it adds two error codes, and the code set is baked into an OpenAPI
   document and a TypeScript union the moment those ship.
-- **M5.11** — referential actions: a table that points at a row gets a function call
-  when that row is deleted, inside the same transaction, and can refuse it. The other
-  half of the sentence RIG6040 already started. (Was M5.10; `go-client` shipped into
-  the number while this was being written.)
+- ~~**M5.11** — referential actions.~~ Shipped: a table that points at a row gets a
+  function call when that row is deleted, inside the same transaction, and can refuse
+  it. The other half of the sentence RIG6040 already started.
 - **M5.12** — the auth log and who is signed in: a read endpoint over
   `rig_auth_log`, and `GET /auth/sessions` widened past the caller's own. The
   events have been recorded since M4 and nothing has ever served them. (Was
@@ -1702,11 +1701,17 @@ report naming the line of everything that did not go in.
 
 ---
 
-## M5.11 — referential actions
+## M5.11 — referential actions (shipped)
 
 **Goal.** When a row is deleted, every table pointing at it gets a function call —
 inside the same transaction, before the row goes and again after it is committed — so
 a child can refuse the delete, clean itself up, or do nothing, in code it wrote.
+
+Shipped as one milestone, which answers the last open question below: the closure
+argument held up, so there was never a separate registry to land first. Two things
+came out differently from the sketch and both are noted where they belong — the
+registry is assembled in `api.Register` rather than at `Bind`, and a parent must
+offer `Delete` for its children to get hooks at all.
 
 ### rig already wrote the argument and never finished the sentence
 
@@ -1965,32 +1970,41 @@ does not want this feature.
 Honest gap: nothing here tests that the *scaffold* teaches the difference between the fast
 body and the correct one, and that is the part most likely to be got wrong in the field.
 
-### Open questions for you
+### The questions, answered
 
-**Is the parent row enough, or does the child want its own rows?** I lean the parent — it is
-one call, the child knows how to find its rows, and the alternative is rig doing a query on
-the child's behalf that the child may not want. The counter is that "for each of my rows
-affected by this" is what people actually write, and every one of them will write the same
-`SELECT` first.
+**The child gets the parent row, not its own rows.** One call per relation. The
+alternative — rig running a `SELECT` on the child's behalf — is a query the child may not
+want, and the generated doc comment says instead what the two bodies cost, because the fast
+one and the correct one are both one line and do not look different.
 
-**Is the derived sibling order worth it, or should the parent just always say?** The
-topological sort is right, and it is also invisible: reading a project tells you nothing
-about what order its hooks run in unless you go and build the graph in your head. The
-alternative is requiring `on_delete.order` on any parent with more than one child — noisier,
-but the sequence is then written down where somebody debugging it will look. I lean derived,
-with `rig ir` able to print the resolved order, so the answer exists somewhere you can ask
-for it rather than in nobody's head.
+**The sibling order is derived, and `rig ir` prints it.** `Resource.Children` carries the
+resolved sequence, so the answer exists somewhere you can ask for it rather than in nobody's
+head. `on_delete.order` overrides it; a cycle among siblings falls back to schema order and
+says so as RIG5060 rather than silently picking.
 
-**Should `Deleting` also fire for a restore?** A child that nulled a link on a hard delete
-has nothing to undo, but a child that archived rows might want the symmetric call. I lean no
-for now — `Restore` is already the one path that deliberately does not walk anything — but
-it is the obvious next request and it is worth deciding before the hook names are baked into
-generated code.
+**`Deleting` does not fire for a restore.** `Restore` stays the one path that deliberately
+walks nothing. It is still the obvious next request.
 
-**And is this one milestone or two?** The registry is small precisely because closures carry
-their own repositories, so I no longer think this needs the dependency-injection change I
-would have proposed for a declarative cascade. If that holds up in the first hour of
-implementation, it is one milestone. If it does not, the registry lands first and alone.
+**One milestone.** The closure argument held: nothing had to be injected backwards, so there
+was no dependency-injection change to land separately.
+
+### Two departures worth reading before changing either
+
+**The registry is assembled in `api.Register`, not at `Bind`.** `Bind` was the sketch's
+answer and it cannot work as written: `Default<Res>Service` is a value, `Handlers` holds it
+in an interface, and a value in an interface cannot be addressed — so a child constructed
+after its parent has nothing to register with. `Register` sees every service at once and
+runs before anything is served, and `Handlers` already has one field per resource, so the
+compile-time check survives. The writer holds `children *<Res>ChildDeletes` and reads it at
+delete time; `Link` is exported for the program that builds services and serves them some
+other way.
+
+**A parent has to offer `Delete`.** Being exposed is not enough, and the case that forces
+the distinction is `rig_file`: with `files.expose` it is a resource, and it is
+`operations: [Get, List]` — the write path is the upload endpoint on the row that owns the
+file. A `RigFileDeleting` field on every table with a file column would be a hook nothing
+can ever reach, and a field that can never fire is worse than no field, because somebody
+implements it and waits.
 
 ---
 

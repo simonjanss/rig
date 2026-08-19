@@ -1512,3 +1512,184 @@ func TestOnlyATenantCarryingKeyIsCoveredByATenantLeadingIndex(t *testing.T) {
 		})
 	}
 }
+
+// cascadeSchema is three tables around one parent, arranged so the derived
+// order is not the order they are declared in.
+//
+// fixture references player, so fixture is told about a team's deletion before
+// player is — referencing tables before referenced ones, which is the order the
+// rows themselves would have to go in. Declared the other way round on purpose:
+// an implementation that returned schema order would pass a fixture where the
+// two agreed.
+func cascadeSchema() ir.Schema {
+	return ir.Schema{
+		Tables: []ir.Table{
+			{
+				Name: "team", Kind: ir.TableKindBase,
+				Columns:    []ir.Column{{Name: "id", SQLType: "uuid", Ordinal: 1}},
+				PrimaryKey: []string{"id"},
+			},
+			{
+				Name: "player", Kind: ir.TableKindBase,
+				Columns: []ir.Column{
+					{Name: "id", SQLType: "uuid", Ordinal: 1},
+					{Name: "team_id", SQLType: "uuid", Ordinal: 2,
+						ForeignKey: &ir.FKRef{Table: "team", Column: "id"}},
+				},
+				PrimaryKey: []string{"id"},
+			},
+			{
+				Name: "fixture", Kind: ir.TableKindBase,
+				Columns: []ir.Column{
+					{Name: "id", SQLType: "uuid", Ordinal: 1},
+					{Name: "home_team_id", SQLType: "uuid", Ordinal: 2,
+						ForeignKey: &ir.FKRef{Table: "team", Column: "id"}},
+					{Name: "player_id", SQLType: "uuid", Ordinal: 3,
+						ForeignKey: &ir.FKRef{Table: "player", Column: "id"}},
+				},
+				PrimaryKey: []string{"id"},
+			},
+		},
+	}
+}
+
+func resource(t *testing.T, api ir.API, name string) *ir.Resource {
+	t.Helper()
+	for i := range api.Resources {
+		if api.Resources[i].Name == name {
+			return &api.Resources[i]
+		}
+	}
+	t.Fatalf("no resource named %s", name)
+	return nil
+}
+
+func childTables(res *ir.Resource) []string {
+	out := make([]string, 0, len(res.Children))
+	for _, c := range res.Children {
+		out = append(out, c.Table)
+	}
+	return out
+}
+
+// The order siblings hear about a delete is derived from their own foreign keys.
+// It does not matter for correctness — everything is one transaction — and it
+// decides what one sibling can see of another and which error a caller gets when
+// two would both refuse, so it has to be the same on every request.
+func TestChildrenAreOrderedByTheirOwnForeignKeys(t *testing.T) {
+	t.Parallel()
+
+	schema, diags := compile.Normalize(cascadeSchema(), compile.NormalizeOptions{})
+	if diags.HasErrors() {
+		t.Fatalf("the fixture itself should normalize:\n%s", diags.String())
+	}
+	api, diags := compile.Project(schema, compile.ProjectOptions{Name: "Demo", BasePath: "/api/v1"})
+	if diags.HasErrors() {
+		t.Fatalf("the fixture itself should project:\n%s", diags.String())
+	}
+
+	if got, want := childTables(resource(t, api, "Team")), []string{"fixture", "player"}; !slices.Equal(got, want) {
+		t.Errorf("team's children = %v, want %v", got, want)
+	}
+
+	// The child's end of the same edge: the field it fills is named after the
+	// column, so two foreign keys to one table are two hooks rather than one
+	// that swallowed the other.
+	fixture := resource(t, api, "Fixture")
+	if got, want := len(fixture.Parents), 2; got != want {
+		t.Fatalf("fixture should have %d parents, has %d", want, got)
+	}
+	if got, want := fixture.Parents[0].Name, "HomeTeam"; got != want {
+		t.Errorf("the first parent hook is %q, want %q", got, want)
+	}
+
+	// Both sides have to agree about the name, because Link reads one and
+	// assigns it to the other.
+	team := resource(t, api, "Team")
+	if got, want := team.Children[0].Hook, "HomeTeam"; got != want {
+		t.Errorf("team names fixture's hook %q, want %q", got, want)
+	}
+}
+
+// The derived order is right for the case that recurs and it is not right for
+// every case. When it is wrong the parent says so, because the parent is the
+// only place that can see all its children at once.
+func TestOnDeleteOrderOverridesTheDerivedOne(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name  string
+		order []string
+		want  []string
+		diag  string
+	}{
+		{"unset keeps the derived order", nil, []string{"fixture", "player"}, ""},
+		{"a full list is taken as written", []string{"player", "fixture"},
+			[]string{"player", "fixture"}, ""},
+		// Naming some of them is the ordinary case: the reason to write the key
+		// at all is one pair whose order is wrong, and demanding the whole
+		// sequence would mean a list that silently stops mentioning a table.
+		{"anything unlisted runs after, in the derived order", []string{"player"},
+			[]string{"player", "fixture"}, ""},
+		{"a table that references nothing here is refused", []string{"referee"},
+			[]string{"fixture", "player"}, "RIG5061"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			schema, _ := compile.Normalize(cascadeSchema(), compile.NormalizeOptions{})
+			api, _ := compile.Project(schema, compile.ProjectOptions{Name: "Demo", BasePath: "/api/v1"})
+
+			set := tableconf.NewSet()
+			if tc.order != nil {
+				set.Add(&tableconf.Loaded{File: &tableconf.File{
+					Table:    "team",
+					OnDelete: &tableconf.OnDelete{Order: tc.order},
+				}})
+			}
+
+			out, _, diags := compile.ApplyConfig(api, schema, set, compile.ConfigOptions{})
+			if got := childTables(resource(t, out, "Team")); !slices.Equal(got, tc.want) {
+				t.Errorf("team's children = %v, want %v", got, tc.want)
+			}
+			if tc.diag != "" && !strings.Contains(diags.String(), tc.diag) {
+				t.Errorf("expected %s:\n%s", tc.diag, diags.String())
+			}
+			if tc.diag == "" && diags.HasErrors() {
+				t.Errorf("nothing here is an error:\n%s", diags.String())
+			}
+		})
+	}
+}
+
+// A cycle among the siblings has no topological order at all. Falling back to
+// schema order and saying so is better than silently picking one, because the
+// pick would be stable, undocumented, and impossible to reason about from the
+// project — which is exactly the property the derived order exists to have.
+func TestASiblingCycleIsReportedRatherThanResolved(t *testing.T) {
+	t.Parallel()
+
+	schema := cascadeSchema()
+	// player now points back at fixture, so neither can go first.
+	for i := range schema.Tables {
+		if schema.Tables[i].Name != "player" {
+			continue
+		}
+		schema.Tables[i].Columns = append(schema.Tables[i].Columns, ir.Column{
+			Name: "fixture_id", SQLType: "uuid", Ordinal: 3, Nullable: true,
+			ForeignKey: &ir.FKRef{Table: "fixture", Column: "id"},
+		})
+	}
+
+	normalized, _ := compile.Normalize(schema, compile.NormalizeOptions{})
+	api, diags := compile.Project(normalized, compile.ProjectOptions{Name: "Demo", BasePath: "/api/v1"})
+
+	if !strings.Contains(diags.String(), "RIG5060") {
+		t.Errorf("a sibling cycle should be reported:\n%s", diags.String())
+	}
+	// Reported, not refused: the order is still total and still stable, so a
+	// project with a cycle keeps generating and keeps deleting.
+	if got, want := len(childTables(resource(t, api, "Team"))), 2; got != want {
+		t.Errorf("team should still have %d children, has %d", want, got)
+	}
+}

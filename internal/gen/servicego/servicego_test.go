@@ -59,6 +59,18 @@ func TestDeterministic(t *testing.T) {
 	gentest.Deterministic(t, servicego.New(), doc, opts())
 }
 
+// The parent hooks are one field pair per foreign key, and the relations fixture
+// is the one with any: fixture points at team twice, so its ParentHooks has to
+// carry HomeTeam and AwayTeam rather than one Team that swallowed the other.
+func TestCascadeGolden(t *testing.T) {
+	t.Parallel()
+
+	doc := gentest.LoadDocument(t, filepath.Join("testdata", "relations.ir.json"))
+	artifacts := gentest.Run(t, servicego.New(), doc, opts())
+
+	gentest.Golden(t, filepath.Join("testdata", "relations"), artifacts, *update)
+}
+
 // TestGeneratedCodeCompiles builds the API layer against the persistence layer
 // it calls. Compiling either alone would miss the mismatches worth catching.
 func TestGeneratedCodeCompiles(t *testing.T) {

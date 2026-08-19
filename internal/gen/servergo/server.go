@@ -14,6 +14,7 @@ func (e *emitter) serverFile() (gen.Artifact, error) {
 	e.serverType(b)
 	e.handlersStruct(b)
 	e.registerFunc(b)
+	e.linkFunc(b)
 	e.helpers(b)
 
 	return artifact("server.gen.go", b)
@@ -153,6 +154,9 @@ func (e *emitter) registerFunc(b *gobuf.Buf) {
 		"project authenticates its own way\")")
 	b.L("}")
 	b.NL()
+	b.L("Link(h)")
+	b.NL()
+
 	b.L("mux := %s.NewServeMux()", httpPkg)
 	b.NL()
 

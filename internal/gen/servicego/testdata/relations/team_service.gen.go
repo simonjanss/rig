@@ -6,10 +6,10 @@ package api
 
 import (
 	"context"
+	"rigtest/model"
+	"rigtest/store"
 
 	"github.com/google/uuid"
-	"github.com/simonjanss/rig/examples/fantasyfootball/internal/model"
-	"github.com/simonjanss/rig/examples/fantasyfootball/internal/store"
 	"github.com/simonjanss/rig/runtime/dbhook"
 	"github.com/simonjanss/rig/runtime/tenancy"
 )
@@ -29,18 +29,7 @@ type TeamService interface {
 	// Search Teams with filters.
 	Search(ctx context.Context, r Request[struct{}, TeamSearchQuery, TeamSearchBody]) (*TeamListResponse, error)
 
-	// List retired Teams.
-	//
-	// A deletion stamps the row rather than removing it, so this is what was
-	// deleted and can still be brought back. Only rows inside the 30-day restore
-	// window appear: past it a row is gone as far as anyone is concerned, so it is
-	// not in the trash either.
-	ListDeleted(ctx context.Context, r Request[struct{}, TeamListDeletedQuery, struct{}]) (*TeamListResponse, error)
-
 	// Delete a Team.
-	//
-	// The row is retired by stamping a deletion time; it stops appearing in reads
-	// but can be restored within the retention window.
 	Delete(ctx context.Context, r Request[TeamDeletePath, struct{}, struct{}]) error
 
 	// Fetch one Team by identifier.
@@ -51,26 +40,6 @@ type TeamService interface {
 	// Only the fields present in the body are changed. A field set to null is
 	// cleared; a field left out is left alone.
 	Update(ctx context.Context, r Request[TeamUpdatePath, struct{}, model.TeamUpdateInput]) (*model.Team, error)
-
-	// Bring a retired Team back.
-	//
-	// The deletion stamp is cleared and the row appears in reads again. It works
-	// for 30 days after the deletion; past that the row is no longer eligible and
-	// this answers 409.
-	//
-	// Restoring a row that was never deleted is not an error. It is already in the
-	// state the caller asked for, and answering otherwise would make a retry of a
-	// request whose response went missing look like a failure.
-	//
-	// The request carries no fields. What to do when the world has moved on while
-	// the row was retired — a unique value taken by something created since —
-	// is the application's decision, and it is made in the restore hook: refuse,
-	// or change the row so that it fits.
-	//
-	// Every rule then runs against whatever the hook settled on, not only the ones
-	// for fields it touched. The row was not live, so nothing about it has been
-	// checked against the world it is returning to.
-	Restore(ctx context.Context, r Request[TeamRestorePath, struct{}, struct{}]) (*model.Team, error)
 
 	// AdoptChildren receives the hooks of the tables referencing this one. [Link]
 	// calls it.
@@ -139,13 +108,6 @@ func (w TeamWriter) Delete(ctx context.Context, in model.TeamDeleteInput) error 
 	return w.repo.Delete(ctx, dbhook.Delete[model.TeamDeleteInput, model.Team]{Input: in, Hooks: hooks})
 }
 
-// Restore brings a retired row back, running the restore hooks. The input
-// starts empty: what a row has to change to be allowed back is the hook's
-// decision, not the caller's.
-func (w TeamWriter) Restore(ctx context.Context, id uuid.UUID) (*model.Team, error) {
-	return w.repo.Restore(ctx, id, dbhook.Restore[model.TeamUpdateInput, model.Team]{Hooks: w.hooks.Restore})
-}
-
 // DefaultTeamService implements every operation.
 //
 // The generated ones it answers itself, by calling the repository. A custom
@@ -189,9 +151,6 @@ type TeamHooks struct {
 	Create dbhook.CreateHooks[model.TeamCreateInput, model.Team]
 	Update dbhook.UpdateHooks[model.TeamUpdateInput, model.Team]
 	Delete dbhook.DeleteHooks[model.TeamDeleteInput, model.Team]
-	// Restore takes the update input, because a restore may have to change the row
-	// to be allowed back at all.
-	Restore dbhook.RestoreHooks[model.TeamUpdateInput, model.Team]
 }
 
 // TeamRules is everything the service layer supplies about Team.
@@ -332,28 +291,6 @@ func (s DefaultTeamService) Search(ctx context.Context, r Request[struct{}, Team
 	}, nil
 }
 
-// ListDeleted implements TeamService.
-func (s DefaultTeamService) ListDeleted(ctx context.Context, r Request[struct{}, TeamListDeletedQuery, struct{}]) (*TeamListResponse, error) {
-	page := model.TeamPage{Limit: r.Query.Limit, Offset: r.Query.Offset}
-	filter, err := s.readFilter(ctx, r.Claims, model.NewTeamFilter())
-	if err != nil {
-		return nil, err
-	}
-
-	rows, total, err := s.repo.ListDeleted(ctx, filter, page)
-	if err != nil {
-		return nil, err
-	}
-	if err := s.readRows(ctx, r.Claims, rows); err != nil {
-		return nil, err
-	}
-
-	return &TeamListResponse{
-		Data:       rows,
-		Pagination: Pagination{Offset: page.Offset, Limit: page.Limit, Total: total},
-	}, nil
-}
-
 // Delete implements TeamService.
 func (s DefaultTeamService) Delete(ctx context.Context, r Request[TeamDeletePath, struct{}, struct{}]) error {
 	return s.write.Delete(ctx, model.TeamDeleteInput{ID: r.Path.ID})
@@ -378,9 +315,4 @@ func (s DefaultTeamService) Get(ctx context.Context, r Request[TeamGetPath, stru
 // Update implements TeamService.
 func (s DefaultTeamService) Update(ctx context.Context, r Request[TeamUpdatePath, struct{}, model.TeamUpdateInput]) (*model.Team, error) {
 	return s.write.Update(ctx, r.Path.ID, r.Body)
-}
-
-// Restore implements TeamService.
-func (s DefaultTeamService) Restore(ctx context.Context, r Request[TeamRestorePath, struct{}, struct{}]) (*model.Team, error) {
-	return s.write.Restore(ctx, r.Path.ID)
 }

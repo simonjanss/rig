@@ -89,8 +89,68 @@ type txKey struct{}
 
 type commitKey struct{}
 
+type cascadeKey struct{}
+
 // pending collects what should run once the outermost transaction commits.
 type pending struct{ fns []func() }
+
+// MaxCascadeDepth bounds how far a delete may propagate through child hooks.
+//
+// A child that deletes its own rows by calling its own Delete triggers their
+// children the same way, so depth is the call stack and recursion falls out
+// rather than being designed. What does not fall out is termination: a cycle in
+// the schema — a table that reaches itself through two relations — would
+// exhaust the stack, and the failure would arrive as a crash rather than as an
+// error somebody can read.
+//
+// It is the same shape as the generated MaxFilterDepth and the same kind of
+// number: high enough that no schema anybody writes on purpose reaches it, low
+// enough that the one that does says so.
+const MaxCascadeDepth = 10
+
+// cascade is the visited set and depth for one outermost transaction.
+type cascade struct {
+	seen  map[string]bool
+	depth int
+}
+
+// EnterDelete records that a row is being deleted, and reports whether to go on.
+//
+// False means this row is already being deleted further up the same
+// transaction — a cycle — and the second visit is a no-op rather than an error:
+// the row is going, which is what the caller asked for, and refusing would turn
+// a legal schema into a runtime failure. The returned context carries the depth
+// for anything nested inside this delete, so [LeaveDelete] is not needed and
+// does not exist: the depth is the context's, and it unwinds with the call.
+//
+// The error is the depth cap, which is a different answer from the visited set
+// and deserves to be: reaching it means the propagation is deeper than rig will
+// follow, and finishing halfway through would leave the transaction in a state
+// nobody asked for.
+//
+// A delete outside any transaction has nothing to guard — there is no parent to
+// have been visited — so it always proceeds.
+func EnterDelete(ctx context.Context, table, id string) (context.Context, bool, error) {
+	c, ok := ctx.Value(cascadeKey{}).(*cascade)
+	if !ok {
+		return ctx, true, nil
+	}
+
+	key := table + " " + id
+	if c.seen[key] {
+		return ctx, false, nil
+	}
+	if c.depth >= MaxCascadeDepth {
+		return ctx, false, fmt.Errorf(
+			"deleting %s: delete propagation reached %d levels, which is as far as rig follows one; "+
+				"a cycle among the relations is the usual cause", table, MaxCascadeDepth)
+	}
+
+	c.seen[key] = true
+	inner := *c
+	inner.depth = c.depth + 1
+	return context.WithValue(ctx, cascadeKey{}, &inner), true, nil
+}
 
 // AfterCommit runs fn once the transaction this context belongs to has
 // committed, or immediately when there is no transaction.
@@ -141,7 +201,10 @@ func InTx(ctx context.Context, db Beginner, fn func(ctx context.Context, tx Conn
 	defer func() { _ = tx.Rollback(ctx) }()
 
 	p := &pending{}
-	inner := context.WithValue(context.WithValue(ctx, txKey{}, tx), commitKey{}, p)
+	c := &cascade{seen: make(map[string]bool)}
+	inner := context.WithValue(
+		context.WithValue(context.WithValue(ctx, txKey{}, tx), commitKey{}, p),
+		cascadeKey{}, c)
 
 	if err := fn(inner, tx); err != nil {
 		return err

@@ -410,6 +410,56 @@ func TestUnknownOptionIsRejected(t *testing.T) {
 	}
 }
 
+// The five steps of a delete, in order, and the guard around them. The order is
+// the whole of what the repository contributes to the propagation — every
+// decision above it was the compiler's — so it is asserted against the text
+// rather than inferred from the fact that it compiles.
+func TestDeleteRunsTheChildrenInTheRightPlace(t *testing.T) {
+	t.Parallel()
+
+	doc := gentest.LoadDocument(t, filepath.Join("testdata", "relations.ir.json"))
+	artifacts := gentest.Run(t, persistgo.New(), doc, opts())
+	team := collapse(find(t, artifacts, "team_repository.gen.go"))
+
+	for _, tc := range []struct{ what, want string }{
+		// The parent's own veto first: the cheapest and most specific rule
+		// should not have to wait for every child's cleanup.
+		{"the row's own Before comes first", "if in.Hooks.Before != nil {"},
+		{"then every child, in the order the document settled",
+			"for _, child := range in.Hooks.Children { if child.Deleting == nil { continue }"},
+		{"a refusal names the relation that refused",
+			`return fmt.Errorf("%s: %w", child.Child, err)`},
+		{"the after-commit half is queued, not run",
+			"dbx.AfterCommit(ctx, func() { done(ctx, claims, row, input) })"},
+		{"a cycle terminates rather than exhausting the stack",
+			`dbx.EnterDelete(ctx, "team", in.Input.ID.String())`},
+		{"a row already being deleted in this transaction is a no-op",
+			"if !more { return nil }"},
+	} {
+		if !strings.Contains(team, collapse(tc.want)) {
+			t.Errorf("%s\nexpected: %s", tc.what, tc.want)
+		}
+	}
+
+	before := strings.Index(team, "if in.Hooks.Before != nil {")
+	children := strings.Index(team, "for _, child := range in.Hooks.Children {")
+	write := strings.Index(team, "DELETE FROM team WHERE id = $1")
+	if !(before < children && children < write) {
+		t.Errorf("the order should be Before, then the children, then the row; got %d, %d, %d",
+			before, children, write)
+	}
+
+	// A table nothing points at gets none of it, so a schema without relations
+	// pays nothing for this feature.
+	player := collapse(find(t, artifacts, "player_repository.gen.go"))
+	if strings.Contains(player, "in.Hooks.Children") {
+		t.Error("a resource with no children should not walk a child list")
+	}
+	if strings.Contains(player, "dbx.EnterDelete") {
+		t.Error("a resource with no children cannot start a cycle, so it needs no guard")
+	}
+}
+
 func find(t *testing.T, artifacts []gen.Artifact, name string) string {
 	t.Helper()
 	for _, a := range artifacts {

@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5"
@@ -261,5 +263,79 @@ func TestTxReportsWhatIsOnTheContext(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatal(err)
+	}
+}
+
+// The visited set is what makes a cycle in the schema terminate. A child that
+// deletes its own rows by calling its own Delete triggers their children the
+// same way, so depth is the call stack — and a table that reaches itself would
+// exhaust it.
+func TestEnterDeleteRefusesASecondVisitToTheSameRow(t *testing.T) {
+	t.Parallel()
+
+	err := dbx.InTx(t.Context(), &fakeDB{}, func(ctx context.Context, _ dbx.Conn) error {
+		inner, more, err := dbx.EnterDelete(ctx, "team", "a")
+		if err != nil || !more {
+			t.Fatalf("the first visit should proceed: more=%v err=%v", more, err)
+		}
+
+		// A different row of the same table is a different delete.
+		if _, more, _ := dbx.EnterDelete(inner, "team", "b"); !more {
+			t.Error("a different row should proceed")
+		}
+		// The same row further down the same transaction is a no-op rather than
+		// an error: the row is going, which is what the caller asked for.
+		if _, more, err := dbx.EnterDelete(inner, "team", "a"); more || err != nil {
+			t.Errorf("a repeat visit should stop quietly: more=%v err=%v", more, err)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+// The depth cap is the other half, and it is an error rather than a no-op:
+// stopping halfway through a propagation would leave the transaction in a state
+// nobody asked for.
+func TestEnterDeleteStopsAtTheDepthCap(t *testing.T) {
+	t.Parallel()
+
+	err := dbx.InTx(t.Context(), &fakeDB{}, func(ctx context.Context, _ dbx.Conn) error {
+		for i := range dbx.MaxCascadeDepth {
+			next, more, err := dbx.EnterDelete(ctx, "team", strconv.Itoa(i))
+			if err != nil || !more {
+				t.Fatalf("level %d should proceed: more=%v err=%v", i, more, err)
+			}
+			ctx = next
+		}
+
+		_, more, err := dbx.EnterDelete(ctx, "team", "one too many")
+		if err == nil {
+			t.Fatal("the cap should be an error, not a silent stop")
+		}
+		if more {
+			t.Error("a refused delete should not proceed")
+		}
+		if !strings.Contains(err.Error(), "cycle") {
+			t.Errorf("the error should name the usual cause: %v", err)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+// Outside a transaction there is no parent to have been visited, so there is
+// nothing to guard and the guard says so rather than allocating a set nobody
+// reads.
+func TestEnterDeleteOutsideATransactionAlwaysProceeds(t *testing.T) {
+	t.Parallel()
+
+	for range 2 {
+		if _, more, err := dbx.EnterDelete(t.Context(), "team", "a"); !more || err != nil {
+			t.Errorf("more=%v err=%v, want true and nil", more, err)
+		}
 	}
 }

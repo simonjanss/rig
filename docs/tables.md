@@ -72,6 +72,7 @@ restore_window_days: 30
 | `order_by` | Default ordering, most significant first. `-` for descending. |
 | `restore_window_days` | Days a soft-deleted row stays restorable. Required when the table has `deleted_at`. |
 | `access` | How wide a read reaches by default. |
+| `on_delete` | The order the tables referencing this one are told a row is going. |
 
 ### `operations`
 
@@ -126,6 +127,34 @@ It narrows **writes** too, and there is no widening for those: an owner-scoped
 table refuses to change somebody else's row outright. A write is a different
 kind of decision from a read, and one flag answering both would be a bad answer
 to two questions.
+
+### `on_delete`
+
+When a row here is deleted, every table pointing at it is told, inside the same
+transaction, and can refuse — that is a
+[parent hook](services.md#when-a-row-you-point-at-is-deleted), and it lives in
+the child's service layer because the *action* is the child's.
+
+The *sequence* is this table's, because this is the only place that can see all
+its children at once. rig derives one — tables that reference each other are told
+outermost-first, which is the order the rows themselves would have to go in — and
+this key is for when that is wrong:
+
+```yaml
+on_delete:
+  order: [fixture, player]   # anything unlisted runs after, in the derived order
+```
+
+Physical table names. Naming some of them is the ordinary case: the reason to
+write this at all is one pair whose order is wrong, and a list that had to name
+every child is a list that silently stops mentioning one.
+
+The order does not affect whether the delete succeeds — everything is one
+transaction, so a refusal unwinds every hook before it. It affects what one
+sibling can see of another, and which error the caller gets when two of them
+would both refuse.
+
+`rig ir` prints the resolved order under each resource's `children`.
 
 ---
 

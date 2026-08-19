@@ -116,11 +116,57 @@ type DeleteHooks[In any, Out any] struct {
 	// Before runs after the row is read and before it is retired or removed.
 	Before func(ctx context.Context, claims tenancy.Claims, in *In, prev *Out) error
 
+	// Children are the tables that point at this one, each with whatever it
+	// wants to happen when one of its parents goes away.
+	//
+	// They run after Before and before the row is touched, in the order rig
+	// derived — see the resource's own writer, which assembles this list. The
+	// parent's own veto comes first on purpose: "this team may not be deleted
+	// while the season is open" is the cheapest and most specific rule in the
+	// building, and it should not require running every child's cleanup before
+	// it gets to say so.
+	//
+	// A generated writer fills this in. Setting it by hand is possible and is
+	// not the intended path: what belongs to the application is the function on
+	// the child, not the wiring that finds it.
+	Children []ChildDelete[In, Out]
+
 	// After runs after the delete, with the row as it was.
 	After func(ctx context.Context, claims tenancy.Claims, prev *Out) error
 
 	// AfterCommit runs once the deletion has landed.
 	AfterCommit func(ctx context.Context, claims tenancy.Claims, prev *Out)
+}
+
+// ChildDelete is one child table's answer to its parent being deleted.
+//
+// The two halves are separate because they can fail in different ways and only
+// one of them may. Deleting runs inside the transaction that is deleting the
+// parent and can refuse it; Deleted runs after that transaction commits, is
+// best-effort, and exists for the cache eviction, the search index and the
+// email — the things that must not be able to fail a delete that already
+// happened.
+//
+// The child receives the parent row and the delete input, never its own rows:
+// one call per relation rather than one per row, because nulling ten thousand
+// links is one UPDATE the child writes itself. The input is there because
+// [Delete] carrying Hard is the difference between a soft delete the parent can
+// undo and a permanent one, and a child that nulls a link on the first has
+// destroyed the only record of what to re-link on a restore.
+type ChildDelete[In any, Out any] struct {
+	// Child names the table the hooks came from, so a refusal can say which
+	// relation blocked the delete rather than naming none.
+	Child string
+
+	// Deleting runs inside the transaction, before the parent row is touched.
+	// Returning an error refuses the delete and unwinds every child that ran
+	// before it.
+	Deleting func(ctx context.Context, claims tenancy.Claims, parent *Out, in In) error
+
+	// Deleted runs once the outermost transaction has committed, in the same
+	// order Deleting ran. It returns nothing: there is no longer anything to
+	// fail.
+	Deleted func(ctx context.Context, claims tenancy.Claims, parent *Out, in In)
 }
 
 // Delete is one delete.

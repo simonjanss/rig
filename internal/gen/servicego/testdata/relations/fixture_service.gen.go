@@ -6,10 +6,10 @@ package api
 
 import (
 	"context"
+	"rigtest/model"
+	"rigtest/store"
 
 	"github.com/google/uuid"
-	"github.com/simonjanss/rig/examples/fantasyfootball/internal/model"
-	"github.com/simonjanss/rig/examples/fantasyfootball/internal/store"
 	"github.com/simonjanss/rig/runtime/dbhook"
 	"github.com/simonjanss/rig/runtime/tenancy"
 )

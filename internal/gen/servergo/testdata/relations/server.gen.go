@@ -10,11 +10,13 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"rigtest/model"
 	"strconv"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/simonjanss/rig/runtime/apirev"
+	"github.com/simonjanss/rig/runtime/dbhook"
 	"github.com/simonjanss/rig/runtime/rigerr"
 	"github.com/simonjanss/rig/runtime/tenancy"
 	"github.com/simonjanss/rig/runtime/throttle"
@@ -97,7 +99,9 @@ type Server struct {
 type Handlers struct {
 	Server Server
 
-	Note NoteService
+	Fixture FixtureService
+	Player  PlayerService
+	Team    TeamService
 }
 
 // Register mounts every route and returns the mux.
@@ -132,8 +136,14 @@ func Register(h Handlers) *http.ServeMux {
 
 	mux := http.NewServeMux()
 
-	if h.Note != nil {
-		registerNote(mux, h.Server, h.Note)
+	if h.Fixture != nil {
+		registerFixture(mux, h.Server, h.Fixture)
+	}
+	if h.Player != nil {
+		registerPlayer(mux, h.Server, h.Player)
+	}
+	if h.Team != nil {
+		registerTeam(mux, h.Server, h.Team)
 	}
 
 	// After the resources, so a pattern collision between the two is a panic
@@ -159,9 +169,27 @@ func Register(h Handlers) *http.ServeMux {
 // appended to. A resource whose field is nil is skipped, and a parent whose
 // children are all nil adopts an empty list, which is what it had before.
 func Link(h Handlers) {
-	// No table here references another one rig writes a service for, so there is
-	// nothing to propagate.
-	_ = h
+	if h.Team != nil {
+		var cs TeamChildDeletes
+		if h.Fixture != nil {
+			p := h.Fixture.ParentHooks()
+			cs = append(cs, dbhook.ChildDelete[model.TeamDeleteInput, model.Team]{
+				Child:    "fixture",
+				Deleting: p.HomeTeamDeleting,
+				Deleted:  p.HomeTeamDeleted,
+			})
+		}
+		if h.Fixture != nil {
+			p := h.Fixture.ParentHooks()
+			cs = append(cs, dbhook.ChildDelete[model.TeamDeleteInput, model.Team]{
+				Child:    "fixture",
+				Deleting: p.AwayTeamDeleting,
+				Deleted:  p.AwayTeamDeleted,
+			})
+		}
+		h.Team.AdoptChildren(cs)
+	}
+
 }
 
 // maxBodyBytes bounds a request body. Without a limit, one client can exhaust

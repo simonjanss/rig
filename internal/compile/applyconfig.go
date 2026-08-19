@@ -143,8 +143,73 @@ func ApplyConfig(api ir.API, schema ir.Schema, set *tableconf.Set, opt ConfigOpt
 	}
 
 	retypeEnums(&outAPI, renamed)
+	pruneCascade(&outAPI)
 
 	return outAPI, outSchema, diags
+}
+
+// pruneCascade drops every delete-propagation edge that has nowhere to land.
+//
+// It runs after configuration rather than during projection because `expose` is
+// a configuration key: at projection time nothing is unexposed yet. An unexposed
+// resource has a model and a repository and no service — service-go skips it —
+// so there is no rules interface to declare a hook in and no writer to run one
+// from. rig calls the tables it generates a service for, and this is where that
+// sentence is enforced rather than restated.
+//
+// A parent also has to offer Delete, which is a second question from being
+// exposed and settles the case that would otherwise be confusing: rig_file is a
+// resource in a project with `files.expose`, and it is `operations: [Get, List]`
+// — the write path is the upload endpoint on the row that owns the file, not a
+// POST to the file table. A `<RigFile>Deleting` field on every table with a file
+// column would be a hook nothing can ever reach, and a field that can never fire
+// is worse than no field: somebody implements it and waits.
+// It also refreshes the resource name on every surviving edge. The links were
+// derived before configuration had its say, and `resource:` renames a resource —
+// rig_notification_recipient arrives as NotificationRecipient — so a generator
+// handed the projected name would emit a type that does not exist. Tables are
+// what the edges are keyed by, because a physical name is the one thing
+// configuration cannot move.
+func pruneCascade(api *ir.API) {
+	var (
+		// serviced is a table rig writes a service layer for, so a hook has
+		// somewhere to be declared.
+		serviced = make(map[string]string, len(api.Resources))
+		// deletable is a table whose delete a hook could actually be reached by.
+		deletable = make(map[string]bool, len(api.Resources))
+	)
+	for i := range api.Resources {
+		res := &api.Resources[i]
+		if res.Unexposed || res.Storage == nil {
+			continue
+		}
+		serviced[res.Storage.Table] = res.Name
+		deletable[res.Storage.Table] = res.Supports(ir.OpDelete)
+	}
+
+	for i := range api.Resources {
+		res := &api.Resources[i]
+		if res.Storage == nil || serviced[res.Storage.Table] == "" {
+			res.Parents, res.Children = nil, nil
+			continue
+		}
+		res.Parents = slices.DeleteFunc(res.Parents, func(p ir.ParentLink) bool {
+			return !deletable[p.Table]
+		})
+		for j := range res.Parents {
+			res.Parents[j].Parent = serviced[res.Parents[j].Table]
+		}
+		if !res.Supports(ir.OpDelete) {
+			res.Children = nil
+			continue
+		}
+		res.Children = slices.DeleteFunc(res.Children, func(c ir.ChildLink) bool {
+			return serviced[c.Table] == ""
+		})
+		for j := range res.Children {
+			res.Children[j].Child = serviced[res.Children[j].Table]
+		}
+	}
 }
 
 // retypeEnums points every field at an enum's configured name.
@@ -284,6 +349,7 @@ func applyTableConfig(
 	}
 
 	diags.Append(applyAccessConfig(loaded, &out, cfg))
+	diags.Append(applyOnDeleteConfig(loaded, &out, cfg))
 	diags.Append(applyColumnConfig(loaded, t, &out, cfg, n, opt))
 	diags.Append(applyRelationConfig(loaded, &out, cfg))
 	diags.Append(applyElectricConfig(loaded, &out, cfg, n))
@@ -615,6 +681,59 @@ func applyAccessConfig(loaded *tableconf.Loaded, res *ir.Resource, cfg tableconf
 	// generated repository says it where somebody reading the query will see it.
 	owner := *res.Storage.Audit.CreatedBy
 	res.Storage.Owner = &owner
+	return diags
+}
+
+// applyOnDeleteConfig moves the named children to the front of the derived
+// order.
+//
+// Listing some of them rather than all is the ordinary case: the reason to write
+// this key at all is one pair whose derived order is wrong, and demanding the
+// whole sequence would mean a list that has to be edited every time a table is
+// added — and, worse, a list that silently stops mentioning one.
+func applyOnDeleteConfig(loaded *tableconf.Loaded, res *ir.Resource, cfg tableconf.File) diag.List {
+	var diags diag.List
+	if cfg.OnDelete == nil || len(cfg.OnDelete.Order) == 0 {
+		return diags
+	}
+
+	known := make(map[string]bool, len(res.Children))
+	for _, c := range res.Children {
+		known[c.Table] = true
+	}
+
+	var (
+		front []ir.ChildLink
+		taken = make(map[string]bool, len(cfg.OnDelete.Order))
+	)
+	for i, table := range cfg.OnDelete.Order {
+		at := loaded.At("on_delete", "order")
+		if !known[table] {
+			diags.Add(diag.CodeDeleteOrderUnknown, at,
+				"on_delete.order names %q, which has no foreign key to %s; the order is over "+
+					"the tables that reference this one", table, res.Storage.Table)
+			continue
+		}
+		if taken[table] {
+			diags.Add(diag.CodeDeleteOrderUnknown, at,
+				"on_delete.order names %q twice; position %d is the one that would win", table, i+1)
+			continue
+		}
+		taken[table] = true
+		for _, c := range res.Children {
+			if c.Table == table {
+				front = append(front, c)
+			}
+		}
+	}
+
+	rest := make([]ir.ChildLink, 0, len(res.Children))
+	for _, c := range res.Children {
+		if !taken[c.Table] {
+			rest = append(rest, c)
+		}
+	}
+	res.Children = append(front, rest...)
 	return diags
 }
 

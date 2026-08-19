@@ -390,10 +390,53 @@ type Resource struct {
 	// already settled.
 	Files []FileColumn `json:"files,omitempty"`
 
+	// Parents are the resources this one points at, one per foreign key, in the
+	// order the columns appear on the table. Each becomes a pair of hook fields
+	// the service layer may fill in.
+	Parents []ParentLink `json:"parents,omitempty"`
+
+	// Children are the resources that point at this one, in the order they are
+	// told about a delete.
+	//
+	// The order is derived — referencing tables before referenced ones — and
+	// resolved here rather than in a generator, because it is a fact about the
+	// whole schema and a generator holds one resource at a time.
+	Children []ChildLink `json:"children,omitempty"`
+
 	// Storage is nil for a virtual resource with no table behind it.
 	Storage *ResourceStorage `json:"storage,omitempty"`
 	// Electric is set when the resource exposes a live-sync shape endpoint.
 	Electric *ElectricEndpoint `json:"electric,omitempty"`
+}
+
+// ParentLink is one foreign key from a resource to another resource.
+//
+// Only a foreign key to a table rig generates a service for is here. A column
+// pointing at rig_file or at an audit actor has no service to declare a hook in,
+// and rig should not pretend it can call one.
+type ParentLink struct {
+	// Name is the accessor, matching the BelongsTo relation: HomeTeam out of
+	// home_team_id. It is what the two hook fields are named after.
+	Name string `json:"name"`
+	// Parent is the resource name, Table the physical table behind it.
+	Parent string `json:"parent"`
+	Table  string `json:"table"`
+	// Column is the foreign key on this resource's own table.
+	Column string `json:"column"`
+}
+
+// ChildLink is one foreign key pointing at a resource, from the parent's side.
+type ChildLink struct {
+	// Name is the HasMany accessor: HomeFixtures out of fixture.home_team_id.
+	Name string `json:"name"`
+	// Child is the resource name, Table the physical table behind it.
+	Child string `json:"child"`
+	Table string `json:"table"`
+	// Column is the foreign key on the child's table.
+	Column string `json:"column"`
+	// Hook is the field on the child's parent-hooks struct this edge fills:
+	// HomeTeam, matching the child's own [ParentLink.Name].
+	Hook string `json:"hook"`
 }
 
 // Supports reports whether the resource has the given operation.

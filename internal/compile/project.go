@@ -156,7 +156,210 @@ func projectResource(
 	res.Files = projectFileColumns(t, n)
 	res.Storage = projectStorage(t, schema, life, resourceForTable, n)
 
+	res.Parents = projectParents(t, resourceForTable, n)
+	children, d := projectChildren(t, schema, resourceForTable, n)
+	diags.Append(d)
+	res.Children = children
+
 	return res, diags
+}
+
+// projectParents resolves the foreign keys this table holds to tables rig
+// generates a service for.
+//
+// The boundary is the one M5.9's reference check already draws: a table with no
+// resource has no hooks to declare and no service to declare them in, so
+// rig_file, rig_account and the audit actor columns are all on the other side of
+// it and their foreign keys go on behaving exactly as the schema says. The rule
+// is one sentence — rig calls the tables it generates a service for.
+func projectParents(t *ir.Table, resourceForTable map[string]string, n *naming.Namer) []ir.ParentLink {
+	var out []ir.ParentLink
+	seen := make(map[string]bool)
+
+	for i := range t.Columns {
+		c := &t.Columns[i]
+		if c.ForeignKey == nil || c.ForeignKey.Table == t.Name {
+			continue
+		}
+		target, ok := resourceForTable[c.ForeignKey.Table]
+		if !ok {
+			continue
+		}
+
+		// The same accessor the BelongsTo relation gets, so the hook a service
+		// implements is named after the relation a reader already knows.
+		name := relationName(n, c.Name, target)
+		if seen[name] {
+			name += n.Go(c.Name)
+		}
+		seen[name] = true
+
+		out = append(out, ir.ParentLink{
+			Name:   name,
+			Parent: target,
+			Table:  c.ForeignKey.Table,
+			Column: c.Name,
+		})
+	}
+	return out
+}
+
+// projectChildren resolves the tables pointing at this one, in the order they
+// are told about a delete.
+//
+// The order does not matter for correctness — everything is in one transaction,
+// so any hook returning an error unwinds every hook before it — and it matters
+// for two things that are worth naming, because they are the reason somebody
+// will file a bug: what one sibling can see of another, and which error the
+// caller gets when two of them would both refuse. Whatever the order is, it has
+// to be the same on every request and in every process.
+//
+// So it is derived rather than alphabetical: referencing tables before
+// referenced ones, which is the order the rows themselves would have to go in,
+// and the graph is the same one the HasMany relations are built from.
+// Alphabetical would settle determinism and nothing else, and "your hooks run in
+// alphabetical order" is the kind of rule that is technically documented and
+// never once anticipated.
+func projectChildren(
+	t *ir.Table,
+	schema ir.Schema,
+	resourceForTable map[string]string,
+	n *naming.Namer,
+) ([]ir.ChildLink, diag.List) {
+	var (
+		diags diag.List
+		links []ir.ChildLink
+	)
+
+	parent, isResource := resourceForTable[t.Name]
+	if !isResource {
+		return nil, diags
+	}
+
+	for i := range schema.Tables {
+		other := &schema.Tables[i]
+		if other.Name == t.Name || !projectable(other) {
+			continue
+		}
+		child, ok := resourceForTable[other.Name]
+		if !ok {
+			continue
+		}
+
+		for j := range other.Columns {
+			c := &other.Columns[j]
+			if c.ForeignKey == nil || c.ForeignKey.Table != t.Name {
+				continue
+			}
+			name := n.Go(n.Plural(other.Name))
+			if q := foreignKeyQualifier(c.Name, t.Name); q != "" {
+				name = n.Go(q) + name
+			}
+			links = append(links, ir.ChildLink{
+				Name:   name,
+				Child:  child,
+				Table:  other.Name,
+				Column: c.Name,
+				Hook:   relationName(n, c.Name, parent),
+			})
+		}
+	}
+
+	if len(links) < 2 {
+		return links, diags
+	}
+
+	ordered, cyclic := orderChildren(links, schema)
+	if cyclic {
+		diags.Add(diag.CodeDeleteOrderCycle, diag.At(t.Name),
+			"the tables referencing %q reference each other in a cycle, so there is no order "+
+				"that tells each one after the tables pointing at it; they are told in schema "+
+				"order instead, and `on_delete.order` in %q's configuration is how to settle it",
+			t.Name, t.Name)
+	}
+	return ordered, diags
+}
+
+// orderChildren topologically sorts child links by their own foreign keys, ties
+// broken by the order the tables appear in the schema so the result is stable.
+//
+// The second return reports a cycle, which has no topological order at all: the
+// remaining tables keep schema order and the caller says so in a diagnostic
+// rather than silently picking one.
+func orderChildren(links []ir.ChildLink, schema ir.Schema) ([]ir.ChildLink, bool) {
+	// Distinct tables, in first-appearance order. Two foreign keys from one
+	// table — home_team_id and away_team_id — are one node with two links
+	// hanging off it: the table hears about the delete once, in one place.
+	var tables []string
+	byTable := make(map[string][]ir.ChildLink, len(links))
+	for _, l := range links {
+		if _, seen := byTable[l.Table]; !seen {
+			tables = append(tables, l.Table)
+		}
+		byTable[l.Table] = append(byTable[l.Table], l)
+	}
+
+	member := make(map[string]bool, len(tables))
+	for _, name := range tables {
+		member[name] = true
+	}
+
+	// An edge from a table to the sibling it references. Deleting is told to
+	// the referencing table first, so the referenced one is the dependency.
+	after := make(map[string]map[string]bool, len(tables))
+	indegree := make(map[string]int, len(tables))
+	for i := range schema.Tables {
+		tbl := &schema.Tables[i]
+		if !member[tbl.Name] {
+			continue
+		}
+		for j := range tbl.Columns {
+			c := &tbl.Columns[j]
+			if c.ForeignKey == nil || c.ForeignKey.Table == tbl.Name || !member[c.ForeignKey.Table] {
+				continue
+			}
+			if after[tbl.Name] == nil {
+				after[tbl.Name] = make(map[string]bool)
+			}
+			if after[tbl.Name][c.ForeignKey.Table] {
+				continue
+			}
+			after[tbl.Name][c.ForeignKey.Table] = true
+			indegree[c.ForeignKey.Table]++
+		}
+	}
+
+	var (
+		out     = make([]ir.ChildLink, 0, len(links))
+		emitted = make(map[string]bool, len(tables))
+	)
+	for len(emitted) < len(tables) {
+		next := ""
+		for _, name := range tables {
+			if !emitted[name] && indegree[name] == 0 {
+				next = name
+				break
+			}
+		}
+		if next == "" {
+			break // a cycle: nothing is free.
+		}
+		emitted[next] = true
+		out = append(out, byTable[next]...)
+		for dep := range after[next] {
+			indegree[dep]--
+		}
+	}
+
+	if len(emitted) == len(tables) {
+		return out, false
+	}
+	for _, name := range tables {
+		if !emitted[name] {
+			out = append(out, byTable[name]...)
+		}
+	}
+	return out, true
 }
 
 // projectFileColumns resolves the table's `<role>_file_id` columns, in the order

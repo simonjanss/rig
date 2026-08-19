@@ -14,8 +14,10 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/simonjanss/rig/examples/todo/internal/model"
 	"github.com/simonjanss/rig/files"
 	"github.com/simonjanss/rig/runtime/apirev"
+	"github.com/simonjanss/rig/runtime/dbhook"
 	"github.com/simonjanss/rig/runtime/rigerr"
 	"github.com/simonjanss/rig/runtime/tenancy"
 	"github.com/simonjanss/rig/runtime/throttle"
@@ -130,6 +132,8 @@ func Register(h Handlers) *http.ServeMux {
 		panic("api.Register: set Server.Auth, or Server.GetClaims if this project authenticates its own way")
 	}
 
+	Link(h)
+
 	mux := http.NewServeMux()
 
 	if h.Todo != nil {
@@ -147,6 +151,34 @@ func Register(h Handlers) *http.ServeMux {
 	}
 
 	return mux
+}
+
+// Link hands every resource the hooks of the tables that reference it, so a
+// delete reaches them.
+//
+// Register calls it, which is all an ordinary server needs. It is exported for
+// the program that builds services and does not call Register — a batch job,
+// a test that drives the service layer directly — because a delete that
+// silently skipped every child is the same delete with different data left
+// behind.
+//
+// Calling it twice is calling it once: each list is replaced rather than
+// appended to. A resource whose field is nil is skipped, and a parent whose
+// children are all nil adopts an empty list, which is what it had before.
+func Link(h Handlers) {
+	if h.Todo != nil {
+		var cs TodoChildDeletes
+		if h.TodoAttachment != nil {
+			p := h.TodoAttachment.ParentHooks()
+			cs = append(cs, dbhook.ChildDelete[model.TodoDeleteInput, model.Todo]{
+				Child:    "todo_attachment",
+				Deleting: p.TodoDeleting,
+				Deleted:  p.TodoDeleted,
+			})
+		}
+		h.Todo.AdoptChildren(cs)
+	}
+
 }
 
 // maxBodyBytes bounds a request body. Without a limit, one client can exhaust

@@ -164,9 +164,37 @@ func (e *emitter) stubContract(b *gobuf.Buf, res *ir.Resource, api string) {
 		e.stubHookSet(b, hookPkg, model, res, "Restore", "RestoreHooks", res.Name+"UpdateInput",
 			res.Name+"UpdateValidator", genutil.WritableFields(res, ir.FieldOpUpdate), example, hasExample)
 	}
+	e.stubParentHooks(b, res, api)
 	b.L("}")
 	b.L("}")
 	b.NL()
+}
+
+// stubParentHooks spells out one field pair per foreign key, all nil.
+//
+// Nil is a working answer and stays the default: the foreign key refuses the
+// delete and the 23503 becomes a 409, which is what every project does today.
+// They are written out for the reason the rest of this file is written out — a
+// field nobody filled in is visible, and an absent one is not.
+func (e *emitter) stubParentHooks(b *gobuf.Buf, res *ir.Resource, api string) {
+	if !hasParents(res) {
+		return
+	}
+
+	b.L("Parents: %s.%sParentHooks{", api, res.Name)
+	for _, p := range res.Parents {
+		b.Comment("What should happen to this table's rows when the " + p.Parent +
+			" that " + p.Column + " points at is deleted. Nil refuses the delete, " +
+			"because the foreign key does.\n\n" +
+			"Two shapes, and they do not look different. `s.repo.Clear" + p.Name +
+			"(ctx, parent.ID)` is one statement and skips this table's own hooks and " +
+			"snapshots. A loop calling this service's own Delete on each row gets " +
+			"both, and costs a statement per row. Which one is right is a question " +
+			"about this table, and it is the reason this is a function.")
+		b.L("%sDeleting: nil,", p.Name)
+		b.L("%sDeleted: nil,", p.Name)
+	}
+	b.L("},")
 }
 
 // stubHookSet spells out one operation: its rules, then its three callbacks.

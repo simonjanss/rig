@@ -14,7 +14,7 @@ Six generators ship with rig. `rig init` scaffolds all but `go-client`.
 | `model-go` | the shared entity, its enums, its query types, and its inputs |
 | `persist-go` | the repository interface and its pgx implementation |
 | `service-go` | API types, service interfaces, and a working default implementation |
-| `server-go` | net/http routing, request decoding, and the handler registration struct |
+| `server-go` | net/http routing, request decoding, the handler registration struct, and the `Link` that wires deletes to the tables they reach |
 | `electric` | live-sync shape endpoints, with the tenant and lifecycle filters built in |
 | `go-client` | a typed Go client: the wire types and one method per endpoint |
 

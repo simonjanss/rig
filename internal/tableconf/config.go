@@ -64,6 +64,9 @@ type File struct {
 	// Access is how wide a read reaches by default.
 	Access *Access `yaml:"access,omitempty" json:"access,omitempty" jsonschema_description:"How wide a read of this table reaches by default."`
 
+	// OnDelete states the order this table's children hear about a delete.
+	OnDelete *OnDelete `yaml:"on_delete,omitempty" json:"on_delete,omitempty" jsonschema_description:"The order tables referencing this one are told about a delete."`
+
 	Columns   map[string]Column   `yaml:"columns,omitempty" json:"columns,omitempty" jsonschema_description:"Per-column configuration keyed by physical column name."`
 	Enums     map[string]Enum     `yaml:"enums,omitempty" json:"enums,omitempty" jsonschema_description:"Per-enum configuration keyed by Postgres enum type name."`
 	Relations map[string]Relation `yaml:"relations,omitempty" json:"relations,omitempty" jsonschema_description:"Per-relation configuration keyed by the related table name."`
@@ -151,6 +154,24 @@ type Access struct {
 	// different kind of decision from a read and one flag for both would be a bad
 	// answer to two questions.
 	Scope string `yaml:"scope,omitempty" json:"scope,omitempty" jsonschema:"enum=tenant,enum=own" jsonschema_description:"Default read width: tenant (every row) or own (rows the caller created)."`
+}
+
+// OnDelete states the order the tables referencing this one are told that a row
+// is going.
+//
+// Note what is and is not here. The parent states the *sequence*, which is a
+// fact about the relationships between its children and belongs to no single one
+// of them — and the parent is the only place that can see all of them at once.
+// It does not state the *action*: that is a function on the child, and the
+// parent has no opinion about it.
+//
+// rig derives an order already — referencing tables before referenced ones — and
+// that default is right for the case that recurs. This is for when it is wrong.
+type OnDelete struct {
+	// Order names child tables, by their physical names, in the order they
+	// should hear about a delete. Anything left out runs after, in the derived
+	// order.
+	Order []string `yaml:"order,omitempty" json:"order,omitempty" jsonschema_description:"Child tables in the order they are told about a delete. Anything unlisted runs after."`
 }
 
 // Electric configures a live-sync shape endpoint.

@@ -100,6 +100,11 @@ type TodoAttachmentService interface {
 	// valid until the next one is asked for — so there is no point at which the
 	// whole form could be handed over at once.
 	Files() *files.Service
+
+	// ParentHooks is what this resource does when a row it points at is deleted.
+	// [Link] reads it and hands it to the parent, which is the only caller: the
+	// parent never sees this service, only the closures.
+	ParentHooks() TodoAttachmentParentHooks
 }
 
 // TodoAttachmentWriter writes a TodoAttachment with the service's rules
@@ -191,6 +196,49 @@ type TodoAttachmentHooks struct {
 	// Restore takes the update input, because a restore may have to change the row
 	// to be allowed back at all.
 	Restore dbhook.RestoreHooks[model.TodoAttachmentUpdateInput, model.TodoAttachment]
+
+	// Parents is one field pair per foreign key this table has to another
+	// resource: what to do when the row it points at is deleted. They are here
+	// rather than under Delete because they are about somebody else's delete, not
+	// this one's.
+	Parents TodoAttachmentParentHooks
+}
+
+// TodoAttachmentParentHooks is what TodoAttachment does when a row it points
+// at is deleted.
+//
+// One pair per foreign key. `<Parent>Deleting` runs inside the transaction
+// doing the delete, before that row is touched, and returning an error refuses
+// it and unwinds everything the children before it already did.
+// `<Parent>Deleted` runs once that transaction has committed, in the same
+// order, and returns nothing — the row is gone, so this is where the cache
+// eviction, the search index and the mail belong.
+//
+// Every field is optional and nil does nothing, which is the default and stays
+// supported: a table that declares none behaves exactly as it did before any
+// of this existed — the foreign key refuses, and the 23503 becomes a 409.
+//
+// What a configuration key would have spelled `set_null`, `cascade` and
+// `restrict` are three obvious bodies here: an update that nulls the column, a
+// loop calling this resource's own Delete, and a returned error. The fourth
+// case — "delete the drafts and reassign the published ones" — is the same
+// function with an if in it, and it is the case every vocabulary of four
+// keywords runs out on.
+//
+// Two things about the arguments. The whole parent row arrives and not this
+// table's own rows, so it is one call per relation rather than one per row:
+// nulling ten thousand links is one UPDATE written here, and the loop that
+// gets each row's hooks and snapshots instead costs a statement each — which
+// is the correct price for what it buys, and the two versions do not look
+// different. And the delete input is passed because Hard is the difference
+// between a soft delete the parent can undo and a permanent one: a body that
+// nulls a link on a soft delete has destroyed the only record of what to
+// re-link on a restore.
+type TodoAttachmentParentHooks struct {
+	// The Todo that todo_id points at is going, and has not gone yet.
+	TodoDeleting func(ctx context.Context, claims tenancy.Claims, parent *model.Todo, in model.TodoDeleteInput) error
+	// It has gone, and the transaction that took it has committed.
+	TodoDeleted func(ctx context.Context, claims tenancy.Claims, parent *model.Todo, in model.TodoDeleteInput)
 }
 
 // TodoAttachmentRules is everything the service layer supplies about
@@ -253,6 +301,11 @@ func NewDefaultTodoAttachmentService(repo store.TodoAttachmentRepository, contra
 // It is a method rather than something the service layer holds because there
 // is then nothing to wire, and nothing to wire wrongly.
 func (s DefaultTodoAttachmentService) Writer() TodoAttachmentWriter { return s.write }
+
+// ParentHooks implements TodoAttachmentService.
+func (s DefaultTodoAttachmentService) ParentHooks() TodoAttachmentParentHooks {
+	return s.contract.Hooks.Parents
+}
 
 // readFilter combines the caller's filter with whatever the read hook narrows
 // to.

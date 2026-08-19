@@ -128,6 +128,8 @@ func Register(h Handlers) *http.ServeMux {
 		panic("api.Register: set Server.Auth, or Server.GetClaims if this project authenticates its own way")
 	}
 
+	Link(h)
+
 	mux := http.NewServeMux()
 
 	if h.Lesson != nil {
@@ -142,6 +144,24 @@ func Register(h Handlers) *http.ServeMux {
 	}
 
 	return mux
+}
+
+// Link hands every resource the hooks of the tables that reference it, so a
+// delete reaches them.
+//
+// Register calls it, which is all an ordinary server needs. It is exported for
+// the program that builds services and does not call Register — a batch job,
+// a test that drives the service layer directly — because a delete that
+// silently skipped every child is the same delete with different data left
+// behind.
+//
+// Calling it twice is calling it once: each list is replaced rather than
+// appended to. A resource whose field is nil is skipped, and a parent whose
+// children are all nil adopts an empty list, which is what it had before.
+func Link(h Handlers) {
+	// No table here references another one rig writes a service for, so there is
+	// nothing to propagate.
+	_ = h
 }
 
 // maxBodyBytes bounds a request body. Without a limit, one client can exhaust
