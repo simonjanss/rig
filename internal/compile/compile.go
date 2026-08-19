@@ -61,9 +61,10 @@ func Compile(raw ir.Schema, set *tableconf.Set, opt Options) (*ir.Document, diag
 	diags.Append(d)
 
 	api, schema, d = ApplyConfig(api, schema, set, ConfigOptions{
-		Namer:             n,
-		UnmentionedColumn: p.Severity(cfg.Validate.UnmentionedColumn, diag.CodeUnmentionedColumn),
-		Ignored:           opt.IgnoreTables,
+		Namer:                 n,
+		UnmentionedColumn:     p.Severity(cfg.Validate.UnmentionedColumn, diag.CodeUnmentionedColumn),
+		Ignored:               opt.IgnoreTables,
+		FileRestoreWindowDays: fileRestoreWindowDays(p),
 	})
 	diags.Append(d)
 
@@ -84,6 +85,20 @@ func Compile(raw ir.Schema, set *tableconf.Set, opt Options) (*ir.Document, diag
 	doc.Valid = !diags.HasErrors()
 
 	return doc, diags
+}
+
+// fileRestoreWindowDays is rig_file's restore window, or zero for a project
+// that keeps no files.
+//
+// Zero rather than a default, because it is what tells the stages downstream
+// that nothing here governs rig_file: a project with `auth.own` or an
+// `auth.expose` naming it has an ordinary table by that name, and it answers to
+// `restore_window_days` like any other.
+func fileRestoreWindowDays(p *project.Project) int {
+	if !p.Config.Files.Enabled {
+		return 0
+	}
+	return p.Config.Files.RestoreWindowDays()
 }
 
 // namerOrDefault keeps the stages usable on their own, in tests and in tools

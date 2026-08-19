@@ -2,7 +2,11 @@ table: rig_file
 comment: >-
   One uploaded file. Metadata only — the bytes live in the blob store, and the
   storage key never leaves the server.
-restore_window_days: 30
+
+# No restore_window_days. It is files.restore_window in rig.yaml, because that
+# number is how long the bytes are kept as well as how long the row can be
+# brought back, and a second copy here could only disagree with it. rig refuses
+# the key on this table for that reason.
 columns:
   storage_key:
     comment: Where the bytes are, derived from the identifier and never from a name.

@@ -44,7 +44,7 @@ func Validate(doc *ir.Document, set *tableconf.Set, p *project.Project) diag.Lis
 		diags.Append(checkAuditColumns(t, loaded))
 		diags.Append(checkSnapshotColumns(doc, t, loaded))
 		if !unreadable {
-			diags.Append(checkRestoreWindow(t, res, loaded))
+			diags.Append(checkRestoreWindow(t, res, loaded, fileRestoreWindowDays(p)))
 			diags.Append(checkSnapshotIgnore(t, res, loaded))
 		}
 
@@ -227,7 +227,12 @@ func checkSnapshotColumns(doc *ir.Document, t *ir.Table, loaded *tableconf.Loade
 }
 
 // checkRestoreWindow ties the retention setting to the schema that needs it.
-func checkRestoreWindow(t *ir.Table, res *ir.Resource, loaded *tableconf.Loaded) diag.List {
+//
+// fileWindow is rig_file's window resolved from `files.restore_window`, or zero
+// when no files block governs it. Where it applies it replaces the key rather
+// than defaulting it: one number decides how long the bytes are kept, and a
+// second one in services/rig_file could only ever disagree with it.
+func checkRestoreWindow(t *ir.Table, res *ir.Resource, loaded *tableconf.Loaded, fileWindow int) diag.List {
 	var diags diag.List
 	if res == nil {
 		return diags
@@ -238,6 +243,17 @@ func checkRestoreWindow(t *ir.Table, res *ir.Resource, loaded *tableconf.Loaded)
 	var configured *int
 	if loaded != nil {
 		configured = loaded.File.RestoreWindowDays
+	}
+
+	if t.Name == FileTable && fileWindow > 0 {
+		if configured != nil {
+			diags.Add(diag.CodeRestoreWindowForbidden, at(loaded, t, "restore_window_days"),
+				"restore_window_days is set on %q, whose window is files.restore_window in "+
+					"rig.yaml: it is how long the bytes are kept as well as how long the row "+
+					"is restorable, so there is one number and this is not where it lives",
+				t.Name)
+		}
+		return diags
 	}
 
 	switch {

@@ -34,8 +34,11 @@ validate:
 			"-- +goose Up\nSELECT 1;\n")
 	}
 	if withConfig {
+		// No restore_window_days: rig_file's window is files.restore_window, and
+		// the key is refused here. TestTheScaffoldedFileConfigurationValidates
+		// holds the real scaffolded file to the same shape.
 		write(t, filepath.Join(root, "services", "rig_file", "rig_file.yaml"),
-			"table: rig_file\nresource: File\noperations: [Get, List]\nrestore_window_days: 30\n")
+			"table: rig_file\nresource: File\noperations: [Get, List]\n")
 		addFileTable(t, filepath.Join(root, "schema.json"))
 	}
 	return root
@@ -146,5 +149,115 @@ func TestFilesWithoutExposeNeedsNoConfiguration(t *testing.T) {
 	_, stderr, code := runWithSchema(t, root, "validate", "-C", root)
 	if code != 0 {
 		t.Errorf("an unexposed rig_file should need no table configuration:\n%s", stderr)
+	}
+}
+
+// rig_file has no restore_window_days, and the window it does have comes from
+// rig.yaml. Both halves are asserted here, because a table configuration that
+// declared its own would be a second number able to disagree with how long the
+// bytes are actually kept.
+func TestFileRestoreWindowComesFromTheProject(t *testing.T) {
+	root := filesProject(t,
+		"files:\n  enabled: true\n  expose: true\n  restore_window: 168h\n", true, true)
+
+	stdout, stderr, code := runWithSchema(t, root, "ir", "-C", root)
+	if code != 0 {
+		t.Fatalf("this project should compile:\n%s", stderr)
+	}
+	if !strings.Contains(stdout, `"restore_window_days": 7`) {
+		t.Error("rig_file's restore window was not read from files.restore_window")
+	}
+
+	write(t, filepath.Join(root, "services", "rig_file", "rig_file.yaml"),
+		"table: rig_file\nresource: File\noperations: [Get, List]\nrestore_window_days: 30\n")
+
+	_, stderr, code = runWithSchema(t, root, "validate", "-C", root)
+	if code == 0 {
+		t.Error("restore_window_days on rig_file should be refused")
+	}
+	if !strings.Contains(stderr, "files.restore_window") {
+		t.Errorf("stderr does not say where the window lives:\n%s", stderr)
+	}
+}
+
+// The flow checkFilesFoundation prescribes, run end to end.
+//
+// The hand-written configuration above stands in for the scaffolded one
+// everywhere else in this file, and a stand-in cannot catch the scaffolded file
+// being wrong — which it was: it shipped without the restore window key while
+// the rule still demanded one, so following the diagnostic's own advice left
+// the project failing `rig validate`.
+func TestTheScaffoldedFileConfigurationValidates(t *testing.T) {
+	root := t.TempDir()
+	if _, stderr, code := run(t, "init", root,
+		"--name", "demo", "--module", "example.com/demo"); code != 0 {
+		t.Fatalf("init failed:\n%s", stderr)
+	}
+	if _, stderr, code := run(t, "setup-project", "-C", root,
+		"--expose", "rig_file"); code != 0 {
+		t.Fatalf("setup-project failed:\n%s", stderr)
+	}
+
+	write(t, filepath.Join(root, "rig.yaml"), `project:
+  name: demo
+  module: example.com/demo
+validate:
+  missing_comment: "off"
+files:
+  enabled: true
+  expose: true
+`)
+	write(t, filepath.Join(root, "schema.json"), `{"name":"public","tables":[]}`)
+	addFileTable(t, filepath.Join(root, "schema.json"))
+
+	_, stderr, code := runWithSchema(t, root, "validate", "-C", root)
+	if code != 0 {
+		t.Errorf("the configuration `rig setup-project --expose rig_file` writes "+
+			"should validate:\n%s", stderr)
+	}
+}
+
+// What `--expose` tells you to write has to be the key that reads it.
+//
+// rig_file's is files.expose, and auth.expose does not reach it, so printing
+// the auth block for it would be advice that leaves the project exactly where
+// it was.
+func TestExposeAdviceNamesTheRightKey(t *testing.T) {
+	root := t.TempDir()
+	if _, stderr, code := run(t, "init", root,
+		"--name", "demo", "--module", "example.com/demo"); code != 0 {
+		t.Fatalf("init failed:\n%s", stderr)
+	}
+
+	_, stderr, code := run(t, "setup-project", "-C", root,
+		"--expose", "rig_account,rig_file")
+	if code != 0 {
+		t.Fatalf("setup-project failed:\n%s", stderr)
+	}
+
+	if !strings.Contains(stderr, "expose: [rig_account]") {
+		t.Errorf("an auth table is not sent to auth.expose:\n%s", stderr)
+	}
+	if strings.Contains(stderr, "rig_account, rig_file") {
+		t.Errorf("rig_file is sent to auth.expose, which does not read it:\n%s", stderr)
+	}
+	if !strings.Contains(stderr, "files:\n    enabled: true\n    expose: true") {
+		t.Errorf("rig_file is not sent to files.expose:\n%s", stderr)
+	}
+}
+
+// The other half of rig_file having a switch of its own: `auth.expose` must not
+// reach it, or the key the rest of rig reads says one thing while the table is
+// projected anyway — with no table configuration required and full CRUD over
+// the storage key.
+func TestAuthExposeDoesNotReachRigFile(t *testing.T) {
+	root := filesProject(t, "auth:\n  expose: [rig_file]\n", true, true)
+
+	_, stderr, code := runWithSchema(t, root, "validate", "-C", root)
+	if code == 0 {
+		t.Error("auth.expose should not project rig_file")
+	}
+	if !strings.Contains(stderr, "files.expose") {
+		t.Errorf("stderr does not name the switch that does:\n%s", stderr)
 	}
 }

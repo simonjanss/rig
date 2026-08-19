@@ -4333,7 +4333,7 @@
           {
             "name": "ListDeleted",
             "summary": "List retired RigFiles.",
-            "description": "A deletion stamps the row rather than removing it, so this is what was deleted and can still be brought back. Only rows inside the 30-day restore window appear: past it a row is gone as far as anyone is concerned, so it is not in the trash either.",
+            "description": "A deletion stamps the row rather than removing it, so this is what was deleted and can still be brought back. Only rows inside the 7-day restore window appear: past it a row is gone as far as anyone is concerned, so it is not in the trash either.",
             "method": "GET",
             "path": "/_deleted",
             "pattern": "GET /api/v1/rig-files/_deleted",
@@ -4622,7 +4622,7 @@
           {
             "name": "Restore",
             "summary": "Bring a retired RigFile back.",
-            "description": "The deletion stamp is cleared and the row appears in reads again. It works for 30 days after the deletion; past that the row is no longer eligible and this answers 409.\n\nRestoring a row that was never deleted is not an error. It is already in the state the caller asked for, and answering otherwise would make a retry of a request whose response went missing look like a failure.\n\nThe request carries no fields. What to do when the world has moved on while the row was retired — a unique value taken by something created since — is the application's decision, and it is made in the restore hook: refuse, or change the row so that it fits.\n\nEvery rule then runs against whatever the hook settled on, not only the ones for fields it touched. The row was not live, so nothing about it has been checked against the world it is returning to.",
+            "description": "The deletion stamp is cleared and the row appears in reads again. It works for 7 days after the deletion; past that the row is no longer eligible and this answers 409.\n\nRestoring a row that was never deleted is not an error. It is already in the state the caller asked for, and answering otherwise would make a retry of a request whose response went missing look like a failure.\n\nThe request carries no fields. What to do when the world has moved on while the row was retired — a unique value taken by something created since — is the application's decision, and it is made in the restore hook: refuse, or change the row so that it fits.\n\nEvery rule then runs against whatever the hook settled on, not only the ones for fields it touched. The row was not live, so nothing about it has been checked against the world it is returning to.",
             "method": "POST",
             "path": "/{id}/_restore",
             "pattern": "POST /api/v1/rig-files/{id}/_restore",
@@ -4704,7 +4704,7 @@
               "nullable": true,
               "scan": "Timestamptz"
             },
-            "restore_window_days": 30
+            "restore_window_days": 7
           },
           "default_order": [
             {

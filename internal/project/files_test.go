@@ -42,6 +42,23 @@ func TestFilesDefaults(t *testing.T) {
 	if len(f.InlineTypes) == 0 {
 		t.Error("no inline types, so every image would download instead of rendering")
 	}
+	// rig_file has no restore_window_days of its own, so this is where the
+	// number the compiler puts on the resource comes from.
+	if f.RestoreWindowDays() != 30 {
+		t.Errorf("restore window = %d days, want 30", f.RestoreWindowDays())
+	}
+}
+
+// Truncated rather than rounded up, because the row has to stop being
+// restorable before the bytes behind it go.
+func TestTheRestoreWindowIsTruncatedToWholeDays(t *testing.T) {
+	p, out := parseFiles(t, "files:\n  enabled: true\n  restore_window: 60h\n")
+	if out != "" {
+		t.Fatalf("this configuration should be accepted:\n%s", out)
+	}
+	if got := p.Config.Files.RestoreWindowDays(); got != 2 {
+		t.Errorf("60h is %d days, want 2", got)
+	}
 }
 
 // The list is short on purpose, and these three are the ones somebody adds
@@ -110,6 +127,15 @@ func TestFilesDiagnostics(t *testing.T) {
 			name: "cookie downloads without auth",
 			body: "files:\n  enabled: true\n  cookie_downloads: true\n",
 			want: "no sessions",
+		},
+		{
+			// The generated restore window is a whole number of days, and
+			// rig_file has no table configuration key to say otherwise, so
+			// anything under a day truncates to a window that refuses
+			// everything.
+			name: "an exposed table with a window under a day",
+			body: "files:\n  enabled: true\n  expose: true\n  restore_window: 6h\n",
+			want: "at least 24h",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

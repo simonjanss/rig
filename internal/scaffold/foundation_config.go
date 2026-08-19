@@ -319,9 +319,10 @@ func fileConfigs() []tableConfig {
 # file, which is what makes the upload permissioned and tenant-scoped; a
 # generic POST here would be a way around both.
 operations: [Get, List]`,
-				`# How long a deleted file stays restorable is files.restore_window in
-# rig.yaml, not a key here — rig_file is the framework's table and the
-# sweeper reads one number for all of them.
+				`# There is no restore_window_days here, and rig refuses one. How long a
+# deleted file stays restorable is files.restore_window in rig.yaml: that
+# number is how long the bytes are kept as well as how long the row can be
+# brought back, and a second copy of it here could only disagree with it.
 columns:
   storage_key:
     exclude: true

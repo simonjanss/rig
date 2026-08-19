@@ -92,17 +92,25 @@ func foundationTables(p *project.Project) ([]string, error) {
 
 	var out []string
 	for _, table := range scaffold.Managed(names) {
-		// An exposed table is projected like any other: the point of the list is
-		// to get a model and a repository back.
-		if slices.Contains(p.Config.Auth.Expose, table) {
-			continue
-		}
 		// rig_file has a switch of its own rather than a place in that list,
 		// because the reason to expose it is not the reason to expose any of the
 		// others. The url lives on the row, so a client that cannot read
 		// rig_file cannot use the column that exists for it — and a live-sync
 		// endpoint on an unexposed resource is refused, correctly.
-		if table == compile.FileTable && p.Config.Files.Enabled && p.Config.Files.Expose {
+		//
+		// `auth.expose` deliberately does not reach it. It would happen to work
+		// and would leave `files.expose` — which the rest of rig reads, and which
+		// checkFilesFoundation guards — saying the opposite.
+		if table == compile.FileTable {
+			if p.Config.Files.Enabled && p.Config.Files.Expose {
+				continue
+			}
+			out = append(out, table)
+			continue
+		}
+		// An exposed table is projected like any other: the point of the list is
+		// to get a model and a repository back.
+		if slices.Contains(p.Config.Auth.Expose, table) {
 			continue
 		}
 		out = append(out, table)

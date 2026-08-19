@@ -493,7 +493,14 @@ type Files struct {
 	//
 	// It lives here rather than in a table configuration because rig_file does
 	// not have one — an asymmetry with `restore_window_days` worth knowing about
-	// before going to look for the key.
+	// before going to look for the key. The key is refused on rig_file for the
+	// same reason: this number is how long the bytes are kept as well as how
+	// long the row can be brought back, and a second copy of it could only ever
+	// disagree.
+	//
+	// A projected rig_file gets a generated restore endpoint, whose window is a
+	// whole number of days — see [Files.RestoreWindowDays] — so with
+	// `files.expose` set this has to be at least 24h.
 	//
 	// If the bucket has a lifecycle rule of its own, that rule has to outlive
 	// this, or a restore inside the window succeeds and hands back a row pointing
