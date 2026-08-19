@@ -404,3 +404,34 @@ wrong is deleting somebody's data.
 > **`backend: s3` has not shipped.** The adapter is a module of its own, and
 > `rig generate` refuses the setting rather than writing wiring that would keep
 > every upload in a map a restart empties.
+
+## `notifications`
+
+The inbox. Off by default, and what makes `server-go` write the engine, the
+dispatch task and the routes at all — a project without this block carries none
+of it.
+
+```yaml
+notifications:
+  enabled: true
+  expose: false       # also project the inbox as a generated resource
+```
+
+`enabled` needs the migrations behind it (`rig setup-project` writes them) and
+the tenancy tables they depend on, because a notification is addressed to an
+account. It does **not** need the `auth:` block: where the claims naming that
+account come from is not this block's business.
+
+The block does nothing on its own. A table becomes notifiable by being joined to
+`rig_notification`, and then its service layer owes two methods — see
+[notifications.md](notifications.md).
+
+`expose` is the second answer rather than the only one. Without it the inbox is
+served by the hand-written routes under `/notifications`, which is what most
+applications show in a bell icon; with it, `rig_notification_recipient` is also
+projected as a resource and gets the filter grammar, the sort keys and a typed
+client. Both stay, and the difference between them is the point.
+
+> **Delivery has not shipped.** Channels, per-account settings, delivery windows
+> and digests — the half of a notification that reaches somebody who does not
+> have the application open — are not built. What exists is the inbox.

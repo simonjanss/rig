@@ -33,6 +33,7 @@ file per table.
 | [Your service layer](services.md) | The part rig will not write: business rules, lifecycle hooks, and running the server. |
 | [Clients](clients.md) | The generated Go client. |
 | [Live sync](electric.md) | Shape endpoints, for a client that subscribes instead of polling. |
+| [Notifications](notifications.md) | An inbox: who is told what happened, worked out when it is sent rather than when it was written. |
 | [Diagnostics](diagnostics.md) | Every `RIG####` code, what it means, and how to change its severity. |
 
 ## Complete applications

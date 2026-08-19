@@ -86,3 +86,21 @@ confirm the row exists.
 - [tables.md](tables.md) — choosing which operations exist, and adding your own
 - [rig-yaml.md](rig-yaml.md#api) — `base_path`, `permissions`, `search_method`
 - [auth.md](auth.md) — the authentication endpoints, which are documented in full
+
+## The inbox
+
+A project with a [`notifications:`](rig-yaml.md#notifications) block also serves
+five routes rig writes rather than generates, because the tables behind them are
+rig's own and are the same in every project:
+
+```
+GET    /notifications                 the caller's inbox, newest first
+GET    /notifications/_unread-count    the badge, one number
+POST   /notifications/{id}/_read       mark one read
+POST   /notifications/_read-all        mark what the caller can currently see
+DELETE /notifications/{id}             remove one from the inbox
+```
+
+They sit outside `api.base_path`, beside the authentication routes, and every one
+of them narrows to the caller's own account. None takes a `?scope=` parameter:
+there is no widening for an inbox. See [notifications.md](notifications.md).

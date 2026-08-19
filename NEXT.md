@@ -35,12 +35,10 @@ Next:
   `rig_auth_log`, and `GET /auth/sessions` widened past the caller's own. The
   events have been recorded since M4 and nothing has ever served them. (Was
   M5.11; referential actions had already taken it.)
-- **M12** — notifications, the engine and the inbox: a `rig_notification` table a
-  project links its own tables to, two generated callbacks that say when a
-  notification is due and — at the moment it is sent, not when it was written — who
-  should get it, and an inbox somebody can empty. After M5.11 because the delete
-  propagation it generates is that milestone's registry with one child hardcoded, and
-  the two should not be built twice.
+- ~~**M12** — notifications, the engine and the inbox.~~ Shipped: a
+  `rig_notification` table a project links its own tables to, two generated
+  callbacks that say when a notification is due and — at the moment it is sent,
+  not when it was written — who should get it, and an inbox somebody can empty.
 - **M13** — notification delivery: Desktop, Mobile and Email as channels an
   application implements, per-account settings with a window each, digests, and a
   dispatcher every replica can run because the claim is a lease rather than a lock.
@@ -2748,7 +2746,7 @@ thing that unblocks M11 rather than something M11 works around.
 
 ---
 
-## M12 — notifications: the engine and the inbox
+## M12 — notifications: the engine and the inbox (shipped)
 
 **Goal.** A project declares that one of its tables is worth notifying people about,
 answers two questions rig asks it — when, and who — and gets an inbox: a row per
@@ -3330,7 +3328,64 @@ ticket is a doc comment. A `DispatchReport` that logs resolutions with zero reci
 the way `SweepReport` logs its zeros, is the cheapest thing that would catch it in the
 field, and it belongs in M13 with the rest of the reporting.
 
-### Open questions for you
+### What came out differently, and why
+
+Four departures, each forced by something the milestone could not have known
+without building it.
+
+**`NotifyAt` is not on the registry, and the dispatcher never asks it.** The
+sketch had the engine ask a subject when its notification was due, which would
+have meant reading the row back — and a generated `Get` goes to the pool, not to
+the transaction on the context, so a hook that announced inside its own write's
+transaction would have asked about a row that had not committed. The time comes
+from the announcement instead, asked where the row is already in hand. The
+registry is down to one question: who. `api.Announce<Res>` asks `NotifyAt` for
+you, because that is the line to forget and forgetting it makes every draft go
+out the moment somebody saves it.
+
+**The two methods are an interface on the contract, not fields on the hooks
+struct.** Both are required, and a field that could be left nil moves the failure
+from the constructor to a background job — where it arrives as an audience of
+nobody, hours later. `<Res>Notify` is refused at construction the way
+`<Res>Endpoints` already is.
+
+**`Deleted` leaves the notification row.** A notification can be about rows in
+two tables, and deleting it from inside one table's delete would fail on the
+other table's link — aborting a delete that had already succeeded. The link rows
+and the inbox lines go; the notification is left for the retention sweep, which
+is the second thing that sweep is for.
+
+**`notifications.enabled` does not require `auth.enabled`.** What an inbox needs
+is `rig_account`, which is a question about migrations. `examples/todo` has an
+inbox and reads its claims from two headers.
+
+Two things this closed on the way through, both holes rather than decisions. The
+Electric shape builder ignored `ResourceStorage.Owner`, so any owner-scoped table
+with a shape streamed the whole tenant unless the application remembered to
+narrow it in the stub. And RIG3250 claimed an unexposed resource's live-sync
+endpoint would never be served, which was never true — the electric generator
+mounts its own routes and has never read `expose`.
+
+### The questions, answered
+
+**`NotifyWho` gets the whole `notify.Notification`**, payload included, and the
+documentation says that depending on the payload is the case `AccountIDs` covers
+better — a recipient list smuggled through a jsonb column is the thing late
+resolution exists to prevent, and it would arrive without the honesty of a name
+that says what it is doing.
+
+**The inbox routes hand back identifiers.** A line carries the notification's id
+and its kind, not the subject row. `notifications.expose` is the answer for
+anybody who wants otherwise, and it is named as the limitation it is.
+
+**The boilerplate question is still open**, and now has one data point: two real
+services, and their `NotifyWho`s are both "everybody in the tenant except whoever
+caused the change". A third that looks the same would be the argument for
+`notify.Column("assignee_account_id")` — a helper the method can return, which
+closes it without touching the contract because it is still a function returning
+accounts.
+
+### The original open questions
 
 **Does `NotifyWho` get the notification's `payload` as well as the row?** It gets the row
 and the kind as written above. An announcement might reasonably want to carry "and here
@@ -3362,6 +3417,19 @@ means guessing which shape recurs.
 ---
 
 ## M13 — notification delivery
+
+**Still to build**, and M12 is useful without it: an inbox that fills itself,
+updates itself live and can be emptied is the whole of what most applications
+show in a bell icon. What is missing is everybody who does not have the
+application open.
+
+Two things landed early because M12 needed the configuration surface to exist,
+and both are read by nothing so far: `notifications.claim_ttl`, `max_attempts`,
+`backoff_base`, `retention` and `default_digest` are parsed, defaulted and
+validated, and `docs/rig-yaml.md` deliberately does not document them yet. The
+startup checks they describe — a claim lease under a minute, a retention shorter
+than the longest digest window — are written and are the ones this milestone will
+use.
 
 **Goal.** M12's inbox reaches somebody who has the application open. This is
 everybody else: three channels an application implements, per-account settings with a

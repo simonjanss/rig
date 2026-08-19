@@ -3,8 +3,8 @@
 An opinionated Postgres-first web system generator.
 
 You write a good Postgres schema and your business logic. `rig` writes everything else: models,
-repositories, HTTP handlers, routing, filter plumbing, live-sync endpoints, a typed Go client, and
-an authentication foundation.
+repositories, HTTP handlers, routing, filter plumbing, live-sync endpoints, a typed Go client, an
+authentication foundation, file uploads, and an inbox.
 
 ```
    generated            YOU WRITE THIS           generated
@@ -35,7 +35,7 @@ rig generate   # 4. compile to one IR, fan out to generators
 | `model-go` | the shared entity, its enums, its query types, and its inputs |
 | `persist-go` | the repository interface and its pgx implementation |
 | `service-go` | API types, service interfaces, and a working default implementation |
-| `server-go` | net/http routing, request decoding, and the handler registration struct |
+| `server-go` | net/http routing, request decoding, the handler registration struct, and the delete propagation |
 | `electric` | live-sync shape endpoints, with the tenant and lifecycle filters built in |
 | `go-client` | a typed Go client: the wire types and one method per endpoint |
 
@@ -51,6 +51,7 @@ rig generate   # 4. compile to one IR, fan out to generators
 | [Schema](docs/schema.md) | The columns rig recognizes by name |
 | [rig.yaml](docs/rig-yaml.md) · [Tables](docs/tables.md) | The two files you write |
 | [Authentication](docs/auth.md) | Sessions, API keys, OAuth, RBAC |
+| [Notifications](docs/notifications.md) | An inbox, with the audience worked out when it is sent |
 
 [examples/](examples/) holds complete applications, built and tested in CI.
 
@@ -71,6 +72,8 @@ pre-push hook that runs the checks. [AGENTS.md](AGENTS.md) has the rest.
 | `internal/compile` | the pure compile pipeline |
 | `runtime/` | a separate module, imported by generated code |
 | `auth/` | a separate module: sessions, OAuth, API keys, RBAC |
+| `files/` | a separate module: uploads, the blob seam, the sweeper |
+| `notify/` | a separate module: the notification engine and the inbox routes |
 | `migrate/` | a separate module: apply the project's migrations from its own binary |
 | `rigclient/` | a separate module: the half of a generated Go client that is not generated |
 
