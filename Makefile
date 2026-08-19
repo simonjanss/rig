@@ -6,7 +6,7 @@ GO       ?= go
 # vulnerability scanning and the Docker suite run over the first group only:
 # the examples are mostly generated output, and their Docker tests are already
 # run by `make examples`, which brings each example's own database up first.
-CORE_MODULES    := . ./runtime ./auth ./migrate ./rigclient
+CORE_MODULES    := . ./runtime ./auth ./files ./migrate ./rigclient
 EXAMPLE_MODULES := ./examples/todo ./examples/fantasyfootball ./examples/auth ./examples/auth_oauth ./examples/sdk
 MODULES         := $(CORE_MODULES) $(EXAMPLE_MODULES)
 EXAMPLES        := todo fantasyfootball auth auth_oauth

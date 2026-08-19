@@ -44,7 +44,8 @@ make test-docker   # the suite behind the `docker` build tag
 make examples      # regenerate all four examples and run them for real
 ```
 
-`make test-docker` covers `.`, `runtime`, `auth`, `migrate` and `rigclient`.
+`make test-docker` covers `.`, `runtime`, `auth`, `files`, `migrate` and
+`rigclient`.
 Most of it starts its own Postgres on a port of its own and cleans up after
 itself. The `migrate` module is the exception: it expects a database at
 `localhost:55440`, or wherever `DATABASE_URL` points, and **skips itself
