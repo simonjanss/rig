@@ -23,6 +23,9 @@ type SweepReport struct {
 	Remarked int
 }
 
+// String is the one line a sweep is worth in a log: all three counts, including
+// the zeros. A pass that reaped nothing is the ordinary case and still worth
+// seeing, because the absence of a line cannot be told from the job not running.
 func (r SweepReport) String() string {
 	return fmt.Sprintf("files: swept %d abandoned, %d expired, re-marked %d",
 		r.Abandoned, r.Expired, r.Remarked)
