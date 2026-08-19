@@ -879,3 +879,57 @@ func TestFileEndpointsCompile(t *testing.T) {
 		Artifacts: gentest.Run(t, servicego.New(), doc, opts()),
 	})...)
 }
+
+// A notifiable table owes rig two answers, and an ordinary one owes it nothing.
+//
+// Both halves matter. The methods are required — that is the whole mechanism, a
+// build failure rather than a 501 — and requiring them of a table that is not
+// notifiable would make every project answer a question it was never asked.
+func TestNotifiableTablesOweTwoMethodsAndOthersOweNone(t *testing.T) {
+	t.Parallel()
+
+	doc := gentest.LoadDocument(t, filepath.Join("testdata", "notify.ir.json"))
+	artifacts := gentest.Run(t, servicego.New(), doc, opts())
+
+	post := find(t, artifacts, "blog_post_service.gen.go")
+	for _, want := range []string{
+		"type BlogPostNotify interface {",
+		"NotifyAt(row *model.BlogPost, kind string) (time.Time, bool)",
+		"NotifyWho(ctx context.Context, n *notify.Notification, row *model.BlogPost) ([]uuid.UUID, error)",
+		// Required at the constructor, not discovered in a background job.
+		"if contract.Notify == nil {",
+		// And the adapter that carries the answers to the dispatcher.
+		"func (s BlogPostSubject) Audience(",
+		`func NotifyAboutBlogPost(id uuid.UUID) notify.Subject {`,
+	} {
+		if !strings.Contains(collapse(post), collapse(want)) {
+			t.Errorf("blog_post should carry %s", want)
+		}
+	}
+
+	// The read that answers the audience runs without a caller, so the owner
+	// narrowing has to be turned off explicitly — the one trap in this design,
+	// and the generator should not leave it to the application.
+	if !strings.Contains(collapse(post), collapse("readopt.WithoutOwnerScope()")) {
+		t.Error("the dispatcher's read should not be narrowed to a caller that does not exist")
+	}
+
+	account := find(t, artifacts, "rig_account_service.gen.go")
+	for _, unwanted := range []string{"NotifyAt(", "NotifyWho(", "AccountNotify"} {
+		if strings.Contains(account, unwanted) {
+			t.Errorf("an ordinary table should not be asked %s", unwanted)
+		}
+	}
+}
+
+// The inbox's generated output, kept where it can be read. The wiring is small
+// and every line of it is a decision the milestone argued for; a golden is how
+// those stay reviewable rather than being re-derived from the emitter.
+func TestNotifyGolden(t *testing.T) {
+	t.Parallel()
+
+	doc := gentest.LoadDocument(t, filepath.Join("testdata", "notify.ir.json"))
+	artifacts := gentest.Run(t, servicego.New(), doc, opts())
+
+	gentest.Golden(t, filepath.Join("testdata", "notify"), artifacts, *update)
+}

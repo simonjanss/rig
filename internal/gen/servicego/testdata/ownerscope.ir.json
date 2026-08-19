@@ -1604,6 +1604,10 @@
             "deleted_by_account_id",
             "body"
           ]
+        },
+        "electric": {
+          "auth": "tenant",
+          "path": "/electric/memo"
         }
       }
     ],

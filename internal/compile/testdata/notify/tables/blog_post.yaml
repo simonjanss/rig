@@ -1,0 +1,10 @@
+table: blog_post
+comment: A post, which people are told about when it goes live.
+
+restore_window_days: 30
+
+columns:
+  title:
+    comment: What the post is called.
+  publish_at:
+    comment: When the post goes live, or null while it is a draft.

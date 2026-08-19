@@ -97,6 +97,7 @@ func (e *emitter) stubFile(res *ir.Resource) (gen.Artifact, error) {
 	}
 
 	e.stubContract(b, res, api)
+	e.notifyStub(b, res, ctxPkg)
 	e.stubValidator(b, res, ctxPkg)
 	e.customStubs(b, res, api, ctxPkg)
 

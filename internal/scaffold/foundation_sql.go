@@ -747,7 +747,9 @@ CREATE TABLE rig_notification (
     state                   rig_notification_state NOT NULL DEFAULT 'Pending',
     deliver_at              timestamptz NOT NULL DEFAULT now(),
     resolved_at             timestamptz,
-    payload                 jsonb NOT NULL DEFAULT '{}'
+    payload                 jsonb NOT NULL DEFAULT '{}',
+    group_key               text,
+    account_ids             uuid[]
 );
 
 -- What lets a link table put the tenant inside its own foreign key:
@@ -767,6 +769,8 @@ COMMENT ON COLUMN rig_notification.state IS 'Resolved means the audience was det
 COMMENT ON COLUMN rig_notification.deliver_at IS 'When this is due. now() is the ordinary case; a scheduled notification is the same row with a later time, which is the only difference between the two.';
 COMMENT ON COLUMN rig_notification.resolved_at IS 'When the audience was computed. Null while the notification is still pending or was cancelled.';
 COMMENT ON COLUMN rig_notification.payload IS 'What a template needs beyond the linked row. Give it a Go type with the go_type key if it has a shape.';
+COMMENT ON COLUMN rig_notification.group_key IS 'What collapses several of these into one inbox line, decided when the announcement was written and copied onto the line when the audience is resolved.';
+COMMENT ON COLUMN rig_notification.account_ids IS 'A recipient list captured at write time, and the one exception to computing the audience late. Null is the ordinary case; a list here skips the question entirely, for an audience that genuinely cannot be re-derived.';
 
 -- The inbox line: one row per notification per account, written when the
 -- audience was resolved rather than when the notification was written.
@@ -822,6 +826,11 @@ CREATE INDEX rig_notification_recipient_inbox_idx
 
 CREATE INDEX rig_notification_recipient_notification_idx
     ON rig_notification_recipient (notification_id);
+
+-- The account foreign key, covered on its own. The inbox index above leads with
+-- the tenant, which is right for the read and does not cover this.
+CREATE INDEX rig_notification_recipient_account_idx
+    ON rig_notification_recipient (account_id);
 
 COMMENT ON TABLE  rig_notification_recipient IS 'One inbox line: a notification, an account, and whether it has been read.';
 COMMENT ON COLUMN rig_notification_recipient.kind IS 'Copied from the notification, so the inbox and its live-sync shape never touch a table holding rows for people who are not recipients.';

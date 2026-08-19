@@ -22,7 +22,19 @@ import (
 func hasParents(res *ir.Resource) bool { return len(res.Parents) > 0 }
 
 // hasChildren reports whether anything rig can call points at this resource.
-func hasChildren(res *ir.Resource) bool { return len(res.Children) > 0 }
+//
+// A notifiable table always does, even with nothing in the schema pointing at
+// it: its own notifications are a child of it in every way that matters here,
+// and server-go's Link registers them as one. The two generators write into the
+// same package and have to agree about this, which is why it is one answer
+// rather than two conditions that happen to line up.
+func (e *emitter) hasChildren(res *ir.Resource) bool {
+	if len(res.Children) > 0 {
+		return true
+	}
+	n := e.doc.API.Notifications
+	return n != nil && n.Enabled && res.Notifiable
+}
 
 // childDeletesAlias is the name of the ordered slice a parent adopts.
 func childDeletesAlias(res *ir.Resource) string { return res.Name + "ChildDeletes" }
@@ -104,7 +116,7 @@ func (e *emitter) parentEntity(b *gobuf.Buf, p ir.ParentLink) string {
 // slice dbhook takes: this names a shape to make the signatures readable, and a
 // new type would make them require a conversion for nothing.
 func (e *emitter) childDeletesType(b *gobuf.Buf, res *ir.Resource) {
-	if !hasChildren(res) {
+	if !e.hasChildren(res) {
 		return
 	}
 	var (
@@ -133,7 +145,7 @@ func (e *emitter) childDeletesType(b *gobuf.Buf, res *ir.Resource) {
 // parameter on every constructor, which would work and would change the
 // signature of every service stub in every project that already exists.
 func (e *emitter) adoptChildren(b *gobuf.Buf, res *ir.Resource, writer string) {
-	if !hasChildren(res) {
+	if !e.hasChildren(res) {
 		return
 	}
 

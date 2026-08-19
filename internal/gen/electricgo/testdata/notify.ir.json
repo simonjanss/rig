@@ -1,0 +1,4742 @@
+{
+  "ir_version": 1,
+  "generated_by": "rig (test)",
+  "api": {
+    "name": "demo",
+    "version": "v1",
+    "base_path": "/api/v1",
+    "revision_header": "API-Revision",
+    "enums": [
+      {
+        "name": "ErrorCode",
+        "description": "Machine-readable reason a request failed.",
+        "values": [
+          {
+            "name": "BadRequest",
+            "wire": "BadRequest",
+            "description": "The request was malformed or a parameter could not be parsed."
+          },
+          {
+            "name": "Unauthorized",
+            "wire": "Unauthorized",
+            "description": "No valid session or API key was presented."
+          },
+          {
+            "name": "Forbidden",
+            "wire": "Forbidden",
+            "description": "The caller is known but not permitted to do this."
+          },
+          {
+            "name": "NotFound",
+            "wire": "NotFound",
+            "description": "No such resource, or it belongs to another tenant."
+          },
+          {
+            "name": "Conflict",
+            "wire": "Conflict",
+            "description": "The request conflicts with the current state of the resource."
+          },
+          {
+            "name": "UnprocessableEntity",
+            "wire": "UnprocessableEntity",
+            "description": "The request was well-formed but failed validation."
+          },
+          {
+            "name": "RateLimited",
+            "wire": "RateLimited",
+            "description": "Too many requests. Retry after the interval in the Retry-After header."
+          },
+          {
+            "name": "TooLarge",
+            "wire": "TooLarge",
+            "description": "The request body is larger than this endpoint accepts."
+          },
+          {
+            "name": "UnsupportedMediaType",
+            "wire": "UnsupportedMediaType",
+            "description": "The body's content type is not one this endpoint accepts."
+          },
+          {
+            "name": "UpgradeRequired",
+            "wire": "UpgradeRequired",
+            "description": "The client was built against an API revision this server no longer serves."
+          },
+          {
+            "name": "Internal",
+            "wire": "Internal",
+            "description": "Something went wrong on the server."
+          }
+        ]
+      }
+    ],
+    "objects": [
+      {
+        "name": "BlogPost",
+        "description": "A post, which people are told about when it goes live.",
+        "fields": [
+          {
+            "name": "ID",
+            "wire": "id",
+            "description": "Unique identifier for this row.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "uuid.UUID",
+            "read_only": true,
+            "column": {
+              "table": "blog_post",
+              "name": "id",
+              "sql_type": "uuid",
+              "nullable": false,
+              "scan": "UUID"
+            }
+          },
+          {
+            "name": "TenantID",
+            "wire": "tenantId",
+            "description": "Tenant this row belongs to. Every query is scoped by it.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "uuid.UUID",
+            "read_only": true,
+            "column": {
+              "table": "blog_post",
+              "name": "tenant_id",
+              "sql_type": "uuid",
+              "nullable": false,
+              "scan": "UUID"
+            }
+          },
+          {
+            "name": "CreatedAt",
+            "wire": "createdAt",
+            "description": "When this row was created. Set automatically and never changes.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "time.Time",
+            "default": "now()",
+            "read_only": true,
+            "column": {
+              "table": "blog_post",
+              "name": "created_at",
+              "sql_type": "timestamptz",
+              "nullable": false,
+              "scan": "Timestamptz"
+            }
+          },
+          {
+            "name": "CreatedByAccountID",
+            "wire": "createdByAccountId",
+            "description": "Account that created this row, taken from the request's claims.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "*uuid.UUID",
+            "modifiers": [
+              "Nullable"
+            ],
+            "read_only": true,
+            "column": {
+              "table": "blog_post",
+              "name": "created_by_account_id",
+              "sql_type": "uuid",
+              "nullable": true,
+              "scan": "UUID"
+            }
+          },
+          {
+            "name": "UpdatedAt",
+            "wire": "updatedAt",
+            "description": "When this row was last updated. Set automatically on every update.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "*time.Time",
+            "modifiers": [
+              "Nullable"
+            ],
+            "read_only": true,
+            "column": {
+              "table": "blog_post",
+              "name": "updated_at",
+              "sql_type": "timestamptz",
+              "nullable": true,
+              "scan": "Timestamptz"
+            }
+          },
+          {
+            "name": "DeletedAt",
+            "wire": "deletedAt",
+            "description": "When this row was soft-deleted. Null while the row is live.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "*time.Time",
+            "modifiers": [
+              "Nullable"
+            ],
+            "read_only": true,
+            "column": {
+              "table": "blog_post",
+              "name": "deleted_at",
+              "sql_type": "timestamptz",
+              "nullable": true,
+              "scan": "Timestamptz"
+            }
+          },
+          {
+            "name": "Title",
+            "wire": "title",
+            "description": "What the post is called.",
+            "type": "String",
+            "type_kind": "Primitive",
+            "go_type": "string",
+            "column": {
+              "table": "blog_post",
+              "name": "title",
+              "sql_type": "text",
+              "nullable": false,
+              "scan": "Direct"
+            }
+          },
+          {
+            "name": "PublishAt",
+            "wire": "publishAt",
+            "description": "When the post goes live, or null while it is a draft.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "*time.Time",
+            "modifiers": [
+              "Nullable"
+            ],
+            "column": {
+              "table": "blog_post",
+              "name": "publish_at",
+              "sql_type": "timestamptz",
+              "nullable": true,
+              "scan": "Timestamptz"
+            }
+          }
+        ],
+        "origin": "Projected"
+      },
+      {
+        "name": "BlogPostFilter",
+        "description": "Conditions a BlogPost must satisfy to match a search.",
+        "fields": [
+          {
+            "name": "Equals",
+            "wire": "equals",
+            "description": "Fields that must equal the given value.",
+            "type": "BlogPostFilterEquals",
+            "type_kind": "Object",
+            "go_type": "*BlogPostFilterEquals",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "NotEquals",
+            "wire": "notEquals",
+            "description": "Fields that must not equal the given value.",
+            "type": "BlogPostFilterEquals",
+            "type_kind": "Object",
+            "go_type": "*BlogPostFilterEquals",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "GreaterThan",
+            "wire": "greaterThan",
+            "description": "Fields that must be greater than the given value.",
+            "type": "BlogPostFilterRange",
+            "type_kind": "Object",
+            "go_type": "*BlogPostFilterRange",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "SmallerThan",
+            "wire": "smallerThan",
+            "description": "Fields that must be less than the given value.",
+            "type": "BlogPostFilterRange",
+            "type_kind": "Object",
+            "go_type": "*BlogPostFilterRange",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "GreaterOrEqual",
+            "wire": "greaterOrEqual",
+            "description": "Fields that must be greater than or equal to the given value.",
+            "type": "BlogPostFilterRange",
+            "type_kind": "Object",
+            "go_type": "*BlogPostFilterRange",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "SmallerOrEqual",
+            "wire": "smallerOrEqual",
+            "description": "Fields that must be less than or equal to the given value.",
+            "type": "BlogPostFilterRange",
+            "type_kind": "Object",
+            "go_type": "*BlogPostFilterRange",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "Contains",
+            "wire": "contains",
+            "description": "Fields that must be one of the given values.",
+            "type": "BlogPostFilterContains",
+            "type_kind": "Object",
+            "go_type": "*BlogPostFilterContains",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "NotContains",
+            "wire": "notContains",
+            "description": "Fields that must not be one of the given values.",
+            "type": "BlogPostFilterContains",
+            "type_kind": "Object",
+            "go_type": "*BlogPostFilterContains",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "Like",
+            "wire": "like",
+            "description": "Text fields that must match the given pattern.",
+            "type": "BlogPostFilterLike",
+            "type_kind": "Object",
+            "go_type": "*BlogPostFilterLike",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "NotLike",
+            "wire": "notLike",
+            "description": "Text fields that must not match the given pattern.",
+            "type": "BlogPostFilterLike",
+            "type_kind": "Object",
+            "go_type": "*BlogPostFilterLike",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "Null",
+            "wire": "null",
+            "description": "Fields that must be null.",
+            "type": "BlogPostFilterNull",
+            "type_kind": "Object",
+            "go_type": "*BlogPostFilterNull",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "NotNull",
+            "wire": "notNull",
+            "description": "Fields that must not be null.",
+            "type": "BlogPostFilterNull",
+            "type_kind": "Object",
+            "go_type": "*BlogPostFilterNull",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "OrCondition",
+            "wire": "orCondition",
+            "description": "Combine this filter's conditions with OR instead of AND.",
+            "type": "Bool",
+            "type_kind": "Primitive",
+            "go_type": "bool"
+          },
+          {
+            "name": "NestedFilters",
+            "wire": "nestedFilters",
+            "description": "Sub-filters combined with this one, so that AND and OR can be mixed to any depth.",
+            "type": "BlogPostFilter",
+            "type_kind": "Object",
+            "go_type": "[]BlogPostFilter",
+            "modifiers": [
+              "Array"
+            ]
+          }
+        ],
+        "origin": "Filter"
+      },
+      {
+        "name": "BlogPostFilterContains",
+        "description": "Set-membership conditions on BlogPost fields.",
+        "fields": [
+          {
+            "name": "ID",
+            "wire": "id",
+            "description": "Unique identifier for this row.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "[]uuid.UUID",
+            "modifiers": [
+              "Array"
+            ]
+          },
+          {
+            "name": "CreatedAt",
+            "wire": "createdAt",
+            "description": "When this row was created. Set automatically and never changes.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "[]time.Time",
+            "modifiers": [
+              "Array"
+            ]
+          },
+          {
+            "name": "CreatedByAccountID",
+            "wire": "createdByAccountId",
+            "description": "Account that created this row, taken from the request's claims.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "[]uuid.UUID",
+            "modifiers": [
+              "Array"
+            ]
+          },
+          {
+            "name": "UpdatedAt",
+            "wire": "updatedAt",
+            "description": "When this row was last updated. Set automatically on every update.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "[]time.Time",
+            "modifiers": [
+              "Array"
+            ]
+          },
+          {
+            "name": "DeletedAt",
+            "wire": "deletedAt",
+            "description": "When this row was soft-deleted. Null while the row is live.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "[]time.Time",
+            "modifiers": [
+              "Array"
+            ]
+          },
+          {
+            "name": "Title",
+            "wire": "title",
+            "description": "What the post is called.",
+            "type": "String",
+            "type_kind": "Primitive",
+            "go_type": "[]string",
+            "modifiers": [
+              "Array"
+            ]
+          },
+          {
+            "name": "PublishAt",
+            "wire": "publishAt",
+            "description": "When the post goes live, or null while it is a draft.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "[]time.Time",
+            "modifiers": [
+              "Array"
+            ]
+          }
+        ],
+        "origin": "Filter"
+      },
+      {
+        "name": "BlogPostFilterEquals",
+        "description": "Exact-match conditions on BlogPost fields.",
+        "fields": [
+          {
+            "name": "ID",
+            "wire": "id",
+            "description": "Unique identifier for this row.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "*uuid.UUID",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "CreatedAt",
+            "wire": "createdAt",
+            "description": "When this row was created. Set automatically and never changes.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "*time.Time",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "CreatedByAccountID",
+            "wire": "createdByAccountId",
+            "description": "Account that created this row, taken from the request's claims.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "*uuid.UUID",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "UpdatedAt",
+            "wire": "updatedAt",
+            "description": "When this row was last updated. Set automatically on every update.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "*time.Time",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "DeletedAt",
+            "wire": "deletedAt",
+            "description": "When this row was soft-deleted. Null while the row is live.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "*time.Time",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "Title",
+            "wire": "title",
+            "description": "What the post is called.",
+            "type": "String",
+            "type_kind": "Primitive",
+            "go_type": "*string",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "PublishAt",
+            "wire": "publishAt",
+            "description": "When the post goes live, or null while it is a draft.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "*time.Time",
+            "modifiers": [
+              "Nullable"
+            ]
+          }
+        ],
+        "origin": "Filter"
+      },
+      {
+        "name": "BlogPostFilterLike",
+        "description": "Pattern conditions on BlogPost text fields.",
+        "fields": [
+          {
+            "name": "Title",
+            "wire": "title",
+            "description": "What the post is called.",
+            "type": "String",
+            "type_kind": "Primitive",
+            "go_type": "*string",
+            "modifiers": [
+              "Nullable"
+            ]
+          }
+        ],
+        "origin": "Filter"
+      },
+      {
+        "name": "BlogPostFilterNull",
+        "description": "Presence conditions on nullable BlogPost fields.",
+        "fields": [
+          {
+            "name": "CreatedByAccountID",
+            "wire": "createdByAccountId",
+            "description": "Account that created this row, taken from the request's claims.",
+            "type": "Bool",
+            "type_kind": "Primitive",
+            "go_type": "*bool",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "UpdatedAt",
+            "wire": "updatedAt",
+            "description": "When this row was last updated. Set automatically on every update.",
+            "type": "Bool",
+            "type_kind": "Primitive",
+            "go_type": "*bool",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "DeletedAt",
+            "wire": "deletedAt",
+            "description": "When this row was soft-deleted. Null while the row is live.",
+            "type": "Bool",
+            "type_kind": "Primitive",
+            "go_type": "*bool",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "PublishAt",
+            "wire": "publishAt",
+            "description": "When the post goes live, or null while it is a draft.",
+            "type": "Bool",
+            "type_kind": "Primitive",
+            "go_type": "*bool",
+            "modifiers": [
+              "Nullable"
+            ]
+          }
+        ],
+        "origin": "Filter"
+      },
+      {
+        "name": "BlogPostFilterRange",
+        "description": "Ordering conditions on BlogPost fields that can be compared.",
+        "fields": [
+          {
+            "name": "CreatedAt",
+            "wire": "createdAt",
+            "description": "When this row was created. Set automatically and never changes.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "*time.Time",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "UpdatedAt",
+            "wire": "updatedAt",
+            "description": "When this row was last updated. Set automatically on every update.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "*time.Time",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "DeletedAt",
+            "wire": "deletedAt",
+            "description": "When this row was soft-deleted. Null while the row is live.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "*time.Time",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "PublishAt",
+            "wire": "publishAt",
+            "description": "When the post goes live, or null while it is a draft.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "*time.Time",
+            "modifiers": [
+              "Nullable"
+            ]
+          }
+        ],
+        "origin": "Filter"
+      },
+      {
+        "name": "BlogPostListResponse",
+        "description": "A page of BlogPosts.",
+        "fields": [
+          {
+            "name": "Data",
+            "wire": "data",
+            "description": "The rows in this page.",
+            "type": "BlogPost",
+            "type_kind": "Resource",
+            "go_type": "[]BlogPost",
+            "modifiers": [
+              "Array"
+            ]
+          },
+          {
+            "name": "Pagination",
+            "wire": "pagination",
+            "description": "Where this page sits in the full result set.",
+            "type": "Pagination",
+            "type_kind": "Object",
+            "go_type": "Pagination"
+          }
+        ],
+        "origin": "Projected"
+      },
+      {
+        "name": "Error",
+        "description": "Returned whenever a request fails.",
+        "fields": [
+          {
+            "name": "Code",
+            "wire": "code",
+            "description": "Machine-readable reason the request failed.",
+            "type": "ErrorCode",
+            "type_kind": "Enum",
+            "go_type": "ErrorCode"
+          },
+          {
+            "name": "Message",
+            "wire": "message",
+            "description": "Human-readable explanation. Not intended for clients to parse.",
+            "type": "String",
+            "type_kind": "Primitive",
+            "go_type": "string"
+          },
+          {
+            "name": "RequestID",
+            "wire": "requestId",
+            "description": "Identifier of this request, for correlating with server logs.",
+            "type": "String",
+            "type_kind": "Primitive",
+            "go_type": "string",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "Fields",
+            "wire": "fields",
+            "description": "Present when the failure was validation. It is shaped like the request body that failed — one member per field, holding the problem with that field — so a client can put each message beside the control it belongs to.",
+            "type": "JSON",
+            "type_kind": "Primitive",
+            "go_type": "any",
+            "modifiers": [
+              "Nullable"
+            ]
+          }
+        ],
+        "origin": "Builtin"
+      },
+      {
+        "name": "Pagination",
+        "description": "Where the returned page sits within the full result set.",
+        "fields": [
+          {
+            "name": "Offset",
+            "wire": "offset",
+            "description": "Number of rows skipped before this page.",
+            "type": "Int",
+            "type_kind": "Primitive",
+            "go_type": "int"
+          },
+          {
+            "name": "Limit",
+            "wire": "limit",
+            "description": "Maximum number of rows in this page.",
+            "type": "Int",
+            "type_kind": "Primitive",
+            "go_type": "int"
+          },
+          {
+            "name": "Total",
+            "wire": "total",
+            "description": "Total number of rows matching the query, ignoring pagination.",
+            "type": "Int64",
+            "type_kind": "Primitive",
+            "go_type": "int64"
+          }
+        ],
+        "origin": "Builtin"
+      },
+      {
+        "name": "RigAccount",
+        "description": "One person's membership of one tenant.",
+        "fields": [
+          {
+            "name": "ID",
+            "wire": "id",
+            "description": "Unique identifier for this row.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "uuid.UUID",
+            "read_only": true,
+            "column": {
+              "table": "rig_account",
+              "name": "id",
+              "sql_type": "uuid",
+              "nullable": false,
+              "scan": "UUID"
+            }
+          },
+          {
+            "name": "TenantID",
+            "wire": "tenantId",
+            "description": "Tenant this row belongs to. Every query is scoped by it.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "uuid.UUID",
+            "read_only": true,
+            "column": {
+              "table": "rig_account",
+              "name": "tenant_id",
+              "sql_type": "uuid",
+              "nullable": false,
+              "scan": "UUID"
+            }
+          },
+          {
+            "name": "DisplayName",
+            "wire": "displayName",
+            "type": "String",
+            "type_kind": "Primitive",
+            "go_type": "string",
+            "column": {
+              "table": "rig_account",
+              "name": "display_name",
+              "sql_type": "text",
+              "nullable": false,
+              "scan": "Direct"
+            }
+          }
+        ],
+        "origin": "Projected"
+      },
+      {
+        "name": "RigAccountFilter",
+        "description": "Conditions a RigAccount must satisfy to match a search.",
+        "fields": [
+          {
+            "name": "Equals",
+            "wire": "equals",
+            "description": "Fields that must equal the given value.",
+            "type": "RigAccountFilterEquals",
+            "type_kind": "Object",
+            "go_type": "*RigAccountFilterEquals",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "NotEquals",
+            "wire": "notEquals",
+            "description": "Fields that must not equal the given value.",
+            "type": "RigAccountFilterEquals",
+            "type_kind": "Object",
+            "go_type": "*RigAccountFilterEquals",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "GreaterThan",
+            "wire": "greaterThan",
+            "description": "Fields that must be greater than the given value.",
+            "type": "RigAccountFilterRange",
+            "type_kind": "Object",
+            "go_type": "*RigAccountFilterRange",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "SmallerThan",
+            "wire": "smallerThan",
+            "description": "Fields that must be less than the given value.",
+            "type": "RigAccountFilterRange",
+            "type_kind": "Object",
+            "go_type": "*RigAccountFilterRange",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "GreaterOrEqual",
+            "wire": "greaterOrEqual",
+            "description": "Fields that must be greater than or equal to the given value.",
+            "type": "RigAccountFilterRange",
+            "type_kind": "Object",
+            "go_type": "*RigAccountFilterRange",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "SmallerOrEqual",
+            "wire": "smallerOrEqual",
+            "description": "Fields that must be less than or equal to the given value.",
+            "type": "RigAccountFilterRange",
+            "type_kind": "Object",
+            "go_type": "*RigAccountFilterRange",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "Contains",
+            "wire": "contains",
+            "description": "Fields that must be one of the given values.",
+            "type": "RigAccountFilterContains",
+            "type_kind": "Object",
+            "go_type": "*RigAccountFilterContains",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "NotContains",
+            "wire": "notContains",
+            "description": "Fields that must not be one of the given values.",
+            "type": "RigAccountFilterContains",
+            "type_kind": "Object",
+            "go_type": "*RigAccountFilterContains",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "Like",
+            "wire": "like",
+            "description": "Text fields that must match the given pattern.",
+            "type": "RigAccountFilterLike",
+            "type_kind": "Object",
+            "go_type": "*RigAccountFilterLike",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "NotLike",
+            "wire": "notLike",
+            "description": "Text fields that must not match the given pattern.",
+            "type": "RigAccountFilterLike",
+            "type_kind": "Object",
+            "go_type": "*RigAccountFilterLike",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "Null",
+            "wire": "null",
+            "description": "Fields that must be null.",
+            "type": "RigAccountFilterNull",
+            "type_kind": "Object",
+            "go_type": "*RigAccountFilterNull",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "NotNull",
+            "wire": "notNull",
+            "description": "Fields that must not be null.",
+            "type": "RigAccountFilterNull",
+            "type_kind": "Object",
+            "go_type": "*RigAccountFilterNull",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "OrCondition",
+            "wire": "orCondition",
+            "description": "Combine this filter's conditions with OR instead of AND.",
+            "type": "Bool",
+            "type_kind": "Primitive",
+            "go_type": "bool"
+          },
+          {
+            "name": "NestedFilters",
+            "wire": "nestedFilters",
+            "description": "Sub-filters combined with this one, so that AND and OR can be mixed to any depth.",
+            "type": "RigAccountFilter",
+            "type_kind": "Object",
+            "go_type": "[]RigAccountFilter",
+            "modifiers": [
+              "Array"
+            ]
+          }
+        ],
+        "origin": "Filter"
+      },
+      {
+        "name": "RigAccountFilterContains",
+        "description": "Set-membership conditions on RigAccount fields.",
+        "fields": [
+          {
+            "name": "ID",
+            "wire": "id",
+            "description": "Unique identifier for this row.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "[]uuid.UUID",
+            "modifiers": [
+              "Array"
+            ]
+          },
+          {
+            "name": "DisplayName",
+            "wire": "displayName",
+            "type": "String",
+            "type_kind": "Primitive",
+            "go_type": "[]string",
+            "modifiers": [
+              "Array"
+            ]
+          }
+        ],
+        "origin": "Filter"
+      },
+      {
+        "name": "RigAccountFilterEquals",
+        "description": "Exact-match conditions on RigAccount fields.",
+        "fields": [
+          {
+            "name": "ID",
+            "wire": "id",
+            "description": "Unique identifier for this row.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "*uuid.UUID",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "DisplayName",
+            "wire": "displayName",
+            "type": "String",
+            "type_kind": "Primitive",
+            "go_type": "*string",
+            "modifiers": [
+              "Nullable"
+            ]
+          }
+        ],
+        "origin": "Filter"
+      },
+      {
+        "name": "RigAccountFilterLike",
+        "description": "Pattern conditions on RigAccount text fields.",
+        "fields": [
+          {
+            "name": "DisplayName",
+            "wire": "displayName",
+            "type": "String",
+            "type_kind": "Primitive",
+            "go_type": "*string",
+            "modifiers": [
+              "Nullable"
+            ]
+          }
+        ],
+        "origin": "Filter"
+      },
+      {
+        "name": "RigAccountFilterNull",
+        "description": "Presence conditions on nullable RigAccount fields.",
+        "fields": null,
+        "origin": "Filter"
+      },
+      {
+        "name": "RigAccountFilterRange",
+        "description": "Ordering conditions on RigAccount fields that can be compared.",
+        "fields": null,
+        "origin": "Filter"
+      },
+      {
+        "name": "RigAccountListResponse",
+        "description": "A page of RigAccounts.",
+        "fields": [
+          {
+            "name": "Data",
+            "wire": "data",
+            "description": "The rows in this page.",
+            "type": "RigAccount",
+            "type_kind": "Resource",
+            "go_type": "[]RigAccount",
+            "modifiers": [
+              "Array"
+            ]
+          },
+          {
+            "name": "Pagination",
+            "wire": "pagination",
+            "description": "Where this page sits in the full result set.",
+            "type": "Pagination",
+            "type_kind": "Object",
+            "go_type": "Pagination"
+          }
+        ],
+        "origin": "Projected"
+      },
+      {
+        "name": "RigNotificationFilter",
+        "description": "Conditions a RigNotification must satisfy to match a search.",
+        "fields": [
+          {
+            "name": "Equals",
+            "wire": "equals",
+            "description": "Fields that must equal the given value.",
+            "type": "RigNotificationFilterEquals",
+            "type_kind": "Object",
+            "go_type": "*RigNotificationFilterEquals",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "NotEquals",
+            "wire": "notEquals",
+            "description": "Fields that must not equal the given value.",
+            "type": "RigNotificationFilterEquals",
+            "type_kind": "Object",
+            "go_type": "*RigNotificationFilterEquals",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "GreaterThan",
+            "wire": "greaterThan",
+            "description": "Fields that must be greater than the given value.",
+            "type": "RigNotificationFilterRange",
+            "type_kind": "Object",
+            "go_type": "*RigNotificationFilterRange",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "SmallerThan",
+            "wire": "smallerThan",
+            "description": "Fields that must be less than the given value.",
+            "type": "RigNotificationFilterRange",
+            "type_kind": "Object",
+            "go_type": "*RigNotificationFilterRange",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "GreaterOrEqual",
+            "wire": "greaterOrEqual",
+            "description": "Fields that must be greater than or equal to the given value.",
+            "type": "RigNotificationFilterRange",
+            "type_kind": "Object",
+            "go_type": "*RigNotificationFilterRange",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "SmallerOrEqual",
+            "wire": "smallerOrEqual",
+            "description": "Fields that must be less than or equal to the given value.",
+            "type": "RigNotificationFilterRange",
+            "type_kind": "Object",
+            "go_type": "*RigNotificationFilterRange",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "Contains",
+            "wire": "contains",
+            "description": "Fields that must be one of the given values.",
+            "type": "RigNotificationFilterContains",
+            "type_kind": "Object",
+            "go_type": "*RigNotificationFilterContains",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "NotContains",
+            "wire": "notContains",
+            "description": "Fields that must not be one of the given values.",
+            "type": "RigNotificationFilterContains",
+            "type_kind": "Object",
+            "go_type": "*RigNotificationFilterContains",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "Like",
+            "wire": "like",
+            "description": "Text fields that must match the given pattern.",
+            "type": "RigNotificationFilterLike",
+            "type_kind": "Object",
+            "go_type": "*RigNotificationFilterLike",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "NotLike",
+            "wire": "notLike",
+            "description": "Text fields that must not match the given pattern.",
+            "type": "RigNotificationFilterLike",
+            "type_kind": "Object",
+            "go_type": "*RigNotificationFilterLike",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "Null",
+            "wire": "null",
+            "description": "Fields that must be null.",
+            "type": "RigNotificationFilterNull",
+            "type_kind": "Object",
+            "go_type": "*RigNotificationFilterNull",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "NotNull",
+            "wire": "notNull",
+            "description": "Fields that must not be null.",
+            "type": "RigNotificationFilterNull",
+            "type_kind": "Object",
+            "go_type": "*RigNotificationFilterNull",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "OrCondition",
+            "wire": "orCondition",
+            "description": "Combine this filter's conditions with OR instead of AND.",
+            "type": "Bool",
+            "type_kind": "Primitive",
+            "go_type": "bool"
+          },
+          {
+            "name": "NestedFilters",
+            "wire": "nestedFilters",
+            "description": "Sub-filters combined with this one, so that AND and OR can be mixed to any depth.",
+            "type": "RigNotificationFilter",
+            "type_kind": "Object",
+            "go_type": "[]RigNotificationFilter",
+            "modifiers": [
+              "Array"
+            ]
+          },
+          {
+            "name": "Without",
+            "wire": "without",
+            "description": "Relations with no row matching the given conditions. An empty one asks for no related row at all.\n\nThis is where a negation belongs when what you mean is \"not\": it negates whether a matching related row exists, so a row with no related row at all satisfies it. The negative operators above negate the comparison instead and still require the related row to be there — \"no related row called X\" is here, \"a related row not called X\" is NotEquals.",
+            "type": "RigNotificationFilterWithout",
+            "type_kind": "Object",
+            "go_type": "*RigNotificationFilterWithout",
+            "modifiers": [
+              "Nullable"
+            ]
+          }
+        ],
+        "origin": "Filter"
+      },
+      {
+        "name": "RigNotificationFilterContains",
+        "description": "Set-membership conditions on RigNotification fields.",
+        "fields": [
+          {
+            "name": "ID",
+            "wire": "id",
+            "description": "Unique identifier for this row.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "[]uuid.UUID",
+            "modifiers": [
+              "Array"
+            ]
+          },
+          {
+            "name": "CreatedAt",
+            "wire": "createdAt",
+            "description": "When this row was created. Set automatically and never changes.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "[]time.Time",
+            "modifiers": [
+              "Array"
+            ]
+          },
+          {
+            "name": "UpdatedAt",
+            "wire": "updatedAt",
+            "description": "When this row was last updated. Set automatically on every update.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "[]time.Time",
+            "modifiers": [
+              "Array"
+            ]
+          },
+          {
+            "name": "Kind",
+            "wire": "kind",
+            "type": "String",
+            "type_kind": "Primitive",
+            "go_type": "[]string",
+            "modifiers": [
+              "Array"
+            ]
+          },
+          {
+            "name": "DeliverAt",
+            "wire": "deliverAt",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "[]time.Time",
+            "modifiers": [
+              "Array"
+            ]
+          },
+          {
+            "name": "ResolvedAt",
+            "wire": "resolvedAt",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "[]time.Time",
+            "modifiers": [
+              "Array"
+            ]
+          },
+          {
+            "name": "GroupKey",
+            "wire": "groupKey",
+            "type": "String",
+            "type_kind": "Primitive",
+            "go_type": "[]string",
+            "modifiers": [
+              "Array"
+            ]
+          },
+          {
+            "name": "BlogPosts",
+            "wire": "blogPosts",
+            "description": "Conditions on one of this row's BlogPosts.\n\nEvery condition has to hold of the same one, not of the set between them.\n\nUnder the negative operators this asks whether one of them differs, which is not the same as none of them matching: a row can have one that matches and one that does not, satisfying the first and failing the second. Without.BlogPosts asks the second.",
+            "type": "BlogPostFilterContains",
+            "type_kind": "Object",
+            "go_type": "*BlogPostFilterContains",
+            "modifiers": [
+              "Nullable"
+            ]
+          }
+        ],
+        "origin": "Filter"
+      },
+      {
+        "name": "RigNotificationFilterEquals",
+        "description": "Exact-match conditions on RigNotification fields.",
+        "fields": [
+          {
+            "name": "ID",
+            "wire": "id",
+            "description": "Unique identifier for this row.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "*uuid.UUID",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "CreatedAt",
+            "wire": "createdAt",
+            "description": "When this row was created. Set automatically and never changes.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "*time.Time",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "UpdatedAt",
+            "wire": "updatedAt",
+            "description": "When this row was last updated. Set automatically on every update.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "*time.Time",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "Kind",
+            "wire": "kind",
+            "type": "String",
+            "type_kind": "Primitive",
+            "go_type": "*string",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "DeliverAt",
+            "wire": "deliverAt",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "*time.Time",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "ResolvedAt",
+            "wire": "resolvedAt",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "*time.Time",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "GroupKey",
+            "wire": "groupKey",
+            "type": "String",
+            "type_kind": "Primitive",
+            "go_type": "*string",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "BlogPosts",
+            "wire": "blogPosts",
+            "description": "Conditions on one of this row's BlogPosts.\n\nEvery condition has to hold of the same one, not of the set between them.\n\nUnder the negative operators this asks whether one of them differs, which is not the same as none of them matching: a row can have one that matches and one that does not, satisfying the first and failing the second. Without.BlogPosts asks the second.",
+            "type": "BlogPostFilterEquals",
+            "type_kind": "Object",
+            "go_type": "*BlogPostFilterEquals",
+            "modifiers": [
+              "Nullable"
+            ]
+          }
+        ],
+        "origin": "Filter"
+      },
+      {
+        "name": "RigNotificationFilterLike",
+        "description": "Pattern conditions on RigNotification text fields.",
+        "fields": [
+          {
+            "name": "Kind",
+            "wire": "kind",
+            "type": "String",
+            "type_kind": "Primitive",
+            "go_type": "*string",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "GroupKey",
+            "wire": "groupKey",
+            "type": "String",
+            "type_kind": "Primitive",
+            "go_type": "*string",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "BlogPosts",
+            "wire": "blogPosts",
+            "description": "Conditions on one of this row's BlogPosts.\n\nEvery condition has to hold of the same one, not of the set between them.\n\nUnder the negative operators this asks whether one of them differs, which is not the same as none of them matching: a row can have one that matches and one that does not, satisfying the first and failing the second. Without.BlogPosts asks the second.",
+            "type": "BlogPostFilterLike",
+            "type_kind": "Object",
+            "go_type": "*BlogPostFilterLike",
+            "modifiers": [
+              "Nullable"
+            ]
+          }
+        ],
+        "origin": "Filter"
+      },
+      {
+        "name": "RigNotificationFilterNull",
+        "description": "Presence conditions on nullable RigNotification fields.",
+        "fields": [
+          {
+            "name": "UpdatedAt",
+            "wire": "updatedAt",
+            "description": "When this row was last updated. Set automatically on every update.",
+            "type": "Bool",
+            "type_kind": "Primitive",
+            "go_type": "*bool",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "ResolvedAt",
+            "wire": "resolvedAt",
+            "type": "Bool",
+            "type_kind": "Primitive",
+            "go_type": "*bool",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "GroupKey",
+            "wire": "groupKey",
+            "type": "Bool",
+            "type_kind": "Primitive",
+            "go_type": "*bool",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "BlogPosts",
+            "wire": "blogPosts",
+            "description": "Conditions on one of this row's BlogPosts.\n\nEvery condition has to hold of the same one, not of the set between them.\n\nUnder the negative operators this asks whether one of them differs, which is not the same as none of them matching: a row can have one that matches and one that does not, satisfying the first and failing the second. Without.BlogPosts asks the second.",
+            "type": "BlogPostFilterNull",
+            "type_kind": "Object",
+            "go_type": "*BlogPostFilterNull",
+            "modifiers": [
+              "Nullable"
+            ]
+          }
+        ],
+        "origin": "Filter"
+      },
+      {
+        "name": "RigNotificationFilterRange",
+        "description": "Ordering conditions on RigNotification fields that can be compared.",
+        "fields": [
+          {
+            "name": "CreatedAt",
+            "wire": "createdAt",
+            "description": "When this row was created. Set automatically and never changes.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "*time.Time",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "UpdatedAt",
+            "wire": "updatedAt",
+            "description": "When this row was last updated. Set automatically on every update.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "*time.Time",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "DeliverAt",
+            "wire": "deliverAt",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "*time.Time",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "ResolvedAt",
+            "wire": "resolvedAt",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "*time.Time",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "BlogPosts",
+            "wire": "blogPosts",
+            "description": "Conditions on one of this row's BlogPosts.\n\nEvery condition has to hold of the same one, not of the set between them.\n\nUnder the negative operators this asks whether one of them differs, which is not the same as none of them matching: a row can have one that matches and one that does not, satisfying the first and failing the second. Without.BlogPosts asks the second.",
+            "type": "BlogPostFilterRange",
+            "type_kind": "Object",
+            "go_type": "*BlogPostFilterRange",
+            "modifiers": [
+              "Nullable"
+            ]
+          }
+        ],
+        "origin": "Filter"
+      },
+      {
+        "name": "RigNotificationFilterWithout",
+        "description": "Relations a RigNotification must have no matching row for.",
+        "fields": [
+          {
+            "name": "BlogPosts",
+            "wire": "blogPosts",
+            "description": "Match rows with no BlogPosts satisfying these conditions, including rows with none at all.\n\nThis negates the existence of a matching row rather than the comparison, which is the whole difference from NotEquals.BlogPosts: that one is satisfied by one of them differing, and a row can have one that differs and one that matches at the same time. An empty object asks for rows with no BlogPosts at all.",
+            "type": "BlogPostFilter",
+            "type_kind": "Object",
+            "go_type": "*BlogPostFilter",
+            "modifiers": [
+              "Nullable"
+            ]
+          }
+        ],
+        "origin": "Filter"
+      },
+      {
+        "name": "RigNotificationRecipientFilter",
+        "description": "Conditions a RigNotificationRecipient must satisfy to match a search.",
+        "fields": [
+          {
+            "name": "Equals",
+            "wire": "equals",
+            "description": "Fields that must equal the given value.",
+            "type": "RigNotificationRecipientFilterEquals",
+            "type_kind": "Object",
+            "go_type": "*RigNotificationRecipientFilterEquals",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "NotEquals",
+            "wire": "notEquals",
+            "description": "Fields that must not equal the given value.",
+            "type": "RigNotificationRecipientFilterEquals",
+            "type_kind": "Object",
+            "go_type": "*RigNotificationRecipientFilterEquals",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "GreaterThan",
+            "wire": "greaterThan",
+            "description": "Fields that must be greater than the given value.",
+            "type": "RigNotificationRecipientFilterRange",
+            "type_kind": "Object",
+            "go_type": "*RigNotificationRecipientFilterRange",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "SmallerThan",
+            "wire": "smallerThan",
+            "description": "Fields that must be less than the given value.",
+            "type": "RigNotificationRecipientFilterRange",
+            "type_kind": "Object",
+            "go_type": "*RigNotificationRecipientFilterRange",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "GreaterOrEqual",
+            "wire": "greaterOrEqual",
+            "description": "Fields that must be greater than or equal to the given value.",
+            "type": "RigNotificationRecipientFilterRange",
+            "type_kind": "Object",
+            "go_type": "*RigNotificationRecipientFilterRange",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "SmallerOrEqual",
+            "wire": "smallerOrEqual",
+            "description": "Fields that must be less than or equal to the given value.",
+            "type": "RigNotificationRecipientFilterRange",
+            "type_kind": "Object",
+            "go_type": "*RigNotificationRecipientFilterRange",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "Contains",
+            "wire": "contains",
+            "description": "Fields that must be one of the given values.",
+            "type": "RigNotificationRecipientFilterContains",
+            "type_kind": "Object",
+            "go_type": "*RigNotificationRecipientFilterContains",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "NotContains",
+            "wire": "notContains",
+            "description": "Fields that must not be one of the given values.",
+            "type": "RigNotificationRecipientFilterContains",
+            "type_kind": "Object",
+            "go_type": "*RigNotificationRecipientFilterContains",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "Like",
+            "wire": "like",
+            "description": "Text fields that must match the given pattern.",
+            "type": "RigNotificationRecipientFilterLike",
+            "type_kind": "Object",
+            "go_type": "*RigNotificationRecipientFilterLike",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "NotLike",
+            "wire": "notLike",
+            "description": "Text fields that must not match the given pattern.",
+            "type": "RigNotificationRecipientFilterLike",
+            "type_kind": "Object",
+            "go_type": "*RigNotificationRecipientFilterLike",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "Null",
+            "wire": "null",
+            "description": "Fields that must be null.",
+            "type": "RigNotificationRecipientFilterNull",
+            "type_kind": "Object",
+            "go_type": "*RigNotificationRecipientFilterNull",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "NotNull",
+            "wire": "notNull",
+            "description": "Fields that must not be null.",
+            "type": "RigNotificationRecipientFilterNull",
+            "type_kind": "Object",
+            "go_type": "*RigNotificationRecipientFilterNull",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "OrCondition",
+            "wire": "orCondition",
+            "description": "Combine this filter's conditions with OR instead of AND.",
+            "type": "Bool",
+            "type_kind": "Primitive",
+            "go_type": "bool"
+          },
+          {
+            "name": "NestedFilters",
+            "wire": "nestedFilters",
+            "description": "Sub-filters combined with this one, so that AND and OR can be mixed to any depth.",
+            "type": "RigNotificationRecipientFilter",
+            "type_kind": "Object",
+            "go_type": "[]RigNotificationRecipientFilter",
+            "modifiers": [
+              "Array"
+            ]
+          },
+          {
+            "name": "Without",
+            "wire": "without",
+            "description": "Relations with no row matching the given conditions. An empty one asks for no related row at all.\n\nThis is where a negation belongs when what you mean is \"not\": it negates whether a matching related row exists, so a row with no related row at all satisfies it. The negative operators above negate the comparison instead and still require the related row to be there — \"no related row called X\" is here, \"a related row not called X\" is NotEquals.",
+            "type": "RigNotificationRecipientFilterWithout",
+            "type_kind": "Object",
+            "go_type": "*RigNotificationRecipientFilterWithout",
+            "modifiers": [
+              "Nullable"
+            ]
+          }
+        ],
+        "origin": "Filter"
+      },
+      {
+        "name": "RigNotificationRecipientFilterContains",
+        "description": "Set-membership conditions on RigNotificationRecipient fields.",
+        "fields": [
+          {
+            "name": "ID",
+            "wire": "id",
+            "description": "Unique identifier for this row.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "[]uuid.UUID",
+            "modifiers": [
+              "Array"
+            ]
+          },
+          {
+            "name": "NotificationID",
+            "wire": "notificationId",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "[]uuid.UUID",
+            "modifiers": [
+              "Array"
+            ]
+          },
+          {
+            "name": "AccountID",
+            "wire": "accountId",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "[]uuid.UUID",
+            "modifiers": [
+              "Array"
+            ]
+          },
+          {
+            "name": "CreatedAt",
+            "wire": "createdAt",
+            "description": "When this row was created. Set automatically and never changes.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "[]time.Time",
+            "modifiers": [
+              "Array"
+            ]
+          },
+          {
+            "name": "UpdatedAt",
+            "wire": "updatedAt",
+            "description": "When this row was last updated. Set automatically on every update.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "[]time.Time",
+            "modifiers": [
+              "Array"
+            ]
+          },
+          {
+            "name": "DeletedAt",
+            "wire": "deletedAt",
+            "description": "When this row was soft-deleted. Null while the row is live.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "[]time.Time",
+            "modifiers": [
+              "Array"
+            ]
+          },
+          {
+            "name": "DeletedByAccountID",
+            "wire": "deletedByAccountId",
+            "description": "Account that soft-deleted this row, taken from the request's claims.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "[]uuid.UUID",
+            "modifiers": [
+              "Array"
+            ]
+          },
+          {
+            "name": "Kind",
+            "wire": "kind",
+            "type": "String",
+            "type_kind": "Primitive",
+            "go_type": "[]string",
+            "modifiers": [
+              "Array"
+            ]
+          },
+          {
+            "name": "GroupKey",
+            "wire": "groupKey",
+            "type": "String",
+            "type_kind": "Primitive",
+            "go_type": "[]string",
+            "modifiers": [
+              "Array"
+            ]
+          },
+          {
+            "name": "EventCount",
+            "wire": "eventCount",
+            "type": "Int",
+            "type_kind": "Primitive",
+            "go_type": "[]int",
+            "modifiers": [
+              "Array"
+            ]
+          },
+          {
+            "name": "ReadAt",
+            "wire": "readAt",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "[]time.Time",
+            "modifiers": [
+              "Array"
+            ]
+          },
+          {
+            "name": "Account",
+            "wire": "account",
+            "description": "Conditions on this row's Account.\n\nA row with no Account never matches, and that holds for the negative operators too: under NotEquals this asks whether the Account is there and differs, so a row without one fails that as well. To ask the other question — no matching Account, which a row with none satisfies — use Without.Account.",
+            "type": "RigAccountFilterContains",
+            "type_kind": "Object",
+            "go_type": "*RigAccountFilterContains",
+            "modifiers": [
+              "Nullable"
+            ]
+          }
+        ],
+        "origin": "Filter"
+      },
+      {
+        "name": "RigNotificationRecipientFilterEquals",
+        "description": "Exact-match conditions on RigNotificationRecipient fields.",
+        "fields": [
+          {
+            "name": "ID",
+            "wire": "id",
+            "description": "Unique identifier for this row.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "*uuid.UUID",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "NotificationID",
+            "wire": "notificationId",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "*uuid.UUID",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "AccountID",
+            "wire": "accountId",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "*uuid.UUID",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "CreatedAt",
+            "wire": "createdAt",
+            "description": "When this row was created. Set automatically and never changes.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "*time.Time",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "UpdatedAt",
+            "wire": "updatedAt",
+            "description": "When this row was last updated. Set automatically on every update.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "*time.Time",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "DeletedAt",
+            "wire": "deletedAt",
+            "description": "When this row was soft-deleted. Null while the row is live.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "*time.Time",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "DeletedByAccountID",
+            "wire": "deletedByAccountId",
+            "description": "Account that soft-deleted this row, taken from the request's claims.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "*uuid.UUID",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "Kind",
+            "wire": "kind",
+            "type": "String",
+            "type_kind": "Primitive",
+            "go_type": "*string",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "GroupKey",
+            "wire": "groupKey",
+            "type": "String",
+            "type_kind": "Primitive",
+            "go_type": "*string",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "EventCount",
+            "wire": "eventCount",
+            "type": "Int",
+            "type_kind": "Primitive",
+            "go_type": "*int",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "ReadAt",
+            "wire": "readAt",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "*time.Time",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "Account",
+            "wire": "account",
+            "description": "Conditions on this row's Account.\n\nA row with no Account never matches, and that holds for the negative operators too: under NotEquals this asks whether the Account is there and differs, so a row without one fails that as well. To ask the other question — no matching Account, which a row with none satisfies — use Without.Account.",
+            "type": "RigAccountFilterEquals",
+            "type_kind": "Object",
+            "go_type": "*RigAccountFilterEquals",
+            "modifiers": [
+              "Nullable"
+            ]
+          }
+        ],
+        "origin": "Filter"
+      },
+      {
+        "name": "RigNotificationRecipientFilterLike",
+        "description": "Pattern conditions on RigNotificationRecipient text fields.",
+        "fields": [
+          {
+            "name": "Kind",
+            "wire": "kind",
+            "type": "String",
+            "type_kind": "Primitive",
+            "go_type": "*string",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "GroupKey",
+            "wire": "groupKey",
+            "type": "String",
+            "type_kind": "Primitive",
+            "go_type": "*string",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "Account",
+            "wire": "account",
+            "description": "Conditions on this row's Account.\n\nA row with no Account never matches, and that holds for the negative operators too: under NotEquals this asks whether the Account is there and differs, so a row without one fails that as well. To ask the other question — no matching Account, which a row with none satisfies — use Without.Account.",
+            "type": "RigAccountFilterLike",
+            "type_kind": "Object",
+            "go_type": "*RigAccountFilterLike",
+            "modifiers": [
+              "Nullable"
+            ]
+          }
+        ],
+        "origin": "Filter"
+      },
+      {
+        "name": "RigNotificationRecipientFilterNull",
+        "description": "Presence conditions on nullable RigNotificationRecipient fields.",
+        "fields": [
+          {
+            "name": "UpdatedAt",
+            "wire": "updatedAt",
+            "description": "When this row was last updated. Set automatically on every update.",
+            "type": "Bool",
+            "type_kind": "Primitive",
+            "go_type": "*bool",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "DeletedAt",
+            "wire": "deletedAt",
+            "description": "When this row was soft-deleted. Null while the row is live.",
+            "type": "Bool",
+            "type_kind": "Primitive",
+            "go_type": "*bool",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "DeletedByAccountID",
+            "wire": "deletedByAccountId",
+            "description": "Account that soft-deleted this row, taken from the request's claims.",
+            "type": "Bool",
+            "type_kind": "Primitive",
+            "go_type": "*bool",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "GroupKey",
+            "wire": "groupKey",
+            "type": "Bool",
+            "type_kind": "Primitive",
+            "go_type": "*bool",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "ReadAt",
+            "wire": "readAt",
+            "type": "Bool",
+            "type_kind": "Primitive",
+            "go_type": "*bool",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "Account",
+            "wire": "account",
+            "description": "Conditions on this row's Account.\n\nA row with no Account never matches, and that holds for the negative operators too: under NotEquals this asks whether the Account is there and differs, so a row without one fails that as well. To ask the other question — no matching Account, which a row with none satisfies — use Without.Account.",
+            "type": "RigAccountFilterNull",
+            "type_kind": "Object",
+            "go_type": "*RigAccountFilterNull",
+            "modifiers": [
+              "Nullable"
+            ]
+          }
+        ],
+        "origin": "Filter"
+      },
+      {
+        "name": "RigNotificationRecipientFilterRange",
+        "description": "Ordering conditions on RigNotificationRecipient fields that can be compared.",
+        "fields": [
+          {
+            "name": "CreatedAt",
+            "wire": "createdAt",
+            "description": "When this row was created. Set automatically and never changes.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "*time.Time",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "UpdatedAt",
+            "wire": "updatedAt",
+            "description": "When this row was last updated. Set automatically on every update.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "*time.Time",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "DeletedAt",
+            "wire": "deletedAt",
+            "description": "When this row was soft-deleted. Null while the row is live.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "*time.Time",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "EventCount",
+            "wire": "eventCount",
+            "type": "Int",
+            "type_kind": "Primitive",
+            "go_type": "*int",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "ReadAt",
+            "wire": "readAt",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "*time.Time",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "Account",
+            "wire": "account",
+            "description": "Conditions on this row's Account.\n\nA row with no Account never matches, and that holds for the negative operators too: under NotEquals this asks whether the Account is there and differs, so a row without one fails that as well. To ask the other question — no matching Account, which a row with none satisfies — use Without.Account.",
+            "type": "RigAccountFilterRange",
+            "type_kind": "Object",
+            "go_type": "*RigAccountFilterRange",
+            "modifiers": [
+              "Nullable"
+            ]
+          }
+        ],
+        "origin": "Filter"
+      },
+      {
+        "name": "RigNotificationRecipientFilterWithout",
+        "description": "Relations a RigNotificationRecipient must have no matching row for.",
+        "fields": [
+          {
+            "name": "Account",
+            "wire": "account",
+            "description": "Match rows with no Account satisfying these conditions, including rows that have none at all.\n\nThis negates the existence of the related row rather than the comparison, which is the whole difference from NotEquals.Account: that one needs the Account to be there and to differ, so a row without one fails it and satisfies this. An empty object asks for rows with no Account at all.",
+            "type": "RigAccountFilter",
+            "type_kind": "Object",
+            "go_type": "*RigAccountFilter",
+            "modifiers": [
+              "Nullable"
+            ]
+          }
+        ],
+        "origin": "Filter"
+      }
+    ],
+    "resources": [
+      {
+        "name": "BlogPost",
+        "plural": "BlogPosts",
+        "path_segment": "blog-posts",
+        "description": "A post, which people are told about when it goes live.",
+        "operations": [
+          "Create",
+          "Get",
+          "List",
+          "Search",
+          "Update",
+          "Delete"
+        ],
+        "fields": [
+          {
+            "name": "ID",
+            "wire": "id",
+            "description": "Unique identifier for this row.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "uuid.UUID",
+            "read_only": true,
+            "column": {
+              "table": "blog_post",
+              "name": "id",
+              "sql_type": "uuid",
+              "nullable": false,
+              "scan": "UUID"
+            },
+            "operations": [
+              "Read"
+            ]
+          },
+          {
+            "name": "TenantID",
+            "wire": "tenantId",
+            "description": "Tenant this row belongs to. Every query is scoped by it.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "uuid.UUID",
+            "read_only": true,
+            "column": {
+              "table": "blog_post",
+              "name": "tenant_id",
+              "sql_type": "uuid",
+              "nullable": false,
+              "scan": "UUID"
+            },
+            "operations": [
+              "Read"
+            ]
+          },
+          {
+            "name": "CreatedAt",
+            "wire": "createdAt",
+            "description": "When this row was created. Set automatically and never changes.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "time.Time",
+            "default": "now()",
+            "read_only": true,
+            "column": {
+              "table": "blog_post",
+              "name": "created_at",
+              "sql_type": "timestamptz",
+              "nullable": false,
+              "scan": "Timestamptz"
+            },
+            "operations": [
+              "Read"
+            ]
+          },
+          {
+            "name": "CreatedByAccountID",
+            "wire": "createdByAccountId",
+            "description": "Account that created this row, taken from the request's claims.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "*uuid.UUID",
+            "modifiers": [
+              "Nullable"
+            ],
+            "read_only": true,
+            "column": {
+              "table": "blog_post",
+              "name": "created_by_account_id",
+              "sql_type": "uuid",
+              "nullable": true,
+              "scan": "UUID"
+            },
+            "operations": [
+              "Read"
+            ]
+          },
+          {
+            "name": "UpdatedAt",
+            "wire": "updatedAt",
+            "description": "When this row was last updated. Set automatically on every update.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "*time.Time",
+            "modifiers": [
+              "Nullable"
+            ],
+            "read_only": true,
+            "column": {
+              "table": "blog_post",
+              "name": "updated_at",
+              "sql_type": "timestamptz",
+              "nullable": true,
+              "scan": "Timestamptz"
+            },
+            "operations": [
+              "Read"
+            ]
+          },
+          {
+            "name": "DeletedAt",
+            "wire": "deletedAt",
+            "description": "When this row was soft-deleted. Null while the row is live.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "*time.Time",
+            "modifiers": [
+              "Nullable"
+            ],
+            "read_only": true,
+            "column": {
+              "table": "blog_post",
+              "name": "deleted_at",
+              "sql_type": "timestamptz",
+              "nullable": true,
+              "scan": "Timestamptz"
+            },
+            "operations": [
+              "Read"
+            ]
+          },
+          {
+            "name": "Title",
+            "wire": "title",
+            "description": "What the post is called.",
+            "type": "String",
+            "type_kind": "Primitive",
+            "go_type": "string",
+            "column": {
+              "table": "blog_post",
+              "name": "title",
+              "sql_type": "text",
+              "nullable": false,
+              "scan": "Direct"
+            },
+            "operations": [
+              "Read",
+              "Create",
+              "Update"
+            ]
+          },
+          {
+            "name": "PublishAt",
+            "wire": "publishAt",
+            "description": "When the post goes live, or null while it is a draft.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "*time.Time",
+            "modifiers": [
+              "Nullable"
+            ],
+            "column": {
+              "table": "blog_post",
+              "name": "publish_at",
+              "sql_type": "timestamptz",
+              "nullable": true,
+              "scan": "Timestamptz"
+            },
+            "operations": [
+              "Read",
+              "Create",
+              "Update"
+            ]
+          }
+        ],
+        "endpoints": [
+          {
+            "name": "List",
+            "summary": "List BlogPosts.",
+            "method": "GET",
+            "path": "",
+            "pattern": "GET /api/v1/blog-posts",
+            "operation_id": "listBlogPosts",
+            "permission": "blog_post.read",
+            "request": {
+              "query_params": [
+                {
+                  "name": "Limit",
+                  "wire": "limit",
+                  "description": "Maximum rows to return.",
+                  "type": "Int",
+                  "type_kind": "Primitive",
+                  "go_type": "int",
+                  "default": "50"
+                },
+                {
+                  "name": "Offset",
+                  "wire": "offset",
+                  "description": "Rows to skip before the first returned row.",
+                  "type": "Int",
+                  "type_kind": "Primitive",
+                  "go_type": "int",
+                  "default": "0"
+                }
+              ]
+            },
+            "responses": [
+              {
+                "status_code": 200,
+                "description": "A page of BlogPosts.",
+                "content_types": [
+                  "application/json"
+                ],
+                "body_object": "BlogPostListResponse"
+              }
+            ],
+            "errors": [
+              400,
+              401,
+              403,
+              429,
+              500
+            ],
+            "impl": {
+              "kind": "Generated",
+              "repo_method": "List",
+              "service_method": "List",
+              "handler_name": "ListBlogPosts"
+            }
+          },
+          {
+            "name": "Create",
+            "summary": "Create a BlogPost.",
+            "method": "POST",
+            "path": "",
+            "pattern": "POST /api/v1/blog-posts",
+            "operation_id": "createBlogPost",
+            "permission": "blog_post.write",
+            "request": {
+              "content_types": [
+                "application/json"
+              ],
+              "body_params": [
+                {
+                  "name": "Title",
+                  "wire": "title",
+                  "description": "What the post is called.",
+                  "type": "String",
+                  "type_kind": "Primitive",
+                  "go_type": "string",
+                  "column": {
+                    "table": "blog_post",
+                    "name": "title",
+                    "sql_type": "text",
+                    "nullable": false,
+                    "scan": "Direct"
+                  }
+                },
+                {
+                  "name": "PublishAt",
+                  "wire": "publishAt",
+                  "description": "When the post goes live, or null while it is a draft.",
+                  "type": "Timestamp",
+                  "type_kind": "Primitive",
+                  "go_type": "*time.Time",
+                  "modifiers": [
+                    "Nullable"
+                  ],
+                  "column": {
+                    "table": "blog_post",
+                    "name": "publish_at",
+                    "sql_type": "timestamptz",
+                    "nullable": true,
+                    "scan": "Timestamptz"
+                  }
+                }
+              ]
+            },
+            "responses": [
+              {
+                "status_code": 201,
+                "description": "The created BlogPost.",
+                "content_types": [
+                  "application/json"
+                ],
+                "body_object": "BlogPost"
+              }
+            ],
+            "errors": [
+              400,
+              401,
+              403,
+              409,
+              422,
+              429,
+              500
+            ],
+            "impl": {
+              "kind": "Generated",
+              "repo_method": "Create",
+              "service_method": "Create",
+              "handler_name": "CreateBlogPost"
+            }
+          },
+          {
+            "name": "Search",
+            "summary": "Search BlogPosts with filters.",
+            "method": "QUERY",
+            "path": "",
+            "pattern": "QUERY /api/v1/blog-posts",
+            "alias_patterns": [
+              "POST /api/v1/blog-posts/_search"
+            ],
+            "operation_id": "searchBlogPosts",
+            "permission": "blog_post.read",
+            "request": {
+              "content_types": [
+                "application/json"
+              ],
+              "query_params": [
+                {
+                  "name": "Limit",
+                  "wire": "limit",
+                  "description": "Maximum rows to return.",
+                  "type": "Int",
+                  "type_kind": "Primitive",
+                  "go_type": "int",
+                  "default": "50"
+                },
+                {
+                  "name": "Offset",
+                  "wire": "offset",
+                  "description": "Rows to skip before the first returned row.",
+                  "type": "Int",
+                  "type_kind": "Primitive",
+                  "go_type": "int",
+                  "default": "0"
+                }
+              ],
+              "body_params": [
+                {
+                  "name": "Filter",
+                  "wire": "filter",
+                  "description": "Conditions rows must satisfy.",
+                  "type": "BlogPostFilter",
+                  "type_kind": "Object",
+                  "go_type": "BlogPostFilter"
+                }
+              ]
+            },
+            "responses": [
+              {
+                "status_code": 200,
+                "description": "A page of matching BlogPosts.",
+                "content_types": [
+                  "application/json"
+                ],
+                "body_object": "BlogPostListResponse"
+              }
+            ],
+            "errors": [
+              400,
+              401,
+              403,
+              422,
+              429,
+              500
+            ],
+            "impl": {
+              "kind": "Generated",
+              "repo_method": "List",
+              "service_method": "Search",
+              "handler_name": "SearchBlogPosts"
+            }
+          },
+          {
+            "name": "ListDeleted",
+            "summary": "List retired BlogPosts.",
+            "description": "A deletion stamps the row rather than removing it, so this is what was deleted and can still be brought back. Only rows inside the 30-day restore window appear: past it a row is gone as far as anyone is concerned, so it is not in the trash either.",
+            "method": "GET",
+            "path": "/_deleted",
+            "pattern": "GET /api/v1/blog-posts/_deleted",
+            "operation_id": "listDeletedBlogPosts",
+            "permission": "blog_post.read",
+            "request": {
+              "query_params": [
+                {
+                  "name": "Limit",
+                  "wire": "limit",
+                  "description": "Maximum rows to return.",
+                  "type": "Int",
+                  "type_kind": "Primitive",
+                  "go_type": "int",
+                  "default": "50"
+                },
+                {
+                  "name": "Offset",
+                  "wire": "offset",
+                  "description": "Rows to skip before the first returned row.",
+                  "type": "Int",
+                  "type_kind": "Primitive",
+                  "go_type": "int",
+                  "default": "0"
+                }
+              ]
+            },
+            "responses": [
+              {
+                "status_code": 200,
+                "description": "A page of retired BlogPosts.",
+                "content_types": [
+                  "application/json"
+                ],
+                "body_object": "BlogPostListResponse"
+              }
+            ],
+            "errors": [
+              400,
+              401,
+              403,
+              429,
+              500
+            ],
+            "impl": {
+              "kind": "Generated",
+              "repo_method": "ListDeleted",
+              "service_method": "ListDeleted",
+              "handler_name": "ListDeletedBlogPosts"
+            }
+          },
+          {
+            "name": "Delete",
+            "summary": "Delete a BlogPost.",
+            "description": "The row is retired by stamping a deletion time; it stops appearing in reads but can be restored within the retention window.",
+            "method": "DELETE",
+            "path": "/{id}",
+            "pattern": "DELETE /api/v1/blog-posts/{id}",
+            "operation_id": "deleteBlogPost",
+            "permission": "blog_post.delete",
+            "request": {
+              "path_params": [
+                {
+                  "name": "ID",
+                  "wire": "id",
+                  "description": "Identifier of the BlogPost.",
+                  "type": "UUID",
+                  "type_kind": "Primitive",
+                  "go_type": "uuid.UUID"
+                }
+              ]
+            },
+            "responses": [
+              {
+                "status_code": 204,
+                "description": "The BlogPost was deleted."
+              }
+            ],
+            "errors": [
+              400,
+              401,
+              403,
+              404,
+              409,
+              429,
+              500
+            ],
+            "impl": {
+              "kind": "Generated",
+              "repo_method": "Delete",
+              "service_method": "Delete",
+              "handler_name": "DeleteBlogPost"
+            }
+          },
+          {
+            "name": "Get",
+            "summary": "Fetch one BlogPost by identifier.",
+            "method": "GET",
+            "path": "/{id}",
+            "pattern": "GET /api/v1/blog-posts/{id}",
+            "operation_id": "getBlogPost",
+            "permission": "blog_post.read",
+            "request": {
+              "path_params": [
+                {
+                  "name": "ID",
+                  "wire": "id",
+                  "description": "Identifier of the BlogPost.",
+                  "type": "UUID",
+                  "type_kind": "Primitive",
+                  "go_type": "uuid.UUID"
+                }
+              ]
+            },
+            "responses": [
+              {
+                "status_code": 200,
+                "description": "The requested BlogPost.",
+                "content_types": [
+                  "application/json"
+                ],
+                "body_object": "BlogPost"
+              }
+            ],
+            "errors": [
+              400,
+              401,
+              403,
+              404,
+              429,
+              500
+            ],
+            "impl": {
+              "kind": "Generated",
+              "repo_method": "Get",
+              "service_method": "Get",
+              "handler_name": "GetBlogPost"
+            }
+          },
+          {
+            "name": "Update",
+            "summary": "Update a BlogPost.",
+            "description": "Only the fields present in the body are changed. A field set to null is cleared; a field left out is left alone.",
+            "method": "PATCH",
+            "path": "/{id}",
+            "pattern": "PATCH /api/v1/blog-posts/{id}",
+            "operation_id": "updateBlogPost",
+            "permission": "blog_post.write",
+            "request": {
+              "content_types": [
+                "application/json"
+              ],
+              "path_params": [
+                {
+                  "name": "ID",
+                  "wire": "id",
+                  "description": "Identifier of the BlogPost.",
+                  "type": "UUID",
+                  "type_kind": "Primitive",
+                  "go_type": "uuid.UUID"
+                }
+              ],
+              "body_params": [
+                {
+                  "name": "Title",
+                  "wire": "title",
+                  "description": "What the post is called.",
+                  "type": "String",
+                  "type_kind": "Primitive",
+                  "go_type": "string",
+                  "column": {
+                    "table": "blog_post",
+                    "name": "title",
+                    "sql_type": "text",
+                    "nullable": false,
+                    "scan": "Direct"
+                  }
+                },
+                {
+                  "name": "PublishAt",
+                  "wire": "publishAt",
+                  "description": "When the post goes live, or null while it is a draft.",
+                  "type": "Timestamp",
+                  "type_kind": "Primitive",
+                  "go_type": "*time.Time",
+                  "modifiers": [
+                    "Nullable"
+                  ],
+                  "column": {
+                    "table": "blog_post",
+                    "name": "publish_at",
+                    "sql_type": "timestamptz",
+                    "nullable": true,
+                    "scan": "Timestamptz"
+                  }
+                }
+              ]
+            },
+            "responses": [
+              {
+                "status_code": 200,
+                "description": "The updated BlogPost.",
+                "content_types": [
+                  "application/json"
+                ],
+                "body_object": "BlogPost"
+              }
+            ],
+            "errors": [
+              400,
+              401,
+              403,
+              404,
+              409,
+              422,
+              429,
+              500
+            ],
+            "impl": {
+              "kind": "Generated",
+              "repo_method": "Update",
+              "service_method": "Update",
+              "handler_name": "UpdateBlogPost"
+            }
+          },
+          {
+            "name": "Restore",
+            "summary": "Bring a retired BlogPost back.",
+            "description": "The deletion stamp is cleared and the row appears in reads again. It works for 30 days after the deletion; past that the row is no longer eligible and this answers 409.\n\nRestoring a row that was never deleted is not an error. It is already in the state the caller asked for, and answering otherwise would make a retry of a request whose response went missing look like a failure.\n\nThe request carries no fields. What to do when the world has moved on while the row was retired — a unique value taken by something created since — is the application's decision, and it is made in the restore hook: refuse, or change the row so that it fits.\n\nEvery rule then runs against whatever the hook settled on, not only the ones for fields it touched. The row was not live, so nothing about it has been checked against the world it is returning to.",
+            "method": "POST",
+            "path": "/{id}/_restore",
+            "pattern": "POST /api/v1/blog-posts/{id}/_restore",
+            "operation_id": "restoreBlogPost",
+            "permission": "blog_post.write",
+            "request": {
+              "path_params": [
+                {
+                  "name": "ID",
+                  "wire": "id",
+                  "description": "Identifier of the BlogPost.",
+                  "type": "UUID",
+                  "type_kind": "Primitive",
+                  "go_type": "uuid.UUID"
+                }
+              ]
+            },
+            "responses": [
+              {
+                "status_code": 200,
+                "description": "The restored BlogPost.",
+                "content_types": [
+                  "application/json"
+                ],
+                "body_object": "BlogPost"
+              }
+            ],
+            "errors": [
+              400,
+              401,
+              403,
+              404,
+              409,
+              422,
+              429,
+              500
+            ],
+            "impl": {
+              "kind": "Generated",
+              "repo_method": "Restore",
+              "service_method": "Restore",
+              "handler_name": "RestoreBlogPost"
+            }
+          }
+        ],
+        "notifiable": true,
+        "storage": {
+          "table": "blog_post",
+          "primary_key": [
+            "id"
+          ],
+          "tenant": {
+            "table": "blog_post",
+            "name": "tenant_id",
+            "sql_type": "uuid",
+            "nullable": false,
+            "scan": "UUID"
+          },
+          "audit": {
+            "created_at": {
+              "table": "blog_post",
+              "name": "created_at",
+              "sql_type": "timestamptz",
+              "nullable": false,
+              "scan": "Timestamptz"
+            },
+            "created_by": {
+              "table": "blog_post",
+              "name": "created_by_account_id",
+              "sql_type": "uuid",
+              "nullable": true,
+              "scan": "UUID"
+            },
+            "updated_at": {
+              "table": "blog_post",
+              "name": "updated_at",
+              "sql_type": "timestamptz",
+              "nullable": true,
+              "scan": "Timestamptz"
+            },
+            "deleted_at": {
+              "table": "blog_post",
+              "name": "deleted_at",
+              "sql_type": "timestamptz",
+              "nullable": true,
+              "scan": "Timestamptz"
+            }
+          },
+          "soft_delete": {
+            "column": {
+              "table": "blog_post",
+              "name": "deleted_at",
+              "sql_type": "timestamptz",
+              "nullable": true,
+              "scan": "Timestamptz"
+            },
+            "restore_window_days": 30
+          },
+          "default_order": [
+            {
+              "column": "created_at",
+              "desc": true
+            },
+            {
+              "column": "id"
+            }
+          ],
+          "relations": [
+            {
+              "name": "RigNotifications",
+              "kind": "ManyToMany",
+              "target": "RigNotification",
+              "foreign_table": "rig_notification",
+              "link_table": {
+                "table": "blog_post_notification",
+                "left_table": "blog_post",
+                "left_column": "blog_post_id",
+                "right_table": "rig_notification",
+                "right_column": "notification_id"
+              }
+            }
+          ],
+          "sortable": [
+            "id",
+            "tenant_id",
+            "created_at",
+            "created_by_account_id",
+            "updated_at",
+            "deleted_at",
+            "title",
+            "publish_at"
+          ],
+          "filterable": [
+            "id",
+            "tenant_id",
+            "created_at",
+            "created_by_account_id",
+            "updated_at",
+            "deleted_at",
+            "title",
+            "publish_at"
+          ]
+        }
+      },
+      {
+        "name": "RigAccount",
+        "plural": "RigAccounts",
+        "path_segment": "rig-accounts",
+        "description": "One person's membership of one tenant.",
+        "operations": [
+          "Create",
+          "Get",
+          "List",
+          "Search",
+          "Update",
+          "Delete"
+        ],
+        "fields": [
+          {
+            "name": "ID",
+            "wire": "id",
+            "description": "Unique identifier for this row.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "uuid.UUID",
+            "read_only": true,
+            "column": {
+              "table": "rig_account",
+              "name": "id",
+              "sql_type": "uuid",
+              "nullable": false,
+              "scan": "UUID"
+            },
+            "operations": [
+              "Read"
+            ]
+          },
+          {
+            "name": "TenantID",
+            "wire": "tenantId",
+            "description": "Tenant this row belongs to. Every query is scoped by it.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "uuid.UUID",
+            "read_only": true,
+            "column": {
+              "table": "rig_account",
+              "name": "tenant_id",
+              "sql_type": "uuid",
+              "nullable": false,
+              "scan": "UUID"
+            },
+            "operations": [
+              "Read"
+            ]
+          },
+          {
+            "name": "DisplayName",
+            "wire": "displayName",
+            "type": "String",
+            "type_kind": "Primitive",
+            "go_type": "string",
+            "column": {
+              "table": "rig_account",
+              "name": "display_name",
+              "sql_type": "text",
+              "nullable": false,
+              "scan": "Direct"
+            },
+            "operations": [
+              "Read",
+              "Create",
+              "Update"
+            ]
+          }
+        ],
+        "endpoints": [
+          {
+            "name": "List",
+            "summary": "List RigAccounts.",
+            "method": "GET",
+            "path": "",
+            "pattern": "GET /api/v1/rig-accounts",
+            "operation_id": "listRigAccounts",
+            "permission": "rig_account.read",
+            "request": {
+              "query_params": [
+                {
+                  "name": "Limit",
+                  "wire": "limit",
+                  "description": "Maximum rows to return.",
+                  "type": "Int",
+                  "type_kind": "Primitive",
+                  "go_type": "int",
+                  "default": "50"
+                },
+                {
+                  "name": "Offset",
+                  "wire": "offset",
+                  "description": "Rows to skip before the first returned row.",
+                  "type": "Int",
+                  "type_kind": "Primitive",
+                  "go_type": "int",
+                  "default": "0"
+                }
+              ]
+            },
+            "responses": [
+              {
+                "status_code": 200,
+                "description": "A page of RigAccounts.",
+                "content_types": [
+                  "application/json"
+                ],
+                "body_object": "RigAccountListResponse"
+              }
+            ],
+            "errors": [
+              400,
+              401,
+              403,
+              429,
+              500
+            ],
+            "impl": {
+              "kind": "Generated",
+              "repo_method": "List",
+              "service_method": "List",
+              "handler_name": "ListRigAccounts"
+            }
+          },
+          {
+            "name": "Create",
+            "summary": "Create a RigAccount.",
+            "method": "POST",
+            "path": "",
+            "pattern": "POST /api/v1/rig-accounts",
+            "operation_id": "createRigAccount",
+            "permission": "rig_account.write",
+            "request": {
+              "content_types": [
+                "application/json"
+              ],
+              "body_params": [
+                {
+                  "name": "DisplayName",
+                  "wire": "displayName",
+                  "type": "String",
+                  "type_kind": "Primitive",
+                  "go_type": "string",
+                  "column": {
+                    "table": "rig_account",
+                    "name": "display_name",
+                    "sql_type": "text",
+                    "nullable": false,
+                    "scan": "Direct"
+                  }
+                }
+              ]
+            },
+            "responses": [
+              {
+                "status_code": 201,
+                "description": "The created RigAccount.",
+                "content_types": [
+                  "application/json"
+                ],
+                "body_object": "RigAccount"
+              }
+            ],
+            "errors": [
+              400,
+              401,
+              403,
+              409,
+              422,
+              429,
+              500
+            ],
+            "impl": {
+              "kind": "Generated",
+              "repo_method": "Create",
+              "service_method": "Create",
+              "handler_name": "CreateRigAccount"
+            }
+          },
+          {
+            "name": "Search",
+            "summary": "Search RigAccounts with filters.",
+            "method": "QUERY",
+            "path": "",
+            "pattern": "QUERY /api/v1/rig-accounts",
+            "alias_patterns": [
+              "POST /api/v1/rig-accounts/_search"
+            ],
+            "operation_id": "searchRigAccounts",
+            "permission": "rig_account.read",
+            "request": {
+              "content_types": [
+                "application/json"
+              ],
+              "query_params": [
+                {
+                  "name": "Limit",
+                  "wire": "limit",
+                  "description": "Maximum rows to return.",
+                  "type": "Int",
+                  "type_kind": "Primitive",
+                  "go_type": "int",
+                  "default": "50"
+                },
+                {
+                  "name": "Offset",
+                  "wire": "offset",
+                  "description": "Rows to skip before the first returned row.",
+                  "type": "Int",
+                  "type_kind": "Primitive",
+                  "go_type": "int",
+                  "default": "0"
+                }
+              ],
+              "body_params": [
+                {
+                  "name": "Filter",
+                  "wire": "filter",
+                  "description": "Conditions rows must satisfy.",
+                  "type": "RigAccountFilter",
+                  "type_kind": "Object",
+                  "go_type": "RigAccountFilter"
+                }
+              ]
+            },
+            "responses": [
+              {
+                "status_code": 200,
+                "description": "A page of matching RigAccounts.",
+                "content_types": [
+                  "application/json"
+                ],
+                "body_object": "RigAccountListResponse"
+              }
+            ],
+            "errors": [
+              400,
+              401,
+              403,
+              422,
+              429,
+              500
+            ],
+            "impl": {
+              "kind": "Generated",
+              "repo_method": "List",
+              "service_method": "Search",
+              "handler_name": "SearchRigAccounts"
+            }
+          },
+          {
+            "name": "Delete",
+            "summary": "Delete a RigAccount.",
+            "method": "DELETE",
+            "path": "/{id}",
+            "pattern": "DELETE /api/v1/rig-accounts/{id}",
+            "operation_id": "deleteRigAccount",
+            "permission": "rig_account.delete",
+            "request": {
+              "path_params": [
+                {
+                  "name": "ID",
+                  "wire": "id",
+                  "description": "Identifier of the RigAccount.",
+                  "type": "UUID",
+                  "type_kind": "Primitive",
+                  "go_type": "uuid.UUID"
+                }
+              ]
+            },
+            "responses": [
+              {
+                "status_code": 204,
+                "description": "The RigAccount was deleted."
+              }
+            ],
+            "errors": [
+              400,
+              401,
+              403,
+              404,
+              409,
+              429,
+              500
+            ],
+            "impl": {
+              "kind": "Generated",
+              "repo_method": "Delete",
+              "service_method": "Delete",
+              "handler_name": "DeleteRigAccount"
+            }
+          },
+          {
+            "name": "Get",
+            "summary": "Fetch one RigAccount by identifier.",
+            "method": "GET",
+            "path": "/{id}",
+            "pattern": "GET /api/v1/rig-accounts/{id}",
+            "operation_id": "getRigAccount",
+            "permission": "rig_account.read",
+            "request": {
+              "path_params": [
+                {
+                  "name": "ID",
+                  "wire": "id",
+                  "description": "Identifier of the RigAccount.",
+                  "type": "UUID",
+                  "type_kind": "Primitive",
+                  "go_type": "uuid.UUID"
+                }
+              ]
+            },
+            "responses": [
+              {
+                "status_code": 200,
+                "description": "The requested RigAccount.",
+                "content_types": [
+                  "application/json"
+                ],
+                "body_object": "RigAccount"
+              }
+            ],
+            "errors": [
+              400,
+              401,
+              403,
+              404,
+              429,
+              500
+            ],
+            "impl": {
+              "kind": "Generated",
+              "repo_method": "Get",
+              "service_method": "Get",
+              "handler_name": "GetRigAccount"
+            }
+          },
+          {
+            "name": "Update",
+            "summary": "Update a RigAccount.",
+            "description": "Only the fields present in the body are changed. A field set to null is cleared; a field left out is left alone.",
+            "method": "PATCH",
+            "path": "/{id}",
+            "pattern": "PATCH /api/v1/rig-accounts/{id}",
+            "operation_id": "updateRigAccount",
+            "permission": "rig_account.write",
+            "request": {
+              "content_types": [
+                "application/json"
+              ],
+              "path_params": [
+                {
+                  "name": "ID",
+                  "wire": "id",
+                  "description": "Identifier of the RigAccount.",
+                  "type": "UUID",
+                  "type_kind": "Primitive",
+                  "go_type": "uuid.UUID"
+                }
+              ],
+              "body_params": [
+                {
+                  "name": "DisplayName",
+                  "wire": "displayName",
+                  "type": "String",
+                  "type_kind": "Primitive",
+                  "go_type": "string",
+                  "column": {
+                    "table": "rig_account",
+                    "name": "display_name",
+                    "sql_type": "text",
+                    "nullable": false,
+                    "scan": "Direct"
+                  }
+                }
+              ]
+            },
+            "responses": [
+              {
+                "status_code": 200,
+                "description": "The updated RigAccount.",
+                "content_types": [
+                  "application/json"
+                ],
+                "body_object": "RigAccount"
+              }
+            ],
+            "errors": [
+              400,
+              401,
+              403,
+              404,
+              409,
+              422,
+              429,
+              500
+            ],
+            "impl": {
+              "kind": "Generated",
+              "repo_method": "Update",
+              "service_method": "Update",
+              "handler_name": "UpdateRigAccount"
+            }
+          }
+        ],
+        "storage": {
+          "table": "rig_account",
+          "primary_key": [
+            "id"
+          ],
+          "tenant": {
+            "table": "rig_account",
+            "name": "tenant_id",
+            "sql_type": "uuid",
+            "nullable": false,
+            "scan": "UUID"
+          },
+          "default_order": [
+            {
+              "column": "id"
+            }
+          ],
+          "relations": [
+            {
+              "name": "AccountRigNotificationRecipients",
+              "kind": "HasMany",
+              "target": "RigNotificationRecipient",
+              "foreign_table": "rig_notification_recipient",
+              "foreign_column": "account_id"
+            }
+          ],
+          "sortable": [
+            "id",
+            "tenant_id",
+            "display_name"
+          ],
+          "filterable": [
+            "id",
+            "tenant_id",
+            "display_name"
+          ]
+        }
+      },
+      {
+        "name": "RigNotification",
+        "plural": "RigNotifications",
+        "path_segment": "rig-notifications",
+        "description": "Something worth telling somebody about, and when it is due.",
+        "unexposed": true,
+        "operations": null,
+        "fields": [
+          {
+            "name": "ID",
+            "wire": "id",
+            "description": "Unique identifier for this row.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "uuid.UUID",
+            "read_only": true,
+            "column": {
+              "table": "rig_notification",
+              "name": "id",
+              "sql_type": "uuid",
+              "nullable": false,
+              "scan": "UUID"
+            },
+            "operations": [
+              "Read"
+            ]
+          },
+          {
+            "name": "TenantID",
+            "wire": "tenantId",
+            "description": "Tenant this row belongs to. Every query is scoped by it.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "uuid.UUID",
+            "read_only": true,
+            "column": {
+              "table": "rig_notification",
+              "name": "tenant_id",
+              "sql_type": "uuid",
+              "nullable": false,
+              "scan": "UUID"
+            },
+            "operations": [
+              "Read"
+            ]
+          },
+          {
+            "name": "CreatedAt",
+            "wire": "createdAt",
+            "description": "When this row was created. Set automatically and never changes.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "time.Time",
+            "default": "now()",
+            "read_only": true,
+            "column": {
+              "table": "rig_notification",
+              "name": "created_at",
+              "sql_type": "timestamptz",
+              "nullable": false,
+              "scan": "Timestamptz"
+            },
+            "operations": [
+              "Read"
+            ]
+          },
+          {
+            "name": "UpdatedAt",
+            "wire": "updatedAt",
+            "description": "When this row was last updated. Set automatically on every update.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "*time.Time",
+            "modifiers": [
+              "Nullable"
+            ],
+            "read_only": true,
+            "column": {
+              "table": "rig_notification",
+              "name": "updated_at",
+              "sql_type": "timestamptz",
+              "nullable": true,
+              "scan": "Timestamptz"
+            },
+            "operations": [
+              "Read"
+            ]
+          },
+          {
+            "name": "Kind",
+            "wire": "kind",
+            "type": "String",
+            "type_kind": "Primitive",
+            "go_type": "string",
+            "column": {
+              "table": "rig_notification",
+              "name": "kind",
+              "sql_type": "text",
+              "nullable": false,
+              "scan": "Direct"
+            },
+            "operations": [
+              "Read",
+              "Create",
+              "Update"
+            ]
+          },
+          {
+            "name": "DeliverAt",
+            "wire": "deliverAt",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "time.Time",
+            "default": "now()",
+            "column": {
+              "table": "rig_notification",
+              "name": "deliver_at",
+              "sql_type": "timestamptz",
+              "nullable": false,
+              "scan": "Timestamptz"
+            },
+            "operations": [
+              "Read",
+              "Create",
+              "Update"
+            ]
+          },
+          {
+            "name": "ResolvedAt",
+            "wire": "resolvedAt",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "*time.Time",
+            "modifiers": [
+              "Nullable"
+            ],
+            "column": {
+              "table": "rig_notification",
+              "name": "resolved_at",
+              "sql_type": "timestamptz",
+              "nullable": true,
+              "scan": "Timestamptz"
+            },
+            "operations": [
+              "Read",
+              "Create",
+              "Update"
+            ]
+          },
+          {
+            "name": "GroupKey",
+            "wire": "groupKey",
+            "type": "String",
+            "type_kind": "Primitive",
+            "go_type": "*string",
+            "modifiers": [
+              "Nullable"
+            ],
+            "column": {
+              "table": "rig_notification",
+              "name": "group_key",
+              "sql_type": "text",
+              "nullable": true,
+              "scan": "Direct"
+            },
+            "operations": [
+              "Read",
+              "Create",
+              "Update"
+            ]
+          }
+        ],
+        "endpoints": null,
+        "storage": {
+          "table": "rig_notification",
+          "primary_key": [
+            "id"
+          ],
+          "tenant": {
+            "table": "rig_notification",
+            "name": "tenant_id",
+            "sql_type": "uuid",
+            "nullable": false,
+            "scan": "UUID"
+          },
+          "audit": {
+            "created_at": {
+              "table": "rig_notification",
+              "name": "created_at",
+              "sql_type": "timestamptz",
+              "nullable": false,
+              "scan": "Timestamptz"
+            },
+            "updated_at": {
+              "table": "rig_notification",
+              "name": "updated_at",
+              "sql_type": "timestamptz",
+              "nullable": true,
+              "scan": "Timestamptz"
+            }
+          },
+          "default_order": [
+            {
+              "column": "created_at",
+              "desc": true
+            },
+            {
+              "column": "id"
+            }
+          ],
+          "relations": [
+            {
+              "name": "BlogPosts",
+              "kind": "ManyToMany",
+              "target": "BlogPost",
+              "foreign_table": "blog_post",
+              "link_table": {
+                "table": "blog_post_notification",
+                "left_table": "blog_post",
+                "left_column": "blog_post_id",
+                "right_table": "rig_notification",
+                "right_column": "notification_id"
+              }
+            },
+            {
+              "name": "NotificationRigNotificationRecipients",
+              "kind": "HasMany",
+              "target": "RigNotificationRecipient",
+              "foreign_table": "rig_notification_recipient",
+              "foreign_column": "notification_id"
+            }
+          ],
+          "sortable": [
+            "id",
+            "tenant_id",
+            "created_at",
+            "updated_at",
+            "kind",
+            "deliver_at",
+            "resolved_at",
+            "group_key"
+          ],
+          "filterable": [
+            "id",
+            "tenant_id",
+            "created_at",
+            "updated_at",
+            "kind",
+            "deliver_at",
+            "resolved_at",
+            "group_key"
+          ]
+        }
+      },
+      {
+        "name": "RigNotificationRecipient",
+        "plural": "RigNotificationRecipients",
+        "path_segment": "rig-notification-recipients",
+        "description": "One inbox line: a notification, an account, and whether it has been read.",
+        "unexposed": true,
+        "operations": null,
+        "fields": [
+          {
+            "name": "ID",
+            "wire": "id",
+            "description": "Unique identifier for this row.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "uuid.UUID",
+            "read_only": true,
+            "column": {
+              "table": "rig_notification_recipient",
+              "name": "id",
+              "sql_type": "uuid",
+              "nullable": false,
+              "scan": "UUID"
+            },
+            "operations": [
+              "Read"
+            ]
+          },
+          {
+            "name": "TenantID",
+            "wire": "tenantId",
+            "description": "Tenant this row belongs to. Every query is scoped by it.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "uuid.UUID",
+            "read_only": true,
+            "column": {
+              "table": "rig_notification_recipient",
+              "name": "tenant_id",
+              "sql_type": "uuid",
+              "nullable": false,
+              "scan": "UUID"
+            },
+            "operations": [
+              "Read"
+            ]
+          },
+          {
+            "name": "NotificationID",
+            "wire": "notificationId",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "uuid.UUID",
+            "column": {
+              "table": "rig_notification_recipient",
+              "name": "notification_id",
+              "sql_type": "uuid",
+              "nullable": false,
+              "scan": "UUID"
+            },
+            "operations": [
+              "Read",
+              "Create",
+              "Update"
+            ]
+          },
+          {
+            "name": "AccountID",
+            "wire": "accountId",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "uuid.UUID",
+            "column": {
+              "table": "rig_notification_recipient",
+              "name": "account_id",
+              "sql_type": "uuid",
+              "nullable": false,
+              "scan": "UUID"
+            },
+            "operations": [
+              "Read",
+              "Create",
+              "Update"
+            ]
+          },
+          {
+            "name": "CreatedAt",
+            "wire": "createdAt",
+            "description": "When this row was created. Set automatically and never changes.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "time.Time",
+            "default": "now()",
+            "read_only": true,
+            "column": {
+              "table": "rig_notification_recipient",
+              "name": "created_at",
+              "sql_type": "timestamptz",
+              "nullable": false,
+              "scan": "Timestamptz"
+            },
+            "operations": [
+              "Read"
+            ]
+          },
+          {
+            "name": "UpdatedAt",
+            "wire": "updatedAt",
+            "description": "When this row was last updated. Set automatically on every update.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "*time.Time",
+            "modifiers": [
+              "Nullable"
+            ],
+            "read_only": true,
+            "column": {
+              "table": "rig_notification_recipient",
+              "name": "updated_at",
+              "sql_type": "timestamptz",
+              "nullable": true,
+              "scan": "Timestamptz"
+            },
+            "operations": [
+              "Read"
+            ]
+          },
+          {
+            "name": "DeletedAt",
+            "wire": "deletedAt",
+            "description": "When this row was soft-deleted. Null while the row is live.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "*time.Time",
+            "modifiers": [
+              "Nullable"
+            ],
+            "read_only": true,
+            "column": {
+              "table": "rig_notification_recipient",
+              "name": "deleted_at",
+              "sql_type": "timestamptz",
+              "nullable": true,
+              "scan": "Timestamptz"
+            },
+            "operations": [
+              "Read"
+            ]
+          },
+          {
+            "name": "DeletedByAccountID",
+            "wire": "deletedByAccountId",
+            "description": "Account that soft-deleted this row, taken from the request's claims.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "*uuid.UUID",
+            "modifiers": [
+              "Nullable"
+            ],
+            "read_only": true,
+            "column": {
+              "table": "rig_notification_recipient",
+              "name": "deleted_by_account_id",
+              "sql_type": "uuid",
+              "nullable": true,
+              "scan": "UUID"
+            },
+            "operations": [
+              "Read"
+            ]
+          },
+          {
+            "name": "Kind",
+            "wire": "kind",
+            "type": "String",
+            "type_kind": "Primitive",
+            "go_type": "string",
+            "column": {
+              "table": "rig_notification_recipient",
+              "name": "kind",
+              "sql_type": "text",
+              "nullable": false,
+              "scan": "Direct"
+            },
+            "operations": [
+              "Read",
+              "Create",
+              "Update"
+            ]
+          },
+          {
+            "name": "GroupKey",
+            "wire": "groupKey",
+            "type": "String",
+            "type_kind": "Primitive",
+            "go_type": "*string",
+            "modifiers": [
+              "Nullable"
+            ],
+            "column": {
+              "table": "rig_notification_recipient",
+              "name": "group_key",
+              "sql_type": "text",
+              "nullable": true,
+              "scan": "Direct"
+            },
+            "operations": [
+              "Read",
+              "Create",
+              "Update"
+            ]
+          },
+          {
+            "name": "EventCount",
+            "wire": "eventCount",
+            "type": "Int",
+            "type_kind": "Primitive",
+            "go_type": "int",
+            "default": "1",
+            "column": {
+              "table": "rig_notification_recipient",
+              "name": "event_count",
+              "sql_type": "int4",
+              "nullable": false,
+              "scan": "Direct"
+            },
+            "operations": [
+              "Read",
+              "Create",
+              "Update"
+            ]
+          },
+          {
+            "name": "ReadAt",
+            "wire": "readAt",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "*time.Time",
+            "modifiers": [
+              "Nullable"
+            ],
+            "column": {
+              "table": "rig_notification_recipient",
+              "name": "read_at",
+              "sql_type": "timestamptz",
+              "nullable": true,
+              "scan": "Timestamptz"
+            },
+            "operations": [
+              "Read",
+              "Create",
+              "Update"
+            ]
+          }
+        ],
+        "endpoints": null,
+        "storage": {
+          "table": "rig_notification_recipient",
+          "primary_key": [
+            "id"
+          ],
+          "tenant": {
+            "table": "rig_notification_recipient",
+            "name": "tenant_id",
+            "sql_type": "uuid",
+            "nullable": false,
+            "scan": "UUID"
+          },
+          "owner": {
+            "table": "rig_notification_recipient",
+            "name": "account_id",
+            "sql_type": "uuid",
+            "nullable": false,
+            "scan": "UUID"
+          },
+          "audit": {
+            "created_at": {
+              "table": "rig_notification_recipient",
+              "name": "created_at",
+              "sql_type": "timestamptz",
+              "nullable": false,
+              "scan": "Timestamptz"
+            },
+            "updated_at": {
+              "table": "rig_notification_recipient",
+              "name": "updated_at",
+              "sql_type": "timestamptz",
+              "nullable": true,
+              "scan": "Timestamptz"
+            },
+            "deleted_at": {
+              "table": "rig_notification_recipient",
+              "name": "deleted_at",
+              "sql_type": "timestamptz",
+              "nullable": true,
+              "scan": "Timestamptz"
+            },
+            "deleted_by": {
+              "table": "rig_notification_recipient",
+              "name": "deleted_by_account_id",
+              "sql_type": "uuid",
+              "nullable": true,
+              "scan": "UUID"
+            }
+          },
+          "soft_delete": {
+            "column": {
+              "table": "rig_notification_recipient",
+              "name": "deleted_at",
+              "sql_type": "timestamptz",
+              "nullable": true,
+              "scan": "Timestamptz"
+            },
+            "actor": {
+              "table": "rig_notification_recipient",
+              "name": "deleted_by_account_id",
+              "sql_type": "uuid",
+              "nullable": true,
+              "scan": "UUID"
+            },
+            "restore_window_days": 0
+          },
+          "default_order": [
+            {
+              "column": "created_at",
+              "desc": true
+            },
+            {
+              "column": "id"
+            }
+          ],
+          "relations": [
+            {
+              "name": "Account",
+              "kind": "BelongsTo",
+              "target": "RigAccount",
+              "local_column": "account_id",
+              "foreign_table": "rig_account",
+              "foreign_column": "id"
+            },
+            {
+              "name": "Notification",
+              "kind": "BelongsTo",
+              "target": "RigNotification",
+              "local_column": "notification_id",
+              "foreign_table": "rig_notification",
+              "foreign_column": "id"
+            }
+          ],
+          "sortable": [
+            "id",
+            "tenant_id",
+            "notification_id",
+            "account_id",
+            "created_at",
+            "updated_at",
+            "deleted_at",
+            "deleted_by_account_id",
+            "kind",
+            "group_key",
+            "event_count",
+            "read_at"
+          ],
+          "filterable": [
+            "id",
+            "tenant_id",
+            "notification_id",
+            "account_id",
+            "created_at",
+            "updated_at",
+            "deleted_at",
+            "deleted_by_account_id",
+            "kind",
+            "group_key",
+            "event_count",
+            "read_at"
+          ]
+        },
+        "electric": {
+          "auth": "tenant",
+          "path": "/electric/rig_notification_recipient"
+        }
+      }
+    ],
+    "auth": {
+      "base_path": "/auth",
+      "tenant": {
+        "sources": [
+          "header"
+        ],
+        "header": "X-Tenant-Id"
+      },
+      "session": {
+        "access_ttl": "10m",
+        "refresh_ttl": "12h",
+        "remember_ttl": "30d",
+        "rotation_leeway": "30s",
+        "identity_ttl": "30m",
+        "cache_ttl": "0s"
+      },
+      "password": {
+        "min_length": 12,
+        "max_length": 1024,
+        "breach_check": false
+      },
+      "limits": {
+        "login_by_email": {
+          "max": 5,
+          "window": "15m"
+        },
+        "login_by_ip": {
+          "max": 50,
+          "window": "15m"
+        },
+        "password_reset": {
+          "max": 5,
+          "window": "1h"
+        },
+        "verification_resend": {
+          "max": 5,
+          "window": "1h"
+        },
+        "refresh": {
+          "max": 60,
+          "window": "1m"
+        },
+        "api_key_failures": {
+          "max": 20,
+          "window": "1m"
+        }
+      },
+      "allow_registration": false,
+      "allow_tenant_creation": false,
+      "require_verified_email": false
+    },
+    "notifications": {
+      "enabled": true,
+      "default_digest": "Immediate",
+      "claim_ttl_seconds": 300,
+      "max_attempts": 5,
+      "backoff_base_seconds": 60,
+      "retention_seconds": 7776000
+    },
+    "permissions": [
+      {
+        "key": "blog_post.delete",
+        "name": "Delete blogposts",
+        "description": "Delete blogposts — A post, which people are told about when it goes live.",
+        "resource": "BlogPost",
+        "action": "delete"
+      },
+      {
+        "key": "blog_post.read",
+        "name": "Read blogposts",
+        "description": "Read blogposts — A post, which people are told about when it goes live.",
+        "resource": "BlogPost",
+        "action": "read"
+      },
+      {
+        "key": "blog_post.write",
+        "name": "Write blogposts",
+        "description": "Create and change blogposts — A post, which people are told about when it goes live.",
+        "resource": "BlogPost",
+        "action": "write"
+      },
+      {
+        "key": "rig_account.delete",
+        "name": "Delete rigaccounts",
+        "description": "Delete rigaccounts — One person's membership of one tenant.",
+        "resource": "RigAccount",
+        "action": "delete"
+      },
+      {
+        "key": "rig_account.read",
+        "name": "Read rigaccounts",
+        "description": "Read rigaccounts — One person's membership of one tenant.",
+        "resource": "RigAccount",
+        "action": "read"
+      },
+      {
+        "key": "rig_account.write",
+        "name": "Write rigaccounts",
+        "description": "Create and change rigaccounts — One person's membership of one tenant.",
+        "resource": "RigAccount",
+        "action": "write"
+      }
+    ]
+  },
+  "schema": {
+    "name": "public",
+    "tables": [
+      {
+        "name": "blog_post",
+        "comment": "A post, which people are told about when it goes live.",
+        "kind": "Base",
+        "columns": [
+          {
+            "name": "id",
+            "comment": "Unique identifier for this row.",
+            "comment_source": "auto",
+            "sql_type": "uuid",
+            "udt_name": "uuid",
+            "nullable": false,
+            "ordinal": 1,
+            "is_primary_key": true
+          },
+          {
+            "name": "tenant_id",
+            "comment": "Tenant this row belongs to. Every query is scoped by it.",
+            "comment_source": "auto",
+            "sql_type": "uuid",
+            "udt_name": "uuid",
+            "nullable": false,
+            "ordinal": 2
+          },
+          {
+            "name": "created_at",
+            "comment": "When this row was created. Set automatically and never changes.",
+            "comment_source": "auto",
+            "sql_type": "timestamptz",
+            "udt_name": "timestamptz",
+            "nullable": false,
+            "has_default": true,
+            "default": "now()",
+            "ordinal": 3
+          },
+          {
+            "name": "created_by_account_id",
+            "comment": "Account that created this row, taken from the request's claims.",
+            "comment_source": "auto",
+            "sql_type": "uuid",
+            "udt_name": "uuid",
+            "nullable": true,
+            "ordinal": 4
+          },
+          {
+            "name": "updated_at",
+            "comment": "When this row was last updated. Set automatically on every update.",
+            "comment_source": "auto",
+            "sql_type": "timestamptz",
+            "udt_name": "timestamptz",
+            "nullable": true,
+            "ordinal": 5
+          },
+          {
+            "name": "deleted_at",
+            "comment": "When this row was soft-deleted. Null while the row is live.",
+            "comment_source": "auto",
+            "sql_type": "timestamptz",
+            "udt_name": "timestamptz",
+            "nullable": true,
+            "ordinal": 6
+          },
+          {
+            "name": "title",
+            "comment": "What the post is called.",
+            "comment_source": "config",
+            "sql_type": "text",
+            "udt_name": "text",
+            "nullable": false,
+            "ordinal": 7
+          },
+          {
+            "name": "publish_at",
+            "comment": "When the post goes live, or null while it is a draft.",
+            "comment_source": "config",
+            "sql_type": "timestamptz",
+            "udt_name": "timestamptz",
+            "nullable": true,
+            "ordinal": 8
+          }
+        ],
+        "primary_key": [
+          "id"
+        ],
+        "indexes": [
+          {
+            "name": "blog_post_pkey",
+            "columns": [
+              "id"
+            ],
+            "unique": true,
+            "method": "btree"
+          },
+          {
+            "name": "blog_post_tenant_id_key",
+            "columns": [
+              "tenant_id",
+              "id"
+            ],
+            "unique": true,
+            "method": "btree"
+          },
+          {
+            "name": "blog_post_tenant_idx",
+            "columns": [
+              "tenant_id",
+              "created_at"
+            ],
+            "method": "btree"
+          }
+        ]
+      },
+      {
+        "name": "blog_post_notification",
+        "comment": "What makes a post notifiable: the join, and nothing else.",
+        "kind": "Base",
+        "columns": [
+          {
+            "name": "tenant_id",
+            "comment": "Tenant this row belongs to. Every query is scoped by it.",
+            "comment_source": "auto",
+            "sql_type": "uuid",
+            "udt_name": "uuid",
+            "nullable": false,
+            "ordinal": 1
+          },
+          {
+            "name": "blog_post_id",
+            "comment_source": "none",
+            "sql_type": "uuid",
+            "udt_name": "uuid",
+            "nullable": false,
+            "ordinal": 2,
+            "is_primary_key": true,
+            "foreign_key": {
+              "table": "blog_post",
+              "column": "id"
+            }
+          },
+          {
+            "name": "notification_id",
+            "comment_source": "none",
+            "sql_type": "uuid",
+            "udt_name": "uuid",
+            "nullable": false,
+            "ordinal": 3,
+            "is_primary_key": true,
+            "foreign_key": {
+              "table": "rig_notification",
+              "column": "id"
+            }
+          }
+        ],
+        "primary_key": [
+          "blog_post_id",
+          "notification_id"
+        ],
+        "indexes": [
+          {
+            "name": "blog_post_notification_notification_idx",
+            "columns": [
+              "tenant_id",
+              "notification_id"
+            ],
+            "method": "btree"
+          },
+          {
+            "name": "blog_post_notification_pkey",
+            "columns": [
+              "blog_post_id",
+              "notification_id"
+            ],
+            "unique": true,
+            "method": "btree"
+          }
+        ],
+        "foreign_keys": [
+          {
+            "name": "blog_post_notification_notification_fkey",
+            "columns": [
+              "tenant_id",
+              "notification_id"
+            ],
+            "foreign_table": "rig_notification",
+            "foreign_columns": [
+              "tenant_id",
+              "id"
+            ]
+          },
+          {
+            "name": "blog_post_notification_post_fkey",
+            "columns": [
+              "tenant_id",
+              "blog_post_id"
+            ],
+            "foreign_table": "blog_post",
+            "foreign_columns": [
+              "tenant_id",
+              "id"
+            ]
+          }
+        ],
+        "link_table": {
+          "table": "blog_post_notification",
+          "left_table": "blog_post",
+          "left_column": "blog_post_id",
+          "right_table": "rig_notification",
+          "right_column": "notification_id"
+        }
+      },
+      {
+        "name": "rig_account",
+        "comment": "One person's membership of one tenant.",
+        "kind": "Base",
+        "columns": [
+          {
+            "name": "id",
+            "comment": "Unique identifier for this row.",
+            "comment_source": "auto",
+            "sql_type": "uuid",
+            "udt_name": "uuid",
+            "nullable": false,
+            "ordinal": 1,
+            "is_primary_key": true
+          },
+          {
+            "name": "tenant_id",
+            "comment": "Tenant this row belongs to. Every query is scoped by it.",
+            "comment_source": "auto",
+            "sql_type": "uuid",
+            "udt_name": "uuid",
+            "nullable": false,
+            "ordinal": 2
+          },
+          {
+            "name": "display_name",
+            "comment_source": "none",
+            "sql_type": "text",
+            "udt_name": "text",
+            "nullable": false,
+            "ordinal": 3
+          }
+        ],
+        "primary_key": [
+          "id"
+        ],
+        "indexes": [
+          {
+            "name": "rig_account_pkey",
+            "columns": [
+              "id"
+            ],
+            "unique": true,
+            "method": "btree"
+          },
+          {
+            "name": "rig_account_tenant_idx",
+            "columns": [
+              "tenant_id",
+              "id"
+            ],
+            "method": "btree"
+          }
+        ]
+      },
+      {
+        "name": "rig_notification",
+        "comment": "Something worth telling somebody about, and when it is due.",
+        "kind": "Base",
+        "columns": [
+          {
+            "name": "id",
+            "comment": "Unique identifier for this row.",
+            "comment_source": "auto",
+            "sql_type": "uuid",
+            "udt_name": "uuid",
+            "nullable": false,
+            "ordinal": 1,
+            "is_primary_key": true
+          },
+          {
+            "name": "tenant_id",
+            "comment": "Tenant this row belongs to. Every query is scoped by it.",
+            "comment_source": "auto",
+            "sql_type": "uuid",
+            "udt_name": "uuid",
+            "nullable": false,
+            "ordinal": 2
+          },
+          {
+            "name": "created_at",
+            "comment": "When this row was created. Set automatically and never changes.",
+            "comment_source": "auto",
+            "sql_type": "timestamptz",
+            "udt_name": "timestamptz",
+            "nullable": false,
+            "has_default": true,
+            "default": "now()",
+            "ordinal": 3
+          },
+          {
+            "name": "updated_at",
+            "comment": "When this row was last updated. Set automatically on every update.",
+            "comment_source": "auto",
+            "sql_type": "timestamptz",
+            "udt_name": "timestamptz",
+            "nullable": true,
+            "ordinal": 4
+          },
+          {
+            "name": "kind",
+            "comment_source": "none",
+            "sql_type": "text",
+            "udt_name": "text",
+            "nullable": false,
+            "ordinal": 5
+          },
+          {
+            "name": "deliver_at",
+            "comment_source": "none",
+            "sql_type": "timestamptz",
+            "udt_name": "timestamptz",
+            "nullable": false,
+            "has_default": true,
+            "default": "now()",
+            "ordinal": 6
+          },
+          {
+            "name": "resolved_at",
+            "comment_source": "none",
+            "sql_type": "timestamptz",
+            "udt_name": "timestamptz",
+            "nullable": true,
+            "ordinal": 7
+          },
+          {
+            "name": "group_key",
+            "comment_source": "none",
+            "sql_type": "text",
+            "udt_name": "text",
+            "nullable": true,
+            "ordinal": 8
+          }
+        ],
+        "primary_key": [
+          "id"
+        ],
+        "indexes": [
+          {
+            "name": "rig_notification_pkey",
+            "columns": [
+              "id"
+            ],
+            "unique": true,
+            "method": "btree"
+          },
+          {
+            "name": "rig_notification_tenant_id_key",
+            "columns": [
+              "tenant_id",
+              "id"
+            ],
+            "unique": true,
+            "method": "btree"
+          }
+        ]
+      },
+      {
+        "name": "rig_notification_recipient",
+        "comment": "One inbox line: a notification, an account, and whether it has been read.",
+        "kind": "Base",
+        "columns": [
+          {
+            "name": "id",
+            "comment": "Unique identifier for this row.",
+            "comment_source": "auto",
+            "sql_type": "uuid",
+            "udt_name": "uuid",
+            "nullable": false,
+            "ordinal": 1,
+            "is_primary_key": true
+          },
+          {
+            "name": "tenant_id",
+            "comment": "Tenant this row belongs to. Every query is scoped by it.",
+            "comment_source": "auto",
+            "sql_type": "uuid",
+            "udt_name": "uuid",
+            "nullable": false,
+            "ordinal": 2
+          },
+          {
+            "name": "notification_id",
+            "comment_source": "none",
+            "sql_type": "uuid",
+            "udt_name": "uuid",
+            "nullable": false,
+            "ordinal": 3,
+            "foreign_key": {
+              "table": "rig_notification",
+              "column": "id"
+            }
+          },
+          {
+            "name": "account_id",
+            "comment_source": "none",
+            "sql_type": "uuid",
+            "udt_name": "uuid",
+            "nullable": false,
+            "ordinal": 4,
+            "foreign_key": {
+              "table": "rig_account",
+              "column": "id"
+            }
+          },
+          {
+            "name": "created_at",
+            "comment": "When this row was created. Set automatically and never changes.",
+            "comment_source": "auto",
+            "sql_type": "timestamptz",
+            "udt_name": "timestamptz",
+            "nullable": false,
+            "has_default": true,
+            "default": "now()",
+            "ordinal": 5
+          },
+          {
+            "name": "updated_at",
+            "comment": "When this row was last updated. Set automatically on every update.",
+            "comment_source": "auto",
+            "sql_type": "timestamptz",
+            "udt_name": "timestamptz",
+            "nullable": true,
+            "ordinal": 6
+          },
+          {
+            "name": "deleted_at",
+            "comment": "When this row was soft-deleted. Null while the row is live.",
+            "comment_source": "auto",
+            "sql_type": "timestamptz",
+            "udt_name": "timestamptz",
+            "nullable": true,
+            "ordinal": 7
+          },
+          {
+            "name": "deleted_by_account_id",
+            "comment": "Account that soft-deleted this row, taken from the request's claims.",
+            "comment_source": "auto",
+            "sql_type": "uuid",
+            "udt_name": "uuid",
+            "nullable": true,
+            "ordinal": 8
+          },
+          {
+            "name": "kind",
+            "comment_source": "none",
+            "sql_type": "text",
+            "udt_name": "text",
+            "nullable": false,
+            "ordinal": 9
+          },
+          {
+            "name": "group_key",
+            "comment_source": "none",
+            "sql_type": "text",
+            "udt_name": "text",
+            "nullable": true,
+            "ordinal": 10
+          },
+          {
+            "name": "event_count",
+            "comment_source": "none",
+            "sql_type": "int4",
+            "udt_name": "int4",
+            "nullable": false,
+            "has_default": true,
+            "default": "1",
+            "ordinal": 11
+          },
+          {
+            "name": "read_at",
+            "comment_source": "none",
+            "sql_type": "timestamptz",
+            "udt_name": "timestamptz",
+            "nullable": true,
+            "ordinal": 12
+          }
+        ],
+        "primary_key": [
+          "id"
+        ],
+        "indexes": [
+          {
+            "name": "rig_notification_recipient_account_idx",
+            "columns": [
+              "account_id"
+            ],
+            "method": "btree"
+          },
+          {
+            "name": "rig_notification_recipient_inbox_idx",
+            "columns": [
+              "tenant_id",
+              "account_id",
+              "created_at"
+            ],
+            "method": "btree"
+          },
+          {
+            "name": "rig_notification_recipient_key",
+            "columns": [
+              "notification_id",
+              "account_id"
+            ],
+            "unique": true,
+            "method": "btree"
+          },
+          {
+            "name": "rig_notification_recipient_pkey",
+            "columns": [
+              "id"
+            ],
+            "unique": true,
+            "method": "btree"
+          }
+        ],
+        "foreign_keys": [
+          {
+            "name": "rig_notification_recipient_account_fkey",
+            "columns": [
+              "account_id"
+            ],
+            "foreign_table": "rig_account",
+            "foreign_columns": [
+              "id"
+            ]
+          },
+          {
+            "name": "rig_notification_recipient_notification_fkey",
+            "columns": [
+              "notification_id"
+            ],
+            "foreign_table": "rig_notification",
+            "foreign_columns": [
+              "id"
+            ]
+          }
+        ]
+      }
+    ],
+    "enums": []
+  },
+  "valid": true
+}

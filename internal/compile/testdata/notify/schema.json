@@ -1,0 +1,477 @@
+{
+  "name": "public",
+  "tables": [
+    {
+      "name": "rig_account",
+      "comment": "One person's membership of one tenant.",
+      "kind": "Base",
+      "columns": [
+        {
+          "name": "id",
+          "sql_type": "uuid",
+          "udt_name": "uuid",
+          "nullable": false,
+          "ordinal": 1,
+          "is_primary_key": true
+        },
+        {
+          "name": "tenant_id",
+          "sql_type": "uuid",
+          "udt_name": "uuid",
+          "nullable": false,
+          "ordinal": 2
+        },
+        {
+          "name": "display_name",
+          "sql_type": "text",
+          "udt_name": "text",
+          "nullable": false,
+          "ordinal": 3
+        }
+      ],
+      "primary_key": [
+        "id"
+      ],
+      "indexes": [
+        {
+          "name": "rig_account_pkey",
+          "columns": [
+            "id"
+          ],
+          "unique": true,
+          "method": "btree"
+        },
+        {
+          "name": "rig_account_tenant_idx",
+          "columns": [
+            "tenant_id",
+            "id"
+          ],
+          "method": "btree"
+        }
+      ]
+    },
+    {
+      "name": "rig_notification",
+      "comment": "Something worth telling somebody about, and when it is due.",
+      "kind": "Base",
+      "columns": [
+        {
+          "name": "id",
+          "sql_type": "uuid",
+          "udt_name": "uuid",
+          "nullable": false,
+          "ordinal": 1,
+          "is_primary_key": true
+        },
+        {
+          "name": "tenant_id",
+          "sql_type": "uuid",
+          "udt_name": "uuid",
+          "nullable": false,
+          "ordinal": 2
+        },
+        {
+          "name": "created_at",
+          "sql_type": "timestamptz",
+          "udt_name": "timestamptz",
+          "nullable": false,
+          "ordinal": 3,
+          "has_default": true,
+          "default": "now()"
+        },
+        {
+          "name": "updated_at",
+          "sql_type": "timestamptz",
+          "udt_name": "timestamptz",
+          "nullable": true,
+          "ordinal": 4
+        },
+        {
+          "name": "kind",
+          "sql_type": "text",
+          "udt_name": "text",
+          "nullable": false,
+          "ordinal": 5
+        },
+        {
+          "name": "deliver_at",
+          "sql_type": "timestamptz",
+          "udt_name": "timestamptz",
+          "nullable": false,
+          "ordinal": 6,
+          "has_default": true,
+          "default": "now()"
+        },
+        {
+          "name": "resolved_at",
+          "sql_type": "timestamptz",
+          "udt_name": "timestamptz",
+          "nullable": true,
+          "ordinal": 7
+        },
+        {
+          "name": "group_key",
+          "sql_type": "text",
+          "udt_name": "text",
+          "nullable": true,
+          "ordinal": 8
+        }
+      ],
+      "primary_key": [
+        "id"
+      ],
+      "indexes": [
+        {
+          "name": "rig_notification_pkey",
+          "columns": [
+            "id"
+          ],
+          "unique": true,
+          "method": "btree"
+        },
+        {
+          "name": "rig_notification_tenant_id_key",
+          "columns": [
+            "tenant_id",
+            "id"
+          ],
+          "unique": true,
+          "method": "btree"
+        }
+      ]
+    },
+    {
+      "name": "rig_notification_recipient",
+      "comment": "One inbox line: a notification, an account, and whether it has been read.",
+      "kind": "Base",
+      "columns": [
+        {
+          "name": "id",
+          "sql_type": "uuid",
+          "udt_name": "uuid",
+          "nullable": false,
+          "ordinal": 1,
+          "is_primary_key": true
+        },
+        {
+          "name": "tenant_id",
+          "sql_type": "uuid",
+          "udt_name": "uuid",
+          "nullable": false,
+          "ordinal": 2
+        },
+        {
+          "name": "notification_id",
+          "sql_type": "uuid",
+          "udt_name": "uuid",
+          "nullable": false,
+          "ordinal": 3
+        },
+        {
+          "name": "account_id",
+          "sql_type": "uuid",
+          "udt_name": "uuid",
+          "nullable": false,
+          "ordinal": 4
+        },
+        {
+          "name": "created_at",
+          "sql_type": "timestamptz",
+          "udt_name": "timestamptz",
+          "nullable": false,
+          "ordinal": 5,
+          "has_default": true,
+          "default": "now()"
+        },
+        {
+          "name": "updated_at",
+          "sql_type": "timestamptz",
+          "udt_name": "timestamptz",
+          "nullable": true,
+          "ordinal": 6
+        },
+        {
+          "name": "deleted_at",
+          "sql_type": "timestamptz",
+          "udt_name": "timestamptz",
+          "nullable": true,
+          "ordinal": 7
+        },
+        {
+          "name": "deleted_by_account_id",
+          "sql_type": "uuid",
+          "udt_name": "uuid",
+          "nullable": true,
+          "ordinal": 8
+        },
+        {
+          "name": "kind",
+          "sql_type": "text",
+          "udt_name": "text",
+          "nullable": false,
+          "ordinal": 9
+        },
+        {
+          "name": "group_key",
+          "sql_type": "text",
+          "udt_name": "text",
+          "nullable": true,
+          "ordinal": 10
+        },
+        {
+          "name": "event_count",
+          "sql_type": "int4",
+          "udt_name": "int4",
+          "nullable": false,
+          "ordinal": 11,
+          "has_default": true,
+          "default": "1"
+        },
+        {
+          "name": "read_at",
+          "sql_type": "timestamptz",
+          "udt_name": "timestamptz",
+          "nullable": true,
+          "ordinal": 12
+        }
+      ],
+      "primary_key": [
+        "id"
+      ],
+      "foreign_keys": [
+        {
+          "name": "rig_notification_recipient_notification_fkey",
+          "columns": [
+            "notification_id"
+          ],
+          "foreign_table": "rig_notification",
+          "foreign_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "rig_notification_recipient_account_fkey",
+          "columns": [
+            "account_id"
+          ],
+          "foreign_table": "rig_account",
+          "foreign_columns": [
+            "id"
+          ]
+        }
+      ],
+      "indexes": [
+        {
+          "name": "rig_notification_recipient_pkey",
+          "columns": [
+            "id"
+          ],
+          "unique": true,
+          "method": "btree"
+        },
+        {
+          "name": "rig_notification_recipient_inbox_idx",
+          "columns": [
+            "tenant_id",
+            "account_id",
+            "created_at"
+          ],
+          "method": "btree"
+        },
+        {
+          "name": "rig_notification_recipient_key",
+          "columns": [
+            "notification_id",
+            "account_id"
+          ],
+          "unique": true,
+          "method": "btree"
+        },
+        {
+          "name": "rig_notification_recipient_account_idx",
+          "columns": [
+            "account_id"
+          ],
+          "method": "btree"
+        }
+      ]
+    },
+    {
+      "name": "blog_post",
+      "comment": "A post, which people are told about when it goes live.",
+      "kind": "Base",
+      "columns": [
+        {
+          "name": "id",
+          "sql_type": "uuid",
+          "udt_name": "uuid",
+          "nullable": false,
+          "ordinal": 1,
+          "is_primary_key": true
+        },
+        {
+          "name": "tenant_id",
+          "sql_type": "uuid",
+          "udt_name": "uuid",
+          "nullable": false,
+          "ordinal": 2
+        },
+        {
+          "name": "created_at",
+          "sql_type": "timestamptz",
+          "udt_name": "timestamptz",
+          "nullable": false,
+          "ordinal": 3,
+          "has_default": true,
+          "default": "now()"
+        },
+        {
+          "name": "created_by_account_id",
+          "sql_type": "uuid",
+          "udt_name": "uuid",
+          "nullable": true,
+          "ordinal": 4
+        },
+        {
+          "name": "updated_at",
+          "sql_type": "timestamptz",
+          "udt_name": "timestamptz",
+          "nullable": true,
+          "ordinal": 5
+        },
+        {
+          "name": "deleted_at",
+          "sql_type": "timestamptz",
+          "udt_name": "timestamptz",
+          "nullable": true,
+          "ordinal": 6
+        },
+        {
+          "name": "title",
+          "sql_type": "text",
+          "udt_name": "text",
+          "nullable": false,
+          "ordinal": 7
+        },
+        {
+          "name": "publish_at",
+          "sql_type": "timestamptz",
+          "udt_name": "timestamptz",
+          "nullable": true,
+          "ordinal": 8
+        }
+      ],
+      "primary_key": [
+        "id"
+      ],
+      "indexes": [
+        {
+          "name": "blog_post_pkey",
+          "columns": [
+            "id"
+          ],
+          "unique": true,
+          "method": "btree"
+        },
+        {
+          "name": "blog_post_tenant_idx",
+          "columns": [
+            "tenant_id",
+            "created_at"
+          ],
+          "method": "btree"
+        },
+        {
+          "name": "blog_post_tenant_id_key",
+          "columns": [
+            "tenant_id",
+            "id"
+          ],
+          "unique": true,
+          "method": "btree"
+        }
+      ]
+    },
+    {
+      "name": "blog_post_notification",
+      "comment": "What makes a post notifiable: the join, and nothing else.",
+      "kind": "Base",
+      "columns": [
+        {
+          "name": "tenant_id",
+          "sql_type": "uuid",
+          "udt_name": "uuid",
+          "nullable": false,
+          "ordinal": 1
+        },
+        {
+          "name": "blog_post_id",
+          "sql_type": "uuid",
+          "udt_name": "uuid",
+          "nullable": false,
+          "ordinal": 2,
+          "is_primary_key": true
+        },
+        {
+          "name": "notification_id",
+          "sql_type": "uuid",
+          "udt_name": "uuid",
+          "nullable": false,
+          "ordinal": 3,
+          "is_primary_key": true
+        }
+      ],
+      "primary_key": [
+        "blog_post_id",
+        "notification_id"
+      ],
+      "foreign_keys": [
+        {
+          "name": "blog_post_notification_post_fkey",
+          "columns": [
+            "tenant_id",
+            "blog_post_id"
+          ],
+          "foreign_table": "blog_post",
+          "foreign_columns": [
+            "tenant_id",
+            "id"
+          ]
+        },
+        {
+          "name": "blog_post_notification_notification_fkey",
+          "columns": [
+            "tenant_id",
+            "notification_id"
+          ],
+          "foreign_table": "rig_notification",
+          "foreign_columns": [
+            "tenant_id",
+            "id"
+          ]
+        }
+      ],
+      "indexes": [
+        {
+          "name": "blog_post_notification_pkey",
+          "columns": [
+            "blog_post_id",
+            "notification_id"
+          ],
+          "unique": true,
+          "method": "btree"
+        },
+        {
+          "name": "blog_post_notification_notification_idx",
+          "columns": [
+            "tenant_id",
+            "notification_id"
+          ],
+          "method": "btree"
+        }
+      ]
+    }
+  ],
+  "enums": []
+}

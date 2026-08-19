@@ -1,0 +1,23 @@
+project:
+  name: demo
+  module: example.com/demo
+
+# A notification is addressed to an account, so the inbox needs the tenancy half
+# of the authentication foundation. That is the one dependency this block has.
+auth:
+  enabled: true
+
+# The inbox. `expose` is off, which is the ordinary case: the routes under
+# /notifications serve it, and rig's two tables keep their model and their
+# repository and get no endpoints.
+#
+# What this fixture is for is the trap in that arrangement — the tables have to
+# stay in the schema, or blog_post_notification silently stops being a link
+# table and blog_post silently stops being notifiable.
+notifications:
+  enabled: true
+  expose: false
+
+validate:
+  missing_comment: off
+  unmentioned_column: off

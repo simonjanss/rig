@@ -40,19 +40,18 @@ func (e *emitter) linkFunc(b *gobuf.Buf) {
 		return
 	}
 
-	var (
-		hookPkg = b.Import(runtimeModule + "/dbhook")
-		model   = e.model(b)
-	)
-
+	// Imported where the first entry needs them rather than up front: a project
+	// whose only child is its own notifications names neither type, and an
+	// import nothing uses does not compile.
 	for _, res := range parents {
 		b.L("if h.%s != nil {", res.Name)
 		b.L("var cs %sChildDeletes", res.Name)
+		e.notifyChild(b, res)
 		for _, c := range res.Children {
 			b.L("if h.%s != nil {", c.Child)
 			b.L("p := h.%s.ParentHooks()", c.Child)
 			b.L("cs = append(cs, %s.ChildDelete[%s.%sDeleteInput, %s.%s]{",
-				hookPkg, model, res.Name, model, res.Name)
+				b.Import(runtimeModule+"/dbhook"), e.model(b), res.Name, e.model(b), res.Name)
 			b.L("Child: %s,", gobuf.Quote(c.Table))
 			b.L("Deleting: p.%sDeleting,", c.Hook)
 			b.L("Deleted: p.%sDeleted,", c.Hook)
@@ -68,13 +67,38 @@ func (e *emitter) linkFunc(b *gobuf.Buf) {
 	b.NL()
 }
 
-// cascadeParents are the resources something else points at, in document order.
+// cascadeParents are the resources whose delete has to reach something: a table
+// that points at them, or their own notifications.
+//
+// The second is why this is not simply "resources with children". Notifications
+// about a row are a child of that row in every way that matters here — they
+// point at it, they have to be told, and the telling is inside the same
+// transaction — and treating them as one is what lets the propagation ride a
+// mechanism that already exists instead of being a second one beside it.
 func (e *emitter) cascadeParents() []*ir.Resource {
 	var out []*ir.Resource
 	for _, res := range e.resources() {
-		if len(res.Children) > 0 {
+		if len(res.Children) > 0 || (e.hasNotifications() && res.Notifiable) {
 			out = append(out, res)
 		}
 	}
 	return out
+}
+
+// notifyChild emits the notification entry, first in the list.
+//
+// First because it is rig's, and a project's own hook that refuses the delete
+// should refuse it after the bookkeeping rather than leaving the bookkeeping to
+// a rollback. Both orders are correct — everything is one transaction — and this
+// one puts rig's work where a reader expects it.
+func (e *emitter) notifyChild(b *gobuf.Buf, res *ir.Resource) {
+	if !e.hasNotifications() || !res.Notifiable || linkTableOf(res) == nil {
+		return
+	}
+	b.Comment("The row's own notifications, which are a child of it in every way " +
+		"that matters: they point at it, they have to be told, and the telling is " +
+		"inside the same transaction.")
+	b.L("if h.Notifications != nil {")
+	b.L("cs = append(cs, notify%sDeletes(h.Notifications))", res.Name)
+	b.L("}")
 }

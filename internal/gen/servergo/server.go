@@ -102,6 +102,14 @@ func (e *emitter) handlersStruct(b *gobuf.Buf) {
 	b.L("type Handlers struct {")
 	b.L("Server Server")
 	b.NL()
+	if e.hasNotifications() {
+		b.Comment("Notifications is this project's inbox. Setting it mounts the " +
+			"routes under /notifications and lets a delete of a notifiable row " +
+			"take its notifications with it — a nil one leaves both undone, which " +
+			"is why it is a field here rather than something reached for.")
+		b.L("Notifications *%s.Service", b.Import(notifyModule))
+		b.NL()
+	}
 	for _, res := range e.resources() {
 		b.L("%s %sService", res.Name, res.Name)
 	}
@@ -163,6 +171,21 @@ func (e *emitter) registerFunc(b *gobuf.Buf) {
 	for _, res := range e.resources() {
 		b.L("if h.%s != nil {", res.Name)
 		b.L("register%s(mux, h.Server, h.%s)", res.Name, res.Name)
+		b.L("}")
+	}
+
+	if e.hasNotifications() {
+		b.NL()
+		b.Comment("The inbox, on the same mux. Hand-written rather than " +
+			"generated, because the tables are rig's own and are the same in every " +
+			"project — there is nothing here for a generator to vary.")
+		b.L("if h.Notifications != nil {")
+		b.L("%s.New(h.Notifications, %s.Options{Fail: func(w %s.ResponseWriter, r *%s.Request, err error) {",
+			b.Import(notifyhttpModule), b.Import(notifyhttpModule), httpPkg, httpPkg)
+		b.Comment("The project's own error shape, so an inbox route's 404 looks " +
+			"like every other route's.")
+		b.L("fail(h.Server, w, r, RequestContext{}, err)")
+		b.L("}}).Mount(mux)")
 		b.L("}")
 	}
 

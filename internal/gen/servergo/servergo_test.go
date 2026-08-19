@@ -616,3 +616,90 @@ func TestFileHandlersCompile(t *testing.T) {
 		gentest.Package{Dir: "api", Artifacts: api},
 	)
 }
+
+// The inbox, end to end through the generators.
+//
+// The two halves are written by two generators into one package — service-go
+// writes the answers a notifiable table owes and the adapter that carries them,
+// server-go writes the engine, the links and the propagation — so nothing but a
+// compile proves they agree about the shapes.
+func TestNotificationWiringCompiles(t *testing.T) {
+	t.Parallel()
+
+	doc := gentest.LoadDocument(t, filepath.Join("testdata", "notify.ir.json"))
+
+	api := gentest.Run(t, servicego.New(), doc, gen.Options{Raw: map[string]any{
+		"package": "api", "model_import": "rigtest/model", "store_import": "rigtest/store",
+	}})
+	api = append(api, gentest.Run(t, servergo.New(), doc, opts())...)
+
+	gentest.MustCompileAll(t,
+		gentest.Package{
+			Dir: "model",
+			Artifacts: gentest.Run(t, modelgo.New(), doc,
+				gen.Options{Raw: map[string]any{"package": "model"}}),
+		},
+		gentest.Package{
+			Dir: "store",
+			Artifacts: gentest.Run(t, persistgo.New(), doc, gen.Options{Raw: map[string]any{
+				"package": "store", "model_import": "rigtest/model",
+			}}),
+		},
+		gentest.Package{Dir: "api", Artifacts: api},
+	)
+}
+
+// What a project with an inbox gets that a project without one does not — and
+// the second half matters as much: a table with no notifications must carry no
+// dispatcher, no routes and no import of either.
+func TestTheInboxIsWiredOnlyWhereItExists(t *testing.T) {
+	t.Parallel()
+
+	with := gentest.LoadDocument(t, filepath.Join("testdata", "notify.ir.json"))
+	server := find(t, gentest.Run(t, servergo.New(), with, opts()), "server.gen.go")
+
+	for _, want := range []string{
+		"Notifications *notify.Service",
+		"notifyhttp.New(h.Notifications,",
+		// The propagation rides the delete mechanism rather than being a second
+		// one beside it.
+		"cs = append(cs, notifyBlogPostDeletes(h.Notifications))",
+	} {
+		if !strings.Contains(collapse(server), collapse(want)) {
+			t.Errorf("a project with an inbox should carry %s", want)
+		}
+	}
+
+	wiring := find(t, gentest.Run(t, servergo.New(), with, opts()), "notifications.gen.go")
+	for _, want := range []string{
+		"func NewNotificationEngine(",
+		"func NotificationDispatcher(",
+		`{Table: "blog_post", LinkTable: "blog_post_notification", Column: "blog_post_id"},`,
+	} {
+		if !strings.Contains(collapse(wiring), collapse(want)) {
+			t.Errorf("the wiring should carry %s", want)
+		}
+	}
+
+	without := gentest.LoadDocument(t, filepath.Join("testdata", fixture))
+	for _, a := range gentest.Run(t, servergo.New(), without, opts()) {
+		if filepath.Base(a.Path) == "notifications.gen.go" {
+			t.Error("a project with no notifications block should get no inbox wiring")
+		}
+		if strings.Contains(string(a.Content), "rig/notify") {
+			t.Errorf("%s imports the notify module in a project that has no inbox", a.Path)
+		}
+	}
+}
+
+// The inbox's generated output, kept where it can be read. The wiring is small
+// and every line of it is a decision the milestone argued for; a golden is how
+// those stay reviewable rather than being re-derived from the emitter.
+func TestNotifyGolden(t *testing.T) {
+	t.Parallel()
+
+	doc := gentest.LoadDocument(t, filepath.Join("testdata", "notify.ir.json"))
+	artifacts := gentest.Run(t, servergo.New(), doc, opts())
+
+	gentest.Golden(t, filepath.Join("testdata", "notify"), artifacts, *update)
+}
