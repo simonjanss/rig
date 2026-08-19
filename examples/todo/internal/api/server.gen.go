@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/simonjanss/rig/files"
 	"github.com/simonjanss/rig/runtime/apirev"
 	"github.com/simonjanss/rig/runtime/rigerr"
 	"github.com/simonjanss/rig/runtime/tenancy"
@@ -97,7 +98,8 @@ type Server struct {
 type Handlers struct {
 	Server Server
 
-	Todo TodoService
+	Todo           TodoService
+	TodoAttachment TodoAttachmentService
 }
 
 // Register mounts every route and returns the mux.
@@ -132,6 +134,9 @@ func Register(h Handlers) *http.ServeMux {
 
 	if h.Todo != nil {
 		registerTodo(mux, h.Server, h.Todo)
+	}
+	if h.TodoAttachment != nil {
+		registerTodoAttachment(mux, h.Server, h.TodoAttachment)
 	}
 
 	// After the resources, so a pattern collision between the two is a panic
@@ -291,8 +296,17 @@ func writeJSON(w http.ResponseWriter, status int, body any) {
 // for something it will not get, and telling it so beats silently ignoring
 // half the request.
 func decodeBody(r *http.Request, into any) error {
-	body := io.LimitReader(r.Body, maxBodyBytes)
-	dec := json.NewDecoder(body)
+	return decodeReader(r.Body, into)
+}
+
+// decodeReader is the decode itself, separated from the request so that a body
+// arriving as one part of a form goes through exactly the same one.
+//
+// That sharing is the point rather than a tidiness: a multipart create and a
+// JSON create have to refuse the same keys and produce the same field errors,
+// and two decoders would eventually differ about one of them.
+func decodeReader(r io.Reader, into any) error {
+	dec := json.NewDecoder(io.LimitReader(r, maxBodyBytes))
 	dec.DisallowUnknownFields()
 
 	if err := dec.Decode(into); err != nil {
@@ -302,6 +316,16 @@ func decodeBody(r *http.Request, into any) error {
 		return rigerr.BadRequest("cannot read the request body: %v", err)
 	}
 	return nil
+}
+
+// hasPart reports whether a form carried the named file.
+func hasPart(pending []*files.Pending, name string) bool {
+	for _, p := range pending {
+		if p.Part == name {
+			return true
+		}
+	}
+	return false
 }
 
 func pathUUID(r *http.Request, name string) (uuid.UUID, error) {

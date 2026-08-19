@@ -10,25 +10,23 @@ import (
 	"github.com/google/uuid"
 )
 
-// One thing somebody means to do.
+// A file attached to a todo, with a caption and a place in the order.
 //
 // Every field the server returns, and no field it does not: this is the
 // readable projection of the row rather than the row.
-type Todo struct {
+type TodoAttachment struct {
 	// Unique identifier for this row.
 	ID uuid.UUID `json:"id"`
 	// Tenant this row belongs to. Every query is scoped by it.
 	TenantID uuid.UUID `json:"tenantId"`
-	// What needs doing, in a few words.
-	Title string `json:"title"`
-	// Anything worth remembering that does not fit in the title.
-	Notes *string `json:"notes,omitempty"`
-	// Whether the task has been completed.
-	IsDone bool `json:"isDone"`
-	// How urgently the task wants attention.
-	Priority TodoPriority `json:"priority"`
-	// When the task is due, or null if it never expires.
-	DueAt *time.Time `json:"dueAt,omitempty"`
+	// The todo this is attached to.
+	TodoID uuid.UUID `json:"todoId"`
+	// The file itself. Required: an attachment with no file is nothing.
+	AttachmentFileID uuid.UUID `json:"attachmentFileId"`
+	// What the attachment is, in a few words.
+	Caption *string `json:"caption,omitempty"`
+	// Where this sits in the todo's list of attachments.
+	Position int `json:"position"`
 	// When this row was created. Set automatically and never changes.
 	CreatedAt time.Time `json:"createdAt"`
 	// Account that created this row, taken from the request's claims.
@@ -41,22 +39,12 @@ type Todo struct {
 	DeletedAt *time.Time `json:"deletedAt,omitempty"`
 	// Account that soft-deleted this row, taken from the request's claims.
 	DeletedByAccountID *uuid.UUID `json:"deletedByAccountId,omitempty"`
-	// Whether this row is the live version or an immutable snapshot of a previous
-	// one.
-	VersionType TodoVersionType `json:"versionType"`
-	// The row this snapshot was copied from. Null on live rows.
-	SnapshotFromTodoID *uuid.UUID `json:"snapshotFromTodoId,omitempty"`
-	// The source row's last-updated time at the moment this snapshot was taken.
-	// This identifies the version captured, not when the copy was made.
-	SnapshotFromTodoAt *time.Time `json:"snapshotFromTodoAt,omitempty"`
-	// A picture for the todo, if it has one.
-	CoverFileID *uuid.UUID `json:"coverFileId,omitempty"`
 }
 
-// A page of Todos.
-type TodoListResponse struct {
+// A page of TodoAttachments.
+type TodoAttachmentListResponse struct {
 	// The rows in this page.
-	Data []Todo `json:"data,omitempty"`
+	Data []TodoAttachment `json:"data,omitempty"`
 	// Where this page sits in the full result set.
 	Pagination Pagination `json:"pagination"`
 }

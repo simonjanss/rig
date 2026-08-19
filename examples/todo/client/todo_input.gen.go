@@ -38,6 +38,8 @@ type TodoCreateInput struct {
 	Priority TodoPriority `json:"priority"`
 	// When the task is due, or null if it never expires.
 	DueAt *time.Time `json:"dueAt,omitempty"`
+	// A picture for the todo, if it has one.
+	CoverFileID *uuid.UUID `json:"coverFileId,omitempty"`
 }
 
 // TodoCreateFields is what a validation failure on a TodoCreateInput says,
@@ -47,11 +49,12 @@ type TodoCreateInput struct {
 // It is read out of a failed call with rigclient.FieldsAs[TodoCreateFields],
 // and a member is nil when there was nothing wrong with that field.
 type TodoCreateFields struct {
-	Title    *rigerr.FieldError `json:"title,omitempty"`
-	Notes    *rigerr.FieldError `json:"notes,omitempty"`
-	IsDone   *rigerr.FieldError `json:"isDone,omitempty"`
-	Priority *rigerr.FieldError `json:"priority,omitempty"`
-	DueAt    *rigerr.FieldError `json:"dueAt,omitempty"`
+	Title       *rigerr.FieldError `json:"title,omitempty"`
+	Notes       *rigerr.FieldError `json:"notes,omitempty"`
+	IsDone      *rigerr.FieldError `json:"isDone,omitempty"`
+	Priority    *rigerr.FieldError `json:"priority,omitempty"`
+	DueAt       *rigerr.FieldError `json:"dueAt,omitempty"`
+	CoverFileID *rigerr.FieldError `json:"coverFileId,omitempty"`
 	// Entity carries what was wrong with the request as a whole rather than with
 	// any one field.
 	Entity *rigerr.FieldError `json:"entity,omitempty"`
@@ -102,6 +105,8 @@ type TodoUpdateInput struct {
 	Priority patch.Optional[TodoPriority] `json:"priority,omitzero"`
 	// When the task is due, or null if it never expires.
 	DueAt patch.Nullable[time.Time] `json:"dueAt,omitzero"`
+	// A picture for the todo, if it has one.
+	CoverFileID patch.Nullable[uuid.UUID] `json:"coverFileId,omitzero"`
 }
 
 // TodoUpdateFields is what a validation failure on a TodoUpdateInput says,
@@ -111,11 +116,12 @@ type TodoUpdateInput struct {
 // It is read out of a failed call with rigclient.FieldsAs[TodoUpdateFields],
 // and a member is nil when there was nothing wrong with that field.
 type TodoUpdateFields struct {
-	Title    *rigerr.FieldError `json:"title,omitempty"`
-	Notes    *rigerr.FieldError `json:"notes,omitempty"`
-	IsDone   *rigerr.FieldError `json:"isDone,omitempty"`
-	Priority *rigerr.FieldError `json:"priority,omitempty"`
-	DueAt    *rigerr.FieldError `json:"dueAt,omitempty"`
+	Title       *rigerr.FieldError `json:"title,omitempty"`
+	Notes       *rigerr.FieldError `json:"notes,omitempty"`
+	IsDone      *rigerr.FieldError `json:"isDone,omitempty"`
+	Priority    *rigerr.FieldError `json:"priority,omitempty"`
+	DueAt       *rigerr.FieldError `json:"dueAt,omitempty"`
+	CoverFileID *rigerr.FieldError `json:"coverFileId,omitempty"`
 	// Entity carries what was wrong with the request as a whole rather than with
 	// any one field.
 	Entity *rigerr.FieldError `json:"entity,omitempty"`

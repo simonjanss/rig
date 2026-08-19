@@ -12,6 +12,7 @@
 //	go run . todo      # the whole lifecycle of a resource, no authentication
 //	go run . auth      # signing in, sessions, tenants and API keys
 //	go run . import    # a batch job: a CSV of todos, imported through the client
+//	go run . files     # uploading, downloading, and a create that carries its file
 //
 // Each needs the corresponding example running. From the repository root:
 //
@@ -55,6 +56,8 @@ func run() error {
 		return authDemo(ctx, os.Args[2:])
 	case "import":
 		return importDemo(ctx, os.Args[2:])
+	case "files":
+		return filesDemo(ctx, os.Args[2:])
 	case "-h", "--help", "help":
 		usage()
 		return nil
@@ -79,6 +82,11 @@ func usage() {
       Import a CSV of todos: a bounded worker pool, a retry that knows
       which failures are worth retrying, and a report naming the line
       of every row that did not go in.
+
+  go run . files [-base-url URL] [-tenant UUID]
+      Upload a file, read its url off the row, download it, ask for part
+      of it, create a row and its file in one request, and delete it —
+      against examples/todo.
 `)
 }
 

@@ -123,10 +123,12 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 		in.Priority = model.TodoPriority(p)
 	}
 
+	// No files: this form posts a title and a priority, and the second argument
+	// is what a multipart create would have carried.
 	_, err := h.svc.Create(h.ctx(r), api.Request[struct{}, struct{}, model.TodoCreateInput]{
 		Claims: h.claims,
 		Body:   in,
-	})
+	}, nil)
 	h.after(w, r, err, "Added.")
 }
 

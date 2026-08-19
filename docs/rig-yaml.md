@@ -361,3 +361,46 @@ generators:
 - [tables.md](tables.md) — the per-table file
 - [generators.md](generators.md) — what each generator's `options` accepts
 - [auth.md](auth.md) — the `auth:` block
+
+## `files`
+
+Uploads. Off by default, and what makes `server-go` write the wiring at all — a
+project without this block carries no blob store and no multipart reader.
+
+```yaml
+files:
+  enabled: true
+  backend: memory       # memory or s3
+  max_bytes: 5242880    # one upload, 25 MiB by default
+  abandoned_after: 24h  # how long a row with no bytes is left alone
+  restore_window: 720h  # how long a deleted file stays restorable
+  inline_types: [image/png, image/jpeg]
+  expose: false         # project rig_file as a read-only resource
+  cookie_downloads: false
+```
+
+The block does nothing on its own: a file appears when a table has a
+`<role>_file_id` column pointing at `rig_file`. See
+[schema.md](schema.md#files).
+
+`max_bytes` is a hard per-file cap and not a quota — rig does not do storage
+quotas, and saying so is better than implying one. `inline_types` is the short
+list served without an attachment disposition; everything else downloads,
+because a file served inline from the API origin runs there.
+
+`restore_window` is how long a deleted file stays restorable **and** how long its
+bytes are kept, which is why it lives here rather than in a table configuration:
+`rig_file` does not have one, and a second copy of this number could only
+disagree with the first. If the bucket has a lifecycle rule, that rule has to
+outlive this window, or a restore inside it hands back a row pointing at nothing.
+
+The two sweeper intervals are read by `<binary> sweep-files`, which is a
+subcommand rather than a goroutine so it is a cron job rather than something
+racing itself in every replica. It has two rules — abandoned uploads, and trash
+past the window — and no third: finding unreferenced files means enumerating
+every foreign key pointing at `rig_file`, and the failure mode of getting that
+wrong is deleting somebody's data.
+
+> **`backend: s3` has not shipped.** The adapter is a module of its own, and
+> `rig generate` refuses the setting rather than writing wiring that would keep
+> every upload in a map a restart empties.

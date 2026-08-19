@@ -45,6 +45,8 @@ type Client struct {
 
 	// One thing somebody means to do.
 	Todos *TodoClient
+	// A file attached to a todo, with a caption and a place in the order.
+	TodoAttachments *TodoAttachmentClient
 }
 
 // New builds a client.
@@ -63,6 +65,7 @@ func New(cfg rigclient.Config) (*Client, error) {
 
 	c := &Client{rt: rt}
 	c.Todos = &TodoClient{rt: rt}
+	c.TodoAttachments = &TodoAttachmentClient{rt: rt}
 	return c, nil
 }
 

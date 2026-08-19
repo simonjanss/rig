@@ -11,6 +11,7 @@ import (
 	"github.com/simonjanss/rig/examples/todo/internal/api"
 	"github.com/simonjanss/rig/examples/todo/internal/model"
 	"github.com/simonjanss/rig/examples/todo/internal/store"
+	"github.com/simonjanss/rig/files"
 	"github.com/simonjanss/rig/runtime/dbhook"
 	"github.com/simonjanss/rig/runtime/patch"
 	"github.com/simonjanss/rig/runtime/rigerr"
@@ -67,11 +68,13 @@ var _ api.TodoRules = (*rules)(nil)
 // The logger is the server's, so that what a rule or a hook says lands with
 // everything else the process writes. Nil falls back to the default, the way
 // serve.Config does, rather than panicking somewhere later.
-func New(repo store.TodoRepository, notifier Notifier, logger *slog.Logger) api.DefaultTodoService {
+// The file service is a parameter because todo has a cover_file_id, and a
+// table with a file column has endpoints that cannot answer without one.
+func New(repo store.TodoRepository, files *files.Service, notifier Notifier, logger *slog.Logger) api.DefaultTodoService {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return api.NewTodoService(repo, &rules{repo: repo, notifier: notifier, logger: logger})
+	return api.NewTodoService(repo, &rules{repo: repo, notifier: notifier, logger: logger}, files)
 }
 
 // Bind receives the writer built from the hooks below. rig calls it once,

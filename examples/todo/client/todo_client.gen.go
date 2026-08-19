@@ -19,6 +19,16 @@ import (
 // than built directly.
 type TodoClient struct{ rt *rigclient.Runtime }
 
+// TodoCreateFiles is the files a create carries with it.
+//
+// A not-null file column is unreachable without this: the row would have to
+// exist before an upload had anywhere to go. Such a column is a plain Upload
+// here and a nullable one is a pointer, so leaving out a file the schema
+// requires does not compile.
+type TodoCreateFiles struct {
+	CoverFile *rigclient.Upload
+}
+
 // List Todos.
 //
 // GET /api/v1/todos
@@ -227,6 +237,119 @@ func (c *TodoClient) Versions(ctx context.Context, id uuid.UUID, opts ...rigclie
 		Path:   strings.Replace("/todos/{id}/_versions", "{id}", rigclient.PathValue(id.String()), 1),
 	}
 	return rigclient.Do[TodoListResponse](ctx, c.rt, op, opts...)
+}
+
+// Remove a Todo's cover.
+//
+// The column is cleared and the file is retired. Its bytes outlive the delete
+// for as long as the file restore window, because a restore inside that window
+// has to hand back a row pointing at something.
+//
+// DELETE /api/v1/todos/{id}/cover-file
+//
+// Operation deleteTodoCoverFile.
+func (c *TodoClient) DeleteCoverFile(ctx context.Context, id uuid.UUID, opts ...rigclient.CallOption) error {
+	op := rigclient.Op{
+		Method: http.MethodDelete,
+		Path:   strings.Replace("/todos/{id}/cover-file", "{id}", rigclient.PathValue(id.String()), 1),
+	}
+	return rigclient.DoNoContent(ctx, c.rt, op, opts...)
+}
+
+// Attach a file to a Todo as its cover.
+//
+// The form carries one part, named coverFile. Nothing else in it is accepted.
+//
+// The type is sniffed from the bytes rather than taken from what the request
+// claimed, and the sniffed type is what is stored and what a download
+// announces. A file replacing an existing one does not delete it: a row that
+// keeps its previous versions still points at the old file from every one of
+// them.
+//
+// POST /api/v1/todos/{id}/cover-file
+//
+// Operation uploadTodoCoverFile.
+// The default client times the whole exchange out after thirty seconds, which
+// is right for a JSON call and wrong for anything moving a file — and a
+// context deadline cannot raise it, because http.Client.Timeout is a ceiling
+// rather than a default. Bound this call instead:
+//
+//	rigclient.WithTimeout(10 * time.Minute)
+//
+// Nothing is buffered: the form is written to a pipe as the request goes out,
+// so a file larger than memory is an ordinary upload. Two consequences follow.
+// The request is chunked, because the length of the form is not known when the
+// headers are written. And a body that cannot seek cannot be retried — if
+// the call comes back 401 and the credential is refreshed, the second send
+// needs the bytes again, and rather than buffering every upload against a
+// retry that almost never happens the SDK answers rigclient.ErrCannotRetry.
+func (c *TodoClient) UploadCoverFile(ctx context.Context, id uuid.UUID, file rigclient.Upload, opts ...rigclient.CallOption) (*RigFile, error) {
+	op := rigclient.Op{
+		Method:    http.MethodPost,
+		Path:      strings.Replace("/todos/{id}/cover-file", "{id}", rigclient.PathValue(id.String()), 1),
+		Multipart: &rigclient.Multipart{Files: []rigclient.Upload{rigclient.Part("coverFile", file)}},
+	}
+	return rigclient.Do[RigFile](ctx, c.rt, op, opts...)
+}
+
+// Fetch a Todo's cover.
+//
+// Answers range and conditional requests, so a resumed download does not start
+// over and a media element can seek.
+//
+// GET /api/v1/todos/{id}/cover-file/{fileId}/{filename}
+//
+// Operation downloadTodoCoverFile.
+// **Close the body.** Nothing reads ahead, which is what lets a file larger
+// than memory go straight to disk — and it means the connection is held
+// until you are done with it. It is the one thing this method cannot do for
+// you, which is why it is said here even though the document does not say it.
+//
+// ContentType is the type the server sniffed at upload, Length is the size or
+// -1, and Filename is the name from Content-Disposition. That last one is a
+// suggestion and not a path: if you write it to disk, you decide where and you
+// sanitize what.
+//
+// rigclient.WithRange and rigclient.WithIfNoneMatch get you a 206 and a 304,
+// both of which arrive as Content.Status rather than as an error — you asked
+// the question, so the answer is a result.
+func (c *TodoClient) DownloadCoverFile(ctx context.Context, id uuid.UUID, fileID uuid.UUID, filename string, opts ...rigclient.CallOption) (*rigclient.Content, error) {
+	op := rigclient.Op{
+		Method: http.MethodGet,
+		Path:   strings.Replace(strings.Replace(strings.Replace("/todos/{id}/cover-file/{fileId}/{filename}", "{id}", rigclient.PathValue(id.String()), 1), "{fileId}", rigclient.PathValue(fileID.String()), 1), "{filename}", rigclient.PathValue(string(filename)), 1),
+		// A download is whatever the file turned out to be, and the document cannot
+		// know that at generation time.
+		Accept: "*/*",
+	}
+	return rigclient.DoContent(ctx, c.rt, op, opts...)
+}
+
+// CreateWithFiles creates a Todo and its files in one request.
+//
+// The row and the bytes are committed together, so a create that fails leaves
+// neither. The JSON body travels as a part named "json", which is the same
+// body Create sends and goes through the same validation — a 422 comes back
+// with the same field errors.
+//
+// Bound the call: the default thirty-second client timeout covers the whole
+// exchange, and this one carries files.
+func (c *TodoClient) CreateWithFiles(ctx context.Context, in TodoCreateInput, files TodoCreateFiles, opts ...rigclient.CallOption) (*Todo, error) {
+	op := rigclient.Op{
+		Method: http.MethodPost,
+		Path:   "/todos",
+		Multipart: &rigclient.Multipart{
+			// The JSON goes first, and the transport writes it first, because the server
+			// reads the parts in order and wants the row before the bytes.
+			JSON:  in,
+			Files: []rigclient.Upload{},
+		},
+	}
+
+	if files.CoverFile != nil {
+		op.Multipart.Files = append(op.Multipart.Files, rigclient.Part("coverFile", *files.CoverFile))
+	}
+
+	return rigclient.Do[Todo](ctx, c.rt, op, opts...)
 }
 
 // All reads every Todo the query matches, a page at a time.

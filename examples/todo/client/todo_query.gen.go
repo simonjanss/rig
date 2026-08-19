@@ -41,6 +41,15 @@ type TodoFilter struct {
 	// Sub-filters combined with this one, so that AND and OR can be mixed to any
 	// depth.
 	NestedFilters []TodoFilter `json:"nestedFilters,omitempty"`
+	// Relations with no row matching the given conditions. An empty one asks for
+	// no related row at all.
+	//
+	// This is where a negation belongs when what you mean is "not": it negates
+	// whether a matching related row exists, so a row with no related row at all
+	// satisfies it. The negative operators above negate the comparison instead and
+	// still require the related row to be there — "no related row called X" is
+	// here, "a related row not called X" is NotEquals.
+	Without *TodoFilterWithout `json:"without,omitempty"`
 }
 
 // Set-membership conditions on Todo fields.
@@ -77,6 +86,17 @@ type TodoFilterContains struct {
 	// The source row's last-updated time at the moment this snapshot was taken.
 	// This identifies the version captured, not when the copy was made.
 	SnapshotFromTodoAt []time.Time `json:"snapshotFromTodoAt,omitempty"`
+	// A picture for the todo, if it has one.
+	CoverFileID []uuid.UUID `json:"coverFileId,omitempty"`
+	// Conditions on one of this row's TodoAttachments.
+	//
+	// Every condition has to hold of the same one, not of the set between them.
+	//
+	// Under the negative operators this asks whether one of them differs, which is
+	// not the same as none of them matching: a row can have one that matches and
+	// one that does not, satisfying the first and failing the second.
+	// Without.TodoAttachments asks the second.
+	TodoAttachments *TodoAttachmentFilterContains `json:"todoAttachments,omitempty"`
 }
 
 // Exact-match conditions on Todo fields.
@@ -113,6 +133,17 @@ type TodoFilterEquals struct {
 	// The source row's last-updated time at the moment this snapshot was taken.
 	// This identifies the version captured, not when the copy was made.
 	SnapshotFromTodoAt *time.Time `json:"snapshotFromTodoAt,omitempty"`
+	// A picture for the todo, if it has one.
+	CoverFileID *uuid.UUID `json:"coverFileId,omitempty"`
+	// Conditions on one of this row's TodoAttachments.
+	//
+	// Every condition has to hold of the same one, not of the set between them.
+	//
+	// Under the negative operators this asks whether one of them differs, which is
+	// not the same as none of them matching: a row can have one that matches and
+	// one that does not, satisfying the first and failing the second.
+	// Without.TodoAttachments asks the second.
+	TodoAttachments *TodoAttachmentFilterEquals `json:"todoAttachments,omitempty"`
 }
 
 // Pattern conditions on Todo text fields.
@@ -121,6 +152,15 @@ type TodoFilterLike struct {
 	Title *string `json:"title,omitempty"`
 	// Anything worth remembering that does not fit in the title.
 	Notes *string `json:"notes,omitempty"`
+	// Conditions on one of this row's TodoAttachments.
+	//
+	// Every condition has to hold of the same one, not of the set between them.
+	//
+	// Under the negative operators this asks whether one of them differs, which is
+	// not the same as none of them matching: a row can have one that matches and
+	// one that does not, satisfying the first and failing the second.
+	// Without.TodoAttachments asks the second.
+	TodoAttachments *TodoAttachmentFilterLike `json:"todoAttachments,omitempty"`
 }
 
 // Presence conditions on nullable Todo fields.
@@ -144,6 +184,17 @@ type TodoFilterNull struct {
 	// The source row's last-updated time at the moment this snapshot was taken.
 	// This identifies the version captured, not when the copy was made.
 	SnapshotFromTodoAt *bool `json:"snapshotFromTodoAt,omitempty"`
+	// A picture for the todo, if it has one.
+	CoverFileID *bool `json:"coverFileId,omitempty"`
+	// Conditions on one of this row's TodoAttachments.
+	//
+	// Every condition has to hold of the same one, not of the set between them.
+	//
+	// Under the negative operators this asks whether one of them differs, which is
+	// not the same as none of them matching: a row can have one that matches and
+	// one that does not, satisfying the first and failing the second.
+	// Without.TodoAttachments asks the second.
+	TodoAttachments *TodoAttachmentFilterNull `json:"todoAttachments,omitempty"`
 }
 
 // Ordering conditions on Todo fields that can be compared.
@@ -159,6 +210,28 @@ type TodoFilterRange struct {
 	// The source row's last-updated time at the moment this snapshot was taken.
 	// This identifies the version captured, not when the copy was made.
 	SnapshotFromTodoAt *time.Time `json:"snapshotFromTodoAt,omitempty"`
+	// Conditions on one of this row's TodoAttachments.
+	//
+	// Every condition has to hold of the same one, not of the set between them.
+	//
+	// Under the negative operators this asks whether one of them differs, which is
+	// not the same as none of them matching: a row can have one that matches and
+	// one that does not, satisfying the first and failing the second.
+	// Without.TodoAttachments asks the second.
+	TodoAttachments *TodoAttachmentFilterRange `json:"todoAttachments,omitempty"`
+}
+
+// Relations a Todo must have no matching row for.
+type TodoFilterWithout struct {
+	// Match rows with no TodoAttachments satisfying these conditions, including
+	// rows with none at all.
+	//
+	// This negates the existence of a matching row rather than the comparison,
+	// which is the whole difference from NotEquals.TodoAttachments: that one is
+	// satisfied by one of them differing, and a row can have one that differs and
+	// one that matches at the same time. An empty object asks for rows with no
+	// TodoAttachments at all.
+	TodoAttachments *TodoAttachmentFilter `json:"todoAttachments,omitempty"`
 }
 
 // NewTodoFilter builds an empty filter, which matches every row the caller is

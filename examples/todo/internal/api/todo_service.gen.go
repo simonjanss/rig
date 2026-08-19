@@ -6,10 +6,12 @@ package api
 
 import (
 	"context"
+	"net/url"
 
 	"github.com/google/uuid"
 	"github.com/simonjanss/rig/examples/todo/internal/model"
 	"github.com/simonjanss/rig/examples/todo/internal/store"
+	"github.com/simonjanss/rig/files"
 	"github.com/simonjanss/rig/runtime/dbhook"
 	"github.com/simonjanss/rig/runtime/rigerr"
 	"github.com/simonjanss/rig/runtime/tenancy"
@@ -25,7 +27,7 @@ type TodoService interface {
 	List(ctx context.Context, r Request[struct{}, TodoListQuery, struct{}]) (*TodoListResponse, error)
 
 	// Create a Todo.
-	Create(ctx context.Context, r Request[struct{}, struct{}, model.TodoCreateInput]) (*model.Todo, error)
+	Create(ctx context.Context, r Request[struct{}, struct{}, model.TodoCreateInput], pending []*files.Pending) (*model.Todo, error)
 
 	// Search Todos with filters.
 	Search(ctx context.Context, r Request[struct{}, TodoSearchQuery, TodoSearchBody]) (*TodoListResponse, error)
@@ -97,6 +99,38 @@ type TodoService interface {
 	// identifier, but it is filtered out of List and Search, so history does not
 	// turn up in a listing.
 	Versions(ctx context.Context, r Request[TodoVersionsPath, struct{}, struct{}]) (*TodoListResponse, error)
+
+	// Remove a Todo's cover.
+	//
+	// The column is cleared and the file is retired. Its bytes outlive the delete
+	// for as long as the file restore window, because a restore inside that window
+	// has to hand back a row pointing at something.
+	DeleteCoverFile(ctx context.Context, r Request[TodoDeleteCoverFilePath, struct{}, struct{}]) error
+
+	// Attach a file to a Todo as its cover.
+	//
+	// The form carries one part, named coverFile. Nothing else in it is accepted.
+	//
+	// The type is sniffed from the bytes rather than taken from what the request
+	// claimed, and the sniffed type is what is stored and what a download
+	// announces. A file replacing an existing one does not delete it: a row that
+	// keeps its previous versions still points at the old file from every one of
+	// them.
+	UploadCoverFile(ctx context.Context, r Request[TodoUploadCoverFilePath, struct{}, files.Upload]) (*RigFile, error)
+
+	// Fetch a Todo's cover.
+	//
+	// Answers range and conditional requests, so a resumed download does not start
+	// over and a media element can seek.
+	DownloadCoverFile(ctx context.Context, r Request[TodoDownloadCoverFilePath, struct{}, struct{}]) (*files.Content, error)
+
+	// Files is where this resource's uploads go.
+	//
+	// It is on the interface because the handler needs it too: the parts of a
+	// multipart create have to be stored as they arrive, and a part's body is only
+	// valid until the next one is asked for — so there is no point at which the
+	// whole form could be handed over at once.
+	Files() *files.Service
 }
 
 // TodoWriter writes a Todo with the service's rules attached.
@@ -154,6 +188,10 @@ type DefaultTodoService struct {
 	// write is the same writer a custom endpoint gets through Writer, so the
 	// generated operations and the hand-written ones take one path.
 	write TodoWriter
+	// files is where this resource's uploads go. It is a parameter of the
+	// constructor rather than something to set afterwards, because a table with a
+	// file column has endpoints that cannot answer without it.
+	files *files.Service
 }
 
 // TodoContract is what the service layer owes Todo: everything about it the
@@ -242,8 +280,8 @@ type TodoRules interface {
 // It asks the rules what they are, builds the writer from that, and hands the
 // writer back. The service layer never has to hold a half-built value or name
 // the type it is part of.
-func NewTodoService(repo store.TodoRepository, rules TodoRules) DefaultTodoService {
-	svc := NewDefaultTodoService(repo, TodoContract{Hooks: rules.Hooks(), Endpoints: rules})
+func NewTodoService(repo store.TodoRepository, rules TodoRules, files *files.Service) DefaultTodoService {
+	svc := NewDefaultTodoService(repo, TodoContract{Hooks: rules.Hooks(), Endpoints: rules}, files)
 	rules.Bind(svc.Writer())
 	return svc
 }
@@ -254,7 +292,7 @@ func NewTodoService(repo store.TodoRepository, rules TodoRules) DefaultTodoServi
 // rule nobody attached is a rule that does not run, and nothing at the call
 // site would have said so. An empty TodoContract is still allowed — it is
 // just a thing somebody wrote down.
-func NewDefaultTodoService(repo store.TodoRepository, contract TodoContract) DefaultTodoService {
+func NewDefaultTodoService(repo store.TodoRepository, contract TodoContract, files *files.Service) DefaultTodoService {
 	// A nil set is not a service with no custom endpoints; it is one whose custom
 	// endpoints all answer 500. Failing at startup beats finding that out from a
 	// caller.
@@ -262,7 +300,13 @@ func NewDefaultTodoService(repo store.TodoRepository, contract TodoContract) Def
 		panic("api.NewDefaultTodoService: Contract.Endpoints is required: todo declares custom endpoints")
 	}
 
-	return DefaultTodoService{repo: repo, contract: contract, write: NewTodoWriter(repo, contract.Hooks)}
+	// A nil file service is a resource whose upload routes all answer 500. Failing
+	// at startup beats finding that out from a caller.
+	if files == nil {
+		panic("api.NewDefaultTodoService: a file service is required: todo has a file column")
+	}
+
+	return DefaultTodoService{repo: repo, contract: contract, write: NewTodoWriter(repo, contract.Hooks), files: files}
 }
 
 // Writer is how a custom endpoint writes.
@@ -306,6 +350,24 @@ func (s DefaultTodoService) readRows(ctx context.Context, claims tenancy.Claims,
 	return s.contract.Hooks.Read.Rows(ctx, caller(claims), rows)
 }
 
+// Files is the file service this resource's uploads go through.
+//
+// It is on the service rather than reached for from the handler so that
+// nothing about a file is a reason to abandon the generated service and
+// hand-write a route.
+func (s DefaultTodoService) Files() *files.Service { return s.files }
+
+// todoCoverFileURL is where a Todo's cover file is served from.
+//
+// Stable and unsigned, so it is safe to store on the row and to sync: holding
+// it grants nothing, because the endpoint behind it still checks the caller.
+// Downloads flow through the API rather than through a signed storage URL for
+// exactly that reason, and the honest cost is bandwidth through the
+// application.
+func todoCoverFileURL(ownerID, fileID uuid.UUID, name string) string {
+	return "/api/v1/todos/" + ownerID.String() + "/cover-file/" + fileID.String() + "/" + url.PathEscape(name)
+}
+
 // List implements TodoService.
 func (s DefaultTodoService) List(ctx context.Context, r Request[struct{}, TodoListQuery, struct{}]) (*TodoListResponse, error) {
 	page := model.TodoPage{Limit: r.Query.Limit, Offset: r.Query.Offset}
@@ -330,8 +392,42 @@ func (s DefaultTodoService) List(ctx context.Context, r Request[struct{}, TodoLi
 }
 
 // Create implements TodoService.
-func (s DefaultTodoService) Create(ctx context.Context, r Request[struct{}, struct{}, model.TodoCreateInput]) (*model.Todo, error) {
-	return s.write.Create(ctx, r.Body)
+func (s DefaultTodoService) Create(ctx context.Context, r Request[struct{}, struct{}, model.TodoCreateInput], pending []*files.Pending) (*model.Todo, error) {
+	if len(pending) == 0 {
+		return s.write.Create(ctx, r.Body)
+	}
+
+	// Each prepared file's identifier goes on the column its part names, before
+	// the row is written: the file rows already exist, so the foreign key is
+	// satisfiable, and they are still invisible until the commit below finalizes
+	// them.
+	for _, p := range pending {
+		switch p.Part {
+		case "coverFile":
+			id := p.File.ID
+			r.Body.CoverFileID = &id
+		}
+	}
+
+	var out *model.Todo
+	err := s.files.Commit(ctx, pending, func(ctx context.Context) error {
+		row, err := s.write.Create(ctx, r.Body)
+		if err != nil {
+			return err
+		}
+		out = row
+		return nil
+	}, func(p *files.Pending) string {
+		switch p.Part {
+		case "coverFile":
+			return todoCoverFileURL(out.ID, p.File.ID, p.File.Name)
+		}
+		return ""
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 // Search implements TodoService.
@@ -443,4 +539,59 @@ func (s DefaultTodoService) Versions(ctx context.Context, r Request[TodoVersions
 		Data:       versions,
 		Pagination: Pagination{Limit: len(versions), Total: int64(len(versions))},
 	}, nil
+}
+
+// DeleteCoverFile implements TodoService.
+func (s DefaultTodoService) DeleteCoverFile(ctx context.Context, r Request[TodoDeleteCoverFilePath, struct{}, struct{}]) error {
+	row, err := s.repo.Get(ctx, r.Path.ID)
+	if err != nil {
+		return err
+	}
+
+	// Nothing there is the state the caller asked for. Answering otherwise would
+	// make a retry of a request whose response went missing look like a failure.
+	if row.CoverFileID == nil {
+		return nil
+	}
+
+	return s.files.Detach(ctx, r.Claims.TenantID, files.Owner{Table: "todo", IDColumn: "id", TenantColumn: "tenant_id", FileColumn: "cover_file_id", ID: row.ID}, *row.CoverFileID)
+}
+
+// UploadCoverFile implements TodoService.
+func (s DefaultTodoService) UploadCoverFile(ctx context.Context, r Request[TodoUploadCoverFilePath, struct{}, files.Upload]) (*RigFile, error) {
+	// The owning row first, through the repository, which is what makes this
+	// tenant-scoped and owner-scoped without a second rule: you cannot upload to a
+	// row you cannot read.
+	row, err := s.repo.Get(ctx, r.Path.ID)
+	if err != nil {
+		return nil, err
+	}
+
+	f, err := s.files.Attach(ctx, files.AttachRequest{
+		TenantID: r.Claims.TenantID,
+		Upload:   r.Body,
+		Owner:    files.Owner{Table: "todo", IDColumn: "id", TenantColumn: "tenant_id", FileColumn: "cover_file_id", ID: row.ID},
+		URL:      func(fileID uuid.UUID, name string) string { return todoCoverFileURL(row.ID, fileID, name) },
+	})
+	if err != nil {
+		return nil, err
+	}
+	return newRigFile(f), nil
+}
+
+// DownloadCoverFile implements TodoService.
+func (s DefaultTodoService) DownloadCoverFile(ctx context.Context, r Request[TodoDownloadCoverFilePath, struct{}, struct{}]) (*files.Content, error) {
+	row, err := s.repo.Get(ctx, r.Path.ID)
+	if err != nil {
+		return nil, err
+	}
+
+	// The identifier has to be this row's. Opening any file the tenant owns from
+	// under any row would make the nesting decorative, and the nesting is what the
+	// permission check hangs off.
+	if row.CoverFileID == nil || *row.CoverFileID != r.Path.FileID {
+		return nil, rigerr.NotFound("no such file")
+	}
+
+	return s.files.Open(ctx, r.Claims.TenantID, r.Path.FileID, r.Path.Filename)
 }

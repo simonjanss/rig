@@ -24,6 +24,8 @@ cd examples/todo && rig db up && go run .        # leave this running
 cd examples/sdk  && go run . todo
 cd examples/sdk  && go run . import
 
+cd examples/sdk  && go run . files
+
 # The authentication demonstration
 cd examples/auth && rig db up && go run .        # leave this running
 cd examples/sdk  && go run . auth
@@ -84,6 +86,22 @@ check-then-act and it races — the honest answer to two copies of the job start
 at once is a unique index, which is a schema decision and belongs in the
 migration. What it buys is the ordinary case: somebody re-running the import
 after fixing three rows.
+
+**`files`** — bytes, which is the one thing a JSON client cannot do by being
+careful. It uploads a cover, reads the stable url off the row, downloads it and
+checks the bytes came back unchanged, asks for a range the way a resumed download
+would, asks again with an etag and gets a 304, creates an attachment and its file
+in one request, and has a file past the cap refused rather than truncated.
+
+Four things in it are the argument for generating this half rather than leaving
+it to a caller:
+
+| | |
+|---|---|
+| The call is bounded, not the client | `http.Client.Timeout` covers the whole exchange and a context deadline cannot raise it, so `WithTimeout` bounds the one call that moves a file |
+| The body is the response | A download hands back the open reader, which is what lets a file larger than memory go straight to disk — and is why closing it is the caller's job |
+| A range is a call option | The document says nothing about ranges, so nothing generated mentions them |
+| A required file is a compile error | `CreateFiles` has a pointer where the column is nullable and a value where it is not |
 
 ## The parts worth stealing
 

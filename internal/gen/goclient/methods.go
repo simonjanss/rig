@@ -21,8 +21,18 @@ func (e *emitter) methodFile(res *ir.Resource) (gen.Artifact, error) {
 	b.L("type %sClient struct { rt *%s.Runtime }", res.Name, rig)
 	b.NL()
 
+	if len(res.Files) > 0 {
+		e.createFilesType(b, res, rig)
+	}
+
 	for i := range res.Endpoints {
 		e.method(b, res, &res.Endpoints[i], rig)
+	}
+
+	// Beside Create rather than instead of it, so no existing caller breaks the
+	// day somebody adds a file column to a table they already had.
+	if ep := res.Endpoint(ir.OpCreate); ep != nil && len(ep.Request.FileParts) > 0 {
+		e.createWithFilesMethod(b, res, ep, rig)
 	}
 
 	if ep := res.Endpoint(ir.OpList); ep != nil {
@@ -34,6 +44,9 @@ func (e *emitter) methodFile(res *ir.Resource) (gen.Artifact, error) {
 
 // method emits one endpoint.
 func (e *emitter) method(b *gobuf.Buf, res *ir.Resource, ep *ir.Endpoint, rig string) {
+	if e.fileMethod(b, res, ep, rig) {
+		return
+	}
 	sig := e.signature(b, res, ep, rig)
 
 	e.methodDoc(b, res, ep)

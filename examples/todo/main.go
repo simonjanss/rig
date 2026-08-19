@@ -19,11 +19,13 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/simonjanss/rig/examples/todo/internal/api"
 	"github.com/simonjanss/rig/examples/todo/internal/store"
 	"github.com/simonjanss/rig/examples/todo/notify"
 	"github.com/simonjanss/rig/examples/todo/services/todo"
+	todo_attachment "github.com/simonjanss/rig/examples/todo/services/todo_attachment"
 	"github.com/simonjanss/rig/examples/todo/web"
 	"github.com/simonjanss/rig/migrate"
 	"github.com/simonjanss/rig/runtime/rigerr"
@@ -69,8 +71,15 @@ func main() {
 
 		// `todo migrate` applies the schema and exits: a job before the
 		// rollout, so one process migrates and the replicas only serve.
+		// `todo sweep-files` is the file housekeeping: abandoned uploads, and
+		// trash past the restore window. A subcommand rather than a goroutine,
+		// so it is a cron job rather than something racing itself in every
+		// replica.
 		Tasks: map[string]serve.Task{
 			"migrate": migrate.Apply(migrations, migrate.Options{Log: os.Stdout}),
+			"sweep-files": func(ctx context.Context, pool *pgxpool.Pool) error {
+				return api.FileSweeper(api.NewFiles(pool))(ctx, pool)
+			},
 		},
 
 		// The server does not apply them. It refuses to start without them,
@@ -96,9 +105,19 @@ func main() {
 
 		repos := store.New(app.Pool, store.Config{})
 
+		// Where uploads go. The pool is the repositories' own, and that is not
+		// incidental: the transaction that finalizes a file and writes the row
+		// pointing at it has to be one transaction.
+		//
+		// Everything about it — the byte cap, the types served inline, how long
+		// an abandoned upload is left alone — came from the `files:` block in
+		// rig.yaml, so none of it is a number in this file.
+		fileSvc := api.NewFiles(app.Pool)
+
 		// One field per resource is the whole registration surface: adding a
 		// table and forgetting to wire it up does not compile.
-		svc := todo.New(repos.Todos, notifier, app.Logger)
+		svc := todo.New(repos.Todos, fileSvc, notifier, app.Logger)
+		attachments := todo_attachment.New(repos.TodoAttachments, fileSvc)
 
 		mux := api.Register(api.Handlers{
 			Server: api.Server{
@@ -114,7 +133,8 @@ func main() {
 					},
 				},
 			},
-			Todo: svc,
+			Todo:           svc,
+			TodoAttachment: attachments,
 		})
 
 		// A second caller of the same service, on the same mux. The UI renders

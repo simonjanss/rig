@@ -103,3 +103,26 @@ type TodoVersionsPath struct {
 	// Identifier of the Todo.
 	ID uuid.UUID `json:"id"`
 }
+
+// Path parameters for Todo.DeleteCoverFile.
+type TodoDeleteCoverFilePath struct {
+	// Identifier of the Todo.
+	ID uuid.UUID `json:"id"`
+}
+
+// Path parameters for Todo.UploadCoverFile.
+type TodoUploadCoverFilePath struct {
+	// Identifier of the Todo.
+	ID uuid.UUID `json:"id"`
+}
+
+// Path parameters for Todo.DownloadCoverFile.
+type TodoDownloadCoverFilePath struct {
+	// Identifier of the Todo.
+	ID uuid.UUID `json:"id"`
+	// Identifier of the file, from the row's cover field.
+	FileID uuid.UUID `json:"fileId"`
+	// The file's own name. It has to match the stored one, and it is what the
+	// browser offers to save the download as.
+	Filename string `json:"filename"`
+}

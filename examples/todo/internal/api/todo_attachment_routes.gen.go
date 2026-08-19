@@ -14,36 +14,32 @@ import (
 	"github.com/simonjanss/rig/files/filehttp"
 )
 
-// registerTodo mounts Todo's routes.
-func registerTodo(mux *http.ServeMux, s Server, svc TodoService) {
-	mux.HandleFunc("GET /api/v1/todos", handleListTodos(s, svc))
-	mux.HandleFunc("POST /api/v1/todos", handleCreateTodo(s, svc))
-	mux.HandleFunc("QUERY /api/v1/todos", handleSearchTodos(s, svc))
-	mux.HandleFunc("POST /api/v1/todos/_search", handleSearchTodos(s, svc))
-	mux.HandleFunc("GET /api/v1/todos/_deleted", handleListDeletedTodos(s, svc))
-	mux.HandleFunc("DELETE /api/v1/todos/{id}", handleDeleteTodo(s, svc))
-	mux.HandleFunc("GET /api/v1/todos/{id}", handleGetTodo(s, svc))
-	mux.HandleFunc("PATCH /api/v1/todos/{id}", handleUpdateTodo(s, svc))
-	mux.HandleFunc("POST /api/v1/todos/{id}/_complete", handleCompleteTodo(s, svc))
-	mux.HandleFunc("POST /api/v1/todos/{id}/_restore", handleRestoreTodo(s, svc))
-	mux.HandleFunc("POST /api/v1/todos/{id}/_revert", handleRevertTodo(s, svc))
-	mux.HandleFunc("GET /api/v1/todos/{id}/_versions", handleVersionsOfTodo(s, svc))
-	mux.HandleFunc("DELETE /api/v1/todos/{id}/cover-file", handleDeleteTodoCoverFile(s, svc))
-	mux.HandleFunc("POST /api/v1/todos/{id}/cover-file", handleUploadTodoCoverFile(s, svc))
-	mux.HandleFunc("GET /api/v1/todos/{id}/cover-file/{fileId}/{filename}", handleDownloadTodoCoverFile(s, svc))
+// registerTodoAttachment mounts TodoAttachment's routes.
+func registerTodoAttachment(mux *http.ServeMux, s Server, svc TodoAttachmentService) {
+	mux.HandleFunc("GET /api/v1/todo-attachments", handleListTodoAttachments(s, svc))
+	mux.HandleFunc("POST /api/v1/todo-attachments", handleCreateTodoAttachment(s, svc))
+	mux.HandleFunc("QUERY /api/v1/todo-attachments", handleSearchTodoAttachments(s, svc))
+	mux.HandleFunc("POST /api/v1/todo-attachments/_search", handleSearchTodoAttachments(s, svc))
+	mux.HandleFunc("GET /api/v1/todo-attachments/_deleted", handleListDeletedTodoAttachments(s, svc))
+	mux.HandleFunc("DELETE /api/v1/todo-attachments/{id}", handleDeleteTodoAttachment(s, svc))
+	mux.HandleFunc("GET /api/v1/todo-attachments/{id}", handleGetTodoAttachment(s, svc))
+	mux.HandleFunc("PATCH /api/v1/todo-attachments/{id}", handleUpdateTodoAttachment(s, svc))
+	mux.HandleFunc("POST /api/v1/todo-attachments/{id}/_restore", handleRestoreTodoAttachment(s, svc))
+	mux.HandleFunc("POST /api/v1/todo-attachments/{id}/attachment-file", handleUploadTodoAttachmentAttachmentFile(s, svc))
+	mux.HandleFunc("GET /api/v1/todo-attachments/{id}/attachment-file/{fileId}/{filename}", handleDownloadTodoAttachmentAttachmentFile(s, svc))
 }
 
-// handleListTodos serves GET /api/v1/todos.
+// handleListTodoAttachments serves GET /api/v1/todo-attachments.
 //
-// List Todos.
-func handleListTodos(s Server, svc TodoService) http.HandlerFunc {
+// List TodoAttachments.
+func handleListTodoAttachments(s Server, svc TodoAttachmentService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx, claims, rc, ok := prepare(s, w, r)
 		if !ok {
 			return
 		}
 
-		var query TodoListQuery
+		var query TodoAttachmentListQuery
 		limitParam, err := queryInt(r, "limit", 50)
 		if err != nil {
 			fail(s, w, r, rc, err)
@@ -68,17 +64,17 @@ func handleListTodos(s Server, svc TodoService) http.HandlerFunc {
 	}
 }
 
-// handleCreateTodo serves POST /api/v1/todos.
+// handleCreateTodoAttachment serves POST /api/v1/todo-attachments.
 //
-// Create a Todo.
-func handleCreateTodo(s Server, svc TodoService) http.HandlerFunc {
+// Create a TodoAttachment.
+func handleCreateTodoAttachment(s Server, svc TodoAttachmentService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx, claims, rc, ok := prepare(s, w, r)
 		if !ok {
 			return
 		}
 
-		var body model.TodoCreateInput
+		var body model.TodoAttachmentCreateInput
 		var pending []*files.Pending
 		if filehttp.IsMultipart(r) {
 			filehttp.Deadline(w, filehttp.DefaultDeadline)
@@ -107,7 +103,7 @@ func handleCreateTodo(s Server, svc TodoService) http.HandlerFunc {
 						fail(s, w, r, rc, err)
 						return
 					}
-				case "coverFile":
+				case "attachmentFile":
 					p, err := svc.Files().Prepare(ctx, part.Name, files.AttachRequest{
 						TenantID: claims.TenantID,
 						Upload:   part.Upload(),
@@ -126,6 +122,10 @@ func handleCreateTodo(s Server, svc TodoService) http.HandlerFunc {
 				}
 			}
 
+			if !hasPart(pending, "attachmentFile") {
+				fail(s, w, r, rc, filehttp.ErrMissingPart("attachmentFile"))
+				return
+			}
 		} else if err := decodeBody(r, &body); err != nil {
 			fail(s, w, r, rc, err)
 			return
@@ -142,17 +142,17 @@ func handleCreateTodo(s Server, svc TodoService) http.HandlerFunc {
 	}
 }
 
-// handleSearchTodos serves QUERY /api/v1/todos.
+// handleSearchTodoAttachments serves QUERY /api/v1/todo-attachments.
 //
-// Search Todos with filters.
-func handleSearchTodos(s Server, svc TodoService) http.HandlerFunc {
+// Search TodoAttachments with filters.
+func handleSearchTodoAttachments(s Server, svc TodoAttachmentService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx, claims, rc, ok := prepare(s, w, r)
 		if !ok {
 			return
 		}
 
-		var query TodoSearchQuery
+		var query TodoAttachmentSearchQuery
 		limitParam, err := queryInt(r, "limit", 50)
 		if err != nil {
 			fail(s, w, r, rc, err)
@@ -166,7 +166,7 @@ func handleSearchTodos(s Server, svc TodoService) http.HandlerFunc {
 		}
 		query.Offset = offsetParam
 
-		var body TodoSearchBody
+		var body TodoAttachmentSearchBody
 		if err := decodeBody(r, &body); err != nil {
 			fail(s, w, r, rc, err)
 			return
@@ -183,22 +183,23 @@ func handleSearchTodos(s Server, svc TodoService) http.HandlerFunc {
 	}
 }
 
-// handleListDeletedTodos serves GET /api/v1/todos/_deleted.
+// handleListDeletedTodoAttachments serves GET
+// /api/v1/todo-attachments/_deleted.
 //
-// List retired Todos.
+// List retired TodoAttachments.
 //
 // A deletion stamps the row rather than removing it, so this is what was
 // deleted and can still be brought back. Only rows inside the 30-day restore
 // window appear: past it a row is gone as far as anyone is concerned, so it is
 // not in the trash either.
-func handleListDeletedTodos(s Server, svc TodoService) http.HandlerFunc {
+func handleListDeletedTodoAttachments(s Server, svc TodoAttachmentService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx, claims, rc, ok := prepare(s, w, r)
 		if !ok {
 			return
 		}
 
-		var query TodoListDeletedQuery
+		var query TodoAttachmentListDeletedQuery
 		limitParam, err := queryInt(r, "limit", 50)
 		if err != nil {
 			fail(s, w, r, rc, err)
@@ -223,20 +224,20 @@ func handleListDeletedTodos(s Server, svc TodoService) http.HandlerFunc {
 	}
 }
 
-// handleDeleteTodo serves DELETE /api/v1/todos/{id}.
+// handleDeleteTodoAttachment serves DELETE /api/v1/todo-attachments/{id}.
 //
-// Delete a Todo.
+// Delete a TodoAttachment.
 //
 // The row is retired by stamping a deletion time; it stops appearing in reads
 // but can be restored within the retention window.
-func handleDeleteTodo(s Server, svc TodoService) http.HandlerFunc {
+func handleDeleteTodoAttachment(s Server, svc TodoAttachmentService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx, claims, rc, ok := prepare(s, w, r)
 		if !ok {
 			return
 		}
 
-		var path TodoDeletePath
+		var path TodoAttachmentDeletePath
 		idParam, err := pathUUID(r, "id")
 		if err != nil {
 			fail(s, w, r, rc, err)
@@ -254,17 +255,17 @@ func handleDeleteTodo(s Server, svc TodoService) http.HandlerFunc {
 	}
 }
 
-// handleGetTodo serves GET /api/v1/todos/{id}.
+// handleGetTodoAttachment serves GET /api/v1/todo-attachments/{id}.
 //
-// Fetch one Todo by identifier.
-func handleGetTodo(s Server, svc TodoService) http.HandlerFunc {
+// Fetch one TodoAttachment by identifier.
+func handleGetTodoAttachment(s Server, svc TodoAttachmentService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx, claims, rc, ok := prepare(s, w, r)
 		if !ok {
 			return
 		}
 
-		var path TodoGetPath
+		var path TodoAttachmentGetPath
 		idParam, err := pathUUID(r, "id")
 		if err != nil {
 			fail(s, w, r, rc, err)
@@ -283,20 +284,20 @@ func handleGetTodo(s Server, svc TodoService) http.HandlerFunc {
 	}
 }
 
-// handleUpdateTodo serves PATCH /api/v1/todos/{id}.
+// handleUpdateTodoAttachment serves PATCH /api/v1/todo-attachments/{id}.
 //
-// Update a Todo.
+// Update a TodoAttachment.
 //
 // Only the fields present in the body are changed. A field set to null is
 // cleared; a field left out is left alone.
-func handleUpdateTodo(s Server, svc TodoService) http.HandlerFunc {
+func handleUpdateTodoAttachment(s Server, svc TodoAttachmentService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx, claims, rc, ok := prepare(s, w, r)
 		if !ok {
 			return
 		}
 
-		var path TodoUpdatePath
+		var path TodoAttachmentUpdatePath
 		idParam, err := pathUUID(r, "id")
 		if err != nil {
 			fail(s, w, r, rc, err)
@@ -304,7 +305,7 @@ func handleUpdateTodo(s Server, svc TodoService) http.HandlerFunc {
 		}
 		path.ID = idParam
 
-		var body model.TodoUpdateInput
+		var body model.TodoAttachmentUpdateInput
 		if err := decodeBody(r, &body); err != nil {
 			fail(s, w, r, rc, err)
 			return
@@ -321,48 +322,10 @@ func handleUpdateTodo(s Server, svc TodoService) http.HandlerFunc {
 	}
 }
 
-// handleCompleteTodo serves POST /api/v1/todos/{id}/_complete.
+// handleRestoreTodoAttachment serves POST
+// /api/v1/todo-attachments/{id}/_restore.
 //
-// Mark the task as done.
-//
-// Completing a task that is already done is a conflict rather than a no-op:
-// two people ticking the same box should not both be told they were the one
-// who finished it.
-func handleCompleteTodo(s Server, svc TodoService) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		ctx, claims, rc, ok := prepare(s, w, r)
-		if !ok {
-			return
-		}
-
-		var path TodoCompletePath
-		idParam, err := pathUUID(r, "id")
-		if err != nil {
-			fail(s, w, r, rc, err)
-			return
-		}
-		path.ID = idParam
-
-		var body TodoCompleteBody
-		if err := decodeBody(r, &body); err != nil {
-			fail(s, w, r, rc, err)
-			return
-		}
-
-		req := NewRequest(claims, path, struct{}{}, body, rc)
-
-		out, err := svc.Complete(ctx, req)
-		if err != nil {
-			fail(s, w, r, rc, err)
-			return
-		}
-		writeJSON(w, http.StatusOK, out)
-	}
-}
-
-// handleRestoreTodo serves POST /api/v1/todos/{id}/_restore.
-//
-// Bring a retired Todo back.
+// Bring a retired TodoAttachment back.
 //
 // The deletion stamp is cleared and the row appears in reads again. It works
 // for 30 days after the deletion; past that the row is no longer eligible and
@@ -380,14 +343,14 @@ func handleCompleteTodo(s Server, svc TodoService) http.HandlerFunc {
 // Every rule then runs against whatever the hook settled on, not only the ones
 // for fields it touched. The row was not live, so nothing about it has been
 // checked against the world it is returning to.
-func handleRestoreTodo(s Server, svc TodoService) http.HandlerFunc {
+func handleRestoreTodoAttachment(s Server, svc TodoAttachmentService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx, claims, rc, ok := prepare(s, w, r)
 		if !ok {
 			return
 		}
 
-		var path TodoRestorePath
+		var path TodoAttachmentRestorePath
 		idParam, err := pathUUID(r, "id")
 		if err != nil {
 			fail(s, w, r, rc, err)
@@ -406,133 +369,27 @@ func handleRestoreTodo(s Server, svc TodoService) http.HandlerFunc {
 	}
 }
 
-// handleRevertTodo serves POST /api/v1/todos/{id}/_revert.
+// handleUploadTodoAttachmentAttachmentFile serves POST
+// /api/v1/todo-attachments/{id}/attachment-file.
 //
-// Put a Todo back to one of its previous versions.
+// Attach a file to a TodoAttachment as its attachment.
 //
-// The version is replayed through the ordinary update path rather than written
-// over the row, so the state being replaced is itself snapshotted first and
-// every rule an update runs still runs. Reverting is undoable, and a value
-// that would be refused now is still refused.
-func handleRevertTodo(s Server, svc TodoService) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		ctx, claims, rc, ok := prepare(s, w, r)
-		if !ok {
-			return
-		}
-
-		var path TodoRevertPath
-		idParam, err := pathUUID(r, "id")
-		if err != nil {
-			fail(s, w, r, rc, err)
-			return
-		}
-		path.ID = idParam
-
-		var body TodoRevertBody
-		if err := decodeBody(r, &body); err != nil {
-			fail(s, w, r, rc, err)
-			return
-		}
-
-		req := NewRequest(claims, path, struct{}{}, body, rc)
-
-		out, err := svc.Revert(ctx, req)
-		if err != nil {
-			fail(s, w, r, rc, err)
-			return
-		}
-		writeJSON(w, http.StatusOK, out)
-	}
-}
-
-// handleVersionsOfTodo serves GET /api/v1/todos/{id}/_versions.
-//
-// List a Todo's previous versions.
-//
-// Every update copies the row as it was before writing the change, so this is
-// the row's history: newest first, and never the live row itself.
-//
-// These do not appear in ordinary reads. A version answers Get by its own
-// identifier, but it is filtered out of List and Search, so history does not
-// turn up in a listing.
-func handleVersionsOfTodo(s Server, svc TodoService) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		ctx, claims, rc, ok := prepare(s, w, r)
-		if !ok {
-			return
-		}
-
-		var path TodoVersionsPath
-		idParam, err := pathUUID(r, "id")
-		if err != nil {
-			fail(s, w, r, rc, err)
-			return
-		}
-		path.ID = idParam
-
-		req := NewRequest(claims, path, struct{}{}, struct{}{}, rc)
-
-		out, err := svc.Versions(ctx, req)
-		if err != nil {
-			fail(s, w, r, rc, err)
-			return
-		}
-		writeJSON(w, http.StatusOK, out)
-	}
-}
-
-// handleDeleteTodoCoverFile serves DELETE /api/v1/todos/{id}/cover-file.
-//
-// Remove a Todo's cover.
-//
-// The column is cleared and the file is retired. Its bytes outlive the delete
-// for as long as the file restore window, because a restore inside that window
-// has to hand back a row pointing at something.
-func handleDeleteTodoCoverFile(s Server, svc TodoService) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		ctx, claims, rc, ok := prepare(s, w, r)
-		if !ok {
-			return
-		}
-
-		var path TodoDeleteCoverFilePath
-		idParam, err := pathUUID(r, "id")
-		if err != nil {
-			fail(s, w, r, rc, err)
-			return
-		}
-		path.ID = idParam
-
-		req := NewRequest(claims, path, struct{}{}, struct{}{}, rc)
-
-		if err := svc.DeleteCoverFile(ctx, req); err != nil {
-			fail(s, w, r, rc, err)
-			return
-		}
-		w.WriteHeader(http.StatusNoContent)
-	}
-}
-
-// handleUploadTodoCoverFile serves POST /api/v1/todos/{id}/cover-file.
-//
-// Attach a file to a Todo as its cover.
-//
-// The form carries one part, named coverFile. Nothing else in it is accepted.
+// The form carries one part, named attachmentFile. Nothing else in it is
+// accepted.
 //
 // The type is sniffed from the bytes rather than taken from what the request
 // claimed, and the sniffed type is what is stored and what a download
 // announces. A file replacing an existing one does not delete it: a row that
 // keeps its previous versions still points at the old file from every one of
 // them.
-func handleUploadTodoCoverFile(s Server, svc TodoService) http.HandlerFunc {
+func handleUploadTodoAttachmentAttachmentFile(s Server, svc TodoAttachmentService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx, claims, rc, ok := prepare(s, w, r)
 		if !ok {
 			return
 		}
 
-		var path TodoUploadCoverFilePath
+		var path TodoAttachmentUploadAttachmentFilePath
 		idParam, err := pathUUID(r, "id")
 		if err != nil {
 			fail(s, w, r, rc, err)
@@ -541,14 +398,14 @@ func handleUploadTodoCoverFile(s Server, svc TodoService) http.HandlerFunc {
 		path.ID = idParam
 
 		filehttp.Deadline(w, filehttp.DefaultDeadline)
-		body, err := filehttp.OnePart(r, "coverFile")
+		body, err := filehttp.OnePart(r, "attachmentFile")
 		if err != nil {
 			fail(s, w, r, rc, err)
 			return
 		}
 
 		req := NewRequest(claims, path, struct{}{}, body, rc)
-		out, err := svc.UploadCoverFile(ctx, req)
+		out, err := svc.UploadAttachmentFile(ctx, req)
 		if err != nil {
 			fail(s, w, r, rc, err)
 			return
@@ -557,21 +414,21 @@ func handleUploadTodoCoverFile(s Server, svc TodoService) http.HandlerFunc {
 	}
 }
 
-// handleDownloadTodoCoverFile serves GET
-// /api/v1/todos/{id}/cover-file/{fileId}/{filename}.
+// handleDownloadTodoAttachmentAttachmentFile serves GET
+// /api/v1/todo-attachments/{id}/attachment-file/{fileId}/{filename}.
 //
-// Fetch a Todo's cover.
+// Fetch a TodoAttachment's attachment.
 //
 // Answers range and conditional requests, so a resumed download does not start
 // over and a media element can seek.
-func handleDownloadTodoCoverFile(s Server, svc TodoService) http.HandlerFunc {
+func handleDownloadTodoAttachmentAttachmentFile(s Server, svc TodoAttachmentService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx, claims, rc, ok := prepare(s, w, r)
 		if !ok {
 			return
 		}
 
-		var path TodoDownloadCoverFilePath
+		var path TodoAttachmentDownloadAttachmentFilePath
 		idParam, err := pathUUID(r, "id")
 		if err != nil {
 			fail(s, w, r, rc, err)
@@ -594,7 +451,7 @@ func handleDownloadTodoCoverFile(s Server, svc TodoService) http.HandlerFunc {
 		filehttp.Deadline(w, filehttp.DefaultDeadline)
 		req := NewRequest(claims, path, struct{}{}, struct{}{}, rc)
 
-		content, err := svc.DownloadCoverFile(ctx, req)
+		content, err := svc.DownloadAttachmentFile(ctx, req)
 		if err != nil {
 			fail(s, w, r, rc, err)
 			return

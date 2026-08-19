@@ -324,3 +324,17 @@ func between(s, start, end string) (string, bool) {
 	}
 	return rest[:j], true
 }
+
+// TestFileMethodsCompile builds a client for a project with three file columns
+// in three shapes: one reached through a composite key, one nullable, one not.
+//
+// The upload and the download are the two the ordinary method shape cannot
+// express, and CreateWithFiles is the one whose whole point is that leaving out
+// a required file does not compile.
+func TestFileMethodsCompile(t *testing.T) {
+	t.Parallel()
+
+	doc := gentest.LoadDocument(t, filepath.Join("testdata", "files.ir.json"))
+
+	gentest.MustCompile(t, gentest.Run(t, goclient.New(), doc, opts()), "client")
+}

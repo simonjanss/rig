@@ -21,6 +21,21 @@ database:
   image: postgres:17-alpine
   port: 55440
 
+# Uploads. `enabled` is what makes server-go write the wiring at all, and a
+# project without this block carries no blob store and no multipart reader.
+#
+# The backend is memory because this example is a `go run .` and a throwaway
+# database: uploads do not survive a restart, which is exactly right here and
+# exactly wrong in production. `expose` is off, so rig_file stays managed and
+# the file's URL is read from the response to an upload rather than synced off
+# a row — the todo example has no live sync to read it with.
+files:
+  enabled: true
+  backend: memory
+  # Small on purpose, so the demonstration can show a refusal without asking
+  # anybody to produce a 25 MiB file.
+  max_bytes: 5242880
+
 # Every table gets a configuration file. `rig sync` creates and updates them.
 layout:
   table_dir: services/{table}
