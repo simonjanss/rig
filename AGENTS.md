@@ -58,6 +58,12 @@ visibly. `rig generate` starts and migrates the database each example names in
 its own `rig.yaml`, so do not have something else listening on those ports
 (todo 55440, fantasyfootball 55441, auth 55442, auth_oauth 55443).
 
+Every port a suite or an example pins is named in `internal/dockerdb/ports.go`,
+and a test there refuses two suites on one number. A new suite takes its port
+from that file rather than by grepping for one that looks free — the examples
+are listed there too, even though their own configuration is where the number
+actually lives.
+
 Expect `make examples` to take a few minutes. It is worth it for any change
 under `internal/gen/` or `internal/compile/`.
 

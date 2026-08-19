@@ -2285,9 +2285,12 @@ consumer — a better use of the time?
 - The `auth` module's `go.mod` carries a `replace` to `../runtime`. Harmless —
   consumers ignore a dependency's replaces — but it will need a real version on
   first publish.
-- `examples/todo` pins the database to port 55440 and `internal/*test` packages
-  each pin their own. There is no registry of which port belongs to which
-  suite, and the next one added will collide with something.
+- ~~`examples/todo` pins the database to port 55440 and `internal/*test`
+  packages each pin their own. There is no registry of which port belongs to
+  which suite, and the next one added will collide with something.~~ Done in
+  M5.9: `internal/dockerdb/ports.go` names all thirteen and a test refuses a
+  collision. The examples are listed but not read from there — their ports live
+  in their own `rig.yaml`, in modules that cannot import it.
 - `throttle.Postgres.qualify` prefixes known column names by string replacement.
   It is fed from a closed map rig owns, and it is still the least pleasant code
   in the runtime.

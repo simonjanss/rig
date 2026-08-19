@@ -34,9 +34,9 @@ import (
 
 const (
 	pgName    = "rigElectric-db"
-	pgPort    = 55492
+	pgPort    = dockerdb.PortElectricDB
 	syncName  = "rigElectric-sync"
-	syncPort  = 55490
+	syncPort  = dockerdb.PortElectricSync
 	startWait = 60 * time.Second
 	pollEvery = 250 * time.Millisecond
 )

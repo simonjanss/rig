@@ -54,7 +54,7 @@ import (
 
 const (
 	containerName = "rigAuth-db"
-	containerPort = 55498
+	containerPort = dockerdb.PortAuth
 	goodPassword  = "correct horse battery staple"
 )
 

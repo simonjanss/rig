@@ -15,10 +15,13 @@
 package cli_test
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/simonjanss/rig/internal/dockerdb"
 
 	"github.com/simonjanss/rig/internal/scaffold"
 )
@@ -40,7 +43,7 @@ func TestSetupProject(t *testing.T) {
 			t.Fatalf("init failed:\n%s", stderr)
 		}
 	})
-	appendTo(t, filepath.Join(root, "rig.yaml"), "\ndatabase:\n  port: 55496\n")
+	appendTo(t, filepath.Join(root, "rig.yaml"), fmt.Sprintf("\ndatabase:\n  port: %d\n", dockerdb.PortCLISetup))
 
 	step(t, "setup-project", func() {
 		_, stderr, code := run(t, "setup-project", "-C", root)
@@ -231,7 +234,7 @@ func TestSetupProjectSkip(t *testing.T) {
 		"--name", "rigSkip", "--module", "example.com/skip"); code != 0 {
 		t.Fatalf("init failed:\n%s", stderr)
 	}
-	appendTo(t, filepath.Join(root, "rig.yaml"), "\ndatabase:\n  port: 55497\n")
+	appendTo(t, filepath.Join(root, "rig.yaml"), fmt.Sprintf("\ndatabase:\n  port: %d\n", dockerdb.PortCLISetupOwn))
 
 	if _, stderr, code := run(t, "setup-project", "-C", root, "--skip", "tenancy"); code == 0 {
 		t.Errorf("skipping tenancy should be refused: everything references it\n%s", stderr)
