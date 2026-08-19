@@ -158,12 +158,19 @@ func newAPI(ctx context.Context, pool *pgxpool.Pool) (http.Handler, *notify.Engi
 	notifier := api.NewNotifications(pool, reg)
 	notes := note.New(repos.Notes, notifier, pool)
 	reg.Register(api.NewNoteSubject(notes))
-	engine := api.NewNotificationEngine(pool, reg)
 
 	// The mail this example would have sent. A Notifier delivers the single-use
 	// links the auth package mints; this one keeps them in memory so the
 	// interface can show an invitation without a mail server standing by.
 	mail := outbox.New(20)
+
+	// One channel, and it records rather than sends — the same ring buffer the
+	// auth links go into, so the interface can show a mail nobody sent. rig
+	// ships no transport: what it knows is who is owed what and when, and every
+	// provider decision after that is one it would get wrong.
+	engine := api.NewNotificationEngine(pool, reg, map[notify.Channel]notify.Sender{
+		notify.ChannelEmail: mail.NotificationSender(),
+	})
 
 	// The whole foundation, over the tables `rig setup-project` wrote, wired from
 	// the auth block in rig.yaml.

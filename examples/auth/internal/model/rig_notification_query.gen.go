@@ -48,6 +48,14 @@ type RigNotificationFilterEquals struct {
 	// the audience late. Null is the ordinary case; a list here skips the question
 	// entirely, for an audience that genuinely cannot be re-derived.
 	AccountIds []uuid.UUID `json:"accountIds,omitempty"`
+	// When a dispatcher took this to resolve. Past notifications.claim_ttl another
+	// may, which is what makes a crashed process recoverable.
+	ClaimedAt *time.Time `json:"claimedAt,omitempty"`
+	// Which process holds the lease, so a stuck one traces to a pod rather than to
+	// a mystery.
+	ClaimedBy *uuid.UUID `json:"claimedBy,omitempty"`
+	// How many times resolving this has been attempted.
+	Attempts *int `json:"attempts,omitempty"`
 	// Conditions on one of this row's Notes.
 	//
 	// Every condition has to hold of the same one, not of the set between them.
@@ -72,6 +80,11 @@ type RigNotificationFilterRange struct {
 	// When the audience was computed. Null while the notification is still pending
 	// or was cancelled.
 	ResolvedAt *time.Time `json:"resolvedAt,omitempty"`
+	// When a dispatcher took this to resolve. Past notifications.claim_ttl another
+	// may, which is what makes a crashed process recoverable.
+	ClaimedAt *time.Time `json:"claimedAt,omitempty"`
+	// How many times resolving this has been attempted.
+	Attempts *int `json:"attempts,omitempty"`
 	// Conditions on one of this row's Notes.
 	//
 	// Every condition has to hold of the same one, not of the set between them.
@@ -116,6 +129,14 @@ type RigNotificationFilterContains struct {
 	// announcement was written and copied onto the line when the audience is
 	// resolved.
 	GroupKey []string `json:"groupKey,omitempty"`
+	// When a dispatcher took this to resolve. Past notifications.claim_ttl another
+	// may, which is what makes a crashed process recoverable.
+	ClaimedAt []time.Time `json:"claimedAt,omitempty"`
+	// Which process holds the lease, so a stuck one traces to a pod rather than to
+	// a mystery.
+	ClaimedBy []uuid.UUID `json:"claimedBy,omitempty"`
+	// How many times resolving this has been attempted.
+	Attempts []int `json:"attempts,omitempty"`
 	// Conditions on one of this row's Notes.
 	//
 	// Every condition has to hold of the same one, not of the set between them.
@@ -167,6 +188,12 @@ type RigNotificationFilterNull struct {
 	// the audience late. Null is the ordinary case; a list here skips the question
 	// entirely, for an audience that genuinely cannot be re-derived.
 	AccountIds *bool `json:"accountIds,omitempty"`
+	// When a dispatcher took this to resolve. Past notifications.claim_ttl another
+	// may, which is what makes a crashed process recoverable.
+	ClaimedAt *bool `json:"claimedAt,omitempty"`
+	// Which process holds the lease, so a stuck one traces to a pod rather than to
+	// a mystery.
+	ClaimedBy *bool `json:"claimedBy,omitempty"`
 	// Conditions on one of this row's Notes.
 	//
 	// Every condition has to hold of the same one, not of the set between them.
@@ -285,6 +312,12 @@ var (
 	RigNotificationOrderPayloadDesc            = RigNotificationOrder{Column: "payload", Desc: true}
 	RigNotificationOrderGroupKeyAsc            = RigNotificationOrder{Column: "group_key"}
 	RigNotificationOrderGroupKeyDesc           = RigNotificationOrder{Column: "group_key", Desc: true}
+	RigNotificationOrderClaimedAtAsc           = RigNotificationOrder{Column: "claimed_at"}
+	RigNotificationOrderClaimedAtDesc          = RigNotificationOrder{Column: "claimed_at", Desc: true}
+	RigNotificationOrderClaimedByAsc           = RigNotificationOrder{Column: "claimed_by"}
+	RigNotificationOrderClaimedByDesc          = RigNotificationOrder{Column: "claimed_by", Desc: true}
+	RigNotificationOrderAttemptsAsc            = RigNotificationOrder{Column: "attempts"}
+	RigNotificationOrderAttemptsDesc           = RigNotificationOrder{Column: "attempts", Desc: true}
 )
 
 // NewRigNotificationFilterEquals builds an empty RigNotificationFilterEquals

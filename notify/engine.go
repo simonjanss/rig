@@ -36,6 +36,15 @@ type Engine struct {
 	// back to the row it is about. Written from the compiled document.
 	links []Subject
 
+	// The delivery half, and what it runs on. Resolved once at construction so
+	// that a pass reads no configuration.
+	senders       map[Channel]Sender
+	claimedBy     uuid.UUID
+	claimTTL      time.Duration
+	maxAttempts   int
+	backoffBase   time.Duration
+	defaultDigest Digest
+
 	nudge chan struct{}
 	stop  chan struct{}
 	done  chan struct{}
@@ -43,6 +52,9 @@ type Engine struct {
 	mu       sync.Mutex
 	claiming bool
 	interval time.Duration
+	// held are the leases this process currently owns, so a clean shutdown can
+	// give them back rather than leaving them to expire.
+	held map[uuid.UUID]bool
 }
 
 // EngineConfig is what an engine needs beyond [Config].
@@ -57,6 +69,27 @@ type EngineConfig struct {
 	// Interval is how often a pass runs without a nudge. Zero means a minute,
 	// which is the number a scheduled notification's lateness is bounded by.
 	Interval time.Duration
+
+	// Senders are the channels this project can actually send on. A channel
+	// with nothing here has no delivery rows written for it at all, which is
+	// the right answer: the alternative is a table of copies nobody will take.
+	//
+	// Empty is a working configuration: the inbox is not a channel, so an
+	// application with no transport still has one.
+	Senders map[Channel]Sender
+
+	// ClaimTTL is how long this process's claim is honoured. Zero means
+	// [DefaultClaimTTL]; under [MinClaimTTL] panics.
+	ClaimTTL time.Duration
+
+	// MaxAttempts and BackoffBase are the retry arithmetic. Zero means the
+	// defaults.
+	MaxAttempts int
+	BackoffBase time.Duration
+
+	// DefaultDigest is what an account with no setting for a channel gets.
+	// Empty means Immediate.
+	DefaultDigest Digest
 }
 
 // DefaultInterval is how often the engine looks for work on its own.
@@ -72,16 +105,90 @@ func NewEngine(cfg EngineConfig) *Engine {
 	if interval <= 0 {
 		interval = DefaultInterval
 	}
+	ttl := cfg.ClaimTTL
+	if ttl == 0 {
+		ttl = DefaultClaimTTL
+	}
+	if ttl < MinClaimTTL {
+		// At boot rather than at dispatch time, the way the shutdown budget is
+		// checked: under a minute, every message a slow channel is still
+		// sending is claimed a second time under ordinary load, and
+		// at-least-once stops being a crash-recovery property.
+		panic(fmt.Sprintf(
+			"notify.NewEngine: claim_ttl is %s, and under %s every message a slow channel is "+
+				"still sending is claimed twice; set it longer than that channel's own timeout",
+			ttl, MinClaimTTL))
+	}
+
+	attempts := cfg.MaxAttempts
+	if attempts <= 0 {
+		attempts = DefaultMaxAttempts
+	}
+	backoff := cfg.BackoffBase
+	if backoff <= 0 {
+		backoff = DefaultBackoffBase
+	}
+	digest := cfg.DefaultDigest
+	if digest == "" {
+		digest = DigestImmediate
+	}
+
 	return &Engine{
-		cfg:      cfg.Config,
-		store:    store{db: cfg.DB},
-		links:    cfg.Links,
+		cfg:   cfg.Config,
+		store: store{db: cfg.DB},
+		links: cfg.Links,
+
+		senders: cfg.Senders,
+		// One identifier per process, with the hostname beside it in the log
+		// line, so a lease that is stuck traces to a pod rather than a mystery.
+		claimedBy:     uuid.New(),
+		claimTTL:      ttl,
+		maxAttempts:   attempts,
+		backoffBase:   backoff,
+		defaultDigest: digest,
+
 		nudge:    make(chan struct{}, 1),
 		stop:     make(chan struct{}),
 		done:     make(chan struct{}),
 		claiming: true,
 		interval: interval,
+		held:     make(map[uuid.UUID]bool),
 	}
+}
+
+// ClaimedBy is this process's lease identifier, for the log line that makes a
+// stuck lease traceable to a pod.
+func (e *Engine) ClaimedBy() uuid.UUID { return e.claimedBy }
+
+// The lease bookkeeping a clean shutdown reads.
+func (e *Engine) hold(ds []Delivery) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	for _, d := range ds {
+		e.held[d.ID] = true
+	}
+}
+
+func (e *Engine) forget(id uuid.UUID) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	delete(e.held, id)
+}
+
+func (e *Engine) forgetAll() {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	clear(e.held)
+}
+
+func (e *Engine) heldIDs() []uuid.UUID {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	out := make([]uuid.UUID, 0, len(e.held))
+	for id := range e.held {
+		out = append(out, id)
+	}
+	return out
 }
 
 // Start runs the dispatcher until [Engine.Close].
@@ -133,10 +240,16 @@ func (e *Engine) Close(ctx context.Context) error {
 	}
 	select {
 	case <-e.done:
-		return nil
 	case <-ctx.Done():
 		return ctx.Err()
 	}
+
+	// And then the work goes back rather than being left to expire. The TTL is
+	// for crashes; a process that knows it is going has no excuse for being
+	// slow about saying so, and leaving them turns every ordinary rollout into
+	// a delivery delay — repeatedly, for a rollout that replaces every pod.
+	_, err := e.ReleaseClaims(ctx)
+	return err
 }
 
 func (e *Engine) run() {
@@ -163,6 +276,7 @@ func (e *Engine) run() {
 		// A pass that fails is a pass: the rows are still Pending and the next
 		// one takes them. Nothing here may take the process down.
 		_, _ = e.Resolve(context.Background())
+		_, _ = e.Dispatch(context.Background())
 	}
 }
 
@@ -191,13 +305,21 @@ type Report struct {
 	// Unregistered is how many notifications named a table nothing answers for.
 	// A build whose registry lost a service, most often.
 	Unregistered int
+
+	// Deliveries is how many copies were written for channels somebody's
+	// settings allow, and Held how many were moved into a window rather than
+	// being due at once.
+	Deliveries int
+	Held       int
 }
 
 // String is the one line a pass is worth in a log: every count, zeros included.
 func (r Report) String() string {
 	return fmt.Sprintf(
-		"notify: resolved %d, %d recipients, %d collapsed, %d with nobody to tell, %d unregistered",
-		r.Resolved, r.Recipients, r.Collapsed, r.Empty, r.Unregistered)
+		"notify: resolved %d, %d recipients, %d collapsed, %d with nobody to tell, "+
+			"%d unregistered, %d deliveries, %d held",
+		r.Resolved, r.Recipients, r.Collapsed, r.Empty, r.Unregistered,
+		r.Deliveries, r.Held)
 }
 
 // Resolve is one pass: take what is due, ask who, write the lines.
@@ -257,6 +379,23 @@ func (e *Engine) resolveOne(ctx context.Context, n *Notification) (Report, error
 		}
 		report.Recipients += written
 		report.Collapsed += collapsed
+
+		// The copies each of those lines is owed, in the same transaction: a
+		// line somebody sees in the application and never hears about anywhere
+		// else is exactly the kind of "sometimes" a notification system is
+		// judged on.
+		for _, account := range accounts {
+			id, ok, err := e.store.recipientID(ctx, n.ID, account)
+			if err != nil {
+				return err
+			}
+			if !ok {
+				continue
+			}
+			if err := e.writeDeliveries(ctx, n, id, account, &report); err != nil {
+				return err
+			}
+		}
 
 		if len(accounts) == 0 {
 			report.Empty++

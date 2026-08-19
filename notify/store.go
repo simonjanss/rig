@@ -235,6 +235,27 @@ func (s store) collapse(ctx context.Context, n *Notification, group string, acco
 	return tag.RowsAffected() > 0, nil
 }
 
+// recipientID finds the inbox line for one account, which is what a delivery
+// row points at.
+//
+// False rather than an error when there is none: a fan-out that collapsed into
+// an existing line wrote no row for this notification, and the copies that line
+// is owed were written when it was.
+func (s store) recipientID(ctx context.Context, notificationID, accountID uuid.UUID) (uuid.UUID, bool, error) {
+	const q = `SELECT id FROM ` + RecipientTable + `
+		WHERE notification_id = $1 AND account_id = $2`
+
+	var id uuid.UUID
+	err := s.conn(ctx).QueryRow(ctx, q, notificationID, accountID).Scan(&id)
+	if err != nil {
+		if dbx.IsNoRows(err) {
+			return uuid.Nil, false, nil
+		}
+		return uuid.Nil, false, fmt.Errorf("notify: read inbox line: %w", err)
+	}
+	return id, true, nil
+}
+
 // resolve marks a notification's audience as computed.
 //
 // It does not mean anything was sent. What it means is that the inbox lines

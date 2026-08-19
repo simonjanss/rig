@@ -228,16 +228,25 @@ const AccountTable = "rig_account"
 const (
 	NotificationTable          = "rig_notification"
 	NotificationRecipientTable = "rig_notification_recipient"
+
+	// And the three delivery carries: where a push can reach somebody, what
+	// they want told to them, and one copy on its way.
+	NotificationDeviceTable   = "rig_notification_device"
+	NotificationSettingTable  = "rig_notification_setting"
+	NotificationDeliveryTable = "rig_notification_delivery"
 )
 
-// NotificationTables are both of them, in dependency order.
+// NotificationTables are all five, in dependency order.
 func NotificationTables() []string {
-	return []string{NotificationTable, NotificationRecipientTable}
+	return []string{
+		NotificationTable, NotificationRecipientTable,
+		NotificationDeviceTable, NotificationSettingTable, NotificationDeliveryTable,
+	}
 }
 
-// isNotificationTable reports whether a table is one of rig's own two.
+// isNotificationTable reports whether a table is one of rig's own.
 func isNotificationTable(name string) bool {
-	return name == NotificationTable || name == NotificationRecipientTable
+	return slices.Contains(NotificationTables(), name)
 }
 
 // NotificationRecipientOwner is the column an inbox read narrows to.

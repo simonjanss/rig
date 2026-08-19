@@ -41,6 +41,18 @@ func (s *Service) Deleting(ctx context.Context, subject Subject) error {
 	if _, err := s.store.conn(ctx).Exec(ctx, q, ids, s.cfg.now()); err != nil {
 		return fmt.Errorf("notify: retire inbox lines: %w", err)
 	}
+
+	// And the copies that have not gone yet. Skipped rather than deleted: what
+	// was owed is a fact, and a report that could not tell "we decided against
+	// this" from "this never existed" would be a worse report. Anything already
+	// Sent is left alone — mail that is out cannot be recalled, and a state
+	// transition that pretended otherwise would be a lie the schema tells.
+	const held = `UPDATE ` + DeliveryTable + ` SET state = 'Skipped', updated_at = now()
+		WHERE state = 'Pending' AND recipient_id IN (
+			SELECT id FROM ` + RecipientTable + ` WHERE notification_id = ANY($1))`
+	if _, err := s.store.conn(ctx).Exec(ctx, held, ids); err != nil {
+		return fmt.Errorf("notify: skip held deliveries: %w", err)
+	}
 	return nil
 }
 
@@ -86,6 +98,14 @@ func (s *Service) Deleted(ctx context.Context, subject Subject) error {
 	}
 	if len(ids) == 0 {
 		return nil
+	}
+
+	// The copies first: one points at an inbox line, and the foreign key would
+	// refuse the other order.
+	const copies = `DELETE FROM ` + DeliveryTable + ` WHERE recipient_id IN (
+			SELECT id FROM ` + RecipientTable + ` WHERE notification_id = ANY($1))`
+	if _, err := s.store.conn(ctx).Exec(ctx, copies, ids); err != nil {
+		return fmt.Errorf("notify: delete copies: %w", err)
 	}
 
 	const orphans = `DELETE FROM ` + RecipientTable + ` WHERE notification_id = ANY($1)`

@@ -45,6 +45,14 @@ type RigNotificationCreateInput struct {
 	// the audience late. Null is the ordinary case; a list here skips the question
 	// entirely, for an audience that genuinely cannot be re-derived.
 	AccountIds []uuid.UUID `json:"accountIds"`
+	// When a dispatcher took this to resolve. Past notifications.claim_ttl another
+	// may, which is what makes a crashed process recoverable.
+	ClaimedAt *time.Time `json:"claimedAt"`
+	// Which process holds the lease, so a stuck one traces to a pod rather than to
+	// a mystery.
+	ClaimedBy *uuid.UUID `json:"claimedBy"`
+	// How many times resolving this has been attempted.
+	Attempts int `json:"attempts"`
 }
 
 // Normalize tidies what was given before anything checks it.
@@ -98,6 +106,14 @@ type RigNotificationCreateInputError struct {
 	// the audience late. Null is the ordinary case; a list here skips the question
 	// entirely, for an audience that genuinely cannot be re-derived.
 	AccountIds *rigerr.FieldError `json:"accountIds,omitempty"`
+	// When a dispatcher took this to resolve. Past notifications.claim_ttl another
+	// may, which is what makes a crashed process recoverable.
+	ClaimedAt *rigerr.FieldError `json:"claimedAt,omitempty"`
+	// Which process holds the lease, so a stuck one traces to a pod rather than to
+	// a mystery.
+	ClaimedBy *rigerr.FieldError `json:"claimedBy,omitempty"`
+	// How many times resolving this has been attempted.
+	Attempts *rigerr.FieldError `json:"attempts,omitempty"`
 
 	// Entity is a problem with the row as a whole rather than with one field: what
 	// the Entity rule said.
@@ -111,7 +127,7 @@ func (e *RigNotificationCreateInputError) Empty() bool {
 		return true
 	}
 
-	return e.Kind == nil && e.State == nil && e.DeliverAt == nil && e.ResolvedAt == nil && e.Payload == nil && e.GroupKey == nil && e.AccountIds == nil && e.Entity == nil
+	return e.Kind == nil && e.State == nil && e.DeliverAt == nil && e.ResolvedAt == nil && e.Payload == nil && e.GroupKey == nil && e.AccountIds == nil && e.ClaimedAt == nil && e.ClaimedBy == nil && e.Attempts == nil && e.Entity == nil
 }
 
 // Error implements error. The sentence is for logs and for a person; the
@@ -138,6 +154,15 @@ func (e *RigNotificationCreateInputError) Error() string {
 	}
 	if e.AccountIds != nil {
 		parts = append(parts, "accountIds "+e.AccountIds.Error())
+	}
+	if e.ClaimedAt != nil {
+		parts = append(parts, "claimedAt "+e.ClaimedAt.Error())
+	}
+	if e.ClaimedBy != nil {
+		parts = append(parts, "claimedBy "+e.ClaimedBy.Error())
+	}
+	if e.Attempts != nil {
+		parts = append(parts, "attempts "+e.Attempts.Error())
 	}
 	if e.Entity != nil {
 		parts = append(parts, e.Entity.Error())
@@ -212,6 +237,14 @@ type RigNotificationUpdateInput struct {
 	// the audience late. Null is the ordinary case; a list here skips the question
 	// entirely, for an audience that genuinely cannot be re-derived.
 	AccountIds patch.Nullable[[]uuid.UUID] `json:"accountIds"`
+	// When a dispatcher took this to resolve. Past notifications.claim_ttl another
+	// may, which is what makes a crashed process recoverable.
+	ClaimedAt patch.Nullable[time.Time] `json:"claimedAt"`
+	// Which process holds the lease, so a stuck one traces to a pod rather than to
+	// a mystery.
+	ClaimedBy patch.Nullable[uuid.UUID] `json:"claimedBy"`
+	// How many times resolving this has been attempted.
+	Attempts patch.Optional[int] `json:"attempts"`
 }
 
 // Normalize tidies the fields this request actually carries.
@@ -270,6 +303,15 @@ func (i RigNotificationUpdateInput) Merged(prev *RigNotification) RigNotificatio
 		v, _ := i.AccountIds.Get()
 		out.AccountIds = v
 	}
+	if i.ClaimedAt.Touched() {
+		out.ClaimedAt = i.ClaimedAt.Ptr()
+	}
+	if i.ClaimedBy.Touched() {
+		out.ClaimedBy = i.ClaimedBy.Ptr()
+	}
+	if v, ok := i.Attempts.Get(); ok {
+		out.Attempts = v
+	}
 
 	return out
 }
@@ -306,6 +348,14 @@ type RigNotificationUpdateInputError struct {
 	// the audience late. Null is the ordinary case; a list here skips the question
 	// entirely, for an audience that genuinely cannot be re-derived.
 	AccountIds *rigerr.FieldError `json:"accountIds,omitempty"`
+	// When a dispatcher took this to resolve. Past notifications.claim_ttl another
+	// may, which is what makes a crashed process recoverable.
+	ClaimedAt *rigerr.FieldError `json:"claimedAt,omitempty"`
+	// Which process holds the lease, so a stuck one traces to a pod rather than to
+	// a mystery.
+	ClaimedBy *rigerr.FieldError `json:"claimedBy,omitempty"`
+	// How many times resolving this has been attempted.
+	Attempts *rigerr.FieldError `json:"attempts,omitempty"`
 
 	// Entity is a problem with the row as a whole rather than with one field: what
 	// the Entity rule said.
@@ -319,7 +369,7 @@ func (e *RigNotificationUpdateInputError) Empty() bool {
 		return true
 	}
 
-	return e.Kind == nil && e.State == nil && e.DeliverAt == nil && e.ResolvedAt == nil && e.Payload == nil && e.GroupKey == nil && e.AccountIds == nil && e.Entity == nil
+	return e.Kind == nil && e.State == nil && e.DeliverAt == nil && e.ResolvedAt == nil && e.Payload == nil && e.GroupKey == nil && e.AccountIds == nil && e.ClaimedAt == nil && e.ClaimedBy == nil && e.Attempts == nil && e.Entity == nil
 }
 
 // Error implements error. The sentence is for logs and for a person; the
@@ -346,6 +396,15 @@ func (e *RigNotificationUpdateInputError) Error() string {
 	}
 	if e.AccountIds != nil {
 		parts = append(parts, "accountIds "+e.AccountIds.Error())
+	}
+	if e.ClaimedAt != nil {
+		parts = append(parts, "claimedAt "+e.ClaimedAt.Error())
+	}
+	if e.ClaimedBy != nil {
+		parts = append(parts, "claimedBy "+e.ClaimedBy.Error())
+	}
+	if e.Attempts != nil {
+		parts = append(parts, "attempts "+e.Attempts.Error())
 	}
 	if e.Entity != nil {
 		parts = append(parts, e.Entity.Error())
@@ -468,6 +527,21 @@ func (c *RigNotificationValidatorContext) AccountIdsChanged() bool {
 	return c.changed[ColumnRigNotificationAccountIds]
 }
 
+// ClaimedAtChanged reports whether this request set claimed_at.
+func (c *RigNotificationValidatorContext) ClaimedAtChanged() bool {
+	return c.changed[ColumnRigNotificationClaimedAt]
+}
+
+// ClaimedByChanged reports whether this request set claimed_by.
+func (c *RigNotificationValidatorContext) ClaimedByChanged() bool {
+	return c.changed[ColumnRigNotificationClaimedBy]
+}
+
+// AttemptsChanged reports whether this request set attempts.
+func (c *RigNotificationValidatorContext) AttemptsChanged() bool {
+	return c.changed[ColumnRigNotificationAttempts]
+}
+
 // RigNotificationCreateValidator is the rules for bringing a RigNotification
 // into existence: what the schema cannot express.
 //
@@ -504,6 +578,14 @@ type RigNotificationCreateValidator struct {
 	// the audience late. Null is the ordinary case; a list here skips the question
 	// entirely, for an audience that genuinely cannot be re-derived.
 	AccountIds func(ctx context.Context, c *RigNotificationValidatorContext, value []uuid.UUID) error
+	// When a dispatcher took this to resolve. Past notifications.claim_ttl another
+	// may, which is what makes a crashed process recoverable.
+	ClaimedAt func(ctx context.Context, c *RigNotificationValidatorContext, value *time.Time) error
+	// Which process holds the lease, so a stuck one traces to a pod rather than to
+	// a mystery.
+	ClaimedBy func(ctx context.Context, c *RigNotificationValidatorContext, value *uuid.UUID) error
+	// How many times resolving this has been attempted.
+	Attempts func(ctx context.Context, c *RigNotificationValidatorContext, value int) error
 
 	// Entity runs after the per-field hooks, for a rule that is about the row
 	// rather than about one column.
@@ -534,6 +616,12 @@ func (v RigNotificationCreateValidator) RunCreate(ctx context.Context, claims te
 	c.changed[ColumnRigNotificationGroupKey] = true
 	c.Values.AccountIds = i.AccountIds
 	c.changed[ColumnRigNotificationAccountIds] = true
+	c.Values.ClaimedAt = i.ClaimedAt
+	c.changed[ColumnRigNotificationClaimedAt] = true
+	c.Values.ClaimedBy = i.ClaimedBy
+	c.changed[ColumnRigNotificationClaimedBy] = true
+	c.Values.Attempts = i.Attempts
+	c.changed[ColumnRigNotificationAttempts] = true
 
 	failed, err := v.run(ctx, c)
 	if err != nil {
@@ -620,6 +708,33 @@ func (v RigNotificationCreateValidator) run(ctx context.Context, c *RigNotificat
 			failed.AccountIds = field
 		}
 	}
+	if v.ClaimedAt != nil {
+		if err := v.ClaimedAt(ctx, c, c.Values.ClaimedAt); err != nil {
+			field, ok := rigerr.AsFieldError(err)
+			if !ok {
+				return nil, rigerr.Wrap(err, "validate claimed_at")
+			}
+			failed.ClaimedAt = field
+		}
+	}
+	if v.ClaimedBy != nil {
+		if err := v.ClaimedBy(ctx, c, c.Values.ClaimedBy); err != nil {
+			field, ok := rigerr.AsFieldError(err)
+			if !ok {
+				return nil, rigerr.Wrap(err, "validate claimed_by")
+			}
+			failed.ClaimedBy = field
+		}
+	}
+	if v.Attempts != nil {
+		if err := v.Attempts(ctx, c, c.Values.Attempts); err != nil {
+			field, ok := rigerr.AsFieldError(err)
+			if !ok {
+				return nil, rigerr.Wrap(err, "validate attempts")
+			}
+			failed.Attempts = field
+		}
+	}
 
 	if v.Entity != nil {
 		if err := v.Entity(ctx, c); err != nil {
@@ -673,6 +788,14 @@ type RigNotificationUpdateValidator struct {
 	// the audience late. Null is the ordinary case; a list here skips the question
 	// entirely, for an audience that genuinely cannot be re-derived.
 	AccountIds func(ctx context.Context, c *RigNotificationValidatorContext, value []uuid.UUID) error
+	// When a dispatcher took this to resolve. Past notifications.claim_ttl another
+	// may, which is what makes a crashed process recoverable.
+	ClaimedAt func(ctx context.Context, c *RigNotificationValidatorContext, value *time.Time) error
+	// Which process holds the lease, so a stuck one traces to a pod rather than to
+	// a mystery.
+	ClaimedBy func(ctx context.Context, c *RigNotificationValidatorContext, value *uuid.UUID) error
+	// How many times resolving this has been attempted.
+	Attempts func(ctx context.Context, c *RigNotificationValidatorContext, value int) error
 
 	// Entity runs after the per-field hooks, for a rule that is about the row
 	// rather than about one column.
@@ -697,6 +820,9 @@ func (v RigNotificationUpdateValidator) RunUpdate(ctx context.Context, claims te
 	c.changed[ColumnRigNotificationPayload] = i.Payload.IsSet()
 	c.changed[ColumnRigNotificationGroupKey] = i.GroupKey.Touched()
 	c.changed[ColumnRigNotificationAccountIds] = i.AccountIds.Touched()
+	c.changed[ColumnRigNotificationClaimedAt] = i.ClaimedAt.Touched()
+	c.changed[ColumnRigNotificationClaimedBy] = i.ClaimedBy.Touched()
+	c.changed[ColumnRigNotificationAttempts] = i.Attempts.IsSet()
 
 	failed, err := v.run(ctx, c)
 	if err != nil {
@@ -781,6 +907,33 @@ func (v RigNotificationUpdateValidator) run(ctx context.Context, c *RigNotificat
 				return nil, rigerr.Wrap(err, "validate account_ids")
 			}
 			failed.AccountIds = field
+		}
+	}
+	if v.ClaimedAt != nil {
+		if err := v.ClaimedAt(ctx, c, c.Values.ClaimedAt); err != nil {
+			field, ok := rigerr.AsFieldError(err)
+			if !ok {
+				return nil, rigerr.Wrap(err, "validate claimed_at")
+			}
+			failed.ClaimedAt = field
+		}
+	}
+	if v.ClaimedBy != nil {
+		if err := v.ClaimedBy(ctx, c, c.Values.ClaimedBy); err != nil {
+			field, ok := rigerr.AsFieldError(err)
+			if !ok {
+				return nil, rigerr.Wrap(err, "validate claimed_by")
+			}
+			failed.ClaimedBy = field
+		}
+	}
+	if v.Attempts != nil {
+		if err := v.Attempts(ctx, c, c.Values.Attempts); err != nil {
+			field, ok := rigerr.AsFieldError(err)
+			if !ok {
+				return nil, rigerr.Wrap(err, "validate attempts")
+			}
+			failed.Attempts = field
 		}
 	}
 

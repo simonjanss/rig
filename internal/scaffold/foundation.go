@@ -163,7 +163,11 @@ func PartTables(part string) []string {
 	case PartFiles:
 		return []string{"rig_file"}
 	case PartNotifications:
-		return []string{"rig_notification", "rig_notification_recipient"}
+		return []string{
+			"rig_notification", "rig_notification_recipient",
+			"rig_notification_device", "rig_notification_setting",
+			"rig_notification_delivery",
+		}
 	default:
 		return nil
 	}

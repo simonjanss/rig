@@ -808,7 +808,7 @@ func applyNotificationTable(res *ir.Resource, t *ir.Table, opt ConfigOptions) {
 	if cfg == nil || !cfg.Enabled || res.Storage == nil {
 		return
 	}
-	if t.Name != NotificationTable && t.Name != NotificationRecipientTable {
+	if !isNotificationTable(t.Name) {
 		return
 	}
 

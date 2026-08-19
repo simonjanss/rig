@@ -6,6 +6,7 @@ package api
 
 import (
 	"context"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/simonjanss/rig/examples/auth/internal/model"
@@ -47,10 +48,18 @@ func NewNotifications(db notify.DB, reg *notify.Registry) *notify.Service {
 // is the right order: the requests in flight are the last ones whose commits
 // will nudge it, and the time left is better spent finishing than starting.
 // Closing runs before the pool does, because what is in flight is a write.
-func NewNotificationEngine(db notify.DB, reg *notify.Registry) *notify.Engine {
+func NewNotificationEngine(db notify.DB, reg *notify.Registry, senders map[notify.Channel]notify.Sender) *notify.Engine {
 	return notify.NewEngine(notify.EngineConfig{
 		Config: notify.Config{DB: db, Registry: reg},
 		Links:  NotificationLinks(),
+		// Every number here came from the `notifications:` block, so a claim lease is
+		// a line in a file the documentation can quote rather than a literal in a main
+		// function nobody diffs.
+		Senders:       senders,
+		ClaimTTL:      300 * time.Second,
+		MaxAttempts:   5,
+		BackoffBase:   60 * time.Second,
+		DefaultDigest: notify.Digest("Immediate"),
 	})
 }
 
@@ -75,7 +84,16 @@ func NotificationLinks() []notify.Subject {
 // and run `<binary> dispatch-notifications`.
 func NotificationDispatcher(engine *notify.Engine) serve.Task {
 	return func(ctx context.Context, _ *pgxpool.Pool) error {
-		_, err := engine.Resolve(ctx)
+		if _, err := engine.Resolve(ctx); err != nil {
+			return err
+		}
+		if _, err := engine.Dispatch(ctx); err != nil {
+			return err
+		}
+		// And the housekeeping, in the same task for the reason the file sweeper's two
+		// rules share one: a schema that grows forever is the state every other table
+		// in rig is already in, and this milestone added three more.
+		_, err := engine.Prune(ctx, 7776000*time.Second)
 		return err
 	}
 }

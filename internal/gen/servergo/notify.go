@@ -111,11 +111,22 @@ func (e *emitter) notifyConstructor(b *gobuf.Buf) {
 		"commits will nudge it, and the time left is better spent finishing than " +
 		"starting. Closing runs before the pool does, because what is in flight is " +
 		"a write.")
-	b.L("func NewNotificationEngine(db %s.DB, reg *%s.Registry) *%s.Engine {",
-		notifyPkg, notifyPkg, notifyPkg)
+	timePkg := b.Import("time")
+	cfg := e.doc.API.Notifications
+
+	b.L("func NewNotificationEngine(db %s.DB, reg *%s.Registry, senders map[%s.Channel]%s.Sender) *%s.Engine {",
+		notifyPkg, notifyPkg, notifyPkg, notifyPkg, notifyPkg)
 	b.L("return %s.NewEngine(%s.EngineConfig{", notifyPkg, notifyPkg)
 	b.L("Config: %s.Config{DB: db, Registry: reg},", notifyPkg)
 	b.L("Links: NotificationLinks(),")
+	b.Comment("Every number here came from the `notifications:` block, so a " +
+		"claim lease is a line in a file the documentation can quote rather " +
+		"than a literal in a main function nobody diffs.")
+	b.L("Senders: senders,")
+	b.L("ClaimTTL: %d * %s.Second,", cfg.ClaimTTLSeconds, timePkg)
+	b.L("MaxAttempts: %d,", cfg.MaxAttempts)
+	b.L("BackoffBase: %d * %s.Second,", cfg.BackoffBaseSeconds, timePkg)
+	b.L("DefaultDigest: %s.Digest(%s),", notifyPkg, gobuf.Quote(cfg.DefaultDigest))
 	b.L("})")
 	b.L("}")
 	b.NL()
@@ -181,9 +192,18 @@ func (e *emitter) notifyDispatcher(b *gobuf.Buf) {
 		"A subcommand rather than a goroutine, so it is a cron job rather than " +
 		"something racing itself in every replica. Register it in " +
 		"serve.Config.Tasks and run `<binary> dispatch-notifications`.")
+	timePkg := b.Import("time")
+	retention := e.doc.API.Notifications.RetentionSeconds
+
 	b.L("func NotificationDispatcher(engine *%s.Engine) %s.Task {", notifyPkg, servePkg)
 	b.L("return func(ctx %s.Context, _ *%s.Pool) error {", ctxPkg, poolPkg)
-	b.L("_, err := engine.Resolve(ctx)")
+	b.L("if _, err := engine.Resolve(ctx); err != nil { return err }")
+	b.L("if _, err := engine.Dispatch(ctx); err != nil { return err }")
+	b.Comment("And the housekeeping, in the same task for the reason the file " +
+		"sweeper's two rules share one: a schema that grows forever is the " +
+		"state every other table in rig is already in, and this milestone " +
+		"added three more.")
+	b.L("_, err := engine.Prune(ctx, %d * %s.Second)", retention, timePkg)
 	b.L("return err")
 	b.L("}")
 	b.L("}")

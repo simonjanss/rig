@@ -148,7 +148,10 @@ func main() {
 		// that builds it. The engine is latency — it turns a notification into
 		// an inbox line in milliseconds rather than by the next tick — and the
 		// task below is the guarantee.
-		engine := api.NewNotificationEngine(app.Pool, reg)
+		// No channels, deliberately. This example has no mail and no push, and
+		// the inbox works anyway — it is not a channel, which is the whole
+		// reason it cannot be turned off. examples/auth has the other half.
+		engine := api.NewNotificationEngine(app.Pool, reg, nil)
 		engine.Start()
 		app.Drain("notifications", engine.StopClaiming)
 		app.CloseWithin("notifications", 15*time.Second, engine.Close)
@@ -240,7 +243,7 @@ func dispatchNotifications(ctx context.Context, pool *pgxpool.Pool) error {
 	svc := todo.New(repos.Todos, api.NewFiles(pool), nil, inbox, pool, nil)
 	reg.Register(api.NewTodoSubject(svc))
 
-	report, err := api.NewNotificationEngine(pool, reg).Resolve(ctx)
+	report, err := api.NewNotificationEngine(pool, reg, nil).Resolve(ctx)
 	fmt.Fprintln(os.Stdout, report)
 	return err
 }

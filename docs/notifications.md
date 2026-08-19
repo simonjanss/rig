@@ -226,6 +226,86 @@ into an inbox line in milliseconds rather than by the next tick. Nothing is lost
 when it is skipped: the row is pending, the task is coming, and the inbox was live
 the moment the row committed regardless.
 
+## Delivery
+
+The inbox reaches somebody who has the application open. Channels are everybody
+else, and there are three: `Desktop`, `Mobile` and `Email`.
+
+**The inbox is not one of them.** It is always on, and a switch that turned it
+off would produce a notification nobody can ever find — the badge wrong, the
+count wrong, the row unread forever. Every channel is a *copy* of an inbox line
+sent somewhere else, which is why they can all be refused and it cannot.
+
+Desktop and Mobile are separate rather than one push channel with a platform
+column, because they are separately *answerable*: "not on my phone during dinner,
+yes on my laptop while I am working" is the setting people reach for, and a
+platform on a device row cannot express it.
+
+**rig ships no transport.** You register a sender per channel:
+
+```go
+engine := api.NewNotificationEngine(pool, reg, map[notify.Channel]notify.Sender{
+    notify.ChannelEmail: myMailer,
+})
+```
+
+A channel with nothing registered has no delivery rows written for it at all,
+which is the right answer: the alternative is a table of copies nobody will take.
+
+A sender is handed a `notify.Message` — the deliveries it stands for, and where
+they go. One delivery for an immediate send, several for a digest, and what to
+say with them is yours. **Hand `Delivery.ID` to your provider as its own
+idempotency key**: it is stable across retries, and it is the whole of what rig
+can do about duplicates. The send and the bookkeeping are two systems and no
+transaction spans both, so a process that handed a message over and died will
+hand it over again — the inbox cannot duplicate, and a channel that ignores the
+key can.
+
+### Settings
+
+Per account, per channel, and optionally per kind. Resolution is three steps:
+**the row for this kind and this channel, else the row for this channel with a
+null kind, else `default_digest` in rig.yaml.**
+
+```sql
+insert into rig_notification_setting (id, tenant_id, account_id, channel, digest,
+                                      active_from, active_until, active_days)
+values (..., 'Mobile', 'Immediate', '09:00', '17:00', '{1,2,3,4,5}');
+```
+
+The window is **when to deliver, not when to stay quiet**. "Mobile, weekdays,
+nine to five" is one row; as quiet hours it is two, because the quiet period
+wraps a weekend and a night. Times are read in the account's own zone from
+`rig_account.time_zone`, and a window that wraps midnight — `22:00` to `06:00` —
+is one window.
+
+**Outside its window a delivery is held, not dropped.** `deliver_at` moves to the
+next opening. The inbox line exists either way, so a discarded copy would make
+the badge and the mailbox disagree, and the person would eventually see the
+notification and wonder why nobody told them. Late is a delay; dropped is a lie.
+
+`digest: Off` sends nothing on that channel and still writes the inbox line.
+`is_enabled: false` writes no delivery row at all. Both mean "no mail" today, and
+they are kept apart because somebody will set the wrong one: `Off` is about
+preferring to look rather than be told.
+
+### Scaling out
+
+Every replica runs a dispatcher and your cron runs another, so ten claimants on
+one row is normal operation. The claim is a **lease**, not a lock, and a send is
+three short transactions: claim, send with nothing open, mark.
+
+`SELECT … FOR UPDATE SKIP LOCKED` inside the sending transaction would be correct
+and unusable — a row lock lives as long as its transaction, so it would be held
+across a call to SMTP, and one slow provider would hold a pool connection per
+message in flight. `SKIP LOCKED` is still what makes the *claim* contention-free:
+a second claimant walks past the rows the first is taking, so throughput rises
+with replicas rather than flattening.
+
+A clean shutdown gives its claims back rather than leaving them to expire. The
+TTL is for crashes; a process that knows it is going has no excuse for being slow
+about saying so, and leaving them turns every rollout into a delivery delay.
+
 ## What rig does not do
 
 - **No templates, no rendering, no localisation, and no title or body anywhere.**
@@ -241,9 +321,15 @@ the moment the row committed regardless.
   relation, the filter and every join a client could follow.
 - **No cross-tenant inbox.** A person in two tenants has two accounts and
   therefore two inboxes.
-- **No delivery yet.** Channels, per-account settings, delivery windows and
-  digests are not built. What exists is the inbox, which is the whole of what
-  most applications show in a bell icon.
+- **No transport.** No SMTP, no APNs, no FCM, no web-push, and no dependency for
+  any of them. A channel is an interface you implement.
+- **No exactly-once sending.** The inbox is exactly-once by index; a channel is
+  at-least-once with a stable key. No database promises more about a network call
+  it does not make.
+- **No templates and no localisation**, for the third time, because it is the
+  thing most often asked for.
+- **No read receipts.** Whether a mail was opened is the provider's answer and a
+  different product.
 
 ## See also
 

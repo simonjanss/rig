@@ -39,11 +39,10 @@ Next:
   `rig_notification` table a project links its own tables to, two generated
   callbacks that say when a notification is due and — at the moment it is sent,
   not when it was written — who should get it, and an inbox somebody can empty.
-- **M13** — notification delivery: Desktop, Mobile and Email as channels an
-  application implements, per-account settings with a window each, digests, and a
-  dispatcher every replica can run because the claim is a lease rather than a lock.
-  Split from M12 because M12's schema is the part that cannot be changed later and
-  this is the part whose shape depends on what somebody asks for.
+- ~~**M13** — notification delivery.~~ Shipped: Desktop, Mobile and Email as
+  channels an application implements, per-account settings with a window each,
+  digests, and a dispatcher every replica can run because the claim is a lease
+  rather than a lock.
 
 ### Modules
 
@@ -3416,20 +3415,24 @@ means guessing which shape recurs.
 
 ---
 
-## M13 — notification delivery
+## M13 — notification delivery (shipped)
 
-**Still to build**, and M12 is useful without it: an inbox that fills itself,
-updates itself live and can be emptied is the whole of what most applications
-show in a bell icon. What is missing is everybody who does not have the
-application open.
+### What came out differently
 
-Two things landed early because M12 needed the configuration surface to exist,
-and both are read by nothing so far: `notifications.claim_ttl`, `max_attempts`,
-`backoff_base`, `retention` and `default_digest` are parsed, defaulted and
-validated, and `docs/rig-yaml.md` deliberately does not document them yet. The
-startup checks they describe — a claim lease under a minute, a retention shorter
-than the longest digest window — are written and are the ones this milestone will
-use.
+**A `digest` column on the delivery row.** The plan grouped a claimed batch by
+account and channel, which folds an Immediate account's three simultaneous copies
+into one message as readily as an Hourly account's three — and "tell me as things
+happen" and "give me a summary" are different requests. The setting that decided
+it is copied onto the row, so a claim knows without a join, and an Immediate row
+is sent on its own.
+
+**The propagation orders its deletes.** A delivery points at an inbox line, so a
+subject's hard delete removes the copies first; a soft delete marks the pending
+ones Skipped rather than deleting them, because what was owed is a fact and
+anything already Sent cannot be recalled.
+
+**The retention sweep runs in the dispatch task**, the way the file sweeper's two
+rules share one, and it has the two rules the plan named and no third.
 
 **Goal.** M12's inbox reaches somebody who has the application open. This is
 everybody else: three channels an application implements, per-account settings with a

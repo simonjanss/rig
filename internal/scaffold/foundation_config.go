@@ -362,6 +362,38 @@ operations: [Get, List]`,
 			),
 		},
 		{
+			table: "rig_notification_device",
+			content: config("rig_notification_device", "NotificationDevice", schemaRef,
+				`# Where a push can reach somebody, and the one notification table a
+# client genuinely writes to: registering a device is something the
+# application it runs on does, and revoking one is something a person does
+# from a list of their own devices.
+operations: [Create, Get, List, Delete]`,
+			),
+		},
+		{
+			table: "rig_notification_setting",
+			content: config("rig_notification_setting", "NotificationSetting", schemaRef,
+				`# What somebody wants told to them, and when. A settings screen is a
+# CRUD surface over exactly this, which is why it has one — and it is the
+# only table here where a full one is the right answer.
+operations: [Create, Get, List, Update, Delete]`,
+			),
+		},
+		{
+			table: "rig_notification_delivery",
+			content: config("rig_notification_delivery", "NotificationDelivery", schemaRef,
+				`# Read-only, and narrow. A delivery row is the dispatcher's bookkeeping:
+# retry counts, claim leases and provider errors. A client that could write
+# one could send anything to anybody, and a client that could read them all
+# would be reading a table that says who was told what.
+#
+# It is exposed at all because "why did I not get that mail" is a question
+# support has to be able to answer.
+operations: [Get, List]`,
+			),
+		},
+		{
 			table: "rig_notification_recipient",
 			content: config("rig_notification_recipient", "NotificationRecipient", schemaRef,
 				`# The inbox. Read and delete, and nothing else: what a person may change
