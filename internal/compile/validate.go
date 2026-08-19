@@ -497,7 +497,7 @@ func checkColumnNaming(t *ir.Table, loaded *tableconf.Loaded, boolSev, tsSev, da
 		// and the alternative the rule would demand is either rig_file_id — one
 		// file per table, forever — or profile_image_rig_file_id.
 		if fkSev != "" && c.ForeignKey != nil && !isAuditActorColumn(c.Name) &&
-			!selfReference && !isFileColumn(c) {
+			!selfReference && !isFileColumn(t, c) {
 			want := c.ForeignKey.Table + "_id"
 			if c.Name != want && !strings.HasSuffix(c.Name, "_"+want) {
 				diags.AddSeverity(diag.CodeForeignKeyNaming, fkSev, at,

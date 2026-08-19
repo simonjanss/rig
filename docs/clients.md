@@ -47,10 +47,9 @@ different deadline, so the transport and its connection pool are still shared.
 
 ## Sending files
 
-> The upload and download methods below appear on a generated client once your
-> project has a file column. Until then, `rigclient.Upload`, `DoContent` and the
-> call options are the surface — everything this section says about how bytes
-> travel is already true of a call you write by hand.
+These methods appear on a generated client once your project has a file column.
+A `<role>_file_id` column is the whole declaration — see
+[schema.md](schema.md#files).
 
 A file goes out as a `multipart/form-data` body, which the SDK builds for you
 from a `rigclient.Upload`:
@@ -141,6 +140,30 @@ c, err := client.Todos.DownloadCoverFile(ctx, todoID, fileID, "clip.mp4",
 arrive as `Content.Status` rather than as an error: you asked the question, so
 the answer is a result. On a 304 the body is empty and closing it is all there
 is to do with it.
+
+## Sending a file with the row
+
+A table whose file column is `not null` cannot be filled in two requests: the row
+would have to exist before the upload had anywhere to go. So a create on such a
+table also accepts a form, and the client has a second method for it:
+
+```go
+attachment, err := client.TodoAttachments.CreateWithFiles(ctx,
+    client.TodoAttachmentCreateInput{TodoID: id, Caption: rigclient.P("On the summit")},
+    client.TodoAttachmentCreateFiles{
+        AttachmentFile: rigclient.UploadBytes("summit.png", "image/png", b),
+    },
+    rigclient.WithTimeout(10*time.Minute))
+```
+
+The row and the bytes are committed together, so a create that fails leaves
+neither. `CreateFiles` has one member per file column — a plain `Upload` where
+the column is not null and a pointer where it is — so leaving out a file the
+schema requires does not compile.
+
+It is a second method rather than a wider `Create` because `Create` is the
+most-called method rig generates: adding a parameter to it would break every
+existing caller the day somebody adds a file column to a table they already had.
 
 ## See also
 

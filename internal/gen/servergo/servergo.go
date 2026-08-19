@@ -123,6 +123,17 @@ func (g *Generator) Generate(_ context.Context, doc *ir.Document, opts gen.Optio
 		artifacts = append(artifacts, auth)
 	}
 
+	// The file wiring, when there is any to write. A project with no `files:`
+	// block gets no file, which is what keeps its API package — and so its
+	// module — free of a blob store and a multipart reader.
+	if doc.API.Files != nil && doc.API.Files.Enabled {
+		files, err := e.filesFile()
+		if err != nil {
+			return nil, err
+		}
+		artifacts = append(artifacts, files)
+	}
+
 	return artifacts, nil
 }
 

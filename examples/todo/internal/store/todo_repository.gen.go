@@ -77,6 +77,66 @@ type TodoRepository interface {
 	Revert(ctx context.Context, id, versionID uuid.UUID, hooks dbhook.UpdateHooks[model.TodoUpdateInput, model.Todo]) (*model.Todo, error)
 }
 
+// todoTodoAttachmentsFilter collects the conditions written on a Todo's
+// TodoAttachments.
+//
+// The bool is whether there were any: a relation nobody mentioned is not a
+// condition that everything satisfies, it is no condition at all.
+func todoTodoAttachmentsFilter(f model.TodoFilter) (model.TodoAttachmentFilter, bool) {
+	var (
+		sub   model.TodoAttachmentFilter
+		asked bool
+	)
+
+	if p := f.Equals; p != nil && p.TodoAttachments != nil {
+		sub.Equals, asked = p.TodoAttachments, true
+	}
+	if p := f.NotEquals; p != nil && p.TodoAttachments != nil {
+		sub.NotEquals, asked = p.TodoAttachments, true
+	}
+	if p := f.GreaterThan; p != nil && p.TodoAttachments != nil {
+		sub.GreaterThan, asked = p.TodoAttachments, true
+	}
+	if p := f.SmallerThan; p != nil && p.TodoAttachments != nil {
+		sub.SmallerThan, asked = p.TodoAttachments, true
+	}
+	if p := f.GreaterOrEqual; p != nil && p.TodoAttachments != nil {
+		sub.GreaterOrEqual, asked = p.TodoAttachments, true
+	}
+	if p := f.SmallerOrEqual; p != nil && p.TodoAttachments != nil {
+		sub.SmallerOrEqual, asked = p.TodoAttachments, true
+	}
+	if p := f.Contains; p != nil && p.TodoAttachments != nil {
+		sub.Contains, asked = p.TodoAttachments, true
+	}
+	if p := f.NotContains; p != nil && p.TodoAttachments != nil {
+		sub.NotContains, asked = p.TodoAttachments, true
+	}
+	if p := f.Like; p != nil && p.TodoAttachments != nil {
+		sub.Like, asked = p.TodoAttachments, true
+	}
+	if p := f.NotLike; p != nil && p.TodoAttachments != nil {
+		sub.NotLike, asked = p.TodoAttachments, true
+	}
+	if p := f.Null; p != nil && p.TodoAttachments != nil {
+		sub.Null, asked = p.TodoAttachments, true
+	}
+	if p := f.NotNull; p != nil && p.TodoAttachments != nil {
+		sub.NotNull, asked = p.TodoAttachments, true
+	}
+
+	if !asked {
+		return sub, false
+	}
+
+	// The connective comes down with them, and it has to: under OR the caller
+	// asked for a related row satisfying either condition, and one subquery whose
+	// inside is a disjunction is exactly that. Under AND it is the same row
+	// satisfying both, which is the part a subquery per operator could not say.
+	sub.OrCondition = f.OrCondition
+	return sub, true
+}
+
 // todoGroup turns a filter into the condition tree the runtime renders.
 //
 // The scope carries what a condition needs besides the filter itself: who is
@@ -136,6 +196,9 @@ func todoGroup(f model.TodoFilter, sc filterScope) (query.Group, error) {
 		if p.SnapshotFromTodoAt != nil {
 			g.Add(sc.at(query.Eq("snapshot_from_todo_at", p.SnapshotFromTodoAt)))
 		}
+		if p.CoverFileID != nil {
+			g.Add(sc.at(query.Eq("cover_file_id", p.CoverFileID)))
+		}
 	}
 	if p := f.NotEquals; p != nil {
 		if p.ID != nil {
@@ -182,6 +245,9 @@ func todoGroup(f model.TodoFilter, sc filterScope) (query.Group, error) {
 		}
 		if p.SnapshotFromTodoAt != nil {
 			g.Add(sc.at(query.Ne("snapshot_from_todo_at", p.SnapshotFromTodoAt)))
+		}
+		if p.CoverFileID != nil {
+			g.Add(sc.at(query.Ne("cover_file_id", p.CoverFileID)))
 		}
 	}
 	if p := f.GreaterThan; p != nil {
@@ -298,6 +364,9 @@ func todoGroup(f model.TodoFilter, sc filterScope) (query.Group, error) {
 		if len(p.SnapshotFromTodoAt) > 0 {
 			g.Add(sc.at(query.In("snapshot_from_todo_at", p.SnapshotFromTodoAt)))
 		}
+		if len(p.CoverFileID) > 0 {
+			g.Add(sc.at(query.In("cover_file_id", p.CoverFileID)))
+		}
 	}
 	if p := f.NotContains; p != nil {
 		if len(p.ID) > 0 {
@@ -344,6 +413,9 @@ func todoGroup(f model.TodoFilter, sc filterScope) (query.Group, error) {
 		}
 		if len(p.SnapshotFromTodoAt) > 0 {
 			g.Add(sc.at(query.NotIn("snapshot_from_todo_at", p.SnapshotFromTodoAt)))
+		}
+		if len(p.CoverFileID) > 0 {
+			g.Add(sc.at(query.NotIn("cover_file_id", p.CoverFileID)))
 		}
 	}
 	if p := f.Like; p != nil {
@@ -426,6 +498,13 @@ func todoGroup(f model.TodoFilter, sc filterScope) (query.Group, error) {
 				g.Add(sc.at(query.NotNull("snapshot_from_todo_at")))
 			}
 		}
+		if p.CoverFileID != nil {
+			if *p.CoverFileID {
+				g.Add(sc.at(query.IsNull("cover_file_id")))
+			} else {
+				g.Add(sc.at(query.NotNull("cover_file_id")))
+			}
+		}
 	}
 	if p := f.NotNull; p != nil {
 		if p.Notes != nil {
@@ -491,6 +570,43 @@ func todoGroup(f model.TodoFilter, sc filterScope) (query.Group, error) {
 				g.Add(sc.at(query.IsNull("snapshot_from_todo_at")))
 			}
 		}
+		if p.CoverFileID != nil {
+			if *p.CoverFileID {
+				g.Add(sc.at(query.NotNull("cover_file_id")))
+			} else {
+				g.Add(sc.at(query.IsNull("cover_file_id")))
+			}
+		}
+	}
+
+	if sub, ok := todoTodoAttachmentsFilter(f); ok {
+		inner, from, on := sc.hasMany("todo_attachment", "todo_id", "id")
+		where, err := todoAttachmentGroup(sub, inner)
+		if err != nil {
+			return query.Group{}, err
+		}
+
+		// The far side is scoped whatever the read asked for. A read option widens
+		// what this query returns, not what it may look through to decide.
+		where.Add(inner.tenant("tenant_id"))
+		where.Add(inner.live("deleted_at"))
+
+		g.Add(query.Related(query.Exists{From: from, On: on, Where: where}))
+	}
+
+	if p := f.Without; p != nil && p.TodoAttachments != nil {
+		inner, from, on := sc.hasMany("todo_attachment", "todo_id", "id")
+		where, err := todoAttachmentGroup(*p.TodoAttachments, inner)
+		if err != nil {
+			return query.Group{}, err
+		}
+
+		// The far side is scoped whatever the read asked for. A read option widens
+		// what this query returns, not what it may look through to decide.
+		where.Add(inner.tenant("tenant_id"))
+		where.Add(inner.live("deleted_at"))
+
+		g.Add(query.Related(query.Exists{From: from, On: on, Where: where, Not: true}))
 	}
 
 	for _, n := range f.NestedFilters {
@@ -506,7 +622,7 @@ func todoGroup(f model.TodoFilter, sc filterScope) (query.Group, error) {
 // todoSortable reports whether a column can be ordered by.
 func todoSortable(column string) bool {
 	switch column {
-	case "id", "tenant_id", "title", "notes", "is_done", "priority", "due_at", "created_at", "created_by_account_id", "updated_at", "updated_by_account_id", "deleted_at", "deleted_by_account_id", "version_type", "snapshot_from_todo_id", "snapshot_from_todo_at":
+	case "id", "tenant_id", "title", "notes", "is_done", "priority", "due_at", "created_at", "created_by_account_id", "updated_at", "updated_by_account_id", "deleted_at", "deleted_by_account_id", "version_type", "snapshot_from_todo_id", "snapshot_from_todo_at", "cover_file_id":
 		return true
 	}
 	return false
@@ -538,12 +654,12 @@ type todoRepo struct {
 
 var _ TodoRepository = (*todoRepo)(nil)
 
-const todoRepoSelect = "todo.id, todo.tenant_id, todo.title, todo.notes, todo.is_done, todo.priority, todo.due_at, todo.created_at, todo.created_by_account_id, todo.updated_at, todo.updated_by_account_id, todo.deleted_at, todo.deleted_by_account_id, todo.version_type, todo.snapshot_from_todo_id, todo.snapshot_from_todo_at"
+const todoRepoSelect = "todo.id, todo.tenant_id, todo.title, todo.notes, todo.is_done, todo.priority, todo.due_at, todo.created_at, todo.created_by_account_id, todo.updated_at, todo.updated_by_account_id, todo.deleted_at, todo.deleted_by_account_id, todo.version_type, todo.snapshot_from_todo_id, todo.snapshot_from_todo_at, todo.cover_file_id"
 
 // scanTodo reads one row in the order todoRepoSelect lists.
 func scanTodo(row pgx.Row) (*model.Todo, error) {
 	var m model.Todo
-	if err := row.Scan(&m.ID, &m.TenantID, &m.Title, &m.Notes, &m.IsDone, &m.Priority, &m.DueAt, &m.CreatedAt, &m.CreatedByAccountID, &m.UpdatedAt, &m.UpdatedByAccountID, &m.DeletedAt, &m.DeletedByAccountID, &m.VersionType, &m.SnapshotFromTodoID, &m.SnapshotFromTodoAt); err != nil {
+	if err := row.Scan(&m.ID, &m.TenantID, &m.Title, &m.Notes, &m.IsDone, &m.Priority, &m.DueAt, &m.CreatedAt, &m.CreatedByAccountID, &m.UpdatedAt, &m.UpdatedByAccountID, &m.DeletedAt, &m.DeletedByAccountID, &m.VersionType, &m.SnapshotFromTodoID, &m.SnapshotFromTodoAt, &m.CoverFileID); err != nil {
 		return nil, err
 	}
 	m.DueAt = dbx.UTCPtr(m.DueAt)
@@ -748,8 +864,8 @@ func (r *todoRepo) Create(ctx context.Context, in dbhook.Create[model.TodoCreate
 			}
 		}
 
-		columns := []string{"id", "tenant_id", "created_at", "created_by_account_id", "version_type", "title", "notes", "is_done", "priority", "due_at"}
-		values := []any{id, claims.TenantID, now, claims.Actor(), versionType, in.Input.Title, in.Input.Notes, in.Input.IsDone, in.Input.Priority, in.Input.DueAt}
+		columns := []string{"id", "tenant_id", "created_at", "created_by_account_id", "version_type", "title", "notes", "is_done", "priority", "due_at", "cover_file_id"}
+		values := []any{id, claims.TenantID, now, claims.Actor(), versionType, in.Input.Title, in.Input.Notes, in.Input.IsDone, in.Input.Priority, in.Input.DueAt, in.Input.CoverFileID}
 
 		sql := fmt.Sprintf("INSERT INTO todo (%s) VALUES (%s) RETURNING %s", joinColumns(columns), placeholders(len(values)), todoRepoSelect)
 
@@ -852,6 +968,10 @@ func (r *todoRepo) Update(ctx context.Context, id uuid.UUID, in dbhook.Update[mo
 			columns = append(columns, "due_at")
 			values = append(values, in.Input.DueAt.Ptr())
 		}
+		if in.Input.CoverFileID.Touched() {
+			columns = append(columns, "cover_file_id")
+			values = append(values, in.Input.CoverFileID.Ptr())
+		}
 
 		if len(columns) == 0 {
 			// Nothing was asked for, so nothing happens — no stamp, and no snapshot
@@ -915,8 +1035,8 @@ func (r *todoRepo) writeSnapshot(ctx context.Context, tx dbx.Conn, prev *model.T
 		sourceVersion = *prev.UpdatedAt
 	}
 
-	columns := []string{"id", "tenant_id", "title", "notes", "is_done", "priority", "due_at", "created_at", "created_by_account_id", "updated_at", "updated_by_account_id", "deleted_at", "deleted_by_account_id", "version_type", "snapshot_from_todo_id", "snapshot_from_todo_at"}
-	values := []any{snapshotID, prev.TenantID, prev.Title, prev.Notes, prev.IsDone, prev.Priority, prev.DueAt, prev.CreatedAt, prev.CreatedByAccountID, nil, prev.UpdatedByAccountID, nil, nil, model.TodoVersionTypeSnapshot, prev.ID, sourceVersion}
+	columns := []string{"id", "tenant_id", "title", "notes", "is_done", "priority", "due_at", "created_at", "created_by_account_id", "updated_at", "updated_by_account_id", "deleted_at", "deleted_by_account_id", "version_type", "snapshot_from_todo_id", "snapshot_from_todo_at", "cover_file_id"}
+	values := []any{snapshotID, prev.TenantID, prev.Title, prev.Notes, prev.IsDone, prev.Priority, prev.DueAt, prev.CreatedAt, prev.CreatedByAccountID, nil, prev.UpdatedByAccountID, nil, nil, model.TodoVersionTypeSnapshot, prev.ID, sourceVersion, prev.CoverFileID}
 
 	sql := fmt.Sprintf("INSERT INTO todo (%s) VALUES (%s)", joinColumns(columns), placeholders(len(values)))
 	if _, err := tx.Exec(ctx, sql, values...); err != nil {
@@ -1083,6 +1203,10 @@ func (r *todoRepo) Restore(ctx context.Context, id uuid.UUID, in dbhook.Restore[
 			columns = append(columns, "due_at")
 			values = append(values, in.Input.DueAt.Ptr())
 		}
+		if in.Input.CoverFileID.Touched() {
+			columns = append(columns, "cover_file_id")
+			values = append(values, in.Input.CoverFileID.Ptr())
+		}
 
 		// The row changed, so it is stamped as changed. A restore that left the update
 		// columns alone would report the row as last touched before it was deleted.
@@ -1172,11 +1296,12 @@ func (r *todoRepo) Revert(ctx context.Context, id, versionID uuid.UUID, hooks db
 		}
 
 		in := model.TodoUpdateInput{
-			Title:    patch.NewOptional(version.Title),
-			Notes:    patch.FromPtr(version.Notes),
-			IsDone:   patch.NewOptional(version.IsDone),
-			Priority: patch.NewOptional(version.Priority),
-			DueAt:    patch.FromPtr(version.DueAt),
+			Title:       patch.NewOptional(version.Title),
+			Notes:       patch.FromPtr(version.Notes),
+			IsDone:      patch.NewOptional(version.IsDone),
+			Priority:    patch.NewOptional(version.Priority),
+			DueAt:       patch.FromPtr(version.DueAt),
+			CoverFileID: patch.FromPtr(version.CoverFileID),
 		}
 
 		// Every field the version carried, including the ones that already match: what

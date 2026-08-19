@@ -25,6 +25,9 @@ type ProjectOptions struct {
 	// Auth is the authentication foundation this API is served with, already
 	// resolved by the project configuration, or nil for a project with none.
 	Auth *ir.Auth
+	// Files is the resolved file handling, or nil for a project that accepts no
+	// uploads.
+	Files *ir.Files
 }
 
 // Project turns a normalized schema into a naked API surface.
@@ -46,6 +49,7 @@ func Project(schema ir.Schema, opt ProjectOptions) (ir.API, diag.List) {
 		BasePath:       opt.BasePath,
 		RevisionHeader: opt.RevisionHeader,
 		Auth:           opt.Auth,
+		Files:          opt.Files,
 	}
 
 	// Enums come first so field types can name them.
@@ -149,9 +153,37 @@ func projectResource(
 		res.Fields = append(res.Fields, f)
 	}
 
+	res.Files = projectFileColumns(t, n)
 	res.Storage = projectStorage(t, schema, life, resourceForTable, n)
 
 	return res, diags
+}
+
+// projectFileColumns resolves the table's `<role>_file_id` columns, in the order
+// they appear on the table.
+//
+// Here rather than in [Expand] because recognizing one means reading the table's
+// foreign keys, and Expand is handed an API with no schema behind it. Everything
+// a generator needs is derived once, in the one place that can still see where
+// the column points.
+func projectFileColumns(t *ir.Table, n *naming.Namer) []ir.FileColumn {
+	var out []ir.FileColumn
+	for i := range t.Columns {
+		c := &t.Columns[i]
+		if !isFileColumn(t, c) {
+			continue
+		}
+		role, _ := FileRole(c.Name)
+		out = append(out, ir.FileColumn{
+			Role:     n.JSON(n.Go(role)),
+			Column:   c.Name,
+			Field:    n.Go(c.Name),
+			Part:     n.JSON(n.Go(role) + "File"),
+			Segment:  n.PathSegment(n.Go(role)) + "-file",
+			Required: !c.Nullable,
+		})
+	}
+	return out
 }
 
 // projectField turns a column into a resource field. The second return is false

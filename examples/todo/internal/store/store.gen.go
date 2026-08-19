@@ -9,10 +9,13 @@ package store
 
 import (
 	"context"
+	"fmt"
 	"strconv"
 	"strings"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/simonjanss/rig/examples/todo/internal/model"
 	"github.com/simonjanss/rig/runtime/dbx"
 	"github.com/simonjanss/rig/runtime/query"
 	"github.com/simonjanss/rig/runtime/rigerr"
@@ -151,13 +154,15 @@ type Config struct{}
 type Store struct {
 	pool *pgxpool.Pool
 
-	Todos TodoRepository
+	Todos           TodoRepository
+	TodoAttachments TodoAttachmentRepository
 }
 
 // New builds a store over a connection pool.
 func New(pool *pgxpool.Pool, _ Config) *Store {
 	s := &Store{pool: pool}
 	s.Todos = &todoRepo{db: s}
+	s.TodoAttachments = &todoAttachmentRepo{db: s}
 	return s
 }
 
@@ -226,4 +231,39 @@ func writeError(err error, table string) error {
 	default:
 		return rigerr.Internal(err, "write %s", table)
 	}
+}
+
+// visibleTodo reports whether this caller could have read the Todo row named,
+// which is what a write pointing at it has to be able to say.
+//
+// It takes the transaction rather than the pool so the answer and the write
+// that depends on it are the same unit of work.
+//
+// There is no readopt here on purpose. SkipTenantScope and SkipOwnerScope
+// exist so a background job can read past the boundary; a request handler
+// reaching a foreign key through them would be the boundary having an opt-out,
+// which is the thing this closes.
+func visibleTodo(ctx context.Context, tx dbx.Conn, claims tenancy.Claims, id uuid.UUID) (bool, error) {
+	args := []any{id}
+	where := "id = $1"
+
+	args = append(args, claims.TenantID)
+	where += fmt.Sprintf(" AND tenant_id = $%d", len(args))
+	// A row in the trash is not something to point new rows at: the sweeper is
+	// coming for it, and the reference would outlive it.
+	where += " AND deleted_at IS NULL"
+	// A snapshot is a copy of a past state. A key pointing at one names a version
+	// rather than the thing, which is never what a relation means.
+	args = append(args, model.TodoVersionTypeOriginal)
+	where += fmt.Sprintf(" AND version_type = $%d", len(args))
+
+	var one int
+	err := tx.QueryRow(ctx, "SELECT 1 FROM todo WHERE "+where, args...).Scan(&one)
+	if dbx.IsNoRows(err) {
+		return false, nil
+	}
+	if err != nil {
+		return false, rigerr.Internal(err, "check that Todo %s can be referenced", id)
+	}
+	return true, nil
 }

@@ -30,6 +30,8 @@ type TodoCreateInput struct {
 	Priority TodoPriority `json:"priority"`
 	// When the task is due, or null if it never expires.
 	DueAt *time.Time `json:"dueAt"`
+	// A picture for the todo, if it has one.
+	CoverFileID *uuid.UUID `json:"coverFileId"`
 }
 
 // Normalize tidies what was given before anything checks it.
@@ -69,6 +71,8 @@ type TodoCreateInputError struct {
 	Priority *rigerr.FieldError `json:"priority,omitempty"`
 	// When the task is due, or null if it never expires.
 	DueAt *rigerr.FieldError `json:"dueAt,omitempty"`
+	// A picture for the todo, if it has one.
+	CoverFileID *rigerr.FieldError `json:"coverFileId,omitempty"`
 
 	// Entity is a problem with the row as a whole rather than with one field: what
 	// the Entity rule said.
@@ -82,7 +86,7 @@ func (e *TodoCreateInputError) Empty() bool {
 		return true
 	}
 
-	return e.Title == nil && e.Notes == nil && e.IsDone == nil && e.Priority == nil && e.DueAt == nil && e.Entity == nil
+	return e.Title == nil && e.Notes == nil && e.IsDone == nil && e.Priority == nil && e.DueAt == nil && e.CoverFileID == nil && e.Entity == nil
 }
 
 // Error implements error. The sentence is for logs and for a person; the
@@ -103,6 +107,9 @@ func (e *TodoCreateInputError) Error() string {
 	}
 	if e.DueAt != nil {
 		parts = append(parts, "dueAt "+e.DueAt.Error())
+	}
+	if e.CoverFileID != nil {
+		parts = append(parts, "coverFileId "+e.CoverFileID.Error())
 	}
 	if e.Entity != nil {
 		parts = append(parts, e.Entity.Error())
@@ -160,6 +167,8 @@ type TodoUpdateInput struct {
 	Priority patch.Optional[TodoPriority] `json:"priority"`
 	// When the task is due, or null if it never expires.
 	DueAt patch.Nullable[time.Time] `json:"dueAt"`
+	// A picture for the todo, if it has one.
+	CoverFileID patch.Nullable[uuid.UUID] `json:"coverFileId"`
 }
 
 // Normalize tidies the fields this request actually carries.
@@ -211,6 +220,9 @@ func (i TodoUpdateInput) Merged(prev *Todo) Todo {
 	if i.DueAt.Touched() {
 		out.DueAt = i.DueAt.Ptr()
 	}
+	if i.CoverFileID.Touched() {
+		out.CoverFileID = i.CoverFileID.Ptr()
+	}
 
 	return out
 }
@@ -233,6 +245,8 @@ type TodoUpdateInputError struct {
 	Priority *rigerr.FieldError `json:"priority,omitempty"`
 	// When the task is due, or null if it never expires.
 	DueAt *rigerr.FieldError `json:"dueAt,omitempty"`
+	// A picture for the todo, if it has one.
+	CoverFileID *rigerr.FieldError `json:"coverFileId,omitempty"`
 
 	// Entity is a problem with the row as a whole rather than with one field: what
 	// the Entity rule said.
@@ -246,7 +260,7 @@ func (e *TodoUpdateInputError) Empty() bool {
 		return true
 	}
 
-	return e.Title == nil && e.Notes == nil && e.IsDone == nil && e.Priority == nil && e.DueAt == nil && e.Entity == nil
+	return e.Title == nil && e.Notes == nil && e.IsDone == nil && e.Priority == nil && e.DueAt == nil && e.CoverFileID == nil && e.Entity == nil
 }
 
 // Error implements error. The sentence is for logs and for a person; the
@@ -267,6 +281,9 @@ func (e *TodoUpdateInputError) Error() string {
 	}
 	if e.DueAt != nil {
 		parts = append(parts, "dueAt "+e.DueAt.Error())
+	}
+	if e.CoverFileID != nil {
+		parts = append(parts, "coverFileId "+e.CoverFileID.Error())
 	}
 	if e.Entity != nil {
 		parts = append(parts, e.Entity.Error())
@@ -369,6 +386,9 @@ func (c *TodoValidatorContext) PriorityChanged() bool { return c.changed[ColumnT
 // DueAtChanged reports whether this request set due_at.
 func (c *TodoValidatorContext) DueAtChanged() bool { return c.changed[ColumnTodoDueAt] }
 
+// CoverFileIDChanged reports whether this request set cover_file_id.
+func (c *TodoValidatorContext) CoverFileIDChanged() bool { return c.changed[ColumnTodoCoverFileID] }
+
 // TodoCreateValidator is the rules for bringing a Todo into existence: what
 // the schema cannot express.
 //
@@ -391,6 +411,8 @@ type TodoCreateValidator struct {
 	Priority func(ctx context.Context, c *TodoValidatorContext, value TodoPriority) error
 	// When the task is due, or null if it never expires.
 	DueAt func(ctx context.Context, c *TodoValidatorContext, value *time.Time) error
+	// A picture for the todo, if it has one.
+	CoverFileID func(ctx context.Context, c *TodoValidatorContext, value *uuid.UUID) error
 
 	// Entity runs after the per-field hooks, for a rule that is about the row
 	// rather than about one column.
@@ -417,6 +439,8 @@ func (v TodoCreateValidator) RunCreate(ctx context.Context, claims tenancy.Claim
 	c.changed[ColumnTodoPriority] = true
 	c.Values.DueAt = i.DueAt
 	c.changed[ColumnTodoDueAt] = true
+	c.Values.CoverFileID = i.CoverFileID
+	c.changed[ColumnTodoCoverFileID] = true
 
 	failed, err := v.run(ctx, c)
 	if err != nil {
@@ -485,6 +509,15 @@ func (v TodoCreateValidator) run(ctx context.Context, c *TodoValidatorContext) (
 			failed.DueAt = field
 		}
 	}
+	if v.CoverFileID != nil {
+		if err := v.CoverFileID(ctx, c, c.Values.CoverFileID); err != nil {
+			field, ok := rigerr.AsFieldError(err)
+			if !ok {
+				return nil, rigerr.Wrap(err, "validate cover_file_id")
+			}
+			failed.CoverFileID = field
+		}
+	}
 
 	if v.Entity != nil {
 		if err := v.Entity(ctx, c); err != nil {
@@ -524,6 +557,8 @@ type TodoUpdateValidator struct {
 	Priority func(ctx context.Context, c *TodoValidatorContext, value TodoPriority) error
 	// When the task is due, or null if it never expires.
 	DueAt func(ctx context.Context, c *TodoValidatorContext, value *time.Time) error
+	// A picture for the todo, if it has one.
+	CoverFileID func(ctx context.Context, c *TodoValidatorContext, value *uuid.UUID) error
 
 	// Entity runs after the per-field hooks, for a rule that is about the row
 	// rather than about one column.
@@ -546,6 +581,7 @@ func (v TodoUpdateValidator) RunUpdate(ctx context.Context, claims tenancy.Claim
 	c.changed[ColumnTodoIsDone] = i.IsDone.IsSet()
 	c.changed[ColumnTodoPriority] = i.Priority.IsSet()
 	c.changed[ColumnTodoDueAt] = i.DueAt.Touched()
+	c.changed[ColumnTodoCoverFileID] = i.CoverFileID.Touched()
 
 	failed, err := v.run(ctx, c)
 	if err != nil {
@@ -576,6 +612,7 @@ func (v TodoUpdateValidator) RunRestore(ctx context.Context, claims tenancy.Clai
 	c.changed[ColumnTodoIsDone] = true
 	c.changed[ColumnTodoPriority] = true
 	c.changed[ColumnTodoDueAt] = true
+	c.changed[ColumnTodoCoverFileID] = true
 
 	failed, err := v.run(ctx, c)
 	if err != nil {
@@ -642,6 +679,15 @@ func (v TodoUpdateValidator) run(ctx context.Context, c *TodoValidatorContext) (
 				return nil, rigerr.Wrap(err, "validate due_at")
 			}
 			failed.DueAt = field
+		}
+	}
+	if v.CoverFileID != nil {
+		if err := v.CoverFileID(ctx, c, c.Values.CoverFileID); err != nil {
+			field, ok := rigerr.AsFieldError(err)
+			if !ok {
+				return nil, rigerr.Wrap(err, "validate cover_file_id")
+			}
+			failed.CoverFileID = field
 		}
 	}
 

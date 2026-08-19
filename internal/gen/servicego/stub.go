@@ -75,8 +75,17 @@ func (e *emitter) stubFile(res *ir.Resource) (gen.Artifact, error) {
 		"\tfunc (s *Service) Get(ctx context.Context, r " + api + ".Request[…]) (…) { … }\n\n" +
 		"The custom endpoints keep working through the value inside it, so only " +
 		"what you shadow changes.")
-	b.L("func New(repo %s.%sRepository) %s.Default%sService {", store, res.Name, api, res.Name)
-	b.L("return %s.New%sService(repo, &rules{repo: repo})", api, res.Name)
+	// A table with a file column cannot answer its upload routes without a file
+	// service, so the stub takes one rather than leaving somebody to discover
+	// the panic.
+	param, arg := "", ""
+	if hasFiles(res) {
+		param = ", files *" + b.Import(filesModule) + ".Service"
+		arg = ", files"
+	}
+
+	b.L("func New(repo %s.%sRepository%s) %s.Default%sService {", store, res.Name, param, api, res.Name)
+	b.L("return %s.New%sService(repo, &rules{repo: repo}%s)", api, res.Name, arg)
 	b.L("}")
 	b.NL()
 

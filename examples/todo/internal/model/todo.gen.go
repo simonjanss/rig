@@ -50,6 +50,8 @@ type Todo struct {
 	// The source row's last-updated time at the moment this snapshot was taken.
 	// This identifies the version captured, not when the copy was made.
 	SnapshotFromTodoAt *time.Time `json:"snapshotFromTodoAt,omitempty"`
+	// A picture for the todo, if it has one.
+	CoverFileID *uuid.UUID `json:"coverFileId,omitempty"`
 }
 
 // TableTodo is the table this entity is stored in.
@@ -73,7 +75,8 @@ const (
 	ColumnTodoVersionType        = "version_type"
 	ColumnTodoSnapshotFromTodoID = "snapshot_from_todo_id"
 	ColumnTodoSnapshotFromTodoAt = "snapshot_from_todo_at"
+	ColumnTodoCoverFileID        = "cover_file_id"
 )
 
 // TodoColumns is every column, in the order the row is scanned.
-var TodoColumns = []string{"id", "tenant_id", "title", "notes", "is_done", "priority", "due_at", "created_at", "created_by_account_id", "updated_at", "updated_by_account_id", "deleted_at", "deleted_by_account_id", "version_type", "snapshot_from_todo_id", "snapshot_from_todo_at"}
+var TodoColumns = []string{"id", "tenant_id", "title", "notes", "is_done", "priority", "due_at", "created_at", "created_by_account_id", "updated_at", "updated_by_account_id", "deleted_at", "deleted_by_account_id", "version_type", "snapshot_from_todo_id", "snapshot_from_todo_at", "cover_file_id"}

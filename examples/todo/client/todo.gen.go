@@ -49,6 +49,8 @@ type Todo struct {
 	// The source row's last-updated time at the moment this snapshot was taken.
 	// This identifies the version captured, not when the copy was made.
 	SnapshotFromTodoAt *time.Time `json:"snapshotFromTodoAt,omitempty"`
+	// A picture for the todo, if it has one.
+	CoverFileID *uuid.UUID `json:"coverFileId,omitempty"`
 }
 
 // A page of Todos.

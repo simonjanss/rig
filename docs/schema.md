@@ -270,3 +270,56 @@ birthday or for opening hours, and the wrong one for an event.
 - [tables.md](tables.md) — the configuration file that annotates all of this
 - [rig-yaml.md](rig-yaml.md) — where the validation rules are set
 - [diagnostics.md](diagnostics.md) — every code these rules produce
+
+## Files
+
+A file attaches to a row through a column, and the column's name carries the
+role:
+
+```sql
+cover_file_id uuid references rig_file (id)
+```
+
+`<role>_file_id` is the whole declaration. Everything follows from it — the path
+segment `cover-file`, the endpoints, the permission keys `todo.cover_file.read`
+and `todo.cover_file.write`, the Go field, the part on a form — and no
+configuration key can disagree with it, because there is none. This is the same
+kind of fact as `deleted_at` meaning soft-deletable.
+
+Put the tenant inside the key:
+
+```sql
+foreign key (tenant_id, cover_file_id) references rig_file (tenant_id, id)
+```
+
+`references rig_file (id)` alone proves the file exists and says nothing about
+whose it is, so attaching another tenant's file becomes something every hook has
+to remember. The composite form makes it a constraint violation instead. It needs
+`unique (tenant_id, id)` on `rig_file`, which the foundation migration creates.
+
+Three endpoints appear under the row that owns the file:
+
+```
+POST   /api/v1/todos/{id}/cover-file
+GET    /api/v1/todos/{id}/cover-file/{fileId}/{filename}
+DELETE /api/v1/todos/{id}/cover-file
+```
+
+The nesting is what makes them safe rather than what makes them tidy: the handler
+resolves the owning row through the repository before it touches a byte, so you
+cannot upload to a row you cannot read, and an owner-scoped table's files are
+exactly as invisible as its rows.
+
+**A not-null file column has no delete endpoint.** Detaching means clearing the
+column, and a column that cannot be null has nowhere to be cleared to — the row
+goes instead. It also means the create on that table accepts a form as well as a
+JSON body, because the row and its bytes have to be committed together or the
+column could never be written at all.
+
+**Many files is a table, not a key.** A gallery, an attachment list, a set of
+receipts: write the table, give it a file column, and it gets its own file
+endpoints along with everything else an ordinary rig table gets — a list query,
+ordering, captions, soft delete. `examples/todo` has both forms.
+
+Turn it all on with the `files:` block in [rig-yaml.md](rig-yaml.md#files); the
+column does nothing without it.

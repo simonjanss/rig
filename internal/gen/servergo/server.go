@@ -341,8 +341,19 @@ func (e *emitter) helpers(b *gobuf.Buf) {
 		"asking for something it will not get, and telling it so beats silently " +
 		"ignoring half the request.")
 	b.L("func decodeBody(r *%s.Request, into any) error {", httpPkg)
-	b.L("body := %s.LimitReader(r.Body, maxBodyBytes)", ioPkg)
-	b.L("dec := %s.NewDecoder(body)", jsonPkg)
+	b.L("return decodeReader(r.Body, into)")
+	b.L("}")
+	b.NL()
+
+	b.Comment("decodeReader is the decode itself, separated from the request so " +
+		"that a body arriving as one part of a form goes through exactly the " +
+		"same one.\n\n" +
+		"That sharing is the point rather than a tidiness: a multipart create " +
+		"and a JSON create have to refuse the same keys and produce the same " +
+		"field errors, and two decoders would eventually differ about one of " +
+		"them.")
+	b.L("func decodeReader(r %s.Reader, into any) error {", ioPkg)
+	b.L("dec := %s.NewDecoder(%s.LimitReader(r, maxBodyBytes))", jsonPkg, ioPkg)
 	b.L("dec.DisallowUnknownFields()")
 	b.NL()
 	b.L("if err := dec.Decode(into); err != nil {")
@@ -352,6 +363,10 @@ func (e *emitter) helpers(b *gobuf.Buf) {
 	b.L("return nil")
 	b.L("}")
 	b.NL()
+
+	if e.anyRequiredFilePart() {
+		e.hasPartHelper(b)
+	}
 
 	e.paramHelpers(b, httpPkg, errPkg, uuidPkg, strPkg, timePkg)
 }

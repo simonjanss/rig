@@ -58,6 +58,9 @@ Every failure carries a machine-readable code from a closed set of eight:
 | `Conflict` | 409 | Conflicts with the current state of the resource |
 | `UnprocessableEntity` | 422 | Well-formed but failed validation |
 | `RateLimited` | 429 | Retry after the interval in `Retry-After` |
+| `TooLarge` | 413 | The body is larger than this endpoint accepts |
+| `UnsupportedMediaType` | 415 | The body's content type is not one this endpoint takes |
+| `UpgradeRequired` | 426 | Built against an API revision this server no longer serves |
 | `Internal` | 500 | Something went wrong on the server |
 
 ```json

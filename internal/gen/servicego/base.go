@@ -25,6 +25,10 @@ func (e *emitter) baseFile() (gen.Artifact, error) {
 	}
 	e.errorShape(b)
 	e.paginationShape(b)
+	e.fileShapeType(b)
+	if e.anyFileColumn() {
+		e.fileResponseHelper(b)
+	}
 
 	return artifact("api.gen.go", b, gen.Overwrite)
 }

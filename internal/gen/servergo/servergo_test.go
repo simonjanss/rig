@@ -540,3 +540,35 @@ func TestOwnerScopedCodeCompiles(t *testing.T) {
 		gentest.Package{Dir: "api", Artifacts: api},
 	)
 }
+
+// TestFileHandlersCompile builds the three shapes a file column adds to the HTTP
+// layer against the service layer they call.
+//
+// It is the check that matters most for this half. A golden proves the output
+// has not changed and says nothing about whether a handler refers to a service
+// method that exists, or hands a multipart part to something that wanted JSON.
+func TestFileHandlersCompile(t *testing.T) {
+	t.Parallel()
+
+	doc := gentest.LoadDocument(t, filepath.Join("testdata", "files.ir.json"))
+
+	api := gentest.Run(t, servicego.New(), doc, gen.Options{Raw: map[string]any{
+		"package": "api", "model_import": "rigtest/model", "store_import": "rigtest/store",
+	}})
+	api = append(api, gentest.Run(t, servergo.New(), doc, opts())...)
+
+	gentest.MustCompileAll(t,
+		gentest.Package{
+			Dir: "model",
+			Artifacts: gentest.Run(t, modelgo.New(), doc,
+				gen.Options{Raw: map[string]any{"package": "model"}}),
+		},
+		gentest.Package{
+			Dir: "store",
+			Artifacts: gentest.Run(t, persistgo.New(), doc, gen.Options{Raw: map[string]any{
+				"package": "store", "model_import": "rigtest/model",
+			}}),
+		},
+		gentest.Package{Dir: "api", Artifacts: api},
+	)
+}

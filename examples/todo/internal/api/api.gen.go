@@ -12,6 +12,8 @@ import (
 	"context"
 	"time"
 
+	"github.com/google/uuid"
+	"github.com/simonjanss/rig/files"
 	"github.com/simonjanss/rig/runtime/apirev"
 	"github.com/simonjanss/rig/runtime/rigerr"
 	"github.com/simonjanss/rig/runtime/tenancy"
@@ -222,4 +224,43 @@ type Pagination struct {
 	Limit int `json:"limit"`
 	// Total number of rows matching the query, ignoring pagination.
 	Total int64 `json:"total"`
+}
+
+// One uploaded file. Metadata only; the bytes are fetched from Url.
+type RigFile struct {
+	// Identifier of the file.
+	ID uuid.UUID `json:"id"`
+	// Where the file is served from. Stable and unsigned, so it is safe to keep
+	// and to sync and grants nothing on its own: the endpoint behind it still
+	// checks the caller. Null until the upload is finished.
+	URL *string `json:"url,omitempty"`
+	// What the file was called when it arrived. It is for the save dialog, and it
+	// is not a path: if you write the file somewhere, you decide where and you
+	// sanitize what.
+	FileName string `json:"fileName"`
+	// What the bytes were sniffed to be, which is what a download announces. It is
+	// not necessarily what the client claimed on the way up.
+	ContentType string `json:"contentType"`
+	// How large the file is, in bytes.
+	SizeBytes int64 `json:"sizeBytes"`
+}
+
+// newRigFile is the stored file as a client sees it.
+//
+// What is left out is the point of it. The storage key, the checksum and the
+// declared type are the server's bookkeeping, and the storage key is the one
+// that would actually matter — it is what a signed URL is built from, and
+// putting it in a shape a client can reach is the same class of mistake as
+// handing out a password hash.
+func newRigFile(f *files.File) *RigFile {
+	if f == nil {
+		return nil
+	}
+	return &RigFile{
+		ID:          f.ID,
+		URL:         &f.URL,
+		FileName:    f.Name,
+		ContentType: f.ContentType,
+		SizeBytes:   f.Size,
+	}
 }

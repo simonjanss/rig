@@ -2,6 +2,7 @@ package compile
 
 import (
 	"cmp"
+	"net/http"
 	"slices"
 	"strings"
 
@@ -98,7 +99,7 @@ func computePermissions(doc *ir.Document, mode project.PermissionMode) diag.List
 
 			p := ir.Permission{
 				Key:         ep.Permission,
-				Name:        permissionName(res, action),
+				Name:        permissionName(res, ep, action),
 				Description: permissionDoc(res, ep, action),
 				Resource:    res.Name,
 				Action:      action,
@@ -151,6 +152,28 @@ func computePermissions(doc *ir.Document, mode project.PermissionMode) diag.List
 // that difference is the reason somebody wrote a custom endpoint in the first
 // place.
 func actionFor(ep *ir.Endpoint) string {
+	// A file column gets two keys of its own, so that "may edit a profile" and
+	// "may replace its picture" are separable grants.
+	//
+	// Nothing implies them. Folding the write into the resource's own write key
+	// would make the common case one grant, and it would mean a role quietly
+	// gaining the ability to replace an image the day somebody adds a file
+	// column to a table it could already edit. A permission that is implied is a
+	// permission nobody audits. The price is two more rows per file column in
+	// every grant table, and a role that may edit a profile and cannot touch its
+	// picture until someone says so.
+	//
+	// Two rather than three: the delete is a write, because detaching a file and
+	// replacing it are the same decision, and a role trusted to swap somebody's
+	// picture is not meaningfully restrained by being unable to remove it.
+	if ep.File != nil {
+		stem := strings.TrimSuffix(ep.File.Column, "_id")
+		if ep.Method == http.MethodGet {
+			return stem + "." + actionRead
+		}
+		return stem + "." + actionWrite
+	}
+
 	switch ep.Name {
 	case ir.OpGet, ir.OpList, ir.OpSearch, ir.OpListDeleted, ir.OpVersions:
 		return actionRead
@@ -164,7 +187,15 @@ func actionFor(ep *ir.Endpoint) string {
 }
 
 // permissionName is what an administration screen shows.
-func permissionName(res *ir.Resource, action string) string {
+func permissionName(res *ir.Resource, ep *ir.Endpoint, action string) string {
+	if ep.File != nil {
+		verb := "Replace"
+		if strings.HasSuffix(action, "."+actionRead) {
+			verb = "Read"
+		}
+		return verb + " the " + humanRole(*ep.File) + " of " + strings.ToLower(res.Plural)
+	}
+
 	switch action {
 	case actionRead:
 		return "Read " + strings.ToLower(res.Plural)
@@ -187,6 +218,17 @@ func permissionDoc(res *ir.Resource, ep *ir.Endpoint, action string) string {
 	subject := strings.ToLower(res.Plural)
 	if res.Description != "" {
 		subject += " — " + strings.TrimSuffix(res.Description, ".")
+	}
+
+	if ep.File != nil {
+		role := humanRole(*ep.File)
+		if strings.HasSuffix(action, "."+actionRead) {
+			return "Download the " + role + " of " + subject + "."
+		}
+		return "Attach, replace and remove the " + role + " of " + subject + ". " +
+			"Held in addition to " + res.Storage.Table + "." + actionWrite + " rather than " +
+			"implied by it: a role that may edit the row is not automatically a role " +
+			"that may change its " + role + "."
 	}
 
 	switch action {

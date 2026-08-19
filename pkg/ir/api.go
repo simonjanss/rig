@@ -47,6 +47,16 @@ type API struct {
 	// and the client from each carrying their own copy of the answer.
 	Auth *Auth `json:"auth,omitempty"`
 
+	// Files is the file handling this API is served with, or nil for a project
+	// that accepts no uploads.
+	//
+	// Here for the reason [API.Auth] is: a byte cap, a sweep interval and the
+	// list of types served inline are all part of the surface, and a generator
+	// reads them out of the document rather than asking the project what was
+	// configured. That is what keeps the wiring, the documentation and a
+	// client's expectations from each carrying their own copy of the answer.
+	Files *Files `json:"files,omitempty"`
+
 	// Permissions is every permission this API's endpoints require, computed once
 	// at Freeze from the endpoints themselves.
 	//
@@ -73,6 +83,37 @@ type Permission struct {
 	Resource string `json:"resource,omitempty"`
 	// Action is read, write, delete, or the name of a custom endpoint.
 	Action string `json:"action,omitempty"`
+}
+
+// Files is the resolved `files:` block: everything about uploads that is a
+// number or a name rather than a function.
+//
+// Every duration and size here is resolved when the configuration is read, so a
+// zero means somebody wrote a zero rather than meaning "use the default".
+type Files struct {
+	// Enabled says this project accepts uploads at all. It is what makes
+	// server-go write the wiring.
+	Enabled bool `json:"enabled"`
+	// Expose says rig_file is projected as a read-only resource, so its url can
+	// be read and synced.
+	Expose bool `json:"expose,omitempty"`
+	// Backend is where the bytes go: memory or s3.
+	Backend string `json:"backend"`
+
+	// MaxBytes caps one upload. A hard per-file cap and not a quota.
+	MaxBytes int64 `json:"max_bytes"`
+	// InlineTypes are the sniffed types served without an attachment
+	// disposition. Everything else downloads.
+	InlineTypes []string `json:"inline_types,omitempty"`
+
+	// AbandonedAfterSeconds and RestoreWindowSeconds are the sweeper's two
+	// rules, in seconds because a document is JSON and a duration is not.
+	AbandonedAfterSeconds int64 `json:"abandoned_after_seconds"`
+	RestoreWindowSeconds  int64 `json:"restore_window_seconds"`
+
+	// CookieDownloads accepts the session cookie on file GET routes, so a
+	// stored URL works in an img or a download link.
+	CookieDownloads bool `json:"cookie_downloads,omitempty"`
 }
 
 // Origin records why an object exists, so a generator can treat hand-declared
@@ -338,6 +379,17 @@ type Resource struct {
 	Fields    []ResourceField `json:"fields"`
 	Endpoints []Endpoint      `json:"endpoints"`
 
+	// Files are this resource's file columns, in the order they appear on the
+	// table. Each one yields an upload, a download and a delete endpoint, two
+	// permission keys, and a part on the multipart form the create also accepts.
+	//
+	// Resolved once, where the schema is still in scope: recognizing one means
+	// reading the table's foreign keys, and by the time a generator holds a
+	// resource the constraints are gone. A generator that re-derived it from a
+	// field name would be re-deriving the convention the compiler exists to have
+	// already settled.
+	Files []FileColumn `json:"files,omitempty"`
+
 	// Storage is nil for a virtual resource with no table behind it.
 	Storage *ResourceStorage `json:"storage,omitempty"`
 	// Electric is set when the resource exposes a live-sync shape endpoint.
@@ -570,6 +622,14 @@ type Endpoint struct {
 	// everybody's are two grants, which is the whole point of the parameter.
 	WidePermission string `json:"wide_permission,omitempty"`
 
+	// File is the file column this endpoint acts on, set on the three rig
+	// synthesizes per file column and nil on everything else.
+	//
+	// The upload's own [EndpointRequest.FileParts] says what the form carries;
+	// this says which column the bytes end up on, which the download and the
+	// delete need just as much and neither of them has a form.
+	File *FileColumn `json:"file,omitempty"`
+
 	Request   EndpointRequest    `json:"request"`
 	Responses []EndpointResponse `json:"responses"`
 	// Errors are the standard failure statuses this endpoint can return. They
@@ -611,6 +671,42 @@ type EndpointRequest struct {
 	// BodyObject names a whole object as the body, used instead of BodyParams.
 	BodyObject string `json:"body_object,omitempty"`
 }
+
+// FileColumn is one `<role>_file_id` column on a resource: a single file
+// attached to each row, in a named role.
+//
+// The column is the declaration, so everything here is derived from its name
+// and nothing is configurable. It is spelled out rather than left to each
+// generator because five things follow from one column — three endpoints, a
+// form part, two permission keys, a Go field and a path segment — and five
+// derivations of one convention is five places for it to drift.
+type FileColumn struct {
+	// Role is the `<role>` from `<role>_file_id`, in the API's own casing, for
+	// example "profileImage".
+	Role string `json:"role"`
+	// Column is the column itself, for example "profile_image_file_id". It is
+	// what the upload writes and the download reads, and it is the one member
+	// [FilePart] deliberately does not carry.
+	Column string `json:"column"`
+	// Field is the Go field on the row, for example "ProfileImageFileID".
+	Field string `json:"field"`
+	// Part is the multipart part's name, for example "profileImageFile".
+	Part string `json:"part"`
+	// Segment is the path segment the file endpoints sit under, for example
+	// "profile-image-file". It is derived here so the router, the client and a
+	// specification cannot spell it three ways.
+	Segment string `json:"segment"`
+	// Required says the column cannot be null.
+	Required bool `json:"required,omitempty"`
+}
+
+// GoName is the column's Go name without the identifier suffix, for example
+// "ProfileImageFile" out of "ProfileImageFileID".
+//
+// It is the stem every generated identifier for this column is built from —
+// UploadProfileImageFile, DownloadProfileImageFile, the member on the create's
+// files struct — so that four generators do not each decide where to cut.
+func (f FileColumn) GoName() string { return strings.TrimSuffix(f.Field, "ID") }
 
 // FilePart is one file a multipart request carries.
 type FilePart struct {

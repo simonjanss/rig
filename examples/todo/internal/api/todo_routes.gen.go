@@ -5,9 +5,13 @@
 package api
 
 import (
+	"errors"
+	"io"
 	"net/http"
 
 	"github.com/simonjanss/rig/examples/todo/internal/model"
+	"github.com/simonjanss/rig/files"
+	"github.com/simonjanss/rig/files/filehttp"
 )
 
 // registerTodo mounts Todo's routes.
@@ -24,6 +28,9 @@ func registerTodo(mux *http.ServeMux, s Server, svc TodoService) {
 	mux.HandleFunc("POST /api/v1/todos/{id}/_restore", handleRestoreTodo(s, svc))
 	mux.HandleFunc("POST /api/v1/todos/{id}/_revert", handleRevertTodo(s, svc))
 	mux.HandleFunc("GET /api/v1/todos/{id}/_versions", handleVersionsOfTodo(s, svc))
+	mux.HandleFunc("DELETE /api/v1/todos/{id}/cover-file", handleDeleteTodoCoverFile(s, svc))
+	mux.HandleFunc("POST /api/v1/todos/{id}/cover-file", handleUploadTodoCoverFile(s, svc))
+	mux.HandleFunc("GET /api/v1/todos/{id}/cover-file/{fileId}/{filename}", handleDownloadTodoCoverFile(s, svc))
 }
 
 // handleListTodos serves GET /api/v1/todos.
@@ -72,14 +79,61 @@ func handleCreateTodo(s Server, svc TodoService) http.HandlerFunc {
 		}
 
 		var body model.TodoCreateInput
-		if err := decodeBody(r, &body); err != nil {
+		var pending []*files.Pending
+		if filehttp.IsMultipart(r) {
+			filehttp.Deadline(w, filehttp.DefaultDeadline)
+			form, err := filehttp.ReadForm(r)
+			if err != nil {
+				fail(s, w, r, rc, err)
+				return
+			}
+
+			for {
+				part, err := form.Next()
+				if errors.Is(err, io.EOF) {
+					break
+				}
+				if err != nil {
+					fail(s, w, r, rc, err)
+					return
+				}
+
+				switch part.Name {
+				case filehttp.JSONPart:
+					// The same body the JSON form carries, through the same decoder, so an unknown
+					// key is refused here exactly as it is there and a 422 comes back with the
+					// same field errors.
+					if err := decodeReader(part.Body, &body); err != nil {
+						fail(s, w, r, rc, err)
+						return
+					}
+				case "coverFile":
+					p, err := svc.Files().Prepare(ctx, part.Name, files.AttachRequest{
+						TenantID: claims.TenantID,
+						Upload:   part.Upload(),
+					})
+					if err != nil {
+						fail(s, w, r, rc, err)
+						return
+					}
+					pending = append(pending, p)
+				default:
+					// Refused rather than skipped, for the reason an unknown JSON key is refused:
+					// a client that misspelled a part name has uploaded a file into nowhere, and a
+					// 201 would tell it that worked.
+					fail(s, w, r, rc, filehttp.ErrUnknownPart(part.Name))
+					return
+				}
+			}
+
+		} else if err := decodeBody(r, &body); err != nil {
 			fail(s, w, r, rc, err)
 			return
 		}
 
 		req := NewRequest(claims, struct{}{}, struct{}{}, body, rc)
 
-		out, err := svc.Create(ctx, req)
+		out, err := svc.Create(ctx, req, pending)
 		if err != nil {
 			fail(s, w, r, rc, err)
 			return
@@ -425,5 +479,131 @@ func handleVersionsOfTodo(s Server, svc TodoService) http.HandlerFunc {
 			return
 		}
 		writeJSON(w, http.StatusOK, out)
+	}
+}
+
+// handleDeleteTodoCoverFile serves DELETE /api/v1/todos/{id}/cover-file.
+//
+// Remove a Todo's cover.
+//
+// The column is cleared and the file is retired. Its bytes outlive the delete
+// for as long as the file restore window, because a restore inside that window
+// has to hand back a row pointing at something.
+func handleDeleteTodoCoverFile(s Server, svc TodoService) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		ctx, claims, rc, ok := prepare(s, w, r)
+		if !ok {
+			return
+		}
+
+		var path TodoDeleteCoverFilePath
+		idParam, err := pathUUID(r, "id")
+		if err != nil {
+			fail(s, w, r, rc, err)
+			return
+		}
+		path.ID = idParam
+
+		req := NewRequest(claims, path, struct{}{}, struct{}{}, rc)
+
+		if err := svc.DeleteCoverFile(ctx, req); err != nil {
+			fail(s, w, r, rc, err)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
+// handleUploadTodoCoverFile serves POST /api/v1/todos/{id}/cover-file.
+//
+// Attach a file to a Todo as its cover.
+//
+// The form carries one part, named coverFile. Nothing else in it is accepted.
+//
+// The type is sniffed from the bytes rather than taken from what the request
+// claimed, and the sniffed type is what is stored and what a download
+// announces. A file replacing an existing one does not delete it: a row that
+// keeps its previous versions still points at the old file from every one of
+// them.
+func handleUploadTodoCoverFile(s Server, svc TodoService) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		ctx, claims, rc, ok := prepare(s, w, r)
+		if !ok {
+			return
+		}
+
+		var path TodoUploadCoverFilePath
+		idParam, err := pathUUID(r, "id")
+		if err != nil {
+			fail(s, w, r, rc, err)
+			return
+		}
+		path.ID = idParam
+
+		filehttp.Deadline(w, filehttp.DefaultDeadline)
+		body, err := filehttp.OnePart(r, "coverFile")
+		if err != nil {
+			fail(s, w, r, rc, err)
+			return
+		}
+
+		req := NewRequest(claims, path, struct{}{}, body, rc)
+		out, err := svc.UploadCoverFile(ctx, req)
+		if err != nil {
+			fail(s, w, r, rc, err)
+			return
+		}
+		writeJSON(w, http.StatusCreated, out)
+	}
+}
+
+// handleDownloadTodoCoverFile serves GET
+// /api/v1/todos/{id}/cover-file/{fileId}/{filename}.
+//
+// Fetch a Todo's cover.
+//
+// Answers range and conditional requests, so a resumed download does not start
+// over and a media element can seek.
+func handleDownloadTodoCoverFile(s Server, svc TodoService) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		ctx, claims, rc, ok := prepare(s, w, r)
+		if !ok {
+			return
+		}
+
+		var path TodoDownloadCoverFilePath
+		idParam, err := pathUUID(r, "id")
+		if err != nil {
+			fail(s, w, r, rc, err)
+			return
+		}
+		path.ID = idParam
+		fileIDParam, err := pathUUID(r, "fileId")
+		if err != nil {
+			fail(s, w, r, rc, err)
+			return
+		}
+		path.FileID = fileIDParam
+		filenameParam, err := pathString(r, "filename")
+		if err != nil {
+			fail(s, w, r, rc, err)
+			return
+		}
+		path.Filename = filenameParam
+
+		filehttp.Deadline(w, filehttp.DefaultDeadline)
+		req := NewRequest(claims, path, struct{}{}, struct{}{}, rc)
+
+		content, err := svc.DownloadCoverFile(ctx, req)
+		if err != nil {
+			fail(s, w, r, rc, err)
+			return
+		}
+		defer content.Body.Close()
+
+		// ServeContent from here, so a range request and a conditional request are
+		// answered rather than ignored: a resumed download does not start over and a
+		// media element can seek.
+		filehttp.Serve(w, r, content, svc.Files().InlineTypes())
 	}
 }

@@ -19,6 +19,8 @@ columns:
     comment: How urgently the task wants attention.
   due_at:
     comment: When the task is due, or null if it never expires.
+  cover_file_id:
+    comment: A picture for the todo, if it has one.
 
 enums:
   todo_priority:
@@ -74,4 +76,3 @@ endpoints:
       - status: 409
         body_object: Error
         description: The task was already done.
-
