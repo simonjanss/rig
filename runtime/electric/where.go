@@ -28,10 +28,16 @@ func (w *Where) NotEq(column string, value string) *Where {
 	return w.binary(column, "<>", value)
 }
 
-// Gt, Gte, Lt, and Lte compare.
-func (w *Where) Gt(column, value string) *Where  { return w.binary(column, ">", value) }
+// Gt adds `column > $n`.
+func (w *Where) Gt(column, value string) *Where { return w.binary(column, ">", value) }
+
+// Gte adds `column >= $n`.
 func (w *Where) Gte(column, value string) *Where { return w.binary(column, ">=", value) }
-func (w *Where) Lt(column, value string) *Where  { return w.binary(column, "<", value) }
+
+// Lt adds `column < $n`.
+func (w *Where) Lt(column, value string) *Where { return w.binary(column, "<", value) }
+
+// Lte adds `column <= $n`.
 func (w *Where) Lte(column, value string) *Where { return w.binary(column, "<=", value) }
 
 // In adds `column IN ($a, $b, ...)`.

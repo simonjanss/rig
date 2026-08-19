@@ -21,6 +21,10 @@ import (
 // Op is a comparison.
 type Op string
 
+// The operators, spelled the way they go into the SQL. Two are not quite what
+// their names say: OpLike and OpNotLike render as ILIKE, because a filter a
+// person typed into a search box is not a statement about letter case, and the
+// null checks take no value at all.
 const (
 	OpEq      Op = "="
 	OpNe      Op = "<>"
@@ -146,6 +150,9 @@ func NotNull(column string) Cond { return Cond{Column: column, Op: OpNotNull} }
 // Group is a set of conditions combined with AND or OR, plus nested groups.
 // Nesting is what lets the two be mixed to any depth.
 type Group struct {
+	// Or joins this group's members with OR instead of AND. It applies to the
+	// group, not to a member, which is why mixing the two needs a nested group
+	// rather than a flag per condition.
 	Or     bool
 	Conds  []Cond
 	Groups []Group

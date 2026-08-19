@@ -42,6 +42,8 @@ type Error struct {
 	Body string
 }
 
+// Error is the code and the message, prefixed with "rig: " so that a failure
+// from the server is distinguishable at a glance from one the transport had.
 func (e *Error) Error() string {
 	var b strings.Builder
 	b.WriteString("rig: ")
