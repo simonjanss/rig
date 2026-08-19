@@ -111,6 +111,8 @@ type VerifyEmailRequest struct {
 // RegisterRequest is the body of POST <base>/register, where a stranger creates
 // an account that belongs to no tenant yet.
 type RegisterRequest struct {
+	// EmailAddress is the identity. It is what a second registration with the
+	// same address collides with, and what verification is sent to.
 	EmailAddress string `json:"emailAddress"`
 	DisplayName  string `json:"displayName"`
 	Password     string `json:"password"`
@@ -153,13 +155,22 @@ type CreateTenantRequest struct {
 
 // InvitationView is one invitation into the caller's tenant, seen by whoever
 // administers it.
+//
+// It carries no token, for the same reason [InvitationToMeView] does not: the
+// token is the credential that redeems the invitation, and an administrator who
+// can list invitations is not thereby somebody who can accept one on another
+// person's behalf.
 type InvitationView struct {
 	ID           uuid.UUID `json:"id"`
 	EmailAddress string    `json:"emailAddress"`
 	DisplayName  string    `json:"displayName"`
-	Role         string    `json:"role"`
-	CreatedAt    time.Time `json:"createdAt"`
-	ExpiresAt    time.Time `json:"expiresAt"`
+	// Role is the role the invitation grants on acceptance, not one the invited
+	// person holds yet.
+	Role      string    `json:"role"`
+	CreatedAt time.Time `json:"createdAt"`
+	// ExpiresAt is when the token stops working. A listed invitation past it is
+	// history, not something still waiting to be accepted.
+	ExpiresAt time.Time `json:"expiresAt"`
 }
 
 // InvitationToMeView is one invitation waiting for the caller, seen by the person
@@ -225,14 +236,20 @@ type ProvisionRequest struct {
 // the whole row: an account's audit trail is administration, and this answers "it
 // exists now".
 type AccountView struct {
+	// ID names the account — the person inside this tenant. It is not the
+	// identity: somebody in two tenants has one identity and two accounts, and
+	// this is the one that was just created.
 	ID           uuid.UUID `json:"id"`
 	TenantID     uuid.UUID `json:"tenantId"`
 	EmailAddress string    `json:"emailAddress"`
 	DisplayName  string    `json:"displayName"`
-	Kind         string    `json:"kind"`
-	Role         string    `json:"role"`
-	TimeZone     string    `json:"timeZone,omitempty"`
-	CreatedAt    time.Time `json:"createdAt"`
+	// Kind and Role are the values the database stores, as strings, so that a
+	// client sends back the same words it was given.
+	Kind string `json:"kind"`
+	Role string `json:"role"`
+	// TimeZone is an IANA name, for example Europe/Stockholm. Empty means UTC.
+	TimeZone  string    `json:"timeZone,omitempty"`
+	CreatedAt time.Time `json:"createdAt"`
 }
 
 // APIKeyView is one key, without the secret — which nothing stored can produce

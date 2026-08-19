@@ -15,6 +15,10 @@ import (
 // handler cannot invent a status a client has not been told about.
 type Code string
 
+// The codes. Each one maps to a status through [Code.HTTPStatus], and adding
+// one here without a case there is what the default arm is for — an unmapped
+// code is a 500 rather than a compile error, so the two are kept in step by
+// reading them together.
 const (
 	CodeBadRequest          Code = "BadRequest"
 	CodeUnauthorized        Code = "Unauthorized"
@@ -81,6 +85,9 @@ type Error struct {
 	Err error
 }
 
+// Error is the code, the message, and the cause — everything, because this is
+// for a log. What a client sees is assembled from [Error.Code] and
+// [Error.Message] alone.
 func (e *Error) Error() string {
 	if e.Err != nil {
 		return fmt.Sprintf("%s: %s: %v", e.Code, e.Message, e.Err)
@@ -88,6 +95,7 @@ func (e *Error) Error() string {
 	return fmt.Sprintf("%s: %s", e.Code, e.Message)
 }
 
+// Unwrap returns the underlying cause, so errors.Is and errors.As reach it.
 func (e *Error) Unwrap() error { return e.Err }
 
 // HTTPStatus is the status this error should be returned as.

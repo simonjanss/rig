@@ -12,6 +12,10 @@ cannot hold, under [What you decide](#what-you-decide). `rig generate` writes th
 assembly between them, into the same package as your routes and handlers, so the
 lifetimes the documentation quotes are the lifetimes the server enforces.
 
+New to rig? [concepts.md](concepts.md) and [tutorial.md](tutorial.md) come first;
+this page assumes you have an application already. The rest of the documentation
+is indexed in [README.md](README.md).
+
 ---
 
 ## The four credentials
@@ -556,23 +560,53 @@ auth:
 
   trusted_proxies: [10.0.0.0/8]        # empty believes no X-Forwarded-For
 
+  # Foundation tables to generate a model, a repository and an API for anyway —
+  # for an administration screen listing the people in a tenant, most often. It
+  # changes nothing about authentication: rig/auth still reaches these tables
+  # through its own queries, and a generated repository beside them is a second
+  # door into the same rows.
+  expose: [rig_account]
+
   oauth:
     base_url: https://app.example.com  # a provider compares this exactly
     base_url_env: BASE_URL             # and the environment gets the last word
+    origin_from_host: false            # or derive it per request, see below
     signing_key_env: OAUTH_SIGNING_KEY # >= 32 bytes, the same in every replica
     state_ttl: 10m
     allow_provisioning: false
     allowed_return_to: [https://app.example.com]
+    insecure: false                    # never set this in a deployment
     providers:
       - name: google                   # GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET
       - name: microsoft
         required: true                 # refuse to start without its credentials
+        client_id_env: MS_ID           # when the defaulted names do not suit
+        client_secret_env: MS_SECRET
+        tenant_env: MICROSOFT_TENANT   # Microsoft's tenant, not rig's
 ```
 
 A client secret is never in the file. The configuration names the environment
 variable and the generated code reads it, which is also what lets one binary
 offer Google in a deployment and nothing at all on a laptop: a provider whose
 pair is absent is skipped rather than mounted broken, unless it says `required`.
+
+`client_id_env` and `client_secret_env` default to the provider's name in upper
+case, so `- name: google` already reads `GOOGLE_CLIENT_ID` and
+`GOOGLE_CLIENT_SECRET` and most projects never set either. `tenant_env` is
+Microsoft's own idea of a tenant, which has nothing to do with rig's: `common`
+accepts any account, `organizations` excludes personal ones, and a directory id
+restricts sign-in to one organization.
+
+`origin_from_host` derives the callback origin from each request's `Host`
+instead of from `base_url`. It is what an application serving a tenant per
+subdomain needs: the state cookie carrying the PKCE verifier is set on the host
+the sign-in started at, and a browser will not send it to a sibling subdomain —
+so the callback URL is per host, and every one of them has to be registered with
+the provider.
+
+`insecure` allows that state cookie over plain HTTP, because a browser refuses a
+`__Host-` prefixed cookie without TLS and a laptop rarely has any. It is for
+local development and nowhere else.
 
 There is no generator to add. `server-go` already writes your API package, and
 `rig generate` writes the assembly into it as one more file — `auth.gen.go`,

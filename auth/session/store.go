@@ -21,6 +21,11 @@ const (
 // Client is what kind of thing holds the session.
 type Client string
 
+// The clients. The set is closed because the column is a Postgres enum: a value
+// that is not one of these is rejected by the database rather than stored, which
+// is why [Manager.Issue] defaults an unstated client instead of passing it
+// through. What a session is allowed to do does not depend on this — it is what
+// a person revoking a session from a list is reading to recognise it by.
 const (
 	ClientWeb     Client = "Web"
 	ClientMobile  Client = "Mobile"

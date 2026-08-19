@@ -12,7 +12,11 @@ import "errors"
 // rollout as a crashed container in every dashboard that counts them.
 type ShutdownError struct{ Err error }
 
+// Error prefixes the cause with "shutdown: ", which is the only thing that
+// distinguishes it in a log from the startup failure it is not.
 func (e *ShutdownError) Error() string { return "shutdown: " + e.Err.Error() }
+
+// Unwrap returns what would not close, so errors.Is and errors.As reach it.
 func (e *ShutdownError) Unwrap() error { return e.Err }
 
 // Unclean reports whether err is only about a shutdown that did not go well.

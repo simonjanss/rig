@@ -8,6 +8,12 @@ GO       ?= go
 # run by `make examples`, which brings each example's own database up first.
 CORE_MODULES    := . ./runtime ./auth ./files ./migrate ./rigclient
 EXAMPLE_MODULES := ./examples/todo ./examples/fantasyfootball ./examples/auth ./examples/auth_oauth ./examples/sdk
+
+# The core modules less the root: the ones a generated application imports, so
+# their godoc is the documentation for a Go surface somebody depends on rather
+# than commentary on it. That is why `godoc-check` runs over these four and not
+# over `internal/`, `pkg/ir` or `pkg/gen`, which are nobody else's dependency.
+PUBLIC_MODULES  := ./runtime ./auth ./migrate ./rigclient
 MODULES         := $(CORE_MODULES) $(EXAMPLE_MODULES)
 EXAMPLES        := todo fantasyfootball auth auth_oauth
 
@@ -36,7 +42,7 @@ help:
 ##        This is what the pre-push hook runs. The last two need Docker, and
 ##        `deps` rewrites go.mod/go.sum before comparing, so run it on a clean
 ##        tree or it will report your own work in progress back to you.
-check: fmt-check vet build test deps lint vulncheck test-docker examples
+check: fmt-check vet godoc-check build test deps lint vulncheck test-docker examples
 
 ## hooks: install the repository's git hooks into this clone
 ##        Cloning does not bring hooks with it, so this is opt-in and has to be
@@ -87,6 +93,14 @@ update-golden:
 vet:
 	$(each) $(GO) vet ./...) || exit 1; done
 
+## godoc-check: fail on an exported symbol with no doc comment
+##              Only the modules somebody else imports: their godoc is the
+##              documentation for their Go surface, and there is no other.
+##              Presence, not form — what a comment says is a reviewer's
+##              question, which is why ST1000 and ST1020-ST1022 stay off.
+godoc-check:
+	@$(GO) run ./internal/godoccheck $(PUBLIC_MODULES)
+
 ## fmt: gofmt every module
 fmt:
 	$(each) $(GO) fmt ./...) || exit 1; done
@@ -130,4 +144,4 @@ vulncheck:
 	@GOBIN=$(CURDIR)/bin $(GO) install golang.org/x/vuln/cmd/govulncheck@$(GOVULNCHECK_VERSION)
 	$(eachcore) $(CURDIR)/bin/govulncheck ./...) || exit 1; done
 
-.PHONY: help check hooks build test test-docker examples update-schema update-golden vet fmt fmt-check tidy deps lint vulncheck
+.PHONY: help check hooks build test test-docker examples update-schema update-golden vet godoc-check fmt fmt-check tidy deps lint vulncheck

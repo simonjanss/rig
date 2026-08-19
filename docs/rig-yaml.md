@@ -1,0 +1,363 @@
+# rig.yaml
+
+The project file. It marks the root of a rig project and configures everything
+that is not per-table.
+
+rig commands work from anywhere inside your project — discovery walks up from the
+working directory until it finds this file. Every path in it resolves relative to
+**the file's own directory**, not to where you ran the command, so the same
+configuration means the same thing wherever it is run from.
+
+Your editor can complete and validate it. `rig init` writes the directive, and
+`rig schema` writes the file it points at:
+
+```yaml
+# yaml-language-server: $schema=.rig/rig.schema.json
+version: 1
+```
+
+That is the same schema `rig validate` uses, so what your editor accepts and
+what rig accepts cannot drift apart.
+
+A minimal file is short — everything below has a default:
+
+```yaml
+version: 1
+
+project:
+  name: todo
+  module: github.com/you/todo
+```
+
+---
+
+## `project`
+
+Required. Identity of the application.
+
+```yaml
+project:
+  name: todo
+  module: github.com/you/todo
+```
+
+| Key | |
+|---|---|
+| `name` | Short name of the application. Also the default for `api.name` and the container name. |
+| `module` | Go module path. Every generated import path is built from it, so getting it wrong means generated code that does not compile. |
+
+---
+
+## `layout`
+
+Where a table's configuration file and your service code live.
+
+```yaml
+layout:
+  table_dir: services/{table}
+  config_file: "{table_dir}/{table}.yaml"
+```
+
+| Key | Default |
+|---|---|
+| `table_dir` | `services/{table}` |
+| `config_file` | `{table_dir}/{table}.yaml` |
+
+Templates take `{table}` for the snake_case name, `{Table}` for PascalCase, and
+`{tables}` for the plural. One of the two keys has to name a table somewhere,
+or every table would share a single configuration file.
+
+The default puts a table's configuration next to the service code that
+implements it, so everything about one table is in one directory. A flat layout
+is a one-line change:
+
+```yaml
+layout:
+  config_file: rig/{table}.yaml
+```
+
+---
+
+## `api`
+
+The shape of the generated HTTP surface.
+
+```yaml
+api:
+  version: v1
+  base_path: /api/v1
+  permissions: derived
+```
+
+| Key | Default | |
+|---|---|---|
+| `name` | `project.name` | Used in documentation and generated type prefixes. |
+| `version` | `v1` | Version segment. |
+| `base_path` | `/api/{version}` | Prefix every route sits under. |
+| `description` | — | What this API is for. |
+| `permissions` | `derived` | `derived` or `none`. See below. |
+| `search_method` | `both` | `query`, `post`, or `both`. |
+
+### `permissions`
+
+**`derived`** — the default — gives every endpoint a permission taken from its
+resource and operation (`todo.read`, `todo.write`, `todo.delete`) and generates
+the check. An authenticated caller holding no grants then reaches nothing.
+
+That is the right posture, and it is a real behaviour change for a project that
+had no authorization: turn it on and every request starts failing until somebody
+is granted something.
+
+**`none`** generates no checks at all. It is for a project with no authorization
+— a demonstration, or an API sitting behind something else that does the
+deciding. It is deliberately the thing you have to write down, because being
+unprotected should be a decision somebody made rather than a default nobody
+noticed.
+
+`public:` on a resource or an endpoint is the per-endpoint escape hatch, and
+works either way.
+
+### `search_method`
+
+`Search` is a read with a body, so `QUERY` is the correct method for it. Some
+proxies and CDNs still reject methods they do not recognize, so rig also exposes
+it as `POST` to a `/_search` sub-path.
+
+`both` — the default — offers `QUERY` with the `POST` alias. `query` or `post`
+picks one.
+
+---
+
+## `database`
+
+Where rig runs your migrations and reads your schema from.
+
+With no `url`, rig starts a throwaway container, applies the migrations, reads
+the schema back, and leaves the container running for the next command.
+
+```yaml
+database:
+  image: postgres:17-alpine
+  port: 55440
+```
+
+| Key | Default | |
+|---|---|---|
+| `image` | `postgres:17-alpine` | Container image. |
+| `container_name` | `{project.name}-db` | |
+| `port` | `55432` | Host port. Set it explicitly if you run more than one rig project. |
+| `name` | `rig` | Database name. |
+| `user` | `rig` | |
+| `password` | `rig` | This is a local throwaway database. Do not put a real secret here. |
+| `schema` | `public` | Postgres schema to read. |
+| `url` | — | Connection URL of a database you manage. Set it and no container is started. |
+
+Set `url` to point at a database you manage instead — which is what CI does,
+where a service container is already running and starting another one would be
+wasteful.
+
+A `url` you wrote is used exactly as written. rig does not append parameters to
+it, because quietly editing a connection string is a good way to break one that
+already carries its own.
+
+---
+
+## `migrations`
+
+```yaml
+migrations:
+  dir: migrations
+```
+
+| Key | Default | |
+|---|---|---|
+| `dir` | `migrations` | Directory holding your goose migration files. |
+| `table` | `rig_migrations` | The bookkeeping table. |
+
+`rig db up` and a binary migrating itself have to agree about which migrations
+have run, so a project that changes `table` passes the same name to
+`migrate.Options` — two bookkeeping tables mean the second reader thinks nothing
+has been applied.
+
+---
+
+## `naming`
+
+How database names become Go and JSON names.
+
+```yaml
+naming:
+  json_case: camel
+  initialisms: [SCB, ACME]
+  plurals:
+    person: people
+```
+
+| Key | Default | |
+|---|---|---|
+| `json_case` | `camel` | `camel`, `pascal`, or `snake`. The shape of generated JSON keys. |
+| `initialisms` | — | Extra acronyms that stay uppercase in Go identifiers. Added to the built-in list. |
+| `plurals` | — | Plural overrides keyed by table name, for the words English inflection gets wrong. |
+
+---
+
+## `validate`
+
+The severity of each convention rule. Every value is `off`, `warn`, or `error`.
+
+```yaml
+validate:
+  unmentioned_column: warn
+  missing_comment: error
+  fk_needs_index: error
+  tenant_id_leading_index: error
+  boolean_prefix: warn
+```
+
+| Key | What it catches |
+|---|---|
+| `unmentioned_column` | A column exists in the database but is not mentioned in its table configuration |
+| `missing_comment` | A table or column has no comment |
+| `fk_needs_index` | A foreign-key column is not covered by an index |
+| `tenant_id_leading_index` | No index leads with the tenant column |
+| `boolean_prefix` | A boolean column does not read as a predicate |
+| `timestamp_suffix` | A timestamp column is not named `_at`, or an `_at` column is not a `timestamptz` |
+| `date_suffix` | A date column is not named `_date`, or a `_date` column is not a `date` |
+| `fk_naming` | A foreign-key column is not named after the table it references |
+| `cascade_delete` | A foreign key declares `ON DELETE CASCADE` |
+| `migration_filename` | A migration file is not named `NNNNN_snake_case.sql` |
+
+Structural rules are not listed here. A schema that breaks one of those — no
+primary key, a partial snapshot triple — cannot be generated from at all, so
+there is no severity to set.
+
+`rig validate --strict` treats every warning as a failure, which is what you
+want in CI. A warning nobody ever fails on is a warning nobody ever fixes.
+
+---
+
+## `generators`
+
+Which generators to run, in order, and how to configure each.
+
+```yaml
+generators:
+  - name: model-go
+    out_dir: internal/model
+    options:
+      package: model
+
+  - name: persist-go
+    out_dir: internal/store
+    options:
+      package: store
+      model_import: github.com/you/todo/internal/model
+```
+
+| Key | |
+|---|---|
+| `name` | A registered generator name. `rig generators` lists them. |
+| `out_dir` | Output directory, relative to the project root. |
+| `options` | Generator-specific. Each generator publishes its own schema for this block. |
+
+Order matters only in that the model must be generated before the layers that
+import it, which is why `rig init` lists it first.
+
+See [generators.md](generators.md) for what each one accepts.
+
+---
+
+## `auth`
+
+The authentication foundation: sessions, API keys, OAuth, rate limits, password
+policy. It is off by default, and large enough to have its own page.
+
+```yaml
+auth:
+  enabled: true
+  allow_registration: true
+  tenant:
+    from: [host]
+```
+
+Everything with a fixed answer lives here rather than in a Go literal, because
+the generated documentation and the client libraries read this file: a token
+lifetime written in Go is a lifetime nothing else can quote.
+
+See **[auth.md](auth.md)** for the whole block.
+
+Two keys from it are worth knowing even if you never turn authentication on,
+because they affect code generation:
+
+| Key | |
+|---|---|
+| `expose` | Foundation tables (`rig_account`, …) to generate a model, repository, and API for anyway — for an administration screen. |
+| `own` | Generate for every foundation table, for a project that has forked the schema and no longer imports `rig/auth`. A one-way door. |
+
+---
+
+## The whole file
+
+From [examples/todo](../examples/todo/rig.yaml), lightly trimmed:
+
+```yaml
+# yaml-language-server: $schema=.rig/rig.schema.json
+version: 1
+
+project:
+  name: todo
+  module: github.com/simonjanss/rig/examples/todo
+
+api:
+  version: v1
+  base_path: /api/v1
+  permissions: none
+
+database:
+  image: postgres:17-alpine
+  port: 55440
+
+layout:
+  table_dir: services/{table}
+  config_file: "{table_dir}/{table}.yaml"
+
+validate:
+  unmentioned_column: warn
+  missing_comment: error
+  fk_needs_index: error
+  tenant_id_leading_index: error
+  boolean_prefix: warn
+
+generators:
+  - name: model-go
+    out_dir: internal/model
+    options:
+      package: model
+
+  - name: persist-go
+    out_dir: internal/store
+    options:
+      package: store
+      model_import: github.com/simonjanss/rig/examples/todo/internal/model
+
+  - name: service-go
+    out_dir: internal/api
+    options:
+      package: api
+      model_import: github.com/simonjanss/rig/examples/todo/internal/model
+      store_import: github.com/simonjanss/rig/examples/todo/internal/store
+      api_import: github.com/simonjanss/rig/examples/todo/internal/api
+      stub_dir: services/{table}
+
+  - name: server-go
+    out_dir: internal/api
+    options:
+      package: api
+      model_import: github.com/simonjanss/rig/examples/todo/internal/model
+```
+
+## Next
+
+- [tables.md](tables.md) — the per-table file
+- [generators.md](generators.md) — what each generator's `options` accepts
+- [auth.md](auth.md) — the `auth:` block
