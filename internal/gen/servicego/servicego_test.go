@@ -852,3 +852,18 @@ func TestATableThatIsNotOwnerScopedGetsNoScopeHelper(t *testing.T) {
 		t.Error("readScope was emitted for a project with no owner-scoped table")
 	}
 }
+
+// TestFileEndpointsCompile is the check that matters most for the file half:
+// three methods per column, a create that commits a row and its bytes together,
+// and a conversion to the shape a client sees — none of which a golden would
+// notice was referring to a method that does not exist.
+func TestFileEndpointsCompile(t *testing.T) {
+	t.Parallel()
+
+	doc := gentest.LoadDocument(t, filepath.Join("testdata", "files.ir.json"))
+
+	gentest.MustCompileAll(t, layers(t, doc, gentest.Package{
+		Dir:       "api",
+		Artifacts: gentest.Run(t, servicego.New(), doc, opts()),
+	})...)
+}

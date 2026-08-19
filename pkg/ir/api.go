@@ -47,6 +47,16 @@ type API struct {
 	// and the client from each carrying their own copy of the answer.
 	Auth *Auth `json:"auth,omitempty"`
 
+	// Files is the file handling this API is served with, or nil for a project
+	// that accepts no uploads.
+	//
+	// Here for the reason [API.Auth] is: a byte cap, a sweep interval and the
+	// list of types served inline are all part of the surface, and a generator
+	// reads them out of the document rather than asking the project what was
+	// configured. That is what keeps the wiring, the documentation and a
+	// client's expectations from each carrying their own copy of the answer.
+	Files *Files `json:"files,omitempty"`
+
 	// Permissions is every permission this API's endpoints require, computed once
 	// at Freeze from the endpoints themselves.
 	//
@@ -73,6 +83,37 @@ type Permission struct {
 	Resource string `json:"resource,omitempty"`
 	// Action is read, write, delete, or the name of a custom endpoint.
 	Action string `json:"action,omitempty"`
+}
+
+// Files is the resolved `files:` block: everything about uploads that is a
+// number or a name rather than a function.
+//
+// Every duration and size here is resolved when the configuration is read, so a
+// zero means somebody wrote a zero rather than meaning "use the default".
+type Files struct {
+	// Enabled says this project accepts uploads at all. It is what makes
+	// server-go write the wiring.
+	Enabled bool `json:"enabled"`
+	// Expose says rig_file is projected as a read-only resource, so its url can
+	// be read and synced.
+	Expose bool `json:"expose,omitempty"`
+	// Backend is where the bytes go: memory or s3.
+	Backend string `json:"backend"`
+
+	// MaxBytes caps one upload. A hard per-file cap and not a quota.
+	MaxBytes int64 `json:"max_bytes"`
+	// InlineTypes are the sniffed types served without an attachment
+	// disposition. Everything else downloads.
+	InlineTypes []string `json:"inline_types,omitempty"`
+
+	// AbandonedAfterSeconds and RestoreWindowSeconds are the sweeper's two
+	// rules, in seconds because a document is JSON and a duration is not.
+	AbandonedAfterSeconds int64 `json:"abandoned_after_seconds"`
+	RestoreWindowSeconds  int64 `json:"restore_window_seconds"`
+
+	// CookieDownloads accepts the session cookie on file GET routes, so a
+	// stored URL works in an img or a download link.
+	CookieDownloads bool `json:"cookie_downloads,omitempty"`
 }
 
 // Origin records why an object exists, so a generator can treat hand-declared

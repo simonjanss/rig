@@ -38,6 +38,16 @@ func (e *emitter) serviceInterface(b *gobuf.Buf, res *ir.Resource) {
 		b.L("%s", e.methodSignature(b, res, ep, ctxPkg))
 	}
 
+	if hasFiles(res) {
+		b.NL()
+		b.Comment("Files is where this resource's uploads go.\n\n" +
+			"It is on the interface because the handler needs it too: the parts of " +
+			"a multipart create have to be stored as they arrive, and a part's " +
+			"body is only valid until the next one is asked for — so there is no " +
+			"point at which the whole form could be handed over at once.")
+		b.L("Files() *%s.Service", b.Import(filesModule))
+	}
+
 	b.L("}")
 	b.NL()
 }
@@ -49,12 +59,33 @@ func (e *emitter) methodSignature(b *gobuf.Buf, res *ir.Resource, ep *ir.Endpoin
 		e.slotType(b, res, ep, "query") + ", " +
 		e.slotType(b, res, ep, "body") + "]"
 
-	return ep.Impl.ServiceMethod + "(ctx " + ctxPkg + ".Context, r " + request + ") " +
+	extra := ""
+	if ep.Name == ir.OpCreate && hasFiles(res) {
+		// A create on a table with a file column also arrives as a form, and
+		// what the form carried has to reach the same method: the row and its
+		// files are committed together or the not-null column is unreachable.
+		// It is nil on the JSON path, which is what leaves that path alone.
+		extra = ", pending []*" + b.Import(filesModule) + ".Pending"
+	}
+
+	return ep.Impl.ServiceMethod + "(ctx " + ctxPkg + ".Context, r " + request + extra + ") " +
 		e.returnType(b, res, ep)
 }
 
 // returnType is what an endpoint hands back.
 func (e *emitter) returnType(b *gobuf.Buf, res *ir.Resource, ep *ir.Endpoint) string {
+	if ep.File != nil {
+		switch ep.Method {
+		case "POST":
+			return "(*" + e.fileShapeRef(b) + ", error)"
+		case "GET":
+			// The response, not a copy of it. Nothing reads ahead, which is what
+			// lets a file larger than memory go straight to the wire — and it is
+			// why the caller closes the body.
+			return "(*" + b.Import(filesModule) + ".Content, error)"
+		}
+	}
+
 	obj := successBodyObject(ep)
 	if obj == "" {
 		return "error"
@@ -229,14 +260,18 @@ func (e *emitter) rulesInterface(b *gobuf.Buf, res *ir.Resource) {
 		"It asks the rules what they are, builds the writer from that, and hands " +
 		"the writer back. The service layer never has to hold a half-built value " +
 		"or name the type it is part of.")
-	b.L("func New%sService(repo %s.%sRepository, rules %s) Default%sService {",
-		res.Name, store, res.Name, name, res.Name)
+	front := ""
+	if hasFiles(res) {
+		front = ", files *" + b.Import(filesModule) + ".Service"
+	}
+	b.L("func New%sService(repo %s.%sRepository, rules %s%s) Default%sService {",
+		res.Name, store, res.Name, name, front, res.Name)
 	if len(customEndpoints(res)) > 0 {
-		b.L("svc := NewDefault%sService(repo, %sContract{Hooks: rules.Hooks(), Endpoints: rules})",
-			res.Name, res.Name)
+		b.L("svc := NewDefault%sService(repo, %sContract{Hooks: rules.Hooks(), Endpoints: rules}%s)",
+			res.Name, res.Name, frontArg(res))
 	} else {
-		b.L("svc := NewDefault%sService(repo, %sContract{Hooks: rules.Hooks()})",
-			res.Name, res.Name)
+		b.L("svc := NewDefault%sService(repo, %sContract{Hooks: rules.Hooks()}%s)",
+			res.Name, res.Name, frontArg(res))
 	}
 	b.L("rules.Bind(svc.Writer())")
 	b.L("return svc")
@@ -265,6 +300,13 @@ func (e *emitter) defaultService(b *gobuf.Buf, res *ir.Resource) {
 		"Writer, so the generated operations and the hand-written ones take one " +
 		"path.")
 	b.L("write %sWriter", res.Name)
+	if hasFiles(res) {
+		b.Comment("files is where this resource's uploads go. It is a parameter " +
+			"of the constructor rather than something to set afterwards, because " +
+			"a table with a file column has endpoints that cannot answer without " +
+			"it.")
+		b.L("files *%s.Service", b.Import(filesModule))
+	}
 	b.L("}")
 	b.NL()
 
@@ -279,8 +321,14 @@ func (e *emitter) defaultService(b *gobuf.Buf, res *ir.Resource) {
 		"because a rule nobody attached is a rule that does not run, and nothing " +
 		"at the call site would have said so. An empty " + res.Name +
 		"Contract is still allowed — it is just a thing somebody wrote down.")
-	b.L("func NewDefault%sService(repo %s.%sRepository, contract %sContract) Default%sService {",
-		res.Name, store, res.Name, res.Name, res.Name)
+	filesParam, filesArg := "", ""
+	if hasFiles(res) {
+		filesParam = ", files *" + b.Import(filesModule) + ".Service"
+		filesArg = ", files: files"
+	}
+
+	b.L("func NewDefault%sService(repo %s.%sRepository, contract %sContract%s) Default%sService {",
+		res.Name, store, res.Name, res.Name, filesParam, res.Name)
 	if len(customEndpoints(res)) > 0 {
 		b.Comment("A nil set is not a service with no custom endpoints; it is " +
 			"one whose custom endpoints all answer 500. Failing at startup beats " +
@@ -291,8 +339,17 @@ func (e *emitter) defaultService(b *gobuf.Buf, res *ir.Resource) {
 		b.L("}")
 		b.NL()
 	}
-	b.L("return Default%sService{repo: repo, contract: contract, write: New%sWriter(repo, contract.Hooks)}",
-		res.Name, res.Name)
+	if hasFiles(res) {
+		b.Comment("A nil file service is a resource whose upload routes all " +
+			"answer 500. Failing at startup beats finding that out from a caller.")
+		b.L("if files == nil {")
+		b.L("panic(\"api.NewDefault%sService: a file service is required: %s has a file column\")",
+			res.Name, res.Storage.Table)
+		b.L("}")
+		b.NL()
+	}
+	b.L("return Default%sService{repo: repo, contract: contract, write: New%sWriter(repo, contract.Hooks)%s}",
+		res.Name, res.Name, filesArg)
 	b.L("}")
 	b.NL()
 
@@ -308,6 +365,13 @@ func (e *emitter) defaultService(b *gobuf.Buf, res *ir.Resource) {
 	b.NL()
 
 	e.readHelpers(b, res)
+
+	if hasFiles(res) {
+		e.fileServiceField(b, res)
+		for _, fc := range res.Files {
+			e.fileURLHelper(b, res, fc)
+		}
+	}
 
 	for i := range res.Endpoints {
 		ep := &res.Endpoints[i]
@@ -444,8 +508,26 @@ func (e *emitter) defaultMethod(b *gobuf.Buf, res *ir.Resource, ep *ir.Endpoint,
 		return
 	}
 
+	if ep.File != nil {
+		switch ep.Method {
+		case "POST":
+			e.uploadBody(b, res, ep)
+		case "GET":
+			e.downloadBody(b, res, ep)
+		default:
+			e.deleteFileBody(b, res, ep)
+		}
+		b.L("}")
+		b.NL()
+		return
+	}
+
 	switch ep.Name {
 	case ir.OpCreate:
+		if hasFiles(res) {
+			e.createWithFilesBody(b, res)
+			break
+		}
 		e.createBody(b, res, store)
 	case ir.OpGet:
 		e.getBody(b, res)
@@ -705,4 +787,12 @@ func (e *emitter) revertBody(b *gobuf.Buf, res *ir.Resource) {
 
 func (e *emitter) deleteBody(b *gobuf.Buf, res *ir.Resource, store string) {
 	b.L("return s.write.Delete(ctx, %s.%sDeleteInput{ID: r.Path.ID})", e.model(b), res.Name)
+}
+
+// frontArg passes the file service through the front door when there is one.
+func frontArg(res *ir.Resource) string {
+	if hasFiles(res) {
+		return ", files"
+	}
+	return ""
 }

@@ -57,6 +57,7 @@ func Compile(raw ir.Schema, set *tableconf.Set, opt Options) (*ir.Document, diag
 		RevisionHeader: cfg.API.RevisionHeader,
 		Namer:          n,
 		Auth:           cfg.Auth.IR(),
+		Files:          cfg.Files.IR(),
 	})
 	diags.Append(d)
 

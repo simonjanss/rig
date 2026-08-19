@@ -50,7 +50,8 @@ func Expand(api ir.API, opt ExpandOptions) (ir.API, diag.List) {
 		Resources:      make([]ir.Resource, 0, len(api.Resources)),
 		// Expansion adds endpoints to resources; the authentication foundation
 		// brings its own and is carried through as it arrived.
-		Auth: api.Auth,
+		Auth:  api.Auth,
+		Files: api.Files,
 	}
 
 	have := func(name string) bool {
@@ -235,11 +236,20 @@ func expandResource(res ir.Resource, n *naming.Namer, opt ExpandOptions, exposed
 	// None of that is new machinery. A flat /files/{id} could not reach any of
 	// it without a second authorization model beside the first.
 	for _, fc := range out.Files {
-		for _, build := range []func() ir.Endpoint{
+		builders := []func() ir.Endpoint{
 			func() ir.Endpoint { return uploadFileEndpoint(res, fc, wire) },
 			func() ir.Endpoint { return downloadFileEndpoint(res, fc, wire) },
-			func() ir.Endpoint { return deleteFileEndpoint(res, fc, wire) },
-		} {
+		}
+		// A not-null file column has no delete. Detaching means clearing the
+		// column, and a column the schema says cannot be null has nowhere to be
+		// cleared to — the row goes instead, which is the ordinary delete. This
+		// is the schema deciding, the way `deleted_at` decides whether there is
+		// a restore.
+		if !fc.Required {
+			builders = append(builders, func() ir.Endpoint { return deleteFileEndpoint(res, fc, wire) })
+		}
+
+		for _, build := range builders {
 			ep := build()
 			if existing := out.Endpoint(ep.Name); existing != nil {
 				diags.Add(diag.CodeEndpointShadowed, diag.At(res.Name+".endpoints."+ep.Name),

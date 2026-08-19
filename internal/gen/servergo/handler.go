@@ -70,9 +70,18 @@ func (e *emitter) handler(b *gobuf.Buf, res *ir.Resource, ep *ir.Endpoint) {
 
 	e.decodePath(b, res, ep)
 	e.decodeQuery(b, res, ep)
-	e.decodeBody(b, res, ep)
 
-	e.call(b, res, ep)
+	// A file endpoint's body is bytes rather than JSON, so the two shapes that
+	// move them replace the decode and the call rather than adding to them.
+	switch {
+	case ep.File != nil && ep.Method == "POST":
+		e.uploadHandler(b, res, ep)
+	case ep.File != nil && ep.Method == "GET":
+		e.downloadHandler(b, res, ep)
+	default:
+		e.decodeBody(b, res, ep)
+		e.call(b, res, ep)
+	}
 
 	b.L("}")
 	b.L("}")
@@ -241,6 +250,15 @@ func (e *emitter) decodeBody(b *gobuf.Buf, res *ir.Resource, ep *ir.Endpoint) {
 		return
 	}
 
+	// A create on a table with a file column honestly accepts two bodies, and
+	// which one arrived is a question about this request rather than about the
+	// endpoint. The JSON path below is untouched: a request without a multipart
+	// content type never reaches the other branch.
+	if len(ep.Request.FileParts) > 0 && ep.Name == ir.OpCreate {
+		e.multipartCreate(b, res, ep)
+		return
+	}
+
 	b.L("if err := decodeBody(r, &body); err != nil { fail(s, w, r, rc, err); return }")
 	b.NL()
 }
@@ -265,13 +283,22 @@ func (e *emitter) call(b *gobuf.Buf, res *ir.Resource, ep *ir.Endpoint) {
 
 	status := successStatus(ep)
 
+	// A create on a table with a file column carries whatever the form brought
+	// with it. It is nil on the JSON path, which is what makes that path the one
+	// it has always been.
+	extra := ""
+	if len(ep.Request.FileParts) > 0 && ep.Name == ir.OpCreate {
+		extra = ", pending"
+	}
+
 	if successBodyObject(ep) == "" {
-		b.L("if err := svc.%s(ctx, req); err != nil { fail(s, w, r, rc, err); return }", ep.Impl.ServiceMethod)
+		b.L("if err := svc.%s(ctx, req%s); err != nil { fail(s, w, r, rc, err); return }",
+			ep.Impl.ServiceMethod, extra)
 		b.L("w.WriteHeader(%s)", statusExpr(httpPkg, status))
 		return
 	}
 
-	b.L("out, err := svc.%s(ctx, req)", ep.Impl.ServiceMethod)
+	b.L("out, err := svc.%s(ctx, req%s)", ep.Impl.ServiceMethod, extra)
 	b.L("if err != nil { fail(s, w, r, rc, err); return }")
 	b.L("writeJSON(w, %s, out)", statusExpr(httpPkg, status))
 }

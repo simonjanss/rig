@@ -133,6 +133,15 @@ func (e *emitter) slotType(b *gobuf.Buf, res *ir.Resource, ep *ir.Endpoint, slot
 		}
 		return queryTypeName(res, ep)
 	default:
+		// An upload's body is the bytes on their way past. It is not decoded
+		// into anything and it is not buffered: the service streams it to the
+		// store, so a file larger than memory is an ordinary upload.
+		if ep.File != nil {
+			if ep.Method == "POST" {
+				return b.Import(filesModule) + ".Upload"
+			}
+			return "struct{}"
+		}
 		if ep.Request.BodyObject != "" {
 			return e.objectRef(b, ep.Request.BodyObject)
 		}

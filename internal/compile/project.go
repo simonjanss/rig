@@ -25,6 +25,9 @@ type ProjectOptions struct {
 	// Auth is the authentication foundation this API is served with, already
 	// resolved by the project configuration, or nil for a project with none.
 	Auth *ir.Auth
+	// Files is the resolved file handling, or nil for a project that accepts no
+	// uploads.
+	Files *ir.Files
 }
 
 // Project turns a normalized schema into a naked API surface.
@@ -46,6 +49,7 @@ func Project(schema ir.Schema, opt ProjectOptions) (ir.API, diag.List) {
 		BasePath:       opt.BasePath,
 		RevisionHeader: opt.RevisionHeader,
 		Auth:           opt.Auth,
+		Files:          opt.Files,
 	}
 
 	// Enums come first so field types can name them.

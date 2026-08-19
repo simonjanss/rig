@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/simonjanss/rig/internal/diag"
+	"github.com/simonjanss/rig/pkg/ir"
 )
 
 // The backends a project can keep its bytes in.
@@ -113,4 +114,33 @@ func (p *Project) checkFiles() diag.List {
 	}
 
 	return diags
+}
+
+// IR is the resolved block, as a document carries it.
+//
+// Nil for a project that accepts no uploads, so that a generator asks the
+// document one question — is there file handling — rather than reading a flag
+// and then five numbers that may or may not mean anything.
+//
+// Every duration is resolved to seconds here. A document is JSON, and a Go
+// duration in one is either a number nobody can read or a string every consumer
+// has to parse.
+func (f Files) IR() *ir.Files {
+	if !f.Enabled {
+		return nil
+	}
+
+	// Everything here is already resolved: the defaults were applied when the
+	// configuration was read, which is what makes a zero in this struct mean
+	// somebody wrote a zero.
+	return &ir.Files{
+		Enabled:               true,
+		Expose:                f.Expose,
+		Backend:               f.Backend,
+		MaxBytes:              f.MaxBytes,
+		InlineTypes:           slices.Clone(f.InlineTypes),
+		AbandonedAfterSeconds: int64(f.AbandonedAfter.Duration().Seconds()),
+		RestoreWindowSeconds:  int64(f.RestoreWindow.Duration().Seconds()),
+		CookieDownloads:       f.CookieDownloads,
+	}
 }
