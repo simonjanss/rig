@@ -2360,6 +2360,179 @@ consumer — a better use of the time?
 
 ---
 
+## M9 — tracing and logging
+
+**Goal.** A request traceable from the handler through the hooks to the SQL, and
+a server that can say why it returned a 500, without every generated application
+taking a dependency it did not ask for.
+
+**Shape.**
+
+- The seams exist already, and two of them say so in their own doc comments.
+  `serve.Config.Pool` is a `func(*pgxpool.Config) error` whose comment already
+  offers "a tracer"; that is where `ConnConfig.Tracer` goes. `Mount` returns an
+  `http.Handler` and its comment already shows `otelhttp.NewHandler`.
+  `rigclient.Config.HTTPClient` takes an `*http.Client`, so a `RoundTripper` is
+  the client seam. `serve.App.CloseWithin` is where a `TracerProvider.Shutdown`
+  registers, and a flush that takes too long is then arithmetic the shutdown
+  budget already does. What is missing is not the seams. It is anything to put
+  in them, and the argument about who pays for it.
+- The tracing is optional, and optional means absent. A project that does not
+  ask to be traced gets no spans in its generated source, no `observe/` import,
+  and no otel in its go.mod — not spans that call a no-op. Wanting otel is a
+  decision, and plenty of projects will not want it.
+- Which is why otel does not go in `runtime`. That module has two direct
+  dependencies and every generated application imports it, so putting otel there
+  puts otel in every go.mod, including the applications that trace some other
+  way or not at all. It is the goose argument that made `migrate` a module of
+  its own, and the same one that makes `server-go` write no `auth.gen.go` for a
+  project with no `auth:` block. So: an `observe/` module holding the wiring, a
+  block in `rig.yaml` that turns it on, and emitters that write nothing when it
+  is absent.
+- Enabled is not the same as exporting, and the default is a tracer that goes
+  nowhere. That is a second switch, at run time rather than at generation: a
+  project that turned tracing on still spends most of its life on a laptop and
+  in CI, where the spans are in the code and there is no collector to send them
+  to. Configuring no endpoint is the normal case, not the broken one, so
+  `observe/` starts as a no-op and a collector is something you add. otel
+  supplies the no-op itself — a global provider nobody set already is one — so
+  this is a default to choose rather than code to write.
+- Which matters more than it sounds. An OTLP exporter pointed at nothing retries,
+  and the retry comes due in `App.CloseWithin`, spending the shutdown budget
+  flushing to a host that was never there — so the failure mode of getting this
+  wrong is slow shutdowns in exactly the environments nobody is watching them.
+  `make examples` builds and runs generated servers on every check, and the
+  Docker suites run more, so the default has to be the one that costs nothing
+  and needs nothing running.
+- The logger is not optional, because it costs nothing to have. `log/slog` is
+  the standard library, `serve` already depends on it, and a server that cannot
+  say what it did is not a lighter server, only a quieter one. So there are
+  three settings and they are separate because they are separate prices: logging
+  always, spans when the project asks, an exporter when the environment has
+  somewhere to put them.
+- Spans on the handler, and on each stage of a generated write. The stages are
+  already discrete named calls in the emitted code: the validator, `Before`, the
+  SQL, `After`, `AfterCommit`, around the `dbx.InTx` and `dbx.InTxIf` blocks
+  `persist-go` writes. Every one of them takes `ctx` first, so none of this
+  changes a signature, and `AfterCommit` runs inside `InTx` after the commit, so
+  it is still a child of the request rather than an orphan. A span per stage is
+  the point: "the create was slow" is not worth collecting, "the validator was
+  slow" is.
+- Names come from the IR, where they are already unique and already low
+  cardinality. `Endpoint.Pattern` is proven unique across the whole API at
+  freeze — that is what the duplicate-route diagnostic is — and
+  `RequestContext.Route` is that same pattern, already on the context `resolve`
+  builds. So a span is labelled by endpoint rather than by every distinct
+  identifier that ever appeared in a path, which is the reason `Route` exists at
+  all.
+- The client's span wraps the call, not the attempt. `rigclient`'s `do` can call
+  `send` up to three times: the QUERY→POST fallback, and the retry after a 401
+  refreshes. One span at `do` and a child per `send`, or a fallback reads as
+  three unrelated requests. `Op` carries the method and the path template but
+  not the operation id — the generated method knows it and today only says so in
+  a doc comment — so that has to go onto `Op`.
+- rig gets a logger. This reverses "rig has no logger", written above for the
+  API revision and right about that much: the revision header is telemetry, and
+  what to do with telemetry is the application's decision. It is not right about
+  everything. `serve.App` already holds a `*slog.Logger` and hands it to
+  constructors at mount time; what is new is a `Logger` on the generated
+  `api.Server`, put on the context in `resolve` beside the `RequestContext`, so
+  a service method or a hook logs with the request id and the route already
+  attached instead of threading a logger through its own constructor to get
+  there.
+- What it says, at `slog.LevelDebug`: the request in and the response out, from
+  the fields `RequestContext` already carries. The status and the byte count
+  need a `ResponseWriter` wrapper, which exists nowhere in the repository yet.
+  One wrapper, not a line per handler — `server-go` emits every handler body
+  from one function, and a log statement in each is a log statement to keep
+  correct in each.
+- One line is not debug, and it is the strongest reason for the milestone.
+  `DefaultErrorMapper` reads the code, rewrites an internal message to
+  "something went wrong", and drops the wrapped cause on the floor. Nothing
+  anywhere records why a 500 happened. That is an error line, and it should
+  exist whether or not anybody ever turns on tracing.
+- The probes stay outside all of it. `withProbes` answers liveness and readiness
+  before the application's handler sees them, and the reason is already written
+  down: a check every second is not a traced request, a line in the log, or a
+  bar in a latency histogram.
+
+**Verification.** Goldens for the emitted spans and log calls, and the generator
+suites compile what they emit, which is what catches a span opened on a path
+that returns early. The end that needs a real database is the lifecycle: a
+Docker test asserting one span per stage under the right parent, and none at all
+for a write refused before it began. Honest gap: that an exporter reaches a
+collector is not something this repository can test without becoming a
+deployment.
+
+**Open question for you.** Given that the tracing is gated, is it one
+`observability:` block that M10's page also reads, or two? One block is a
+smaller surface and the page cannot be switched on without the spans it exists
+to display, which is a dependency worth encoding. Two says the honest thing,
+which is that exporting to a collector somebody else runs and serving a page
+this server runs are different decisions, and most projects that want the first
+do not want the second. I lean one block with the page as a key inside it.
+
+---
+
+## M10 — the built-in monitoring page
+
+**Goal.** See the last requests and their spans on a page the server already
+serves, so a deployment too small to be worth a Grafana is not a deployment that
+is blind.
+
+**Shape.**
+
+- Off unless the project asks, and absent rather than disabled. A project that
+  does not want it gets no page, no store, no exporter and no dependency for any
+  of them — not a page behind a flag that is false. Same rule as the `auth:`
+  block: `server-go` writes no `auth.gen.go` at all for a project without one,
+  which is what keeps its API package, and its module, free of `rig/auth`. A
+  monitoring page carries an HTML asset, a store and an exporter, and a server
+  that declined it should not be a byte larger for having been offered.
+- So a top-level block in `rig.yaml`, resolved when the config is read, the way
+  `auth:` and `files:` are: the struct in `internal/project`, the defaults
+  applied there rather than left as zero values meaning something later, an
+  `IR()` translation, and the compile stages that rebuild the API carrying it
+  through. The generator reads a nil and emits nothing.
+- Mounted outside the application's handler, next to the probes, for the reason
+  the probes are: looking at the monitoring page should not appear on the
+  monitoring page.
+- It reads what M9 produces — a `slog.Handler` and a span exporter writing into
+  whatever the page reads. So it inherits M9's split: the log half works in any
+  project, because the logger is always there, and the trace half is empty in a
+  project that did not turn tracing on. A page that shows requests and no spans
+  is a reasonable thing for such a project to see, and it has to say why rather
+  than look broken.
+- The store is the whole question. A bounded ring in memory costs nothing, needs
+  no schema, and loses everything exactly when a restart is the thing you were
+  trying to explain. A `rig_trace` table survives, and rig already owns tables of
+  that shape in `rig_auth_log` and `rig_file` — but then every request writes
+  rows, and rig owns a retention policy, an index that is still useful at a
+  billion rows, and the vacuum behaviour of an append-only table. That is a
+  tracing backend, and I do not think rig wants to be one.
+- It would be the first `go:embed` in a module that is not an example.
+  Everything generated today is Go source assembled through `internal/gen/gobuf`,
+  and the only embedded assets in the repository are an example's templates and
+  its migrations. `gentest` copies artifacts by base name into a throwaway module
+  to compile them, and would have to learn about a file that is not Go.
+- It is not public. The page shows paths, user agents, request ids and the error
+  causes M9 starts recording, which together are a list of what every caller
+  did. It goes behind the project's own authentication — and a project with no
+  `auth:` block has nothing to put it behind, so either the block requires one or
+  the page binds to localhost and says so.
+
+**Verification.** The generator suites own most of it: a project without the
+block emits nothing, a project with it emits a page that compiles. The page
+itself wants an ordinary handler test against a store with a few requests in it.
+
+**Open question for you.** Is this worth building at all, or does M9 export OTLP
+and the page belong to somebody else? The version that earns its keep is small —
+the last few hundred requests and their spans, in memory, behind the project's
+auth — and the version anybody actually wants at three in the morning is the
+thing I just said rig should not become.
+
+---
+
 ## Things I would fix if nobody asked for anything else
 
 - `internal/gen/servicego/servicego.go` still has an `elemType` helper that is
