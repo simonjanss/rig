@@ -115,6 +115,14 @@ func IsInvalid(err error) bool { return CodeOf(err) == rigerr.CodeUnprocessableE
 // IsRateLimited reports whether the caller was asked to slow down.
 func IsRateLimited(err error) bool { return CodeOf(err) == rigerr.CodeRateLimited }
 
+// IsTooLarge reports whether the body was larger than the endpoint accepts.
+func IsTooLarge(err error) bool { return CodeOf(err) == rigerr.CodeTooLarge }
+
+// IsUnsupportedMediaType reports whether the body's content type was refused.
+func IsUnsupportedMediaType(err error) bool {
+	return CodeOf(err) == rigerr.CodeUnsupportedMediaType
+}
+
 // IsUpgradeRequired reports whether this client is older than the server will
 // serve, and has to be regenerated against the current schema.
 //

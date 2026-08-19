@@ -1414,3 +1414,101 @@ func TestAPublicReadGetsNoScopeParameter(t *testing.T) {
 		}
 	}
 }
+
+// attachmentSchema is a child table reaching its parent through the given
+// foreign key, with one index over it.
+//
+// It is written raw rather than frozen by hand so the denormalization runs for
+// real: whether a key is carried onto its column at all is half of what the
+// index rule then sees.
+func attachmentSchema(fk ir.ForeignKey, index []string) ir.Schema {
+	return ir.Schema{
+		Name: "public",
+		Tables: []ir.Table{{
+			Name: "attachment", Kind: ir.TableKindBase, Comment: "An attachment.",
+			Columns: []ir.Column{
+				{Name: "id", SQLType: "uuid", Ordinal: 1, IsPrimaryKey: true, Comment: "The identifier."},
+				{Name: "tenant_id", SQLType: "uuid", Ordinal: 2, Comment: "Which customer."},
+				{Name: "todo_id", SQLType: "uuid", Ordinal: 3, Comment: "What it hangs off."},
+			},
+			PrimaryKey:  []string{"id"},
+			ForeignKeys: []ir.ForeignKey{fk},
+			Indexes: []ir.Index{
+				{Name: "attachment_pkey", Columns: []string{"id"}, Unique: true, Method: "btree"},
+				{Name: "attachment_idx", Columns: index, Method: "btree"},
+			},
+		}},
+	}
+}
+
+// TestOnlyATenantCarryingKeyIsCoveredByATenantLeadingIndex separates the two
+// keys a `(tenant_id, todo_id)` index does and does not answer for.
+//
+// Postgres checks a foreign key from the parent side, with a predicate over
+// exactly the constrained columns and no tenant of its own. For the composite
+// key that is `(tenant_id, todo_id)` and the index serves it; for the
+// single-column key it is `todo_id` alone and the index cannot, however well
+// the generated reads are covered.
+func TestOnlyATenantCarryingKeyIsCoveredByATenantLeadingIndex(t *testing.T) {
+	t.Parallel()
+
+	single := ir.ForeignKey{
+		Name: "attachment_todo_fkey", Columns: []string{"todo_id"},
+		ForeignTable: "todo", ForeignColumns: []string{"id"},
+	}
+	composite := ir.ForeignKey{
+		Name: "attachment_todo_fkey", Columns: []string{"tenant_id", "todo_id"},
+		ForeignTable: "todo", ForeignColumns: []string{"tenant_id", "id"},
+	}
+	tenantLeading := []string{"tenant_id", "todo_id"}
+
+	for _, tc := range []struct {
+		name     string
+		fk       ir.ForeignKey
+		index    []string
+		reported bool
+	}{
+		{"a composite key beside its own index", composite, tenantLeading, false},
+		{"a single-column key behind the tenant", single, tenantLeading, true},
+		{"a single-column key on its own index", single, []string{"todo_id"}, false},
+		{"a composite key with no index at all", composite, []string{"id"}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			schema, diags := compile.Normalize(attachmentSchema(tc.fk, tc.index),
+				compile.NormalizeOptions{})
+			if diags.HasErrors() {
+				t.Fatalf("the fixture itself should normalize:\n%s", diags.String())
+			}
+
+			doc, diags := compile.Freeze(ir.API{Name: "Demo", BasePath: "/api/v1"}, schema,
+				compile.Meta{Tool: "test"})
+			if diags.HasErrors() {
+				t.Fatalf("the fixture itself should compile:\n%s", diags.String())
+			}
+
+			p := &project.Project{Config: &project.Config{
+				Validate: project.Validate{
+					ForeignKeyNotIndexed: "error",
+					TenantIndexLeading:   "off",
+					UnmentionedColumn:    "off",
+					MissingComment:       "off",
+					TimestampSuffix:      "off",
+					BooleanPrefix:        "off",
+					DateSuffix:           "off",
+					ForeignKeyNaming:     "off",
+					CascadeDelete:        "off",
+					MigrationFilename:    "off",
+				},
+			}}
+
+			validation := compile.Validate(doc, &tableconf.Set{}, p)
+			got := validation.String()
+			reported := strings.Contains(got, "not covered by an index")
+			if reported != tc.reported {
+				t.Errorf("reported = %v, want %v:\n%s", reported, tc.reported, got)
+			}
+		})
+	}
+}

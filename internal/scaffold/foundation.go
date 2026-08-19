@@ -13,6 +13,7 @@ const (
 	PartSessions = "sessions"
 	PartAPIKeys  = "apikeys"
 	PartOAuth    = "oauth"
+	PartFiles    = "files"
 )
 
 // Parts in the order they must be applied.
@@ -20,8 +21,12 @@ const (
 // Sessions come before API keys because the key table is optional and the token
 // table is not: keys add a column to tokens rather than tokens depending on
 // keys, so a project that skips keys is still coherent.
+//
+// Files come last and depend on nothing. They are the one part that is useful
+// in a project with no authentication at all, which is why rig_file's tenant
+// column carries no reference to rig_tenant.
 func Parts() []string {
-	return []string{PartTenancy, PartAPIKeys, PartSessions, PartOAuth}
+	return []string{PartTenancy, PartAPIKeys, PartSessions, PartOAuth, PartFiles}
 }
 
 // FoundationOptions describe what to scaffold.
@@ -148,6 +153,8 @@ func PartTables(part string) []string {
 		return []string{"rig_account_token", "rig_auth_log", "rig_identity_session"}
 	case PartOAuth:
 		return []string{"rig_identity_oauth"}
+	case PartFiles:
+		return []string{"rig_file"}
 	default:
 		return nil
 	}
@@ -218,6 +225,8 @@ func foundationPart(name string) part {
 		return part{migration: apiKeysSQL, configs: apiKeyConfigs()}
 	case PartOAuth:
 		return part{migration: oauthSQL, configs: oauthConfigs()}
+	case PartFiles:
+		return part{migration: filesSQL, configs: fileConfigs()}
 	default:
 		return part{}
 	}

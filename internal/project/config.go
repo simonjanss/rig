@@ -18,6 +18,7 @@ type Config struct {
 	Database   Database    `yaml:"database,omitempty" json:"database,omitempty" jsonschema_description:"Where to run migrations and read the schema from."`
 	Migrations Migrations  `yaml:"migrations,omitempty" json:"migrations,omitempty" jsonschema_description:"Migration file location."`
 	Auth       Auth        `yaml:"auth,omitempty" json:"auth,omitempty" jsonschema_description:"How the authentication foundation's tables are treated."`
+	Files      Files       `yaml:"files,omitempty" json:"files,omitempty" jsonschema_description:"Where uploaded files are kept, and what an upload may be."`
 	Naming     Naming      `yaml:"naming,omitempty" json:"naming,omitempty" jsonschema_description:"How database names become Go and JSON names."`
 	Validate   Validate    `yaml:"validate,omitempty" json:"validate,omitempty" jsonschema_description:"Severity of each configurable convention rule."`
 
@@ -427,6 +428,116 @@ type Migrations struct {
 	Dir string `yaml:"dir,omitempty" json:"dir,omitempty" jsonschema_description:"Directory holding goose migration files."`
 	// Table is the goose bookkeeping table.
 	Table string `yaml:"table,omitempty" json:"table,omitempty" jsonschema_description:"Name of the migration bookkeeping table."`
+}
+
+// Files is where uploaded bytes are kept, and what an upload may be.
+//
+// It is configuration rather than a Go literal for the reason M5.8 settled for
+// `auth:`: a byte cap or a sweep interval written in code is a number the
+// generated documentation cannot quote, and a number nobody can find without
+// reading the wiring. Everything with a fixed answer lives here, and it is
+// resolved when the file is read, so the generated wiring, the specification and
+// a client library all quote the same number rather than three zeros meaning
+// "something else decides".
+//
+// Zero means "left out" throughout, the way it does for every duration in this
+// file. There is deliberately no way to write a zero that survives: an upload
+// cap of nothing and a restore window of nothing are not configurations anybody
+// wants, and reading them as "use the default" is kinder than a diagnostic.
+type Files struct {
+	// Enabled says this project accepts uploads. Off by default, and what makes
+	// `server-go` write the wiring at all.
+	Enabled bool `yaml:"enabled,omitempty" json:"enabled,omitempty" jsonschema_description:"Whether this project accepts uploads. The server-go generator writes the wiring only when it is set."`
+
+	// Expose projects rig_file as a read-only resource.
+	//
+	// It is here rather than assumed because the row is the only place the file's
+	// URL lives, and a client that cannot sync rig_file cannot use the column
+	// that exists for it. Off leaves the table managed and unprojected, which is
+	// right for a project whose files are only ever fetched through the download
+	// route.
+	//
+	// There is no write path to find either way: the endpoints rig synthesizes
+	// are the upload and the download, and a client that could POST a row with an
+	// arbitrary storage key and no bytes has found a way around the rules.
+	Expose bool `yaml:"expose,omitempty" json:"expose,omitempty" jsonschema_description:"Project rig_file as a read-only resource, so its url column can be read and synced. There is no generated write path either way."`
+
+	// Backend is where the bytes go: memory or s3.
+	Backend string `yaml:"backend,omitempty" json:"backend,omitempty" jsonschema:"enum=memory,enum=s3" jsonschema_description:"Where the bytes are kept. memory is for tests and go run and is not durable. Defaults to memory."`
+
+	S3 FilesS3 `yaml:"s3,omitempty" json:"s3,omitempty" jsonschema_description:"Bucket settings, read only when backend is s3."`
+
+	// MaxBytes caps one upload. It is a hard per-file cap and not a quota: rig
+	// does not do storage quotas, and saying so is better than implying one.
+	MaxBytes int64 `yaml:"max_bytes,omitempty" json:"max_bytes,omitempty" jsonschema_description:"Largest single upload, in bytes. A hard per-file cap, not a storage quota. Defaults to 26214400 (25 MiB)."`
+
+	// InlineTypes are the sniffed content types served without an attachment
+	// disposition.
+	//
+	// Everything else downloads. The list is short on purpose: a file served
+	// inline from the API origin runs there, and the URL is in a synced row that
+	// will end up in an <img> or an <a> without anybody thinking about it.
+	// text/html is the one that must never be on it.
+	InlineTypes []string `yaml:"inline_types,omitempty" json:"inline_types,omitempty" jsonschema_description:"Sniffed content types served inline rather than as an attachment. Kept short: a file served inline from the API origin runs there. Defaults to common image types."`
+
+	// AbandonedAfter is how long a file row may sit with no bytes behind it
+	// before the sweeper takes it.
+	//
+	// A row is inserted before the upload and finalized after it, so one with a
+	// null uploaded_at is either in flight or the remains of a request that died.
+	// This is how long it gets the benefit of the doubt.
+	AbandonedAfter Duration `yaml:"abandoned_after,omitempty" json:"abandoned_after,omitempty" jsonschema_description:"How long a file row with no bytes behind it is left alone before the sweeper reaps it. Defaults to 24h."`
+
+	// RestoreWindow is how long a deleted file stays restorable, and therefore
+	// how long its bytes outlive the delete.
+	//
+	// It lives here rather than in a table configuration because rig_file does
+	// not have one — an asymmetry with `restore_window_days` worth knowing about
+	// before going to look for the key. The key is refused on rig_file for the
+	// same reason: this number is how long the bytes are kept as well as how
+	// long the row can be brought back, and a second copy of it could only ever
+	// disagree.
+	//
+	// A projected rig_file gets a generated restore endpoint, whose window is a
+	// whole number of days — see [Files.RestoreWindowDays] — so with
+	// `files.expose` set this has to be at least 24h.
+	//
+	// If the bucket has a lifecycle rule of its own, that rule has to outlive
+	// this, or a restore inside the window succeeds and hands back a row pointing
+	// at nothing. The S3 adapter refuses to start when it can tell that is the
+	// case.
+	RestoreWindow Duration `yaml:"restore_window,omitempty" json:"restore_window,omitempty" jsonschema_description:"How long a deleted file stays restorable, and how long its bytes outlive the delete. A bucket lifecycle rule has to outlive it. Defaults to 720h (30 days)."`
+
+	// CookieDownloads accepts the session cookie on file GET routes.
+	//
+	// A stored URL is stable and unsigned and sits in a synced row, which means
+	// it exists to be used directly: <img src>, <a download>, a background-image.
+	// None of those attach an Authorization header, and a bearer token is the
+	// only credential rig's authentication otherwise understands.
+	//
+	// GET only, and that is not an oversight: widening it past GET reintroduces
+	// exactly the cross-site request problem the bearer header avoids. It is
+	// opt-in because an application that never renders a file in a browser should
+	// not be carrying a cookie path at all.
+	CookieDownloads bool `yaml:"cookie_downloads,omitempty" json:"cookie_downloads,omitempty" jsonschema_description:"Accept the session cookie on file download routes, so a stored URL works in an img or a download link. GET only, deliberately: widening it past GET reintroduces the CSRF problem bearer tokens avoid."`
+}
+
+// FilesS3 names the bucket and how to reach it.
+//
+// The credentials are environment variable names rather than values, the way
+// the OAuth client secrets already are: rig.yaml is a file people commit.
+type FilesS3 struct {
+	Bucket string `yaml:"bucket,omitempty" json:"bucket,omitempty" jsonschema_description:"Bucket name. One of bucket and bucket_env has to be set."`
+	// BucketEnv names an environment variable holding the bucket, for a name
+	// that differs per deployment.
+	BucketEnv string `yaml:"bucket_env,omitempty" json:"bucket_env,omitempty" jsonschema_description:"Environment variable holding the bucket name, for a bucket that differs per deployment."`
+
+	Region string `yaml:"region,omitempty" json:"region,omitempty" jsonschema_description:"Bucket region."`
+	// Endpoint points at something other than AWS — MinIO, R2, a test double.
+	Endpoint string `yaml:"endpoint,omitempty" json:"endpoint,omitempty" jsonschema_description:"Endpoint URL, for an S3-compatible service that is not AWS."`
+
+	AccessKeyEnv string `yaml:"access_key_env,omitempty" json:"access_key_env,omitempty" jsonschema_description:"Environment variable holding the access key id. Defaults to AWS_ACCESS_KEY_ID."`
+	SecretKeyEnv string `yaml:"secret_key_env,omitempty" json:"secret_key_env,omitempty" jsonschema_description:"Environment variable holding the secret access key. Defaults to AWS_SECRET_ACCESS_KEY."`
 }
 
 // Naming tunes the conversion from database names to code and wire names.

@@ -187,15 +187,17 @@ type ErrorCode = rigerr.Code
 
 // The codes a client may see.
 const (
-	ErrorCodeBadRequest          ErrorCode = rigerr.CodeBadRequest
-	ErrorCodeUnauthorized        ErrorCode = rigerr.CodeUnauthorized
-	ErrorCodeForbidden           ErrorCode = rigerr.CodeForbidden
-	ErrorCodeNotFound            ErrorCode = rigerr.CodeNotFound
-	ErrorCodeConflict            ErrorCode = rigerr.CodeConflict
-	ErrorCodeUnprocessableEntity ErrorCode = rigerr.CodeUnprocessableEntity
-	ErrorCodeRateLimited         ErrorCode = rigerr.CodeRateLimited
-	ErrorCodeUpgradeRequired     ErrorCode = rigerr.CodeUpgradeRequired
-	ErrorCodeInternal            ErrorCode = rigerr.CodeInternal
+	ErrorCodeBadRequest           ErrorCode = rigerr.CodeBadRequest
+	ErrorCodeUnauthorized         ErrorCode = rigerr.CodeUnauthorized
+	ErrorCodeForbidden            ErrorCode = rigerr.CodeForbidden
+	ErrorCodeNotFound             ErrorCode = rigerr.CodeNotFound
+	ErrorCodeConflict             ErrorCode = rigerr.CodeConflict
+	ErrorCodeUnprocessableEntity  ErrorCode = rigerr.CodeUnprocessableEntity
+	ErrorCodeRateLimited          ErrorCode = rigerr.CodeRateLimited
+	ErrorCodeTooLarge             ErrorCode = rigerr.CodeTooLarge
+	ErrorCodeUnsupportedMediaType ErrorCode = rigerr.CodeUnsupportedMediaType
+	ErrorCodeUpgradeRequired      ErrorCode = rigerr.CodeUpgradeRequired
+	ErrorCodeInternal             ErrorCode = rigerr.CodeInternal
 )
 
 // Returned whenever a request fails.

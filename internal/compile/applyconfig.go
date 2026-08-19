@@ -24,6 +24,16 @@ type ConfigOptions struct {
 	// and "no such table" would send somebody looking for a migration that is
 	// not the problem.
 	Ignored []string
+	// FileRestoreWindowDays is how long a deleted rig_file row stays
+	// restorable, resolved from `files.restore_window` in rig.yaml.
+	//
+	// It arrives here rather than through a table configuration because
+	// rig_file has no `restore_window_days` key: the sweeper reads one number
+	// for every file, and a second copy of it in services/rig_file would be a
+	// number that could disagree with the one the bytes are kept for. Zero
+	// means the project has no files block, and rig_file — if it is projected
+	// at all — is an ordinary table subject to the ordinary rule.
+	FileRestoreWindowDays int
 }
 
 // ApplyConfig merges the per-table YAML onto the projected API.
@@ -89,6 +99,16 @@ func ApplyConfig(api ir.API, schema ir.Schema, set *tableconf.Set, opt ConfigOpt
 			continue
 		}
 		if slices.Contains(opt.Ignored, table) {
+			// rig_file has a switch of its own, and sending somebody to
+			// auth.expose for it would be sending them to a key that happens to
+			// work while leaving files.expose — the one the rest of rig reads —
+			// saying the opposite.
+			if table == FileTable {
+				diags.Add(diag.CodeForeignTable, loaded.At("table"),
+					"%q is rig's own file table, so rig generates nothing from this file; "+
+						"set `files.expose: true` in rig.yaml to project it", table)
+				continue
+			}
 			diags.Add(diag.CodeForeignTable, loaded.At("table"),
 				"%q belongs to the rig/auth module, so rig generates nothing from "+
 					"this file", table)
@@ -240,6 +260,13 @@ func applyTableConfig(
 	if out.Storage != nil {
 		if cfg.RestoreWindowDays != nil && out.Storage.SoftDelete != nil {
 			out.Storage.SoftDelete.RestoreWindowDays = *cfg.RestoreWindowDays
+		}
+		// rig_file's window comes from rig.yaml, and it wins: a project that
+		// wrote the key anyway has been told to remove it by checkRestoreWindow,
+		// and until it does the number the bytes are actually kept for is the
+		// one to generate against.
+		if t.Name == FileTable && opt.FileRestoreWindowDays > 0 && out.Storage.SoftDelete != nil {
+			out.Storage.SoftDelete.RestoreWindowDays = opt.FileRestoreWindowDays
 		}
 
 		if len(cfg.OrderBy) > 0 {
@@ -684,7 +711,7 @@ func applyEndpointConfig(loaded *tableconf.Loaded, res *ir.Resource, cfg tableco
 			BodyObject:  req.BodyObject,
 		}
 		if len(e.Request.BodyParams) > 0 || e.Request.BodyObject != "" {
-			e.Request.ContentType = "application/json"
+			e.Request.ContentTypes = []string{MediaJSON}
 		}
 		if len(e.Request.BodyParams) > 0 && e.Request.BodyObject != "" {
 			diags.Add(diag.CodeInvalidEndpoint, loaded.At("endpoints", strconv.Itoa(i), "request"),
@@ -704,11 +731,11 @@ func applyEndpointConfig(loaded *tableconf.Loaded, res *ir.Resource, cfg tableco
 
 		for _, rc := range ec.Responses {
 			e.Responses = append(e.Responses, ir.EndpointResponse{
-				StatusCode:  rc.Status,
-				Description: rc.Description,
-				BodyObject:  rc.BodyObject,
-				BodyFields:  convertParams(rc.BodyFields, n),
-				ContentType: responseContentType(rc),
+				StatusCode:   rc.Status,
+				Description:  rc.Description,
+				BodyObject:   rc.BodyObject,
+				BodyFields:   convertParams(rc.BodyFields, n),
+				ContentTypes: responseContentTypes(rc),
 			})
 		}
 		if len(e.Responses) == 0 {
@@ -725,11 +752,17 @@ func applyEndpointConfig(loaded *tableconf.Loaded, res *ir.Resource, cfg tableco
 	return diags
 }
 
-func responseContentType(rc tableconf.EndpointResponse) string {
+// responseContentTypes is JSON or nothing.
+//
+// A custom endpoint cannot declare a content type of its own — M5.9 reads the
+// field for the endpoints rig synthesizes and does not let a table configuration
+// write it, because a declared binary body means the service method stops
+// receiving a decoded body in the general case. That is a milestone of its own.
+func responseContentTypes(rc tableconf.EndpointResponse) []string {
 	if rc.BodyObject == "" && len(rc.BodyFields) == 0 {
-		return ""
+		return nil
 	}
-	return "application/json"
+	return []string{MediaJSON}
 }
 
 func convertParams(params []tableconf.Param, n *naming.Namer) []ir.Field {

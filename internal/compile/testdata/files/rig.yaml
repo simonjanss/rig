@@ -1,0 +1,24 @@
+project:
+  name: demo
+  module: example.com/demo
+
+# Exposed, so rig_file is a resource here and its restore window is resolved
+# from this block rather than from a `restore_window_days` in its table
+# configuration. Deliberately not the default: seven days is a number that can
+# only have come from here, so the golden document proves where it was read.
+files:
+  enabled: true
+  expose: true
+  restore_window: 168h
+
+# The two rules this fixture exists to exercise, both turned up so a regression
+# is a failure rather than a warning nobody reads.
+#
+# fk_naming has to stay quiet about a <role>_file_id column and keep speaking
+# about everything else. fk_needs_index has to see a composite key at all —
+# before the tenant-carrying form was denormalized onto its column, it saw
+# nothing there to check.
+validate:
+  fk_naming: error
+  fk_needs_index: error
+  missing_comment: warn

@@ -1,0 +1,14 @@
+table: profile
+comment: Somebody's public face, with pictures attached to it.
+columns:
+  display_name:
+    comment: What to call them.
+  profile_image_file_id:
+    comment: >-
+      The picture. A <role>_file_id column is the declaration: the role names
+      the endpoints and the permission keys, and rig_file is the only table it
+      could point at, so the naming rule exempts it.
+  banner_file_id:
+    comment: >-
+      A second one on the same table, which is the reason the role is in the
+      name at all. The rule's own suggestion, rig_file_id, allows exactly one.

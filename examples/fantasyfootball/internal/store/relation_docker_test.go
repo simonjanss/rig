@@ -141,7 +141,7 @@ func TestFilteringAcrossARelation(t *testing.T) {
 		secret := other.team(t, "Barcelona")
 
 		// A fixture in this tenant pointing at the other tenant's squad.
-		crossed := w.fixture(t, secret.ID, athletic.ID)
+		crossed := w.crossedFixture(t, secret.ID, athletic.ID)
 
 		hidden := model.FixtureFilter{Equals: &model.FixtureFilterEquals{HomeTeam: named("Barcelona")}}
 		if got := w.fixturesWhere(t, hidden); len(got) != 0 {
@@ -263,7 +263,7 @@ func TestFilteringOnTheAbsenceOfARelation(t *testing.T) {
 	// satisfies every "without" condition, including this one.
 	t.Run("a relation the caller cannot see counts as absent", func(t *testing.T) {
 		other := newWorld(t)
-		crossed := w.fixture(t, other.team(t, "Barcelona").ID, social.ID)
+		crossed := w.crossedFixture(t, other.team(t, "Barcelona").ID, social.ID)
 
 		got := w.fixturesWhere(t, model.FixtureFilter{
 			Without: &model.FixtureFilterWithout{HomeTeam: &model.TeamFilter{
@@ -343,7 +343,7 @@ func TestOrderingByARelatedColumn(t *testing.T) {
 	// quietly shortened the list — and nothing in the response would say so.
 	t.Run("a row whose related row is missing is kept", func(t *testing.T) {
 		other := newWorld(t)
-		crossed := w.fixture(t, other.team(t, "Invisible").ID, neutral.ID)
+		crossed := w.crossedFixture(t, other.team(t, "Invisible").ID, neutral.ID)
 
 		unordered, total, err := w.repos.Fixtures.List(w.ctx, model.FixtureFilter{}, model.FixturePage{})
 		if err != nil {
@@ -421,6 +421,10 @@ type world struct {
 	repos *store.Store
 	ctx   context.Context
 	pool  *pgxpool.Pool
+	// claims are also on the context. They are kept here for the one helper that
+	// writes a row the repository would refuse and so has to stamp the tenant
+	// itself.
+	claims tenancy.Claims
 }
 
 func newWorld(t *testing.T) *world {
@@ -445,9 +449,10 @@ func newWorld(t *testing.T) *world {
 	// A fresh tenant per world, so one run's rows are invisible to the next.
 	claims := tenancy.Claims{TenantID: uuid.New(), AccountID: uuid.New()}
 	return &world{
-		repos: store.New(pool, store.Config{}),
-		ctx:   tenancy.NewContext(ctx, claims),
-		pool:  pool,
+		repos:  store.New(pool, store.Config{}),
+		ctx:    tenancy.NewContext(ctx, claims),
+		pool:   pool,
+		claims: claims,
 	}
 }
 
@@ -496,6 +501,40 @@ func (w *world) fixture(t *testing.T, home, away uuid.UUID) *model.Fixture {
 	})
 	if err != nil {
 		t.Fatalf("create fixture: %v", err)
+	}
+	return row
+}
+
+// crossedFixture writes a fixture pointing at a team in another tenant.
+//
+// It has to use SQL, because the repository refuses to write this row: a
+// generated create checks every foreign key against the same scope the target's
+// own reads are built from, and a team in another tenant is not in it. That
+// refusal is the point, and it is asserted directly in
+// TestAReferenceMustBeOneTheCallerCouldRead.
+//
+// The state is still worth constructing, because the repository is not the only
+// thing that ever wrote to this database. Rows predating the check, a migration,
+// a restore, a hand-run UPDATE — the read side has to stay correct in front of
+// any of them, and the tests below are what says so. Postgres will take the row
+// happily: `references team (id)` says the team exists, not whose it is.
+func (w *world) crossedFixture(t *testing.T, home, away uuid.UUID) *model.Fixture {
+	t.Helper()
+
+	id := uuid.New()
+	_, err := w.pool.Exec(w.ctx,
+		`INSERT INTO fixture (id, tenant_id, created_at, created_by_account_id,
+		    home_team_id, away_team_id, kickoff_at)
+		 VALUES ($1, $2, now(), $3, $4, $5, $6)`,
+		id, w.claims.TenantID, w.claims.AccountID, home, away,
+		time.Now().Add(24*time.Hour).Truncate(time.Second))
+	if err != nil {
+		t.Fatalf("write a crossed fixture: %v", err)
+	}
+
+	row, err := w.repos.Fixtures.Get(w.ctx, id)
+	if err != nil {
+		t.Fatalf("read back the crossed fixture: %v", err)
 	}
 	return row
 }

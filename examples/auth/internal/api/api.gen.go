@@ -26,7 +26,7 @@ import (
 // `rig generate` records it in .rig/revision.json, which is committed.
 //
 // Empty when the project has never generated with a revision recorded.
-const Revision = "2026-08-18"
+const Revision = "2026-08-19"
 
 // RevisionHeader carries the revision in both directions: what the caller was
 // built against on the way in, what this server was generated from on the way
@@ -200,15 +200,17 @@ type ErrorCode = rigerr.Code
 
 // The codes a client may see.
 const (
-	ErrorCodeBadRequest          ErrorCode = rigerr.CodeBadRequest
-	ErrorCodeUnauthorized        ErrorCode = rigerr.CodeUnauthorized
-	ErrorCodeForbidden           ErrorCode = rigerr.CodeForbidden
-	ErrorCodeNotFound            ErrorCode = rigerr.CodeNotFound
-	ErrorCodeConflict            ErrorCode = rigerr.CodeConflict
-	ErrorCodeUnprocessableEntity ErrorCode = rigerr.CodeUnprocessableEntity
-	ErrorCodeRateLimited         ErrorCode = rigerr.CodeRateLimited
-	ErrorCodeUpgradeRequired     ErrorCode = rigerr.CodeUpgradeRequired
-	ErrorCodeInternal            ErrorCode = rigerr.CodeInternal
+	ErrorCodeBadRequest           ErrorCode = rigerr.CodeBadRequest
+	ErrorCodeUnauthorized         ErrorCode = rigerr.CodeUnauthorized
+	ErrorCodeForbidden            ErrorCode = rigerr.CodeForbidden
+	ErrorCodeNotFound             ErrorCode = rigerr.CodeNotFound
+	ErrorCodeConflict             ErrorCode = rigerr.CodeConflict
+	ErrorCodeUnprocessableEntity  ErrorCode = rigerr.CodeUnprocessableEntity
+	ErrorCodeRateLimited          ErrorCode = rigerr.CodeRateLimited
+	ErrorCodeTooLarge             ErrorCode = rigerr.CodeTooLarge
+	ErrorCodeUnsupportedMediaType ErrorCode = rigerr.CodeUnsupportedMediaType
+	ErrorCodeUpgradeRequired      ErrorCode = rigerr.CodeUpgradeRequired
+	ErrorCodeInternal             ErrorCode = rigerr.CodeInternal
 )
 
 // Returned whenever a request fails.

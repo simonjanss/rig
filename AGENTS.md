@@ -14,7 +14,7 @@ make check   # what that hook runs, and what CI runs
 ```bash
 make fmt-check   # gofmt; `make fmt` rewrites
 make vet
-make godoc-check # exported symbols in the four imported modules have doc comments
+make godoc-check # exported symbols in the five imported modules have doc comments
 make build
 make test        # the fast suite
 make deps        # go mod tidy, then fail if anything changed
@@ -45,7 +45,8 @@ make test-docker   # the suite behind the `docker` build tag
 make examples      # regenerate all four examples and run them for real
 ```
 
-`make test-docker` covers `.`, `runtime`, `auth`, `migrate` and `rigclient`.
+`make test-docker` covers `.`, `runtime`, `auth`, `files`, `migrate` and
+`rigclient`.
 Most of it starts its own Postgres on a port of its own and cleans up after
 itself. The `migrate` module is the exception: it expects a database at
 `localhost:55440`, or wherever `DATABASE_URL` points, and **skips itself
@@ -57,6 +58,12 @@ examples are real projects, so a generator change that breaks one breaks it
 visibly. `rig generate` starts and migrates the database each example names in
 its own `rig.yaml`, so do not have something else listening on those ports
 (todo 55440, fantasyfootball 55441, auth 55442, auth_oauth 55443).
+
+Every port a suite or an example pins is named in `internal/dockerdb/ports.go`,
+and a test there refuses two suites on one number. A new suite takes its port
+from that file rather than by grepping for one that looks free — the examples
+are listed there too, even though their own configuration is where the number
+actually lives.
 
 Expect `make examples` to take a few minutes. It is worth it for any change
 under `internal/gen/` or `internal/compile/`.
@@ -116,11 +123,12 @@ of the files above is edited. It reminds; it does not gate.
 
 ## Godoc
 
-`runtime/`, `auth/`, `migrate/` and `rigclient/` are separate modules that a
-generated application imports. Their godoc is the only documentation their Go
-surface has: `docs/` covers what somebody writes — `rig.yaml`, a migration, a
-service — and never what they call. So a doc comment there is documentation, not
-commentary, and `make godoc-check` fails on an exported symbol without one.
+`runtime/`, `auth/`, `files/`, `migrate/` and `rigclient/` are separate modules
+that a generated application imports. Their godoc is the only documentation
+their Go surface has: `docs/` covers what somebody writes — `rig.yaml`, a
+migration, a service — and never what they call. So a doc comment there is
+documentation, not commentary, and `make godoc-check` fails on an exported
+symbol without one.
 **A change to a signature updates its doc comment in the same commit.**
 
 The check asks only whether a symbol has a comment, never what the comment says.
@@ -149,7 +157,7 @@ and reads fine where it is. Nothing catches this, so after a rename:
 
 ```bash
 grep -rn '^\s*//.*\[[A-Z][A-Za-z0-9_]*\.[a-z][A-Za-z0-9_]*\]' --include='*.go' \
-  runtime auth migrate rigclient
+  runtime auth files migrate rigclient
 ```
 
 **A doc on a `const (` block covers every name in it**, so the block is where a

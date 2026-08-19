@@ -44,7 +44,7 @@ func Validate(doc *ir.Document, set *tableconf.Set, p *project.Project) diag.Lis
 		diags.Append(checkAuditColumns(t, loaded))
 		diags.Append(checkSnapshotColumns(doc, t, loaded))
 		if !unreadable {
-			diags.Append(checkRestoreWindow(t, res, loaded))
+			diags.Append(checkRestoreWindow(t, res, loaded, fileRestoreWindowDays(p)))
 			diags.Append(checkSnapshotIgnore(t, res, loaded))
 		}
 
@@ -227,7 +227,12 @@ func checkSnapshotColumns(doc *ir.Document, t *ir.Table, loaded *tableconf.Loade
 }
 
 // checkRestoreWindow ties the retention setting to the schema that needs it.
-func checkRestoreWindow(t *ir.Table, res *ir.Resource, loaded *tableconf.Loaded) diag.List {
+//
+// fileWindow is rig_file's window resolved from `files.restore_window`, or zero
+// when no files block governs it. Where it applies it replaces the key rather
+// than defaulting it: one number decides how long the bytes are kept, and a
+// second one in services/rig_file could only ever disagree with it.
+func checkRestoreWindow(t *ir.Table, res *ir.Resource, loaded *tableconf.Loaded, fileWindow int) diag.List {
 	var diags diag.List
 	if res == nil {
 		return diags
@@ -238,6 +243,17 @@ func checkRestoreWindow(t *ir.Table, res *ir.Resource, loaded *tableconf.Loaded)
 	var configured *int
 	if loaded != nil {
 		configured = loaded.File.RestoreWindowDays
+	}
+
+	if t.Name == FileTable && fileWindow > 0 {
+		if configured != nil {
+			diags.Add(diag.CodeRestoreWindowForbidden, at(loaded, t, "restore_window_days"),
+				"restore_window_days is set on %q, whose window is files.restore_window in "+
+					"rig.yaml: it is how long the bytes are kept as well as how long the row "+
+					"is restorable, so there is one number and this is not where it lives",
+				t.Name)
+		}
+		return diags
 	}
 
 	switch {
@@ -376,14 +392,49 @@ func checkIndexes(t *ir.Table, loaded *tableconf.Loaded, fkSev, tenantSev diag.S
 // indexCovers reports whether a column is the first column of some index. Being
 // buried in the middle of a composite index does not help a lookup by that
 // column alone, which is what a foreign key needs.
+//
+// An index leading with the tenant and then this column counts, but only where
+// the key itself carries the tenant. `(tenant_id, todo_id) references todo
+// (tenant_id, id)` is enforced on both columns, so `(tenant_id, todo_id)` is the
+// index Postgres uses to check the child rows when a parent is deleted, as well
+// as the one every generated query wants — and demanding a second index leading
+// with the column alone would be rig warning about the shape it asked for.
+//
+// A single-column key gets no such credit. `references todo (id)` is checked
+// with `WHERE todo_id = $1` and nothing else, which a `(tenant_id, todo_id)`
+// index cannot serve, so deleting a parent would scan the child table however
+// well the generated reads are covered.
 func indexCovers(t *ir.Table, column string) bool {
+	tenantCarrying := carriesTenantInKey(t, column)
+
 	for _, idx := range t.Indexes {
 		if idx.LeadsWith(column) {
+			return true
+		}
+		if tenantCarrying && idx.Partial == "" && len(idx.Columns) > 1 &&
+			idx.Columns[0] == ColTenantID && idx.Columns[1] == column {
 			return true
 		}
 	}
 	// A single-column primary key or unique constraint is an index too.
 	return len(t.PrimaryKey) == 1 && t.PrimaryKey[0] == column
+}
+
+// carriesTenantInKey reports whether the foreign key denormalized onto this
+// column is the two-column form pairing it with the tenant.
+//
+// It reads the table's keys rather than the column's [ir.FKRef], because the
+// FKRef is the denormalized view and by design says nothing about how many
+// columns the constraint spans — which is the whole question here.
+func carriesTenantInKey(t *ir.Table, column string) bool {
+	for _, fk := range t.ForeignKeys {
+		i, ok := denormalizableColumn(fk)
+		if !ok || fk.Columns[i] != column {
+			continue
+		}
+		return len(fk.Columns) == 2
+	}
+	return false
 }
 
 func checkColumnNaming(t *ir.Table, loaded *tableconf.Loaded, boolSev, tsSev, dateSev, fkSev diag.Severity) diag.List {
@@ -440,7 +491,13 @@ func checkColumnNaming(t *ir.Table, loaded *tableconf.Loaded, boolSev, tsSev, da
 		// target obvious rather than to make names long.
 		selfReference := c.ForeignKey != nil && c.ForeignKey.Table == t.Name
 
-		if fkSev != "" && c.ForeignKey != nil && !isAuditActorColumn(c.Name) && !selfReference {
+		// A file column is exempt for the same reason, and it is the third of
+		// these. `<role>_file_id` is the declaration: there is only one table it
+		// could point at, so naming the role says more than naming the target,
+		// and the alternative the rule would demand is either rig_file_id — one
+		// file per table, forever — or profile_image_rig_file_id.
+		if fkSev != "" && c.ForeignKey != nil && !isAuditActorColumn(c.Name) &&
+			!selfReference && !isFileColumn(c) {
 			want := c.ForeignKey.Table + "_id"
 			if c.Name != want && !strings.HasSuffix(c.Name, "_"+want) {
 				diags.AddSeverity(diag.CodeForeignKeyNaming, fkSev, at,

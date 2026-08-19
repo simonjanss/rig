@@ -35,7 +35,7 @@ var update = flag.Bool("update", false, "rewrite the golden schema")
 
 const (
 	containerName = "rig-introspect-test"
-	containerPort = 55491
+	containerPort = dockerdb.PortIntrospect
 )
 
 // schema brings up the corpus once and reads it back. Every test shares it:

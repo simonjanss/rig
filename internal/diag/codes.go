@@ -111,9 +111,10 @@ var (
 		"Delete the file. `rig sync` reports it but will not remove it: it may hold endpoint definitions worth keeping.")
 
 	CodeForeignTable = newCode("RIG3107", SeverityError,
-		"A configuration file names a table another module owns.",
-		"Delete the file, or add the table to `auth.expose` in rig.yaml to have rig "+
-			"generate a model and a repository for it after all.")
+		"A configuration file names a table rig manages rather than generates from.",
+		"Delete the file, or turn on the switch the message names — `auth.expose` for the "+
+			"authentication foundation, `files.expose` for rig_file — to have rig generate a "+
+			"model and a repository for it after all.")
 
 	CodeUnknownEnumValue = newCode("RIG3103", SeverityError,
 		"The configuration names an enum label that no longer exists.",

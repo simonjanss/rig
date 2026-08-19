@@ -47,6 +47,16 @@
             "description": "Too many requests. Retry after the interval in the Retry-After header."
           },
           {
+            "name": "TooLarge",
+            "wire": "TooLarge",
+            "description": "The request body is larger than this endpoint accepts."
+          },
+          {
+            "name": "UnsupportedMediaType",
+            "wire": "UnsupportedMediaType",
+            "description": "The body's content type is not one this endpoint accepts."
+          },
+          {
             "name": "UpgradeRequired",
             "wire": "UpgradeRequired",
             "description": "The client was built against an API revision this server no longer serves."
@@ -1962,7 +1972,9 @@
               {
                 "status_code": 200,
                 "description": "A page of Fixtures.",
-                "content_type": "application/json",
+                "content_types": [
+                  "application/json"
+                ],
                 "body_object": "FixtureListResponse"
               }
             ],
@@ -1989,7 +2001,9 @@
             "operation_id": "createFixture",
             "permission": "fixture.write",
             "request": {
-              "content_type": "application/json",
+              "content_types": [
+                "application/json"
+              ],
               "body_params": [
                 {
                   "name": "HomeTeamID",
@@ -2044,7 +2058,9 @@
               {
                 "status_code": 201,
                 "description": "The created Fixture.",
-                "content_type": "application/json",
+                "content_types": [
+                  "application/json"
+                ],
                 "body_object": "Fixture"
               }
             ],
@@ -2076,7 +2092,9 @@
             "operation_id": "searchFixtures",
             "permission": "fixture.read",
             "request": {
-              "content_type": "application/json",
+              "content_types": [
+                "application/json"
+              ],
               "query_params": [
                 {
                   "name": "Limit",
@@ -2112,7 +2130,9 @@
               {
                 "status_code": 200,
                 "description": "A page of matching Fixtures.",
-                "content_type": "application/json",
+                "content_types": [
+                  "application/json"
+                ],
                 "body_object": "FixtureListResponse"
               }
             ],
@@ -2197,7 +2217,9 @@
               {
                 "status_code": 200,
                 "description": "The requested Fixture.",
-                "content_type": "application/json",
+                "content_types": [
+                  "application/json"
+                ],
                 "body_object": "Fixture"
               }
             ],
@@ -2226,7 +2248,9 @@
             "operation_id": "updateFixture",
             "permission": "fixture.write",
             "request": {
-              "content_type": "application/json",
+              "content_types": [
+                "application/json"
+              ],
               "path_params": [
                 {
                   "name": "ID",
@@ -2259,7 +2283,9 @@
               {
                 "status_code": 200,
                 "description": "The updated Fixture.",
-                "content_type": "application/json",
+                "content_types": [
+                  "application/json"
+                ],
                 "body_object": "Fixture"
               }
             ],
@@ -2474,7 +2500,9 @@
               {
                 "status_code": 200,
                 "description": "A page of Players.",
-                "content_type": "application/json",
+                "content_types": [
+                  "application/json"
+                ],
                 "body_object": "PlayerListResponse"
               }
             ],
@@ -2501,7 +2529,9 @@
             "operation_id": "createPlayer",
             "permission": "player.write",
             "request": {
-              "content_type": "application/json",
+              "content_types": [
+                "application/json"
+              ],
               "body_params": [
                 {
                   "name": "FullName",
@@ -2524,7 +2554,9 @@
               {
                 "status_code": 201,
                 "description": "The created Player.",
-                "content_type": "application/json",
+                "content_types": [
+                  "application/json"
+                ],
                 "body_object": "Player"
               }
             ],
@@ -2556,7 +2588,9 @@
             "operation_id": "searchPlayers",
             "permission": "player.read",
             "request": {
-              "content_type": "application/json",
+              "content_types": [
+                "application/json"
+              ],
               "query_params": [
                 {
                   "name": "Limit",
@@ -2592,7 +2626,9 @@
               {
                 "status_code": 200,
                 "description": "A page of matching Players.",
-                "content_type": "application/json",
+                "content_types": [
+                  "application/json"
+                ],
                 "body_object": "PlayerListResponse"
               }
             ],
@@ -2677,7 +2713,9 @@
               {
                 "status_code": 200,
                 "description": "The requested Player.",
-                "content_type": "application/json",
+                "content_types": [
+                  "application/json"
+                ],
                 "body_object": "Player"
               }
             ],
@@ -2706,7 +2744,9 @@
             "operation_id": "updatePlayer",
             "permission": "player.write",
             "request": {
-              "content_type": "application/json",
+              "content_types": [
+                "application/json"
+              ],
               "path_params": [
                 {
                   "name": "ID",
@@ -2739,7 +2779,9 @@
               {
                 "status_code": 200,
                 "description": "The updated Player.",
-                "content_type": "application/json",
+                "content_types": [
+                  "application/json"
+                ],
                 "body_object": "Player"
               }
             ],
@@ -2947,7 +2989,9 @@
               {
                 "status_code": 200,
                 "description": "A page of Teams.",
-                "content_type": "application/json",
+                "content_types": [
+                  "application/json"
+                ],
                 "body_object": "TeamListResponse"
               }
             ],
@@ -2974,7 +3018,9 @@
             "operation_id": "createTeam",
             "permission": "team.write",
             "request": {
-              "content_type": "application/json",
+              "content_types": [
+                "application/json"
+              ],
               "body_params": [
                 {
                   "name": "Name",
@@ -2997,7 +3043,9 @@
               {
                 "status_code": 201,
                 "description": "The created Team.",
-                "content_type": "application/json",
+                "content_types": [
+                  "application/json"
+                ],
                 "body_object": "Team"
               }
             ],
@@ -3029,7 +3077,9 @@
             "operation_id": "searchTeams",
             "permission": "team.read",
             "request": {
-              "content_type": "application/json",
+              "content_types": [
+                "application/json"
+              ],
               "query_params": [
                 {
                   "name": "Limit",
@@ -3065,7 +3115,9 @@
               {
                 "status_code": 200,
                 "description": "A page of matching Teams.",
-                "content_type": "application/json",
+                "content_types": [
+                  "application/json"
+                ],
                 "body_object": "TeamListResponse"
               }
             ],
@@ -3150,7 +3202,9 @@
               {
                 "status_code": 200,
                 "description": "The requested Team.",
-                "content_type": "application/json",
+                "content_types": [
+                  "application/json"
+                ],
                 "body_object": "Team"
               }
             ],
@@ -3179,7 +3233,9 @@
             "operation_id": "updateTeam",
             "permission": "team.write",
             "request": {
-              "content_type": "application/json",
+              "content_types": [
+                "application/json"
+              ],
               "path_params": [
                 {
                   "name": "ID",
@@ -3212,7 +3268,9 @@
               {
                 "status_code": 200,
                 "description": "The updated Team.",
-                "content_type": "application/json",
+                "content_types": [
+                  "application/json"
+                ],
                 "body_object": "Team"
               }
             ],

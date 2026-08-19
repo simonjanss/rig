@@ -47,6 +47,16 @@
             "description": "Too many requests. Retry after the interval in the Retry-After header."
           },
           {
+            "name": "TooLarge",
+            "wire": "TooLarge",
+            "description": "The request body is larger than this endpoint accepts."
+          },
+          {
+            "name": "UnsupportedMediaType",
+            "wire": "UnsupportedMediaType",
+            "description": "The body's content type is not one this endpoint accepts."
+          },
+          {
             "name": "UpgradeRequired",
             "wire": "UpgradeRequired",
             "description": "The client was built against an API revision this server no longer serves."
@@ -1044,7 +1054,9 @@
               {
                 "status_code": 200,
                 "description": "A page of Memos.",
-                "content_type": "application/json",
+                "content_types": [
+                  "application/json"
+                ],
                 "body_object": "MemoListResponse"
               }
             ],
@@ -1071,7 +1083,9 @@
             "operation_id": "createMemo",
             "permission": "memo.write",
             "request": {
-              "content_type": "application/json",
+              "content_types": [
+                "application/json"
+              ],
               "body_params": [
                 {
                   "name": "Body",
@@ -1094,7 +1108,9 @@
               {
                 "status_code": 201,
                 "description": "The created Memo.",
-                "content_type": "application/json",
+                "content_types": [
+                  "application/json"
+                ],
                 "body_object": "Memo"
               }
             ],
@@ -1127,7 +1143,9 @@
             "permission": "memo.read",
             "wide_permission": "memo.read.all",
             "request": {
-              "content_type": "application/json",
+              "content_types": [
+                "application/json"
+              ],
               "query_params": [
                 {
                   "name": "Limit",
@@ -1172,7 +1190,9 @@
               {
                 "status_code": 200,
                 "description": "A page of matching Memos.",
-                "content_type": "application/json",
+                "content_types": [
+                  "application/json"
+                ],
                 "body_object": "MemoListResponse"
               }
             ],
@@ -1236,7 +1256,9 @@
               {
                 "status_code": 200,
                 "description": "A page of retired Memos.",
-                "content_type": "application/json",
+                "content_types": [
+                  "application/json"
+                ],
                 "body_object": "MemoListResponse"
               }
             ],
@@ -1333,7 +1355,9 @@
               {
                 "status_code": 200,
                 "description": "The requested Memo.",
-                "content_type": "application/json",
+                "content_types": [
+                  "application/json"
+                ],
                 "body_object": "Memo"
               }
             ],
@@ -1362,7 +1386,9 @@
             "operation_id": "updateMemo",
             "permission": "memo.write",
             "request": {
-              "content_type": "application/json",
+              "content_types": [
+                "application/json"
+              ],
               "path_params": [
                 {
                   "name": "ID",
@@ -1395,7 +1421,9 @@
               {
                 "status_code": 200,
                 "description": "The updated Memo.",
-                "content_type": "application/json",
+                "content_types": [
+                  "application/json"
+                ],
                 "body_object": "Memo"
               }
             ],
@@ -1441,7 +1469,9 @@
               {
                 "status_code": 200,
                 "description": "The restored Memo.",
-                "content_type": "application/json",
+                "content_types": [
+                  "application/json"
+                ],
                 "body_object": "Memo"
               }
             ],

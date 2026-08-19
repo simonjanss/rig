@@ -47,6 +47,16 @@
             "description": "Too many requests. Retry after the interval in the Retry-After header."
           },
           {
+            "name": "TooLarge",
+            "wire": "TooLarge",
+            "description": "The request body is larger than this endpoint accepts."
+          },
+          {
+            "name": "UnsupportedMediaType",
+            "wire": "UnsupportedMediaType",
+            "description": "The body's content type is not one this endpoint accepts."
+          },
+          {
             "name": "UpgradeRequired",
             "wire": "UpgradeRequired",
             "description": "The client was built against an API revision this server no longer serves."
@@ -1665,7 +1675,9 @@
               {
                 "status_code": 200,
                 "description": "A page of Articles.",
-                "content_type": "application/json",
+                "content_types": [
+                  "application/json"
+                ],
                 "body_object": "ArticleListResponse"
               }
             ],
@@ -1692,7 +1704,9 @@
             "operation_id": "createArticle",
             "permission": "article.write",
             "request": {
-              "content_type": "application/json",
+              "content_types": [
+                "application/json"
+              ],
               "body_params": [
                 {
                   "name": "Headline",
@@ -1779,7 +1793,9 @@
               {
                 "status_code": 201,
                 "description": "The created Article.",
-                "content_type": "application/json",
+                "content_types": [
+                  "application/json"
+                ],
                 "body_object": "Article"
               }
             ],
@@ -1811,7 +1827,9 @@
             "operation_id": "searchArticles",
             "permission": "article.read",
             "request": {
-              "content_type": "application/json",
+              "content_types": [
+                "application/json"
+              ],
               "query_params": [
                 {
                   "name": "Limit",
@@ -1847,7 +1865,9 @@
               {
                 "status_code": 200,
                 "description": "A page of matching Articles.",
-                "content_type": "application/json",
+                "content_types": [
+                  "application/json"
+                ],
                 "body_object": "ArticleListResponse"
               }
             ],
@@ -1901,7 +1921,9 @@
               {
                 "status_code": 200,
                 "description": "A page of retired Articles.",
-                "content_type": "application/json",
+                "content_types": [
+                  "application/json"
+                ],
                 "body_object": "ArticleListResponse"
               }
             ],
@@ -1986,7 +2008,9 @@
               {
                 "status_code": 200,
                 "description": "The requested Article.",
-                "content_type": "application/json",
+                "content_types": [
+                  "application/json"
+                ],
                 "body_object": "Article"
               }
             ],
@@ -2015,7 +2039,9 @@
             "operation_id": "updateArticle",
             "permission": "article.write",
             "request": {
-              "content_type": "application/json",
+              "content_types": [
+                "application/json"
+              ],
               "path_params": [
                 {
                   "name": "ID",
@@ -2112,7 +2138,9 @@
               {
                 "status_code": 200,
                 "description": "The updated Article.",
-                "content_type": "application/json",
+                "content_types": [
+                  "application/json"
+                ],
                 "body_object": "Article"
               }
             ],
@@ -2158,7 +2186,9 @@
               {
                 "status_code": 200,
                 "description": "The restored Article.",
-                "content_type": "application/json",
+                "content_types": [
+                  "application/json"
+                ],
                 "body_object": "Article"
               }
             ],
@@ -2397,7 +2427,9 @@
               {
                 "status_code": 200,
                 "description": "A page of Authors.",
-                "content_type": "application/json",
+                "content_types": [
+                  "application/json"
+                ],
                 "body_object": "AuthorListResponse"
               }
             ],
@@ -2424,7 +2456,9 @@
             "operation_id": "createAuthor",
             "permission": "author.write",
             "request": {
-              "content_type": "application/json",
+              "content_types": [
+                "application/json"
+              ],
               "body_params": [
                 {
                   "name": "Name",
@@ -2446,7 +2480,9 @@
               {
                 "status_code": 201,
                 "description": "The created Author.",
-                "content_type": "application/json",
+                "content_types": [
+                  "application/json"
+                ],
                 "body_object": "Author"
               }
             ],
@@ -2478,7 +2514,9 @@
             "operation_id": "searchAuthors",
             "permission": "author.read",
             "request": {
-              "content_type": "application/json",
+              "content_types": [
+                "application/json"
+              ],
               "query_params": [
                 {
                   "name": "Limit",
@@ -2514,7 +2552,9 @@
               {
                 "status_code": 200,
                 "description": "A page of matching Authors.",
-                "content_type": "application/json",
+                "content_types": [
+                  "application/json"
+                ],
                 "body_object": "AuthorListResponse"
               }
             ],
@@ -2599,7 +2639,9 @@
               {
                 "status_code": 200,
                 "description": "The requested Author.",
-                "content_type": "application/json",
+                "content_types": [
+                  "application/json"
+                ],
                 "body_object": "Author"
               }
             ],
@@ -2628,7 +2670,9 @@
             "operation_id": "updateAuthor",
             "permission": "author.write",
             "request": {
-              "content_type": "application/json",
+              "content_types": [
+                "application/json"
+              ],
               "path_params": [
                 {
                   "name": "ID",
@@ -2660,7 +2704,9 @@
               {
                 "status_code": 200,
                 "description": "The updated Author.",
-                "content_type": "application/json",
+                "content_types": [
+                  "application/json"
+                ],
                 "body_object": "Author"
               }
             ],

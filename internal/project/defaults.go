@@ -3,6 +3,7 @@ package project
 import (
 	"fmt"
 	"net/url"
+	"slices"
 	"strings"
 	"time"
 
@@ -57,7 +58,45 @@ const (
 	// is read from. It has no alternative source: it is a secret, so a variable
 	// is the only place it can come from and defaulting the name costs nothing.
 	DefaultSigningKeyEnv = "OAUTH_SIGNING_KEY"
+
+	// DefaultFilesBackend is memory, which is not durable. A project that means
+	// to keep its uploads has to say so, and a default of s3 would need a bucket
+	// nobody configured.
+	DefaultFilesBackend = BackendMemory
+
+	// DefaultFilesMaxBytes is 25 MiB: comfortably more than a photograph from a
+	// phone, comfortably less than something that should have been a multipart
+	// upload to a bucket.
+	DefaultFilesMaxBytes = 25 << 20
+
+	// DefaultFilesAbandonedAfter gives a pending upload a day before the sweeper
+	// treats it as the remains of a request that died. Generous on purpose: the
+	// cost of waiting is a row, and the cost of being wrong is deleting a file
+	// somebody is still sending.
+	DefaultFilesAbandonedAfter = 24 * time.Hour
+
+	// DefaultFilesRestoreWindow matches the thirty days `restore_window_days`
+	// scaffolds for an ordinary table, so a file and the row pointing at it go
+	// out of reach together.
+	DefaultFilesRestoreWindow = 30 * 24 * time.Hour
+
+	// The AWS SDK's own variable names, so a deployment that already has
+	// credentials in the environment needs no configuration at all.
+	DefaultAccessKeyEnv = "AWS_ACCESS_KEY_ID"
+	DefaultSecretKeyEnv = "AWS_SECRET_ACCESS_KEY"
 )
+
+// DefaultInlineTypes are the sniffed types served without an attachment
+// disposition.
+//
+// Images and nothing else. A file served inline from the API origin runs on
+// that origin, and the URL is in a synced row that ends up in an <img> without
+// anybody thinking about it — so text/html, image/svg+xml and application/pdf
+// are all deliberately absent. SVG is the one that surprises people: it is an
+// image, and it can carry script.
+func DefaultInlineTypes() []string {
+	return []string{"image/jpeg", "image/png", "image/gif", "image/webp"}
+}
 
 // The authentication defaults are rig/auth's own rather than copies of them.
 // Two constants that happen to match today would not stay matching, and a
@@ -126,6 +165,34 @@ func (p *Project) applyDefaults() {
 	setDefault(&c.Naming.JSONCase, DefaultJSONCase)
 
 	p.applyAuthDefaults()
+	p.applyFilesDefaults()
+}
+
+// applyFilesDefaults resolves every value the files block leaves out, for the
+// same reason applyAuthDefaults does: the numbers here are the ones the
+// generated wiring passes and the specification quotes, and a zero meaning
+// "something else decides" would leave three places to ask.
+func (p *Project) applyFilesDefaults() {
+	f := &p.Config.Files
+	if !f.Enabled {
+		return
+	}
+
+	setDefault(&f.Backend, DefaultFilesBackend)
+	if f.MaxBytes == 0 {
+		f.MaxBytes = DefaultFilesMaxBytes
+	}
+	setDuration(&f.AbandonedAfter, DefaultFilesAbandonedAfter)
+	setDuration(&f.RestoreWindow, DefaultFilesRestoreWindow)
+
+	if len(f.InlineTypes) == 0 {
+		f.InlineTypes = slices.Clone(DefaultInlineTypes())
+	}
+
+	if f.Backend == BackendS3 {
+		setDefault(&f.S3.AccessKeyEnv, DefaultAccessKeyEnv)
+		setDefault(&f.S3.SecretKeyEnv, DefaultSecretKeyEnv)
+	}
 }
 
 // applyAuthDefaults resolves every value the authentication block leaves out.
@@ -283,6 +350,7 @@ func (p *Project) check() diag.List {
 	}
 
 	diags.Append(p.checkAuth())
+	diags.Append(p.checkFiles())
 
 	return diags
 }

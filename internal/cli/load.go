@@ -54,6 +54,7 @@ func compileFrom(p *project.Project, schema ir.Schema) (*ir.Document, diag.List)
 		diags.Add(diag.CodeConfigFile, diag.Anchor{}, "%v", err)
 	}
 	diags.Append(checkFoundationPresent(p))
+	diags.Append(checkFilesFoundation(p, set))
 
 	doc, d := compile.Compile(schema, set, compile.Options{
 		Project:      p,
@@ -91,6 +92,22 @@ func foundationTables(p *project.Project) ([]string, error) {
 
 	var out []string
 	for _, table := range scaffold.Managed(names) {
+		// rig_file has a switch of its own rather than a place in that list,
+		// because the reason to expose it is not the reason to expose any of the
+		// others. The url lives on the row, so a client that cannot read
+		// rig_file cannot use the column that exists for it — and a live-sync
+		// endpoint on an unexposed resource is refused, correctly.
+		//
+		// `auth.expose` deliberately does not reach it. It would happen to work
+		// and would leave `files.expose` — which the rest of rig reads, and which
+		// checkFilesFoundation guards — saying the opposite.
+		if table == compile.FileTable {
+			if p.Config.Files.Enabled && p.Config.Files.Expose {
+				continue
+			}
+			out = append(out, table)
+			continue
+		}
 		// An exposed table is projected like any other: the point of the list is
 		// to get a model and a repository back.
 		if slices.Contains(p.Config.Auth.Expose, table) {
@@ -99,6 +116,41 @@ func foundationTables(p *project.Project) ([]string, error) {
 		out = append(out, table)
 	}
 	return out, nil
+}
+
+// checkFilesFoundation reports a files block whose table is not there, and an
+// exposed rig_file with no configuration saying what may be done to it.
+//
+// The second one is the dangerous half. Removing rig_file from the ignore list
+// is what makes it a resource; the table configuration is what makes that
+// resource read-only and narrow. Without the configuration it would arrive with
+// full CRUD over the storage key — which is a way to point a row at any object
+// in the bucket, and precisely what the design refuses to generate.
+func checkFilesFoundation(p *project.Project, set *tableconf.Set) diag.List {
+	var diags diag.List
+	if !p.Config.Files.Enabled {
+		return diags
+	}
+
+	names, err := migrationNames(p.MigrationsDir())
+	if err != nil && !os.IsNotExist(err) {
+		return diags
+	}
+
+	if !slices.Contains(scaffold.Managed(names), compile.FileTable) {
+		diags.Add(diag.CodeConfigInvalid, p.At("files", "enabled"),
+			"files.enabled is set but this project has no %s migration; "+
+				"run `rig setup-project`", compile.FileTable)
+		return diags
+	}
+
+	if p.Config.Files.Expose && set != nil && set.Get(compile.FileTable) == nil {
+		diags.Add(diag.CodeConfigInvalid, p.At("files", "expose"),
+			"files.expose projects %s, but there is no table configuration for it, so it would "+
+				"arrive with full CRUD over its storage key; "+
+				"run `rig setup-project --expose %s`", compile.FileTable, compile.FileTable)
+	}
+	return diags
 }
 
 // checkFoundationPresent reports an enabled authentication block with nothing

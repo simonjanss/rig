@@ -12,12 +12,15 @@
 package cli_test
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	goruntime "runtime"
 	"strings"
 	"testing"
+
+	"github.com/simonjanss/rig/internal/dockerdb"
 )
 
 func TestEndToEnd(t *testing.T) {
@@ -45,7 +48,7 @@ func TestEndToEnd(t *testing.T) {
 	})
 
 	// A distinct port, so a real project's container is never touched.
-	appendTo(t, filepath.Join(root, "rig.yaml"), "\ndatabase:\n  port: 55493\n")
+	appendTo(t, filepath.Join(root, "rig.yaml"), fmt.Sprintf("\ndatabase:\n  port: %d\n", dockerdb.PortCLIEndToEnd))
 
 	step(t, "migration new", func() {
 		_, stderr, code := run(t, "migration", "new", "create_team",

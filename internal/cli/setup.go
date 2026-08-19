@@ -8,6 +8,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/simonjanss/rig/internal/compile"
 	"github.com/simonjanss/rig/internal/scaffold"
 )
 
@@ -106,8 +107,8 @@ func newSetupProjectCmd(e *env) *cobra.Command {
 
 			if len(expose) > 0 {
 				fmt.Fprintf(e.errOut, "\nAdd this to rig.yaml, or the configuration "+
-					"it just wrote names a table rig leaves out:\n"+
-					"  auth:\n    expose: [%s]\n", strings.Join(expose, ", "))
+					"it just wrote names a table rig leaves out:\n%s",
+					exposeAdvice(expose))
 			}
 			return nil
 		},
@@ -119,6 +120,27 @@ func newSetupProjectCmd(e *env) *cobra.Command {
 		"foundation tables to generate a model, repository, and API for anyway")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "list the files without writing them")
 	return cmd
+}
+
+// exposeAdvice renders the rig.yaml the exposed tables need.
+//
+// rig_file is not in `auth.expose`. It has `files.expose`, because the reason
+// to project it is not the reason to project any of the others — the url lives
+// on the row, and a client that cannot read rig_file cannot use the column that
+// exists for it. Naming it in `auth.expose` would happen to work and would
+// leave the switch every other part of rig reads saying the opposite.
+func exposeAdvice(expose []string) string {
+	var b strings.Builder
+
+	if rest := slices.DeleteFunc(slices.Clone(expose), func(s string) bool {
+		return s == compile.FileTable
+	}); len(rest) > 0 {
+		fmt.Fprintf(&b, "  auth:\n    expose: [%s]\n", strings.Join(rest, ", "))
+	}
+	if slices.Contains(expose, compile.FileTable) {
+		b.WriteString("  files:\n    enabled: true\n    expose: true\n")
+	}
+	return b.String()
 }
 
 // normalizeExpose checks that every named table is one the foundation creates.

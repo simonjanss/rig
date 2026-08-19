@@ -101,6 +101,10 @@ const (
 	ErrorCodeUnprocessableEntity ErrorCode = rigerr.CodeUnprocessableEntity
 	// Too many requests. Retry after the interval in the Retry-After header.
 	ErrorCodeRateLimited ErrorCode = rigerr.CodeRateLimited
+	// The request body is larger than this endpoint accepts.
+	ErrorCodeTooLarge ErrorCode = rigerr.CodeTooLarge
+	// The body's content type is not one this endpoint accepts.
+	ErrorCodeUnsupportedMediaType ErrorCode = rigerr.CodeUnsupportedMediaType
 	// The client was built against an API revision this server no longer serves.
 	ErrorCodeUpgradeRequired ErrorCode = rigerr.CodeUpgradeRequired
 	// Something went wrong on the server.

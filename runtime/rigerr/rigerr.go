@@ -27,6 +27,16 @@ const (
 	CodeConflict            Code = "Conflict"
 	CodeUnprocessableEntity Code = "UnprocessableEntity"
 	CodeRateLimited         Code = "RateLimited"
+	// CodeTooLarge reports a request body past the limit the endpoint accepts.
+	//
+	// It is separate from a bad request because the caller's request was
+	// well-formed and the answer is a number: send fewer bytes. A 400 that also
+	// means a malformed body cannot say that.
+	CodeTooLarge Code = "TooLarge"
+	// CodeUnsupportedMediaType reports a body whose content type the endpoint
+	// does not accept — a JSON-only endpoint sent a form, or an upload of a type
+	// the project does not allow.
+	CodeUnsupportedMediaType Code = "UnsupportedMediaType"
 	// CodeUpgradeRequired reports that the caller was built against an API
 	// revision the server no longer serves.
 	//
@@ -54,6 +64,10 @@ func (c Code) HTTPStatus() int {
 		return http.StatusUnprocessableEntity
 	case CodeRateLimited:
 		return http.StatusTooManyRequests
+	case CodeTooLarge:
+		return http.StatusRequestEntityTooLarge
+	case CodeUnsupportedMediaType:
+		return http.StatusUnsupportedMediaType
 	case CodeUpgradeRequired:
 		return http.StatusUpgradeRequired
 	default:
@@ -115,6 +129,14 @@ func Invalid(format string, args ...any) *Error {
 
 // RateLimited reports that the caller should slow down.
 func RateLimited(format string, args ...any) *Error { return newf(CodeRateLimited, format, args...) }
+
+// TooLarge reports a body past the limit the endpoint accepts.
+func TooLarge(format string, args ...any) *Error { return newf(CodeTooLarge, format, args...) }
+
+// UnsupportedMediaType reports a body whose content type the endpoint refuses.
+func UnsupportedMediaType(format string, args ...any) *Error {
+	return newf(CodeUnsupportedMediaType, format, args...)
+}
 
 // UpgradeRequired reports that the caller is older than the server will serve.
 func UpgradeRequired(format string, args ...any) *Error {

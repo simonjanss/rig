@@ -1,0 +1,21 @@
+table: profile_attachment
+comment: >-
+  A gallery is a table. Many files against one row is a child table with one
+  file column, not a second mechanism.
+columns:
+  profile_id:
+    comment: >-
+      Reached through a composite key carrying the tenant, which is the shape
+      rig recommends wherever the target is tenant-scoped. Its index leads with
+      the tenant, and that is the index the generated queries want.
+  document_file_id:
+    comment: >-
+      The same shape, deliberately left without an index so the rule has
+      something to say. Before the tenant-carrying form was denormalized onto
+      its column, it had nothing to say about either of these.
+  thumbnail_file_id:
+    comment: >-
+      The control. Named like a file column and pointing at profile instead, so
+      it is not one — and it still gets the ordinary naming advice.
+  caption:
+    comment: What the attachment is.
