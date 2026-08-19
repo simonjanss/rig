@@ -154,6 +154,17 @@ type Access struct {
 	// different kind of decision from a read and one flag for both would be a bad
 	// answer to two questions.
 	Scope string `yaml:"scope,omitempty" json:"scope,omitempty" jsonschema:"enum=tenant,enum=own" jsonschema_description:"Default read width: tenant (every row) or own (rows the caller created)."`
+
+	// Owner names the column "own" filters on. It defaults to
+	// created_by_account_id, the audit column every generated write stamps.
+	//
+	// Naming another one is for the table whose owner is not whoever created the
+	// row: an inbox line belongs to the person it is addressed to, and an
+	// assigned task belongs to its assignee. The column has to be a uuid
+	// referencing rig_account and it has to be NOT NULL — the nullability the
+	// audit column is allowed is exactly what a column like this must not have,
+	// because a null there is a row nobody can see and nothing reports.
+	Owner string `yaml:"owner,omitempty" json:"owner,omitempty" jsonschema_description:"Column an owner-scoped read filters on. Defaults to created_by_account_id. Must be a NOT NULL uuid referencing rig_account."`
 }
 
 // OnDelete states the order the tables referencing this one are told that a row

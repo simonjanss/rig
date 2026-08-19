@@ -57,6 +57,10 @@ type API struct {
 	// client's expectations from each carrying their own copy of the answer.
 	Files *Files `json:"files,omitempty"`
 
+	// Notifications is the inbox this API serves, or nil for a project with
+	// none. Here for the reason [API.Auth] and [API.Files] are.
+	Notifications *Notifications `json:"notifications,omitempty"`
+
 	// Permissions is every permission this API's endpoints require, computed once
 	// at Freeze from the endpoints themselves.
 	//
@@ -114,6 +118,30 @@ type Files struct {
 	// CookieDownloads accepts the session cookie on file GET routes, so a
 	// stored URL works in an img or a download link.
 	CookieDownloads bool `json:"cookie_downloads,omitempty"`
+}
+
+// Notifications is the resolved notifications block: whether this project has an
+// inbox, and the numbers the engine that fills it runs on.
+type Notifications struct {
+	// Enabled says this project has an inbox. It is what makes server-go write
+	// the wiring, and what keeps rig's notification tables in the schema.
+	Enabled bool `json:"enabled"`
+	// Expose says the inbox is projected as a resource as well, so it gets the
+	// filter grammar and a generated client. The hand-written routes exist
+	// either way.
+	Expose bool `json:"expose,omitempty"`
+
+	// DefaultDigest is what an account with no setting for a channel gets.
+	DefaultDigest string `json:"default_digest"`
+
+	// ClaimTTLSeconds is how long a dispatcher's claim is honoured, and the rest
+	// of the retry arithmetic beside it. Seconds because a document is JSON and
+	// a Go duration in one is either unreadable or has to be parsed by everybody.
+	ClaimTTLSeconds    int64 `json:"claim_ttl_seconds"`
+	MaxAttempts        int   `json:"max_attempts"`
+	BackoffBaseSeconds int64 `json:"backoff_base_seconds"`
+	// RetentionSeconds is how long a read and deleted inbox line is kept.
+	RetentionSeconds int64 `json:"retention_seconds"`
 }
 
 // Origin records why an object exists, so a generator can treat hand-declared
@@ -389,6 +417,20 @@ type Resource struct {
 	// field name would be re-deriving the convention the compiler exists to have
 	// already settled.
 	Files []FileColumn `json:"files,omitempty"`
+
+	// Notifiable says this table is joined to rig_notification by a link table,
+	// so notifications can be about its rows.
+	//
+	// It is derived from the schema rather than declared: any link table one
+	// side of which is rig_notification makes the other side notifiable, so the
+	// recommended name — blog_post_notification — is a recommendation and
+	// nothing depends on it. There is nothing for a name to say here that the
+	// foreign key does not.
+	//
+	// A notifiable resource's rules interface grows two required methods: when
+	// notifications about a row are due, and — at the moment of sending — who
+	// should hear about it.
+	Notifiable bool `json:"notifiable,omitempty"`
 
 	// Parents are the resources this one points at, one per foreign key, in the
 	// order the columns appear on the table. Each becomes a pair of hook fields

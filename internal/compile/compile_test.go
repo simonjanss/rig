@@ -1693,3 +1693,252 @@ func TestASiblingCycleIsReportedRatherThanResolved(t *testing.T) {
 		t.Errorf("team should still have %d children, has %d", want, got)
 	}
 }
+
+// notifySchema is a subject table, rig's notification table, and the join
+// between them — the shape a project declares when it wants notifications about
+// something.
+//
+// The join carries the tenant inside its own foreign key, which is the form the
+// documentation recommends, so this fixture is also the assertion that the
+// recommended shape is the one that classifies. Before composite keys were
+// denormalized onto the column that carries their meaning, it was not.
+func notifySchema(extraJoinColumns ...ir.Column) ir.Schema {
+	join := ir.Table{
+		Name: "blog_post_notification", Kind: ir.TableKindBase,
+		Columns: append([]ir.Column{
+			{Name: "tenant_id", SQLType: "uuid", Ordinal: 1},
+			{Name: "blog_post_id", SQLType: "uuid", Ordinal: 2,
+				ForeignKey: &ir.FKRef{Table: "blog_post", Column: "id"}},
+			{Name: "notification_id", SQLType: "uuid", Ordinal: 3,
+				ForeignKey: &ir.FKRef{Table: "rig_notification", Column: "id"}},
+		}, extraJoinColumns...),
+		PrimaryKey: []string{"blog_post_id", "notification_id"},
+	}
+
+	return ir.Schema{
+		Tables: []ir.Table{
+			{
+				Name: "blog_post", Kind: ir.TableKindBase,
+				Columns: []ir.Column{
+					{Name: "id", SQLType: "uuid", Ordinal: 1},
+					{Name: "tenant_id", SQLType: "uuid", Ordinal: 2},
+					{Name: "title", SQLType: "text", Ordinal: 3},
+				},
+				PrimaryKey: []string{"id"},
+			},
+			{
+				Name: "rig_notification", Kind: ir.TableKindBase,
+				Columns: []ir.Column{
+					{Name: "id", SQLType: "uuid", Ordinal: 1},
+					{Name: "tenant_id", SQLType: "uuid", Ordinal: 2},
+					{Name: "kind", SQLType: "text", Ordinal: 3},
+				},
+				PrimaryKey: []string{"id"},
+			},
+			join,
+		},
+	}
+}
+
+func relationNames(res *ir.Resource, kind ir.RelationKind) []string {
+	var out []string
+	for _, rel := range res.Storage.Relations {
+		if rel.Kind == kind {
+			out = append(out, rel.Name)
+		}
+	}
+	return out
+}
+
+// A table declares itself notifiable by being joined to rig_notification, and
+// the join is an ordinary link table — which is the whole reason this costs
+// almost no new code. Asserted beside its inverse, because the pair is the
+// point: put a column of its own on the join and it stops being a link table,
+// stops yielding the relations, and becomes a resource with CRUD over a join row.
+func TestALinkToTheNotificationTableMakesATableNotifiable(t *testing.T) {
+	t.Parallel()
+
+	t.Run("a pure join makes the subject notifiable", func(t *testing.T) {
+		t.Parallel()
+
+		schema, diags := compile.Normalize(notifySchema(), compile.NormalizeOptions{})
+		if diags.HasErrors() {
+			t.Fatalf("the fixture itself should normalize:\n%s", diags.String())
+		}
+		api, _ := compile.Project(schema, compile.ProjectOptions{Name: "Demo", BasePath: "/api/v1"})
+
+		post := resource(t, api, "BlogPost")
+		if !post.Notifiable {
+			t.Error("a table joined to rig_notification is notifiable")
+		}
+		// The relations come for free, in both directions, and the join row
+		// itself is not a resource at all.
+		if got := relationNames(post, ir.RelationManyToMany); !slices.Contains(got, "RigNotifications") {
+			t.Errorf("blog_post should reach its notifications: %v", got)
+		}
+		notification := resource(t, api, "RigNotification")
+		if got := relationNames(notification, ir.RelationManyToMany); !slices.Contains(got, "BlogPosts") {
+			t.Errorf("the notification should reach its subjects: %v", got)
+		}
+		if notification.Notifiable {
+			t.Error("the notification table is not a subject of itself")
+		}
+		for _, r := range api.Resources {
+			if r.Storage != nil && r.Storage.Table == "blog_post_notification" {
+				t.Error("a join row should have no resource of its own")
+			}
+		}
+	})
+
+	t.Run("a column of its own stops it being a join", func(t *testing.T) {
+		t.Parallel()
+
+		// Anything beyond the two keys and rig's own managed columns means the
+		// row carries data, which makes it a resource rather than a link.
+		schema, _ := compile.Normalize(
+			notifySchema(ir.Column{Name: "reason", SQLType: "text", Ordinal: 4, Nullable: true}),
+			compile.NormalizeOptions{})
+		api, _ := compile.Project(schema, compile.ProjectOptions{Name: "Demo", BasePath: "/api/v1"})
+
+		if resource(t, api, "BlogPost").Notifiable {
+			t.Error("a join carrying data is not the declaration")
+		}
+		if resource(t, api, "BlogPostNotification") == nil {
+			t.Error("it should have become an ordinary resource instead")
+		}
+	})
+}
+
+// The trap that is cheapest to catch here and expensive to rediscover.
+//
+// classifyLinkTable looks its targets up in a map built after the ignored tables
+// have been dropped, so rig_notification has to stay in the schema even when it
+// has no endpoints. `notifications.expose: false` marks it unexposed instead —
+// a departure from how `files.expose` works, and the two are worth reading side
+// by side before changing either.
+func TestAnUnexposedNotificationTableIsStillALinkTarget(t *testing.T) {
+	t.Parallel()
+
+	schema, _ := compile.Normalize(notifySchema(), compile.NormalizeOptions{})
+	api, _ := compile.Project(schema, compile.ProjectOptions{Name: "Demo", BasePath: "/api/v1"})
+
+	out, _, diags := compile.ApplyConfig(api, schema, tableconf.NewSet(), compile.ConfigOptions{
+		Notifications: &ir.Notifications{Enabled: true, Expose: false},
+	})
+	if diags.HasErrors() {
+		t.Fatalf("nothing here is an error:\n%s", diags.String())
+	}
+
+	notification := resource(t, out, "RigNotification")
+	if !notification.Unexposed {
+		t.Error("notifications.expose is off, so the table should have no endpoints")
+	}
+	if len(notification.Operations) != 0 {
+		t.Errorf("an unexposed table offers no operations: %v", notification.Operations)
+	}
+	// The point of the whole test: unexposed, and still a link target.
+	if !resource(t, out, "BlogPost").Notifiable {
+		t.Error("an unexposed notification table must still make its subjects notifiable")
+	}
+}
+
+// inboxSchema is a table whose owner is not whoever created it: an account_id
+// saying who the row is for, beside a created_by_account_id saying who caused
+// it. The two are different questions and this is the table that has both.
+func inboxSchema(ownerNullable bool, ownerType string) ir.Schema {
+	return ir.Schema{
+		Tables: []ir.Table{
+			{
+				Name: "rig_account", Kind: ir.TableKindBase,
+				Columns:    []ir.Column{{Name: "id", SQLType: "uuid", Ordinal: 1}},
+				PrimaryKey: []string{"id"},
+			},
+			{
+				Name: "reminder", Kind: ir.TableKindBase,
+				Columns: []ir.Column{
+					{Name: "id", SQLType: "uuid", Ordinal: 1},
+					{Name: "tenant_id", SQLType: "uuid", Ordinal: 2},
+					{Name: "created_by_account_id", SQLType: "uuid", Ordinal: 3, Nullable: true},
+					{Name: "account_id", SQLType: ownerType, Ordinal: 4, Nullable: ownerNullable,
+						ForeignKey: &ir.FKRef{Table: "rig_account", Column: "id"}},
+					{Name: "note", SQLType: "text", Ordinal: 5, Nullable: true},
+				},
+				PrimaryKey: []string{"id"},
+			},
+		},
+	}
+}
+
+// `access: {scope: own}` filters on the created-by audit column, and for an
+// inbox that is the wrong column: a line belongs to the person it is addressed
+// to, not to whoever caused it. `access.owner` is the one field that says so.
+func TestAccessOwnerNarrowsToTheColumnThatSaysWhoTheRowIsFor(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name     string
+		owner    string
+		nullable bool
+		sqlType  string
+		want     string
+		diag     string
+	}{
+		{name: "unset keeps the audit column", want: "created_by_account_id"},
+		{name: "a named column wins", owner: "account_id", want: "account_id"},
+		{
+			name:  "a column that is not there is a typo, not a narrowing to nothing",
+			owner: "assignee_id", diag: "has no such column",
+		},
+		{
+			name:  "a column pointing somewhere else matches nothing and says nothing",
+			owner: "note", diag: "has to be uuid",
+		},
+		{
+			// The nullability the audit column is allowed is exactly what a
+			// column like this must not have: a row with no owner is invisible
+			// to every narrow read and nothing reports it.
+			name:  "a nullable column is refused",
+			owner: "account_id", nullable: true, diag: "has to be NOT NULL",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			sqlType := cmpOr(tc.sqlType, "uuid")
+			schema, _ := compile.Normalize(inboxSchema(tc.nullable, sqlType), compile.NormalizeOptions{})
+			api, _ := compile.Project(schema, compile.ProjectOptions{Name: "Demo", BasePath: "/api/v1"})
+
+			set := tableconf.NewSet()
+			set.Add(&tableconf.Loaded{File: &tableconf.File{
+				Table:  "reminder",
+				Access: &tableconf.Access{Scope: "own", Owner: tc.owner},
+			}})
+
+			out, _, diags := compile.ApplyConfig(api, schema, set, compile.ConfigOptions{})
+
+			owner := resource(t, out, "Reminder").Storage.Owner
+			switch {
+			case tc.diag != "":
+				if !strings.Contains(diags.String(), tc.diag) {
+					t.Errorf("expected a diagnostic saying %q:\n%s", tc.diag, diags.String())
+				}
+				// Refused rather than half-applied: a resource that kept a
+				// filter nobody validated is worse than one with none.
+				if owner != nil {
+					t.Errorf("a refused owner should not be applied: %s", owner.Name)
+				}
+			case owner == nil:
+				t.Fatalf("expected the read to narrow on %s, and it does not narrow at all", tc.want)
+			case owner.Name != tc.want:
+				t.Errorf("owner = %s, want %s", owner.Name, tc.want)
+			}
+		})
+	}
+}
+
+func cmpOr(s, fallback string) string {
+	if s == "" {
+		return fallback
+	}
+	return s
+}

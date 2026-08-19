@@ -334,3 +334,45 @@ columns:
 		},
 	}
 }
+
+// notificationConfigs are the two notification tables', and like rig_file's they
+// are written for a project that wants them read rather than for one that wants
+// CRUD.
+//
+// Neither needs a file for the inbox to work. The owner scope and the live-sync
+// shape on rig_notification_recipient come from the `notifications:` block in
+// rig.yaml, the way rig_file's restore window does, because they are one
+// decision and a second copy of them here could only disagree. What a file adds
+// is the rest of what a configuration asks for — the filter grammar, the sort
+// keys, the generated client — for a project that turned `expose` on because the
+// hand-written inbox routes were not enough.
+func notificationConfigs() []tableConfig {
+	return []tableConfig{
+		{
+			table: "rig_notification",
+			content: config("rig_notification", "Notification", schemaRef,
+				`# Read-only, and narrow. A notification is written by the engine and by
+# nothing else: a client that could POST one could announce anything to
+# anybody, and a client that could PATCH one could move a delivery date.
+#
+# What it is not is the inbox. This table holds rows that are pending for
+# people who are not recipients yet and may never be, which is also why it
+# has no live-sync shape.
+operations: [Get, List]`,
+			),
+		},
+		{
+			table: "rig_notification_recipient",
+			content: config("rig_notification_recipient", "NotificationRecipient", schemaRef,
+				`# The inbox. Read and delete, and nothing else: what a person may change
+# about one of these is whether they have read it, and that is the
+# _read endpoint rather than a PATCH that could rewrite the kind.
+#
+# The owner scope and the live-sync shape are not here. They come from the
+# notifications block in rig.yaml, because they are the same decision for
+# every project and a copy here could only disagree with it.
+operations: [Get, List, Search, Delete]`,
+			),
+		},
+	}
+}

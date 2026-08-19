@@ -113,12 +113,24 @@ caller may ask for beyond it is a permission.
 ```yaml
 access:
   scope: own
+  owner: account_id     # defaults to created_by_account_id
 ```
 
 | Value | |
 |---|---|
 | `tenant` | Every row the tenant owns. The default. |
-| `own` | Only the rows the caller created. Needs a `created_by_account_id` column, which is what it filters on. |
+| `own` | Only the caller's own rows. |
+
+`owner` is which column that means. It defaults to `created_by_account_id`, the
+audit column every generated write already stamps, so what a read narrows to and
+what a write records are the same fact.
+
+Name another one when the row's owner is not whoever created it — an inbox line
+belongs to the person it is addressed to, an assigned task to its assignee. The
+column has to be a `uuid` referencing `rig_account` and it has to be `NOT NULL`:
+a row with no owner is invisible to every narrow read and nothing reports it,
+which is tolerable for an audit column (a row a migration created really does
+have nobody behind it) and is not tolerable here.
 
 `own` narrows **reads**, and `?scope=all` widens them for a caller who holds the
 `.read.all` permission.

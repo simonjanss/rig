@@ -11,6 +11,10 @@
             "own"
           ],
           "description": "Default read width: tenant (every row) or own (rows the caller created)."
+        },
+        "owner": {
+          "type": "string",
+          "description": "Column an owner-scoped read filters on. Defaults to created_by_account_id. Must be a NOT NULL uuid referencing rig_account."
         }
       },
       "additionalProperties": false,

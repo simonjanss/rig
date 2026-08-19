@@ -28,6 +28,8 @@ type ProjectOptions struct {
 	// Files is the resolved file handling, or nil for a project that accepts no
 	// uploads.
 	Files *ir.Files
+	// Notifications is the resolved inbox, or nil for a project with none.
+	Notifications *ir.Notifications
 }
 
 // Project turns a normalized schema into a naked API surface.
@@ -50,6 +52,7 @@ func Project(schema ir.Schema, opt ProjectOptions) (ir.API, diag.List) {
 		RevisionHeader: opt.RevisionHeader,
 		Auth:           opt.Auth,
 		Files:          opt.Files,
+		Notifications:  opt.Notifications,
 	}
 
 	// Enums come first so field types can name them.
@@ -156,12 +159,50 @@ func projectResource(
 	res.Files = projectFileColumns(t, n)
 	res.Storage = projectStorage(t, schema, life, resourceForTable, n)
 
+	res.Notifiable = projectNotifiable(t, schema)
 	res.Parents = projectParents(t, resourceForTable, n)
 	children, d := projectChildren(t, schema, resourceForTable, n)
 	diags.Append(d)
 	res.Children = children
 
 	return res, diags
+}
+
+// projectNotifiable reports whether notifications can be about this table's
+// rows, which is to say whether a link table joins it to rig_notification.
+//
+// Found by scanning link tables rather than by parsing names. Any link table one
+// side of which is rig_notification makes the other side notifiable, so
+// `blog_post_notification` is a recommendation in the documentation and nothing
+// depends on it — the same position the file convention takes, minus the part
+// where the name has to carry a role, because here there is nothing for a name
+// to say that the foreign key does not.
+//
+// This costs almost no new code, and that is the reason the join table is the
+// declaration. [classifyLinkTable] already accepts a table whose primary key is
+// exactly two foreign-key columns and whose only other columns are rig's own
+// managed ones; tenant_id is one of those, and the composite tenant-carrying
+// form denormalizes onto its other column — so the tenant-safe shape rig
+// recommends is the shape that classifies. Everything else follows for free:
+// ManyToMany in both directions, the filter, the embed option, and no CRUD
+// surface over a join row.
+func projectNotifiable(t *ir.Table, schema ir.Schema) bool {
+	if t.Name == NotificationTable {
+		return false
+	}
+	for i := range schema.Tables {
+		lt := schema.Tables[i].LinkTable
+		if lt == nil {
+			continue
+		}
+		if lt.LeftTable == NotificationTable && lt.RightTable == t.Name {
+			return true
+		}
+		if lt.RightTable == NotificationTable && lt.LeftTable == t.Name {
+			return true
+		}
+	}
+	return false
 }
 
 // projectParents resolves the foreign keys this table holds to tables rig

@@ -496,8 +496,16 @@ func checkColumnNaming(t *ir.Table, loaded *tableconf.Loaded, boolSev, tsSev, da
 		// could point at, so naming the role says more than naming the target,
 		// and the alternative the rule would demand is either rig_file_id — one
 		// file per table, forever — or profile_image_rig_file_id.
+		// And a link to a notification is exempt for the same reason again. The
+		// rule wants rig_notification_id; the column is notification_id, on a
+		// join table whose other column names the subject, and the prefix is
+		// there so a project can tell rig's tables from its own in psql rather
+		// than so a foreign key has to repeat it.
+		notificationLink := c.ForeignKey != nil && c.ForeignKey.Table == NotificationTable &&
+			c.Name == "notification_id"
+
 		if fkSev != "" && c.ForeignKey != nil && !isAuditActorColumn(c.Name) &&
-			!selfReference && !isFileColumn(t, c) {
+			!selfReference && !isFileColumn(t, c) && !notificationLink {
 			want := c.ForeignKey.Table + "_id"
 			if c.Name != want && !strings.HasSuffix(c.Name, "_"+want) {
 				diags.AddSeverity(diag.CodeForeignKeyNaming, fkSev, at,
