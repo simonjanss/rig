@@ -36,6 +36,10 @@
             "both"
           ],
           "description": "How the Search operation is exposed. Defaults to both: QUERY with a POST alias."
+        },
+        "revision_header": {
+          "type": "string",
+          "description": "Header carrying the API revision, in both directions. Defaults to API-Revision."
         }
       },
       "additionalProperties": false,

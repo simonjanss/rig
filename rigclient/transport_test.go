@@ -223,6 +223,35 @@ func TestRetryAfterIsRead(t *testing.T) {
 	}
 }
 
+// A 426 is what a server with a MinRevision answers a client built before it.
+// Nothing the caller does at runtime fixes it, so it is worth telling apart
+// from every other refusal.
+func TestAnUpgradeRequiredIsRecognized(t *testing.T) {
+	rt := newClient(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusUpgradeRequired)
+		w.Write([]byte(`{"code":"UpgradeRequired","message":"this client was built against API revision 2026-03-01"}`))
+	}), rigclient.Config{})
+
+	_, err := rigclient.Do[todo](t.Context(), rt, rigclient.Op{
+		Method: http.MethodGet, Path: "/todos",
+	})
+
+	if !rigclient.IsUpgradeRequired(err) {
+		t.Errorf("IsUpgradeRequired says no to %v", err)
+	}
+	// And not as one of the refusals it is not: the whole reason it is its own
+	// code is that "regenerate your client" is not advice anybody can take from
+	// a 400 that also means a malformed body.
+	if rigclient.IsInvalid(err) || rigclient.IsForbidden(err) {
+		t.Error("a 426 answers to another predicate as well")
+	}
+
+	var e *rigclient.Error
+	if !errors.As(err, &e) || e.Status != http.StatusUpgradeRequired {
+		t.Fatalf("err = %v, want a 426", err)
+	}
+}
+
 func TestANoContentAnswerDecodesToNil(t *testing.T) {
 	rt := newClient(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
@@ -270,6 +299,59 @@ func TestTheCredentialAndHeadersTravel(t *testing.T) {
 		if got.Get(header) != want {
 			t.Errorf("%s = %q, want %q", header, got.Get(header), want)
 		}
+	}
+}
+
+// The revision is what the generated client was built against, so it comes from
+// the API a generated New supplies rather than from something a caller has to
+// remember to set.
+func TestTheRevisionComesFromTheGeneratedClient(t *testing.T) {
+	var got http.Header
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = r.Header.Clone()
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	t.Cleanup(srv.Close)
+
+	rt, err := rigclient.New(rigclient.Config{BaseURL: srv.URL}, rigclient.API{
+		BasePath:       "/api/v1",
+		Revision:       "2026-08-01",
+		RevisionHeader: "X-Demo-Revision",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := rigclient.DoNoContent(t.Context(), rt, rigclient.Op{
+		Method: http.MethodGet, Path: "/todos",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if got.Get("X-Demo-Revision") != "2026-08-01" {
+		t.Errorf("X-Demo-Revision = %q, want the generated revision", got.Get("X-Demo-Revision"))
+	}
+	if got.Get(rigclient.DefaultRevisionHeader) != "" {
+		t.Error("the revision went to the default header as well as the configured one")
+	}
+}
+
+// A client somebody assembled by hand says nothing, rather than saying
+// something it cannot vouch for.
+func TestAClientWithNoRevisionSendsNone(t *testing.T) {
+	var got http.Header
+	rt := newClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = r.Header.Clone()
+		w.WriteHeader(http.StatusNoContent)
+	}), rigclient.Config{})
+
+	if err := rigclient.DoNoContent(t.Context(), rt, rigclient.Op{
+		Method: http.MethodGet, Path: "/todos",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if v := got.Get(rigclient.DefaultRevisionHeader); v != "" {
+		t.Errorf("%s = %q, want nothing", rigclient.DefaultRevisionHeader, v)
 	}
 }
 

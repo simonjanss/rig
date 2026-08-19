@@ -393,6 +393,105 @@ func TestTheImportsAreRequired(t *testing.T) {
 	}
 }
 
+// The revision is what a client says it was built against, so both the value
+// and the header carrying it come from the document rather than from a literal
+// in the generator.
+func TestRevisionComesFromTheDocument(t *testing.T) {
+	t.Parallel()
+
+	doc := gentest.LoadDocument(t, filepath.Join("testdata", fixture))
+	doc.API.RevisionHeader = "X-Demo-Revision"
+	doc.SetRevision("2026-08-01")
+
+	src := find(t, gentest.Run(t, servicego.New(), doc, opts()), "api.gen.go")
+
+	for _, want := range []string{
+		`const Revision = "2026-08-01"`,
+		`const RevisionHeader = "X-Demo-Revision"`,
+		"ClientRevision string",
+		"func (rc RequestContext) Client() apirev.Revision",
+		"func (rc RequestContext) BuiltBefore(rev apirev.Revision) bool",
+		"func (rc RequestContext) Stale() (time.Duration, bool)",
+	} {
+		if !strings.Contains(collapse(src), collapse(want)) {
+			t.Errorf("api.gen.go is missing %s", want)
+		}
+	}
+}
+
+// A validator and a hook are handed a context and nothing else, so the request
+// metadata has to travel on one or it stops at the service layer.
+func TestTheRequestContextTravelsOnTheContext(t *testing.T) {
+	t.Parallel()
+
+	doc := gentest.LoadDocument(t, filepath.Join("testdata", fixture))
+	src := collapse(find(t, gentest.Run(t, servicego.New(), doc, opts()), "api.gen.go"))
+
+	for _, want := range []string{
+		"type requestContextKey struct{}",
+		"func NewContext(ctx context.Context, rc RequestContext) context.Context",
+		"return context.WithValue(ctx, requestContextKey{}, rc)",
+		"func RequestContextFrom(ctx context.Context) (RequestContext, bool)",
+		"rc, ok := ctx.Value(requestContextKey{}).(RequestContext)",
+	} {
+		if !strings.Contains(src, collapse(want)) {
+			t.Errorf("api.gen.go is missing %s", want)
+		}
+	}
+}
+
+// The shim in the example the method's own documentation gives has to be
+// writable where the request is, which is the service method.
+func TestARequestAnswersWhatItWasBuiltBefore(t *testing.T) {
+	t.Parallel()
+
+	doc := gentest.LoadDocument(t, filepath.Join("testdata", fixture))
+	src := collapse(find(t, gentest.Run(t, servicego.New(), doc, opts()), "api.gen.go"))
+
+	want := "func (r Request[Path, Query, Body]) BuiltBefore(rev apirev.Revision) bool " +
+		"{ return r.ctx.BuiltBefore(rev) }"
+	if !strings.Contains(src, collapse(want)) {
+		t.Errorf("api.gen.go is missing %s", want)
+	}
+}
+
+// A project that has never generated a revision still compiles, and still says
+// so honestly rather than inventing a date.
+func TestRevisionIsEmptyUntilOneIsRecorded(t *testing.T) {
+	t.Parallel()
+
+	doc := gentest.LoadDocument(t, filepath.Join("testdata", fixture))
+	src := find(t, gentest.Run(t, servicego.New(), doc, opts()), "api.gen.go")
+
+	if !strings.Contains(src, `const Revision = ""`) {
+		t.Error("an unstamped document should generate an empty revision")
+	}
+	// The header still has a name: it is what the next client will send.
+	if !strings.Contains(src, `const RevisionHeader = "API-Revision"`) {
+		t.Error("the header should fall back to the default")
+	}
+}
+
+// The set is closed and the compiler owns it. A second copy in the generator is
+// a copy that is one commit away from being wrong.
+func TestErrorCodesComeFromTheDocument(t *testing.T) {
+	t.Parallel()
+
+	doc := gentest.LoadDocument(t, filepath.Join("testdata", fixture))
+	src := find(t, gentest.Run(t, servicego.New(), doc, opts()), "api.gen.go")
+
+	codes := doc.Enum("ErrorCode")
+	if codes == nil {
+		t.Fatal("the fixture has no ErrorCode enumeration")
+	}
+	for _, v := range codes.Values {
+		want := "ErrorCode" + v.Name + " ErrorCode = rigerr.Code" + v.Name
+		if !strings.Contains(collapse(src), collapse(want)) {
+			t.Errorf("api.gen.go is missing %s", want)
+		}
+	}
+}
+
 func find(t *testing.T, artifacts []gen.Artifact, name string) string {
 	t.Helper()
 	for _, a := range artifacts {

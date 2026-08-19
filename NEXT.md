@@ -20,12 +20,10 @@ built, where it departed from that plan, and what is still to come.
 | **M5.6** | Typed per-input errors answered as 422, `runtime/dbhook` lifecycle hooks declared per service, the audit log removed, `runtime/serve`, `rig/migrate` |
 | **M5.8** | The whole authentication configuration moved into `rig.yaml`, resolved when it is read, and `server-go` writes the wiring |
 | **M5.10** | `go-client` and the `rigclient` module: a typed Go SDK generated from the same document the router is, plus `runtime/authwire` and `examples/sdk` |
+| **M5.7** | The API revision: `.rig/revision.json`, the `API-Revision` header both ways, `runtime/apirev`, `Request.BuiltBefore` for a compatibility shim, and an opt-in `Server.MinRevision` |
 
 Next:
 
-- **M5.7** — the API revision: clients say what they were built against, so the
-  logs can say how old the oldest one still calling is. (Was M5.6; the number
-  moved when the model layer's second round took it.)
 - **M5.9** — files: a `rig_file` table, a storage adapter, and an upload and a
   download endpoint per file column, nested under the row that owns them. Before
   M6 because it adds two error codes, and the code set is baked into an OpenAPI
@@ -190,6 +188,34 @@ reversible.
     layer above has said which rule it was; a bare error is a 500, because
     telling the caller their title is "connection refused" would be a lie about
     whose fault it is.
+
+15. **The revision is stamped after Freeze, not during it.** M5.7 below said
+    `ir.API` would gain a `Revision` set "at freeze from `Meta`". It cannot be:
+    the revision is decided from the finished document's hash, so there is
+    nothing to look up until the document exists. `rig generate` resolves it and
+    calls `Document.SetRevision` once, before any generator runs, so a generator
+    still sees one document that does not change under it.
+
+    `Document.Hash` clears the revision itself rather than leaving that to each
+    caller. That is the trap M5.7 wrote down — a hash that saw the revision
+    would move every time it was set, which would move the revision — closed in
+    the one place it cannot be forgotten. It also means `Manifest.IRHash`
+    identifies the surface rather than the stamp.
+
+16. **The revision is a type, not a date-shaped string.** `runtime/apirev` holds
+    it, and the point of the type is that the zero value is *unknown* and
+    `Before` is false whenever either side is unknown. That one rule is every
+    safe default at once: a server with no `MinRevision` refuses nobody, a
+    compatibility shim does not fire for a caller that sent nothing, and neither
+    needs anybody to remember a check. `serveRevision` is one comparison because
+    of it.
+
+    `apirev.MustParse` is how a date written down in source becomes one, and it
+    panics. A cutoff is a constant, so a typo in it is a bug rather than bad
+    input — and a shim that silently never fires is the worst possible way to
+    find that out. Declared at package scope, the panic lands at startup, which
+    is where `Server.MinRevision` used to check itself from inside `Register`
+    before the type made that impossible to get wrong.
 
 ---
 
@@ -630,12 +656,78 @@ does not do — the comment now says what the code does. `rig init` never gave
 
 ---
 
-## M5.7 — the API revision
+## M5.7 — the API revision (shipped)
 
 **Goal.** Every generated client says what it was built against, the server puts
 that on the request context, and a log line can answer "how old are the clients
 still calling this?" — which is the question you have to answer before you can
 remove anything.
+
+**What shipped**, against the design below. `internal/revision` owns
+`.rig/revision.json` and the one rule that decides it: the recorded date stands
+while the recorded hash matches, and today's is written when it does not.
+`rig generate` resolves it and stamps the document; `rig check` and `rig ir`
+read the record and never write it, so a check running the morning after a
+schema change reports the drift rather than quietly accepting it. The two
+departures — stamped after Freeze, and `Document.Hash` clearing the revision
+itself — are 15 above.
+
+`ir.API` gained `Revision` and `RevisionHeader`; `api.revision_header` in
+rig.yaml names the header, defaulting to `API-Revision`. `service-go` writes
+`Revision`, `RevisionHeader`, `RequestContext.ClientRevision`, `Client`,
+`BuiltBefore` and `Stale`; `server-go` reads the header, announces its own on
+every response including the failed ones, and grew `Server.MinRevision`.
+`go-client` bakes the revision into the generated client and hands it to
+`rigclient` through `rigclient.API`, which is where `Config.Revision` — the dead
+seam this milestone was written around — finally gets its value from.
+
+The revision is a value rather than a string, in `runtime/apirev`, and 16 above
+is why. Both the comparison a shim is written in terms of and the one the server
+refuses on are `Before` against it.
+
+Two calls worth knowing about. `MinRevision` refuses only a caller that sent a
+revision older than it: one that sent nothing is served, because an unknown
+client is not the same as an old one and a check that turned every curl into a
+426 would be an outage rather than a deprecation. And the refusal is its own
+code, `rigerr.CodeUpgradeRequired` → 426, rather than a bad request: "regenerate
+your client" is not advice anybody can take from a 400 that also means a
+malformed body. The closed set grew by one, which is cheap now and expensive
+after M6 bakes it into an OpenAPI document and a TypeScript union.
+
+### Reading it from a service
+
+The whole point of knowing how old a caller is, is doing something about it. A
+compatibility shim reads:
+
+```go
+var notesAdded = apirev.MustParse("2026-04-30")
+
+func (s Service) Create(ctx context.Context, r api.Request[…]) (*model.Todo, error) {
+	if r.BuiltBefore(notesAdded) {
+		r.Body.Title = "Unknown"
+	}
+	return s.DefaultTodoService.Create(ctx, r)
+}
+```
+
+It goes in the service method, and that is not an accident of what is reachable:
+this is the one place with the request as it arrived. On a create the generated
+`Validate()` runs in the repository, *after* the service method and before every
+hook — so the same shim written as a `Create` `Before` hook would only ever see
+requests that had already passed the check it exists to satisfy. The method's own
+documentation says so, because the failure is silent otherwise.
+
+Below the service layer a validator and a hook are handed a `context.Context` and
+nothing else, so `resolve` puts the whole `RequestContext` on it — before the
+`Server.Context` hook, so that hook can build on it — and `api.RequestContextFrom`
+takes it off. One value reached two ways rather than two copies that can drift.
+
+The unknown caller is a decision, stated once and inherited everywhere: rig's
+revisions describe what rig's own generated clients were built against, so a
+caller that sends none is served the current behavior. Anything else would make
+adopting a shim an outage for every curl. An application that would rather count
+an unknown caller as ancient still has the raw `ClientRevision` and can say so
+itself.
 
 ### The date has to mean something
 
@@ -725,21 +817,30 @@ The one exception is opt-in, and it is the reason for the whole feature:
 
 ```go
 api.Server{
-    // Refuse anything built before this. Empty, the default, refuses nothing.
-    MinRevision: "2026-01-01",
+    // Refuse anything built before this. The zero value, the default,
+    // refuses nothing.
+    MinRevision: apirev.MustParse("2026-01-01"),
 }
 ```
 
 That is the endgame — you removed a field, you waited, the logs said nobody old
 was left, and now you close the door. Off until somebody decides to.
 
-### Open question
+### The open question, answered
 
 Should a client that sends no revision at all be distinguishable in the logs
-from one that sends an unparseable one? They are different failures — an old
-SDK that predates the header versus something sending nonsense — and telling
-them apart costs one more field on `RequestContext`. I lean yes, one field,
-`ClientRevisionInvalid bool`.
+from one that sends an unparseable one? They are different failures — an old SDK
+that predates the header versus something sending nonsense.
+
+**Answered: no second field, one method instead.** `ClientRevision` is the raw
+string, and `RequestContext.Client` is the one place it becomes an
+`apirev.Revision` — unknown for both failures, because both mean the same thing:
+this caller cannot be placed on the timeline. `Stale` and `BuiltBefore` are
+written in terms of it, so "is this a valid revision" has one answer in one place
+rather than a bool that has to be kept in step with the string beside it. An
+application that wants to count the two apart still can: the raw string is right
+there, and a non-empty `ClientRevision` with an unknown `Client` is exactly the
+nonsense case.
 
 ---
 

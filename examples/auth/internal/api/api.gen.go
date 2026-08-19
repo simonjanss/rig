@@ -9,10 +9,34 @@
 package api
 
 import (
+	"context"
+	"time"
+
+	"github.com/simonjanss/rig/runtime/apirev"
 	"github.com/simonjanss/rig/runtime/readopt"
 	"github.com/simonjanss/rig/runtime/rigerr"
 	"github.com/simonjanss/rig/runtime/tenancy"
 )
+
+// Revision is the date this API surface last changed, as YYYY-MM-DD.
+//
+// It is not a build stamp: it moves when the surface moves and not when
+// somebody regenerates, so two clients built a month apart against an
+// unchanged API report the same thing — because they are the same thing.
+// `rig generate` records it in .rig/revision.json, which is committed.
+//
+// Empty when the project has never generated with a revision recorded.
+const Revision = "2026-08-18"
+
+// RevisionHeader carries the revision in both directions: what the caller was
+// built against on the way in, what this server was generated from on the way
+// out.
+const RevisionHeader = "API-Revision"
+
+// serverRevision is [Revision] as a value, parsed once. Unknown for a project
+// that has never generated with a revision recorded, which reads as "nobody is
+// behind this server" rather than as an error.
+var serverRevision, _ = apirev.Parse(Revision)
 
 // Request is everything a handler received.
 //
@@ -36,6 +60,27 @@ type Request[Path, Query, Body any] struct {
 // it carries.
 func (r Request[Path, Query, Body]) Context() RequestContext { return r.ctx }
 
+// BuiltBefore reports whether the client that sent this request was built
+// before rev.
+//
+// It is [RequestContext.BuiltBefore] with the request already in hand, which
+// is where a compatibility shim usually is:
+//
+//	var notesAdded = apirev.MustParse("2026-04-30")
+//
+//	if r.BuiltBefore(notesAdded) {
+//		r.Body.Title = "Unknown"
+//	}
+//
+// A shim belongs here rather than in a hook. This is the one place that has
+// the request as it arrived, and on a create the generated validation runs
+// after the service method and before every hook — so a hook that filled in
+// a missing NOT NULL column would only ever see requests that already passed
+// the check it was written for.
+func (r Request[Path, Query, Body]) BuiltBefore(rev apirev.Revision) bool {
+	return r.ctx.BuiltBefore(rev)
+}
+
 // RequestContext is the request's own metadata.
 type RequestContext struct {
 	// RequestID correlates this request with the server's logs.
@@ -47,12 +92,79 @@ type RequestContext struct {
 	Route      string
 	RemoteAddr string
 	UserAgent  string
+	// ClientRevision is the raw header, kept for a log line that wants to
+	// count what callers are sending. Empty when the caller said nothing, and
+	// unparseable prose when it said something that is not a revision — a
+	// hand-rolled client and a curl will not say, and that is a normal thing
+	// for a caller to be. Compare with [RequestContext.BuiltBefore] rather
+	// than with this.
+	ClientRevision string
+}
+
+// Client is what the caller was built against.
+//
+// Unknown — the zero [apirev.Revision] — when the caller said nothing and
+// equally when what it said is not a revision. The two are the same answer on
+// purpose: both mean this caller cannot be placed on the timeline.
+func (rc RequestContext) Client() apirev.Revision {
+	rev, _ := apirev.Parse(rc.ClientRevision)
+	return rev
+}
+
+// BuiltBefore reports whether the caller was built before rev, which is the
+// question a compatibility shim is written in terms of.
+//
+// False for a caller that sent no revision. That is a decision rather than a
+// fallback: revisions describe what rig's own generated clients were built
+// against, so a caller rig cannot place is served the current behavior. An
+// application that would rather treat an unknown caller as ancient has
+// [RequestContext.ClientRevision] and can say so itself.
+func (rc RequestContext) BuiltBefore(rev apirev.Revision) bool { return rc.Client().Before(rev) }
+
+// Stale reports how far behind this server's revision the caller is.
+//
+// ok is false when the caller did not say, said something unparseable, or is
+// not behind at all — including the case of a caller newer than this server,
+// which is somebody halfway through a deploy rather than somebody to warn
+// about.
+func (rc RequestContext) Stale() (time.Duration, bool) {
+	client := rc.Client()
+	if !client.Before(serverRevision) {
+		return 0, false
+	}
+	return serverRevision.Sub(client), true
 }
 
 // NewRequest builds a request. The server calls it; it is exported so a test
 // can call a service method directly without going through HTTP.
 func NewRequest[Path, Query, Body any](claims tenancy.Claims, path Path, query Query, body Body, rc RequestContext) Request[Path, Query, Body] {
 	return Request[Path, Query, Body]{Claims: claims, Path: path, Query: query, Body: body, ctx: rc}
+}
+
+type requestContextKey struct{}
+
+// NewContext returns a context carrying the request's metadata.
+//
+// The server calls it on every request, before the [Server.Context] hook runs,
+// so anything that hook adds can already see it. It is exported for the same
+// reason [NewRequest] is: a test that calls a service method directly still
+// has to put one there, or the hooks underneath will find nothing.
+func NewContext(ctx context.Context, rc RequestContext) context.Context {
+	return context.WithValue(ctx, requestContextKey{}, rc)
+}
+
+// RequestContextFrom returns the request metadata on a context.
+//
+// This is how a validator or a hook reaches what only the service method is
+// handed — the revision the caller was built against, the request
+// identifier, the route that matched.
+//
+// ok is false rather than an error, and the zero value is usable: work that
+// did not come from a request at all — a migration, a background job — has
+// no metadata to find, and that is not a failure.
+func RequestContextFrom(ctx context.Context) (RequestContext, bool) {
+	rc, ok := ctx.Value(requestContextKey{}).(RequestContext)
+	return rc, ok
 }
 
 // caller is the claims a read hook is handed, or nil when the request carried
@@ -95,6 +207,7 @@ const (
 	ErrorCodeConflict            ErrorCode = rigerr.CodeConflict
 	ErrorCodeUnprocessableEntity ErrorCode = rigerr.CodeUnprocessableEntity
 	ErrorCodeRateLimited         ErrorCode = rigerr.CodeRateLimited
+	ErrorCodeUpgradeRequired     ErrorCode = rigerr.CodeUpgradeRequired
 	ErrorCodeInternal            ErrorCode = rigerr.CodeInternal
 )
 

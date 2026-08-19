@@ -267,7 +267,7 @@ var (
 //
 // Take the term from Team's own orderings:
 //
-// FixtureOrderAwayTeam(TeamOrderIDDesc)
+//	FixtureOrderAwayTeam(TeamOrderIDDesc)
 //
 // The repository reaches it with a left join, so a Fixture with no AwayTeam
 // sorts to one end rather than vanishing. Only Team's own columns can be used;
@@ -281,7 +281,7 @@ func FixtureOrderAwayTeam(o TeamOrder) FixtureOrder {
 //
 // Take the term from Team's own orderings:
 //
-// FixtureOrderHomeTeam(TeamOrderIDDesc)
+//	FixtureOrderHomeTeam(TeamOrderIDDesc)
 //
 // The repository reaches it with a left join, so a Fixture with no HomeTeam
 // sorts to one end rather than vanishing. Only Team's own columns can be used;

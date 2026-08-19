@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/simonjanss/rig/runtime/apirev"
 	"github.com/simonjanss/rig/runtime/rigerr"
 	"github.com/simonjanss/rig/runtime/tenancy"
 	"github.com/simonjanss/rig/runtime/throttle"
@@ -60,6 +61,21 @@ type Server struct {
 	// RequestID labels a request for the logs. Nil generates nothing, and the
 	// field is simply absent from error bodies.
 	RequestID func(*http.Request) string
+
+	// MinRevision refuses a caller built against an API revision older than this
+	// one. The zero value, the default, refuses nothing.
+	//
+	//	MinRevision: apirev.MustParse("2026-04-30"),
+	//
+	// This is the end of the story [Revision] starts: you removed a field, you
+	// waited, the logs said nobody old was left, and now you close the door. Until
+	// somebody decides to, the revision is telemetry and nothing else.
+	//
+	// Only a caller that sends a revision older than this is refused. One that
+	// sends none is served — an unknown client is not the same as an old one,
+	// and turning every curl and every hand-written integration into a 426 is not
+	// a door closing, it is an outage.
+	MinRevision apirev.Revision
 
 	// OnError turns a service error into a response. Nil uses DefaultErrorMapper,
 	// which is the right behavior for almost everyone.
@@ -142,20 +158,34 @@ func prepare(s Server, w http.ResponseWriter, r *http.Request) (context.Context,
 // be identified is refused.
 func resolve(s Server, w http.ResponseWriter, r *http.Request, required bool) (context.Context, tenancy.Claims, RequestContext, bool) {
 	rc := RequestContext{
-		Method:     r.Method,
-		Path:       r.URL.Path,
-		Route:      r.Pattern,
-		RemoteAddr: r.RemoteAddr,
-		UserAgent:  r.UserAgent(),
+		Method:         r.Method,
+		Path:           r.URL.Path,
+		Route:          r.Pattern,
+		RemoteAddr:     r.RemoteAddr,
+		UserAgent:      r.UserAgent(),
+		ClientRevision: r.Header.Get(RevisionHeader),
 	}
 	if s.RequestID != nil {
 		rc.RequestID = s.RequestID(r)
+	}
+
+	// Announced on the way out of every response, including the failed ones: a
+	// client that is behind should not have to make a successful request to find
+	// out.
+	if Revision != "" {
+		w.Header().Set(RevisionHeader, Revision)
 	}
 
 	for _, hook := range s.PreHooks {
 		if !hook(w, r) {
 			return nil, tenancy.Claims{}, rc, false
 		}
+	}
+
+	// Before the claims, because being too old to be served is not a question
+	// about who you are.
+	if !serveRevision(s, w, r, rc) {
+		return nil, tenancy.Claims{}, rc, false
 	}
 
 	claims, err := s.GetClaims(r)
@@ -171,10 +201,33 @@ func resolve(s Server, w http.ResponseWriter, r *http.Request, required bool) (c
 	}
 
 	ctx := tenancy.NewContext(r.Context(), claims)
+	// So that what only the service method is handed reaches everything under it:
+	// a validator and a hook are given a context and nothing else, and the
+	// revision the caller was built against is exactly the kind of thing they have
+	// to ask about. Before the Context hook, so that hook can see it too.
+	ctx = NewContext(ctx, rc)
 	if s.Context != nil {
 		ctx = s.Context(ctx, r)
 	}
 	return ctx, claims, rc, true
+}
+
+// serveRevision reports whether this caller is new enough to be served, and
+// writes the refusal when it is not.
+//
+// Both ways of not refusing are the one comparison: an unset MinRevision and a
+// caller that sent no revision each leave one side unknown, and nothing is
+// before an unknown revision. A caller that cannot be shown to be old is
+// served.
+func serveRevision(s Server, w http.ResponseWriter, r *http.Request, rc RequestContext) bool {
+	if !rc.BuiltBefore(s.MinRevision) {
+		return true
+	}
+
+	fail(s, w, r, rc, rigerr.UpgradeRequired(
+		"this client was built against API revision %s; this server serves %s and newer",
+		rc.ClientRevision, s.MinRevision))
+	return false
 }
 
 // fail writes an error response.

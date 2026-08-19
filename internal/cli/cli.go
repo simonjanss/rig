@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -37,20 +38,36 @@ type env struct {
 	color      bool
 	out        io.Writer
 	errOut     io.Writer
+
+	// now is the clock the API revision is dated from. Nil is time.Now; a test
+	// sets it, because the interesting case is what happens tomorrow.
+	now func() time.Time
+}
+
+// clock is the current time, from whatever this env was given.
+func (e *env) clock() time.Time {
+	if e.now != nil {
+		return e.now()
+	}
+	return time.Now()
 }
 
 // Main runs the command line and returns a process exit code.
 func Main(args []string, stdout, stderr io.Writer) int {
-	e := &env{out: stdout, errOut: stderr}
+	return execute(&env{out: stdout, errOut: stderr}, args)
+}
 
+// execute is Main once the environment has been decided. It is separate so a
+// test can supply one with a clock of its own.
+func execute(e *env, args []string) int {
 	root := newRoot(e)
 	root.SetArgs(args)
-	root.SetOut(stdout)
-	root.SetErr(stderr)
+	root.SetOut(e.out)
+	root.SetErr(e.errOut)
 
 	if err := root.Execute(); err != nil {
 		if !errors.Is(err, ErrDiagnostics) {
-			fmt.Fprintf(stderr, "rig: %v\n", err)
+			fmt.Fprintf(e.errOut, "rig: %v\n", err)
 		}
 		return 1
 	}

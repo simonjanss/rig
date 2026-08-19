@@ -30,6 +30,20 @@ func (e *emitter) clientFile() (gen.Artifact, error) {
 	b.L("const BasePath = %s", gobuf.Quote(api.BasePath))
 	b.NL()
 
+	b.Comment("Revision is the date the API surface this client was generated " +
+		"from last changed.\n\n" +
+		"Every request says it, so the server's logs can answer the question you " +
+		"have to answer before removing anything: how old is the oldest client " +
+		"still calling. Regenerating against an unchanged API leaves it alone — " +
+		"it is not a build stamp.")
+	b.L("const Revision = %s", gobuf.Quote(api.Revision))
+	b.NL()
+
+	b.Comment("RevisionHeader is where [Revision] is sent: the same header the " +
+		"server generated from this document reads.")
+	b.L("const RevisionHeader = %s", gobuf.Quote(e.revisionHeader()))
+	b.NL()
+
 	if e.cfg.DefaultBaseURL != "" {
 		b.Comment("DefaultBaseURL is where this API runs in development, so a " +
 			"tool that only ever talks to that one can leave Config.BaseURL empty.")
@@ -91,6 +105,8 @@ func (e *emitter) clientStruct(b *gobuf.Buf, rig string) {
 	b.L("func New(cfg %s.Config) (*Client, error) {", rig)
 	b.L("rt, err := %s.New(cfg, %s.API{", rig, rig)
 	b.L("BasePath: BasePath,")
+	b.L("Revision: Revision,")
+	b.L("RevisionHeader: RevisionHeader,")
 	if e.doc.API.Auth != nil {
 		b.L("Auth: &AuthProfile,")
 	}

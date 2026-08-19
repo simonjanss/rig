@@ -76,6 +76,15 @@ func (d *Document) Reindex() {
 	d.idx = ix
 }
 
+// SetRevision stamps the API revision.
+//
+// It is the one field written after the compiler froze the document, and it has
+// to be: the revision is decided from [Document.Hash], so the document has to
+// exist before there is a revision to record. It is set once, before any
+// generator runs, and nothing in the index refers to it — so the document is
+// still safe to hand to concurrent readers afterwards.
+func (d *Document) SetRevision(rev string) { d.API.Revision = rev }
+
 func (d *Document) ensureIndex() *index {
 	if d.idx == nil {
 		d.Reindex()

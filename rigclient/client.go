@@ -61,10 +61,17 @@ type Config struct {
 	// server reads.
 	RequestIDHeader string
 
-	// Revision is sent as API-Revision when it is set. It is a seam rather than
-	// a feature: rig does not yet stamp a revision into a document, and when it
-	// does this is where the generated client will put it.
+	// Revision overrides the API revision this client says it was built against.
+	//
+	// Almost nobody should set it. The generated client carries the revision
+	// from the document it was generated from, which is the honest answer and
+	// the one the server's logs are for; this is here for a client somebody
+	// assembled by hand.
 	Revision string
+
+	// RevisionHeader overrides where the revision is sent. Empty takes the
+	// generated client's, which is what the server it was generated with reads.
+	RevisionHeader string
 
 	// Now is the clock, for a test that has to cross a token expiry without
 	// waiting ten minutes for one. Nil is [time.Now].
@@ -78,6 +85,13 @@ type API struct {
 	BasePath string
 	// Auth is the authentication profile, or nil for a project with none.
 	Auth *AuthProfile
+	// Revision is the date the API surface this client was generated from last
+	// changed. It is sent on every request, which is how a server's logs can
+	// answer how old the oldest caller still calling is.
+	Revision string
+	// RevisionHeader is where Revision is sent — the same header the server it
+	// was generated with reads.
+	RevisionHeader string
 }
 
 // Runtime carries one client's configuration and the state it accumulates.
@@ -94,6 +108,7 @@ type Runtime struct {
 	requestID       func() string
 	requestIDHeader string
 	revision        string
+	revisionHeader  string
 	now             func() time.Time
 
 	mu sync.Mutex
@@ -130,6 +145,11 @@ const DefaultUserAgent = "rig-go-client"
 // DefaultRequestIDHeader is where the generated server looks for a caller's own
 // request identifier.
 const DefaultRequestIDHeader = "X-Request-Id"
+
+// DefaultRevisionHeader carries the API revision, and is what rig.yaml's
+// api.revision_header defaults to. A generated client passes its project's own,
+// so this is the fallback for a client somebody built by hand.
+const DefaultRevisionHeader = "API-Revision"
 
 // New builds a runtime. Generated code calls it; a caller reaches it through the
 // generated New, which supplies the api argument from the document.
@@ -173,6 +193,22 @@ func New(cfg Config, api API) (*Runtime, error) {
 		rt.requestIDHeader = cfg.RequestIDHeader
 	} else {
 		rt.requestIDHeader = DefaultRequestIDHeader
+	}
+
+	// The document's answer unless the caller insisted on their own. A generated
+	// client always has one; a hand-built one may have neither, and then it
+	// simply does not say what it was built against, which is a normal thing for
+	// a caller to be.
+	if rt.revision == "" {
+		rt.revision = api.Revision
+	}
+	switch {
+	case cfg.RevisionHeader != "":
+		rt.revisionHeader = cfg.RevisionHeader
+	case api.RevisionHeader != "":
+		rt.revisionHeader = api.RevisionHeader
+	default:
+		rt.revisionHeader = DefaultRevisionHeader
 	}
 
 	if s, ok := rt.cred.(*Session); ok {

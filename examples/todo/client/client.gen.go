@@ -20,6 +20,19 @@ import (
 // for a different API.
 const BasePath = "/api/v1"
 
+// Revision is the date the API surface this client was generated from last
+// changed.
+//
+// Every request says it, so the server's logs can answer the question you have
+// to answer before removing anything: how old is the oldest client still
+// calling. Regenerating against an unchanged API leaves it alone — it is not
+// a build stamp.
+const Revision = "2026-08-18"
+
+// RevisionHeader is where [Revision] is sent: the same header the server
+// generated from this document reads.
+const RevisionHeader = "API-Revision"
+
 // DefaultBaseURL is where this API runs in development, so a tool that only
 // ever talks to that one can leave Config.BaseURL empty.
 const DefaultBaseURL = "http://localhost:8080"
@@ -40,7 +53,9 @@ type Client struct {
 // or installed later by signing in.
 func New(cfg rigclient.Config) (*Client, error) {
 	rt, err := rigclient.New(cfg, rigclient.API{
-		BasePath: BasePath,
+		BasePath:       BasePath,
+		Revision:       Revision,
+		RevisionHeader: RevisionHeader,
 	})
 	if err != nil {
 		return nil, err
@@ -83,6 +98,8 @@ const (
 	ErrorCodeUnprocessableEntity ErrorCode = rigerr.CodeUnprocessableEntity
 	// Too many requests. Retry after the interval in the Retry-After header.
 	ErrorCodeRateLimited ErrorCode = rigerr.CodeRateLimited
+	// The client was built against an API revision this server no longer serves.
+	ErrorCodeUpgradeRequired ErrorCode = rigerr.CodeUpgradeRequired
 	// Something went wrong on the server.
 	ErrorCodeInternal ErrorCode = rigerr.CodeInternal
 )

@@ -39,6 +39,13 @@ func init() { gen.Register(New()) }
 // half calls into.
 const DefaultClientModule = "github.com/simonjanss/rig/rigclient"
 
+// defaultRevisionHeader matches rigclient.DefaultRevisionHeader and rig.yaml's
+// api.revision_header, for a document compiled before the setting existed. It
+// is a literal rather than the constant because the compiler does not depend on
+// the SDK it generates code for, and every project that has the setting sends
+// its own value through the document.
+const defaultRevisionHeader = "API-Revision"
+
 // Options configure the generator.
 type Options struct {
 	// Package is the Go package the generated files declare.
@@ -238,6 +245,15 @@ func (e *emitter) goType(b *gobuf.Buf, f ir.Field) string { return genutil.GoTyp
 
 func (e *emitter) artifact(path string, b *gobuf.Buf) (gen.Artifact, error) {
 	return genutil.Artifact(path, b, gen.Overwrite)
+}
+
+// revisionHeader is the configured header the revision travels in, or the
+// default for a document compiled before the setting existed.
+func (e *emitter) revisionHeader() string {
+	if h := e.doc.API.RevisionHeader; h != "" {
+		return h
+	}
+	return defaultRevisionHeader
 }
 
 // object returns a named object, or nil.

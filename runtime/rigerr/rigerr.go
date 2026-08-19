@@ -23,7 +23,14 @@ const (
 	CodeConflict            Code = "Conflict"
 	CodeUnprocessableEntity Code = "UnprocessableEntity"
 	CodeRateLimited         Code = "RateLimited"
-	CodeInternal            Code = "Internal"
+	// CodeUpgradeRequired reports that the caller was built against an API
+	// revision the server no longer serves.
+	//
+	// It is its own code rather than a bad request because it is the one failure
+	// a client can actually do something about, and "regenerate your client" is
+	// not advice anybody can take from a 400 that also means a malformed body.
+	CodeUpgradeRequired Code = "UpgradeRequired"
+	CodeInternal        Code = "Internal"
 )
 
 // HTTPStatus maps a code to its status.
@@ -43,6 +50,8 @@ func (c Code) HTTPStatus() int {
 		return http.StatusUnprocessableEntity
 	case CodeRateLimited:
 		return http.StatusTooManyRequests
+	case CodeUpgradeRequired:
+		return http.StatusUpgradeRequired
 	default:
 		return http.StatusInternalServerError
 	}
@@ -98,6 +107,11 @@ func Invalid(format string, args ...any) *Error {
 
 // RateLimited reports that the caller should slow down.
 func RateLimited(format string, args ...any) *Error { return newf(CodeRateLimited, format, args...) }
+
+// UpgradeRequired reports that the caller is older than the server will serve.
+func UpgradeRequired(format string, args ...any) *Error {
+	return newf(CodeUpgradeRequired, format, args...)
+}
 
 // Internal reports a server-side failure, keeping the cause for the logs.
 func Internal(err error, format string, args ...any) *Error {

@@ -20,6 +20,19 @@ import (
 // for a different API.
 const BasePath = "/api/v1"
 
+// Revision is the date the API surface this client was generated from last
+// changed.
+//
+// Every request says it, so the server's logs can answer the question you have
+// to answer before removing anything: how old is the oldest client still
+// calling. Regenerating against an unchanged API leaves it alone — it is not
+// a build stamp.
+const Revision = "2026-08-18"
+
+// RevisionHeader is where [Revision] is sent: the same header the server
+// generated from this document reads.
+const RevisionHeader = "API-Revision"
+
 // Client is the API. One field per resource, so what a client can do is what
 // the schema says it can, and reaching for a resource that does not exist is a
 // compile error rather than a 404.
@@ -41,8 +54,10 @@ type Client struct {
 // or installed later by signing in.
 func New(cfg rigclient.Config) (*Client, error) {
 	rt, err := rigclient.New(cfg, rigclient.API{
-		BasePath: BasePath,
-		Auth:     &AuthProfile,
+		BasePath:       BasePath,
+		Revision:       Revision,
+		RevisionHeader: RevisionHeader,
+		Auth:           &AuthProfile,
 	})
 	if err != nil {
 		return nil, err
@@ -86,6 +101,8 @@ const (
 	ErrorCodeUnprocessableEntity ErrorCode = rigerr.CodeUnprocessableEntity
 	// Too many requests. Retry after the interval in the Retry-After header.
 	ErrorCodeRateLimited ErrorCode = rigerr.CodeRateLimited
+	// The client was built against an API revision this server no longer serves.
+	ErrorCodeUpgradeRequired ErrorCode = rigerr.CodeUpgradeRequired
 	// Something went wrong on the server.
 	ErrorCodeInternal ErrorCode = rigerr.CodeInternal
 )

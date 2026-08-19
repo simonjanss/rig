@@ -77,8 +77,9 @@ update-schema:
 ##                Only the packages that define -update: passing it to a test
 ##                binary without the flag is a usage error, which used to fail
 ##                this target no matter what.
-GOLDEN := ./internal/compile ./internal/gen/electricgo ./internal/gen/modelgo \
-          ./internal/gen/persistgo ./internal/gen/servergo ./internal/gen/servicego
+GOLDEN := ./internal/compile ./internal/gen/electricgo ./internal/gen/goclient \
+          ./internal/gen/modelgo ./internal/gen/persistgo ./internal/gen/servergo \
+          ./internal/gen/servicego
 update-golden:
 	$(GO) test $(GOLDEN) -update
 

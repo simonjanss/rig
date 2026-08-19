@@ -113,6 +113,15 @@ func IsInvalid(err error) bool { return CodeOf(err) == rigerr.CodeUnprocessableE
 // IsRateLimited reports whether the caller was asked to slow down.
 func IsRateLimited(err error) bool { return CodeOf(err) == rigerr.CodeRateLimited }
 
+// IsUpgradeRequired reports whether this client is older than the server will
+// serve, and has to be regenerated against the current schema.
+//
+// It is the one failure here that nothing the caller does at runtime will fix —
+// not a retry, not a different input, not signing in again — so it is usually
+// the one worth turning into a message a person sees rather than an error a
+// handler swallows.
+func IsUpgradeRequired(err error) bool { return CodeOf(err) == rigerr.CodeUpgradeRequired }
+
 // maxErrorBody bounds what is kept from a failure nobody can parse. Enough to
 // recognize a gateway's error page, not enough to be a memory problem.
 const maxErrorBody = 8 << 10

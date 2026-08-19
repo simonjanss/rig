@@ -29,6 +29,7 @@ var ErrorCodes = []ErrorCode{
 	{"Conflict", 409, "The request conflicts with the current state of the resource."},
 	{"UnprocessableEntity", 422, "The request was well-formed but failed validation."},
 	{"RateLimited", 429, "Too many requests. Retry after the interval in the Retry-After header."},
+	{"UpgradeRequired", 426, "The client was built against an API revision this server no longer serves."},
 	{"Internal", 500, "Something went wrong on the server."},
 }
 

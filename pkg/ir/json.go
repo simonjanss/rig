@@ -44,8 +44,17 @@ func Unmarshal(b []byte) (*Document, error) {
 // Hash returns the SHA-256 of the document's canonical encoding, prefixed with
 // the algorithm. It identifies the document's content, not the run that
 // produced it, so an unchanged schema and configuration always hash the same.
+//
+// [API.Revision] is cleared before hashing, and that is not a detail: the
+// revision is derived from this hash, so a hash that saw it would move every
+// time it was set, which would move the revision, which would move the hash. It
+// is cleared here rather than by each caller because there is no caller for whom
+// the other behavior is right.
 func (d *Document) Hash() (string, error) {
-	b, err := Marshal(d)
+	unstamped := *d
+	unstamped.API.Revision = ""
+
+	b, err := Marshal(&unstamped)
 	if err != nil {
 		return "", err
 	}

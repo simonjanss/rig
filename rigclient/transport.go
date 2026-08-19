@@ -156,7 +156,7 @@ func (rt *Runtime) send(ctx context.Context, op Op, call *call) (*http.Response,
 	}
 	req.Header.Set("User-Agent", rt.userAgent)
 	if rt.revision != "" {
-		req.Header.Set("API-Revision", rt.revision)
+		req.Header.Set(rt.revisionHeader, rt.revision)
 	}
 	if rt.requestID != nil {
 		if id := rt.requestID(); id != "" {

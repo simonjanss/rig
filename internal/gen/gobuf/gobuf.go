@@ -146,15 +146,38 @@ func (b *Buf) NL() { b.body.WriteByte('\n') }
 
 // Comment writes a doc comment, wrapping at a readable width and preserving
 // paragraph breaks.
+//
+// A line beginning with a tab is godoc's code block and survives as written.
+// Prose is reflowed because the width it was typed at is nobody's business;
+// an example is not, because reflowing one changes what it says.
 func (b *Buf) Comment(text string) {
 	for i, para := range strings.Split(strings.TrimSpace(text), "\n\n") {
 		if i > 0 {
 			b.L("//")
 		}
-		for _, line := range wrap(strings.Join(strings.Fields(para), " "), 76) {
+		b.paragraph(para)
+	}
+}
+
+// paragraph writes one paragraph, keeping indented lines out of the flow.
+func (b *Buf) paragraph(para string) {
+	var flow []string
+	flush := func() {
+		for _, line := range wrap(strings.Join(flow, " "), 76) {
 			b.L("// %s", line)
 		}
+		flow = nil
 	}
+
+	for _, line := range strings.Split(para, "\n") {
+		if strings.HasPrefix(line, "\t") {
+			flush()
+			b.L("//%s", strings.TrimRight(line, " \t"))
+			continue
+		}
+		flow = append(flow, strings.Fields(line)...)
+	}
+	flush()
 }
 
 // wrap breaks text into lines no longer than width, without splitting words.

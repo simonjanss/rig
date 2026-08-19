@@ -146,6 +146,40 @@ func TestHashTracksContent(t *testing.T) {
 	}
 }
 
+// The revision is derived from the hash, so a hash that saw it would never
+// settle: stamping would move the hash, which would move the revision.
+func TestHashIgnoresTheRevision(t *testing.T) {
+	t.Parallel()
+
+	doc := sample()
+	before, err := doc.Hash()
+	if err != nil {
+		t.Fatalf("hash: %v", err)
+	}
+
+	doc.SetRevision("2026-08-18")
+	after, err := doc.Hash()
+	if err != nil {
+		t.Fatalf("hash: %v", err)
+	}
+	if after != before {
+		t.Fatalf("stamping a revision moved the hash: %s then %s", before, after)
+	}
+	if doc.API.Revision != "2026-08-18" {
+		t.Fatalf("revision = %q, want it left on the document", doc.API.Revision)
+	}
+
+	// It still travels in the document, though — the hash is the only thing
+	// that does not see it.
+	b, err := ir.Marshal(doc)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if !strings.Contains(string(b), `"revision": "2026-08-18"`) {
+		t.Fatal("the marshalled document does not carry the revision")
+	}
+}
+
 func TestUnmarshalRejectsUnknownFields(t *testing.T) {
 	t.Parallel()
 

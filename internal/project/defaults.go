@@ -27,6 +27,14 @@ const (
 	DefaultSearchMethod = SearchBoth
 	DefaultOpenAPI      = "3.1"
 
+	// DefaultRevisionHeader carries the API revision, in both directions.
+	//
+	// This is the one place the name is decided. Both ends of the conversation
+	// are generated from the document that records it, so the server reading it
+	// and the client sending it cannot disagree — rigclient carries the same
+	// literal only as a fallback for a client somebody built by hand.
+	DefaultRevisionHeader = "API-Revision"
+
 	DefaultImage    = "postgres:17-alpine"
 	DefaultPort     = 55432
 	DefaultDBName   = "rig"
@@ -86,6 +94,7 @@ func (p *Project) applyDefaults() {
 	if c.API.SearchMethod == "" {
 		c.API.SearchMethod = DefaultSearchMethod
 	}
+	setDefault(&c.API.RevisionHeader, DefaultRevisionHeader)
 	if c.API.Permissions == "" {
 		// Derived by default, so an endpoint nobody thought about is refused
 		// rather than open. Turning it off is a line in rig.yaml, and being
