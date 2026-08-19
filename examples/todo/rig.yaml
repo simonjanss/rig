@@ -36,6 +36,13 @@ files:
   # anybody to produce a 25 MiB file.
   max_bytes: 5242880
 
+# The inbox, in an example with no authentication at all — which is the half of
+# the story examples/auth cannot tell. What a notification needs is an account to
+# be addressed to; where the claims naming that account come from is not this
+# block's business, and here they come from a header.
+notifications:
+  enabled: true
+
 # Every table gets a configuration file. `rig sync` creates and updates them.
 layout:
   table_dir: services/{table}

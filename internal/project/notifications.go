@@ -164,14 +164,11 @@ func (p *Project) checkNotifications() diag.List {
 			n.Retention, LongestDigestWindow)
 	}
 
-	// An inbox line names an account, and there is no rig_account without the
-	// authentication foundation.
-	if !p.Config.Auth.Enabled {
-		diags.Add(diag.CodeConfigInvalid, p.At("notifications", "enabled"),
-			"notifications are addressed to accounts, and rig_account comes with the "+
-				"authentication foundation; set `auth.enabled: true`, or run "+
-				"`rig setup-project` for at least the tenancy part")
-	}
+	// What an inbox needs is the tenancy tables, not the `auth:` block: a
+	// notification is addressed to an account, and an application whose claims
+	// come from a header has accounts like any other. Whether those tables are
+	// there is a question about migrations rather than about configuration, and
+	// it is asked where the migrations are — see checkNotificationsFoundation.
 
 	return diags
 }

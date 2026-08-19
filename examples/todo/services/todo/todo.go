@@ -7,11 +7,13 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/simonjanss/rig/examples/todo/internal/api"
 	"github.com/simonjanss/rig/examples/todo/internal/model"
 	"github.com/simonjanss/rig/examples/todo/internal/store"
 	"github.com/simonjanss/rig/files"
+	"github.com/simonjanss/rig/notify"
 	"github.com/simonjanss/rig/runtime/dbhook"
 	"github.com/simonjanss/rig/runtime/patch"
 	"github.com/simonjanss/rig/runtime/rigerr"
@@ -38,6 +40,15 @@ type rules struct {
 	write    api.TodoWriter
 	notifier Notifier
 	logger   *slog.Logger
+
+	// inbox is the other kind of notification, and the difference is worth
+	// keeping in view: Notifier above is a background dependency this example
+	// owns, and this is rig's — a row per person per event, live over the sync
+	// stream, markable read, and emptyable.
+	inbox *notify.Service
+	// accounts answers the audience. The plain pool, because rig_account
+	// belongs to the auth module and this example generates nothing for it.
+	accounts *pgxpool.Pool
 }
 
 // Notifier is told about todos as they are created.
@@ -70,11 +81,24 @@ var _ api.TodoRules = (*rules)(nil)
 // serve.Config does, rather than panicking somewhere later.
 // The file service is a parameter because todo has a cover_file_id, and a
 // table with a file column has endpoints that cannot answer without one.
-func New(repo store.TodoRepository, files *files.Service, notifier Notifier, logger *slog.Logger) api.DefaultTodoService {
+func New(
+	repo store.TodoRepository,
+	files *files.Service,
+	notifier Notifier,
+	inbox *notify.Service,
+	pool *pgxpool.Pool,
+	logger *slog.Logger,
+) api.DefaultTodoService {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return api.NewTodoService(repo, &rules{repo: repo, notifier: notifier, logger: logger}, files)
+	return api.NewTodoService(repo, &rules{
+		repo:     repo,
+		notifier: notifier,
+		logger:   logger,
+		inbox:    inbox,
+		accounts: pool,
+	}, files)
 }
 
 // Bind receives the writer built from the hooks below. rig calls it once,
@@ -119,7 +143,8 @@ func (s *rules) Hooks() api.TodoHooks {
 				Entity:   nil,
 			},
 			Before: nil,
-			After:  nil,
+			// The inbox, written inside the transaction that creates the row.
+			After: s.announceToInbox,
 			// The only place a write may be announced from: the row is committed
 			// and nothing that happens here can take it back.
 			AfterCommit: s.announceCreated,
@@ -361,4 +386,65 @@ func (s *rules) announceCreated(ctx context.Context, claims tenancy.Claims, crea
 	// what makes them safe to read here: this runs after the commit, and the
 	// request's context may already be cancelled.
 	s.logger.DebugContext(ctx, "announced a new todo", "todo", created.ID, "by", claims.AccountID)
+}
+
+// KindTodoCreated is what this application calls the event.
+const KindTodoCreated = "TodoCreated"
+
+// NotifyAt says when notifications about a todo are due.
+//
+// Always now, in this example: a task appears and the people who share the
+// tenant are told. The interesting case is the other one — examples/auth
+// schedules its notifications from a publish_at — and the two are the same code
+// with a different column, which is the whole reason the zero time means now
+// rather than being a separate path.
+func (s *rules) NotifyAt(_ *model.Todo, _ string) (time.Time, bool) {
+	return time.Time{}, true
+}
+
+// NotifyWho answers who should hear about a todo, at the moment of sending.
+//
+// Everybody in the tenant except whoever created it. It runs in the dispatcher
+// rather than in a request, under System claims for the row's own tenant, so an
+// account that joined after the task was written is in this list — the list is
+// built now.
+func (s *rules) NotifyWho(ctx context.Context, n *notify.Notification, row *model.Todo) ([]uuid.UUID, error) {
+	const q = `SELECT id FROM rig_account
+		WHERE tenant_id = $1 AND deleted_at IS NULL AND is_active
+		  AND id <> coalesce($2, '00000000-0000-0000-0000-000000000000'::uuid)`
+
+	rows, err := s.accounts.Query(ctx, q, n.TenantID, row.CreatedByAccountID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []uuid.UUID
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out = append(out, id)
+	}
+	return out, rows.Err()
+}
+
+// announceToInbox says a todo happened.
+//
+// The other announce in this file — the one below, which tells the example's own
+// Notifier — is AfterCommit, and this one is After, and the difference is the
+// whole reason both exist. That one hands a line to something outside the
+// database, so it must not run until the change has landed. This one writes a
+// row: the notification is part of the change, and a change that committed
+// without it is a notification nobody will ever send.
+func (s *rules) announceToInbox(ctx context.Context, _ tenancy.Claims, created *model.Todo) error {
+	if s.inbox == nil {
+		return nil
+	}
+	a := api.AnnounceTodo(s, created, KindTodoCreated)
+	a.Group = notify.GroupBySubject(a.Subject)
+
+	_, err := s.inbox.Announce(ctx, a)
+	return err
 }

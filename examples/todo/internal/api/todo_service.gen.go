@@ -7,12 +7,15 @@ package api
 import (
 	"context"
 	"net/url"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/simonjanss/rig/examples/todo/internal/model"
 	"github.com/simonjanss/rig/examples/todo/internal/store"
 	"github.com/simonjanss/rig/files"
+	"github.com/simonjanss/rig/notify"
 	"github.com/simonjanss/rig/runtime/dbhook"
+	"github.com/simonjanss/rig/runtime/readopt"
 	"github.com/simonjanss/rig/runtime/rigerr"
 	"github.com/simonjanss/rig/runtime/tenancy"
 )
@@ -247,6 +250,12 @@ type TodoContract struct {
 	// write. It is required, because a resource that declares one has no working
 	// answer without it.
 	Endpoints TodoEndpoints
+
+	// Notify answers when notifications about a row are due and who should hear
+	// about them. It is required, because this table declared itself notifiable by
+	// being joined to rig_notification, and a nil one would be an audience of
+	// nobody discovered hours later in a job.
+	Notify TodoNotify
 }
 
 // TodoEndpoints are the endpoints the table configuration declares.
@@ -262,6 +271,51 @@ type TodoEndpoints interface {
 	// two people ticking the same box should not both be told they were the one
 	// who finished it.
 	Complete(ctx context.Context, r Request[TodoCompletePath, struct{}, TodoCompleteBody]) (*model.Todo, error)
+}
+
+// TodoNotify is what rig asks about notifications concerning a Todo: when they
+// are due, and who should hear about them.
+//
+// Both are required, because this table declared itself notifiable by being
+// joined to rig_notification. A project that declares one and does not answer
+// these does not compile — not a default at runtime, a build failure, which
+// is the mechanism a declared endpoint already uses.
+type TodoNotify interface {
+	// NotifyAt says when notifications about a row are due, and whether they are
+	// due at all.
+	//
+	// Returning false cancels anything still pending about the row — a
+	// publish_at that was cleared, a post put back to draft. The zero time with
+	// true means now, which is the ordinary case and is not a special path: an
+	// immediate notification and one scheduled for Friday differ by one column and
+	// run the same code.
+	//
+	// rig calls it after every create and every update, so a date that moves takes
+	// its notifications with it and there is no hook to remember.
+	NotifyAt(row *model.Todo, kind string) (time.Time, bool)
+
+	// NotifyWho answers, at the moment of sending, which accounts should hear
+	// about a row.
+	//
+	// It runs in the dispatcher rather than in a request, under System claims for
+	// the row's own tenant, and that is what makes the answer current: an account
+	// added to the group after the notification was written is in this list,
+	// because this list is built now.
+	//
+	// It must be a pure read, and it may be called more than once for the same
+	// notification — a dispatcher that resolved and died before committing, two
+	// replicas racing the same nudge. rig makes a repeat harmless with a unique
+	// index on the inbox line; a method with side effects would make it visible.
+	//
+	// One thing about those claims is surprising and is the one trap in writing
+	// one of these. AccountID is the nil identifier, because there is no caller
+	// — so an owner-scoped read inside this method returns nothing until it is
+	// given readopt.WithoutOwnerScope(). It fails as an empty audience rather than
+	// as an error, and an empty audience is the hardest bug in this system to
+	// notice: a notification nobody was told about looks exactly like a
+	// notification nobody was owed. The dispatcher counts them, which is the only
+	// thing standing between that and a support ticket.
+	NotifyWho(ctx context.Context, n *notify.Notification, row *model.Todo) ([]uuid.UUID, error)
 }
 
 // TodoHooks are the callbacks that run around each generated write.
@@ -296,6 +350,10 @@ type TodoRules interface {
 	// write.
 	TodoEndpoints
 
+	// The two questions notifications ask of this table, which it declared by
+	// being joined to rig_notification.
+	TodoNotify
+
 	// Hooks is everything that happens around a write, plus what a read answers
 	// with. It is called once, during construction.
 	Hooks() TodoHooks
@@ -316,7 +374,7 @@ type TodoRules interface {
 // writer back. The service layer never has to hold a half-built value or name
 // the type it is part of.
 func NewTodoService(repo store.TodoRepository, rules TodoRules, files *files.Service) DefaultTodoService {
-	svc := NewDefaultTodoService(repo, TodoContract{Hooks: rules.Hooks(), Endpoints: rules}, files)
+	svc := NewDefaultTodoService(repo, TodoContract{Hooks: rules.Hooks(), Endpoints: rules, Notify: rules}, files)
 	rules.Bind(svc.Writer())
 	return svc
 }
@@ -333,6 +391,14 @@ func NewDefaultTodoService(repo store.TodoRepository, contract TodoContract, fil
 	// caller.
 	if contract.Endpoints == nil {
 		panic("api.NewDefaultTodoService: Contract.Endpoints is required: todo declares custom endpoints")
+	}
+
+	// Likewise. A nil one is not a table nobody notifies about; it is one whose
+	// every announcement resolves to an audience of nobody, in a background job,
+	// hours later — which is the failure mode this whole design is arranged to
+	// make visible rather than the one to introduce here.
+	if contract.Notify == nil {
+		panic("api.NewDefaultTodoService: Contract.Notify is required: todo is joined to rig_notification")
 	}
 
 	// A nil file service is a resource whose upload routes all answer 500. Failing
@@ -357,6 +423,59 @@ func (s DefaultTodoService) Writer() TodoWriter { return s.write }
 
 // AdoptChildren implements TodoService.
 func (s DefaultTodoService) AdoptChildren(cs TodoChildDeletes) { s.write.AdoptChildren(cs) }
+
+// TodoSubject is how the dispatcher reaches Todo's answers.
+//
+// It is registered where the service is already wired, so adding a link table
+// and forgetting to register does not compile.
+type TodoSubject struct {
+	svc DefaultTodoService
+}
+
+// NewTodoSubject adapts a service to the dispatcher's interface.
+func NewTodoSubject(svc DefaultTodoService) TodoSubject { return TodoSubject{svc: svc} }
+
+// Table implements notify.Subjects.
+func (s TodoSubject) Table() string { return "todo" }
+
+// Audience implements notify.Subjects.
+func (s TodoSubject) Audience(ctx context.Context, n *notify.Notification, id uuid.UUID) ([]uuid.UUID, error) {
+	row, err := s.svc.repo.Get(ctx, id, readopt.WithoutOwnerScope())
+	if err != nil {
+		return nil, err
+	}
+	return s.svc.contract.Notify.NotifyWho(ctx, n, row)
+}
+
+// NotifyAboutTodo names the row an announcement is about.
+//
+// Use it rather than building the value by hand: the table and the join are
+// written here from the schema, so nothing a request carries reaches a
+// statement.
+func NotifyAboutTodo(id uuid.UUID) notify.Subject {
+	return notify.Subject{
+		Table:     "todo",
+		LinkTable: "todo_notification",
+		Column:    "todo_id",
+		ID:        id,
+	}
+}
+
+// AnnounceTodo builds the announcement, asking this resource's own NotifyAt
+// when it is due.
+//
+// One call rather than three lines, because the middle one is the one to
+// forget: an announcement written without asking NotifyAt is due now, and a
+// draft would go out the moment somebody saved it.
+func AnnounceTodo(rules TodoNotify, row *model.Todo, kind string) notify.Announcement {
+	at, due := rules.NotifyAt(row, kind)
+	return notify.Announcement{
+		Kind:    kind,
+		Subject: NotifyAboutTodo(row.ID),
+		At:      at,
+		Due:     due,
+	}
+}
 
 // readFilter combines the caller's filter with whatever the read hook narrows
 // to.

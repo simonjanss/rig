@@ -15,6 +15,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/simonjanss/rig/files"
 	"github.com/simonjanss/rig/runtime/apirev"
+	"github.com/simonjanss/rig/runtime/readopt"
 	"github.com/simonjanss/rig/runtime/rigerr"
 	"github.com/simonjanss/rig/runtime/tenancy"
 )
@@ -180,6 +181,18 @@ func caller(claims tenancy.Claims) *tenancy.Claims {
 		return nil
 	}
 	return &claims
+}
+
+// readScope turns a requested scope into the read options that produce it.
+//
+// Only "all" does anything. Every other value — including a zero value from
+// a caller that never set the field — leaves the narrow default in place, so
+// the failure mode of forgetting this is too few rows rather than too many.
+func readScope(s tenancy.Scope) []readopt.Option {
+	if s == tenancy.ScopeAll {
+		return []readopt.Option{readopt.WithoutOwnerScope()}
+	}
+	return nil
 }
 
 // ErrorCode is the machine-readable reason a request failed. Clients switch on
