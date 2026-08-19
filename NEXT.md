@@ -2533,6 +2533,196 @@ thing I just said rig should not become.
 
 ---
 
+## M11 — the interactive setup
+
+**Goal.** `rig init` asks what the project needs — authentication, files, live
+sync, a Go SDK of its own, whether permissions are derived, which port the
+throwaway database gets — and leaves behind a project that already says so and
+already builds: a `rig.yaml`, a `go.mod`, and a `main.go`, rather than a fixed
+template and a documentation page telling you what to change in it. And the
+questions keep pace with the configuration: a switch nobody is ever asked about
+is a switch nobody finds.
+
+**Shape.**
+
+- Where it stands: `init` takes three flags — `--module`, `--name`,
+  `--db-image` (`internal/cli/init.go`) — and everything else is one template
+  assembled by string concatenation in `internal/scaffold/scaffold.go`. The
+  tutorial's first instruction after running it is to open `rig.yaml` and change
+  `database.port`, because init hands out 55432 and two rig projects on one
+  machine will fight over it (`docs/tutorial.md`). That is a setup question,
+  printed as a documentation step.
+- Interactive by default, and not behind `--interactive`. A flag somebody has to
+  know about is a flag for the people who least need it: the person the
+  questions are for is the one who has just installed rig and does not yet know
+  which flags exist. So plain `rig init` on a terminal asks, and the cost is
+  admitted rather than argued away — everybody who already types `rig init` gets
+  a different command than they had, once.
+- Which is bearable only because the non-interactive path stays the whole
+  surface. `make examples`, the Docker suites and the tutorial script all run
+  init with nobody attached, and a command that blocks on stdin there does not
+  prompt, it hangs. `isTerminal` already exists in `internal/cli/cli.go` and
+  today decides exactly one thing, which is colour; this is the second. Every
+  question also has a flag, and `--no-input` takes the defaults for all of them,
+  so any answer a person can give is an answer a script can give.
+- The questions come from configuration that already exists rather than from new
+  schema, which is what makes this a CLI milestone and not a compiler one. All
+  of it is modelled in `internal/project/config.go` and reachable only by hand
+  today: `auth:` (enabled, `tenant.from`, whether registration is open, which
+  OAuth providers), `files:` (enabled — and `backend: s3` has not shipped, so
+  the question offers `memory` and says why), the two registered generators the
+  scaffold never writes (`electric`, `go-client`), `api.permissions`
+  (`derived|none`), `database.port`, and how strict `validate` starts out.
+- Two of the questions cannot be asked yet: tracing is M9 and the monitoring
+  page is M10. The wizard ships with the ones it can ask and gains those when
+  they land, which is the second half of this milestone rather than an
+  afterthought to it.
+- The answers land in two places and only one of them is a file rig writes
+  today. `rig.yaml` is scaffolded whole, so those answers are just fields on
+  `scaffold.ProjectOptions`. But authentication and files also need migrations,
+  and that is `rig setup-project`: a second command with its own parts and
+  dependency graph (`scaffold.Parts()`, `scaffold.Requires()` in
+  `internal/scaffold/foundation.go`) which ends by *printing* `auth:` /
+  `enabled: true` and asking you to go and type it yourself
+  (`internal/cli/setup.go`). Answering "yes, authentication" should produce a
+  project where it is already true. So either init runs the foundation for the
+  parts that were asked for, or it ends by printing the single `setup-project`
+  invocation matching the answers. I lean the first, with `setup-project`
+  staying as the way to add a part to a project that already exists.
+- `go.mod` is init's to write, and it should be nearly empty: a module path and
+  a `go` directive, which is what `go mod init` would have written. rig should
+  not carry a list of what a generated project depends on. That list is a
+  function of what the generators emit — `runtime` always, `auth` for a project
+  with an `auth:` block, `files` for one with file columns, `rigclient` if
+  `go-client` is on, plus `pgx` and `uuid` — and a hand-maintained copy of it is
+  a copy that goes stale the first time `runtime` gains or drops a dependency
+  and nobody thinks to look here.
+- So the requires are `go mod tidy`'s, and it runs after `generate`, not before.
+  That order is the whole trick: tidy resolves the imports that are actually in
+  the source, and before `generate` there is no source — running it on a fresh
+  directory would write a `go.mod` requiring nothing and then have to be run
+  again. Afterwards it reads the emitted api package, the store, the service
+  stubs and the main, and writes exactly the set that project needs. It also
+  means the answers reach `go.mod` without the wizard telling it anything:
+  declining authentication is not a rule about `require github.com/simonjanss/rig/auth`,
+  it is an api package with no import of it.
+- Which needs a Go toolchain, and that is a new assumption worth stating rather
+  than discovering. rig emits Go source that somebody has to compile, so `go` is
+  already required to use the output — but nothing rig runs today shells out to
+  it, and the container-engine question above is the model for this one:
+  `exec.LookPath("go")` first, and where there is none, the file stays as init
+  wrote it and the command to run is printed.
+- What stops all of it today is that none of rig's modules are published — every
+  example carries `v0.0.0` and a `replace` at a relative path, and the backlog
+  below already notes that `auth`'s replace needs a real version on first
+  publish. Tidy is what makes that a loud failure instead of a quiet one, which
+  is the argument for it rather than against: a project that cannot resolve
+  `github.com/simonjanss/rig/runtime` should say so on the first run, not on the
+  first build. So this half of the milestone is gated on tagging the modules,
+  not on the setup.
+- `main.go` is not init's to write, and that is the reversal M5.6 was asking
+  for. It was right that the file cannot be written at init — a main names
+  `internal/api`, `internal/store` and one package per service, and none of
+  those names exist until the table set does — and wrong that this makes it
+  unwritable. It makes it *`generate`'s*, at the moment those names are
+  finally known. The mechanism is already there and already carries this exact
+  arrangement: `gen.CreateOnce` writes a file once at its final name and never
+  touches it again, which is how `service-go` emits the service stub that
+  "belongs to the developer" from then on. A main is the same bargain one level
+  up — rig writes the first one, you own it after, and a second `generate` does
+  not walk over the flags you added to it.
+- What goes in it is `examples/todo/main.go` minus the parts that are that
+  example's own: `serve.Main` with a `serve.Config`, the two probes, the
+  `DATABASE_URL` fallback to the DSN `rig db url` prints for this project, the
+  migrations `embed.FS` so the schema travels with the binary, and `api.New`
+  with the generated services. Which means the setup's answers reach it —
+  authentication changes what it mounts — and it is the one file in the project
+  where the questions become something you can read.
+- Ending in a project that builds costs a database, and that is the honest
+  price. `rig generate` with no `--schema` migrates and introspects a real one
+  (`resolveSchema`, `internal/cli/schema_source.go`), so the shortest path from
+  an empty directory to a binary is init, `db up`, `generate`, `go mod tidy` —
+  Docker, a Postgres image pulled, a module graph fetched, and a first run
+  measured in minutes rather than the second `init` takes today. An empty
+  project is a legitimate input to all of it: introspection returns cleanly with
+  no tables, so what comes out is an api package with no endpoints, which is
+  still an api package and still compiles.
+- So the setup runs them, and asks first. It is the last question and it is a
+  real one rather than a courtesy: answering no leaves a directory of files and
+  the commands printed, which is what init does today and a perfectly good
+  outcome for somebody who already knows the tool; answering yes is the reason
+  to have built any of this. What it must never do is ask a question whose
+  answer it cannot honour, so the question is only put when there is something
+  to put it about — `dockerdb.FindRuntime` already looks for docker and then
+  podman, and `CLIRuntime.Available` already asks the daemon for its version
+  rather than trusting `LookPath`, which is the difference between installed and
+  running. No runtime, or a project that answered with a `database.url` of its
+  own and wants no throwaway container: no question, and the commands are
+  printed instead.
+- One question, not four. "Set it up now?" covers the database, the generate and
+  the tidy, because they are not separate decisions — a person who wants two of
+  the three has a shell, and asking three times is how a setup becomes the thing
+  people learn to skip.
+- And it says what it is about to do before it does it, because the honest
+  version of "yes" is a first run that pulls a Postgres image and a module graph
+  over somebody's hotel wifi. `rig db up` already exists and already streams what
+  it is doing; the setup's job is to name the price in the question rather than
+  to discover it afterwards, and to stop at the step that failed and say which
+  one it was rather than unwinding. Every file is `CreateOnce` or idempotent and
+  the steps are the commands, so the recovery is running the one that failed
+  again, and there is nothing to roll back.
+- No prompt library. The only dependency the CLI has is cobra, and bubbletea or
+  huh in the root module puts a TUI stack in the module every user installs to
+  get the compiler. A question is a line, a small set of choices and a default;
+  `bufio` over stdin is the whole implementation, and arrow keys are not worth
+  the go.mod. It is the same argument that keeps otel out of `runtime` and made
+  `migrate` a module of its own.
+- **Keeping the questions in step is a test, not a rule.** A line in AGENTS.md
+  is a reminder, and a reminder is a thing somebody forgets on the commit where
+  it mattered; this repository already prefers the mechanical version, which is
+  why `documented` in `internal/compile/validate.go` fails a comment beginning
+  `TODO` instead of asking for a better one. So: a test that walks the project
+  configuration surface — the same JSON Schema `rig schema project` emits and
+  `writeSchemas` writes into `.rig/` — and fails when a key or feature switch is
+  neither asked about by the setup nor named in an explicit table of things that
+  are deliberately not questions, each with its reason. Adding a configuration
+  block then has two legal outcomes and no third: a question, or a written-down
+  reason there is no question.
+- And a matching rule in AGENTS.md's documentation section, in the shape of the
+  same-commit rules already there — written when the setup ships and not before,
+  because a rule pointing at a command that does not exist is worse than no rule
+  at all.
+
+**Verification.** Goldens over the produced `rig.yaml` and `go.mod` for a few
+answer sets: everything declined, everything accepted, authentication without
+OAuth. A test driving the questions from a scripted stdin, and — the regression
+that would otherwise hang CI rather than fail it — a test that init with no
+terminal and no flags never reads stdin and produces exactly what it produces
+today. For the main: a generator test that it is emitted `CreateOnce`, that an
+edited one survives a second `generate`, and that a project with no tables at
+all still compiles. For the last question: that it is not asked at all with no
+container runtime, none with a `database.url` already set, and no tidy where
+there is no `go` on the path — which is the one way this feature turns into a
+wizard nobody can get out of. The strongest check is the one M8's tutorial
+script already wants to be — a Docker test that runs the whole sequence into an
+empty directory and ends in `go build ./...`, which is the only statement of "it
+builds" that cannot rot, and which also proves the tidy ran after the generate
+rather than before: a `go.mod` requiring nothing is what the wrong order leaves
+behind. The drift test above is its own check and needs no fixture. Honest gap:
+whether the questions *read* well, in order, to somebody who has never seen rig,
+is not something a test can tell you.
+
+**Open question for you.** Before the modules are tagged, does the setup skip
+the tidy and say why, or write replaces into a checkout? Replaces work only for
+somebody who has one, which is nobody who has just installed rig, and a
+scaffolded replace is a line every new project then carries forever. I lean
+skipping it with a sentence naming the reason, so the day the tags exist the
+step starts working and nothing has to be unwritten — and, given that this
+milestone's whole promise is a project that builds, treating publication as the
+thing that unblocks M11 rather than something M11 works around.
+
+---
+
 ## Things I would fix if nobody asked for anything else
 
 - `internal/gen/servicego/servicego.go` still has an `elemType` helper that is
