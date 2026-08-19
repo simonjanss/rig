@@ -2724,7 +2724,9 @@
               {
                 "status_code": 200,
                 "description": "A page of Profiles.",
-                "content_type": "application/json",
+                "content_types": [
+                  "application/json"
+                ],
                 "body_object": "ProfileListResponse"
               }
             ],
@@ -2751,7 +2753,9 @@
             "operation_id": "createProfile",
             "permission": "profile.write",
             "request": {
-              "content_type": "application/json",
+              "content_types": [
+                "application/json"
+              ],
               "body_params": [
                 {
                   "name": "DisplayName",
@@ -2810,7 +2814,9 @@
               {
                 "status_code": 201,
                 "description": "The created Profile.",
-                "content_type": "application/json",
+                "content_types": [
+                  "application/json"
+                ],
                 "body_object": "Profile"
               }
             ],
@@ -2842,7 +2848,9 @@
             "operation_id": "searchProfiles",
             "permission": "profile.read",
             "request": {
-              "content_type": "application/json",
+              "content_types": [
+                "application/json"
+              ],
               "query_params": [
                 {
                   "name": "Limit",
@@ -2878,7 +2886,9 @@
               {
                 "status_code": 200,
                 "description": "A page of matching Profiles.",
-                "content_type": "application/json",
+                "content_types": [
+                  "application/json"
+                ],
                 "body_object": "ProfileListResponse"
               }
             ],
@@ -2963,7 +2973,9 @@
               {
                 "status_code": 200,
                 "description": "The requested Profile.",
-                "content_type": "application/json",
+                "content_types": [
+                  "application/json"
+                ],
                 "body_object": "Profile"
               }
             ],
@@ -2992,7 +3004,9 @@
             "operation_id": "updateProfile",
             "permission": "profile.write",
             "request": {
-              "content_type": "application/json",
+              "content_types": [
+                "application/json"
+              ],
               "path_params": [
                 {
                   "name": "ID",
@@ -3061,7 +3075,9 @@
               {
                 "status_code": 200,
                 "description": "The updated Profile.",
-                "content_type": "application/json",
+                "content_types": [
+                  "application/json"
+                ],
                 "body_object": "Profile"
               }
             ],
@@ -3356,7 +3372,9 @@
               {
                 "status_code": 200,
                 "description": "A page of ProfileAttachments.",
-                "content_type": "application/json",
+                "content_types": [
+                  "application/json"
+                ],
                 "body_object": "ProfileAttachmentListResponse"
               }
             ],
@@ -3383,7 +3401,9 @@
             "operation_id": "createProfileAttachment",
             "permission": "profile_attachment.write",
             "request": {
-              "content_type": "application/json",
+              "content_types": [
+                "application/json"
+              ],
               "body_params": [
                 {
                   "name": "ProfileID",
@@ -3457,7 +3477,9 @@
               {
                 "status_code": 201,
                 "description": "The created ProfileAttachment.",
-                "content_type": "application/json",
+                "content_types": [
+                  "application/json"
+                ],
                 "body_object": "ProfileAttachment"
               }
             ],
@@ -3489,7 +3511,9 @@
             "operation_id": "searchProfileAttachments",
             "permission": "profile_attachment.read",
             "request": {
-              "content_type": "application/json",
+              "content_types": [
+                "application/json"
+              ],
               "query_params": [
                 {
                   "name": "Limit",
@@ -3525,7 +3549,9 @@
               {
                 "status_code": 200,
                 "description": "A page of matching ProfileAttachments.",
-                "content_type": "application/json",
+                "content_types": [
+                  "application/json"
+                ],
                 "body_object": "ProfileAttachmentListResponse"
               }
             ],
@@ -3610,7 +3636,9 @@
               {
                 "status_code": 200,
                 "description": "The requested ProfileAttachment.",
-                "content_type": "application/json",
+                "content_types": [
+                  "application/json"
+                ],
                 "body_object": "ProfileAttachment"
               }
             ],
@@ -3639,7 +3667,9 @@
             "operation_id": "updateProfileAttachment",
             "permission": "profile_attachment.write",
             "request": {
-              "content_type": "application/json",
+              "content_types": [
+                "application/json"
+              ],
               "path_params": [
                 {
                   "name": "ID",
@@ -3723,7 +3753,9 @@
               {
                 "status_code": 200,
                 "description": "The updated ProfileAttachment.",
-                "content_type": "application/json",
+                "content_types": [
+                  "application/json"
+                ],
                 "body_object": "ProfileAttachment"
               }
             ],
@@ -4073,7 +4105,9 @@
               {
                 "status_code": 200,
                 "description": "A page of RigFiles.",
-                "content_type": "application/json",
+                "content_types": [
+                  "application/json"
+                ],
                 "body_object": "RigFileListResponse"
               }
             ],
@@ -4100,7 +4134,9 @@
             "operation_id": "createRigFile",
             "permission": "rig_file.write",
             "request": {
-              "content_type": "application/json",
+              "content_types": [
+                "application/json"
+              ],
               "body_params": [
                 {
                   "name": "StorageKey",
@@ -4201,7 +4237,9 @@
               {
                 "status_code": 201,
                 "description": "The created RigFile.",
-                "content_type": "application/json",
+                "content_types": [
+                  "application/json"
+                ],
                 "body_object": "RigFile"
               }
             ],
@@ -4233,7 +4271,9 @@
             "operation_id": "searchRigFiles",
             "permission": "rig_file.read",
             "request": {
-              "content_type": "application/json",
+              "content_types": [
+                "application/json"
+              ],
               "query_params": [
                 {
                   "name": "Limit",
@@ -4269,7 +4309,9 @@
               {
                 "status_code": 200,
                 "description": "A page of matching RigFiles.",
-                "content_type": "application/json",
+                "content_types": [
+                  "application/json"
+                ],
                 "body_object": "RigFileListResponse"
               }
             ],
@@ -4323,7 +4365,9 @@
               {
                 "status_code": 200,
                 "description": "A page of retired RigFiles.",
-                "content_type": "application/json",
+                "content_types": [
+                  "application/json"
+                ],
                 "body_object": "RigFileListResponse"
               }
             ],
@@ -4408,7 +4452,9 @@
               {
                 "status_code": 200,
                 "description": "The requested RigFile.",
-                "content_type": "application/json",
+                "content_types": [
+                  "application/json"
+                ],
                 "body_object": "RigFile"
               }
             ],
@@ -4437,7 +4483,9 @@
             "operation_id": "updateRigFile",
             "permission": "rig_file.write",
             "request": {
-              "content_type": "application/json",
+              "content_types": [
+                "application/json"
+              ],
               "path_params": [
                 {
                   "name": "ID",
@@ -4548,7 +4596,9 @@
               {
                 "status_code": 200,
                 "description": "The updated RigFile.",
-                "content_type": "application/json",
+                "content_types": [
+                  "application/json"
+                ],
                 "body_object": "RigFile"
               }
             ],
@@ -4594,7 +4644,9 @@
               {
                 "status_code": 200,
                 "description": "The restored RigFile.",
-                "content_type": "application/json",
+                "content_types": [
+                  "application/json"
+                ],
                 "body_object": "RigFile"
               }
             ],

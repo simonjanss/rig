@@ -1901,7 +1901,9 @@
               {
                 "status_code": 200,
                 "description": "A page of Lessons.",
-                "content_type": "application/json",
+                "content_types": [
+                  "application/json"
+                ],
                 "body_object": "LessonListResponse"
               }
             ],
@@ -1928,7 +1930,9 @@
             "operation_id": "createLesson",
             "permission": "lesson.write",
             "request": {
-              "content_type": "application/json",
+              "content_types": [
+                "application/json"
+              ],
               "body_params": [
                 {
                   "name": "Title",
@@ -2056,7 +2060,9 @@
               {
                 "status_code": 201,
                 "description": "The created Lesson.",
-                "content_type": "application/json",
+                "content_types": [
+                  "application/json"
+                ],
                 "body_object": "Lesson"
               }
             ],
@@ -2088,7 +2094,9 @@
             "operation_id": "searchLessons",
             "permission": "lesson.read",
             "request": {
-              "content_type": "application/json",
+              "content_types": [
+                "application/json"
+              ],
               "query_params": [
                 {
                   "name": "Limit",
@@ -2124,7 +2132,9 @@
               {
                 "status_code": 200,
                 "description": "A page of matching Lessons.",
-                "content_type": "application/json",
+                "content_types": [
+                  "application/json"
+                ],
                 "body_object": "LessonListResponse"
               }
             ],
@@ -2178,7 +2188,9 @@
               {
                 "status_code": 200,
                 "description": "A page of retired Lessons.",
-                "content_type": "application/json",
+                "content_types": [
+                  "application/json"
+                ],
                 "body_object": "LessonListResponse"
               }
             ],
@@ -2263,7 +2275,9 @@
               {
                 "status_code": 200,
                 "description": "The requested Lesson.",
-                "content_type": "application/json",
+                "content_types": [
+                  "application/json"
+                ],
                 "body_object": "Lesson"
               }
             ],
@@ -2292,7 +2306,9 @@
             "operation_id": "updateLesson",
             "permission": "lesson.write",
             "request": {
-              "content_type": "application/json",
+              "content_types": [
+                "application/json"
+              ],
               "path_params": [
                 {
                   "name": "ID",
@@ -2429,7 +2445,9 @@
               {
                 "status_code": 200,
                 "description": "The updated Lesson.",
-                "content_type": "application/json",
+                "content_types": [
+                  "application/json"
+                ],
                 "body_object": "Lesson"
               }
             ],
@@ -2459,7 +2477,9 @@
             "operation_id": "publishLesson",
             "permission": "lesson.publish",
             "request": {
-              "content_type": "application/json",
+              "content_types": [
+                "application/json"
+              ],
               "path_params": [
                 {
                   "name": "ID",
@@ -2486,13 +2506,17 @@
               {
                 "status_code": 200,
                 "description": "The published lesson.",
-                "content_type": "application/json",
+                "content_types": [
+                  "application/json"
+                ],
                 "body_object": "Lesson"
               },
               {
                 "status_code": 409,
                 "description": "The lesson was not in the Planned state.",
-                "content_type": "application/json",
+                "content_types": [
+                  "application/json"
+                ],
                 "body_object": "Error"
               }
             ],
@@ -2535,7 +2559,9 @@
               {
                 "status_code": 200,
                 "description": "The restored Lesson.",
-                "content_type": "application/json",
+                "content_types": [
+                  "application/json"
+                ],
                 "body_object": "Lesson"
               }
             ],
@@ -2566,7 +2592,9 @@
             "operation_id": "revertLesson",
             "permission": "lesson.write",
             "request": {
-              "content_type": "application/json",
+              "content_types": [
+                "application/json"
+              ],
               "path_params": [
                 {
                   "name": "ID",
@@ -2592,7 +2620,9 @@
               {
                 "status_code": 200,
                 "description": "The Lesson, as of the version replayed.",
-                "content_type": "application/json",
+                "content_types": [
+                  "application/json"
+                ],
                 "body_object": "Lesson"
               }
             ],
@@ -2638,7 +2668,9 @@
               {
                 "status_code": 200,
                 "description": "The versions of the Lesson, newest first.",
-                "content_type": "application/json",
+                "content_types": [
+                  "application/json"
+                ],
                 "body_object": "LessonListResponse"
               }
             ],

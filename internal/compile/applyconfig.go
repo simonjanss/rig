@@ -684,7 +684,7 @@ func applyEndpointConfig(loaded *tableconf.Loaded, res *ir.Resource, cfg tableco
 			BodyObject:  req.BodyObject,
 		}
 		if len(e.Request.BodyParams) > 0 || e.Request.BodyObject != "" {
-			e.Request.ContentType = "application/json"
+			e.Request.ContentTypes = []string{MediaJSON}
 		}
 		if len(e.Request.BodyParams) > 0 && e.Request.BodyObject != "" {
 			diags.Add(diag.CodeInvalidEndpoint, loaded.At("endpoints", strconv.Itoa(i), "request"),
@@ -704,11 +704,11 @@ func applyEndpointConfig(loaded *tableconf.Loaded, res *ir.Resource, cfg tableco
 
 		for _, rc := range ec.Responses {
 			e.Responses = append(e.Responses, ir.EndpointResponse{
-				StatusCode:  rc.Status,
-				Description: rc.Description,
-				BodyObject:  rc.BodyObject,
-				BodyFields:  convertParams(rc.BodyFields, n),
-				ContentType: responseContentType(rc),
+				StatusCode:   rc.Status,
+				Description:  rc.Description,
+				BodyObject:   rc.BodyObject,
+				BodyFields:   convertParams(rc.BodyFields, n),
+				ContentTypes: responseContentTypes(rc),
 			})
 		}
 		if len(e.Responses) == 0 {
@@ -725,11 +725,17 @@ func applyEndpointConfig(loaded *tableconf.Loaded, res *ir.Resource, cfg tableco
 	return diags
 }
 
-func responseContentType(rc tableconf.EndpointResponse) string {
+// responseContentTypes is JSON or nothing.
+//
+// A custom endpoint cannot declare a content type of its own — M5.9 reads the
+// field for the endpoints rig synthesizes and does not let a table configuration
+// write it, because a declared binary body means the service method stops
+// receiving a decoded body in the general case. That is a milestone of its own.
+func responseContentTypes(rc tableconf.EndpointResponse) []string {
 	if rc.BodyObject == "" && len(rc.BodyFields) == 0 {
-		return ""
+		return nil
 	}
-	return "application/json"
+	return []string{MediaJSON}
 }
 
 func convertParams(params []tableconf.Param, n *naming.Namer) []ir.Field {

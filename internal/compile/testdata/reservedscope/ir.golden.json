@@ -966,7 +966,9 @@
               {
                 "status_code": 200,
                 "description": "A page of Todos.",
-                "content_type": "application/json",
+                "content_types": [
+                  "application/json"
+                ],
                 "body_object": "TodoListResponse"
               }
             ],
@@ -993,7 +995,9 @@
             "operation_id": "createTodo",
             "permission": "todo.write",
             "request": {
-              "content_type": "application/json",
+              "content_types": [
+                "application/json"
+              ],
               "body_params": [
                 {
                   "name": "Title",
@@ -1068,7 +1072,9 @@
               {
                 "status_code": 201,
                 "description": "The created Todo.",
-                "content_type": "application/json",
+                "content_types": [
+                  "application/json"
+                ],
                 "body_object": "Todo"
               }
             ],
@@ -1100,7 +1106,9 @@
             "operation_id": "searchTodos",
             "permission": "todo.read",
             "request": {
-              "content_type": "application/json",
+              "content_types": [
+                "application/json"
+              ],
               "query_params": [
                 {
                   "name": "Limit",
@@ -1136,7 +1144,9 @@
               {
                 "status_code": 200,
                 "description": "A page of matching Todos.",
-                "content_type": "application/json",
+                "content_types": [
+                  "application/json"
+                ],
                 "body_object": "TodoListResponse"
               }
             ],
@@ -1221,7 +1231,9 @@
               {
                 "status_code": 200,
                 "description": "The requested Todo.",
-                "content_type": "application/json",
+                "content_types": [
+                  "application/json"
+                ],
                 "body_object": "Todo"
               }
             ],
@@ -1250,7 +1262,9 @@
             "operation_id": "updateTodo",
             "permission": "todo.write",
             "request": {
-              "content_type": "application/json",
+              "content_types": [
+                "application/json"
+              ],
               "path_params": [
                 {
                   "name": "ID",
@@ -1335,7 +1349,9 @@
               {
                 "status_code": 200,
                 "description": "The updated Todo.",
-                "content_type": "application/json",
+                "content_types": [
+                  "application/json"
+                ],
                 "body_object": "Todo"
               }
             ],
@@ -1390,7 +1406,9 @@
               {
                 "status_code": 200,
                 "description": "The archived task.",
-                "content_type": "application/json",
+                "content_types": [
+                  "application/json"
+                ],
                 "body_object": "Todo"
               }
             ],

@@ -583,7 +583,16 @@ type Endpoint struct {
 
 // EndpointRequest is everything a client sends.
 type EndpointRequest struct {
-	ContentType string  `json:"content_type,omitempty"`
+	// ContentTypes are the media types this endpoint accepts, most preferred
+	// first.
+	//
+	// A list rather than one string because an endpoint can honestly accept two:
+	// a create on a table with a file column takes either a JSON body or a
+	// multipart form carrying the same JSON in one part and the bytes in
+	// another. Everything else has exactly one, and a generator that wants "the"
+	// content type takes the first.
+	ContentTypes []string `json:"content_types,omitempty"`
+
 	Headers     []Field `json:"headers,omitempty"`
 	PathParams  []Field `json:"path_params,omitempty"`
 	QueryParams []Field `json:"query_params,omitempty"`
@@ -595,12 +604,15 @@ type EndpointRequest struct {
 // EndpointResponse is one possible outcome. An endpoint always lists every
 // status it can return, so 200, 404, and 409 are all first-class.
 type EndpointResponse struct {
-	StatusCode  int     `json:"status_code"`
-	Description string  `json:"description,omitempty"`
-	ContentType string  `json:"content_type,omitempty"`
-	Headers     []Field `json:"headers,omitempty"`
-	BodyFields  []Field `json:"body_fields,omitempty"`
-	BodyObject  string  `json:"body_object,omitempty"`
+	StatusCode  int    `json:"status_code"`
+	Description string `json:"description,omitempty"`
+	// ContentTypes are what this response can be. A list for symmetry with the
+	// request, and because a download answers with whatever the file turned out
+	// to be rather than with one type known at generation time.
+	ContentTypes []string `json:"content_types,omitempty"`
+	Headers      []Field  `json:"headers,omitempty"`
+	BodyFields   []Field  `json:"body_fields,omitempty"`
+	BodyObject   string   `json:"body_object,omitempty"`
 }
 
 // EndpointImpl tells the service and server generators how this endpoint is

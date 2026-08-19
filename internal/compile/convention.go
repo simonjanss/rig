@@ -261,3 +261,19 @@ func isAuditActorColumn(name string) bool {
 		return false
 	}
 }
+
+// The media types rig's own endpoints speak.
+//
+// Named because they are written into the IR and read back by every generator
+// that renders a request: an OpenAPI document must not claim application/json
+// for an endpoint whose document says otherwise, and until M5.9 every endpoint
+// said JSON so nothing had ever been asked.
+const (
+	MediaJSON = "application/json"
+	// MediaMultipart is what an upload arrives as, and what a create accepts in
+	// addition to JSON on a table with a file column.
+	MediaMultipart = "multipart/form-data"
+	// MediaOctet is the fallback a download announces when the file's own
+	// sniffed type is not known at generation time — which it never is.
+	MediaOctet = "application/octet-stream"
+)

@@ -345,11 +345,11 @@ func createEndpoint(res ir.Resource) ir.Endpoint {
 		Path:    "",
 		Summary: "Create a " + res.Name + ".",
 		Request: ir.EndpointRequest{
-			ContentType: "application/json",
-			BodyParams:  writableFields(res, ir.FieldOpCreate),
+			ContentTypes: []string{MediaJSON},
+			BodyParams:   writableFields(res, ir.FieldOpCreate),
 		},
 		Responses: []ir.EndpointResponse{{
-			StatusCode: 201, ContentType: "application/json",
+			StatusCode: 201, ContentTypes: []string{MediaJSON},
 			BodyObject: res.Name, Description: "The created " + res.Name + ".",
 		}},
 		Errors: []int{400, 401, 403, 409, 422, 429, 500},
@@ -368,7 +368,7 @@ func getEndpoint(res ir.Resource, wire func(string) string) ir.Endpoint {
 		Summary: "Fetch one " + res.Name + " by identifier.",
 		Request: ir.EndpointRequest{PathParams: []ir.Field{idParam(res, wire)}},
 		Responses: []ir.EndpointResponse{{
-			StatusCode: 200, ContentType: "application/json",
+			StatusCode: 200, ContentTypes: []string{MediaJSON},
 			BodyObject: res.Name, Description: "The requested " + res.Name + ".",
 		}},
 		Errors: []int{400, 401, 403, 404, 429, 500},
@@ -387,7 +387,7 @@ func listEndpoint(res ir.Resource, response string, wire func(string) string) ir
 		Summary: "List " + res.Plural + ".",
 		Request: ir.EndpointRequest{QueryParams: paginationParams(wire)},
 		Responses: []ir.EndpointResponse{{
-			StatusCode: 200, ContentType: "application/json",
+			StatusCode: 200, ContentTypes: []string{MediaJSON},
 			BodyObject: response, Description: "A page of " + res.Plural + ".",
 		}},
 		Errors: []int{400, 401, 403, 429, 500},
@@ -411,8 +411,8 @@ func searchEndpoint(res ir.Resource, response, method string, wire func(string) 
 		Path:    "",
 		Summary: "Search " + res.Plural + " with filters.",
 		Request: ir.EndpointRequest{
-			ContentType: "application/json",
-			QueryParams: paginationParams(wire),
+			ContentTypes: []string{MediaJSON},
+			QueryParams:  paginationParams(wire),
 			BodyParams: []ir.Field{{
 				Name: "Filter", Wire: wire("Filter"),
 				Type: res.Name + "Filter", TypeKind: ir.TypeKindObject, GoType: res.Name + "Filter",
@@ -420,7 +420,7 @@ func searchEndpoint(res ir.Resource, response, method string, wire func(string) 
 			}},
 		},
 		Responses: []ir.EndpointResponse{{
-			StatusCode: 200, ContentType: "application/json",
+			StatusCode: 200, ContentTypes: []string{MediaJSON},
 			BodyObject: response, Description: "A page of matching " + res.Plural + ".",
 		}},
 		Errors: []int{400, 401, 403, 422, 429, 500},
@@ -451,12 +451,12 @@ func updateEndpoint(res ir.Resource, wire func(string) string) ir.Endpoint {
 		Description: "Only the fields present in the body are changed. A field set to null is " +
 			"cleared; a field left out is left alone.",
 		Request: ir.EndpointRequest{
-			ContentType: "application/json",
-			PathParams:  []ir.Field{idParam(res, wire)},
-			BodyParams:  writableFields(res, ir.FieldOpUpdate),
+			ContentTypes: []string{MediaJSON},
+			PathParams:   []ir.Field{idParam(res, wire)},
+			BodyParams:   writableFields(res, ir.FieldOpUpdate),
 		},
 		Responses: []ir.EndpointResponse{{
-			StatusCode: 200, ContentType: "application/json",
+			StatusCode: 200, ContentTypes: []string{MediaJSON},
 			BodyObject: res.Name, Description: "The updated " + res.Name + ".",
 		}},
 		Errors: []int{400, 401, 403, 404, 409, 422, 429, 500},
@@ -491,7 +491,7 @@ func listDeletedEndpoint(res ir.Resource, response string, wire func(string) str
 			"as anyone is concerned, so it is not in the trash either.",
 		Request: ir.EndpointRequest{QueryParams: paginationParams(wire)},
 		Responses: []ir.EndpointResponse{{
-			StatusCode: 200, ContentType: "application/json",
+			StatusCode: 200, ContentTypes: []string{MediaJSON},
 			BodyObject: response, Description: "A page of retired " + res.Plural + ".",
 		}},
 		Errors: []int{400, 401, 403, 429, 500},
@@ -535,7 +535,7 @@ func restoreEndpoint(res ir.Resource, wire func(string) string) ir.Endpoint {
 			"been checked against the world it is returning to.",
 		Request: ir.EndpointRequest{PathParams: []ir.Field{idParam(res, wire)}},
 		Responses: []ir.EndpointResponse{{
-			StatusCode: 200, ContentType: "application/json",
+			StatusCode: 200, ContentTypes: []string{MediaJSON},
 			BodyObject: res.Name, Description: "The restored " + res.Name + ".",
 		}},
 		Errors: []int{400, 401, 403, 404, 409, 422, 429, 500},
@@ -579,7 +579,7 @@ func versionsEndpoint(res ir.Resource, response string, wire func(string) string
 			"turn up in a listing.",
 		Request: ir.EndpointRequest{PathParams: []ir.Field{idParam(res, wire)}},
 		Responses: []ir.EndpointResponse{{
-			StatusCode: 200, ContentType: "application/json",
+			StatusCode: 200, ContentTypes: []string{MediaJSON},
 			BodyObject: response, Description: "The versions of the " + res.Name + ", newest first.",
 		}},
 		Errors: []int{400, 401, 403, 404, 429, 500},
@@ -602,8 +602,8 @@ func revertEndpoint(res ir.Resource, wire func(string) string) ir.Endpoint {
 			"first and every rule an update runs still runs. Reverting is undoable, and " +
 			"a value that would be refused now is still refused.",
 		Request: ir.EndpointRequest{
-			ContentType: "application/json",
-			PathParams:  []ir.Field{idParam(res, wire)},
+			ContentTypes: []string{MediaJSON},
+			PathParams:   []ir.Field{idParam(res, wire)},
 			BodyParams: []ir.Field{{
 				Name: "VersionID", Wire: wire("VersionID"),
 				Type: ir.TypeUUID, TypeKind: ir.TypeKindPrimitive, GoType: "uuid.UUID",
@@ -611,7 +611,7 @@ func revertEndpoint(res ir.Resource, wire func(string) string) ir.Endpoint {
 			}},
 		},
 		Responses: []ir.EndpointResponse{{
-			StatusCode: 200, ContentType: "application/json",
+			StatusCode: 200, ContentTypes: []string{MediaJSON},
 			BodyObject: res.Name, Description: "The " + res.Name + ", as of the version replayed.",
 		}},
 		// 404 covers a version that is not one of this row's, deliberately: a
