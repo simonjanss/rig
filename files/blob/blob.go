@@ -2,9 +2,10 @@
 //
 // A rig_file row is metadata: who owns it, what it is called, how big it is,
 // whether it has been uploaded yet. The object itself is somewhere else, and
-// this is the seam between them. Two implementations ship — [Memory], for tests
-// and `go run`, and S3 in a module of its own so that a project which never
-// calls it does not carry the SDK.
+// this is the seam between them. [Memory] is the implementation that ships
+// here, for tests and `go run`. A backend needing a cloud SDK belongs in a
+// module of its own, so a project that never calls it does not carry the
+// dependency — which is why this package's own are a UUID and nothing else.
 //
 // [Signer] and [Marker] are separate interfaces on purpose. A backend that
 // cannot mint a URL, or has nowhere to record that an object is deleted, simply
@@ -97,6 +98,10 @@ type Signer interface {
 // State is what a [Marker] records about an object.
 type State string
 
+// The states. Two, and deliberately not more: the object mirrors what the row
+// says, and every question about how a file got here — abandoned upload, soft
+// delete, restore — is answered by the row rather than by a third state nobody
+// could reconcile against it.
 const (
 	// StateLive is an object whose row is not deleted.
 	StateLive State = "live"

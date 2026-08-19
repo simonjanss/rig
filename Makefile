@@ -11,9 +11,9 @@ EXAMPLE_MODULES := ./examples/todo ./examples/fantasyfootball ./examples/auth ./
 
 # The core modules less the root: the ones a generated application imports, so
 # their godoc is the documentation for a Go surface somebody depends on rather
-# than commentary on it. That is why `godoc-check` runs over these four and not
+# than commentary on it. That is why `godoc-check` runs over these five and not
 # over `internal/`, `pkg/ir` or `pkg/gen`, which are nobody else's dependency.
-PUBLIC_MODULES  := ./runtime ./auth ./migrate ./rigclient
+PUBLIC_MODULES  := ./runtime ./auth ./files ./migrate ./rigclient
 MODULES         := $(CORE_MODULES) $(EXAMPLE_MODULES)
 EXAMPLES        := todo fantasyfootball auth auth_oauth
 

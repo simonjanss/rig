@@ -14,7 +14,7 @@ make check   # what that hook runs, and what CI runs
 ```bash
 make fmt-check   # gofmt; `make fmt` rewrites
 make vet
-make godoc-check # exported symbols in the four imported modules have doc comments
+make godoc-check # exported symbols in the five imported modules have doc comments
 make build
 make test        # the fast suite
 make deps        # go mod tidy, then fail if anything changed
@@ -123,11 +123,12 @@ of the files above is edited. It reminds; it does not gate.
 
 ## Godoc
 
-`runtime/`, `auth/`, `migrate/` and `rigclient/` are separate modules that a
-generated application imports. Their godoc is the only documentation their Go
-surface has: `docs/` covers what somebody writes — `rig.yaml`, a migration, a
-service — and never what they call. So a doc comment there is documentation, not
-commentary, and `make godoc-check` fails on an exported symbol without one.
+`runtime/`, `auth/`, `files/`, `migrate/` and `rigclient/` are separate modules
+that a generated application imports. Their godoc is the only documentation
+their Go surface has: `docs/` covers what somebody writes — `rig.yaml`, a
+migration, a service — and never what they call. So a doc comment there is
+documentation, not commentary, and `make godoc-check` fails on an exported
+symbol without one.
 **A change to a signature updates its doc comment in the same commit.**
 
 The check asks only whether a symbol has a comment, never what the comment says.
@@ -156,7 +157,7 @@ and reads fine where it is. Nothing catches this, so after a rename:
 
 ```bash
 grep -rn '^\s*//.*\[[A-Z][A-Za-z0-9_]*\.[a-z][A-Za-z0-9_]*\]' --include='*.go' \
-  runtime auth migrate rigclient
+  runtime auth files migrate rigclient
 ```
 
 **A doc on a `const (` block covers every name in it**, so the block is where a
