@@ -161,6 +161,9 @@ func (e *emitter) storeFile() (gen.Artifact, error) {
 
 	e.storeType(b)
 	e.helpers(b)
+	for _, res := range e.referenceTargets() {
+		e.visibilityFunc(b, res)
+	}
 
 	return artifact("store.gen.go", b)
 }

@@ -735,15 +735,40 @@ func (r *fixtureRepo) Create(ctx context.Context, in dbhook.Create[model.Fixture
 	_ = now
 
 	// A single INSERT is already atomic, so the transaction is opened only when a
-	// hook needs to be able to undo it. Two round trips is not a price to pay for
-	// nothing.
-	needsTx := in.Hooks.Before != nil || in.Hooks.After != nil
+	// hook needs to be able to undo it — or, here, when a reference has to be
+	// checked first. A check on one connection and an insert on another leaves a
+	// window where the row it approved is deleted before the row that points at it
+	// lands.
+	needsTx := true
 
 	var m *model.Fixture
 	err = dbx.InTxIf(ctx, r.db.pool, r.db.conn(), needsTx, func(ctx context.Context, tx dbx.Conn) error {
 		if in.Hooks.Before != nil {
 			if err := in.Hooks.Before(ctx, claims, &in.Input); err != nil {
 				return err
+			}
+		}
+
+		// Every identifier this row would store has to name a row the caller could
+		// have read. One indexed lookup per key, inside the transaction that is about
+		// to do the write.
+		{
+			ok, err := visibleTeam(ctx, tx, claims, in.Input.AwayTeamID)
+			if err != nil {
+				return err
+			}
+			if !ok {
+				return &model.FixtureCreateInputError{AwayTeamID: rigerr.NewFieldError(rigerr.FieldCodeNotFound, "no Team with id %s", in.Input.AwayTeamID)}
+			}
+		}
+
+		{
+			ok, err := visibleTeam(ctx, tx, claims, in.Input.HomeTeamID)
+			if err != nil {
+				return err
+			}
+			if !ok {
+				return &model.FixtureCreateInputError{HomeTeamID: rigerr.NewFieldError(rigerr.FieldCodeNotFound, "no Team with id %s", in.Input.HomeTeamID)}
 			}
 		}
 
@@ -816,6 +841,28 @@ func (r *fixtureRepo) Update(ctx context.Context, id uuid.UUID, in dbhook.Update
 		if in.Hooks.Validator != nil {
 			if err := in.Hooks.Validator.RunUpdate(ctx, claims, &in.Input, prev); err != nil {
 				return err
+			}
+		}
+
+		// Every identifier this update would store has to name a row the caller could
+		// have read — the ones it actually sends, and no others.
+		if v, sent := in.Input.AwayTeamID.Get(); sent {
+			ok, err := visibleTeam(ctx, tx, claims, v)
+			if err != nil {
+				return err
+			}
+			if !ok {
+				return &model.FixtureUpdateInputError{AwayTeamID: rigerr.NewFieldError(rigerr.FieldCodeNotFound, "no Team with id %s", v)}
+			}
+		}
+
+		if v, sent := in.Input.HomeTeamID.Get(); sent {
+			ok, err := visibleTeam(ctx, tx, claims, v)
+			if err != nil {
+				return err
+			}
+			if !ok {
+				return &model.FixtureUpdateInputError{HomeTeamID: rigerr.NewFieldError(rigerr.FieldCodeNotFound, "no Team with id %s", v)}
 			}
 		}
 

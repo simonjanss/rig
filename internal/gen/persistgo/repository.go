@@ -760,10 +760,19 @@ func (e *emitter) createMethod(b *gobuf.Buf, res *ir.Resource, typeName string) 
 	}
 	b.NL()
 
-	b.Comment("A single INSERT is already atomic, so the transaction is opened " +
-		"only when a hook needs to be able to undo it. Two round trips is not a " +
-		"price to pay for nothing.")
-	b.L("needsTx := in.Hooks.Before != nil || in.Hooks.After != nil")
+	if e.needsReferenceCheck(res, ir.FieldOpCreate) {
+		b.Comment("A single INSERT is already atomic, so the transaction is opened " +
+			"only when a hook needs to be able to undo it — or, here, when a " +
+			"reference has to be checked first. A check on one connection and an " +
+			"insert on another leaves a window where the row it approved is deleted " +
+			"before the row that points at it lands.")
+		b.L("needsTx := true")
+	} else {
+		b.Comment("A single INSERT is already atomic, so the transaction is opened " +
+			"only when a hook needs to be able to undo it. Two round trips is not a " +
+			"price to pay for nothing.")
+		b.L("needsTx := in.Hooks.Before != nil || in.Hooks.After != nil")
+	}
 	b.NL()
 	b.L("var m *%s", entity)
 	b.L("err = %s.InTxIf(ctx, %s.db.pool, %s.db.conn(), needsTx, func(ctx %s.Context, tx %s.Conn) error {",
@@ -772,6 +781,11 @@ func (e *emitter) createMethod(b *gobuf.Buf, res *ir.Resource, typeName string) 
 	b.L("if err := in.Hooks.Before(ctx, claims, &in.Input); err != nil { return err }")
 	b.L("}")
 	b.NL()
+
+	// After the hook, because the hook is allowed to change which row this
+	// points at, and checking the value it replaced would be checking a value
+	// nothing is going to write.
+	e.createReferenceChecks(b, res)
 
 	cols := e.insertColumns(res)
 	b.P("columns := []string{")
@@ -910,6 +924,11 @@ func (e *emitter) updateMethod(b *gobuf.Buf, res *ir.Resource, typeName string) 
 	b.L("if err := in.Hooks.Validator.RunUpdate(ctx, claims, &in.Input, prev); err != nil { return err }")
 	b.L("}")
 	b.NL()
+
+	// After the hook and the rules, for the same reason the create checks there:
+	// the value that gets checked has to be the value that gets written. Before
+	// the snapshot, so a refused update leaves no copy behind.
+	e.updateReferenceChecks(b, res)
 
 	b.L("columns := []string{}")
 	b.L("values := []any{}")
