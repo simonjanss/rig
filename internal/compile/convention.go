@@ -235,6 +235,11 @@ func NotificationTables() []string {
 	return []string{NotificationTable, NotificationRecipientTable}
 }
 
+// isNotificationTable reports whether a table is one of rig's own two.
+func isNotificationTable(name string) bool {
+	return name == NotificationTable || name == NotificationRecipientTable
+}
+
 // NotificationRecipientOwner is the column an inbox read narrows to.
 //
 // Not the created-by audit column every other owner-scoped table filters on: an

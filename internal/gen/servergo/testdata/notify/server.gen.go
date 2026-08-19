@@ -152,11 +152,16 @@ func Register(h Handlers) *http.ServeMux {
 	// tables are rig's own and are the same in every project — there is nothing
 	// here for a generator to vary.
 	if h.Notifications != nil {
-		notifyhttp.New(h.Notifications, notifyhttp.Options{Fail: func(w http.ResponseWriter, r *http.Request, err error) {
-			// The project's own error shape, so an inbox route's 404 looks like every
-			// other route's.
-			fail(h.Server, w, r, RequestContext{}, err)
-		}}).Mount(mux)
+		notifyhttp.New(h.Notifications, notifyhttp.Options{
+			// The server's own answer to "who is calling", so an inbox route identifies
+			// its caller exactly the way every other route does.
+			Claims: h.Server.GetClaims,
+			Fail: func(w http.ResponseWriter, r *http.Request, err error) {
+				// The project's own error shape, so an inbox route's 404 looks like every
+				// other route's.
+				fail(h.Server, w, r, RequestContext{}, err)
+			},
+		}).Mount(mux)
 	}
 
 	// After the resources, so a pattern collision between the two is a panic

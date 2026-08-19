@@ -86,21 +86,16 @@ func (s *Service) Announce(ctx context.Context, a Announcement) (*Notification, 
 		AccountIDs: a.AccountIDs,
 	}
 
-	// When it is due is the subject's answer, and a false one means it is not
-	// due at all — a post with no publish_at, an event that was cancelled. The
-	// row is still written, still linked, and still Cancelled, because a
+	// When it is due came from the subject's own NotifyAt, asked by the hook
+	// that called this — where the row was in hand. A false answer means it is
+	// not due at all: a post with no publish_at, an event that was called off.
+	// The row is still written, still linked and still Cancelled, because a
 	// notification that was decided against is a thing that happened.
-	if subject := s.cfg.Registry.For(a.Subject.Table); subject != nil {
-		at, due, err := subject.DueAt(ctx, a.Subject.ID, a.Kind)
-		if err != nil {
-			return nil, err
-		}
-		switch {
-		case !due:
-			n.State = StateCancelled
-		case !at.IsZero():
-			n.DeliverAt = at.UTC()
-		}
+	switch {
+	case !a.Due:
+		n.State = StateCancelled
+	case !a.At.IsZero():
+		n.DeliverAt = a.At.UTC()
 	}
 
 	if err := s.store.insert(ctx, n, a.Subject); err != nil {

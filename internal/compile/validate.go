@@ -531,8 +531,13 @@ func checkColumnNaming(t *ir.Table, loaded *tableconf.Loaded, boolSev, tsSev, da
 		inboxOwner := t.Name == NotificationRecipientTable &&
 			c.Name == NotificationRecipientOwner
 
+		// And every column of rig's own two tables, which a project cannot
+		// rename and did not write. The rule is advice about a schema somebody
+		// is writing, and this is not one of those.
+		rigsOwn := isNotificationTable(t.Name)
+
 		if fkSev != "" && c.ForeignKey != nil && !isAuditActorColumn(c.Name) &&
-			!selfReference && !isFileColumn(t, c) && !notificationLink && !inboxOwner {
+			!selfReference && !isFileColumn(t, c) && !notificationLink && !inboxOwner && !rigsOwn {
 			want := c.ForeignKey.Table + "_id"
 			if c.Name != want && !strings.HasSuffix(c.Name, "_"+want) {
 				diags.AddSeverity(diag.CodeForeignKeyNaming, fkSev, at,

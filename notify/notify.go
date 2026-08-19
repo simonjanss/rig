@@ -110,6 +110,20 @@ type Announcement struct {
 	// key if it has a shape.
 	Payload json.RawMessage
 
+	// At is when this is due, and Due is whether it is due at all.
+	//
+	// They come from the subject's own NotifyAt, called by the hook that
+	// announces — where the row is in hand. The zero time with Due means now,
+	// which is the ordinary case and is not a special path: an immediate
+	// notification and one scheduled for Friday are the same row with a
+	// different column.
+	//
+	// Due false writes the notification and cancels it. The row is still
+	// written and still linked, because a notification that was decided against
+	// is a thing that happened and something has to be able to say so.
+	At  time.Time
+	Due bool
+
 	// Group collapses several events into one inbox line. Nil is one line per
 	// event; [GroupBySubject] is the ordinary answer; [GroupBy] sets a coarser
 	// key of your own.

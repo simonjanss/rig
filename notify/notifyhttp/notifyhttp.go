@@ -27,6 +27,7 @@ import (
 
 	"github.com/simonjanss/rig/notify"
 	"github.com/simonjanss/rig/runtime/rigerr"
+	"github.com/simonjanss/rig/runtime/tenancy"
 )
 
 // DefaultBasePath is where the routes are mounted unless a project says
@@ -37,6 +38,7 @@ const DefaultBasePath = "/notifications"
 type Handler struct {
 	svc      *notify.Service
 	basePath string
+	claims   func(*http.Request) (tenancy.Claims, error)
 	fail     func(http.ResponseWriter, *http.Request, error)
 }
 
@@ -45,6 +47,15 @@ type Options struct {
 	// BasePath is the prefix the routes sit under. Empty means
 	// [DefaultBasePath].
 	BasePath string
+
+	// Claims identifies the caller.
+	//
+	// Required, and taken rather than assumed for the reason the generated
+	// server takes it: a project authenticates its own way, and an inbox route
+	// that established the caller differently from every other route would be a
+	// second answer to the one question a tenant boundary rests on. The
+	// generated mount passes the server's own.
+	Claims func(*http.Request) (tenancy.Claims, error)
 
 	// Fail writes an error response. It is taken rather than assumed so that an
 	// inbox route's 404 looks like every other route's 404 in the same
@@ -55,7 +66,14 @@ type Options struct {
 
 // New builds the handler.
 func New(svc *notify.Service, opt Options) *Handler {
-	h := &Handler{svc: svc, basePath: opt.BasePath, fail: opt.Fail}
+	if opt.Claims == nil {
+		// Refusing here rather than serving an inbox to nobody: a handler with
+		// no way to identify its caller would answer every request with the
+		// same empty inbox, which reads as "you have no notifications" rather
+		// than as the misconfiguration it is.
+		panic("notifyhttp.New: Claims is required")
+	}
+	h := &Handler{svc: svc, basePath: opt.BasePath, claims: opt.Claims, fail: opt.Fail}
 	if h.basePath == "" {
 		h.basePath = DefaultBasePath
 	}
@@ -63,6 +81,21 @@ func New(svc *notify.Service, opt Options) *Handler {
 		h.fail = writeError
 	}
 	return h
+}
+
+// with establishes the caller and hands the request on.
+//
+// Every route goes through it, which is what makes "narrows to the caller"
+// structural rather than something five handlers each remember.
+func (h *Handler) with(next func(http.ResponseWriter, *http.Request)) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		claims, err := h.claims(r)
+		if err != nil {
+			h.fail(w, r, err)
+			return
+		}
+		next(w, r.WithContext(tenancy.NewContext(r.Context(), claims)))
+	}
 }
 
 // Mount registers the five routes on a mux.
@@ -73,11 +106,11 @@ func New(svc *notify.Service, opt Options) *Handler {
 //	POST   /notifications/_read-all       mark the page's worth read
 //	DELETE /notifications/{id}            remove one from the inbox
 func (h *Handler) Mount(mux *http.ServeMux) {
-	mux.HandleFunc("GET "+h.basePath, h.list)
-	mux.HandleFunc("GET "+h.basePath+"/_unread-count", h.unreadCount)
-	mux.HandleFunc("POST "+h.basePath+"/_read-all", h.readAll)
-	mux.HandleFunc("POST "+h.basePath+"/{id}/_read", h.read)
-	mux.HandleFunc("DELETE "+h.basePath+"/{id}", h.dismiss)
+	mux.HandleFunc("GET "+h.basePath, h.with(h.list))
+	mux.HandleFunc("GET "+h.basePath+"/_unread-count", h.with(h.unreadCount))
+	mux.HandleFunc("POST "+h.basePath+"/_read-all", h.with(h.readAll))
+	mux.HandleFunc("POST "+h.basePath+"/{id}/_read", h.with(h.read))
+	mux.HandleFunc("DELETE "+h.basePath+"/{id}", h.with(h.dismiss))
 }
 
 // Line is one inbox row on the wire.

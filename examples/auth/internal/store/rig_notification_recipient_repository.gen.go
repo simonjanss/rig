@@ -20,37 +20,38 @@ import (
 	"github.com/simonjanss/rig/runtime/tenancy"
 )
 
-// NoteRepository reads and writes note rows.
+// RigNotificationRecipientRepository reads and writes
+// rig_notification_recipient rows.
 //
 // Every method scopes to the caller's tenant. There is no way to ask it not to
 // from a request handler, which is the point.
-type NoteRepository interface {
+type RigNotificationRecipientRepository interface {
 	// Get returns one row by identifier.
 	//
 	// A lookup by primary key deliberately ignores the lifecycle filters: it
 	// returns the row whether it is live, deleted, or a snapshot, because a caller
 	// holding an identifier is usually asking about that exact row.
-	Get(ctx context.Context, id uuid.UUID, opts ...readopt.Option) (*model.Note, error)
+	Get(ctx context.Context, id uuid.UUID, opts ...readopt.Option) (*model.RigNotificationRecipient, error)
 
 	// List returns matching rows and the total ignoring pagination.
 	//
 	// The filter says which rows and the page says how many of them, in what
 	// order. They are separate arguments because they arrive separately: the
 	// filter is a request body, the page is two query parameters.
-	List(ctx context.Context, f model.NoteFilter, page model.NotePage, opts ...readopt.Option) ([]*model.Note, int64, error)
+	List(ctx context.Context, f model.RigNotificationRecipientFilter, page model.RigNotificationRecipientPage, opts ...readopt.Option) ([]*model.RigNotificationRecipient, int64, error)
 
 	// Create inserts a row, stamping the identifier, tenant and audit columns.
 	//
 	// It takes an envelope rather than the input alone: the rules that check the
 	// input and the callbacks that run around the write belong to the same unit of
 	// work as the write itself.
-	Create(ctx context.Context, in dbhook.Create[model.NoteCreateInput, model.Note]) (*model.Note, error)
+	Create(ctx context.Context, in dbhook.Create[model.RigNotificationRecipientCreateInput, model.RigNotificationRecipient]) (*model.RigNotificationRecipient, error)
 
 	// Update changes the fields the input mentions and leaves the rest alone.
-	Update(ctx context.Context, id uuid.UUID, in dbhook.Update[model.NoteUpdateInput, model.Note]) (*model.Note, error)
+	Update(ctx context.Context, id uuid.UUID, in dbhook.Update[model.RigNotificationRecipientUpdateInput, model.RigNotificationRecipient]) (*model.RigNotificationRecipient, error)
 
 	// Delete retires a row by stamping its deletion time. It is idempotent.
-	Delete(ctx context.Context, in dbhook.Delete[model.NoteDeleteInput, model.Note]) error
+	Delete(ctx context.Context, in dbhook.Delete[model.RigNotificationRecipientDeleteInput, model.RigNotificationRecipient]) error
 
 	// Restore brings a deleted row back, if it is still inside the window.
 	//
@@ -58,19 +59,20 @@ type NoteRepository interface {
 	// while the row was retired: a unique value can have been taken by something
 	// created since, and the only way back is to bring the row back under a
 	// different one. An empty input restores it as it was.
-	Restore(ctx context.Context, id uuid.UUID, in dbhook.Restore[model.NoteUpdateInput, model.Note]) (*model.Note, error)
+	Restore(ctx context.Context, id uuid.UUID, in dbhook.Restore[model.RigNotificationRecipientUpdateInput, model.RigNotificationRecipient]) (*model.RigNotificationRecipient, error)
 
 	// ListDeleted returns retired rows still inside the restore window.
-	ListDeleted(ctx context.Context, f model.NoteFilter, page model.NotePage, opts ...readopt.Option) ([]*model.Note, int64, error)
+	ListDeleted(ctx context.Context, f model.RigNotificationRecipientFilter, page model.RigNotificationRecipientPage, opts ...readopt.Option) ([]*model.RigNotificationRecipient, int64, error)
 }
 
-// noteGroup turns a filter into the condition tree the runtime renders.
+// rigNotificationRecipientGroup turns a filter into the condition tree the
+// runtime renders.
 //
 // The scope carries what a condition needs besides the filter itself: who is
 // asking, which alias this level's columns belong to, and how deep the nesting
 // has gone. It is a value rather than three parameters because every relation
 // passes a changed copy of it down.
-func noteGroup(f model.NoteFilter, sc filterScope) (query.Group, error) {
+func rigNotificationRecipientGroup(f model.RigNotificationRecipientFilter, sc filterScope) (query.Group, error) {
 	if err := sc.ok(); err != nil {
 		return query.Group{}, err
 	}
@@ -81,23 +83,17 @@ func noteGroup(f model.NoteFilter, sc filterScope) (query.Group, error) {
 		if p.ID != nil {
 			g.Add(sc.at(query.Eq("id", *p.ID)))
 		}
-		if p.Title != nil {
-			g.Add(sc.at(query.Eq("title", *p.Title)))
+		if p.NotificationID != nil {
+			g.Add(sc.at(query.Eq("notification_id", *p.NotificationID)))
 		}
-		if p.Body != nil {
-			g.Add(sc.at(query.Eq("body", p.Body)))
+		if p.AccountID != nil {
+			g.Add(sc.at(query.Eq("account_id", *p.AccountID)))
 		}
 		if p.CreatedAt != nil {
 			g.Add(sc.at(query.Eq("created_at", *p.CreatedAt)))
 		}
-		if p.CreatedByAccountID != nil {
-			g.Add(sc.at(query.Eq("created_by_account_id", p.CreatedByAccountID)))
-		}
 		if p.UpdatedAt != nil {
 			g.Add(sc.at(query.Eq("updated_at", p.UpdatedAt)))
-		}
-		if p.UpdatedByAccountID != nil {
-			g.Add(sc.at(query.Eq("updated_by_account_id", p.UpdatedByAccountID)))
 		}
 		if p.DeletedAt != nil {
 			g.Add(sc.at(query.Eq("deleted_at", p.DeletedAt)))
@@ -105,40 +101,34 @@ func noteGroup(f model.NoteFilter, sc filterScope) (query.Group, error) {
 		if p.DeletedByAccountID != nil {
 			g.Add(sc.at(query.Eq("deleted_by_account_id", p.DeletedByAccountID)))
 		}
-		if p.CreatedByAPIKeyID != nil {
-			g.Add(sc.at(query.Eq("created_by_api_key_id", p.CreatedByAPIKeyID)))
+		if p.Kind != nil {
+			g.Add(sc.at(query.Eq("kind", *p.Kind)))
 		}
-		if p.UpdatedByAPIKeyID != nil {
-			g.Add(sc.at(query.Eq("updated_by_api_key_id", p.UpdatedByAPIKeyID)))
+		if p.GroupKey != nil {
+			g.Add(sc.at(query.Eq("group_key", p.GroupKey)))
 		}
-		if p.DeletedByAPIKeyID != nil {
-			g.Add(sc.at(query.Eq("deleted_by_api_key_id", p.DeletedByAPIKeyID)))
+		if p.EventCount != nil {
+			g.Add(sc.at(query.Eq("event_count", *p.EventCount)))
 		}
-		if p.PublishAt != nil {
-			g.Add(sc.at(query.Eq("publish_at", p.PublishAt)))
+		if p.ReadAt != nil {
+			g.Add(sc.at(query.Eq("read_at", p.ReadAt)))
 		}
 	}
 	if p := f.NotEquals; p != nil {
 		if p.ID != nil {
 			g.Add(sc.at(query.Ne("id", *p.ID)))
 		}
-		if p.Title != nil {
-			g.Add(sc.at(query.Ne("title", *p.Title)))
+		if p.NotificationID != nil {
+			g.Add(sc.at(query.Ne("notification_id", *p.NotificationID)))
 		}
-		if p.Body != nil {
-			g.Add(sc.at(query.Ne("body", p.Body)))
+		if p.AccountID != nil {
+			g.Add(sc.at(query.Ne("account_id", *p.AccountID)))
 		}
 		if p.CreatedAt != nil {
 			g.Add(sc.at(query.Ne("created_at", *p.CreatedAt)))
 		}
-		if p.CreatedByAccountID != nil {
-			g.Add(sc.at(query.Ne("created_by_account_id", p.CreatedByAccountID)))
-		}
 		if p.UpdatedAt != nil {
 			g.Add(sc.at(query.Ne("updated_at", p.UpdatedAt)))
-		}
-		if p.UpdatedByAccountID != nil {
-			g.Add(sc.at(query.Ne("updated_by_account_id", p.UpdatedByAccountID)))
 		}
 		if p.DeletedAt != nil {
 			g.Add(sc.at(query.Ne("deleted_at", p.DeletedAt)))
@@ -146,17 +136,17 @@ func noteGroup(f model.NoteFilter, sc filterScope) (query.Group, error) {
 		if p.DeletedByAccountID != nil {
 			g.Add(sc.at(query.Ne("deleted_by_account_id", p.DeletedByAccountID)))
 		}
-		if p.CreatedByAPIKeyID != nil {
-			g.Add(sc.at(query.Ne("created_by_api_key_id", p.CreatedByAPIKeyID)))
+		if p.Kind != nil {
+			g.Add(sc.at(query.Ne("kind", *p.Kind)))
 		}
-		if p.UpdatedByAPIKeyID != nil {
-			g.Add(sc.at(query.Ne("updated_by_api_key_id", p.UpdatedByAPIKeyID)))
+		if p.GroupKey != nil {
+			g.Add(sc.at(query.Ne("group_key", p.GroupKey)))
 		}
-		if p.DeletedByAPIKeyID != nil {
-			g.Add(sc.at(query.Ne("deleted_by_api_key_id", p.DeletedByAPIKeyID)))
+		if p.EventCount != nil {
+			g.Add(sc.at(query.Ne("event_count", *p.EventCount)))
 		}
-		if p.PublishAt != nil {
-			g.Add(sc.at(query.Ne("publish_at", p.PublishAt)))
+		if p.ReadAt != nil {
+			g.Add(sc.at(query.Ne("read_at", p.ReadAt)))
 		}
 	}
 	if p := f.GreaterThan; p != nil {
@@ -169,8 +159,11 @@ func noteGroup(f model.NoteFilter, sc filterScope) (query.Group, error) {
 		if p.DeletedAt != nil {
 			g.Add(sc.at(query.Gt("deleted_at", p.DeletedAt)))
 		}
-		if p.PublishAt != nil {
-			g.Add(sc.at(query.Gt("publish_at", p.PublishAt)))
+		if p.EventCount != nil {
+			g.Add(sc.at(query.Gt("event_count", *p.EventCount)))
+		}
+		if p.ReadAt != nil {
+			g.Add(sc.at(query.Gt("read_at", p.ReadAt)))
 		}
 	}
 	if p := f.SmallerThan; p != nil {
@@ -183,8 +176,11 @@ func noteGroup(f model.NoteFilter, sc filterScope) (query.Group, error) {
 		if p.DeletedAt != nil {
 			g.Add(sc.at(query.Lt("deleted_at", p.DeletedAt)))
 		}
-		if p.PublishAt != nil {
-			g.Add(sc.at(query.Lt("publish_at", p.PublishAt)))
+		if p.EventCount != nil {
+			g.Add(sc.at(query.Lt("event_count", *p.EventCount)))
+		}
+		if p.ReadAt != nil {
+			g.Add(sc.at(query.Lt("read_at", p.ReadAt)))
 		}
 	}
 	if p := f.GreaterOrEqual; p != nil {
@@ -197,8 +193,11 @@ func noteGroup(f model.NoteFilter, sc filterScope) (query.Group, error) {
 		if p.DeletedAt != nil {
 			g.Add(sc.at(query.Gte("deleted_at", p.DeletedAt)))
 		}
-		if p.PublishAt != nil {
-			g.Add(sc.at(query.Gte("publish_at", p.PublishAt)))
+		if p.EventCount != nil {
+			g.Add(sc.at(query.Gte("event_count", *p.EventCount)))
+		}
+		if p.ReadAt != nil {
+			g.Add(sc.at(query.Gte("read_at", p.ReadAt)))
 		}
 	}
 	if p := f.SmallerOrEqual; p != nil {
@@ -211,31 +210,28 @@ func noteGroup(f model.NoteFilter, sc filterScope) (query.Group, error) {
 		if p.DeletedAt != nil {
 			g.Add(sc.at(query.Lte("deleted_at", p.DeletedAt)))
 		}
-		if p.PublishAt != nil {
-			g.Add(sc.at(query.Lte("publish_at", p.PublishAt)))
+		if p.EventCount != nil {
+			g.Add(sc.at(query.Lte("event_count", *p.EventCount)))
+		}
+		if p.ReadAt != nil {
+			g.Add(sc.at(query.Lte("read_at", p.ReadAt)))
 		}
 	}
 	if p := f.Contains; p != nil {
 		if len(p.ID) > 0 {
 			g.Add(sc.at(query.In("id", p.ID)))
 		}
-		if len(p.Title) > 0 {
-			g.Add(sc.at(query.In("title", p.Title)))
+		if len(p.NotificationID) > 0 {
+			g.Add(sc.at(query.In("notification_id", p.NotificationID)))
 		}
-		if len(p.Body) > 0 {
-			g.Add(sc.at(query.In("body", p.Body)))
+		if len(p.AccountID) > 0 {
+			g.Add(sc.at(query.In("account_id", p.AccountID)))
 		}
 		if len(p.CreatedAt) > 0 {
 			g.Add(sc.at(query.In("created_at", p.CreatedAt)))
 		}
-		if len(p.CreatedByAccountID) > 0 {
-			g.Add(sc.at(query.In("created_by_account_id", p.CreatedByAccountID)))
-		}
 		if len(p.UpdatedAt) > 0 {
 			g.Add(sc.at(query.In("updated_at", p.UpdatedAt)))
-		}
-		if len(p.UpdatedByAccountID) > 0 {
-			g.Add(sc.at(query.In("updated_by_account_id", p.UpdatedByAccountID)))
 		}
 		if len(p.DeletedAt) > 0 {
 			g.Add(sc.at(query.In("deleted_at", p.DeletedAt)))
@@ -243,40 +239,34 @@ func noteGroup(f model.NoteFilter, sc filterScope) (query.Group, error) {
 		if len(p.DeletedByAccountID) > 0 {
 			g.Add(sc.at(query.In("deleted_by_account_id", p.DeletedByAccountID)))
 		}
-		if len(p.CreatedByAPIKeyID) > 0 {
-			g.Add(sc.at(query.In("created_by_api_key_id", p.CreatedByAPIKeyID)))
+		if len(p.Kind) > 0 {
+			g.Add(sc.at(query.In("kind", p.Kind)))
 		}
-		if len(p.UpdatedByAPIKeyID) > 0 {
-			g.Add(sc.at(query.In("updated_by_api_key_id", p.UpdatedByAPIKeyID)))
+		if len(p.GroupKey) > 0 {
+			g.Add(sc.at(query.In("group_key", p.GroupKey)))
 		}
-		if len(p.DeletedByAPIKeyID) > 0 {
-			g.Add(sc.at(query.In("deleted_by_api_key_id", p.DeletedByAPIKeyID)))
+		if len(p.EventCount) > 0 {
+			g.Add(sc.at(query.In("event_count", p.EventCount)))
 		}
-		if len(p.PublishAt) > 0 {
-			g.Add(sc.at(query.In("publish_at", p.PublishAt)))
+		if len(p.ReadAt) > 0 {
+			g.Add(sc.at(query.In("read_at", p.ReadAt)))
 		}
 	}
 	if p := f.NotContains; p != nil {
 		if len(p.ID) > 0 {
 			g.Add(sc.at(query.NotIn("id", p.ID)))
 		}
-		if len(p.Title) > 0 {
-			g.Add(sc.at(query.NotIn("title", p.Title)))
+		if len(p.NotificationID) > 0 {
+			g.Add(sc.at(query.NotIn("notification_id", p.NotificationID)))
 		}
-		if len(p.Body) > 0 {
-			g.Add(sc.at(query.NotIn("body", p.Body)))
+		if len(p.AccountID) > 0 {
+			g.Add(sc.at(query.NotIn("account_id", p.AccountID)))
 		}
 		if len(p.CreatedAt) > 0 {
 			g.Add(sc.at(query.NotIn("created_at", p.CreatedAt)))
 		}
-		if len(p.CreatedByAccountID) > 0 {
-			g.Add(sc.at(query.NotIn("created_by_account_id", p.CreatedByAccountID)))
-		}
 		if len(p.UpdatedAt) > 0 {
 			g.Add(sc.at(query.NotIn("updated_at", p.UpdatedAt)))
-		}
-		if len(p.UpdatedByAccountID) > 0 {
-			g.Add(sc.at(query.NotIn("updated_by_account_id", p.UpdatedByAccountID)))
 		}
 		if len(p.DeletedAt) > 0 {
 			g.Add(sc.at(query.NotIn("deleted_at", p.DeletedAt)))
@@ -284,62 +274,41 @@ func noteGroup(f model.NoteFilter, sc filterScope) (query.Group, error) {
 		if len(p.DeletedByAccountID) > 0 {
 			g.Add(sc.at(query.NotIn("deleted_by_account_id", p.DeletedByAccountID)))
 		}
-		if len(p.CreatedByAPIKeyID) > 0 {
-			g.Add(sc.at(query.NotIn("created_by_api_key_id", p.CreatedByAPIKeyID)))
+		if len(p.Kind) > 0 {
+			g.Add(sc.at(query.NotIn("kind", p.Kind)))
 		}
-		if len(p.UpdatedByAPIKeyID) > 0 {
-			g.Add(sc.at(query.NotIn("updated_by_api_key_id", p.UpdatedByAPIKeyID)))
+		if len(p.GroupKey) > 0 {
+			g.Add(sc.at(query.NotIn("group_key", p.GroupKey)))
 		}
-		if len(p.DeletedByAPIKeyID) > 0 {
-			g.Add(sc.at(query.NotIn("deleted_by_api_key_id", p.DeletedByAPIKeyID)))
+		if len(p.EventCount) > 0 {
+			g.Add(sc.at(query.NotIn("event_count", p.EventCount)))
 		}
-		if len(p.PublishAt) > 0 {
-			g.Add(sc.at(query.NotIn("publish_at", p.PublishAt)))
+		if len(p.ReadAt) > 0 {
+			g.Add(sc.at(query.NotIn("read_at", p.ReadAt)))
 		}
 	}
 	if p := f.Like; p != nil {
-		if p.Title != nil {
-			g.Add(sc.at(query.Like("title", *p.Title)))
+		if p.Kind != nil {
+			g.Add(sc.at(query.Like("kind", *p.Kind)))
 		}
-		if p.Body != nil {
-			g.Add(sc.at(query.Like("body", *p.Body)))
+		if p.GroupKey != nil {
+			g.Add(sc.at(query.Like("group_key", *p.GroupKey)))
 		}
 	}
 	if p := f.NotLike; p != nil {
-		if p.Title != nil {
-			g.Add(sc.at(query.NotLike("title", *p.Title)))
+		if p.Kind != nil {
+			g.Add(sc.at(query.NotLike("kind", *p.Kind)))
 		}
-		if p.Body != nil {
-			g.Add(sc.at(query.NotLike("body", *p.Body)))
+		if p.GroupKey != nil {
+			g.Add(sc.at(query.NotLike("group_key", *p.GroupKey)))
 		}
 	}
 	if p := f.Null; p != nil {
-		if p.Body != nil {
-			if *p.Body {
-				g.Add(sc.at(query.IsNull("body")))
-			} else {
-				g.Add(sc.at(query.NotNull("body")))
-			}
-		}
-		if p.CreatedByAccountID != nil {
-			if *p.CreatedByAccountID {
-				g.Add(sc.at(query.IsNull("created_by_account_id")))
-			} else {
-				g.Add(sc.at(query.NotNull("created_by_account_id")))
-			}
-		}
 		if p.UpdatedAt != nil {
 			if *p.UpdatedAt {
 				g.Add(sc.at(query.IsNull("updated_at")))
 			} else {
 				g.Add(sc.at(query.NotNull("updated_at")))
-			}
-		}
-		if p.UpdatedByAccountID != nil {
-			if *p.UpdatedByAccountID {
-				g.Add(sc.at(query.IsNull("updated_by_account_id")))
-			} else {
-				g.Add(sc.at(query.NotNull("updated_by_account_id")))
 			}
 		}
 		if p.DeletedAt != nil {
@@ -356,62 +325,27 @@ func noteGroup(f model.NoteFilter, sc filterScope) (query.Group, error) {
 				g.Add(sc.at(query.NotNull("deleted_by_account_id")))
 			}
 		}
-		if p.CreatedByAPIKeyID != nil {
-			if *p.CreatedByAPIKeyID {
-				g.Add(sc.at(query.IsNull("created_by_api_key_id")))
+		if p.GroupKey != nil {
+			if *p.GroupKey {
+				g.Add(sc.at(query.IsNull("group_key")))
 			} else {
-				g.Add(sc.at(query.NotNull("created_by_api_key_id")))
+				g.Add(sc.at(query.NotNull("group_key")))
 			}
 		}
-		if p.UpdatedByAPIKeyID != nil {
-			if *p.UpdatedByAPIKeyID {
-				g.Add(sc.at(query.IsNull("updated_by_api_key_id")))
+		if p.ReadAt != nil {
+			if *p.ReadAt {
+				g.Add(sc.at(query.IsNull("read_at")))
 			} else {
-				g.Add(sc.at(query.NotNull("updated_by_api_key_id")))
-			}
-		}
-		if p.DeletedByAPIKeyID != nil {
-			if *p.DeletedByAPIKeyID {
-				g.Add(sc.at(query.IsNull("deleted_by_api_key_id")))
-			} else {
-				g.Add(sc.at(query.NotNull("deleted_by_api_key_id")))
-			}
-		}
-		if p.PublishAt != nil {
-			if *p.PublishAt {
-				g.Add(sc.at(query.IsNull("publish_at")))
-			} else {
-				g.Add(sc.at(query.NotNull("publish_at")))
+				g.Add(sc.at(query.NotNull("read_at")))
 			}
 		}
 	}
 	if p := f.NotNull; p != nil {
-		if p.Body != nil {
-			if *p.Body {
-				g.Add(sc.at(query.NotNull("body")))
-			} else {
-				g.Add(sc.at(query.IsNull("body")))
-			}
-		}
-		if p.CreatedByAccountID != nil {
-			if *p.CreatedByAccountID {
-				g.Add(sc.at(query.NotNull("created_by_account_id")))
-			} else {
-				g.Add(sc.at(query.IsNull("created_by_account_id")))
-			}
-		}
 		if p.UpdatedAt != nil {
 			if *p.UpdatedAt {
 				g.Add(sc.at(query.NotNull("updated_at")))
 			} else {
 				g.Add(sc.at(query.IsNull("updated_at")))
-			}
-		}
-		if p.UpdatedByAccountID != nil {
-			if *p.UpdatedByAccountID {
-				g.Add(sc.at(query.NotNull("updated_by_account_id")))
-			} else {
-				g.Add(sc.at(query.IsNull("updated_by_account_id")))
 			}
 		}
 		if p.DeletedAt != nil {
@@ -428,38 +362,24 @@ func noteGroup(f model.NoteFilter, sc filterScope) (query.Group, error) {
 				g.Add(sc.at(query.IsNull("deleted_by_account_id")))
 			}
 		}
-		if p.CreatedByAPIKeyID != nil {
-			if *p.CreatedByAPIKeyID {
-				g.Add(sc.at(query.NotNull("created_by_api_key_id")))
+		if p.GroupKey != nil {
+			if *p.GroupKey {
+				g.Add(sc.at(query.NotNull("group_key")))
 			} else {
-				g.Add(sc.at(query.IsNull("created_by_api_key_id")))
+				g.Add(sc.at(query.IsNull("group_key")))
 			}
 		}
-		if p.UpdatedByAPIKeyID != nil {
-			if *p.UpdatedByAPIKeyID {
-				g.Add(sc.at(query.NotNull("updated_by_api_key_id")))
+		if p.ReadAt != nil {
+			if *p.ReadAt {
+				g.Add(sc.at(query.NotNull("read_at")))
 			} else {
-				g.Add(sc.at(query.IsNull("updated_by_api_key_id")))
-			}
-		}
-		if p.DeletedByAPIKeyID != nil {
-			if *p.DeletedByAPIKeyID {
-				g.Add(sc.at(query.NotNull("deleted_by_api_key_id")))
-			} else {
-				g.Add(sc.at(query.IsNull("deleted_by_api_key_id")))
-			}
-		}
-		if p.PublishAt != nil {
-			if *p.PublishAt {
-				g.Add(sc.at(query.NotNull("publish_at")))
-			} else {
-				g.Add(sc.at(query.IsNull("publish_at")))
+				g.Add(sc.at(query.IsNull("read_at")))
 			}
 		}
 	}
 
 	for _, n := range f.NestedFilters {
-		nested, err := noteGroup(n, sc)
+		nested, err := rigNotificationRecipientGroup(n, sc)
 		if err != nil {
 			return query.Group{}, err
 		}
@@ -468,17 +388,18 @@ func noteGroup(f model.NoteFilter, sc filterScope) (query.Group, error) {
 	return g, nil
 }
 
-// noteSortable reports whether a column can be ordered by.
-func noteSortable(column string) bool {
+// rigNotificationRecipientSortable reports whether a column can be ordered by.
+func rigNotificationRecipientSortable(column string) bool {
 	switch column {
-	case "id", "tenant_id", "title", "body", "created_at", "created_by_account_id", "updated_at", "updated_by_account_id", "deleted_at", "deleted_by_account_id", "created_by_api_key_id", "updated_by_api_key_id", "deleted_by_api_key_id", "publish_at":
+	case "id", "tenant_id", "notification_id", "account_id", "created_at", "updated_at", "deleted_at", "deleted_by_account_id", "kind", "group_key", "event_count", "read_at":
 		return true
 	}
 	return false
 }
 
-// noteOrder converts the model's ordering terms into the runtime's.
-func noteOrder(terms []model.NoteOrder, sc filterScope) ([]query.Order, []query.Join, error) {
+// rigNotificationRecipientOrder converts the model's ordering terms into the
+// runtime's.
+func rigNotificationRecipientOrder(terms []model.RigNotificationRecipientOrder, sc filterScope) ([]query.Order, []query.Join, error) {
 	if len(terms) == 0 {
 		return nil, nil, nil
 	}
@@ -488,8 +409,8 @@ func noteOrder(terms []model.NoteOrder, sc filterScope) ([]query.Order, []query.
 	for _, t := range terms {
 		// A column this table cannot be ordered by is the caller's mistake, not a
 		// column name to paste into a statement.
-		if !noteSortable(t.Column) {
-			return nil, nil, rigerr.Invalid("a Note cannot be ordered by %q", t.Column)
+		if !rigNotificationRecipientSortable(t.Column) {
+			return nil, nil, rigerr.Invalid("a RigNotificationRecipient cannot be ordered by %q", t.Column)
 		}
 		out = append(out, query.Order{Table: sc.as, Column: t.Column, Desc: t.Desc})
 	}
@@ -497,29 +418,30 @@ func noteOrder(terms []model.NoteOrder, sc filterScope) ([]query.Order, []query.
 	return out, nil, nil
 }
 
-type noteRepo struct {
+type rigNotificationRecipientRepo struct {
 	db *Store
 }
 
-var _ NoteRepository = (*noteRepo)(nil)
+var _ RigNotificationRecipientRepository = (*rigNotificationRecipientRepo)(nil)
 
-const noteRepoSelect = "note.id, note.tenant_id, note.title, note.body, note.created_at, note.created_by_account_id, note.updated_at, note.updated_by_account_id, note.deleted_at, note.deleted_by_account_id, note.created_by_api_key_id, note.updated_by_api_key_id, note.deleted_by_api_key_id, note.publish_at"
+const rigNotificationRecipientRepoSelect = "rig_notification_recipient.id, rig_notification_recipient.tenant_id, rig_notification_recipient.notification_id, rig_notification_recipient.account_id, rig_notification_recipient.created_at, rig_notification_recipient.updated_at, rig_notification_recipient.deleted_at, rig_notification_recipient.deleted_by_account_id, rig_notification_recipient.kind, rig_notification_recipient.group_key, rig_notification_recipient.event_count, rig_notification_recipient.read_at"
 
-// scanNote reads one row in the order noteRepoSelect lists.
-func scanNote(row pgx.Row) (*model.Note, error) {
-	var m model.Note
-	if err := row.Scan(&m.ID, &m.TenantID, &m.Title, &m.Body, &m.CreatedAt, &m.CreatedByAccountID, &m.UpdatedAt, &m.UpdatedByAccountID, &m.DeletedAt, &m.DeletedByAccountID, &m.CreatedByAPIKeyID, &m.UpdatedByAPIKeyID, &m.DeletedByAPIKeyID, &m.PublishAt); err != nil {
+// scanRigNotificationRecipient reads one row in the order
+// rigNotificationRecipientRepoSelect lists.
+func scanRigNotificationRecipient(row pgx.Row) (*model.RigNotificationRecipient, error) {
+	var m model.RigNotificationRecipient
+	if err := row.Scan(&m.ID, &m.TenantID, &m.NotificationID, &m.AccountID, &m.CreatedAt, &m.UpdatedAt, &m.DeletedAt, &m.DeletedByAccountID, &m.Kind, &m.GroupKey, &m.EventCount, &m.ReadAt); err != nil {
 		return nil, err
 	}
 	m.CreatedAt = dbx.UTC(m.CreatedAt)
 	m.UpdatedAt = dbx.UTCPtr(m.UpdatedAt)
 	m.DeletedAt = dbx.UTCPtr(m.DeletedAt)
-	m.PublishAt = dbx.UTCPtr(m.PublishAt)
+	m.ReadAt = dbx.UTCPtr(m.ReadAt)
 	return &m, nil
 }
 
-// Get implements NoteRepository.
-func (r *noteRepo) Get(ctx context.Context, id uuid.UUID, opts ...readopt.Option) (*model.Note, error) {
+// Get implements RigNotificationRecipientRepository.
+func (r *rigNotificationRecipientRepo) Get(ctx context.Context, id uuid.UUID, opts ...readopt.Option) (*model.RigNotificationRecipient, error) {
 	cfg, err := readopt.Apply(opts)
 	if err != nil {
 		return nil, err
@@ -542,27 +464,27 @@ func (r *noteRepo) Get(ctx context.Context, id uuid.UUID, opts ...readopt.Option
 	// who cannot see it.
 	if !cfg.SkipOwnerScope {
 		args = append(args, claims.AccountID)
-		where += fmt.Sprintf(" AND created_by_account_id = $%d", len(args))
+		where += fmt.Sprintf(" AND account_id = $%d", len(args))
 	}
 
-	sql := fmt.Sprintf("SELECT %s FROM note WHERE %s", noteRepoSelect, where)
-	m, err := scanNote(r.db.conn().QueryRow(ctx, sql, args...))
+	sql := fmt.Sprintf("SELECT %s FROM rig_notification_recipient WHERE %s", rigNotificationRecipientRepoSelect, where)
+	m, err := scanRigNotificationRecipient(r.db.conn().QueryRow(ctx, sql, args...))
 	if dbx.IsNoRows(err) {
-		return nil, rigerr.NotFound("no Note with id %s", id)
+		return nil, rigerr.NotFound("no RigNotificationRecipient with id %s", id)
 	}
 	if err != nil {
-		return nil, rigerr.Internal(err, "read note")
+		return nil, rigerr.Internal(err, "read rig_notification_recipient")
 	}
 	return m, nil
 }
 
-// List implements NoteRepository.
-func (r *noteRepo) List(ctx context.Context, f model.NoteFilter, page model.NotePage, opts ...readopt.Option) ([]*model.Note, int64, error) {
+// List implements RigNotificationRecipientRepository.
+func (r *rigNotificationRecipientRepo) List(ctx context.Context, f model.RigNotificationRecipientFilter, page model.RigNotificationRecipientPage, opts ...readopt.Option) ([]*model.RigNotificationRecipient, int64, error) {
 	return r.list(ctx, f, page, opts)
 }
 
 // list is the body of every read that takes a filter.
-func (r *noteRepo) list(ctx context.Context, f model.NoteFilter, page model.NotePage, opts []readopt.Option) ([]*model.Note, int64, error) {
+func (r *rigNotificationRecipientRepo) list(ctx context.Context, f model.RigNotificationRecipientFilter, page model.RigNotificationRecipientPage, opts []readopt.Option) ([]*model.RigNotificationRecipient, int64, error) {
 	cfg, err := readopt.Apply(opts)
 	if err != nil {
 		return nil, 0, err
@@ -577,7 +499,7 @@ func (r *noteRepo) list(ctx context.Context, f model.NoteFilter, page model.Note
 	// every column with the table it belongs to. The qualification is not
 	// decoration — an ordering that reaches a related table brings a second
 	// tenant_id into scope, and an unqualified one is then ambiguous.
-	sc := newFilterScope(claims, "note")
+	sc := newFilterScope(claims, "rig_notification_recipient")
 
 	scope := query.Group{}
 	if !cfg.SkipTenantScope {
@@ -592,19 +514,19 @@ func (r *noteRepo) list(ctx context.Context, f model.NoteFilter, page model.Note
 	// read. That is the right answer and a surprising one: ask for the wide scope
 	// to see those rows.
 	if !cfg.SkipOwnerScope {
-		scope.Add(sc.at(query.Eq("created_by_account_id", claims.AccountID)))
+		scope.Add(sc.at(query.Eq("account_id", claims.AccountID)))
 	}
 	switch {
 	case cfg.OnlyDeleted:
 		scope.Add(sc.at(query.NotNull("deleted_at")))
 		// A row past the restore window is gone as far as anyone is concerned, so it
 		// does not appear in the trash either.
-		scope.Add(sc.at(query.Gte("deleted_at", NoteRestoreCutoff())))
+		scope.Add(sc.at(query.Gte("deleted_at", RigNotificationRecipientRestoreCutoff())))
 	case !cfg.IncludeDeleted:
 		scope.Add(sc.at(query.IsNull("deleted_at")))
 	}
 
-	group, err := noteGroup(f, sc)
+	group, err := rigNotificationRecipientGroup(f, sc)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -618,18 +540,18 @@ func (r *noteRepo) list(ctx context.Context, f model.NoteFilter, page model.Note
 	if countWhere != "" {
 		countWhere = " WHERE " + countWhere
 	}
-	countSQL := fmt.Sprintf("SELECT count(*) FROM note%s", countWhere)
+	countSQL := fmt.Sprintf("SELECT count(*) FROM rig_notification_recipient%s", countWhere)
 	var total int64
 	if err := r.db.conn().QueryRow(ctx, countSQL, countArgs.Values()...).Scan(&total); err != nil {
-		return nil, 0, rigerr.Internal(err, "count note")
+		return nil, 0, rigerr.Internal(err, "count rig_notification_recipient")
 	}
 
-	order, joins, err := noteOrder(page.OrderBy, sc)
+	order, joins, err := rigNotificationRecipientOrder(page.OrderBy, sc)
 	if err != nil {
 		return nil, 0, err
 	}
 	if len(order) == 0 {
-		order = NoteDefaultOrder
+		order = RigNotificationRecipientDefaultOrder
 	}
 	window := query.Page{Limit: page.Limit, Offset: page.Offset}.Clamp(DefaultLimit, MaxLimit)
 
@@ -642,35 +564,36 @@ func (r *noteRepo) list(ctx context.Context, f model.NoteFilter, page model.Note
 		where = " WHERE " + where
 	}
 
-	listSQL := fmt.Sprintf("SELECT %s FROM note%s%s%s%s", noteRepoSelect, joinSQL, where, query.OrderSQL(order), window.SQL(args))
+	listSQL := fmt.Sprintf("SELECT %s FROM rig_notification_recipient%s%s%s%s", rigNotificationRecipientRepoSelect, joinSQL, where, query.OrderSQL(order), window.SQL(args))
 	rows, err := r.db.conn().Query(ctx, listSQL, args.Values()...)
 	if err != nil {
-		return nil, 0, rigerr.Internal(err, "list note")
+		return nil, 0, rigerr.Internal(err, "list rig_notification_recipient")
 	}
 	defer rows.Close()
 
-	out := make([]*model.Note, 0, window.Limit)
+	out := make([]*model.RigNotificationRecipient, 0, window.Limit)
 	for rows.Next() {
-		m, err := scanNote(rows)
+		m, err := scanRigNotificationRecipient(rows)
 		if err != nil {
-			return nil, 0, rigerr.Internal(err, "read note")
+			return nil, 0, rigerr.Internal(err, "read rig_notification_recipient")
 		}
 		out = append(out, m)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, 0, rigerr.Internal(err, "list note")
+		return nil, 0, rigerr.Internal(err, "list rig_notification_recipient")
 	}
 	return out, total, nil
 }
 
-// NoteDefaultOrder is the ordering used when a query asks for none.
+// RigNotificationRecipientDefaultOrder is the ordering used when a query asks
+// for none.
 //
 // It always ends with the primary key, so the order is total and a page
 // boundary cannot repeat or skip a row.
-var NoteDefaultOrder = []query.Order{{Table: "note", Column: "created_at", Desc: true}, {Table: "note", Column: "id", Desc: false}}
+var RigNotificationRecipientDefaultOrder = []query.Order{{Table: "rig_notification_recipient", Column: "created_at", Desc: true}, {Table: "rig_notification_recipient", Column: "id", Desc: false}}
 
-// Create implements NoteRepository.
-func (r *noteRepo) Create(ctx context.Context, in dbhook.Create[model.NoteCreateInput, model.Note]) (*model.Note, error) {
+// Create implements RigNotificationRecipientRepository.
+func (r *rigNotificationRecipientRepo) Create(ctx context.Context, in dbhook.Create[model.RigNotificationRecipientCreateInput, model.RigNotificationRecipient]) (*model.RigNotificationRecipient, error) {
 	// Who is asking, first of all. A write from a request carrying no identity is
 	// refused here — before a rule runs, before a column notices — which is
 	// what lets every hook below take the claims as a value rather than something
@@ -719,7 +642,7 @@ func (r *noteRepo) Create(ctx context.Context, in dbhook.Create[model.NoteCreate
 	// nothing.
 	needsTx := in.Hooks.Before != nil || in.Hooks.After != nil
 
-	var m *model.Note
+	var m *model.RigNotificationRecipient
 	err = dbx.InTxIf(ctx, r.db.pool, r.db.conn(), needsTx, func(ctx context.Context, tx dbx.Conn) error {
 		if in.Hooks.Before != nil {
 			if err := in.Hooks.Before(ctx, claims, &in.Input); err != nil {
@@ -727,14 +650,14 @@ func (r *noteRepo) Create(ctx context.Context, in dbhook.Create[model.NoteCreate
 			}
 		}
 
-		columns := []string{"id", "tenant_id", "created_at", "created_by_account_id", "created_by_api_key_id", "title", "body", "publish_at"}
-		values := []any{id, claims.TenantID, now, claims.Actor(), claims.ActorKey(), in.Input.Title, in.Input.Body, in.Input.PublishAt}
+		columns := []string{"id", "tenant_id", "created_at", "notification_id", "account_id", "kind", "group_key", "event_count", "read_at"}
+		values := []any{id, claims.TenantID, now, in.Input.NotificationID, in.Input.AccountID, in.Input.Kind, in.Input.GroupKey, in.Input.EventCount, in.Input.ReadAt}
 
-		sql := fmt.Sprintf("INSERT INTO note (%s) VALUES (%s) RETURNING %s", joinColumns(columns), placeholders(len(values)), noteRepoSelect)
+		sql := fmt.Sprintf("INSERT INTO rig_notification_recipient (%s) VALUES (%s) RETURNING %s", joinColumns(columns), placeholders(len(values)), rigNotificationRecipientRepoSelect)
 
-		created, err := scanNote(tx.QueryRow(ctx, sql, values...))
+		created, err := scanRigNotificationRecipient(tx.QueryRow(ctx, sql, values...))
 		if err != nil {
-			return writeError(err, "note")
+			return writeError(err, "rig_notification_recipient")
 		}
 		m = created
 
@@ -758,8 +681,8 @@ func (r *noteRepo) Create(ctx context.Context, in dbhook.Create[model.NoteCreate
 	return m, nil
 }
 
-// Update implements NoteRepository.
-func (r *noteRepo) Update(ctx context.Context, id uuid.UUID, in dbhook.Update[model.NoteUpdateInput, model.Note]) (*model.Note, error) {
+// Update implements RigNotificationRecipientRepository.
+func (r *rigNotificationRecipientRepo) Update(ctx context.Context, id uuid.UUID, in dbhook.Update[model.RigNotificationRecipientUpdateInput, model.RigNotificationRecipient]) (*model.RigNotificationRecipient, error) {
 	in.Input.Normalize()
 
 	claims, err := tenancy.FromContext(ctx)
@@ -768,7 +691,7 @@ func (r *noteRepo) Update(ctx context.Context, id uuid.UUID, in dbhook.Update[mo
 	}
 	_ = claims
 
-	var updated, prev *model.Note
+	var updated, prev *model.RigNotificationRecipient
 	err = dbx.InTx(ctx, r.db.pool, func(ctx context.Context, tx dbx.Conn) error {
 		prev, err = r.Get(ctx, id)
 		if err != nil {
@@ -776,7 +699,7 @@ func (r *noteRepo) Update(ctx context.Context, id uuid.UUID, in dbhook.Update[mo
 		}
 
 		if prev.DeletedAt != nil {
-			return rigerr.Conflict("Note %s is deleted; restore it first", id)
+			return rigerr.Conflict("RigNotificationRecipient %s is deleted; restore it first", id)
 		}
 
 		// The hook shapes the input, so a field it sets is a field that gets written
@@ -806,17 +729,29 @@ func (r *noteRepo) Update(ctx context.Context, id uuid.UUID, in dbhook.Update[mo
 		columns := []string{}
 		values := []any{}
 
-		if v, ok := in.Input.Title.Get(); ok {
-			columns = append(columns, "title")
+		if v, ok := in.Input.NotificationID.Get(); ok {
+			columns = append(columns, "notification_id")
 			values = append(values, v)
 		}
-		if in.Input.Body.Touched() {
-			columns = append(columns, "body")
-			values = append(values, in.Input.Body.Ptr())
+		if v, ok := in.Input.AccountID.Get(); ok {
+			columns = append(columns, "account_id")
+			values = append(values, v)
 		}
-		if in.Input.PublishAt.Touched() {
-			columns = append(columns, "publish_at")
-			values = append(values, in.Input.PublishAt.Ptr())
+		if v, ok := in.Input.Kind.Get(); ok {
+			columns = append(columns, "kind")
+			values = append(values, v)
+		}
+		if in.Input.GroupKey.Touched() {
+			columns = append(columns, "group_key")
+			values = append(values, in.Input.GroupKey.Ptr())
+		}
+		if v, ok := in.Input.EventCount.Get(); ok {
+			columns = append(columns, "event_count")
+			values = append(values, v)
+		}
+		if in.Input.ReadAt.Touched() {
+			columns = append(columns, "read_at")
+			values = append(values, in.Input.ReadAt.Ptr())
 		}
 
 		if len(columns) == 0 {
@@ -829,17 +764,13 @@ func (r *noteRepo) Update(ctx context.Context, id uuid.UUID, in dbhook.Update[mo
 
 		columns = append(columns, "updated_at")
 		values = append(values, time.Now().UTC())
-		columns = append(columns, "updated_by_account_id")
-		values = append(values, claims.Actor())
-		columns = append(columns, "updated_by_api_key_id")
-		values = append(values, claims.ActorKey())
 
 		values = append(values, id)
-		sql := fmt.Sprintf("UPDATE note SET %s WHERE id = $%d RETURNING %s", assignments(columns), len(values), noteRepoSelect)
+		sql := fmt.Sprintf("UPDATE rig_notification_recipient SET %s WHERE id = $%d RETURNING %s", assignments(columns), len(values), rigNotificationRecipientRepoSelect)
 
-		updated, err = scanNote(tx.QueryRow(ctx, sql, values...))
+		updated, err = scanRigNotificationRecipient(tx.QueryRow(ctx, sql, values...))
 		if err != nil {
-			return writeError(err, "note")
+			return writeError(err, "rig_notification_recipient")
 		}
 
 		if in.Hooks.After != nil {
@@ -862,15 +793,15 @@ func (r *noteRepo) Update(ctx context.Context, id uuid.UUID, in dbhook.Update[mo
 	return updated, nil
 }
 
-// Delete implements NoteRepository.
-func (r *noteRepo) Delete(ctx context.Context, in dbhook.Delete[model.NoteDeleteInput, model.Note]) error {
+// Delete implements RigNotificationRecipientRepository.
+func (r *rigNotificationRecipientRepo) Delete(ctx context.Context, in dbhook.Delete[model.RigNotificationRecipientDeleteInput, model.RigNotificationRecipient]) error {
 	claims, err := tenancy.FromContext(ctx)
 	if err != nil {
 		return err
 	}
 	_ = claims
 
-	var prev *model.Note
+	var prev *model.RigNotificationRecipient
 	err = dbx.InTx(ctx, r.db.pool, func(ctx context.Context, tx dbx.Conn) error {
 		prev, err = r.Get(ctx, in.Input.ID)
 		if err != nil {
@@ -891,8 +822,8 @@ func (r *noteRepo) Delete(ctx context.Context, in dbhook.Delete[model.NoteDelete
 		}
 
 		if in.Input.Hard {
-			if _, err := tx.Exec(ctx, "DELETE FROM note WHERE id = $1", in.Input.ID); err != nil {
-				return writeError(err, "note")
+			if _, err := tx.Exec(ctx, "DELETE FROM rig_notification_recipient WHERE id = $1", in.Input.ID); err != nil {
+				return writeError(err, "rig_notification_recipient")
 			}
 			if in.Hooks.After != nil {
 				if err := in.Hooks.After(ctx, claims, prev); err != nil {
@@ -906,15 +837,13 @@ func (r *noteRepo) Delete(ctx context.Context, in dbhook.Delete[model.NoteDelete
 		values := []any{time.Now().UTC()}
 		columns = append(columns, "deleted_by_account_id")
 		values = append(values, claims.Actor())
-		columns = append(columns, "deleted_by_api_key_id")
-		values = append(values, claims.ActorKey())
 		values = append(values, in.Input.ID)
 
 		// The retirement is written directly rather than through Update, so it neither
 		// bumps updated_at nor takes a snapshot of a row nobody changed.
-		sql := fmt.Sprintf("UPDATE note SET %s WHERE id = $%d", assignments(columns), len(values))
+		sql := fmt.Sprintf("UPDATE rig_notification_recipient SET %s WHERE id = $%d", assignments(columns), len(values))
 		if _, err := tx.Exec(ctx, sql, values...); err != nil {
-			return writeError(err, "note")
+			return writeError(err, "rig_notification_recipient")
 		}
 		if in.Hooks.After != nil {
 			if err := in.Hooks.After(ctx, claims, prev); err != nil {
@@ -938,21 +867,21 @@ func (r *noteRepo) Delete(ctx context.Context, in dbhook.Delete[model.NoteDelete
 	return nil
 }
 
-// NoteRestoreCutoff is the moment before which a deleted row can no longer be
-// brought back.
-func NoteRestoreCutoff() time.Time {
-	return time.Now().UTC().AddDate(0, 0, -30)
+// RigNotificationRecipientRestoreCutoff is the moment before which a deleted
+// row can no longer be brought back.
+func RigNotificationRecipientRestoreCutoff() time.Time {
+	return time.Now().UTC().AddDate(0, 0, -0)
 }
 
-// Restore implements NoteRepository.
-func (r *noteRepo) Restore(ctx context.Context, id uuid.UUID, in dbhook.Restore[model.NoteUpdateInput, model.Note]) (*model.Note, error) {
+// Restore implements RigNotificationRecipientRepository.
+func (r *rigNotificationRecipientRepo) Restore(ctx context.Context, id uuid.UUID, in dbhook.Restore[model.RigNotificationRecipientUpdateInput, model.RigNotificationRecipient]) (*model.RigNotificationRecipient, error) {
 	claims, err := tenancy.FromContext(ctx)
 	if err != nil {
 		return nil, err
 	}
 	_ = claims
 
-	var restored, prev *model.Note
+	var restored, prev *model.RigNotificationRecipient
 	err = dbx.InTx(ctx, r.db.pool, func(ctx context.Context, tx dbx.Conn) error {
 		prev, err = r.Get(ctx, id)
 		if err != nil {
@@ -966,8 +895,8 @@ func (r *noteRepo) Restore(ctx context.Context, id uuid.UUID, in dbhook.Restore[
 			return nil
 		}
 
-		if prev.DeletedAt.Before(NoteRestoreCutoff()) {
-			return rigerr.Conflict("Note %s was deleted more than 30 days ago and can no longer be restored", id)
+		if prev.DeletedAt.Before(RigNotificationRecipientRestoreCutoff()) {
+			return rigerr.Conflict("RigNotificationRecipient %s was deleted more than 0 days ago and can no longer be restored", id)
 		}
 
 		// The request carried no fields, so this hook is where they come from. It is
@@ -994,39 +923,45 @@ func (r *noteRepo) Restore(ctx context.Context, id uuid.UUID, in dbhook.Restore[
 		values := []any{nil}
 		columns = append(columns, "deleted_by_account_id")
 		values = append(values, nil)
-		columns = append(columns, "deleted_by_api_key_id")
-		values = append(values, nil)
 
 		// Whatever the input changed goes in the same statement. No snapshot is taken:
 		// a snapshot has to be a copy of a live row — the CHECK constraint says so
 		// — and there was no live row to copy.
-		if v, ok := in.Input.Title.Get(); ok {
-			columns = append(columns, "title")
+		if v, ok := in.Input.NotificationID.Get(); ok {
+			columns = append(columns, "notification_id")
 			values = append(values, v)
 		}
-		if in.Input.Body.Touched() {
-			columns = append(columns, "body")
-			values = append(values, in.Input.Body.Ptr())
+		if v, ok := in.Input.AccountID.Get(); ok {
+			columns = append(columns, "account_id")
+			values = append(values, v)
 		}
-		if in.Input.PublishAt.Touched() {
-			columns = append(columns, "publish_at")
-			values = append(values, in.Input.PublishAt.Ptr())
+		if v, ok := in.Input.Kind.Get(); ok {
+			columns = append(columns, "kind")
+			values = append(values, v)
+		}
+		if in.Input.GroupKey.Touched() {
+			columns = append(columns, "group_key")
+			values = append(values, in.Input.GroupKey.Ptr())
+		}
+		if v, ok := in.Input.EventCount.Get(); ok {
+			columns = append(columns, "event_count")
+			values = append(values, v)
+		}
+		if in.Input.ReadAt.Touched() {
+			columns = append(columns, "read_at")
+			values = append(values, in.Input.ReadAt.Ptr())
 		}
 
 		// The row changed, so it is stamped as changed. A restore that left the update
 		// columns alone would report the row as last touched before it was deleted.
 		columns = append(columns, "updated_at")
 		values = append(values, time.Now().UTC())
-		columns = append(columns, "updated_by_account_id")
-		values = append(values, claims.Actor())
-		columns = append(columns, "updated_by_api_key_id")
-		values = append(values, claims.ActorKey())
 		values = append(values, id)
 
-		sql := fmt.Sprintf("UPDATE note SET %s WHERE id = $%d RETURNING %s", assignments(columns), len(values), noteRepoSelect)
-		restored, err = scanNote(tx.QueryRow(ctx, sql, values...))
+		sql := fmt.Sprintf("UPDATE rig_notification_recipient SET %s WHERE id = $%d RETURNING %s", assignments(columns), len(values), rigNotificationRecipientRepoSelect)
+		restored, err = scanRigNotificationRecipient(tx.QueryRow(ctx, sql, values...))
 		if err != nil {
-			return writeError(err, "note")
+			return writeError(err, "rig_notification_recipient")
 		}
 
 		if in.Hooks.After != nil {
@@ -1050,7 +985,7 @@ func (r *noteRepo) Restore(ctx context.Context, id uuid.UUID, in dbhook.Restore[
 }
 
 // ListDeleted returns retired rows still inside the restore window.
-func (r *noteRepo) ListDeleted(ctx context.Context, f model.NoteFilter, page model.NotePage, opts ...readopt.Option) ([]*model.Note, int64, error) {
+func (r *rigNotificationRecipientRepo) ListDeleted(ctx context.Context, f model.RigNotificationRecipientFilter, page model.RigNotificationRecipientPage, opts ...readopt.Option) ([]*model.RigNotificationRecipient, int64, error) {
 	// The lifecycle option is forced and the caller's are kept: which rows the
 	// trash holds is not up for discussion, and how wide a view of it the caller
 	// gets still is.

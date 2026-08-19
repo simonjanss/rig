@@ -297,6 +297,17 @@ func applyTableConfig(
 		cfg = *loaded.File
 	}
 
+	// Except rig's own notification tables, which are projected so that link
+	// tables can find them and which almost no project writes a configuration
+	// for. The rule exists to catch a migration that added a column nobody
+	// documented; here the migration is rig's, every column is already
+	// commented in it, and the warning is one a project cannot act on. A
+	// warning nobody can act on is one everybody learns to skip, and the ones
+	// worth reading go with it.
+	if loaded == nil && isNotificationTable(t.Name) && opt.Notifications != nil {
+		opt.UnmentionedColumn = ""
+	}
+
 	out := res
 	out.Fields = slices.Clone(res.Fields)
 	out.Endpoints = slices.Clone(res.Endpoints)

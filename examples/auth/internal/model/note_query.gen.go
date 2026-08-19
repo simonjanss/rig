@@ -39,6 +39,9 @@ type NoteFilterEquals struct {
 	// API key this row was soft-deleted through, when it was an integration rather
 	// than a person.
 	DeletedByAPIKeyID *uuid.UUID `json:"deletedByApiKeyId,omitempty"`
+	// When the note goes live, or null while it is a draft. Notifications about it
+	// are due then.
+	PublishAt *time.Time `json:"publishAt,omitempty"`
 }
 
 // Ordering conditions on Note fields that can be compared.
@@ -49,6 +52,9 @@ type NoteFilterRange struct {
 	UpdatedAt *time.Time `json:"updatedAt,omitempty"`
 	// When this row was soft-deleted. Null while the row is live.
 	DeletedAt *time.Time `json:"deletedAt,omitempty"`
+	// When the note goes live, or null while it is a draft. Notifications about it
+	// are due then.
+	PublishAt *time.Time `json:"publishAt,omitempty"`
 }
 
 // Set-membership conditions on Note fields.
@@ -80,6 +86,9 @@ type NoteFilterContains struct {
 	// API key this row was soft-deleted through, when it was an integration rather
 	// than a person.
 	DeletedByAPIKeyID []uuid.UUID `json:"deletedByApiKeyId,omitempty"`
+	// When the note goes live, or null while it is a draft. Notifications about it
+	// are due then.
+	PublishAt []time.Time `json:"publishAt,omitempty"`
 }
 
 // Pattern conditions on Note text fields.
@@ -113,6 +122,9 @@ type NoteFilterNull struct {
 	// API key this row was soft-deleted through, when it was an integration rather
 	// than a person.
 	DeletedByAPIKeyID *bool `json:"deletedByApiKeyId,omitempty"`
+	// When the note goes live, or null while it is a draft. Notifications about it
+	// are due then.
+	PublishAt *bool `json:"publishAt,omitempty"`
 }
 
 // Conditions a Note must satisfy to match a search.
@@ -201,6 +213,8 @@ var (
 	NoteOrderUpdatedByAPIKeyIDDesc  = NoteOrder{Column: "updated_by_api_key_id", Desc: true}
 	NoteOrderDeletedByAPIKeyIDAsc   = NoteOrder{Column: "deleted_by_api_key_id"}
 	NoteOrderDeletedByAPIKeyIDDesc  = NoteOrder{Column: "deleted_by_api_key_id", Desc: true}
+	NoteOrderPublishAtAsc           = NoteOrder{Column: "publish_at"}
+	NoteOrderPublishAtDesc          = NoteOrder{Column: "publish_at", Desc: true}
 )
 
 // NewNoteFilterEquals builds an empty NoteFilterEquals to fill in.

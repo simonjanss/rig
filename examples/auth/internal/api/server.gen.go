@@ -14,6 +14,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/simonjanss/rig/notify"
+	"github.com/simonjanss/rig/notify/notifyhttp"
 	"github.com/simonjanss/rig/runtime/apirev"
 	"github.com/simonjanss/rig/runtime/rigerr"
 	"github.com/simonjanss/rig/runtime/tenancy"
@@ -97,6 +99,12 @@ type Server struct {
 type Handlers struct {
 	Server Server
 
+	// Notifications is this project's inbox. Setting it mounts the routes under
+	// /notifications and lets a delete of a notifiable row take its notifications
+	// with it — a nil one leaves both undone, which is why it is a field here
+	// rather than something reached for.
+	Notifications *notify.Service
+
 	Note NoteService
 }
 
@@ -136,6 +144,22 @@ func Register(h Handlers) *http.ServeMux {
 		registerNote(mux, h.Server, h.Note)
 	}
 
+	// The inbox, on the same mux. Hand-written rather than generated, because the
+	// tables are rig's own and are the same in every project — there is nothing
+	// here for a generator to vary.
+	if h.Notifications != nil {
+		notifyhttp.New(h.Notifications, notifyhttp.Options{
+			// The server's own answer to "who is calling", so an inbox route identifies
+			// its caller exactly the way every other route does.
+			Claims: h.Server.GetClaims,
+			Fail: func(w http.ResponseWriter, r *http.Request, err error) {
+				// The project's own error shape, so an inbox route's 404 looks like every
+				// other route's.
+				fail(h.Server, w, r, RequestContext{}, err)
+			},
+		}).Mount(mux)
+	}
+
 	// After the resources, so a pattern collision between the two is a panic
 	// naming the auth route rather than the resource one — and the resource
 	// routes are the ones this project owns.
@@ -159,9 +183,17 @@ func Register(h Handlers) *http.ServeMux {
 // appended to. A resource whose field is nil is skipped, and a parent whose
 // children are all nil adopts an empty list, which is what it had before.
 func Link(h Handlers) {
-	// No table here references another one rig writes a service for, so there is
-	// nothing to propagate.
-	_ = h
+	if h.Note != nil {
+		var cs NoteChildDeletes
+		// The row's own notifications, which are a child of it in every way that
+		// matters: they point at it, they have to be told, and the telling is inside
+		// the same transaction.
+		if h.Notifications != nil {
+			cs = append(cs, notifyNoteDeletes(h.Notifications))
+		}
+		h.Note.AdoptChildren(cs)
+	}
+
 }
 
 // maxBodyBytes bounds a request body. Without a limit, one client can exhaust

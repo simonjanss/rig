@@ -819,10 +819,11 @@ CREATE UNIQUE INDEX rig_notification_recipient_group_key
     ON rig_notification_recipient (account_id, kind, group_key)
     WHERE group_key IS NOT NULL AND read_at IS NULL AND deleted_at IS NULL;
 
--- The inbox read, newest first, and the badge.
+-- The inbox read, newest first, and the badge. Not partial: a partial index is
+-- not what the tenant-leading rule is looking for, and every generated query
+-- filters by tenant whether or not the row is deleted.
 CREATE INDEX rig_notification_recipient_inbox_idx
-    ON rig_notification_recipient (tenant_id, account_id, created_at DESC)
-    WHERE deleted_at IS NULL;
+    ON rig_notification_recipient (tenant_id, account_id, created_at DESC);
 
 CREATE INDEX rig_notification_recipient_notification_idx
     ON rig_notification_recipient (notification_id);
@@ -833,6 +834,8 @@ CREATE INDEX rig_notification_recipient_account_idx
     ON rig_notification_recipient (account_id);
 
 COMMENT ON TABLE  rig_notification_recipient IS 'One inbox line: a notification, an account, and whether it has been read.';
+COMMENT ON COLUMN rig_notification_recipient.notification_id IS 'What happened. The line is separate from it so that one person clearing their inbox changes nothing anybody else sees.';
+COMMENT ON COLUMN rig_notification_recipient.account_id IS 'Who this line is for. An account rather than an identity: an identity has no tenant, so a row addressed to one would fall outside every generated query.';
 COMMENT ON COLUMN rig_notification_recipient.kind IS 'Copied from the notification, so the inbox and its live-sync shape never touch a table holding rows for people who are not recipients.';
 COMMENT ON COLUMN rig_notification_recipient.group_key IS 'What collapses several events into one line. Null opts out and every event is its own row.';
 COMMENT ON COLUMN rig_notification_recipient.event_count IS 'How many events this line stands for. One unless a group key collapsed them.';

@@ -331,19 +331,6 @@ func NewBlogPostSubject(svc DefaultBlogPostService) BlogPostSubject { return Blo
 // Table implements notify.Subjects.
 func (s BlogPostSubject) Table() string { return "blog_post" }
 
-// DueAt implements notify.Subjects.
-func (s BlogPostSubject) DueAt(ctx context.Context, id uuid.UUID, kind string) (time.Time, bool, error) {
-	// Without the owner narrowing, and deliberately. This runs without a caller,
-	// so "the caller's own rows" is the empty set — and a row rig cannot read is
-	// a notification rig cannot schedule.
-	row, err := s.svc.repo.Get(ctx, id, readopt.WithoutOwnerScope())
-	if err != nil {
-		return time.Time{}, false, err
-	}
-	at, due := s.svc.contract.Notify.NotifyAt(row, kind)
-	return at, due, nil
-}
-
 // Audience implements notify.Subjects.
 func (s BlogPostSubject) Audience(ctx context.Context, n *notify.Notification, id uuid.UUID) ([]uuid.UUID, error) {
 	row, err := s.svc.repo.Get(ctx, id, readopt.WithoutOwnerScope())
@@ -364,6 +351,22 @@ func NotifyAboutBlogPost(id uuid.UUID) notify.Subject {
 		LinkTable: "blog_post_notification",
 		Column:    "blog_post_id",
 		ID:        id,
+	}
+}
+
+// AnnounceBlogPost builds the announcement, asking this resource's own
+// NotifyAt when it is due.
+//
+// One call rather than three lines, because the middle one is the one to
+// forget: an announcement written without asking NotifyAt is due now, and a
+// draft would go out the moment somebody saved it.
+func AnnounceBlogPost(rules BlogPostNotify, row *model.BlogPost, kind string) notify.Announcement {
+	at, due := rules.NotifyAt(row, kind)
+	return notify.Announcement{
+		Kind:    kind,
+		Subject: NotifyAboutBlogPost(row.ID),
+		At:      at,
+		Due:     due,
 	}
 }
 

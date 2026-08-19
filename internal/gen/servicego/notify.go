@@ -122,7 +122,6 @@ func (e *emitter) notifySubject(b *gobuf.Buf, res *ir.Resource) {
 	}
 	var (
 		ctxPkg     = b.Import("context")
-		timePkg    = b.Import("time")
 		uuidPkg    = b.Import("github.com/google/uuid")
 		notifyPkg  = b.Import(notifyModule)
 		readoptPkg = b.Import(runtimeModule + "/readopt")
@@ -143,19 +142,6 @@ func (e *emitter) notifySubject(b *gobuf.Buf, res *ir.Resource) {
 
 	b.Comment("Table implements notify.Subjects.")
 	b.L("func (s %s) Table() string { return %s }", name, gobuf.Quote(res.Storage.Table))
-	b.NL()
-
-	b.Comment("DueAt implements notify.Subjects.")
-	b.L("func (s %s) DueAt(ctx %s.Context, id %s.UUID, kind string) (%s.Time, bool, error) {",
-		name, ctxPkg, uuidPkg, timePkg)
-	b.Comment("Without the owner narrowing, and deliberately. This runs without a " +
-		"caller, so \"the caller's own rows\" is the empty set — and a row rig " +
-		"cannot read is a notification rig cannot schedule.")
-	b.L("row, err := s.svc.repo.Get(ctx, id, %s.WithoutOwnerScope())", readoptPkg)
-	b.L("if err != nil { return %s.Time{}, false, err }", timePkg)
-	b.L("at, due := s.svc.contract.Notify.NotifyAt(row, kind)")
-	b.L("return at, due, nil")
-	b.L("}")
 	b.NL()
 
 	b.Comment("Audience implements notify.Subjects.")
@@ -191,6 +177,23 @@ func (e *emitter) notifySubjectHelper(b *gobuf.Buf, res *ir.Resource, lt *ir.Lin
 	b.L("LinkTable: %s,", gobuf.Quote(lt.Table))
 	b.L("Column: %s,", gobuf.Quote(subjectColumn(res, lt)))
 	b.L("ID: id,")
+	b.L("}")
+	b.L("}")
+	b.NL()
+
+	b.Comment("Announce" + res.Name + " builds the announcement, asking this " +
+		"resource's own NotifyAt when it is due.\n\n" +
+		"One call rather than three lines, because the middle one is the one to " +
+		"forget: an announcement written without asking NotifyAt is due now, and " +
+		"a draft would go out the moment somebody saved it.")
+	b.L("func Announce%s(rules %sNotify, row *%s.%s, kind string) %s.Announcement {",
+		res.Name, res.Name, e.model(b), res.Name, notifyPkg)
+	b.L("at, due := rules.NotifyAt(row, kind)")
+	b.L("return %s.Announcement{", notifyPkg)
+	b.L("Kind: kind,")
+	b.L("Subject: NotifyAbout%s(row.ID),", res.Name)
+	b.L("At: at,")
+	b.L("Due: due,")
 	b.L("}")
 	b.L("}")
 	b.NL()

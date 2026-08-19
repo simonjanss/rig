@@ -44,6 +44,9 @@ type Note struct {
 	// API key this row was soft-deleted through, when it was an integration rather
 	// than a person.
 	DeletedByAPIKeyID *uuid.UUID `json:"deletedByApiKeyId,omitempty"`
+	// When the note goes live, or null while it is a draft. Notifications about it
+	// are due then.
+	PublishAt *time.Time `json:"publishAt,omitempty"`
 }
 
 // A page of Notes.

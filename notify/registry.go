@@ -3,7 +3,6 @@ package notify
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"github.com/google/uuid"
 )
@@ -18,6 +17,12 @@ import (
 // delete propagation already uses — the job does not need the service, it needs
 // the closure, and the closure carries the service it closed over.
 //
+// When a notification is due is deliberately not here. That question is asked
+// where the row is in hand — in the hook that announces, and in the one that
+// reacts to an update — and asking it here would mean reading the row back,
+// which a hook inside the write's own transaction cannot do: a generated read
+// goes to the pool, so it would not see the row that has not committed yet.
+//
 // A generator implements this per notifiable table and registers it where the
 // service is already wired, so adding a link table and forgetting to register
 // does not compile.
@@ -25,13 +30,6 @@ type Subjects interface {
 	// Table is the subject's own table, which is how the dispatcher finds the
 	// right entry for a notification's link row.
 	Table() string
-
-	// DueAt says when notifications about a row are due, and whether they are
-	// due at all. False cancels anything still pending about it.
-	//
-	// rig calls it after every create and every update, so a publish_at that
-	// moves takes its notifications with it and there is no hook to remember.
-	DueAt(ctx context.Context, subjectID uuid.UUID, kind string) (time.Time, bool, error)
 
 	// Audience answers, at the moment of sending, which accounts should hear
 	// about a row.
@@ -73,6 +71,31 @@ func NewRegistry(subjects ...Subjects) *Registry {
 		r.byTable[s.Table()] = s
 	}
 	return r
+}
+
+// Register adds a subject after the registry exists.
+//
+// It is here because of the order services have to be built in: a service needs
+// the notify service to announce anything, and the notify service needs the
+// registry to ask when a notification is due — so the registry is made first,
+// empty, and filled once the services it points at exist. That is a knot rather
+// than a design, and this is the one place it shows.
+//
+// Registering the same table twice is a panic rather than a silent overwrite,
+// for the reason [NewRegistry] gives.
+func (r *Registry) Register(subjects ...Subjects) {
+	if r.byTable == nil {
+		r.byTable = make(map[string]Subjects, len(subjects))
+	}
+	for _, s := range subjects {
+		if s == nil {
+			continue
+		}
+		if _, dup := r.byTable[s.Table()]; dup {
+			panic(fmt.Sprintf("notify.Registry.Register: %s is registered twice", s.Table()))
+		}
+		r.byTable[s.Table()] = s
+	}
 }
 
 // For returns the subject registered for a table, or nil.

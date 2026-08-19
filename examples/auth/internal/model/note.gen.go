@@ -45,6 +45,9 @@ type Note struct {
 	// API key this row was soft-deleted through, when it was an integration rather
 	// than a person.
 	DeletedByAPIKeyID *uuid.UUID `json:"deletedByApiKeyId,omitempty"`
+	// When the note goes live, or null while it is a draft. Notifications about it
+	// are due then.
+	PublishAt *time.Time `json:"publishAt,omitempty"`
 }
 
 // TableNote is the table this entity is stored in.
@@ -65,7 +68,8 @@ const (
 	ColumnNoteCreatedByAPIKeyID  = "created_by_api_key_id"
 	ColumnNoteUpdatedByAPIKeyID  = "updated_by_api_key_id"
 	ColumnNoteDeletedByAPIKeyID  = "deleted_by_api_key_id"
+	ColumnNotePublishAt          = "publish_at"
 )
 
 // NoteColumns is every column, in the order the row is scanned.
-var NoteColumns = []string{"id", "tenant_id", "title", "body", "created_at", "created_by_account_id", "updated_at", "updated_by_account_id", "deleted_at", "deleted_by_account_id", "created_by_api_key_id", "updated_by_api_key_id", "deleted_by_api_key_id"}
+var NoteColumns = []string{"id", "tenant_id", "title", "body", "created_at", "created_by_account_id", "updated_at", "updated_by_account_id", "deleted_at", "deleted_by_account_id", "created_by_api_key_id", "updated_by_api_key_id", "deleted_by_api_key_id", "publish_at"}
