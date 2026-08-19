@@ -364,6 +364,85 @@
         "30d"
       ]
     },
+    "Files": {
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Whether this project accepts uploads. The server-go generator writes the wiring only when it is set."
+        },
+        "expose": {
+          "type": "boolean",
+          "description": "Project rig_file as a read-only resource, so its url column can be read and synced. There is no generated write path either way."
+        },
+        "backend": {
+          "type": "string",
+          "enum": [
+            "memory",
+            "s3"
+          ],
+          "description": "Where the bytes are kept. memory is for tests and go run and is not durable. Defaults to memory."
+        },
+        "s3": {
+          "$ref": "#/$defs/FilesS3",
+          "description": "Bucket settings, read only when backend is s3."
+        },
+        "max_bytes": {
+          "type": "integer",
+          "description": "Largest single upload, in bytes. A hard per-file cap, not a storage quota. Defaults to 26214400 (25 MiB)."
+        },
+        "inline_types": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "description": "Sniffed content types served inline rather than as an attachment. Kept short: a file served inline from the API origin runs there. Defaults to common image types."
+        },
+        "abandoned_after": {
+          "$ref": "#/$defs/Duration",
+          "description": "How long a file row with no bytes behind it is left alone before the sweeper reaps it. Defaults to 24h."
+        },
+        "restore_window": {
+          "$ref": "#/$defs/Duration",
+          "description": "How long a deleted file stays restorable, and how long its bytes outlive the delete. A bucket lifecycle rule has to outlive it. Defaults to 720h (30 days)."
+        },
+        "cookie_downloads": {
+          "type": "boolean",
+          "description": "Accept the session cookie on file download routes, so a stored URL works in an img or a download link. GET only, deliberately: widening it past GET reintroduces the CSRF problem bearer tokens avoid."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
+    },
+    "FilesS3": {
+      "properties": {
+        "bucket": {
+          "type": "string",
+          "description": "Bucket name. One of bucket and bucket_env has to be set."
+        },
+        "bucket_env": {
+          "type": "string",
+          "description": "Environment variable holding the bucket name, for a bucket that differs per deployment."
+        },
+        "region": {
+          "type": "string",
+          "description": "Bucket region."
+        },
+        "endpoint": {
+          "type": "string",
+          "description": "Endpoint URL, for an S3-compatible service that is not AWS."
+        },
+        "access_key_env": {
+          "type": "string",
+          "description": "Environment variable holding the access key id. Defaults to AWS_ACCESS_KEY_ID."
+        },
+        "secret_key_env": {
+          "type": "string",
+          "description": "Environment variable holding the secret access key. Defaults to AWS_SECRET_ACCESS_KEY."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
+    },
     "Generator": {
       "properties": {
         "name": {
@@ -603,6 +682,10 @@
     "auth": {
       "$ref": "#/$defs/Auth",
       "description": "How the authentication foundation's tables are treated."
+    },
+    "files": {
+      "$ref": "#/$defs/Files",
+      "description": "Where uploaded files are kept, and what an upload may be."
     },
     "naming": {
       "$ref": "#/$defs/Naming",
