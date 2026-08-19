@@ -27,6 +27,121 @@ The generated half is the wire types and one method per endpoint. The other half
 `rig/rigclient` module, which your client imports. A program that *calls* a rig
 application depends on `rig/rigclient`; it never depends on rig itself.
 
+## Bounding one call
+
+`rigclient.Config.HTTPClient` defaults to a client with a thirty-second timeout,
+and that is a limit on the whole exchange rather than on a stalled read. It is
+right for a JSON call and wrong for anything that moves a file, and a context
+deadline cannot raise it — `http.Client.Timeout` is a ceiling, not a default.
+
+So bound the call rather than the client:
+
+```go
+file, err := client.Todos.UploadCoverFile(ctx, todoID, upload,
+    rigclient.WithTimeout(10*time.Minute))
+```
+
+Raising the default instead would weaken every other route to suit the one that
+transfers files. `WithTimeout` takes a shallow copy of your client with a
+different deadline, so the transport and its connection pool are still shared.
+
+## Sending files
+
+> The upload and download methods below appear on a generated client once your
+> project has a file column. Until then, `rigclient.Upload`, `DoContent` and the
+> call options are the surface — everything this section says about how bytes
+> travel is already true of a call you write by hand.
+
+A file goes out as a `multipart/form-data` body, which the SDK builds for you
+from a `rigclient.Upload`:
+
+```go
+f, err := os.Open("cover.png")
+if err != nil {
+    return err
+}
+defer f.Close()
+
+upload := rigclient.Upload{Name: "cover.png", ContentType: "image/png", Body: f}
+```
+
+`Name` is what the file is called: the server records it on the row and puts it
+in the download path, and it never becomes the storage key. `ContentType` is
+what you claim the bytes are, and it makes little difference either way — the
+server sniffs the content, and the sniffed type is the one it stores and the one
+it serves back. `rigclient.UploadBytes` is the same thing for a file you already
+hold in memory.
+
+Nothing is buffered. The form is written to a pipe as the request goes out, so a
+file larger than memory is an ordinary upload. Two consequences worth knowing:
+
+**The request is chunked.** The length of the form is not known when the headers
+are written, so no `Content-Length` is sent. An intermediary that insists on one
+is a deployment problem, and buffering every upload to satisfy it is not a trade
+the SDK makes for you.
+
+**A body that cannot seek cannot be retried.** When a call comes back 401 and
+your credential is a `Session`, the SDK refreshes the token and sends the request
+again — and the second send needs the bytes again. A `*os.File` seeks, so the
+ordinary case works. A pipe, another response body, or a decompressor does not,
+and rather than buffering the whole upload against a retry that almost never
+happens, the SDK returns `rigclient.ErrCannotRetry`:
+
+```go
+if errors.Is(err, rigclient.ErrCannotRetry) {
+    // The credential was refreshed. Make the call again from a reader that
+    // still has the bytes.
+}
+```
+
+The failure still answers `rigclient.IsUnauthorized`, because both facts are
+true and you need both to decide what to do.
+
+## Receiving files
+
+A download comes back as a `rigclient.Content`, which is the response and not a
+copy of it:
+
+```go
+c, err := client.Todos.DownloadCoverFile(ctx, todoID, fileID, "cover.png")
+if err != nil {
+    return err
+}
+defer c.Body.Close()
+
+_, err = io.Copy(dst, c.Body)
+```
+
+**Close the body.** Nothing reads ahead, which is what lets a file larger than
+memory go straight to disk — and it means the connection is held until you are
+done with it. It is the one thing the generated method cannot do for you.
+
+`ContentType` is the type the server sniffed at upload, `Length` is the size or
+`-1`, and `Filename` is the name from `Content-Disposition`, decoded from the
+RFC 5987 form when it is not ASCII. It is a suggestion and not a path: if you
+write it to disk, you decide where and you sanitize what.
+
+Downloads flow through the API rather than through a signed storage URL, because
+the endpoint is where the permission check lives. The URL on the row is stable
+and unsigned, so holding it grants nothing.
+
+### Ranges and conditional reads
+
+The server answers range and conditional requests, so a resumed download does
+not start over and a `<video>` can seek. The document says nothing about ranges —
+they are a question about one call, not part of what an endpoint takes — so they
+are call options rather than generated parameters:
+
+```go
+c, err := client.Todos.DownloadCoverFile(ctx, todoID, fileID, "clip.mp4",
+    rigclient.WithRange(1<<20, -1))          // the rest of the file from 1 MiB
+```
+
+`WithRange` gets you a 206 and `WithIfNoneMatch` gets you a 304, both of which
+arrive as `Content.Status` rather than as an error: you asked the question, so
+the answer is a result. On a 304 the body is empty and closing it is all there
+is to do with it.
+
 ## See also
 
 - [generators.md](generators.md) — `go-client` options
