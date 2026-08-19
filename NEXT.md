@@ -36,6 +36,17 @@ Next:
   `rig_auth_log`, and `GET /auth/sessions` widened past the caller's own. The
   events have been recorded since M4 and nothing has ever served them. (Was
   M5.11; referential actions had already taken it.)
+- **M12** — notifications, the engine and the inbox: a `rig_notification` table a
+  project links its own tables to, two generated callbacks that say when a
+  notification is due and — at the moment it is sent, not when it was written — who
+  should get it, and an inbox somebody can empty. After M5.11 because the delete
+  propagation it generates is that milestone's registry with one child hardcoded, and
+  the two should not be built twice.
+- **M13** — notification delivery: Desktop, Mobile and Email as channels an
+  application implements, per-account settings with a window each, digests, and a
+  dispatcher every replica can run because the claim is a lease rather than a lock.
+  Split from M12 because M12's schema is the part that cannot be changed later and
+  this is the part whose shape depends on what somebody asks for.
 
 ### Modules
 
@@ -2720,6 +2731,1040 @@ skipping it with a sentence naming the reason, so the day the tags exist the
 step starts working and nothing has to be unwritten — and, given that this
 milestone's whole promise is a project that builds, treating publication as the
 thing that unblocks M11 rather than something M11 works around.
+
+---
+
+## M12 — notifications: the engine and the inbox
+
+**Goal.** A project declares that one of its tables is worth notifying people about,
+answers two questions rig asks it — when, and who — and gets an inbox: a row per
+person per thing that happened, live over the sync stream, markable read, deletable,
+collapsing ten comments on one post into one line saying ten. The audience is
+resolved when the notification is sent rather than when it was written, which is the
+decision the rest of this section follows from.
+
+rig has no notifications, and the word appears in the repository only as an argument
+for something else. `checkCascades` refuses `ON DELETE CASCADE` because a cascade is
+a delete the application never sees: "no hook runs, **nothing is notified**, nothing
+is snapshotted, and the rows are gone" (`docs/schema.md`). `examples/todo/notify`
+exists to demonstrate the shape of a background dependency — something built while
+the routes are wired, fed by a hook after a write commits, drained before the server
+stops — and what it does with what it is given is print it. Grep for
+`rig_notification` and there is nothing.
+
+So every project rig is for writes this itself, and writes the same five things
+wrong. A recipients column that was true the day it was written. A cron job that
+sends the same mail twice because two pods ran it. An inbox with no way to empty it.
+Ten rows where the person wanted one. Mail at 3am. The tables and the arithmetic are
+the same in every application; the sentence and the audience are not. **That split is
+what rig can take and where it has to stop.**
+
+### The audience is a question, and it has to be asked late
+
+A blog post scheduled for Friday notifies whoever can read it on Friday. Somebody
+added to the group on Thursday evening is one of those people, and a recipient list
+computed on Monday does not know that. This is not an edge case somebody contrived —
+it is the ordinary behaviour of every scheduled write in a system where membership
+changes, and a notification system that captures a list at write time spends the rest
+of its life patching around it: a job that reconciles lists, a second table of
+pending additions, a support ticket that says "I never got the announcement".
+
+**So a pending notification does not carry recipients at all.** It carries what
+happened, what it happened to, and when it is due. The audience is computed at the
+moment it is sent, by asking the table it is about.
+
+The cost is honest and worth stating first, because everything below pays it: the
+audience is computed in a background job, so it is computed without a request, without
+a caller, and after the transaction that caused it has long since committed. Which
+means the code that computes it has to be reachable from a job — see the wiring
+section, which is the most invasive part of this milestone and the only part that
+touches a file rig does not own.
+
+### The subject says what happened and when; the engine asks who
+
+Three statements, and the split between them is the whole design.
+
+**The service says a thing happened.** One line, in a hook it already has:
+
+```go
+// services/blog_post/blog_post.go
+Create: dbhook.CreateHooks[model.BlogPostCreateInput, model.BlogPost]{
+    After: func(ctx context.Context, claims tenancy.Claims, p *model.BlogPost) error {
+        return s.notify.Announce(ctx, notify.Announcement{
+            Kind:    model.NotificationKindBlogPostPublished,
+            Subject: api.NotifyAboutBlogPost(p.ID),
+        })
+    },
+},
+```
+
+No recipients, no time. `After` rather than `AfterCommit`, and that is deliberate:
+the notification row is part of the change, and a change that committed without it is
+a notification nobody will ever send. `dbhook`'s own package doc makes the general
+form of the argument — "a hook that fires after a commit that later rolls back has
+told the world about something that did not happen" — and this is the same sentence
+read backwards.
+
+**Two generated methods answer the rest**, on the rules interface the table already
+has:
+
+```go
+// NotifyAt says when notifications about this row are due, and whether they are due
+// at all. Returning false cancels anything still pending about it.
+//
+// rig calls it after every create and every update, so a publish_at that moves takes
+// its notifications with it and there is no hook to remember.
+func (s *rules) NotifyAt(p *model.BlogPost, kind model.NotificationKind) (time.Time, bool) {
+	if p.PublishAt == nil {
+		return time.Time{}, false
+	}
+	return *p.PublishAt, true
+}
+
+// NotifyWho answers, at the moment of sending, which accounts should hear about this
+// row.
+//
+// It runs in the dispatcher rather than in a request, under System claims for the
+// row's own tenant, which is what makes the answer current: an account added to the
+// group after the post was written is in this list, because this list is built now.
+//
+// It must be a pure read, and it may be called more than once for the same
+// notification. rig makes a repeat harmless — the recipient index below — but a
+// method with side effects would make it visible.
+func (s *rules) NotifyWho(ctx context.Context, p *model.BlogPost, kind model.NotificationKind) ([]uuid.UUID, error) {
+	return s.groups.MemberAccountIDs(ctx, p.GroupID)
+}
+```
+
+Both are **required**, because `blog_post_notification` exists. A project that
+declares a notifiable table and does not answer these does not compile, which is the
+mechanism a declared endpoint already uses: "declare an endpoint in your table
+configuration and your service stops compiling until you implement it. Not a 501 at
+runtime — a build failure" (`docs/design.md`). They go on `BlogPostRules` beside the
+declared endpoints, for the reason that interface gives for being an interface — "the
+rules and the endpoints are one value: a resource whose configuration declares an
+endpoint cannot be wired up without an implementation of it". The stub rig writes
+returns `(time.Time{}, true)` and `nil, nil`, so a freshly generated project compiles
+and the developer fills in two bodies.
+
+**The engine does everything else**: holds the announcement until it is due, calls
+`NotifyWho`, writes an inbox line per account, and in M13 reads each account's
+settings, writes a delivery row per channel and hands them out. None of that is in
+anybody's service.
+
+The `kind` argument is a `string`, and the project's own Go enum type when the project
+narrows `rig_notification.kind` to a Postgres enum of its own. Nothing new is needed
+for that — the enum machinery already produces the type and the labels stay the values
+on the wire — and it is worth doing for exactly one reason: a `switch` over kinds
+inside `NotifyWho` becomes one the compiler can see. Say so in the documentation
+rather than making the enum mandatory, because rig cannot know a project's kinds and a
+foundation migration that shipped an empty enum type would be a worse start than a
+`text` column somebody narrows.
+
+**The tempting alternative is a key, and it should be rejected before anybody builds
+it:**
+
+```yaml
+notify:
+  - on: create
+    kind: BlogPostPublished
+    to: group.member_account_ids   # ← this
+```
+
+`to:` is a path expression, and a path expression is a vocabulary. It cannot say
+"everybody in the group, minus whoever muted the thread, plus the moderators if it
+was flagged, and not the author of the change". Every real audience is that sentence
+after the first month. This is the same refusal M5.11 already made about
+`on_delete: restrict | cascade | set_null | ignore` — those four words are a
+vocabulary, and a vocabulary covers only the cases whoever wrote it thought of — and
+it lands in the same place. **The declaration is a function.** What rig contributes is
+that the function is required, that its subject is typed, and that nothing else about
+the mechanism is the application's problem.
+
+### Immediacy is `deliver_at = now()`, and there is only one path
+
+A direct notification is not a special case. `NotifyAt` returns the zero time,
+`deliver_at` is `now()`, M13's nudge fires on commit, and `NotifyWho` runs
+microseconds later. A scheduled one returns a timestamp and the same code runs when
+that timestamp arrives. **The difference between "now" and "Friday" is one column.**
+
+That is what makes late resolution cheap rather than expensive: there is no fast path
+to keep in step with a slow one, and the interesting case — a scheduled notification
+whose audience changed — is the same code as the boring one.
+
+There is one exception, and naming it is better than pretending there is not.
+`Announcement.AccountIDs` skips `NotifyWho` for that announcement. Some audiences
+genuinely cannot be re-derived: the five people who were @-mentioned in a body that has
+since been edited. Without the exception, `NotifyWho` would have to read a version row
+to reconstruct a list somebody already had in their hand. It is documented as the
+exception rather than as the parameter, because a list captured at write time is a list
+that stops being true, and the whole of this milestone is an argument about that.
+
+### A join table per subject, and rig already knows what one is
+
+`rig_notification` gains no columns for any project. A table declares itself notifiable
+by being joined to it:
+
+```sql
+-- migrations/00012_blog_post_notification.sql
+create table blog_post_notification (
+    tenant_id       uuid not null references rig_tenant (id),
+    blog_post_id    uuid not null,
+    notification_id uuid not null,
+    primary key (blog_post_id, notification_id),
+    foreign key (tenant_id, blog_post_id)    references blog_post (tenant_id, id),
+    foreign key (tenant_id, notification_id) references rig_notification (tenant_id, id)
+);
+```
+
+**Almost none of this is new code, because `classifyLinkTable` already recognizes the
+shape.** It accepts a base table whose primary key is exactly two foreign-key columns
+and whose only other columns are rig's own managed ones; `tenant_id` is one of those,
+so the table above classifies. What follows costs nothing:
+
+- `projectRelations` derives `ManyToMany` in both directions —
+  `BlogPost.Notifications` and `Notification.BlogPosts` — with the filter and the
+  `embed` option every relation gets.
+- A link table is not projected as a resource at all, so nobody gets a CRUD surface
+  over a join row.
+- The composite `(tenant_id, blog_post_id)` form is denormalized onto the non-tenant
+  column, so **the tenant-safe shape rig recommends is the shape that classifies**.
+  That was not true until M5.9 fixed it, and it is why the recommendation can be made
+  without an asterisk: pointing at another tenant's row is a constraint violation
+  rather than something a hook has to remember. It needs `UNIQUE (tenant_id, id)` on
+  the subject table, and on `rig_notification`, which the foundation ships for the
+  reason `rig_file_tenant_id_key` exists.
+
+**rig finds notifiable tables by scanning link tables, not by parsing names.** Any
+link table one side of which is `rig_notification` makes the other side notifiable. So
+`blog_post_notification` is a recommendation in the documentation and nothing depends
+on it — the same position the file convention takes, minus the part where the name has
+to carry a role, because here there is nothing for a name to say that the foreign key
+does not.
+
+The link points at **the notification, not at an inbox line**, and that is what keeps
+it small: one row per subject row per notification, not one per recipient. An
+announcement to a group of two thousand adds one link row. The other reason it is a
+join table rather than a nullable `blog_post_id` on `rig_notification` is worth stating
+too: **it keeps `rig_notification` the same table in every project.** The foundation
+ships it complete, no project migration ever alters it, and that is what makes it safe
+for rig to hand-write its store and its routes rather than generating them — the same
+bargain `rig_file` and the auth tables already made.
+
+`notification_id` has to be exempt from the foreign-key naming rule, which wants
+`rig_notification_id`. The same exemption `<role>_file_id` needed, for the same reason,
+and it goes in the same place.
+
+> **One constraint that will bite, and it is easier to write down than to rediscover.**
+> `classifyLinkTable` looks its targets up in a map built *after* the ignored tables
+> have been dropped. So `rig_notification` has to stay in the schema even when it has
+> no endpoints, or a project with `expose: false` watches its link tables silently stop
+> being link tables. `notifications.enabled` keeps it out of `IgnoreTables`;
+> `notifications.expose` sets `Resource.Unexposed` instead. That is a departure from how
+> `files.expose` works and the two are worth reading side by side before changing
+> either.
+
+### Two tables in this milestone, and what each one is for
+
+```sql
+-- What happened. One row per subject row per kind. The link tables point here.
+create table rig_notification (
+    id                      uuid primary key,
+    tenant_id               uuid not null references rig_tenant (id),
+
+    created_at              timestamptz not null default now(),
+    created_by_account_id   uuid,
+    created_by_api_key_id   uuid,
+    updated_at              timestamptz,
+
+    kind                    text not null,
+    state                   rig_notification_state not null default 'Pending',
+    deliver_at              timestamptz not null default now(),
+    resolved_at             timestamptz,
+    payload                 jsonb not null default '{}'
+);
+
+create unique index rig_notification_tenant_id_key on rig_notification (tenant_id, id);
+create index rig_notification_due_idx on rig_notification (deliver_at)
+    where state = 'Pending';
+
+-- The inbox line. One row per (notification, account), written when the audience is
+-- resolved rather than when the notification was written.
+create table rig_notification_recipient (
+    id                      uuid primary key,
+    tenant_id               uuid not null references rig_tenant (id),
+    notification_id         uuid not null references rig_notification (id),
+    account_id              uuid not null references rig_account (id),
+
+    created_at              timestamptz not null default now(),
+    updated_at              timestamptz,
+    deleted_at              timestamptz,
+    deleted_by_account_id   uuid,
+
+    kind                    text not null,
+    group_key               text,
+    event_count             integer not null default 1,
+    read_at                 timestamptz
+);
+```
+
+`rig_notification_state` is `Pending | Resolved | Cancelled`. `Resolved` means the
+audience was determined and the inbox lines exist. It does not mean anything was sent,
+which is M13's table's business and not this one's.
+
+`kind` is copied onto the recipient row rather than read through the join, and that is
+not denormalization for speed — it is what lets the collapse index and the live-sync
+shape work without the inbox touching `rig_notification` at all. Both of those are
+below and both depend on it.
+
+**There is no `title` and no `body` anywhere.** Those are rendering: they are
+locale-dependent, they belong to a template, and a copy of them in the row is a copy
+that goes stale the day somebody rewords it. `kind` plus `payload` plus the linked
+subject is everything a template needs, and `payload` gets a named Go type through the
+`go_type` key jsonb columns already have. What rig knows is that something happened and
+what it happened to. The sentence is the application's, the same division
+`account.Notifier` already draws about mail — "it knows the templates, the sender, the
+locale, and whether it uses a queue".
+
+**A notification is addressed to an account, not an identity.** An identity has no
+tenant, so an identity-addressed row falls outside every generated query's filter, and
+`tenancy.Claims` carries no identity id at all — a handler could not narrow to one
+without a join. This is the line `account.Notifier` already draws for itself: a
+password reset is about the person, an invitation is about one tenant, and "'you have
+been invited' with no answer to 'invited where' is a mail nobody can act on". A product
+notification is the invitation case. The consequence is that a service account — `kind
+= 'Service'`, `identity_id IS NULL` — has an inbox and no mailbox, which M13 has to say
+out loud rather than discover.
+
+### Fan-out is idempotent, because it is going to run twice
+
+`NotifyWho` may be called more than once for the same notification: a dispatcher that
+resolved and died before committing, two replicas racing M13's nudge. So the recipient
+write is idempotent by construction rather than by care:
+
+```sql
+create unique index rig_notification_recipient_key
+    on rig_notification_recipient (notification_id, account_id);
+```
+
+A repeat fan-out is `on conflict do nothing`. **That index is the whole reason the
+method's contract can be "a pure read that may be called again"** rather than "a read
+that had better only run once", and it is the difference between a system that recovers
+from a crash and one that duplicates somebody's inbox after it.
+
+**Collapsing is a second index, and it is what turns ten comments into one line:**
+
+```sql
+create unique index rig_notification_recipient_group_key
+    on rig_notification_recipient (account_id, kind, group_key)
+    where group_key is not null and read_at is null and deleted_at is null;
+```
+
+Ten announcements about one post upsert into one recipient row with `event_count = 10`,
+pointing at the most recent of them, and the link table can still name all ten comments
+underneath it. Read the row and the next comment starts a fresh one — which is what
+anybody would expect, and it falls out of the index predicate rather than being coded,
+so there is no rule to get wrong about when a group ends. `notify.GroupBySubject`
+derives the key from the subject; `notify.GroupBy("thread:" + id)` sets a coarser one;
+leaving it nil opts out and every event is its own line.
+
+What it costs: an upsert per recipient. An announcement to a group of ten thousand is
+ten thousand statements in bounded batches, and the bound belongs here for the reason
+`sweepBatch` belongs in the sweeper — "so a bucket with a bad week does not become a
+single query holding a connection for an hour". A fan-out is not one query and the
+section should not imply it is.
+
+### Deleting the blog post takes its notifications with it, and rig writes that code
+
+"Somebody commented on ⟨deleted⟩" is the failure mode of every notification system, and
+the link table does not fix it on its own. The link row's foreign key restricts, so a
+hard delete of the subject fails on 23503 until something clears it — the problem moved
+rather than went away.
+
+**So rig generates the propagation, on both sides of the lifecycle**, into the subject's
+writer:
+
+- **Soft-deleted** — cancel the notifications about it that are still `Pending`,
+  soft-delete the recipient rows of the ones already `Resolved`, keep the link rows.
+- **Restored** — restore those recipient rows, because the link rows are still there to
+  say which they were. A notification cancelled while its `deliver_at` went past stays
+  cancelled: reviving it would announce something that was gone when it was due.
+- **Hard-deleted** — delete the link rows as well, so the delete succeeds.
+
+All of it inside the transaction that deletes the row, so a rollback takes the
+propagation with it. **Nothing for the developer to implement and nothing to forget**,
+which is the point: this is the one part of a notification system that is pure
+bookkeeping, and pure bookkeeping is exactly what a generator should own.
+
+It is also, precisely, M5.11's registry with one child hardcoded. rig knows this child
+by name, which is what lets the propagation ship at all — but building it as a special
+case and then building the general mechanism beside it would leave two things that do
+the same job. **So this comes after M5.11 and registers as its first
+`<Parent>Deleting` entry**, and the sibling ordering, the visited set and the depth cap
+are that milestone's and not this one's.
+
+`NotifyAt` returning `false` reaches the same machinery from the other direction: a
+`publish_at` cleared, a post put back to draft. Cancellation touches `Pending` only.
+Mail that is out cannot be recalled, and a state transition that pretended otherwise
+would be a lie the schema tells.
+
+### `access: { scope: own }` narrows to the wrong column
+
+An inbox is the canonical owner-scoped resource and the existing key cannot express it.
+`applyAccessConfig` filters `created_by_account_id` and says the column is not
+configurable, with a good reason: "what a read narrows to and what a write records are
+the same fact, and there is no way to point the filter at a column nothing maintains."
+
+A recipient column breaks that premise honestly rather than quietly. Nothing *audits*
+`account_id` — it is not who acted — but it is `NOT NULL`, it is written by the engine
+and by nothing else, and it is therefore not a column nothing maintains. The premise
+was about columns a caller could leave empty, and this is not one.
+
+```yaml
+access:
+  scope: own
+  owner: account_id   # defaults to created_by_account_id
+```
+
+One field on `tableconf.Access`, one branch in `applyAccessConfig`, and **every layer
+above it works unchanged** — the repository predicate that is the floor, the `?scope=all`
+parameter, the `.read.all` permission the catalogue derives from it, `RequireScope`'s
+refusal. Refuse a column that is not a `uuid` referencing `rig_account`, and refuse a
+nullable one when the key names it: the nullability caveat the existing code documents —
+"a row created by a migration or by a service has no account behind it… invisible to a
+narrow read, which is the correct answer and a surprising one" — is exactly what a
+recipient column must not have, and here it can be checked rather than tolerated.
+
+It lands in this milestone rather than before it, because the inbox is what makes it
+testable end to end. It is useful well beyond notifications: an `assignee_account_id` on
+a task table has wanted this since owner scoping shipped.
+
+### One live-sync shape, and it is not on `rig_notification`
+
+A recipient row is written in a transaction that commits. Electric notices. **That is
+the entire realtime story** — no `LISTEN/NOTIFY`, no socket, no fan-out to connections,
+nothing new to run that a project doing live sync is not already running. The inbox is
+live because the inbox is a table.
+
+```yaml
+# services/rig_notification_recipient/rig_notification_recipient.yaml
+electric:
+  enabled: true
+  auth: tenant
+```
+
+**The shape is on `rig_notification_recipient`, and `rig_notification` is not
+Electric-exposed at all.** That is a security statement rather than a convenience:
+the notification table holds rows that are `Pending` for people who are not recipients
+yet and may never be, so a tenant-scoped shape over it would stream Friday's
+unpublished post to the whole tenant on Monday. The recipient row carries `kind` and
+`group_key` for this reason as much as for the index — a subscriber gets its inbox
+without a join to a table it must not read.
+
+Which needs one generator fix, and it is a hole that exists today. The shape builder
+emits the tenant, soft-delete and snapshot predicates and **ignores
+`ResourceStorage.Owner`**, though the IR has carried it since owner scoping shipped. So
+an owner-scoped table with `electric: enabled` streams the whole tenant right now
+unless the developer remembers to narrow it in the scope stub — which is the one
+narrowing a stub should never have been responsible for, because the repository does not
+make anybody remember it:
+
+```go
+where.Eq(storage.Owner.Name, claims.AccountID.String())
+```
+
+beside the tenant predicate and before the stub runs, so the stub can still only narrow.
+It has to refuse a caller whose `AccountID` is `uuid.Nil` rather than emit the predicate
+— an API key and a system credential both have one, and `Eq` against nil matches nothing
+*silently*, which is the wrong kind of correct: a subscriber that got an empty stream
+cannot tell it from having no notifications. `deliver_at` does not appear here at all,
+because a recipient row does not exist until its notification was due, which is the
+second thing the two-table split buys.
+
+The subject rows are the project's own shapes, which a project doing this already has.
+So a client syncs its inbox and its content separately and joins them locally, which is
+what a live-sync client does anyway; the inbox route below is what serves the same join
+to a client that is not syncing.
+
+### The engine needs the services, and that is the real cost of this milestone
+
+`NotifyWho` is a method on a service. The dispatcher is a background job. **Today those
+two cannot see each other**: services are built inside the mount function, and a
+`serve.Task` is a subcommand handed a pool and nothing else.
+
+This is the reach problem M5.11 states better than a restatement would — "the parent's
+repository does not need a `PlayerRepository`. **It needs the closure, and the closure
+already carries the repository it closed over**" — and the answer is the same one. A
+compiler-generated, typed registry, one entry per notifiable table, populated where each
+service is already wired, which is `Bind`. Adding a link table and forgetting to
+register the service does not compile, and the dispatcher walks a typed list rather than
+a map assembled in whatever order somebody happened to construct services in.
+
+**The honest cost is a change to `main.go`, which rig does not own.** The task needs the
+same object graph the server does, so the file grows a constructor both call instead of
+building services inside the mount closure. `examples/auth` already has the shape —
+`newAPI(ctx, pool)` extracted so it can be tested — so this is a diff somebody has
+already accepted once, but it is a diff, and `rig init`'s template has to grow into it
+or every project's first notification is a refactor. That is an argument for landing
+this after M11, where the template stops being a fixed string.
+
+The dispatcher runs `NotifyWho` under `tenancy.System(tenantID)`, so the reads inside it
+are tenant-scoped without anybody threading a tenant through. **One thing about those
+claims is surprising and the generated doc comment has to say it**: `AccountID` is
+`uuid.Nil`, so an owner-scoped read inside `NotifyWho` returns nothing until it is given
+`readopt.WithoutOwnerScope()`. It is the one trap in writing one of these methods, it
+fails as an empty audience rather than as an error, and an empty audience is the hardest
+bug in this system to notice.
+
+### The routes are hand-written, because the tables are rig's
+
+`notifyhttp`, mounted by `server-go` beside `authhttp` and `filehttp`, for the reason
+those two are hand-written: the tables are fixed in every project, so there is nothing
+for a generator to vary.
+
+```
+GET    /notifications                 the caller's inbox, paginated, newest first
+GET    /notifications/_unread-count   the badge, one number
+POST   /notifications/{id}/_read      mark one read
+POST   /notifications/_read-all       mark the page's worth read
+DELETE /notifications/{id}            remove one from the inbox
+```
+
+Every one of them narrows to `account_id = claims.AccountID` and none of them takes a
+`scope` parameter: there is no widening for an inbox, because "read everybody's
+notifications" is not a thing an application means. The delete is a soft delete against
+the recipient row and the notification is untouched — one person clearing their inbox
+must not change what anybody else sees, which is the one structural argument for the
+recipient row existing separately at all beyond the collapse index.
+
+`_read-all` marks what the caller can currently see rather than everything, and takes
+the filter the list took. "Mark all read" on a filtered inbox that silently cleared the
+unfiltered one is the interaction people complain about.
+
+Exposing `rig_notification_recipient` as a generated resource stays available and is the
+other answer, the way exposing `rig_auth_log` is: a project that wants the filter
+grammar, the sort keys and the generated client for its inbox turns
+`notifications.expose` on and gets all of it, narrowed by `access.owner` above. **So
+both stay, and the difference between them is the point** — the routes are what a
+project gets without thinking about it, and the resource is what it reaches for when the
+routes are not enough.
+
+### What rig does not do here
+
+Each of these is ruled out by something above rather than by taste:
+
+- **No templates, no rendering, no localisation, no `title` column.** rig stores `kind`,
+  `payload` and the link. The sentence is the application's, for the reason
+  `account.Notifier` already gives about mail.
+- **No path expressions for recipients.** `NotifyWho` is a function, because every
+  vocabulary runs out.
+- **No polymorphic subject.** A link table or nothing: `(subject_table, subject_id)`
+  buys a narrow table and gives up referential integrity, the relation, the filter, the
+  embed and every join a client could follow. It is the same instinct M5.9 refused for
+  galleries.
+- **No CRUD over a link row.** `classifyLinkTable` already refuses it.
+- **No Electric shape on `rig_notification`.** Pending announcements are not the
+  tenant's business.
+- **No cross-tenant inbox.** A person in two tenants has two accounts and therefore two
+  inboxes, which is the same answer `rig_account` has been giving since M4.
+- **No delivery, no channels, no settings.** That is M13, and this milestone is useful
+  without it: an inbox that fills itself, updates itself live and can be emptied is the
+  whole of what most applications show in a bell icon.
+
+The tables, the tenancy, the idempotent fan-out and the arithmetic of collapsing are the
+parts that are the same in every project and the parts every project gets subtly wrong.
+**That is the part rig takes.**
+
+### Verification
+
+Compile goldens first, because the link-table recognition is the load-bearing claim and
+it is asserted against existing code: a fixture whose `blog_post_notification` classifies
+and yields `ManyToMany` in both directions, and — asserted beside it, since the pair is
+the point — one with a data column on the join that *stops* classifying and becomes an
+ordinary resource. A golden for `access.owner`, and one for `notifications.expose: false`
+proving the link table still classifies, which is the trap in the blockquote above and
+the only place it can be caught cheaply.
+
+Generator assertions next, each against the text: `persistgo` emits `account_id = $n`
+and not `created_by_account_id` for the inbox; `electricgo` emits the owner predicate
+before the stub call and refuses a nil `AccountID`; `servicego` writes both methods into
+a notifiable table's rules interface and neither into an ordinary one's. The registry's
+check is a compile failure rather than a string, so it belongs in the Docker suite where
+something is actually built.
+
+Then `internal/notifytest`, and its first test is the one the milestone exists for: **an
+announcement written before an account joined the group, resolved after, reaches that
+account.** Asserted beside its inverse — an account that left before the resolve does not
+— since the whole claim is that the answer is computed late and both halves have to hold
+for that to mean anything. Then: a fan-out run twice inserting one recipient row; ten
+announcements collapsing to `event_count = 10` and the eleventh, after a read, starting a
+fresh row; `NotifyAt` moving `deliver_at` on an update and cancelling on a cleared
+`publish_at`; delete, restore and hard-delete propagating inside one transaction, with a
+rollback leaving no trace; and the inbox routes answering only the caller's own rows for
+two accounts in one tenant, asserted side by side.
+
+`examples/todo` grows a second table with a group and a `publish_at` and both methods
+implemented, since `make examples` is the strongest regression test in the repository —
+and it is the only check that the `main.go` rewiring is a diff somebody would accept
+rather than one that reads like a framework leaking.
+
+Honest gap: nothing here tests that a project's *first* `NotifyWho` is easy to write, and
+the `readopt.WithoutOwnerScope()` trap says it may not be. The empty-audience failure
+mode is silent by construction — a notification with no recipients looks exactly like a
+notification nobody was owed — and the only thing standing between that and a support
+ticket is a doc comment. A `DispatchReport` that logs resolutions with zero recipients,
+the way `SweepReport` logs its zeros, is the cheapest thing that would catch it in the
+field, and it belongs in M13 with the rest of the reporting.
+
+### Open questions for you
+
+**Does `NotifyWho` get the notification's `payload` as well as the row?** It gets the row
+and the kind as written above. An announcement might reasonably want to carry "and here
+is who this reply was aimed at", and then the audience depends on the payload. The
+counter is that a payload the audience depends on is a recipient list smuggled through a
+jsonb column, which is the thing late resolution exists to prevent, and it would arrive
+without the honesty of `AccountIDs` — which says what it is doing in its name. I lean
+passing the whole `notify.Notification` so the method can read it, and documenting that
+depending on it is the case `AccountIDs` covers better.
+
+**Should the inbox route hand back the subject row, or its identifier?** A live-sync
+client has the blog post already and wants the id. A client that is not syncing wants the
+row and would otherwise make a request per line. `embed: true` on a `ManyToMany` is a
+second query per page, and the subject is one hop further from the recipient row than a
+relation normally is — through the notification — so embedding is two joins deep on the
+hottest read in the system. I lean identifiers from `notifyhttp`, named as a limitation
+with `notifications.expose` as the answer for anybody who wants otherwise, because
+guessing wrong here bakes a query shape into a route no configuration can change.
+
+**And how does a table whose audience is one column avoid the boilerplate?** Every
+notifiable table implements two methods, and for `assignee_account_id` both are two lines
+that will look identical in every project that has one. That is the price of refusing
+path expressions and it is probably the right price — but if the first real project has
+five near-identical `NotifyWho`s, a `notify.Column("assignee_account_id")` the method can
+return closes it without touching the contract, because it is still a function returning
+accounts. Worth naming as the follow-on rather than building now, since building it now
+means guessing which shape recurs.
+
+---
+
+## M13 — notification delivery
+
+**Goal.** M12's inbox reaches somebody who has the application open. This is
+everybody else: three channels an application implements, per-account settings with a
+delivery window each, one mail instead of nine, and a dispatcher every replica can run
+at once without anybody getting the same notification twice.
+
+Nothing here exists, and the absences are worth listing because each one is a decision
+this milestone has to make rather than a gap it can lean on. There is no mail
+transport — `go.mod` has no mail library and `account.Notifier` is an interface with a
+`NoNotifier` that drops every link. There is no device or push concept anywhere: a
+grep for `push_token`, `apns`, `fcm` and `webpush` returns nothing, and the nearest
+thing in the schema is `rig_account_token.client`, an enum saying `Web | Mobile |
+Machine` about a session, which knows a request came from a phone and holds no address
+you could reach it at. There is no scheduler: the only `time.Ticker` outside a test is
+`examples/todo/notify`. There is no queue, no outbox, and no `SKIP LOCKED` anywhere in
+the repository. The one thing named "outbox" is a twenty-item ring buffer in
+`examples/auth` whose own doc says it is what a real notifier must never do.
+
+So this milestone writes rig's first piece of concurrent background machinery, and
+most of the section is about that rather than about mail.
+
+### Desktop, Mobile, Email — and deliberately no fourth
+
+```sql
+create type rig_notification_channel as enum ('Desktop', 'Mobile', 'Email');
+```
+
+**The inbox is not a channel.** It is the table M12 ships, it is always on, and a
+switch that turned it off would produce a notification nobody can ever find — the
+badge would be wrong, the count would be wrong, and the row would sit there unread
+forever. Every channel here is a *copy* of an inbox line sent somewhere else, which is
+why they can all be refused and it cannot.
+
+Desktop and Mobile are separate channels rather than one push channel with a platform
+column on the device, and that is the whole reason to name them this way: they are
+separately *answerable*. "Not on my phone during dinner, yes on my laptop while I am
+working" is the setting people actually reach for, and a platform on a device row
+cannot express it — the platform says where a token points, and the question is what a
+person wants. One switch per thing somebody has an opinion about.
+
+```sql
+create table rig_notification_device (
+    id, tenant_id,
+    account_id    uuid not null references rig_account (id),
+    channel       rig_notification_channel not null,
+    token         text not null,
+    label         text,
+    created_at    timestamptz not null default now(),
+    last_seen_at  timestamptz,
+    revoked_at    timestamptz,
+    constraint rig_notification_device_channel
+        check (channel in ('Desktop', 'Mobile'))
+);
+```
+
+The `CHECK` refuses `Email`, because there is nothing to register: the address is on
+the account and the identity already, and a third copy of it is a third thing that can
+disagree. `label` is what a person sees in a list of their devices, and it is the
+column that makes revoking one possible for somebody who has four.
+
+Channels themselves are an interface, `NoChannel` is the default, and **rig ships no
+transport**. That is the `account.Notifier` bargain repeated without alteration — "what
+rig knows is when a link exists and what it says" becomes "what rig knows is who is
+owed what, and when" — including the part where the default says so out loud, because
+a production deployment whose notifications all silently succeeded into a discard is
+worse than one that refused to start.
+
+### A window, stated positively
+
+```sql
+create table rig_notification_setting (
+    id, tenant_id,
+    account_id   uuid not null references rig_account (id),
+    kind         text,                              -- null is the default for the channel
+    channel      rig_notification_channel not null,
+    is_enabled   boolean not null default true,
+    digest       rig_notification_digest not null default 'Immediate',
+    active_from  time,                              -- null means all day
+    active_until time,
+    active_days  smallint[] not null default '{}'   -- ISO weekdays; empty means every day
+);
+```
+
+Resolution is three steps and the section states them once, because a settings system
+whose precedence is folklore is one nobody trusts: **the row for this kind and this
+channel, else the row for this channel with a null kind, else the default in
+`rig.yaml`.** A partial unique index per `(account_id, channel)` where `kind is null`
+keeps the middle step single, and a full one on `(account_id, kind, channel)` keeps the
+first.
+
+**The window is stated as when to deliver, not when to stay quiet**, and that is not a
+naming preference. The setting people describe is "mobile, weekdays, nine to five" —
+one row. As quiet hours it is two, because the quiet period wraps a weekend and a
+night, and a person who wants to change the end of their working day has to reason
+about the complement. Positive costs nothing here and reads as what somebody meant.
+
+`active_days` is an ISO weekday array rather than a bitmask, because it appears in a
+`jsonb` settings payload a client renders and `[1,2,3,4,5]` is legible in a way `62` is
+not. Empty means every day, which matches every other "unset is not a restriction"
+default in the schema.
+
+Times are read in the account's own zone, from `rig_account.time_zone`, which already
+exists and already says "IANA name, for example Europe/Stockholm. Null means UTC." So
+`09:00` means nine where the person is, which is the only reading of a work-hours
+setting that is not a bug. **A window that wraps midnight has to work** — `22:00` to
+`06:00` is the ordinary way to say "not overnight" — and it is the arithmetic somebody
+will get wrong, so it is named here and tested below.
+
+**Outside its window a delivery is held, not dropped.** `deliver_at` moves to the next
+opening. Dropping is less code and the wrong answer for a reason the two tables make
+structural: the inbox line exists either way, so a channel that silently discarded its
+copy has made the badge and the mailbox disagree, and the person will eventually see
+the notification and wonder why they were never told. Late is a delay; dropped is a
+lie.
+
+### The row is the truth; the nudge is only latency
+
+Storing is transactional and sending is not. A reply notification must not wait for a
+cron tick, and a scheduled one must survive a process that dies. Three pieces, and the
+order of the argument is the order of trust:
+
+1. **The rows are written in transactions.** M12's announcement in the one that caused
+   it; the recipient rows and one delivery row per channel the settings allow, in the
+   one that resolves it. Those rows are the only durable statement that something is
+   owed, and everything below is a way of working through them.
+2. **`AfterCommit` nudges an in-process dispatcher** for whatever is already due —
+   built in the mount function, `app.Drain` to stop it taking more while the server
+   still answers, `app.CloseWithin` to let it finish. The shape `examples/todo/notify`
+   demonstrates and `App.Drain` documents: "for anything that fetches its own work
+   rather than being handed it — a queue consumer, a scheduler, a poller." This is what
+   makes a direct notification immediate.
+3. **`Config.Tasks["dispatch-notifications"]` is the guarantee.** It takes everything
+   the nudge did not: a process that died mid-send, a channel owed a retry, a
+   `deliver_at` in the future, a digest whose window closed, a delivery held outside
+   somebody's hours.
+
+**The nudge is an optimization and nothing may be built on it.** Say it in those words,
+because the shape invites the opposite reading. Nothing is lost when it is skipped: the
+row is `Pending`, the task is coming, and the inbox was live the moment the recipient
+row committed regardless. What the nudge buys is that the mail arrives in seconds
+rather than by the next tick, and that is all it buys.
+
+This is the one place rig runs periodic work in-process, against a position stated in
+five other places — `files/sweep.go` is the clearest: "a task rather than a goroutine,
+so it is a subcommand in a cron job rather than something racing itself in every
+replica." The departure is defensible because the nudge holds no state, so racing
+itself costs a wasted claim rather than a wrong answer. **But it does mean there are
+now three claimants on the same rows in the ordinary case**, which the sweeper never
+had to consider, and that is the next section.
+
+### Scaling out is a lease, not a lock
+
+Every replica runs a dispatcher and the operator's cron runs another. Ten claimants on
+one row is normal operation here, not an edge, so the guarantee has to be stated rather
+than inferred.
+
+**The obvious answer is wrong.** `select … for update skip locked` inside the
+transaction that sends is correct and unusable: a row lock lives as long as its
+transaction, so it would be held across a call to SMTP or APNs. One slow provider then
+holds a pool connection per message in flight, and a provider that hangs holds them
+until the statement timeout — a notification backlog that takes the API down with it.
+
+**So the claim is a lease, and a send is three short transactions.** The first:
+
+```sql
+update rig_notification_delivery set
+    claimed_at = now(), claimed_by = $1, attempts = attempts + 1
+where id in (
+    select id from rig_notification_delivery
+    where state = 'Pending'
+      and deliver_at <= now()
+      and (claimed_at is null or claimed_at < now() - $2::interval)   -- $2 = claim_ttl
+    order by deliver_at
+    limit $3
+    for update skip locked
+)
+returning *;
+```
+
+Then the send, with no transaction open at all. Then the third: `state = 'Sent'` and
+`sent_at`, or on failure a backoff into `next_attempt_at` and `state = 'Failed'` once
+`attempts` passes `max_attempts`. `skip locked` is what makes the claim itself
+contention-free — a second claimant walks past the rows the first is taking instead of
+queueing behind them, so throughput rises with replicas rather than flattening.
+
+`claimed_by` is a uuid generated once per process, with the hostname beside it in the
+log line, so a lease that is stuck can be traced to a pod rather than to a mystery.
+`claim_ttl` is what makes a crashed process recoverable at all: the row is still
+`Pending` with a stale `claimed_at`, and the next dispatcher past it takes it.
+
+**Which buys at-least-once, and the section has to use those words.** A process that
+handed a message to a provider and died before its third transaction will hand it over
+again when the lease expires. No arrangement of one database prevents that — the send
+and the bookkeeping are two systems and no transaction spans both — so what rig does
+instead is make the duplicate survivable, in two halves that are worth separating
+because one is much stronger than the other:
+
+- **The inbox cannot duplicate.** M12's unique index on `(notification_id,
+  account_id)` makes a repeated fan-out `on conflict do nothing`, so the thing a person
+  actually reads is exactly-once by construction. That is the half that matters most
+  and it holds unconditionally.
+- **A channel gets a stable idempotency key and has to use it.** `Delivery.ID` is a
+  uuid that does not change across retries, it is passed to the channel, and the
+  interface documentation says to hand it to the provider as its own key —
+  `Message-ID`, `apns-id`, whatever the SDK calls it. rig cannot enforce that, and
+  saying so is better than implying exactly-once and letting somebody find out.
+
+`rig_notification` carries the same four columns for its resolve step, so two replicas
+do not both call `NotifyWho` for one announcement. Two that did would be harmless —
+the recipient index absorbs it — but resolving an audience is a read of a membership
+table, and paying for it twice for nothing when `Pending → Resolved` under the same
+lease costs one clause is not a trade worth making.
+
+**The rejected alternative is a leader**, and it is worth naming because it is simpler
+and rig already contains one: goose takes an advisory lock so exactly one process
+migrates. Rejected here for two reasons rather than one. A leader is a throughput
+ceiling, which is the reason people expect. The reason that actually decides it is that
+a leader is a single point of *stall*: wedge it on one slow provider and every channel
+stops, including the ones that were fine. The lease is four lines of SQL and it
+degrades per-row instead of per-fleet.
+
+`claim_ttl`, `max_attempts` and the backoff base are `rig.yaml` keys, and `claim_ttl`
+gets a startup check. Set it shorter than a channel's own timeout and every message is
+claimed twice under ordinary load — at-least-once stops being a crash-recovery property
+and becomes an everyday one. Refuse it at boot rather than at dispatch time, the way
+M5.9's S3 adapter refuses a bucket lifecycle shorter than the restore window and the
+way `checkShutdown` refuses a budget that does not fit.
+
+### Stopping is three steps, and the last one gives the work back
+
+The dispatcher holds leases and may be mid-send when the process is asked to stop. One
+that simply exited would strand every claimed row for a full `claim_ttl`, which turns
+every ordinary rollout into a delivery delay — and a rollout that replaces every pod
+turns it into that delay repeatedly.
+
+The lifecycle already covers this, and the wiring is four lines beside the line that
+builds it:
+
+```go
+engine := notify.NewEngine(app.Pool, notify.EngineConfig{Channels: channels, Registry: reg})
+engine.Start()
+app.Drain("notifications", engine.StopClaiming)
+app.CloseWithin("notifications", 15*time.Second, engine.Close)
+```
+
+**`Drain` stops claiming.** It runs after readiness goes false and *before* the server
+stops answering, which is the right order and the reason `Drain` exists as a separate
+step: the requests still in flight are the last ones whose commits will nudge the
+engine, and the engine should spend what is left of the window finishing rather than
+picking up work it will not finish.
+
+**`Close` finishes what is already claimed**, and it runs before the pool closes — "so
+a final write still has a database to write to", which is not incidental here, because
+the third transaction is exactly that final write. A shutdown that closed the pool
+first would send every in-flight message and record none of them, which is the
+worst-case shape for at-least-once: every one of them sent twice.
+
+**Then whatever is still unfinished is released** — `claimed_at = null`, one statement,
+for every lease the engine still holds. Another replica takes it immediately instead of
+waiting out the TTL. **A clean shutdown must not cost a lease:** the TTL exists for
+crashes, and a process that knows it is going has no excuse for being slow about
+saying so.
+
+Two consequences to state rather than discover:
+
+- **The 15 seconds is a number that has to fit.** `checkShutdown` sums every registered
+  step and refuses to start when the total exceeds `MaxShutdown`, naming both — so a
+  channel with a 30-second timeout under a 20-second `MaxShutdown` is a startup failure
+  on the machine that made the change, not a truncated shutdown in production six weeks
+  later.
+- **A send that outlives the close budget is abandoned, not cancelled.** The provider
+  may still deliver it. So the release leaves `attempts` incremented and the retry after
+  it is the at-least-once case again — the same case, not a new one, which is why there
+  is no second mechanism for it.
+
+The cron-invoked dispatcher stops through the same `Close`. `serve.Once` hands a task an
+unbounded context on purpose — "a migration that takes ten minutes is a migration, not
+a hang" — so the task has no deadline to stop at and stops on signal instead.
+
+### One mail instead of nine
+
+Two things are called grouping and only one of them is M12's. Collapsing is per
+notification and already done: ten comments on one post are one inbox line with
+`event_count = 10`. **Digesting is per channel**, and it is this milestone's.
+
+`rig_notification_digest` is `Immediate | Hourly | Daily | Weekly | Off`. Anything but
+`Immediate` means a delivery is not sent on its own: it waits for the window to close,
+and then every pending delivery for that account on that channel goes out as one
+message. The channel is handed the slice and decides what to say with it — "you have 2
+unread notifications" and a link to the inbox is the obvious rendering and rig does not
+write it, for the reason it writes no other template.
+
+`Off` is not the same as `is_enabled: false` and the difference is worth a sentence,
+because somebody will set the wrong one. `Off` means never send on this channel and
+still write the inbox line — the person will see it when they look. `is_enabled: false`
+means the same thing today and would stop meaning it if a future channel ever needed to
+refuse the recipient row too, so both exist and `Off` is the one to reach for.
+
+A digest is claimed as a unit under the same lease so two replicas do not both send
+one, which is the reason `deliver_at` on a deferred delivery is set to the window's
+close rather than left at the notification's own time: the due-set query does not need a
+second concept, and a digest is just a claim whose batch happens to share an account.
+
+### Retention
+
+Nothing in rig prunes anything. `rig_auth_log` grows forever, expired session tokens
+are never deleted — expiry is evaluated at read time and the rows accumulate — and
+M5.12 names both as known and unfixed. This milestone adds three more tables to a
+schema that already does not clean up after itself, and the busiest of them gets a row
+per person per channel per event.
+
+So the dispatch task takes a second rule, the way the file sweeper has two: recipient
+rows that are read and deleted, past `notifications.retention`, and the resolved
+notifications and link rows left with nothing pointing at them. Batched, for the reason
+every sweep here is batched. Refuse a retention shorter than the longest digest window
+at startup — a weekly digest under a daily retention is a digest assembled from rows
+that were deleted before it ran, and it would present as "the weekly mail is
+sometimes empty" rather than as a configuration error.
+
+`DispatchReport` follows `SweepReport` exactly, including the part that looks like
+noise and is not: **every count, including the zeros**, because "a pass that reaped
+nothing is the ordinary case and still worth seeing, because the absence of a line
+cannot be told from the job not running." Claimed, sent, failed, held outside a window,
+digested, pruned — and resolutions that produced no recipients at all, which is M12's
+silent failure mode and the only place it becomes visible.
+
+### What rig does not do here
+
+- **No transport.** No SMTP, no APNs, no FCM, no web-push, and no dependency for any of
+  them. Channels are an interface for the reason `account.Notifier` is one.
+- **No templates and no localisation**, same as M12.
+- **No exactly-once sending.** The inbox is exactly-once by index; a channel is
+  at-least-once with a stable key. No database promises more about a network call it
+  does not make, and the ones that claim to are describing the key, not the send.
+- **No leader election, no broker, no external queue.** A lease in Postgres, because
+  the database is already running and a second piece of infrastructure is a second
+  thing to deploy, monitor, and be down.
+- **No per-notification delivery state on the inbox line.** The delivery table knows.
+  A row a client live-syncs should not carry retry counts and SMTP errors, for the
+  reason `rig_identity_credential` lives apart from `rig_identity`.
+- **No read receipts and no delivery receipts to the sender.** Whether a mail was
+  opened is the provider's answer and a different product.
+- **No rate limiting per recipient.** `throttle` counts requests against a credential,
+  which is not the same question as "this person has had forty notifications this hour",
+  and answering the second one properly is a milestone rather than a column.
+
+### Verification
+
+The concurrency claims come first, because they are the ones a reader will not
+otherwise believe and the ones a bug in would be invisible in production until it was
+expensive:
+
+- **N dispatchers, one message.** Ten goroutines on one pool claiming from the same due
+  set against a counting channel: every delivery sent exactly once, and no claimant
+  blocked behind another. This is the `skip locked` assertion, and without it the lease
+  is a comment.
+- **A crashed claimant is recovered, and not before it should be.** Claim, never mark,
+  advance the injected clock past `claim_ttl`, claim again: the row comes back with
+  `attempts = 2`. Asserted with its inverse in the same test — before the TTL it does
+  not come back — because a lease that expires too eagerly is the failure that sends
+  everything twice.
+- **A clean shutdown gives the work back.** Claim, `Close`, assert `claimed_at is null`
+  on whatever was unfinished, then assert a second dispatcher takes it immediately
+  rather than after the TTL. Plus `checkShutdown` as a unit test: a close budget over
+  `MaxShutdown` refuses to boot and names both numbers.
+- **`max_attempts` terminates.** A channel that always fails reaches `Failed` and stops
+  being claimed, rather than consuming a lease forever and a log line every minute.
+
+All of these take the injected clock, the way `files.Config.now` does. A lease test that
+sleeps for real is slow, flaky, and deleted within a year.
+
+Then the settings arithmetic, which is where the ordinary bugs are: the three-step
+resolution asserted at each step and at the fallthrough; `is_enabled: false` writing no
+delivery row at all rather than a `Skipped` one; a window that wraps midnight in a
+non-UTC account zone, asserted at four times — inside, outside, and both sides of the
+wrap; `active_days` excluding a weekend and the held delivery landing on Monday morning
+rather than Saturday; and a delivery held and then released arriving once, not twice.
+
+Digests: an `Hourly` account with nine pending deliveries receives one message
+containing nine, and an `Immediate` account beside it in the same pass receives nine.
+Asserted together, because the interesting failure is one setting leaking into the
+other's batch.
+
+The example carries the end-to-end proof. `examples/todo` gains a recording channel —
+the `examples/auth` outbox shape, whose own doc explains why putting a live credential
+on a screen is acceptable only in a demo — and `make examples` asserts that a create
+produces a notification, a mail, and one of each.
+
+Honest gaps, two, and neither is closable by a test. Whether a digest *reads* well is
+not something a test can tell you. And at-least-once is only tolerable if a real
+channel actually passes `Delivery.ID` to its provider — that is the application's code,
+outside anything rig runs, and a doc comment on the interface is the entire enforcement
+mechanism. The section should say that rather than let the word "idempotency" imply
+otherwise.
+
+### Open questions for you
+
+**Is the in-process nudge worth it, now that the lease is the thing that makes it
+safe?** It is the reason a direct notification is immediate, and it is also the reason
+there are three claimants instead of one — the `Drain`/`Close` handshake, the release
+statement, and half the tests above exist for it. Cutting it makes this milestone a
+`serve.Task` and nothing else, at the cost of up to a tick before a reply notification
+reaches a mailbox. Note what it does *not* cost: the inbox is live either way, because
+the recipient row is committed and Electric carries it, so this is about email and push
+latency and nothing else. I lean keeping it, because "they got the mail four seconds
+later" is the difference somebody notices — but if M13 wants to be half its size this is
+the thing to cut, and because the lease is in the schema either way, cutting it now and
+adding it later changes no table.
+
+**What is `claim_ttl`'s default?** The number that matters is the slowest channel's own
+timeout, which rig cannot know. Too short and every slow provider's messages are claimed
+twice under normal load; too long and a crashed pod's queue sits idle for that long
+while nine healthy replicas walk past it. I lean 5m, refusing anything under 1m at
+boot, and documenting the relationship to the channel timeout as the one
+misconfiguration worth understanding before deploying this — but a default that assumes
+mail may be wrong for a project whose only channel is a websocket push that either
+works in 200ms or does not.
 
 ---
 
