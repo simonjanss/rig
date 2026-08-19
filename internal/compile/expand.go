@@ -102,6 +102,24 @@ func Expand(api ir.API, opt ExpandOptions) (ir.API, diag.List) {
 		out.Resources = append(out.Resources, expanded)
 	}
 
+	// The file shape, last, because a projection of the file table beats it.
+	//
+	// It is injected at all so that `files.expose: false` still has something for
+	// an upload to answer with — without it, a project that never syncs a file
+	// row would have endpoints returning a type the document does not contain.
+	// It is injected last so that a project which does expose the table gets the
+	// projected object, which carries the column bindings the persistence and
+	// sync generators read and the builtin has no way to know. One row, one
+	// struct, either way.
+	//
+	// Only where something has a file column. A shape nothing references is a
+	// type every client carries and nobody can obtain, and `files.enabled` on its
+	// own does not put a file on a row.
+	if slices.ContainsFunc(out.Resources, func(r ir.Resource) bool { return len(r.Files) > 0 }) &&
+		!have(ObjectRigFile) {
+		out.Objects = append(out.Objects, rigFileObject(wire))
+	}
+
 	return out, diags
 }
 
@@ -204,6 +222,33 @@ func expandResource(res ir.Resource, n *naming.Namer, opt ExpandOptions, exposed
 			continue
 		}
 		out.Endpoints = append(out.Endpoints, gen.build())
+	}
+
+	// The file endpoints, three per file column, beside the CRUD rather than
+	// under a resource of their own.
+	//
+	// The nesting is the design. It forces a handler to resolve the owning row
+	// through the generated repository before it touches a byte, and every
+	// generated read is tenant-scoped in SQL and narrowed further by
+	// `access: { scope: own }` — so you cannot upload to a row you cannot see,
+	// and an owner-scoped table's files are exactly as invisible as its rows.
+	// None of that is new machinery. A flat /files/{id} could not reach any of
+	// it without a second authorization model beside the first.
+	for _, fc := range out.Files {
+		for _, build := range []func() ir.Endpoint{
+			func() ir.Endpoint { return uploadFileEndpoint(res, fc, wire) },
+			func() ir.Endpoint { return downloadFileEndpoint(res, fc, wire) },
+			func() ir.Endpoint { return deleteFileEndpoint(res, fc, wire) },
+		} {
+			ep := build()
+			if existing := out.Endpoint(ep.Name); existing != nil {
+				diags.Add(diag.CodeEndpointShadowed, diag.At(res.Name+".endpoints."+ep.Name),
+					"%s.%s is hand-written, so the generated %s endpoint is not emitted",
+					res.Name, ep.Name, ep.Name)
+				continue
+			}
+			out.Endpoints = append(out.Endpoints, ep)
+		}
 	}
 
 	// The table's public list is resolved here, once, over everything the
@@ -338,21 +383,56 @@ func paginationParams(wire func(string) string) []ir.Field {
 	}
 }
 
+// createEndpoint makes a row.
+//
+// On a table with a file column it accepts a form as well as a JSON body, and
+// that is not a convenience. Without it, adding a row with a file is two
+// requests: the file column could never be `not null`, because the row has to
+// exist before an upload has anywhere to go, and a client that makes the first
+// request and not the second leaves a row rig has no business sweeping — it is
+// your table, and rig cannot know the row is meaningless.
+//
+// The form is the same body in a part named "json", plus one part per file
+// column. JSON stays first in the list, so a generator that wants "the" content
+// type is unchanged, and a request that arrives without a multipart content
+// type behaves exactly as it did before this existed.
+//
+// Create only. Replacing a file on a row that exists is what the upload
+// endpoint is for, and an update that could also carry bytes would be two ways
+// to do one thing with different transactional shapes.
 func createEndpoint(res ir.Resource) ir.Endpoint {
+	content := []string{MediaJSON}
+	errors := []int{400, 401, 403, 409, 422, 429, 500}
+
+	var parts []ir.FilePart
+	for _, fc := range res.Files {
+		parts = append(parts, filePartOf(fc))
+	}
+	if len(parts) > 0 {
+		content = append(content, MediaMultipart)
+		// The two an upload can answer and a JSON body cannot. They are listed
+		// on the endpoint rather than only on the upload route because this is
+		// the same endpoint, and a client that sends a form here can be told the
+		// file is too large or of a type the project refuses.
+		errors = append(errors, 413, 415)
+		slices.Sort(errors)
+	}
+
 	return ir.Endpoint{
 		Name:    ir.OpCreate,
 		Method:  "POST",
 		Path:    "",
 		Summary: "Create a " + res.Name + ".",
 		Request: ir.EndpointRequest{
-			ContentTypes: []string{MediaJSON},
+			ContentTypes: content,
+			FileParts:    parts,
 			BodyParams:   writableFields(res, ir.FieldOpCreate),
 		},
 		Responses: []ir.EndpointResponse{{
 			StatusCode: 201, ContentTypes: []string{MediaJSON},
 			BodyObject: res.Name, Description: "The created " + res.Name + ".",
 		}},
-		Errors: []int{400, 401, 403, 409, 422, 429, 500},
+		Errors: errors,
 		Impl: ir.EndpointImpl{
 			Kind: ir.EndpointGenerated, RepoMethod: "Create",
 			ServiceMethod: ir.OpCreate, HandlerName: ir.OpCreate + res.Name,
@@ -647,4 +727,137 @@ func deleteEndpoint(res ir.Resource, wire func(string) string) ir.Endpoint {
 			"reads but can be restored within the retention window."
 	}
 	return e
+}
+
+// uploadFileEndpoint attaches bytes to an existing row.
+func uploadFileEndpoint(res ir.Resource, fc ir.FileColumn, wire func(string) string) ir.Endpoint {
+	return ir.Endpoint{
+		Name:    "Upload" + fc.GoName(),
+		Method:  "POST",
+		Path:    "/{id}/" + fc.Segment,
+		Summary: "Attach a file to a " + res.Name + " as its " + humanRole(fc) + ".",
+		Description: "The form carries one part, named " + fc.Part + ". Nothing else in it is " +
+			"accepted.\n\n" +
+			"The type is sniffed from the bytes rather than taken from what the " +
+			"request claimed, and the sniffed type is what is stored and what a " +
+			"download announces. A file replacing an existing one does not delete " +
+			"it: a row that keeps its previous versions still points at the old " +
+			"file from every one of them.",
+		File: &fc,
+		Request: ir.EndpointRequest{
+			ContentTypes: []string{MediaMultipart},
+			PathParams:   []ir.Field{idParam(res, wire)},
+			FileParts:    []ir.FilePart{filePartOf(fc)},
+		},
+		Responses: []ir.EndpointResponse{{
+			StatusCode: 201, ContentTypes: []string{MediaJSON},
+			BodyObject: ObjectRigFile, Description: "The stored file.",
+		}},
+		Errors: []int{400, 401, 403, 404, 409, 413, 415, 422, 429, 500},
+		Impl: ir.EndpointImpl{
+			Kind: ir.EndpointGenerated, RepoMethod: "Get",
+			ServiceMethod: "Upload" + fc.GoName(),
+			HandlerName:   "Upload" + res.Name + fc.GoName(),
+		},
+	}
+}
+
+// downloadFileEndpoint serves the bytes back.
+//
+// The filename is the last segment for the browser's save dialog and for cache
+// busting, and it is not the lookup: the file identifier is. It is compared
+// against the stored name and a mismatch is a 404, and it never goes near the
+// storage key.
+//
+// Bytes flow through the API rather than through a signed storage URL, because
+// the endpoint is where the permission check lives. That is the cost of the URL
+// on the row being stable and unsigned, and it is the reason syncing it is safe.
+func downloadFileEndpoint(res ir.Resource, fc ir.FileColumn, wire func(string) string) ir.Endpoint {
+	return ir.Endpoint{
+		Name:    "Download" + fc.GoName(),
+		Method:  "GET",
+		Path:    "/{id}/" + fc.Segment + "/{fileId}/{filename}",
+		Summary: "Fetch a " + res.Name + "'s " + humanRole(fc) + ".",
+		Description: "Answers range and conditional requests, so a resumed download does not " +
+			"start over and a media element can seek.",
+		File: &fc,
+		Request: ir.EndpointRequest{
+			PathParams: []ir.Field{
+				idParam(res, wire),
+				{
+					Name: "FileID", Wire: wire("FileID"),
+					Type: ir.TypeUUID, TypeKind: ir.TypeKindPrimitive, GoType: "uuid.UUID",
+					Description: "Identifier of the file, from the row's " + fc.Role + " field.",
+				},
+				{
+					Name: "Filename", Wire: wire("Filename"),
+					Type: ir.TypeString, TypeKind: ir.TypeKindPrimitive, GoType: "string",
+					Description: "The file's own name. It has to match the stored one, and it " +
+						"is what the browser offers to save the download as.",
+				},
+			},
+		},
+		Responses: []ir.EndpointResponse{
+			{
+				StatusCode: 200, ContentTypes: []string{MediaOctet},
+				Description: "The file's bytes, announced as whatever they were sniffed to be.",
+			},
+			{
+				StatusCode: 206, ContentTypes: []string{MediaOctet},
+				Description: "The requested range of the file.",
+			},
+			{
+				StatusCode:  304,
+				Description: "The caller already has this version of the file.",
+			},
+		},
+		Errors: []int{400, 401, 403, 404, 429, 500},
+		Impl: ir.EndpointImpl{
+			Kind: ir.EndpointGenerated, RepoMethod: "Get",
+			ServiceMethod: "Download" + fc.GoName(),
+			HandlerName:   "Download" + res.Name + fc.GoName(),
+		},
+	}
+}
+
+// deleteFileEndpoint detaches the file and retires it.
+func deleteFileEndpoint(res ir.Resource, fc ir.FileColumn, wire func(string) string) ir.Endpoint {
+	return ir.Endpoint{
+		Name:    "Delete" + fc.GoName(),
+		Method:  "DELETE",
+		Path:    "/{id}/" + fc.Segment,
+		Summary: "Remove a " + res.Name + "'s " + humanRole(fc) + ".",
+		Description: "The column is cleared and the file is retired. Its bytes outlive the " +
+			"delete for as long as the file restore window, because a restore inside " +
+			"that window has to hand back a row pointing at something.",
+		File: &fc,
+		Request: ir.EndpointRequest{
+			PathParams: []ir.Field{idParam(res, wire)},
+		},
+		Responses: []ir.EndpointResponse{{
+			StatusCode: 204, Description: "The file was removed.",
+		}},
+		Errors: []int{400, 401, 403, 404, 409, 429, 500},
+		Impl: ir.EndpointImpl{
+			Kind: ir.EndpointGenerated, RepoMethod: "Get",
+			ServiceMethod: "Delete" + fc.GoName(),
+			HandlerName:   "Delete" + res.Name + fc.GoName(),
+		},
+	}
+}
+
+// filePartOf is the file column as a part of a form.
+func filePartOf(fc ir.FileColumn) ir.FilePart {
+	return ir.FilePart{
+		Name:     fc.Part,
+		Field:    fc.Field,
+		Role:     fc.Role,
+		Required: fc.Required,
+	}
+}
+
+// humanRole is the role as a sentence reads it: "profile image" rather than
+// "profileImage".
+func humanRole(fc ir.FileColumn) string {
+	return strings.ReplaceAll(strings.TrimSuffix(fc.Segment, "-file"), "-", " ")
 }

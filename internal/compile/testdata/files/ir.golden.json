@@ -2754,7 +2754,20 @@
             "permission": "profile.write",
             "request": {
               "content_types": [
-                "application/json"
+                "application/json",
+                "multipart/form-data"
+              ],
+              "file_parts": [
+                {
+                  "name": "profileImageFile",
+                  "field": "ProfileImageFileID",
+                  "role": "profileImage"
+                },
+                {
+                  "name": "bannerFile",
+                  "field": "BannerFileID",
+                  "role": "banner"
+                }
               ],
               "body_params": [
                 {
@@ -2825,6 +2838,8 @@
               401,
               403,
               409,
+              413,
+              415,
               422,
               429,
               500
@@ -3097,6 +3112,414 @@
               "service_method": "Update",
               "handler_name": "UpdateProfile"
             }
+          },
+          {
+            "name": "DeleteBannerFile",
+            "summary": "Remove a Profile's banner.",
+            "description": "The column is cleared and the file is retired. Its bytes outlive the delete for as long as the file restore window, because a restore inside that window has to hand back a row pointing at something.",
+            "method": "DELETE",
+            "path": "/{id}/banner-file",
+            "pattern": "DELETE /api/v1/profiles/{id}/banner-file",
+            "operation_id": "deleteProfileBannerFile",
+            "permission": "profile.banner_file.write",
+            "file": {
+              "role": "banner",
+              "column": "banner_file_id",
+              "field": "BannerFileID",
+              "part": "bannerFile",
+              "segment": "banner-file"
+            },
+            "request": {
+              "path_params": [
+                {
+                  "name": "ID",
+                  "wire": "id",
+                  "description": "Identifier of the Profile.",
+                  "type": "UUID",
+                  "type_kind": "Primitive",
+                  "go_type": "uuid.UUID"
+                }
+              ]
+            },
+            "responses": [
+              {
+                "status_code": 204,
+                "description": "The file was removed."
+              }
+            ],
+            "errors": [
+              400,
+              401,
+              403,
+              404,
+              409,
+              429,
+              500
+            ],
+            "impl": {
+              "kind": "Generated",
+              "repo_method": "Get",
+              "service_method": "DeleteBannerFile",
+              "handler_name": "DeleteProfileBannerFile"
+            }
+          },
+          {
+            "name": "UploadBannerFile",
+            "summary": "Attach a file to a Profile as its banner.",
+            "description": "The form carries one part, named bannerFile. Nothing else in it is accepted.\n\nThe type is sniffed from the bytes rather than taken from what the request claimed, and the sniffed type is what is stored and what a download announces. A file replacing an existing one does not delete it: a row that keeps its previous versions still points at the old file from every one of them.",
+            "method": "POST",
+            "path": "/{id}/banner-file",
+            "pattern": "POST /api/v1/profiles/{id}/banner-file",
+            "operation_id": "uploadProfileBannerFile",
+            "permission": "profile.banner_file.write",
+            "file": {
+              "role": "banner",
+              "column": "banner_file_id",
+              "field": "BannerFileID",
+              "part": "bannerFile",
+              "segment": "banner-file"
+            },
+            "request": {
+              "content_types": [
+                "multipart/form-data"
+              ],
+              "file_parts": [
+                {
+                  "name": "bannerFile",
+                  "field": "BannerFileID",
+                  "role": "banner"
+                }
+              ],
+              "path_params": [
+                {
+                  "name": "ID",
+                  "wire": "id",
+                  "description": "Identifier of the Profile.",
+                  "type": "UUID",
+                  "type_kind": "Primitive",
+                  "go_type": "uuid.UUID"
+                }
+              ]
+            },
+            "responses": [
+              {
+                "status_code": 201,
+                "description": "The stored file.",
+                "content_types": [
+                  "application/json"
+                ],
+                "body_object": "RigFile"
+              }
+            ],
+            "errors": [
+              400,
+              401,
+              403,
+              404,
+              409,
+              413,
+              415,
+              422,
+              429,
+              500
+            ],
+            "impl": {
+              "kind": "Generated",
+              "repo_method": "Get",
+              "service_method": "UploadBannerFile",
+              "handler_name": "UploadProfileBannerFile"
+            }
+          },
+          {
+            "name": "DownloadBannerFile",
+            "summary": "Fetch a Profile's banner.",
+            "description": "Answers range and conditional requests, so a resumed download does not start over and a media element can seek.",
+            "method": "GET",
+            "path": "/{id}/banner-file/{fileId}/{filename}",
+            "pattern": "GET /api/v1/profiles/{id}/banner-file/{fileId}/{filename}",
+            "operation_id": "downloadProfileBannerFile",
+            "permission": "profile.banner_file.read",
+            "file": {
+              "role": "banner",
+              "column": "banner_file_id",
+              "field": "BannerFileID",
+              "part": "bannerFile",
+              "segment": "banner-file"
+            },
+            "request": {
+              "path_params": [
+                {
+                  "name": "ID",
+                  "wire": "id",
+                  "description": "Identifier of the Profile.",
+                  "type": "UUID",
+                  "type_kind": "Primitive",
+                  "go_type": "uuid.UUID"
+                },
+                {
+                  "name": "FileID",
+                  "wire": "fileId",
+                  "description": "Identifier of the file, from the row's banner field.",
+                  "type": "UUID",
+                  "type_kind": "Primitive",
+                  "go_type": "uuid.UUID"
+                },
+                {
+                  "name": "Filename",
+                  "wire": "filename",
+                  "description": "The file's own name. It has to match the stored one, and it is what the browser offers to save the download as.",
+                  "type": "String",
+                  "type_kind": "Primitive",
+                  "go_type": "string"
+                }
+              ]
+            },
+            "responses": [
+              {
+                "status_code": 200,
+                "description": "The file's bytes, announced as whatever they were sniffed to be.",
+                "content_types": [
+                  "application/octet-stream"
+                ]
+              },
+              {
+                "status_code": 206,
+                "description": "The requested range of the file.",
+                "content_types": [
+                  "application/octet-stream"
+                ]
+              },
+              {
+                "status_code": 304,
+                "description": "The caller already has this version of the file."
+              }
+            ],
+            "errors": [
+              400,
+              401,
+              403,
+              404,
+              429,
+              500
+            ],
+            "impl": {
+              "kind": "Generated",
+              "repo_method": "Get",
+              "service_method": "DownloadBannerFile",
+              "handler_name": "DownloadProfileBannerFile"
+            }
+          },
+          {
+            "name": "DeleteProfileImageFile",
+            "summary": "Remove a Profile's profile image.",
+            "description": "The column is cleared and the file is retired. Its bytes outlive the delete for as long as the file restore window, because a restore inside that window has to hand back a row pointing at something.",
+            "method": "DELETE",
+            "path": "/{id}/profile-image-file",
+            "pattern": "DELETE /api/v1/profiles/{id}/profile-image-file",
+            "operation_id": "deleteProfileProfileImageFile",
+            "permission": "profile.profile_image_file.write",
+            "file": {
+              "role": "profileImage",
+              "column": "profile_image_file_id",
+              "field": "ProfileImageFileID",
+              "part": "profileImageFile",
+              "segment": "profile-image-file"
+            },
+            "request": {
+              "path_params": [
+                {
+                  "name": "ID",
+                  "wire": "id",
+                  "description": "Identifier of the Profile.",
+                  "type": "UUID",
+                  "type_kind": "Primitive",
+                  "go_type": "uuid.UUID"
+                }
+              ]
+            },
+            "responses": [
+              {
+                "status_code": 204,
+                "description": "The file was removed."
+              }
+            ],
+            "errors": [
+              400,
+              401,
+              403,
+              404,
+              409,
+              429,
+              500
+            ],
+            "impl": {
+              "kind": "Generated",
+              "repo_method": "Get",
+              "service_method": "DeleteProfileImageFile",
+              "handler_name": "DeleteProfileProfileImageFile"
+            }
+          },
+          {
+            "name": "UploadProfileImageFile",
+            "summary": "Attach a file to a Profile as its profile image.",
+            "description": "The form carries one part, named profileImageFile. Nothing else in it is accepted.\n\nThe type is sniffed from the bytes rather than taken from what the request claimed, and the sniffed type is what is stored and what a download announces. A file replacing an existing one does not delete it: a row that keeps its previous versions still points at the old file from every one of them.",
+            "method": "POST",
+            "path": "/{id}/profile-image-file",
+            "pattern": "POST /api/v1/profiles/{id}/profile-image-file",
+            "operation_id": "uploadProfileProfileImageFile",
+            "permission": "profile.profile_image_file.write",
+            "file": {
+              "role": "profileImage",
+              "column": "profile_image_file_id",
+              "field": "ProfileImageFileID",
+              "part": "profileImageFile",
+              "segment": "profile-image-file"
+            },
+            "request": {
+              "content_types": [
+                "multipart/form-data"
+              ],
+              "file_parts": [
+                {
+                  "name": "profileImageFile",
+                  "field": "ProfileImageFileID",
+                  "role": "profileImage"
+                }
+              ],
+              "path_params": [
+                {
+                  "name": "ID",
+                  "wire": "id",
+                  "description": "Identifier of the Profile.",
+                  "type": "UUID",
+                  "type_kind": "Primitive",
+                  "go_type": "uuid.UUID"
+                }
+              ]
+            },
+            "responses": [
+              {
+                "status_code": 201,
+                "description": "The stored file.",
+                "content_types": [
+                  "application/json"
+                ],
+                "body_object": "RigFile"
+              }
+            ],
+            "errors": [
+              400,
+              401,
+              403,
+              404,
+              409,
+              413,
+              415,
+              422,
+              429,
+              500
+            ],
+            "impl": {
+              "kind": "Generated",
+              "repo_method": "Get",
+              "service_method": "UploadProfileImageFile",
+              "handler_name": "UploadProfileProfileImageFile"
+            }
+          },
+          {
+            "name": "DownloadProfileImageFile",
+            "summary": "Fetch a Profile's profile image.",
+            "description": "Answers range and conditional requests, so a resumed download does not start over and a media element can seek.",
+            "method": "GET",
+            "path": "/{id}/profile-image-file/{fileId}/{filename}",
+            "pattern": "GET /api/v1/profiles/{id}/profile-image-file/{fileId}/{filename}",
+            "operation_id": "downloadProfileProfileImageFile",
+            "permission": "profile.profile_image_file.read",
+            "file": {
+              "role": "profileImage",
+              "column": "profile_image_file_id",
+              "field": "ProfileImageFileID",
+              "part": "profileImageFile",
+              "segment": "profile-image-file"
+            },
+            "request": {
+              "path_params": [
+                {
+                  "name": "ID",
+                  "wire": "id",
+                  "description": "Identifier of the Profile.",
+                  "type": "UUID",
+                  "type_kind": "Primitive",
+                  "go_type": "uuid.UUID"
+                },
+                {
+                  "name": "FileID",
+                  "wire": "fileId",
+                  "description": "Identifier of the file, from the row's profileImage field.",
+                  "type": "UUID",
+                  "type_kind": "Primitive",
+                  "go_type": "uuid.UUID"
+                },
+                {
+                  "name": "Filename",
+                  "wire": "filename",
+                  "description": "The file's own name. It has to match the stored one, and it is what the browser offers to save the download as.",
+                  "type": "String",
+                  "type_kind": "Primitive",
+                  "go_type": "string"
+                }
+              ]
+            },
+            "responses": [
+              {
+                "status_code": 200,
+                "description": "The file's bytes, announced as whatever they were sniffed to be.",
+                "content_types": [
+                  "application/octet-stream"
+                ]
+              },
+              {
+                "status_code": 206,
+                "description": "The requested range of the file.",
+                "content_types": [
+                  "application/octet-stream"
+                ]
+              },
+              {
+                "status_code": 304,
+                "description": "The caller already has this version of the file."
+              }
+            ],
+            "errors": [
+              400,
+              401,
+              403,
+              404,
+              429,
+              500
+            ],
+            "impl": {
+              "kind": "Generated",
+              "repo_method": "Get",
+              "service_method": "DownloadProfileImageFile",
+              "handler_name": "DownloadProfileProfileImageFile"
+            }
+          }
+        ],
+        "files": [
+          {
+            "role": "profileImage",
+            "column": "profile_image_file_id",
+            "field": "ProfileImageFileID",
+            "part": "profileImageFile",
+            "segment": "profile-image-file"
+          },
+          {
+            "role": "banner",
+            "column": "banner_file_id",
+            "field": "BannerFileID",
+            "part": "bannerFile",
+            "segment": "banner-file"
           }
         ],
         "storage": {
@@ -3402,7 +3825,16 @@
             "permission": "profile_attachment.write",
             "request": {
               "content_types": [
-                "application/json"
+                "application/json",
+                "multipart/form-data"
+              ],
+              "file_parts": [
+                {
+                  "name": "documentFile",
+                  "field": "DocumentFileID",
+                  "role": "document",
+                  "required": true
+                }
               ],
               "body_params": [
                 {
@@ -3488,6 +3920,8 @@
               401,
               403,
               409,
+              413,
+              415,
               422,
               429,
               500
@@ -3775,6 +4209,216 @@
               "service_method": "Update",
               "handler_name": "UpdateProfileAttachment"
             }
+          },
+          {
+            "name": "DeleteDocumentFile",
+            "summary": "Remove a ProfileAttachment's document.",
+            "description": "The column is cleared and the file is retired. Its bytes outlive the delete for as long as the file restore window, because a restore inside that window has to hand back a row pointing at something.",
+            "method": "DELETE",
+            "path": "/{id}/document-file",
+            "pattern": "DELETE /api/v1/profile-attachments/{id}/document-file",
+            "operation_id": "deleteProfileAttachmentDocumentFile",
+            "permission": "profile_attachment.document_file.write",
+            "file": {
+              "role": "document",
+              "column": "document_file_id",
+              "field": "DocumentFileID",
+              "part": "documentFile",
+              "segment": "document-file",
+              "required": true
+            },
+            "request": {
+              "path_params": [
+                {
+                  "name": "ID",
+                  "wire": "id",
+                  "description": "Identifier of the ProfileAttachment.",
+                  "type": "UUID",
+                  "type_kind": "Primitive",
+                  "go_type": "uuid.UUID"
+                }
+              ]
+            },
+            "responses": [
+              {
+                "status_code": 204,
+                "description": "The file was removed."
+              }
+            ],
+            "errors": [
+              400,
+              401,
+              403,
+              404,
+              409,
+              429,
+              500
+            ],
+            "impl": {
+              "kind": "Generated",
+              "repo_method": "Get",
+              "service_method": "DeleteDocumentFile",
+              "handler_name": "DeleteProfileAttachmentDocumentFile"
+            }
+          },
+          {
+            "name": "UploadDocumentFile",
+            "summary": "Attach a file to a ProfileAttachment as its document.",
+            "description": "The form carries one part, named documentFile. Nothing else in it is accepted.\n\nThe type is sniffed from the bytes rather than taken from what the request claimed, and the sniffed type is what is stored and what a download announces. A file replacing an existing one does not delete it: a row that keeps its previous versions still points at the old file from every one of them.",
+            "method": "POST",
+            "path": "/{id}/document-file",
+            "pattern": "POST /api/v1/profile-attachments/{id}/document-file",
+            "operation_id": "uploadProfileAttachmentDocumentFile",
+            "permission": "profile_attachment.document_file.write",
+            "file": {
+              "role": "document",
+              "column": "document_file_id",
+              "field": "DocumentFileID",
+              "part": "documentFile",
+              "segment": "document-file",
+              "required": true
+            },
+            "request": {
+              "content_types": [
+                "multipart/form-data"
+              ],
+              "file_parts": [
+                {
+                  "name": "documentFile",
+                  "field": "DocumentFileID",
+                  "role": "document",
+                  "required": true
+                }
+              ],
+              "path_params": [
+                {
+                  "name": "ID",
+                  "wire": "id",
+                  "description": "Identifier of the ProfileAttachment.",
+                  "type": "UUID",
+                  "type_kind": "Primitive",
+                  "go_type": "uuid.UUID"
+                }
+              ]
+            },
+            "responses": [
+              {
+                "status_code": 201,
+                "description": "The stored file.",
+                "content_types": [
+                  "application/json"
+                ],
+                "body_object": "RigFile"
+              }
+            ],
+            "errors": [
+              400,
+              401,
+              403,
+              404,
+              409,
+              413,
+              415,
+              422,
+              429,
+              500
+            ],
+            "impl": {
+              "kind": "Generated",
+              "repo_method": "Get",
+              "service_method": "UploadDocumentFile",
+              "handler_name": "UploadProfileAttachmentDocumentFile"
+            }
+          },
+          {
+            "name": "DownloadDocumentFile",
+            "summary": "Fetch a ProfileAttachment's document.",
+            "description": "Answers range and conditional requests, so a resumed download does not start over and a media element can seek.",
+            "method": "GET",
+            "path": "/{id}/document-file/{fileId}/{filename}",
+            "pattern": "GET /api/v1/profile-attachments/{id}/document-file/{fileId}/{filename}",
+            "operation_id": "downloadProfileAttachmentDocumentFile",
+            "permission": "profile_attachment.document_file.read",
+            "file": {
+              "role": "document",
+              "column": "document_file_id",
+              "field": "DocumentFileID",
+              "part": "documentFile",
+              "segment": "document-file",
+              "required": true
+            },
+            "request": {
+              "path_params": [
+                {
+                  "name": "ID",
+                  "wire": "id",
+                  "description": "Identifier of the ProfileAttachment.",
+                  "type": "UUID",
+                  "type_kind": "Primitive",
+                  "go_type": "uuid.UUID"
+                },
+                {
+                  "name": "FileID",
+                  "wire": "fileId",
+                  "description": "Identifier of the file, from the row's document field.",
+                  "type": "UUID",
+                  "type_kind": "Primitive",
+                  "go_type": "uuid.UUID"
+                },
+                {
+                  "name": "Filename",
+                  "wire": "filename",
+                  "description": "The file's own name. It has to match the stored one, and it is what the browser offers to save the download as.",
+                  "type": "String",
+                  "type_kind": "Primitive",
+                  "go_type": "string"
+                }
+              ]
+            },
+            "responses": [
+              {
+                "status_code": 200,
+                "description": "The file's bytes, announced as whatever they were sniffed to be.",
+                "content_types": [
+                  "application/octet-stream"
+                ]
+              },
+              {
+                "status_code": 206,
+                "description": "The requested range of the file.",
+                "content_types": [
+                  "application/octet-stream"
+                ]
+              },
+              {
+                "status_code": 304,
+                "description": "The caller already has this version of the file."
+              }
+            ],
+            "errors": [
+              400,
+              401,
+              403,
+              404,
+              429,
+              500
+            ],
+            "impl": {
+              "kind": "Generated",
+              "repo_method": "Get",
+              "service_method": "DownloadDocumentFile",
+              "handler_name": "DownloadProfileAttachmentDocumentFile"
+            }
+          }
+        ],
+        "files": [
+          {
+            "role": "document",
+            "column": "document_file_id",
+            "field": "DocumentFileID",
+            "part": "documentFile",
+            "segment": "document-file",
+            "required": true
           }
         ],
         "storage": {
@@ -4767,11 +5411,39 @@
     ],
     "permissions": [
       {
+        "key": "profile.banner_file.read",
+        "name": "Read the banner of profiles",
+        "description": "Download the banner of profiles — Somebody's public face, with pictures attached to it.",
+        "resource": "Profile",
+        "action": "banner_file.read"
+      },
+      {
+        "key": "profile.banner_file.write",
+        "name": "Replace the banner of profiles",
+        "description": "Attach, replace and remove the banner of profiles — Somebody's public face, with pictures attached to it. Held in addition to profile.write rather than implied by it: a role that may edit the row is not automatically a role that may change its banner.",
+        "resource": "Profile",
+        "action": "banner_file.write"
+      },
+      {
         "key": "profile.delete",
         "name": "Delete profiles",
         "description": "Delete profiles — Somebody's public face, with pictures attached to it.",
         "resource": "Profile",
         "action": "delete"
+      },
+      {
+        "key": "profile.profile_image_file.read",
+        "name": "Read the profile image of profiles",
+        "description": "Download the profile image of profiles — Somebody's public face, with pictures attached to it.",
+        "resource": "Profile",
+        "action": "profile_image_file.read"
+      },
+      {
+        "key": "profile.profile_image_file.write",
+        "name": "Replace the profile image of profiles",
+        "description": "Attach, replace and remove the profile image of profiles — Somebody's public face, with pictures attached to it. Held in addition to profile.write rather than implied by it: a role that may edit the row is not automatically a role that may change its profile image.",
+        "resource": "Profile",
+        "action": "profile_image_file.write"
       },
       {
         "key": "profile.read",
@@ -4793,6 +5465,20 @@
         "description": "Delete profileattachments — A gallery is a table. Many files against one row is a child table with one file column, not a second mechanism.",
         "resource": "ProfileAttachment",
         "action": "delete"
+      },
+      {
+        "key": "profile_attachment.document_file.read",
+        "name": "Read the document of profileattachments",
+        "description": "Download the document of profileattachments — A gallery is a table. Many files against one row is a child table with one file column, not a second mechanism.",
+        "resource": "ProfileAttachment",
+        "action": "document_file.read"
+      },
+      {
+        "key": "profile_attachment.document_file.write",
+        "name": "Replace the document of profileattachments",
+        "description": "Attach, replace and remove the document of profileattachments — A gallery is a table. Many files against one row is a child table with one file column, not a second mechanism. Held in addition to profile_attachment.write rather than implied by it: a role that may edit the row is not automatically a role that may change its document.",
+        "resource": "ProfileAttachment",
+        "action": "document_file.write"
       },
       {
         "key": "profile_attachment.read",

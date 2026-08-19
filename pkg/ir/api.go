@@ -338,6 +338,17 @@ type Resource struct {
 	Fields    []ResourceField `json:"fields"`
 	Endpoints []Endpoint      `json:"endpoints"`
 
+	// Files are this resource's file columns, in the order they appear on the
+	// table. Each one yields an upload, a download and a delete endpoint, two
+	// permission keys, and a part on the multipart form the create also accepts.
+	//
+	// Resolved once, where the schema is still in scope: recognizing one means
+	// reading the table's foreign keys, and by the time a generator holds a
+	// resource the constraints are gone. A generator that re-derived it from a
+	// field name would be re-deriving the convention the compiler exists to have
+	// already settled.
+	Files []FileColumn `json:"files,omitempty"`
+
 	// Storage is nil for a virtual resource with no table behind it.
 	Storage *ResourceStorage `json:"storage,omitempty"`
 	// Electric is set when the resource exposes a live-sync shape endpoint.
@@ -570,6 +581,14 @@ type Endpoint struct {
 	// everybody's are two grants, which is the whole point of the parameter.
 	WidePermission string `json:"wide_permission,omitempty"`
 
+	// File is the file column this endpoint acts on, set on the three rig
+	// synthesizes per file column and nil on everything else.
+	//
+	// The upload's own [EndpointRequest.FileParts] says what the form carries;
+	// this says which column the bytes end up on, which the download and the
+	// delete need just as much and neither of them has a form.
+	File *FileColumn `json:"file,omitempty"`
+
 	Request   EndpointRequest    `json:"request"`
 	Responses []EndpointResponse `json:"responses"`
 	// Errors are the standard failure statuses this endpoint can return. They
@@ -611,6 +630,42 @@ type EndpointRequest struct {
 	// BodyObject names a whole object as the body, used instead of BodyParams.
 	BodyObject string `json:"body_object,omitempty"`
 }
+
+// FileColumn is one `<role>_file_id` column on a resource: a single file
+// attached to each row, in a named role.
+//
+// The column is the declaration, so everything here is derived from its name
+// and nothing is configurable. It is spelled out rather than left to each
+// generator because five things follow from one column — three endpoints, a
+// form part, two permission keys, a Go field and a path segment — and five
+// derivations of one convention is five places for it to drift.
+type FileColumn struct {
+	// Role is the `<role>` from `<role>_file_id`, in the API's own casing, for
+	// example "profileImage".
+	Role string `json:"role"`
+	// Column is the column itself, for example "profile_image_file_id". It is
+	// what the upload writes and the download reads, and it is the one member
+	// [FilePart] deliberately does not carry.
+	Column string `json:"column"`
+	// Field is the Go field on the row, for example "ProfileImageFileID".
+	Field string `json:"field"`
+	// Part is the multipart part's name, for example "profileImageFile".
+	Part string `json:"part"`
+	// Segment is the path segment the file endpoints sit under, for example
+	// "profile-image-file". It is derived here so the router, the client and a
+	// specification cannot spell it three ways.
+	Segment string `json:"segment"`
+	// Required says the column cannot be null.
+	Required bool `json:"required,omitempty"`
+}
+
+// GoName is the column's Go name without the identifier suffix, for example
+// "ProfileImageFile" out of "ProfileImageFileID".
+//
+// It is the stem every generated identifier for this column is built from —
+// UploadProfileImageFile, DownloadProfileImageFile, the member on the create's
+// files struct — so that four generators do not each decide where to cut.
+func (f FileColumn) GoName() string { return strings.TrimSuffix(f.Field, "ID") }
 
 // FilePart is one file a multipart request carries.
 type FilePart struct {

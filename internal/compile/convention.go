@@ -1,6 +1,7 @@
 package compile
 
 import (
+	"slices"
 	"strings"
 
 	"github.com/simonjanss/rig/pkg/ir"
@@ -242,12 +243,44 @@ func FileRole(column string) (role string, ok bool) {
 // it is. A `cover_file_id` pointing at some other table is an ordinary foreign
 // key that happens to be named confusingly, and it gets the ordinary naming
 // advice rather than this exemption.
-func isFileColumn(c *ir.Column) bool {
-	if c.ForeignKey == nil || c.ForeignKey.Table != FileTable {
+//
+// The target is read from the table's constraints as well as from the column,
+// because the shape rig recommends is the one [ir.Column.ForeignKey] cannot
+// see. Tenant-safety wants a composite key — `(tenant_id, cover_file_id)`
+// referencing `rig_file (tenant_id, id)` — so that attaching another tenant's
+// file is a constraint violation rather than something a hook has to remember.
+// Composite constraints live on the table, and a recognition that consulted
+// only the convenient denormalized field would fail on precisely the schema
+// this convention exists to encourage.
+func isFileColumn(t *ir.Table, c *ir.Column) bool {
+	if _, ok := FileRole(c.Name); !ok {
 		return false
 	}
-	_, ok := FileRole(c.Name)
-	return ok
+	return fileKeyTarget(t, c.Name) == FileTable
+}
+
+// fileKeyTarget names the table a column's foreign key points at, looking at the
+// column's own key first and then at every constraint on the table. Empty when
+// the column is in no foreign key at all.
+func fileKeyTarget(t *ir.Table, column string) string {
+	if c := columnByName(t, column); c != nil && c.ForeignKey != nil {
+		return c.ForeignKey.Table
+	}
+	for _, fk := range t.ForeignKeys {
+		if slices.Contains(fk.Columns, column) {
+			return fk.ForeignTable
+		}
+	}
+	return ""
+}
+
+func columnByName(t *ir.Table, name string) *ir.Column {
+	for i := range t.Columns {
+		if t.Columns[i].Name == name {
+			return &t.Columns[i]
+		}
+	}
+	return nil
 }
 
 // isAuditActorColumn reports whether a column names who or what performed an

@@ -8,6 +8,12 @@ const (
 	EnumErrorCode    = "ErrorCode"
 	ObjectError      = "Error"
 	ObjectPagination = "Pagination"
+	// ObjectRigFile is what an upload answers with and what a file column points
+	// at. It is spelled the way projecting [FileTable] would spell it, because
+	// with `files.expose` set the projection produces exactly this name and one
+	// of the two has to win — an exposed project with two structs for one row
+	// would leave the upload method picking between them.
+	ObjectRigFile = "RigFile"
 )
 
 // ErrorCode pairs an HTTP status with the machine-readable code clients switch
@@ -82,6 +88,61 @@ func errorObject(wire func(string) string) ir.Object {
 					"the request body that failed — one member per field, holding the " +
 					"problem with that field — so a client can put each message beside " +
 					"the control it belongs to.",
+			},
+		},
+	}
+}
+
+// rigFileObject is one uploaded file, as a client sees it.
+//
+// It is injected whether or not `files.expose` projects the table, because a
+// project that never syncs a file row still uploads to one and an upload has to
+// answer with something. Where the projection does happen it produces the same
+// name and [Expand]'s guard keeps whichever arrived first, so the two spellings
+// have to agree — which is why the fields here are exactly the ones rig_file's
+// own table configuration exposes, and in the same order.
+//
+// What is not here is the point of it. The storage key, the checksum, the
+// declared content type and the tenant are the server's bookkeeping. The
+// storage key is the one that would actually matter: it is what a signed URL is
+// built from, and putting it in a shape a client syncs is the same class of
+// mistake as syncing a password hash.
+func rigFileObject(wire func(string) string) ir.Object {
+	return ir.Object{
+		Name:        ObjectRigFile,
+		Description: "One uploaded file. Metadata only; the bytes are fetched from Url.",
+		Origin:      ir.OriginBuiltin,
+		Fields: []ir.Field{
+			{
+				Name: "ID", Wire: wire("ID"),
+				Type: ir.TypeUUID, TypeKind: ir.TypeKindPrimitive, GoType: "uuid.UUID",
+				Description: "Identifier of the file.",
+			},
+			{
+				Name: "URL", Wire: wire("URL"),
+				Type: ir.TypeString, TypeKind: ir.TypeKindPrimitive, GoType: "*string",
+				Modifiers: []string{ir.ModifierNullable},
+				Description: "Where the file is served from. Stable and unsigned, so it is safe " +
+					"to keep and to sync and grants nothing on its own: the endpoint behind " +
+					"it still checks the caller. Null until the upload is finished.",
+			},
+			{
+				Name: "FileName", Wire: wire("FileName"),
+				Type: ir.TypeString, TypeKind: ir.TypeKindPrimitive, GoType: "string",
+				Description: "What the file was called when it arrived. It is for the save " +
+					"dialog, and it is not a path: if you write the file somewhere, you " +
+					"decide where and you sanitize what.",
+			},
+			{
+				Name: "ContentType", Wire: wire("ContentType"),
+				Type: ir.TypeString, TypeKind: ir.TypeKindPrimitive, GoType: "string",
+				Description: "What the bytes were sniffed to be, which is what a download " +
+					"announces. It is not necessarily what the client claimed on the way up.",
+			},
+			{
+				Name: "SizeBytes", Wire: wire("SizeBytes"),
+				Type: ir.TypeInt64, TypeKind: ir.TypeKindPrimitive, GoType: "int64",
+				Description: "How large the file is, in bytes.",
 			},
 		},
 	}
