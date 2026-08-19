@@ -1,0 +1,5188 @@
+{
+  "ir_version": 1,
+  "generated_by": "rig (test)",
+  "api": {
+    "name": "demo",
+    "version": "v1",
+    "base_path": "/api/v1",
+    "revision_header": "API-Revision",
+    "enums": [
+      {
+        "name": "ErrorCode",
+        "description": "Machine-readable reason a request failed.",
+        "values": [
+          {
+            "name": "BadRequest",
+            "wire": "BadRequest",
+            "description": "The request was malformed or a parameter could not be parsed."
+          },
+          {
+            "name": "Unauthorized",
+            "wire": "Unauthorized",
+            "description": "No valid session or API key was presented."
+          },
+          {
+            "name": "Forbidden",
+            "wire": "Forbidden",
+            "description": "The caller is known but not permitted to do this."
+          },
+          {
+            "name": "NotFound",
+            "wire": "NotFound",
+            "description": "No such resource, or it belongs to another tenant."
+          },
+          {
+            "name": "Conflict",
+            "wire": "Conflict",
+            "description": "The request conflicts with the current state of the resource."
+          },
+          {
+            "name": "UnprocessableEntity",
+            "wire": "UnprocessableEntity",
+            "description": "The request was well-formed but failed validation."
+          },
+          {
+            "name": "RateLimited",
+            "wire": "RateLimited",
+            "description": "Too many requests. Retry after the interval in the Retry-After header."
+          },
+          {
+            "name": "TooLarge",
+            "wire": "TooLarge",
+            "description": "The request body is larger than this endpoint accepts."
+          },
+          {
+            "name": "UnsupportedMediaType",
+            "wire": "UnsupportedMediaType",
+            "description": "The body's content type is not one this endpoint accepts."
+          },
+          {
+            "name": "UpgradeRequired",
+            "wire": "UpgradeRequired",
+            "description": "The client was built against an API revision this server no longer serves."
+          },
+          {
+            "name": "Internal",
+            "wire": "Internal",
+            "description": "Something went wrong on the server."
+          }
+        ]
+      }
+    ],
+    "objects": [
+      {
+        "name": "Error",
+        "description": "Returned whenever a request fails.",
+        "fields": [
+          {
+            "name": "Code",
+            "wire": "code",
+            "description": "Machine-readable reason the request failed.",
+            "type": "ErrorCode",
+            "type_kind": "Enum",
+            "go_type": "ErrorCode"
+          },
+          {
+            "name": "Message",
+            "wire": "message",
+            "description": "Human-readable explanation. Not intended for clients to parse.",
+            "type": "String",
+            "type_kind": "Primitive",
+            "go_type": "string"
+          },
+          {
+            "name": "RequestID",
+            "wire": "requestId",
+            "description": "Identifier of this request, for correlating with server logs.",
+            "type": "String",
+            "type_kind": "Primitive",
+            "go_type": "string",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "Fields",
+            "wire": "fields",
+            "description": "Present when the failure was validation. It is shaped like the request body that failed — one member per field, holding the problem with that field — so a client can put each message beside the control it belongs to.",
+            "type": "JSON",
+            "type_kind": "Primitive",
+            "go_type": "any",
+            "modifiers": [
+              "Nullable"
+            ]
+          }
+        ],
+        "origin": "Builtin"
+      },
+      {
+        "name": "Pagination",
+        "description": "Where the returned page sits within the full result set.",
+        "fields": [
+          {
+            "name": "Offset",
+            "wire": "offset",
+            "description": "Number of rows skipped before this page.",
+            "type": "Int",
+            "type_kind": "Primitive",
+            "go_type": "int"
+          },
+          {
+            "name": "Limit",
+            "wire": "limit",
+            "description": "Maximum number of rows in this page.",
+            "type": "Int",
+            "type_kind": "Primitive",
+            "go_type": "int"
+          },
+          {
+            "name": "Total",
+            "wire": "total",
+            "description": "Total number of rows matching the query, ignoring pagination.",
+            "type": "Int64",
+            "type_kind": "Primitive",
+            "go_type": "int64"
+          }
+        ],
+        "origin": "Builtin"
+      },
+      {
+        "name": "Profile",
+        "description": "Somebody's public face, with pictures attached to it.",
+        "fields": [
+          {
+            "name": "ID",
+            "wire": "id",
+            "description": "Unique identifier for this row.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "uuid.UUID",
+            "read_only": true,
+            "column": {
+              "table": "profile",
+              "name": "id",
+              "sql_type": "uuid",
+              "nullable": false,
+              "scan": "UUID"
+            }
+          },
+          {
+            "name": "TenantID",
+            "wire": "tenantId",
+            "description": "Tenant this row belongs to. Every query is scoped by it.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "uuid.UUID",
+            "read_only": true,
+            "column": {
+              "table": "profile",
+              "name": "tenant_id",
+              "sql_type": "uuid",
+              "nullable": false,
+              "scan": "UUID"
+            }
+          },
+          {
+            "name": "CreatedAt",
+            "wire": "createdAt",
+            "description": "When this row was created. Set automatically and never changes.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "time.Time",
+            "read_only": true,
+            "column": {
+              "table": "profile",
+              "name": "created_at",
+              "sql_type": "timestamptz",
+              "nullable": false,
+              "scan": "Timestamptz"
+            }
+          },
+          {
+            "name": "DisplayName",
+            "wire": "displayName",
+            "description": "What to call them.",
+            "type": "String",
+            "type_kind": "Primitive",
+            "go_type": "string",
+            "column": {
+              "table": "profile",
+              "name": "display_name",
+              "sql_type": "text",
+              "nullable": false,
+              "scan": "Direct"
+            }
+          },
+          {
+            "name": "ProfileImageFileID",
+            "wire": "profileImageFileId",
+            "description": "The picture. A <role>_file_id column is the declaration: the role names the endpoints and the permission keys, and rig_file is the only table it could point at, so the naming rule exempts it.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "*uuid.UUID",
+            "modifiers": [
+              "Nullable"
+            ],
+            "column": {
+              "table": "profile",
+              "name": "profile_image_file_id",
+              "sql_type": "uuid",
+              "nullable": true,
+              "scan": "UUID"
+            }
+          },
+          {
+            "name": "BannerFileID",
+            "wire": "bannerFileId",
+            "description": "A second one on the same table, which is the reason the role is in the name at all. The rule's own suggestion, rig_file_id, allows exactly one.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "*uuid.UUID",
+            "modifiers": [
+              "Nullable"
+            ],
+            "column": {
+              "table": "profile",
+              "name": "banner_file_id",
+              "sql_type": "uuid",
+              "nullable": true,
+              "scan": "UUID"
+            }
+          }
+        ],
+        "origin": "Projected"
+      },
+      {
+        "name": "ProfileAttachment",
+        "description": "A gallery is a table. Many files against one row is a child table with one file column, not a second mechanism.",
+        "fields": [
+          {
+            "name": "ID",
+            "wire": "id",
+            "description": "Unique identifier for this row.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "uuid.UUID",
+            "read_only": true,
+            "column": {
+              "table": "profile_attachment",
+              "name": "id",
+              "sql_type": "uuid",
+              "nullable": false,
+              "scan": "UUID"
+            }
+          },
+          {
+            "name": "TenantID",
+            "wire": "tenantId",
+            "description": "Tenant this row belongs to. Every query is scoped by it.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "uuid.UUID",
+            "read_only": true,
+            "column": {
+              "table": "profile_attachment",
+              "name": "tenant_id",
+              "sql_type": "uuid",
+              "nullable": false,
+              "scan": "UUID"
+            }
+          },
+          {
+            "name": "CreatedAt",
+            "wire": "createdAt",
+            "description": "When this row was created. Set automatically and never changes.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "time.Time",
+            "read_only": true,
+            "column": {
+              "table": "profile_attachment",
+              "name": "created_at",
+              "sql_type": "timestamptz",
+              "nullable": false,
+              "scan": "Timestamptz"
+            }
+          },
+          {
+            "name": "ProfileID",
+            "wire": "profileId",
+            "description": "Reached through a composite key carrying the tenant, which is the shape rig recommends wherever the target is tenant-scoped. Its index leads with the tenant, and that is the index the generated queries want.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "uuid.UUID",
+            "column": {
+              "table": "profile_attachment",
+              "name": "profile_id",
+              "sql_type": "uuid",
+              "nullable": false,
+              "scan": "UUID"
+            }
+          },
+          {
+            "name": "DocumentFileID",
+            "wire": "documentFileId",
+            "description": "The same shape, deliberately left without an index so the rule has something to say. Before the tenant-carrying form was denormalized onto its column, it had nothing to say about either of these.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "uuid.UUID",
+            "column": {
+              "table": "profile_attachment",
+              "name": "document_file_id",
+              "sql_type": "uuid",
+              "nullable": false,
+              "scan": "UUID"
+            }
+          },
+          {
+            "name": "ThumbnailFileID",
+            "wire": "thumbnailFileId",
+            "description": "The control. Named like a file column and pointing at profile instead, so it is not one — and it still gets the ordinary naming advice.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "*uuid.UUID",
+            "modifiers": [
+              "Nullable"
+            ],
+            "column": {
+              "table": "profile_attachment",
+              "name": "thumbnail_file_id",
+              "sql_type": "uuid",
+              "nullable": true,
+              "scan": "UUID"
+            }
+          },
+          {
+            "name": "Caption",
+            "wire": "caption",
+            "description": "What the attachment is.",
+            "type": "String",
+            "type_kind": "Primitive",
+            "go_type": "*string",
+            "modifiers": [
+              "Nullable"
+            ],
+            "column": {
+              "table": "profile_attachment",
+              "name": "caption",
+              "sql_type": "text",
+              "nullable": true,
+              "scan": "Direct"
+            }
+          }
+        ],
+        "origin": "Projected"
+      },
+      {
+        "name": "ProfileAttachmentFilter",
+        "description": "Conditions a ProfileAttachment must satisfy to match a search.",
+        "fields": [
+          {
+            "name": "Equals",
+            "wire": "equals",
+            "description": "Fields that must equal the given value.",
+            "type": "ProfileAttachmentFilterEquals",
+            "type_kind": "Object",
+            "go_type": "*ProfileAttachmentFilterEquals",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "NotEquals",
+            "wire": "notEquals",
+            "description": "Fields that must not equal the given value.",
+            "type": "ProfileAttachmentFilterEquals",
+            "type_kind": "Object",
+            "go_type": "*ProfileAttachmentFilterEquals",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "GreaterThan",
+            "wire": "greaterThan",
+            "description": "Fields that must be greater than the given value.",
+            "type": "ProfileAttachmentFilterRange",
+            "type_kind": "Object",
+            "go_type": "*ProfileAttachmentFilterRange",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "SmallerThan",
+            "wire": "smallerThan",
+            "description": "Fields that must be less than the given value.",
+            "type": "ProfileAttachmentFilterRange",
+            "type_kind": "Object",
+            "go_type": "*ProfileAttachmentFilterRange",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "GreaterOrEqual",
+            "wire": "greaterOrEqual",
+            "description": "Fields that must be greater than or equal to the given value.",
+            "type": "ProfileAttachmentFilterRange",
+            "type_kind": "Object",
+            "go_type": "*ProfileAttachmentFilterRange",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "SmallerOrEqual",
+            "wire": "smallerOrEqual",
+            "description": "Fields that must be less than or equal to the given value.",
+            "type": "ProfileAttachmentFilterRange",
+            "type_kind": "Object",
+            "go_type": "*ProfileAttachmentFilterRange",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "Contains",
+            "wire": "contains",
+            "description": "Fields that must be one of the given values.",
+            "type": "ProfileAttachmentFilterContains",
+            "type_kind": "Object",
+            "go_type": "*ProfileAttachmentFilterContains",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "NotContains",
+            "wire": "notContains",
+            "description": "Fields that must not be one of the given values.",
+            "type": "ProfileAttachmentFilterContains",
+            "type_kind": "Object",
+            "go_type": "*ProfileAttachmentFilterContains",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "Like",
+            "wire": "like",
+            "description": "Text fields that must match the given pattern.",
+            "type": "ProfileAttachmentFilterLike",
+            "type_kind": "Object",
+            "go_type": "*ProfileAttachmentFilterLike",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "NotLike",
+            "wire": "notLike",
+            "description": "Text fields that must not match the given pattern.",
+            "type": "ProfileAttachmentFilterLike",
+            "type_kind": "Object",
+            "go_type": "*ProfileAttachmentFilterLike",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "Null",
+            "wire": "null",
+            "description": "Fields that must be null.",
+            "type": "ProfileAttachmentFilterNull",
+            "type_kind": "Object",
+            "go_type": "*ProfileAttachmentFilterNull",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "NotNull",
+            "wire": "notNull",
+            "description": "Fields that must not be null.",
+            "type": "ProfileAttachmentFilterNull",
+            "type_kind": "Object",
+            "go_type": "*ProfileAttachmentFilterNull",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "OrCondition",
+            "wire": "orCondition",
+            "description": "Combine this filter's conditions with OR instead of AND.",
+            "type": "Bool",
+            "type_kind": "Primitive",
+            "go_type": "bool"
+          },
+          {
+            "name": "NestedFilters",
+            "wire": "nestedFilters",
+            "description": "Sub-filters combined with this one, so that AND and OR can be mixed to any depth.",
+            "type": "ProfileAttachmentFilter",
+            "type_kind": "Object",
+            "go_type": "[]ProfileAttachmentFilter",
+            "modifiers": [
+              "Array"
+            ]
+          },
+          {
+            "name": "Without",
+            "wire": "without",
+            "description": "Relations with no row matching the given conditions. An empty one asks for no related row at all.\n\nThis is where a negation belongs when what you mean is \"not\": it negates whether a matching related row exists, so a row with no related row at all satisfies it. The negative operators above negate the comparison instead and still require the related row to be there — \"no related row called X\" is here, \"a related row not called X\" is NotEquals.",
+            "type": "ProfileAttachmentFilterWithout",
+            "type_kind": "Object",
+            "go_type": "*ProfileAttachmentFilterWithout",
+            "modifiers": [
+              "Nullable"
+            ]
+          }
+        ],
+        "origin": "Filter"
+      },
+      {
+        "name": "ProfileAttachmentFilterContains",
+        "description": "Set-membership conditions on ProfileAttachment fields.",
+        "fields": [
+          {
+            "name": "ID",
+            "wire": "id",
+            "description": "Unique identifier for this row.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "[]uuid.UUID",
+            "modifiers": [
+              "Array"
+            ]
+          },
+          {
+            "name": "CreatedAt",
+            "wire": "createdAt",
+            "description": "When this row was created. Set automatically and never changes.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "[]time.Time",
+            "modifiers": [
+              "Array"
+            ]
+          },
+          {
+            "name": "ProfileID",
+            "wire": "profileId",
+            "description": "Reached through a composite key carrying the tenant, which is the shape rig recommends wherever the target is tenant-scoped. Its index leads with the tenant, and that is the index the generated queries want.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "[]uuid.UUID",
+            "modifiers": [
+              "Array"
+            ]
+          },
+          {
+            "name": "DocumentFileID",
+            "wire": "documentFileId",
+            "description": "The same shape, deliberately left without an index so the rule has something to say. Before the tenant-carrying form was denormalized onto its column, it had nothing to say about either of these.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "[]uuid.UUID",
+            "modifiers": [
+              "Array"
+            ]
+          },
+          {
+            "name": "ThumbnailFileID",
+            "wire": "thumbnailFileId",
+            "description": "The control. Named like a file column and pointing at profile instead, so it is not one — and it still gets the ordinary naming advice.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "[]uuid.UUID",
+            "modifiers": [
+              "Array"
+            ]
+          },
+          {
+            "name": "Caption",
+            "wire": "caption",
+            "description": "What the attachment is.",
+            "type": "String",
+            "type_kind": "Primitive",
+            "go_type": "[]string",
+            "modifiers": [
+              "Array"
+            ]
+          },
+          {
+            "name": "DocumentFile",
+            "wire": "documentFile",
+            "description": "Conditions on this row's DocumentFile.\n\nA row with no DocumentFile never matches, and that holds for the negative operators too: under NotEquals this asks whether the DocumentFile is there and differs, so a row without one fails that as well. To ask the other question — no matching DocumentFile, which a row with none satisfies — use Without.DocumentFile.",
+            "type": "RigFileFilterContains",
+            "type_kind": "Object",
+            "go_type": "*RigFileFilterContains",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "Profile",
+            "wire": "profile",
+            "description": "Conditions on this row's Profile.\n\nA row with no Profile never matches, and that holds for the negative operators too: under NotEquals this asks whether the Profile is there and differs, so a row without one fails that as well. To ask the other question — no matching Profile, which a row with none satisfies — use Without.Profile.",
+            "type": "ProfileFilterContains",
+            "type_kind": "Object",
+            "go_type": "*ProfileFilterContains",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "ThumbnailFile",
+            "wire": "thumbnailFile",
+            "description": "Conditions on this row's ThumbnailFile.\n\nA row with no ThumbnailFile never matches, and that holds for the negative operators too: under NotEquals this asks whether the ThumbnailFile is there and differs, so a row without one fails that as well. To ask the other question — no matching ThumbnailFile, which a row with none satisfies — use Without.ThumbnailFile.",
+            "type": "ProfileFilterContains",
+            "type_kind": "Object",
+            "go_type": "*ProfileFilterContains",
+            "modifiers": [
+              "Nullable"
+            ]
+          }
+        ],
+        "origin": "Filter"
+      },
+      {
+        "name": "ProfileAttachmentFilterEquals",
+        "description": "Exact-match conditions on ProfileAttachment fields.",
+        "fields": [
+          {
+            "name": "ID",
+            "wire": "id",
+            "description": "Unique identifier for this row.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "*uuid.UUID",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "CreatedAt",
+            "wire": "createdAt",
+            "description": "When this row was created. Set automatically and never changes.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "*time.Time",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "ProfileID",
+            "wire": "profileId",
+            "description": "Reached through a composite key carrying the tenant, which is the shape rig recommends wherever the target is tenant-scoped. Its index leads with the tenant, and that is the index the generated queries want.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "*uuid.UUID",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "DocumentFileID",
+            "wire": "documentFileId",
+            "description": "The same shape, deliberately left without an index so the rule has something to say. Before the tenant-carrying form was denormalized onto its column, it had nothing to say about either of these.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "*uuid.UUID",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "ThumbnailFileID",
+            "wire": "thumbnailFileId",
+            "description": "The control. Named like a file column and pointing at profile instead, so it is not one — and it still gets the ordinary naming advice.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "*uuid.UUID",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "Caption",
+            "wire": "caption",
+            "description": "What the attachment is.",
+            "type": "String",
+            "type_kind": "Primitive",
+            "go_type": "*string",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "DocumentFile",
+            "wire": "documentFile",
+            "description": "Conditions on this row's DocumentFile.\n\nA row with no DocumentFile never matches, and that holds for the negative operators too: under NotEquals this asks whether the DocumentFile is there and differs, so a row without one fails that as well. To ask the other question — no matching DocumentFile, which a row with none satisfies — use Without.DocumentFile.",
+            "type": "RigFileFilterEquals",
+            "type_kind": "Object",
+            "go_type": "*RigFileFilterEquals",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "Profile",
+            "wire": "profile",
+            "description": "Conditions on this row's Profile.\n\nA row with no Profile never matches, and that holds for the negative operators too: under NotEquals this asks whether the Profile is there and differs, so a row without one fails that as well. To ask the other question — no matching Profile, which a row with none satisfies — use Without.Profile.",
+            "type": "ProfileFilterEquals",
+            "type_kind": "Object",
+            "go_type": "*ProfileFilterEquals",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "ThumbnailFile",
+            "wire": "thumbnailFile",
+            "description": "Conditions on this row's ThumbnailFile.\n\nA row with no ThumbnailFile never matches, and that holds for the negative operators too: under NotEquals this asks whether the ThumbnailFile is there and differs, so a row without one fails that as well. To ask the other question — no matching ThumbnailFile, which a row with none satisfies — use Without.ThumbnailFile.",
+            "type": "ProfileFilterEquals",
+            "type_kind": "Object",
+            "go_type": "*ProfileFilterEquals",
+            "modifiers": [
+              "Nullable"
+            ]
+          }
+        ],
+        "origin": "Filter"
+      },
+      {
+        "name": "ProfileAttachmentFilterLike",
+        "description": "Pattern conditions on ProfileAttachment text fields.",
+        "fields": [
+          {
+            "name": "Caption",
+            "wire": "caption",
+            "description": "What the attachment is.",
+            "type": "String",
+            "type_kind": "Primitive",
+            "go_type": "*string",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "DocumentFile",
+            "wire": "documentFile",
+            "description": "Conditions on this row's DocumentFile.\n\nA row with no DocumentFile never matches, and that holds for the negative operators too: under NotEquals this asks whether the DocumentFile is there and differs, so a row without one fails that as well. To ask the other question — no matching DocumentFile, which a row with none satisfies — use Without.DocumentFile.",
+            "type": "RigFileFilterLike",
+            "type_kind": "Object",
+            "go_type": "*RigFileFilterLike",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "Profile",
+            "wire": "profile",
+            "description": "Conditions on this row's Profile.\n\nA row with no Profile never matches, and that holds for the negative operators too: under NotEquals this asks whether the Profile is there and differs, so a row without one fails that as well. To ask the other question — no matching Profile, which a row with none satisfies — use Without.Profile.",
+            "type": "ProfileFilterLike",
+            "type_kind": "Object",
+            "go_type": "*ProfileFilterLike",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "ThumbnailFile",
+            "wire": "thumbnailFile",
+            "description": "Conditions on this row's ThumbnailFile.\n\nA row with no ThumbnailFile never matches, and that holds for the negative operators too: under NotEquals this asks whether the ThumbnailFile is there and differs, so a row without one fails that as well. To ask the other question — no matching ThumbnailFile, which a row with none satisfies — use Without.ThumbnailFile.",
+            "type": "ProfileFilterLike",
+            "type_kind": "Object",
+            "go_type": "*ProfileFilterLike",
+            "modifiers": [
+              "Nullable"
+            ]
+          }
+        ],
+        "origin": "Filter"
+      },
+      {
+        "name": "ProfileAttachmentFilterNull",
+        "description": "Presence conditions on nullable ProfileAttachment fields.",
+        "fields": [
+          {
+            "name": "ThumbnailFileID",
+            "wire": "thumbnailFileId",
+            "description": "The control. Named like a file column and pointing at profile instead, so it is not one — and it still gets the ordinary naming advice.",
+            "type": "Bool",
+            "type_kind": "Primitive",
+            "go_type": "*bool",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "Caption",
+            "wire": "caption",
+            "description": "What the attachment is.",
+            "type": "Bool",
+            "type_kind": "Primitive",
+            "go_type": "*bool",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "DocumentFile",
+            "wire": "documentFile",
+            "description": "Conditions on this row's DocumentFile.\n\nA row with no DocumentFile never matches, and that holds for the negative operators too: under NotEquals this asks whether the DocumentFile is there and differs, so a row without one fails that as well. To ask the other question — no matching DocumentFile, which a row with none satisfies — use Without.DocumentFile.",
+            "type": "RigFileFilterNull",
+            "type_kind": "Object",
+            "go_type": "*RigFileFilterNull",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "Profile",
+            "wire": "profile",
+            "description": "Conditions on this row's Profile.\n\nA row with no Profile never matches, and that holds for the negative operators too: under NotEquals this asks whether the Profile is there and differs, so a row without one fails that as well. To ask the other question — no matching Profile, which a row with none satisfies — use Without.Profile.",
+            "type": "ProfileFilterNull",
+            "type_kind": "Object",
+            "go_type": "*ProfileFilterNull",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "ThumbnailFile",
+            "wire": "thumbnailFile",
+            "description": "Conditions on this row's ThumbnailFile.\n\nA row with no ThumbnailFile never matches, and that holds for the negative operators too: under NotEquals this asks whether the ThumbnailFile is there and differs, so a row without one fails that as well. To ask the other question — no matching ThumbnailFile, which a row with none satisfies — use Without.ThumbnailFile.",
+            "type": "ProfileFilterNull",
+            "type_kind": "Object",
+            "go_type": "*ProfileFilterNull",
+            "modifiers": [
+              "Nullable"
+            ]
+          }
+        ],
+        "origin": "Filter"
+      },
+      {
+        "name": "ProfileAttachmentFilterRange",
+        "description": "Ordering conditions on ProfileAttachment fields that can be compared.",
+        "fields": [
+          {
+            "name": "CreatedAt",
+            "wire": "createdAt",
+            "description": "When this row was created. Set automatically and never changes.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "*time.Time",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "DocumentFile",
+            "wire": "documentFile",
+            "description": "Conditions on this row's DocumentFile.\n\nA row with no DocumentFile never matches, and that holds for the negative operators too: under NotEquals this asks whether the DocumentFile is there and differs, so a row without one fails that as well. To ask the other question — no matching DocumentFile, which a row with none satisfies — use Without.DocumentFile.",
+            "type": "RigFileFilterRange",
+            "type_kind": "Object",
+            "go_type": "*RigFileFilterRange",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "Profile",
+            "wire": "profile",
+            "description": "Conditions on this row's Profile.\n\nA row with no Profile never matches, and that holds for the negative operators too: under NotEquals this asks whether the Profile is there and differs, so a row without one fails that as well. To ask the other question — no matching Profile, which a row with none satisfies — use Without.Profile.",
+            "type": "ProfileFilterRange",
+            "type_kind": "Object",
+            "go_type": "*ProfileFilterRange",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "ThumbnailFile",
+            "wire": "thumbnailFile",
+            "description": "Conditions on this row's ThumbnailFile.\n\nA row with no ThumbnailFile never matches, and that holds for the negative operators too: under NotEquals this asks whether the ThumbnailFile is there and differs, so a row without one fails that as well. To ask the other question — no matching ThumbnailFile, which a row with none satisfies — use Without.ThumbnailFile.",
+            "type": "ProfileFilterRange",
+            "type_kind": "Object",
+            "go_type": "*ProfileFilterRange",
+            "modifiers": [
+              "Nullable"
+            ]
+          }
+        ],
+        "origin": "Filter"
+      },
+      {
+        "name": "ProfileAttachmentFilterWithout",
+        "description": "Relations a ProfileAttachment must have no matching row for.",
+        "fields": [
+          {
+            "name": "DocumentFile",
+            "wire": "documentFile",
+            "description": "Match rows with no DocumentFile satisfying these conditions, including rows that have none at all.\n\nThis negates the existence of the related row rather than the comparison, which is the whole difference from NotEquals.DocumentFile: that one needs the DocumentFile to be there and to differ, so a row without one fails it and satisfies this. An empty object asks for rows with no DocumentFile at all.",
+            "type": "RigFileFilter",
+            "type_kind": "Object",
+            "go_type": "*RigFileFilter",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "Profile",
+            "wire": "profile",
+            "description": "Match rows with no Profile satisfying these conditions, including rows that have none at all.\n\nThis negates the existence of the related row rather than the comparison, which is the whole difference from NotEquals.Profile: that one needs the Profile to be there and to differ, so a row without one fails it and satisfies this. An empty object asks for rows with no Profile at all.",
+            "type": "ProfileFilter",
+            "type_kind": "Object",
+            "go_type": "*ProfileFilter",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "ThumbnailFile",
+            "wire": "thumbnailFile",
+            "description": "Match rows with no ThumbnailFile satisfying these conditions, including rows that have none at all.\n\nThis negates the existence of the related row rather than the comparison, which is the whole difference from NotEquals.ThumbnailFile: that one needs the ThumbnailFile to be there and to differ, so a row without one fails it and satisfies this. An empty object asks for rows with no ThumbnailFile at all.",
+            "type": "ProfileFilter",
+            "type_kind": "Object",
+            "go_type": "*ProfileFilter",
+            "modifiers": [
+              "Nullable"
+            ]
+          }
+        ],
+        "origin": "Filter"
+      },
+      {
+        "name": "ProfileAttachmentListResponse",
+        "description": "A page of ProfileAttachments.",
+        "fields": [
+          {
+            "name": "Data",
+            "wire": "data",
+            "description": "The rows in this page.",
+            "type": "ProfileAttachment",
+            "type_kind": "Resource",
+            "go_type": "[]ProfileAttachment",
+            "modifiers": [
+              "Array"
+            ]
+          },
+          {
+            "name": "Pagination",
+            "wire": "pagination",
+            "description": "Where this page sits in the full result set.",
+            "type": "Pagination",
+            "type_kind": "Object",
+            "go_type": "Pagination"
+          }
+        ],
+        "origin": "Projected"
+      },
+      {
+        "name": "ProfileFilter",
+        "description": "Conditions a Profile must satisfy to match a search.",
+        "fields": [
+          {
+            "name": "Equals",
+            "wire": "equals",
+            "description": "Fields that must equal the given value.",
+            "type": "ProfileFilterEquals",
+            "type_kind": "Object",
+            "go_type": "*ProfileFilterEquals",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "NotEquals",
+            "wire": "notEquals",
+            "description": "Fields that must not equal the given value.",
+            "type": "ProfileFilterEquals",
+            "type_kind": "Object",
+            "go_type": "*ProfileFilterEquals",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "GreaterThan",
+            "wire": "greaterThan",
+            "description": "Fields that must be greater than the given value.",
+            "type": "ProfileFilterRange",
+            "type_kind": "Object",
+            "go_type": "*ProfileFilterRange",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "SmallerThan",
+            "wire": "smallerThan",
+            "description": "Fields that must be less than the given value.",
+            "type": "ProfileFilterRange",
+            "type_kind": "Object",
+            "go_type": "*ProfileFilterRange",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "GreaterOrEqual",
+            "wire": "greaterOrEqual",
+            "description": "Fields that must be greater than or equal to the given value.",
+            "type": "ProfileFilterRange",
+            "type_kind": "Object",
+            "go_type": "*ProfileFilterRange",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "SmallerOrEqual",
+            "wire": "smallerOrEqual",
+            "description": "Fields that must be less than or equal to the given value.",
+            "type": "ProfileFilterRange",
+            "type_kind": "Object",
+            "go_type": "*ProfileFilterRange",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "Contains",
+            "wire": "contains",
+            "description": "Fields that must be one of the given values.",
+            "type": "ProfileFilterContains",
+            "type_kind": "Object",
+            "go_type": "*ProfileFilterContains",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "NotContains",
+            "wire": "notContains",
+            "description": "Fields that must not be one of the given values.",
+            "type": "ProfileFilterContains",
+            "type_kind": "Object",
+            "go_type": "*ProfileFilterContains",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "Like",
+            "wire": "like",
+            "description": "Text fields that must match the given pattern.",
+            "type": "ProfileFilterLike",
+            "type_kind": "Object",
+            "go_type": "*ProfileFilterLike",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "NotLike",
+            "wire": "notLike",
+            "description": "Text fields that must not match the given pattern.",
+            "type": "ProfileFilterLike",
+            "type_kind": "Object",
+            "go_type": "*ProfileFilterLike",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "Null",
+            "wire": "null",
+            "description": "Fields that must be null.",
+            "type": "ProfileFilterNull",
+            "type_kind": "Object",
+            "go_type": "*ProfileFilterNull",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "NotNull",
+            "wire": "notNull",
+            "description": "Fields that must not be null.",
+            "type": "ProfileFilterNull",
+            "type_kind": "Object",
+            "go_type": "*ProfileFilterNull",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "OrCondition",
+            "wire": "orCondition",
+            "description": "Combine this filter's conditions with OR instead of AND.",
+            "type": "Bool",
+            "type_kind": "Primitive",
+            "go_type": "bool"
+          },
+          {
+            "name": "NestedFilters",
+            "wire": "nestedFilters",
+            "description": "Sub-filters combined with this one, so that AND and OR can be mixed to any depth.",
+            "type": "ProfileFilter",
+            "type_kind": "Object",
+            "go_type": "[]ProfileFilter",
+            "modifiers": [
+              "Array"
+            ]
+          },
+          {
+            "name": "Without",
+            "wire": "without",
+            "description": "Relations with no row matching the given conditions. An empty one asks for no related row at all.\n\nThis is where a negation belongs when what you mean is \"not\": it negates whether a matching related row exists, so a row with no related row at all satisfies it. The negative operators above negate the comparison instead and still require the related row to be there — \"no related row called X\" is here, \"a related row not called X\" is NotEquals.",
+            "type": "ProfileFilterWithout",
+            "type_kind": "Object",
+            "go_type": "*ProfileFilterWithout",
+            "modifiers": [
+              "Nullable"
+            ]
+          }
+        ],
+        "origin": "Filter"
+      },
+      {
+        "name": "ProfileFilterContains",
+        "description": "Set-membership conditions on Profile fields.",
+        "fields": [
+          {
+            "name": "ID",
+            "wire": "id",
+            "description": "Unique identifier for this row.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "[]uuid.UUID",
+            "modifiers": [
+              "Array"
+            ]
+          },
+          {
+            "name": "CreatedAt",
+            "wire": "createdAt",
+            "description": "When this row was created. Set automatically and never changes.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "[]time.Time",
+            "modifiers": [
+              "Array"
+            ]
+          },
+          {
+            "name": "DisplayName",
+            "wire": "displayName",
+            "description": "What to call them.",
+            "type": "String",
+            "type_kind": "Primitive",
+            "go_type": "[]string",
+            "modifiers": [
+              "Array"
+            ]
+          },
+          {
+            "name": "ProfileImageFileID",
+            "wire": "profileImageFileId",
+            "description": "The picture. A <role>_file_id column is the declaration: the role names the endpoints and the permission keys, and rig_file is the only table it could point at, so the naming rule exempts it.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "[]uuid.UUID",
+            "modifiers": [
+              "Array"
+            ]
+          },
+          {
+            "name": "BannerFileID",
+            "wire": "bannerFileId",
+            "description": "A second one on the same table, which is the reason the role is in the name at all. The rule's own suggestion, rig_file_id, allows exactly one.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "[]uuid.UUID",
+            "modifiers": [
+              "Array"
+            ]
+          },
+          {
+            "name": "BannerFile",
+            "wire": "bannerFile",
+            "description": "Conditions on this row's BannerFile.\n\nA row with no BannerFile never matches, and that holds for the negative operators too: under NotEquals this asks whether the BannerFile is there and differs, so a row without one fails that as well. To ask the other question — no matching BannerFile, which a row with none satisfies — use Without.BannerFile.",
+            "type": "RigFileFilterContains",
+            "type_kind": "Object",
+            "go_type": "*RigFileFilterContains",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "ProfileAttachments",
+            "wire": "profileAttachments",
+            "description": "Conditions on one of this row's ProfileAttachments.\n\nEvery condition has to hold of the same one, not of the set between them.\n\nUnder the negative operators this asks whether one of them differs, which is not the same as none of them matching: a row can have one that matches and one that does not, satisfying the first and failing the second. Without.ProfileAttachments asks the second.",
+            "type": "ProfileAttachmentFilterContains",
+            "type_kind": "Object",
+            "go_type": "*ProfileAttachmentFilterContains",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "ProfileImageFile",
+            "wire": "profileImageFile",
+            "description": "Conditions on this row's ProfileImageFile.\n\nA row with no ProfileImageFile never matches, and that holds for the negative operators too: under NotEquals this asks whether the ProfileImageFile is there and differs, so a row without one fails that as well. To ask the other question — no matching ProfileImageFile, which a row with none satisfies — use Without.ProfileImageFile.",
+            "type": "RigFileFilterContains",
+            "type_kind": "Object",
+            "go_type": "*RigFileFilterContains",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "ThumbnailFileProfileAttachments",
+            "wire": "thumbnailFileProfileAttachments",
+            "description": "Conditions on one of this row's ThumbnailFileProfileAttachments.\n\nEvery condition has to hold of the same one, not of the set between them.\n\nUnder the negative operators this asks whether one of them differs, which is not the same as none of them matching: a row can have one that matches and one that does not, satisfying the first and failing the second. Without.ThumbnailFileProfileAttachments asks the second.",
+            "type": "ProfileAttachmentFilterContains",
+            "type_kind": "Object",
+            "go_type": "*ProfileAttachmentFilterContains",
+            "modifiers": [
+              "Nullable"
+            ]
+          }
+        ],
+        "origin": "Filter"
+      },
+      {
+        "name": "ProfileFilterEquals",
+        "description": "Exact-match conditions on Profile fields.",
+        "fields": [
+          {
+            "name": "ID",
+            "wire": "id",
+            "description": "Unique identifier for this row.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "*uuid.UUID",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "CreatedAt",
+            "wire": "createdAt",
+            "description": "When this row was created. Set automatically and never changes.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "*time.Time",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "DisplayName",
+            "wire": "displayName",
+            "description": "What to call them.",
+            "type": "String",
+            "type_kind": "Primitive",
+            "go_type": "*string",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "ProfileImageFileID",
+            "wire": "profileImageFileId",
+            "description": "The picture. A <role>_file_id column is the declaration: the role names the endpoints and the permission keys, and rig_file is the only table it could point at, so the naming rule exempts it.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "*uuid.UUID",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "BannerFileID",
+            "wire": "bannerFileId",
+            "description": "A second one on the same table, which is the reason the role is in the name at all. The rule's own suggestion, rig_file_id, allows exactly one.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "*uuid.UUID",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "BannerFile",
+            "wire": "bannerFile",
+            "description": "Conditions on this row's BannerFile.\n\nA row with no BannerFile never matches, and that holds for the negative operators too: under NotEquals this asks whether the BannerFile is there and differs, so a row without one fails that as well. To ask the other question — no matching BannerFile, which a row with none satisfies — use Without.BannerFile.",
+            "type": "RigFileFilterEquals",
+            "type_kind": "Object",
+            "go_type": "*RigFileFilterEquals",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "ProfileAttachments",
+            "wire": "profileAttachments",
+            "description": "Conditions on one of this row's ProfileAttachments.\n\nEvery condition has to hold of the same one, not of the set between them.\n\nUnder the negative operators this asks whether one of them differs, which is not the same as none of them matching: a row can have one that matches and one that does not, satisfying the first and failing the second. Without.ProfileAttachments asks the second.",
+            "type": "ProfileAttachmentFilterEquals",
+            "type_kind": "Object",
+            "go_type": "*ProfileAttachmentFilterEquals",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "ProfileImageFile",
+            "wire": "profileImageFile",
+            "description": "Conditions on this row's ProfileImageFile.\n\nA row with no ProfileImageFile never matches, and that holds for the negative operators too: under NotEquals this asks whether the ProfileImageFile is there and differs, so a row without one fails that as well. To ask the other question — no matching ProfileImageFile, which a row with none satisfies — use Without.ProfileImageFile.",
+            "type": "RigFileFilterEquals",
+            "type_kind": "Object",
+            "go_type": "*RigFileFilterEquals",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "ThumbnailFileProfileAttachments",
+            "wire": "thumbnailFileProfileAttachments",
+            "description": "Conditions on one of this row's ThumbnailFileProfileAttachments.\n\nEvery condition has to hold of the same one, not of the set between them.\n\nUnder the negative operators this asks whether one of them differs, which is not the same as none of them matching: a row can have one that matches and one that does not, satisfying the first and failing the second. Without.ThumbnailFileProfileAttachments asks the second.",
+            "type": "ProfileAttachmentFilterEquals",
+            "type_kind": "Object",
+            "go_type": "*ProfileAttachmentFilterEquals",
+            "modifiers": [
+              "Nullable"
+            ]
+          }
+        ],
+        "origin": "Filter"
+      },
+      {
+        "name": "ProfileFilterLike",
+        "description": "Pattern conditions on Profile text fields.",
+        "fields": [
+          {
+            "name": "DisplayName",
+            "wire": "displayName",
+            "description": "What to call them.",
+            "type": "String",
+            "type_kind": "Primitive",
+            "go_type": "*string",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "BannerFile",
+            "wire": "bannerFile",
+            "description": "Conditions on this row's BannerFile.\n\nA row with no BannerFile never matches, and that holds for the negative operators too: under NotEquals this asks whether the BannerFile is there and differs, so a row without one fails that as well. To ask the other question — no matching BannerFile, which a row with none satisfies — use Without.BannerFile.",
+            "type": "RigFileFilterLike",
+            "type_kind": "Object",
+            "go_type": "*RigFileFilterLike",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "ProfileAttachments",
+            "wire": "profileAttachments",
+            "description": "Conditions on one of this row's ProfileAttachments.\n\nEvery condition has to hold of the same one, not of the set between them.\n\nUnder the negative operators this asks whether one of them differs, which is not the same as none of them matching: a row can have one that matches and one that does not, satisfying the first and failing the second. Without.ProfileAttachments asks the second.",
+            "type": "ProfileAttachmentFilterLike",
+            "type_kind": "Object",
+            "go_type": "*ProfileAttachmentFilterLike",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "ProfileImageFile",
+            "wire": "profileImageFile",
+            "description": "Conditions on this row's ProfileImageFile.\n\nA row with no ProfileImageFile never matches, and that holds for the negative operators too: under NotEquals this asks whether the ProfileImageFile is there and differs, so a row without one fails that as well. To ask the other question — no matching ProfileImageFile, which a row with none satisfies — use Without.ProfileImageFile.",
+            "type": "RigFileFilterLike",
+            "type_kind": "Object",
+            "go_type": "*RigFileFilterLike",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "ThumbnailFileProfileAttachments",
+            "wire": "thumbnailFileProfileAttachments",
+            "description": "Conditions on one of this row's ThumbnailFileProfileAttachments.\n\nEvery condition has to hold of the same one, not of the set between them.\n\nUnder the negative operators this asks whether one of them differs, which is not the same as none of them matching: a row can have one that matches and one that does not, satisfying the first and failing the second. Without.ThumbnailFileProfileAttachments asks the second.",
+            "type": "ProfileAttachmentFilterLike",
+            "type_kind": "Object",
+            "go_type": "*ProfileAttachmentFilterLike",
+            "modifiers": [
+              "Nullable"
+            ]
+          }
+        ],
+        "origin": "Filter"
+      },
+      {
+        "name": "ProfileFilterNull",
+        "description": "Presence conditions on nullable Profile fields.",
+        "fields": [
+          {
+            "name": "ProfileImageFileID",
+            "wire": "profileImageFileId",
+            "description": "The picture. A <role>_file_id column is the declaration: the role names the endpoints and the permission keys, and rig_file is the only table it could point at, so the naming rule exempts it.",
+            "type": "Bool",
+            "type_kind": "Primitive",
+            "go_type": "*bool",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "BannerFileID",
+            "wire": "bannerFileId",
+            "description": "A second one on the same table, which is the reason the role is in the name at all. The rule's own suggestion, rig_file_id, allows exactly one.",
+            "type": "Bool",
+            "type_kind": "Primitive",
+            "go_type": "*bool",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "BannerFile",
+            "wire": "bannerFile",
+            "description": "Conditions on this row's BannerFile.\n\nA row with no BannerFile never matches, and that holds for the negative operators too: under NotEquals this asks whether the BannerFile is there and differs, so a row without one fails that as well. To ask the other question — no matching BannerFile, which a row with none satisfies — use Without.BannerFile.",
+            "type": "RigFileFilterNull",
+            "type_kind": "Object",
+            "go_type": "*RigFileFilterNull",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "ProfileAttachments",
+            "wire": "profileAttachments",
+            "description": "Conditions on one of this row's ProfileAttachments.\n\nEvery condition has to hold of the same one, not of the set between them.\n\nUnder the negative operators this asks whether one of them differs, which is not the same as none of them matching: a row can have one that matches and one that does not, satisfying the first and failing the second. Without.ProfileAttachments asks the second.",
+            "type": "ProfileAttachmentFilterNull",
+            "type_kind": "Object",
+            "go_type": "*ProfileAttachmentFilterNull",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "ProfileImageFile",
+            "wire": "profileImageFile",
+            "description": "Conditions on this row's ProfileImageFile.\n\nA row with no ProfileImageFile never matches, and that holds for the negative operators too: under NotEquals this asks whether the ProfileImageFile is there and differs, so a row without one fails that as well. To ask the other question — no matching ProfileImageFile, which a row with none satisfies — use Without.ProfileImageFile.",
+            "type": "RigFileFilterNull",
+            "type_kind": "Object",
+            "go_type": "*RigFileFilterNull",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "ThumbnailFileProfileAttachments",
+            "wire": "thumbnailFileProfileAttachments",
+            "description": "Conditions on one of this row's ThumbnailFileProfileAttachments.\n\nEvery condition has to hold of the same one, not of the set between them.\n\nUnder the negative operators this asks whether one of them differs, which is not the same as none of them matching: a row can have one that matches and one that does not, satisfying the first and failing the second. Without.ThumbnailFileProfileAttachments asks the second.",
+            "type": "ProfileAttachmentFilterNull",
+            "type_kind": "Object",
+            "go_type": "*ProfileAttachmentFilterNull",
+            "modifiers": [
+              "Nullable"
+            ]
+          }
+        ],
+        "origin": "Filter"
+      },
+      {
+        "name": "ProfileFilterRange",
+        "description": "Ordering conditions on Profile fields that can be compared.",
+        "fields": [
+          {
+            "name": "CreatedAt",
+            "wire": "createdAt",
+            "description": "When this row was created. Set automatically and never changes.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "*time.Time",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "BannerFile",
+            "wire": "bannerFile",
+            "description": "Conditions on this row's BannerFile.\n\nA row with no BannerFile never matches, and that holds for the negative operators too: under NotEquals this asks whether the BannerFile is there and differs, so a row without one fails that as well. To ask the other question — no matching BannerFile, which a row with none satisfies — use Without.BannerFile.",
+            "type": "RigFileFilterRange",
+            "type_kind": "Object",
+            "go_type": "*RigFileFilterRange",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "ProfileAttachments",
+            "wire": "profileAttachments",
+            "description": "Conditions on one of this row's ProfileAttachments.\n\nEvery condition has to hold of the same one, not of the set between them.\n\nUnder the negative operators this asks whether one of them differs, which is not the same as none of them matching: a row can have one that matches and one that does not, satisfying the first and failing the second. Without.ProfileAttachments asks the second.",
+            "type": "ProfileAttachmentFilterRange",
+            "type_kind": "Object",
+            "go_type": "*ProfileAttachmentFilterRange",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "ProfileImageFile",
+            "wire": "profileImageFile",
+            "description": "Conditions on this row's ProfileImageFile.\n\nA row with no ProfileImageFile never matches, and that holds for the negative operators too: under NotEquals this asks whether the ProfileImageFile is there and differs, so a row without one fails that as well. To ask the other question — no matching ProfileImageFile, which a row with none satisfies — use Without.ProfileImageFile.",
+            "type": "RigFileFilterRange",
+            "type_kind": "Object",
+            "go_type": "*RigFileFilterRange",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "ThumbnailFileProfileAttachments",
+            "wire": "thumbnailFileProfileAttachments",
+            "description": "Conditions on one of this row's ThumbnailFileProfileAttachments.\n\nEvery condition has to hold of the same one, not of the set between them.\n\nUnder the negative operators this asks whether one of them differs, which is not the same as none of them matching: a row can have one that matches and one that does not, satisfying the first and failing the second. Without.ThumbnailFileProfileAttachments asks the second.",
+            "type": "ProfileAttachmentFilterRange",
+            "type_kind": "Object",
+            "go_type": "*ProfileAttachmentFilterRange",
+            "modifiers": [
+              "Nullable"
+            ]
+          }
+        ],
+        "origin": "Filter"
+      },
+      {
+        "name": "ProfileFilterWithout",
+        "description": "Relations a Profile must have no matching row for.",
+        "fields": [
+          {
+            "name": "BannerFile",
+            "wire": "bannerFile",
+            "description": "Match rows with no BannerFile satisfying these conditions, including rows that have none at all.\n\nThis negates the existence of the related row rather than the comparison, which is the whole difference from NotEquals.BannerFile: that one needs the BannerFile to be there and to differ, so a row without one fails it and satisfies this. An empty object asks for rows with no BannerFile at all.",
+            "type": "RigFileFilter",
+            "type_kind": "Object",
+            "go_type": "*RigFileFilter",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "ProfileAttachments",
+            "wire": "profileAttachments",
+            "description": "Match rows with no ProfileAttachments satisfying these conditions, including rows with none at all.\n\nThis negates the existence of a matching row rather than the comparison, which is the whole difference from NotEquals.ProfileAttachments: that one is satisfied by one of them differing, and a row can have one that differs and one that matches at the same time. An empty object asks for rows with no ProfileAttachments at all.",
+            "type": "ProfileAttachmentFilter",
+            "type_kind": "Object",
+            "go_type": "*ProfileAttachmentFilter",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "ProfileImageFile",
+            "wire": "profileImageFile",
+            "description": "Match rows with no ProfileImageFile satisfying these conditions, including rows that have none at all.\n\nThis negates the existence of the related row rather than the comparison, which is the whole difference from NotEquals.ProfileImageFile: that one needs the ProfileImageFile to be there and to differ, so a row without one fails it and satisfies this. An empty object asks for rows with no ProfileImageFile at all.",
+            "type": "RigFileFilter",
+            "type_kind": "Object",
+            "go_type": "*RigFileFilter",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "ThumbnailFileProfileAttachments",
+            "wire": "thumbnailFileProfileAttachments",
+            "description": "Match rows with no ThumbnailFileProfileAttachments satisfying these conditions, including rows with none at all.\n\nThis negates the existence of a matching row rather than the comparison, which is the whole difference from NotEquals.ThumbnailFileProfileAttachments: that one is satisfied by one of them differing, and a row can have one that differs and one that matches at the same time. An empty object asks for rows with no ThumbnailFileProfileAttachments at all.",
+            "type": "ProfileAttachmentFilter",
+            "type_kind": "Object",
+            "go_type": "*ProfileAttachmentFilter",
+            "modifiers": [
+              "Nullable"
+            ]
+          }
+        ],
+        "origin": "Filter"
+      },
+      {
+        "name": "ProfileListResponse",
+        "description": "A page of Profiles.",
+        "fields": [
+          {
+            "name": "Data",
+            "wire": "data",
+            "description": "The rows in this page.",
+            "type": "Profile",
+            "type_kind": "Resource",
+            "go_type": "[]Profile",
+            "modifiers": [
+              "Array"
+            ]
+          },
+          {
+            "name": "Pagination",
+            "wire": "pagination",
+            "description": "Where this page sits in the full result set.",
+            "type": "Pagination",
+            "type_kind": "Object",
+            "go_type": "Pagination"
+          }
+        ],
+        "origin": "Projected"
+      },
+      {
+        "name": "RigFile",
+        "description": "One uploaded file. Metadata only — the bytes live in the blob store, and the storage key never leaves the server.",
+        "fields": [
+          {
+            "name": "ID",
+            "wire": "id",
+            "description": "Unique identifier for this row.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "uuid.UUID",
+            "read_only": true,
+            "column": {
+              "table": "rig_file",
+              "name": "id",
+              "sql_type": "uuid",
+              "nullable": false,
+              "scan": "UUID"
+            }
+          },
+          {
+            "name": "TenantID",
+            "wire": "tenantId",
+            "description": "Tenant this row belongs to. Every query is scoped by it.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "uuid.UUID",
+            "read_only": true,
+            "column": {
+              "table": "rig_file",
+              "name": "tenant_id",
+              "sql_type": "uuid",
+              "nullable": false,
+              "scan": "UUID"
+            }
+          },
+          {
+            "name": "StorageKey",
+            "wire": "storageKey",
+            "description": "Where the bytes are, derived from the identifier and never from a name.",
+            "type": "String",
+            "type_kind": "Primitive",
+            "go_type": "string",
+            "column": {
+              "table": "rig_file",
+              "name": "storage_key",
+              "sql_type": "text",
+              "nullable": false,
+              "scan": "Direct"
+            }
+          },
+          {
+            "name": "URL",
+            "wire": "url",
+            "description": "Where the file is served from. It is a column so a synced row carries it and a client can render the file without asking anything first.",
+            "type": "String",
+            "type_kind": "Primitive",
+            "go_type": "string",
+            "column": {
+              "table": "rig_file",
+              "name": "url",
+              "sql_type": "text",
+              "nullable": false,
+              "scan": "Direct"
+            }
+          },
+          {
+            "name": "FileName",
+            "wire": "fileName",
+            "description": "What the file was called when it arrived.",
+            "type": "String",
+            "type_kind": "Primitive",
+            "go_type": "string",
+            "column": {
+              "table": "rig_file",
+              "name": "file_name",
+              "sql_type": "text",
+              "nullable": false,
+              "scan": "Direct"
+            }
+          },
+          {
+            "name": "ContentType",
+            "wire": "contentType",
+            "description": "What the bytes were sniffed to be, which is not what the client claimed.",
+            "type": "String",
+            "type_kind": "Primitive",
+            "go_type": "string",
+            "column": {
+              "table": "rig_file",
+              "name": "content_type",
+              "sql_type": "text",
+              "nullable": false,
+              "scan": "Direct"
+            }
+          },
+          {
+            "name": "SizeBytes",
+            "wire": "sizeBytes",
+            "description": "How large the object is.",
+            "type": "Int64",
+            "type_kind": "Primitive",
+            "go_type": "int64",
+            "column": {
+              "table": "rig_file",
+              "name": "size_bytes",
+              "sql_type": "bigint",
+              "nullable": false,
+              "scan": "Direct"
+            }
+          },
+          {
+            "name": "UploadedAt",
+            "wire": "uploadedAt",
+            "description": "When the bytes landed. Null means the row was inserted and the upload has not finished, which is what makes an abandoned upload reapable.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "*time.Time",
+            "modifiers": [
+              "Nullable"
+            ],
+            "column": {
+              "table": "rig_file",
+              "name": "uploaded_at",
+              "sql_type": "timestamptz",
+              "nullable": true,
+              "scan": "Timestamptz"
+            }
+          },
+          {
+            "name": "CreatedAt",
+            "wire": "createdAt",
+            "description": "When this row was created. Set automatically and never changes.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "time.Time",
+            "read_only": true,
+            "column": {
+              "table": "rig_file",
+              "name": "created_at",
+              "sql_type": "timestamptz",
+              "nullable": false,
+              "scan": "Timestamptz"
+            }
+          },
+          {
+            "name": "DeletedAt",
+            "wire": "deletedAt",
+            "description": "When this row was soft-deleted. Null while the row is live.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "*time.Time",
+            "modifiers": [
+              "Nullable"
+            ],
+            "read_only": true,
+            "column": {
+              "table": "rig_file",
+              "name": "deleted_at",
+              "sql_type": "timestamptz",
+              "nullable": true,
+              "scan": "Timestamptz"
+            }
+          }
+        ],
+        "origin": "Projected"
+      },
+      {
+        "name": "RigFileFilter",
+        "description": "Conditions a RigFile must satisfy to match a search.",
+        "fields": [
+          {
+            "name": "Equals",
+            "wire": "equals",
+            "description": "Fields that must equal the given value.",
+            "type": "RigFileFilterEquals",
+            "type_kind": "Object",
+            "go_type": "*RigFileFilterEquals",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "NotEquals",
+            "wire": "notEquals",
+            "description": "Fields that must not equal the given value.",
+            "type": "RigFileFilterEquals",
+            "type_kind": "Object",
+            "go_type": "*RigFileFilterEquals",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "GreaterThan",
+            "wire": "greaterThan",
+            "description": "Fields that must be greater than the given value.",
+            "type": "RigFileFilterRange",
+            "type_kind": "Object",
+            "go_type": "*RigFileFilterRange",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "SmallerThan",
+            "wire": "smallerThan",
+            "description": "Fields that must be less than the given value.",
+            "type": "RigFileFilterRange",
+            "type_kind": "Object",
+            "go_type": "*RigFileFilterRange",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "GreaterOrEqual",
+            "wire": "greaterOrEqual",
+            "description": "Fields that must be greater than or equal to the given value.",
+            "type": "RigFileFilterRange",
+            "type_kind": "Object",
+            "go_type": "*RigFileFilterRange",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "SmallerOrEqual",
+            "wire": "smallerOrEqual",
+            "description": "Fields that must be less than or equal to the given value.",
+            "type": "RigFileFilterRange",
+            "type_kind": "Object",
+            "go_type": "*RigFileFilterRange",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "Contains",
+            "wire": "contains",
+            "description": "Fields that must be one of the given values.",
+            "type": "RigFileFilterContains",
+            "type_kind": "Object",
+            "go_type": "*RigFileFilterContains",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "NotContains",
+            "wire": "notContains",
+            "description": "Fields that must not be one of the given values.",
+            "type": "RigFileFilterContains",
+            "type_kind": "Object",
+            "go_type": "*RigFileFilterContains",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "Like",
+            "wire": "like",
+            "description": "Text fields that must match the given pattern.",
+            "type": "RigFileFilterLike",
+            "type_kind": "Object",
+            "go_type": "*RigFileFilterLike",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "NotLike",
+            "wire": "notLike",
+            "description": "Text fields that must not match the given pattern.",
+            "type": "RigFileFilterLike",
+            "type_kind": "Object",
+            "go_type": "*RigFileFilterLike",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "Null",
+            "wire": "null",
+            "description": "Fields that must be null.",
+            "type": "RigFileFilterNull",
+            "type_kind": "Object",
+            "go_type": "*RigFileFilterNull",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "NotNull",
+            "wire": "notNull",
+            "description": "Fields that must not be null.",
+            "type": "RigFileFilterNull",
+            "type_kind": "Object",
+            "go_type": "*RigFileFilterNull",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "OrCondition",
+            "wire": "orCondition",
+            "description": "Combine this filter's conditions with OR instead of AND.",
+            "type": "Bool",
+            "type_kind": "Primitive",
+            "go_type": "bool"
+          },
+          {
+            "name": "NestedFilters",
+            "wire": "nestedFilters",
+            "description": "Sub-filters combined with this one, so that AND and OR can be mixed to any depth.",
+            "type": "RigFileFilter",
+            "type_kind": "Object",
+            "go_type": "[]RigFileFilter",
+            "modifiers": [
+              "Array"
+            ]
+          },
+          {
+            "name": "Without",
+            "wire": "without",
+            "description": "Relations with no row matching the given conditions. An empty one asks for no related row at all.\n\nThis is where a negation belongs when what you mean is \"not\": it negates whether a matching related row exists, so a row with no related row at all satisfies it. The negative operators above negate the comparison instead and still require the related row to be there — \"no related row called X\" is here, \"a related row not called X\" is NotEquals.",
+            "type": "RigFileFilterWithout",
+            "type_kind": "Object",
+            "go_type": "*RigFileFilterWithout",
+            "modifiers": [
+              "Nullable"
+            ]
+          }
+        ],
+        "origin": "Filter"
+      },
+      {
+        "name": "RigFileFilterContains",
+        "description": "Set-membership conditions on RigFile fields.",
+        "fields": [
+          {
+            "name": "ID",
+            "wire": "id",
+            "description": "Unique identifier for this row.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "[]uuid.UUID",
+            "modifiers": [
+              "Array"
+            ]
+          },
+          {
+            "name": "StorageKey",
+            "wire": "storageKey",
+            "description": "Where the bytes are, derived from the identifier and never from a name.",
+            "type": "String",
+            "type_kind": "Primitive",
+            "go_type": "[]string",
+            "modifiers": [
+              "Array"
+            ]
+          },
+          {
+            "name": "URL",
+            "wire": "url",
+            "description": "Where the file is served from. It is a column so a synced row carries it and a client can render the file without asking anything first.",
+            "type": "String",
+            "type_kind": "Primitive",
+            "go_type": "[]string",
+            "modifiers": [
+              "Array"
+            ]
+          },
+          {
+            "name": "FileName",
+            "wire": "fileName",
+            "description": "What the file was called when it arrived.",
+            "type": "String",
+            "type_kind": "Primitive",
+            "go_type": "[]string",
+            "modifiers": [
+              "Array"
+            ]
+          },
+          {
+            "name": "ContentType",
+            "wire": "contentType",
+            "description": "What the bytes were sniffed to be, which is not what the client claimed.",
+            "type": "String",
+            "type_kind": "Primitive",
+            "go_type": "[]string",
+            "modifiers": [
+              "Array"
+            ]
+          },
+          {
+            "name": "SizeBytes",
+            "wire": "sizeBytes",
+            "description": "How large the object is.",
+            "type": "Int64",
+            "type_kind": "Primitive",
+            "go_type": "[]int64",
+            "modifiers": [
+              "Array"
+            ]
+          },
+          {
+            "name": "UploadedAt",
+            "wire": "uploadedAt",
+            "description": "When the bytes landed. Null means the row was inserted and the upload has not finished, which is what makes an abandoned upload reapable.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "[]time.Time",
+            "modifiers": [
+              "Array"
+            ]
+          },
+          {
+            "name": "CreatedAt",
+            "wire": "createdAt",
+            "description": "When this row was created. Set automatically and never changes.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "[]time.Time",
+            "modifiers": [
+              "Array"
+            ]
+          },
+          {
+            "name": "DeletedAt",
+            "wire": "deletedAt",
+            "description": "When this row was soft-deleted. Null while the row is live.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "[]time.Time",
+            "modifiers": [
+              "Array"
+            ]
+          },
+          {
+            "name": "BannerFileProfiles",
+            "wire": "bannerFileProfiles",
+            "description": "Conditions on one of this row's BannerFileProfiles.\n\nEvery condition has to hold of the same one, not of the set between them.\n\nUnder the negative operators this asks whether one of them differs, which is not the same as none of them matching: a row can have one that matches and one that does not, satisfying the first and failing the second. Without.BannerFileProfiles asks the second.",
+            "type": "ProfileFilterContains",
+            "type_kind": "Object",
+            "go_type": "*ProfileFilterContains",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "DocumentFileProfileAttachments",
+            "wire": "documentFileProfileAttachments",
+            "description": "Conditions on one of this row's DocumentFileProfileAttachments.\n\nEvery condition has to hold of the same one, not of the set between them.\n\nUnder the negative operators this asks whether one of them differs, which is not the same as none of them matching: a row can have one that matches and one that does not, satisfying the first and failing the second. Without.DocumentFileProfileAttachments asks the second.",
+            "type": "ProfileAttachmentFilterContains",
+            "type_kind": "Object",
+            "go_type": "*ProfileAttachmentFilterContains",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "ProfileImageFileProfiles",
+            "wire": "profileImageFileProfiles",
+            "description": "Conditions on one of this row's ProfileImageFileProfiles.\n\nEvery condition has to hold of the same one, not of the set between them.\n\nUnder the negative operators this asks whether one of them differs, which is not the same as none of them matching: a row can have one that matches and one that does not, satisfying the first and failing the second. Without.ProfileImageFileProfiles asks the second.",
+            "type": "ProfileFilterContains",
+            "type_kind": "Object",
+            "go_type": "*ProfileFilterContains",
+            "modifiers": [
+              "Nullable"
+            ]
+          }
+        ],
+        "origin": "Filter"
+      },
+      {
+        "name": "RigFileFilterEquals",
+        "description": "Exact-match conditions on RigFile fields.",
+        "fields": [
+          {
+            "name": "ID",
+            "wire": "id",
+            "description": "Unique identifier for this row.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "*uuid.UUID",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "StorageKey",
+            "wire": "storageKey",
+            "description": "Where the bytes are, derived from the identifier and never from a name.",
+            "type": "String",
+            "type_kind": "Primitive",
+            "go_type": "*string",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "URL",
+            "wire": "url",
+            "description": "Where the file is served from. It is a column so a synced row carries it and a client can render the file without asking anything first.",
+            "type": "String",
+            "type_kind": "Primitive",
+            "go_type": "*string",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "FileName",
+            "wire": "fileName",
+            "description": "What the file was called when it arrived.",
+            "type": "String",
+            "type_kind": "Primitive",
+            "go_type": "*string",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "ContentType",
+            "wire": "contentType",
+            "description": "What the bytes were sniffed to be, which is not what the client claimed.",
+            "type": "String",
+            "type_kind": "Primitive",
+            "go_type": "*string",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "SizeBytes",
+            "wire": "sizeBytes",
+            "description": "How large the object is.",
+            "type": "Int64",
+            "type_kind": "Primitive",
+            "go_type": "*int64",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "UploadedAt",
+            "wire": "uploadedAt",
+            "description": "When the bytes landed. Null means the row was inserted and the upload has not finished, which is what makes an abandoned upload reapable.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "*time.Time",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "CreatedAt",
+            "wire": "createdAt",
+            "description": "When this row was created. Set automatically and never changes.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "*time.Time",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "DeletedAt",
+            "wire": "deletedAt",
+            "description": "When this row was soft-deleted. Null while the row is live.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "*time.Time",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "BannerFileProfiles",
+            "wire": "bannerFileProfiles",
+            "description": "Conditions on one of this row's BannerFileProfiles.\n\nEvery condition has to hold of the same one, not of the set between them.\n\nUnder the negative operators this asks whether one of them differs, which is not the same as none of them matching: a row can have one that matches and one that does not, satisfying the first and failing the second. Without.BannerFileProfiles asks the second.",
+            "type": "ProfileFilterEquals",
+            "type_kind": "Object",
+            "go_type": "*ProfileFilterEquals",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "DocumentFileProfileAttachments",
+            "wire": "documentFileProfileAttachments",
+            "description": "Conditions on one of this row's DocumentFileProfileAttachments.\n\nEvery condition has to hold of the same one, not of the set between them.\n\nUnder the negative operators this asks whether one of them differs, which is not the same as none of them matching: a row can have one that matches and one that does not, satisfying the first and failing the second. Without.DocumentFileProfileAttachments asks the second.",
+            "type": "ProfileAttachmentFilterEquals",
+            "type_kind": "Object",
+            "go_type": "*ProfileAttachmentFilterEquals",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "ProfileImageFileProfiles",
+            "wire": "profileImageFileProfiles",
+            "description": "Conditions on one of this row's ProfileImageFileProfiles.\n\nEvery condition has to hold of the same one, not of the set between them.\n\nUnder the negative operators this asks whether one of them differs, which is not the same as none of them matching: a row can have one that matches and one that does not, satisfying the first and failing the second. Without.ProfileImageFileProfiles asks the second.",
+            "type": "ProfileFilterEquals",
+            "type_kind": "Object",
+            "go_type": "*ProfileFilterEquals",
+            "modifiers": [
+              "Nullable"
+            ]
+          }
+        ],
+        "origin": "Filter"
+      },
+      {
+        "name": "RigFileFilterLike",
+        "description": "Pattern conditions on RigFile text fields.",
+        "fields": [
+          {
+            "name": "StorageKey",
+            "wire": "storageKey",
+            "description": "Where the bytes are, derived from the identifier and never from a name.",
+            "type": "String",
+            "type_kind": "Primitive",
+            "go_type": "*string",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "URL",
+            "wire": "url",
+            "description": "Where the file is served from. It is a column so a synced row carries it and a client can render the file without asking anything first.",
+            "type": "String",
+            "type_kind": "Primitive",
+            "go_type": "*string",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "FileName",
+            "wire": "fileName",
+            "description": "What the file was called when it arrived.",
+            "type": "String",
+            "type_kind": "Primitive",
+            "go_type": "*string",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "ContentType",
+            "wire": "contentType",
+            "description": "What the bytes were sniffed to be, which is not what the client claimed.",
+            "type": "String",
+            "type_kind": "Primitive",
+            "go_type": "*string",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "BannerFileProfiles",
+            "wire": "bannerFileProfiles",
+            "description": "Conditions on one of this row's BannerFileProfiles.\n\nEvery condition has to hold of the same one, not of the set between them.\n\nUnder the negative operators this asks whether one of them differs, which is not the same as none of them matching: a row can have one that matches and one that does not, satisfying the first and failing the second. Without.BannerFileProfiles asks the second.",
+            "type": "ProfileFilterLike",
+            "type_kind": "Object",
+            "go_type": "*ProfileFilterLike",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "DocumentFileProfileAttachments",
+            "wire": "documentFileProfileAttachments",
+            "description": "Conditions on one of this row's DocumentFileProfileAttachments.\n\nEvery condition has to hold of the same one, not of the set between them.\n\nUnder the negative operators this asks whether one of them differs, which is not the same as none of them matching: a row can have one that matches and one that does not, satisfying the first and failing the second. Without.DocumentFileProfileAttachments asks the second.",
+            "type": "ProfileAttachmentFilterLike",
+            "type_kind": "Object",
+            "go_type": "*ProfileAttachmentFilterLike",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "ProfileImageFileProfiles",
+            "wire": "profileImageFileProfiles",
+            "description": "Conditions on one of this row's ProfileImageFileProfiles.\n\nEvery condition has to hold of the same one, not of the set between them.\n\nUnder the negative operators this asks whether one of them differs, which is not the same as none of them matching: a row can have one that matches and one that does not, satisfying the first and failing the second. Without.ProfileImageFileProfiles asks the second.",
+            "type": "ProfileFilterLike",
+            "type_kind": "Object",
+            "go_type": "*ProfileFilterLike",
+            "modifiers": [
+              "Nullable"
+            ]
+          }
+        ],
+        "origin": "Filter"
+      },
+      {
+        "name": "RigFileFilterNull",
+        "description": "Presence conditions on nullable RigFile fields.",
+        "fields": [
+          {
+            "name": "UploadedAt",
+            "wire": "uploadedAt",
+            "description": "When the bytes landed. Null means the row was inserted and the upload has not finished, which is what makes an abandoned upload reapable.",
+            "type": "Bool",
+            "type_kind": "Primitive",
+            "go_type": "*bool",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "DeletedAt",
+            "wire": "deletedAt",
+            "description": "When this row was soft-deleted. Null while the row is live.",
+            "type": "Bool",
+            "type_kind": "Primitive",
+            "go_type": "*bool",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "BannerFileProfiles",
+            "wire": "bannerFileProfiles",
+            "description": "Conditions on one of this row's BannerFileProfiles.\n\nEvery condition has to hold of the same one, not of the set between them.\n\nUnder the negative operators this asks whether one of them differs, which is not the same as none of them matching: a row can have one that matches and one that does not, satisfying the first and failing the second. Without.BannerFileProfiles asks the second.",
+            "type": "ProfileFilterNull",
+            "type_kind": "Object",
+            "go_type": "*ProfileFilterNull",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "DocumentFileProfileAttachments",
+            "wire": "documentFileProfileAttachments",
+            "description": "Conditions on one of this row's DocumentFileProfileAttachments.\n\nEvery condition has to hold of the same one, not of the set between them.\n\nUnder the negative operators this asks whether one of them differs, which is not the same as none of them matching: a row can have one that matches and one that does not, satisfying the first and failing the second. Without.DocumentFileProfileAttachments asks the second.",
+            "type": "ProfileAttachmentFilterNull",
+            "type_kind": "Object",
+            "go_type": "*ProfileAttachmentFilterNull",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "ProfileImageFileProfiles",
+            "wire": "profileImageFileProfiles",
+            "description": "Conditions on one of this row's ProfileImageFileProfiles.\n\nEvery condition has to hold of the same one, not of the set between them.\n\nUnder the negative operators this asks whether one of them differs, which is not the same as none of them matching: a row can have one that matches and one that does not, satisfying the first and failing the second. Without.ProfileImageFileProfiles asks the second.",
+            "type": "ProfileFilterNull",
+            "type_kind": "Object",
+            "go_type": "*ProfileFilterNull",
+            "modifiers": [
+              "Nullable"
+            ]
+          }
+        ],
+        "origin": "Filter"
+      },
+      {
+        "name": "RigFileFilterRange",
+        "description": "Ordering conditions on RigFile fields that can be compared.",
+        "fields": [
+          {
+            "name": "SizeBytes",
+            "wire": "sizeBytes",
+            "description": "How large the object is.",
+            "type": "Int64",
+            "type_kind": "Primitive",
+            "go_type": "*int64",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "UploadedAt",
+            "wire": "uploadedAt",
+            "description": "When the bytes landed. Null means the row was inserted and the upload has not finished, which is what makes an abandoned upload reapable.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "*time.Time",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "CreatedAt",
+            "wire": "createdAt",
+            "description": "When this row was created. Set automatically and never changes.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "*time.Time",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "DeletedAt",
+            "wire": "deletedAt",
+            "description": "When this row was soft-deleted. Null while the row is live.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "*time.Time",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "BannerFileProfiles",
+            "wire": "bannerFileProfiles",
+            "description": "Conditions on one of this row's BannerFileProfiles.\n\nEvery condition has to hold of the same one, not of the set between them.\n\nUnder the negative operators this asks whether one of them differs, which is not the same as none of them matching: a row can have one that matches and one that does not, satisfying the first and failing the second. Without.BannerFileProfiles asks the second.",
+            "type": "ProfileFilterRange",
+            "type_kind": "Object",
+            "go_type": "*ProfileFilterRange",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "DocumentFileProfileAttachments",
+            "wire": "documentFileProfileAttachments",
+            "description": "Conditions on one of this row's DocumentFileProfileAttachments.\n\nEvery condition has to hold of the same one, not of the set between them.\n\nUnder the negative operators this asks whether one of them differs, which is not the same as none of them matching: a row can have one that matches and one that does not, satisfying the first and failing the second. Without.DocumentFileProfileAttachments asks the second.",
+            "type": "ProfileAttachmentFilterRange",
+            "type_kind": "Object",
+            "go_type": "*ProfileAttachmentFilterRange",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "ProfileImageFileProfiles",
+            "wire": "profileImageFileProfiles",
+            "description": "Conditions on one of this row's ProfileImageFileProfiles.\n\nEvery condition has to hold of the same one, not of the set between them.\n\nUnder the negative operators this asks whether one of them differs, which is not the same as none of them matching: a row can have one that matches and one that does not, satisfying the first and failing the second. Without.ProfileImageFileProfiles asks the second.",
+            "type": "ProfileFilterRange",
+            "type_kind": "Object",
+            "go_type": "*ProfileFilterRange",
+            "modifiers": [
+              "Nullable"
+            ]
+          }
+        ],
+        "origin": "Filter"
+      },
+      {
+        "name": "RigFileFilterWithout",
+        "description": "Relations a RigFile must have no matching row for.",
+        "fields": [
+          {
+            "name": "BannerFileProfiles",
+            "wire": "bannerFileProfiles",
+            "description": "Match rows with no BannerFileProfiles satisfying these conditions, including rows with none at all.\n\nThis negates the existence of a matching row rather than the comparison, which is the whole difference from NotEquals.BannerFileProfiles: that one is satisfied by one of them differing, and a row can have one that differs and one that matches at the same time. An empty object asks for rows with no BannerFileProfiles at all.",
+            "type": "ProfileFilter",
+            "type_kind": "Object",
+            "go_type": "*ProfileFilter",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "DocumentFileProfileAttachments",
+            "wire": "documentFileProfileAttachments",
+            "description": "Match rows with no DocumentFileProfileAttachments satisfying these conditions, including rows with none at all.\n\nThis negates the existence of a matching row rather than the comparison, which is the whole difference from NotEquals.DocumentFileProfileAttachments: that one is satisfied by one of them differing, and a row can have one that differs and one that matches at the same time. An empty object asks for rows with no DocumentFileProfileAttachments at all.",
+            "type": "ProfileAttachmentFilter",
+            "type_kind": "Object",
+            "go_type": "*ProfileAttachmentFilter",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "ProfileImageFileProfiles",
+            "wire": "profileImageFileProfiles",
+            "description": "Match rows with no ProfileImageFileProfiles satisfying these conditions, including rows with none at all.\n\nThis negates the existence of a matching row rather than the comparison, which is the whole difference from NotEquals.ProfileImageFileProfiles: that one is satisfied by one of them differing, and a row can have one that differs and one that matches at the same time. An empty object asks for rows with no ProfileImageFileProfiles at all.",
+            "type": "ProfileFilter",
+            "type_kind": "Object",
+            "go_type": "*ProfileFilter",
+            "modifiers": [
+              "Nullable"
+            ]
+          }
+        ],
+        "origin": "Filter"
+      },
+      {
+        "name": "RigFileListResponse",
+        "description": "A page of RigFiles.",
+        "fields": [
+          {
+            "name": "Data",
+            "wire": "data",
+            "description": "The rows in this page.",
+            "type": "RigFile",
+            "type_kind": "Resource",
+            "go_type": "[]RigFile",
+            "modifiers": [
+              "Array"
+            ]
+          },
+          {
+            "name": "Pagination",
+            "wire": "pagination",
+            "description": "Where this page sits in the full result set.",
+            "type": "Pagination",
+            "type_kind": "Object",
+            "go_type": "Pagination"
+          }
+        ],
+        "origin": "Projected"
+      }
+    ],
+    "resources": [
+      {
+        "name": "Profile",
+        "plural": "Profiles",
+        "path_segment": "profiles",
+        "description": "Somebody's public face, with pictures attached to it.",
+        "operations": [
+          "Create",
+          "Get",
+          "List",
+          "Search",
+          "Update",
+          "Delete"
+        ],
+        "fields": [
+          {
+            "name": "ID",
+            "wire": "id",
+            "description": "Unique identifier for this row.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "uuid.UUID",
+            "read_only": true,
+            "column": {
+              "table": "profile",
+              "name": "id",
+              "sql_type": "uuid",
+              "nullable": false,
+              "scan": "UUID"
+            },
+            "operations": [
+              "Read"
+            ]
+          },
+          {
+            "name": "TenantID",
+            "wire": "tenantId",
+            "description": "Tenant this row belongs to. Every query is scoped by it.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "uuid.UUID",
+            "read_only": true,
+            "column": {
+              "table": "profile",
+              "name": "tenant_id",
+              "sql_type": "uuid",
+              "nullable": false,
+              "scan": "UUID"
+            },
+            "operations": [
+              "Read"
+            ]
+          },
+          {
+            "name": "CreatedAt",
+            "wire": "createdAt",
+            "description": "When this row was created. Set automatically and never changes.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "time.Time",
+            "read_only": true,
+            "column": {
+              "table": "profile",
+              "name": "created_at",
+              "sql_type": "timestamptz",
+              "nullable": false,
+              "scan": "Timestamptz"
+            },
+            "operations": [
+              "Read"
+            ]
+          },
+          {
+            "name": "DisplayName",
+            "wire": "displayName",
+            "description": "What to call them.",
+            "type": "String",
+            "type_kind": "Primitive",
+            "go_type": "string",
+            "column": {
+              "table": "profile",
+              "name": "display_name",
+              "sql_type": "text",
+              "nullable": false,
+              "scan": "Direct"
+            },
+            "operations": [
+              "Read",
+              "Create",
+              "Update"
+            ]
+          },
+          {
+            "name": "ProfileImageFileID",
+            "wire": "profileImageFileId",
+            "description": "The picture. A <role>_file_id column is the declaration: the role names the endpoints and the permission keys, and rig_file is the only table it could point at, so the naming rule exempts it.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "*uuid.UUID",
+            "modifiers": [
+              "Nullable"
+            ],
+            "column": {
+              "table": "profile",
+              "name": "profile_image_file_id",
+              "sql_type": "uuid",
+              "nullable": true,
+              "scan": "UUID"
+            },
+            "operations": [
+              "Read",
+              "Create",
+              "Update"
+            ]
+          },
+          {
+            "name": "BannerFileID",
+            "wire": "bannerFileId",
+            "description": "A second one on the same table, which is the reason the role is in the name at all. The rule's own suggestion, rig_file_id, allows exactly one.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "*uuid.UUID",
+            "modifiers": [
+              "Nullable"
+            ],
+            "column": {
+              "table": "profile",
+              "name": "banner_file_id",
+              "sql_type": "uuid",
+              "nullable": true,
+              "scan": "UUID"
+            },
+            "operations": [
+              "Read",
+              "Create",
+              "Update"
+            ]
+          }
+        ],
+        "endpoints": [
+          {
+            "name": "List",
+            "summary": "List Profiles.",
+            "method": "GET",
+            "path": "",
+            "pattern": "GET /api/v1/profiles",
+            "operation_id": "listProfiles",
+            "permission": "profile.read",
+            "request": {
+              "query_params": [
+                {
+                  "name": "Limit",
+                  "wire": "limit",
+                  "description": "Maximum rows to return.",
+                  "type": "Int",
+                  "type_kind": "Primitive",
+                  "go_type": "int",
+                  "default": "50"
+                },
+                {
+                  "name": "Offset",
+                  "wire": "offset",
+                  "description": "Rows to skip before the first returned row.",
+                  "type": "Int",
+                  "type_kind": "Primitive",
+                  "go_type": "int",
+                  "default": "0"
+                }
+              ]
+            },
+            "responses": [
+              {
+                "status_code": 200,
+                "description": "A page of Profiles.",
+                "content_type": "application/json",
+                "body_object": "ProfileListResponse"
+              }
+            ],
+            "errors": [
+              400,
+              401,
+              403,
+              429,
+              500
+            ],
+            "impl": {
+              "kind": "Generated",
+              "repo_method": "List",
+              "service_method": "List",
+              "handler_name": "ListProfiles"
+            }
+          },
+          {
+            "name": "Create",
+            "summary": "Create a Profile.",
+            "method": "POST",
+            "path": "",
+            "pattern": "POST /api/v1/profiles",
+            "operation_id": "createProfile",
+            "permission": "profile.write",
+            "request": {
+              "content_type": "application/json",
+              "body_params": [
+                {
+                  "name": "DisplayName",
+                  "wire": "displayName",
+                  "description": "What to call them.",
+                  "type": "String",
+                  "type_kind": "Primitive",
+                  "go_type": "string",
+                  "column": {
+                    "table": "profile",
+                    "name": "display_name",
+                    "sql_type": "text",
+                    "nullable": false,
+                    "scan": "Direct"
+                  }
+                },
+                {
+                  "name": "ProfileImageFileID",
+                  "wire": "profileImageFileId",
+                  "description": "The picture. A <role>_file_id column is the declaration: the role names the endpoints and the permission keys, and rig_file is the only table it could point at, so the naming rule exempts it.",
+                  "type": "UUID",
+                  "type_kind": "Primitive",
+                  "go_type": "*uuid.UUID",
+                  "modifiers": [
+                    "Nullable"
+                  ],
+                  "column": {
+                    "table": "profile",
+                    "name": "profile_image_file_id",
+                    "sql_type": "uuid",
+                    "nullable": true,
+                    "scan": "UUID"
+                  }
+                },
+                {
+                  "name": "BannerFileID",
+                  "wire": "bannerFileId",
+                  "description": "A second one on the same table, which is the reason the role is in the name at all. The rule's own suggestion, rig_file_id, allows exactly one.",
+                  "type": "UUID",
+                  "type_kind": "Primitive",
+                  "go_type": "*uuid.UUID",
+                  "modifiers": [
+                    "Nullable"
+                  ],
+                  "column": {
+                    "table": "profile",
+                    "name": "banner_file_id",
+                    "sql_type": "uuid",
+                    "nullable": true,
+                    "scan": "UUID"
+                  }
+                }
+              ]
+            },
+            "responses": [
+              {
+                "status_code": 201,
+                "description": "The created Profile.",
+                "content_type": "application/json",
+                "body_object": "Profile"
+              }
+            ],
+            "errors": [
+              400,
+              401,
+              403,
+              409,
+              422,
+              429,
+              500
+            ],
+            "impl": {
+              "kind": "Generated",
+              "repo_method": "Create",
+              "service_method": "Create",
+              "handler_name": "CreateProfile"
+            }
+          },
+          {
+            "name": "Search",
+            "summary": "Search Profiles with filters.",
+            "method": "QUERY",
+            "path": "",
+            "pattern": "QUERY /api/v1/profiles",
+            "alias_patterns": [
+              "POST /api/v1/profiles/_search"
+            ],
+            "operation_id": "searchProfiles",
+            "permission": "profile.read",
+            "request": {
+              "content_type": "application/json",
+              "query_params": [
+                {
+                  "name": "Limit",
+                  "wire": "limit",
+                  "description": "Maximum rows to return.",
+                  "type": "Int",
+                  "type_kind": "Primitive",
+                  "go_type": "int",
+                  "default": "50"
+                },
+                {
+                  "name": "Offset",
+                  "wire": "offset",
+                  "description": "Rows to skip before the first returned row.",
+                  "type": "Int",
+                  "type_kind": "Primitive",
+                  "go_type": "int",
+                  "default": "0"
+                }
+              ],
+              "body_params": [
+                {
+                  "name": "Filter",
+                  "wire": "filter",
+                  "description": "Conditions rows must satisfy.",
+                  "type": "ProfileFilter",
+                  "type_kind": "Object",
+                  "go_type": "ProfileFilter"
+                }
+              ]
+            },
+            "responses": [
+              {
+                "status_code": 200,
+                "description": "A page of matching Profiles.",
+                "content_type": "application/json",
+                "body_object": "ProfileListResponse"
+              }
+            ],
+            "errors": [
+              400,
+              401,
+              403,
+              422,
+              429,
+              500
+            ],
+            "impl": {
+              "kind": "Generated",
+              "repo_method": "List",
+              "service_method": "Search",
+              "handler_name": "SearchProfiles"
+            }
+          },
+          {
+            "name": "Delete",
+            "summary": "Delete a Profile.",
+            "method": "DELETE",
+            "path": "/{id}",
+            "pattern": "DELETE /api/v1/profiles/{id}",
+            "operation_id": "deleteProfile",
+            "permission": "profile.delete",
+            "request": {
+              "path_params": [
+                {
+                  "name": "ID",
+                  "wire": "id",
+                  "description": "Identifier of the Profile.",
+                  "type": "UUID",
+                  "type_kind": "Primitive",
+                  "go_type": "uuid.UUID"
+                }
+              ]
+            },
+            "responses": [
+              {
+                "status_code": 204,
+                "description": "The Profile was deleted."
+              }
+            ],
+            "errors": [
+              400,
+              401,
+              403,
+              404,
+              409,
+              429,
+              500
+            ],
+            "impl": {
+              "kind": "Generated",
+              "repo_method": "Delete",
+              "service_method": "Delete",
+              "handler_name": "DeleteProfile"
+            }
+          },
+          {
+            "name": "Get",
+            "summary": "Fetch one Profile by identifier.",
+            "method": "GET",
+            "path": "/{id}",
+            "pattern": "GET /api/v1/profiles/{id}",
+            "operation_id": "getProfile",
+            "permission": "profile.read",
+            "request": {
+              "path_params": [
+                {
+                  "name": "ID",
+                  "wire": "id",
+                  "description": "Identifier of the Profile.",
+                  "type": "UUID",
+                  "type_kind": "Primitive",
+                  "go_type": "uuid.UUID"
+                }
+              ]
+            },
+            "responses": [
+              {
+                "status_code": 200,
+                "description": "The requested Profile.",
+                "content_type": "application/json",
+                "body_object": "Profile"
+              }
+            ],
+            "errors": [
+              400,
+              401,
+              403,
+              404,
+              429,
+              500
+            ],
+            "impl": {
+              "kind": "Generated",
+              "repo_method": "Get",
+              "service_method": "Get",
+              "handler_name": "GetProfile"
+            }
+          },
+          {
+            "name": "Update",
+            "summary": "Update a Profile.",
+            "description": "Only the fields present in the body are changed. A field set to null is cleared; a field left out is left alone.",
+            "method": "PATCH",
+            "path": "/{id}",
+            "pattern": "PATCH /api/v1/profiles/{id}",
+            "operation_id": "updateProfile",
+            "permission": "profile.write",
+            "request": {
+              "content_type": "application/json",
+              "path_params": [
+                {
+                  "name": "ID",
+                  "wire": "id",
+                  "description": "Identifier of the Profile.",
+                  "type": "UUID",
+                  "type_kind": "Primitive",
+                  "go_type": "uuid.UUID"
+                }
+              ],
+              "body_params": [
+                {
+                  "name": "DisplayName",
+                  "wire": "displayName",
+                  "description": "What to call them.",
+                  "type": "String",
+                  "type_kind": "Primitive",
+                  "go_type": "string",
+                  "column": {
+                    "table": "profile",
+                    "name": "display_name",
+                    "sql_type": "text",
+                    "nullable": false,
+                    "scan": "Direct"
+                  }
+                },
+                {
+                  "name": "ProfileImageFileID",
+                  "wire": "profileImageFileId",
+                  "description": "The picture. A <role>_file_id column is the declaration: the role names the endpoints and the permission keys, and rig_file is the only table it could point at, so the naming rule exempts it.",
+                  "type": "UUID",
+                  "type_kind": "Primitive",
+                  "go_type": "*uuid.UUID",
+                  "modifiers": [
+                    "Nullable"
+                  ],
+                  "column": {
+                    "table": "profile",
+                    "name": "profile_image_file_id",
+                    "sql_type": "uuid",
+                    "nullable": true,
+                    "scan": "UUID"
+                  }
+                },
+                {
+                  "name": "BannerFileID",
+                  "wire": "bannerFileId",
+                  "description": "A second one on the same table, which is the reason the role is in the name at all. The rule's own suggestion, rig_file_id, allows exactly one.",
+                  "type": "UUID",
+                  "type_kind": "Primitive",
+                  "go_type": "*uuid.UUID",
+                  "modifiers": [
+                    "Nullable"
+                  ],
+                  "column": {
+                    "table": "profile",
+                    "name": "banner_file_id",
+                    "sql_type": "uuid",
+                    "nullable": true,
+                    "scan": "UUID"
+                  }
+                }
+              ]
+            },
+            "responses": [
+              {
+                "status_code": 200,
+                "description": "The updated Profile.",
+                "content_type": "application/json",
+                "body_object": "Profile"
+              }
+            ],
+            "errors": [
+              400,
+              401,
+              403,
+              404,
+              409,
+              422,
+              429,
+              500
+            ],
+            "impl": {
+              "kind": "Generated",
+              "repo_method": "Update",
+              "service_method": "Update",
+              "handler_name": "UpdateProfile"
+            }
+          }
+        ],
+        "storage": {
+          "table": "profile",
+          "primary_key": [
+            "id"
+          ],
+          "tenant": {
+            "table": "profile",
+            "name": "tenant_id",
+            "sql_type": "uuid",
+            "nullable": false,
+            "scan": "UUID"
+          },
+          "audit": {
+            "created_at": {
+              "table": "profile",
+              "name": "created_at",
+              "sql_type": "timestamptz",
+              "nullable": false,
+              "scan": "Timestamptz"
+            }
+          },
+          "default_order": [
+            {
+              "column": "created_at",
+              "desc": true
+            },
+            {
+              "column": "id"
+            }
+          ],
+          "relations": [
+            {
+              "name": "BannerFile",
+              "kind": "BelongsTo",
+              "target": "RigFile",
+              "local_column": "banner_file_id",
+              "foreign_table": "rig_file",
+              "foreign_column": "id"
+            },
+            {
+              "name": "ProfileAttachments",
+              "kind": "HasMany",
+              "target": "ProfileAttachment",
+              "foreign_table": "profile_attachment",
+              "foreign_column": "profile_id"
+            },
+            {
+              "name": "ProfileImageFile",
+              "kind": "BelongsTo",
+              "target": "RigFile",
+              "local_column": "profile_image_file_id",
+              "foreign_table": "rig_file",
+              "foreign_column": "id"
+            },
+            {
+              "name": "ThumbnailFileProfileAttachments",
+              "kind": "HasMany",
+              "target": "ProfileAttachment",
+              "foreign_table": "profile_attachment",
+              "foreign_column": "thumbnail_file_id"
+            }
+          ],
+          "sortable": [
+            "id",
+            "tenant_id",
+            "created_at",
+            "display_name",
+            "profile_image_file_id",
+            "banner_file_id"
+          ],
+          "filterable": [
+            "id",
+            "tenant_id",
+            "created_at",
+            "display_name",
+            "profile_image_file_id",
+            "banner_file_id"
+          ]
+        }
+      },
+      {
+        "name": "ProfileAttachment",
+        "plural": "ProfileAttachments",
+        "path_segment": "profile-attachments",
+        "description": "A gallery is a table. Many files against one row is a child table with one file column, not a second mechanism.",
+        "operations": [
+          "Create",
+          "Get",
+          "List",
+          "Search",
+          "Update",
+          "Delete"
+        ],
+        "fields": [
+          {
+            "name": "ID",
+            "wire": "id",
+            "description": "Unique identifier for this row.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "uuid.UUID",
+            "read_only": true,
+            "column": {
+              "table": "profile_attachment",
+              "name": "id",
+              "sql_type": "uuid",
+              "nullable": false,
+              "scan": "UUID"
+            },
+            "operations": [
+              "Read"
+            ]
+          },
+          {
+            "name": "TenantID",
+            "wire": "tenantId",
+            "description": "Tenant this row belongs to. Every query is scoped by it.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "uuid.UUID",
+            "read_only": true,
+            "column": {
+              "table": "profile_attachment",
+              "name": "tenant_id",
+              "sql_type": "uuid",
+              "nullable": false,
+              "scan": "UUID"
+            },
+            "operations": [
+              "Read"
+            ]
+          },
+          {
+            "name": "CreatedAt",
+            "wire": "createdAt",
+            "description": "When this row was created. Set automatically and never changes.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "time.Time",
+            "read_only": true,
+            "column": {
+              "table": "profile_attachment",
+              "name": "created_at",
+              "sql_type": "timestamptz",
+              "nullable": false,
+              "scan": "Timestamptz"
+            },
+            "operations": [
+              "Read"
+            ]
+          },
+          {
+            "name": "ProfileID",
+            "wire": "profileId",
+            "description": "Reached through a composite key carrying the tenant, which is the shape rig recommends wherever the target is tenant-scoped. Its index leads with the tenant, and that is the index the generated queries want.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "uuid.UUID",
+            "column": {
+              "table": "profile_attachment",
+              "name": "profile_id",
+              "sql_type": "uuid",
+              "nullable": false,
+              "scan": "UUID"
+            },
+            "operations": [
+              "Read",
+              "Create",
+              "Update"
+            ]
+          },
+          {
+            "name": "DocumentFileID",
+            "wire": "documentFileId",
+            "description": "The same shape, deliberately left without an index so the rule has something to say. Before the tenant-carrying form was denormalized onto its column, it had nothing to say about either of these.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "uuid.UUID",
+            "column": {
+              "table": "profile_attachment",
+              "name": "document_file_id",
+              "sql_type": "uuid",
+              "nullable": false,
+              "scan": "UUID"
+            },
+            "operations": [
+              "Read",
+              "Create",
+              "Update"
+            ]
+          },
+          {
+            "name": "ThumbnailFileID",
+            "wire": "thumbnailFileId",
+            "description": "The control. Named like a file column and pointing at profile instead, so it is not one — and it still gets the ordinary naming advice.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "*uuid.UUID",
+            "modifiers": [
+              "Nullable"
+            ],
+            "column": {
+              "table": "profile_attachment",
+              "name": "thumbnail_file_id",
+              "sql_type": "uuid",
+              "nullable": true,
+              "scan": "UUID"
+            },
+            "operations": [
+              "Read",
+              "Create",
+              "Update"
+            ]
+          },
+          {
+            "name": "Caption",
+            "wire": "caption",
+            "description": "What the attachment is.",
+            "type": "String",
+            "type_kind": "Primitive",
+            "go_type": "*string",
+            "modifiers": [
+              "Nullable"
+            ],
+            "column": {
+              "table": "profile_attachment",
+              "name": "caption",
+              "sql_type": "text",
+              "nullable": true,
+              "scan": "Direct"
+            },
+            "operations": [
+              "Read",
+              "Create",
+              "Update"
+            ]
+          }
+        ],
+        "endpoints": [
+          {
+            "name": "List",
+            "summary": "List ProfileAttachments.",
+            "method": "GET",
+            "path": "",
+            "pattern": "GET /api/v1/profile-attachments",
+            "operation_id": "listProfileAttachments",
+            "permission": "profile_attachment.read",
+            "request": {
+              "query_params": [
+                {
+                  "name": "Limit",
+                  "wire": "limit",
+                  "description": "Maximum rows to return.",
+                  "type": "Int",
+                  "type_kind": "Primitive",
+                  "go_type": "int",
+                  "default": "50"
+                },
+                {
+                  "name": "Offset",
+                  "wire": "offset",
+                  "description": "Rows to skip before the first returned row.",
+                  "type": "Int",
+                  "type_kind": "Primitive",
+                  "go_type": "int",
+                  "default": "0"
+                }
+              ]
+            },
+            "responses": [
+              {
+                "status_code": 200,
+                "description": "A page of ProfileAttachments.",
+                "content_type": "application/json",
+                "body_object": "ProfileAttachmentListResponse"
+              }
+            ],
+            "errors": [
+              400,
+              401,
+              403,
+              429,
+              500
+            ],
+            "impl": {
+              "kind": "Generated",
+              "repo_method": "List",
+              "service_method": "List",
+              "handler_name": "ListProfileAttachments"
+            }
+          },
+          {
+            "name": "Create",
+            "summary": "Create a ProfileAttachment.",
+            "method": "POST",
+            "path": "",
+            "pattern": "POST /api/v1/profile-attachments",
+            "operation_id": "createProfileAttachment",
+            "permission": "profile_attachment.write",
+            "request": {
+              "content_type": "application/json",
+              "body_params": [
+                {
+                  "name": "ProfileID",
+                  "wire": "profileId",
+                  "description": "Reached through a composite key carrying the tenant, which is the shape rig recommends wherever the target is tenant-scoped. Its index leads with the tenant, and that is the index the generated queries want.",
+                  "type": "UUID",
+                  "type_kind": "Primitive",
+                  "go_type": "uuid.UUID",
+                  "column": {
+                    "table": "profile_attachment",
+                    "name": "profile_id",
+                    "sql_type": "uuid",
+                    "nullable": false,
+                    "scan": "UUID"
+                  }
+                },
+                {
+                  "name": "DocumentFileID",
+                  "wire": "documentFileId",
+                  "description": "The same shape, deliberately left without an index so the rule has something to say. Before the tenant-carrying form was denormalized onto its column, it had nothing to say about either of these.",
+                  "type": "UUID",
+                  "type_kind": "Primitive",
+                  "go_type": "uuid.UUID",
+                  "column": {
+                    "table": "profile_attachment",
+                    "name": "document_file_id",
+                    "sql_type": "uuid",
+                    "nullable": false,
+                    "scan": "UUID"
+                  }
+                },
+                {
+                  "name": "ThumbnailFileID",
+                  "wire": "thumbnailFileId",
+                  "description": "The control. Named like a file column and pointing at profile instead, so it is not one — and it still gets the ordinary naming advice.",
+                  "type": "UUID",
+                  "type_kind": "Primitive",
+                  "go_type": "*uuid.UUID",
+                  "modifiers": [
+                    "Nullable"
+                  ],
+                  "column": {
+                    "table": "profile_attachment",
+                    "name": "thumbnail_file_id",
+                    "sql_type": "uuid",
+                    "nullable": true,
+                    "scan": "UUID"
+                  }
+                },
+                {
+                  "name": "Caption",
+                  "wire": "caption",
+                  "description": "What the attachment is.",
+                  "type": "String",
+                  "type_kind": "Primitive",
+                  "go_type": "*string",
+                  "modifiers": [
+                    "Nullable"
+                  ],
+                  "column": {
+                    "table": "profile_attachment",
+                    "name": "caption",
+                    "sql_type": "text",
+                    "nullable": true,
+                    "scan": "Direct"
+                  }
+                }
+              ]
+            },
+            "responses": [
+              {
+                "status_code": 201,
+                "description": "The created ProfileAttachment.",
+                "content_type": "application/json",
+                "body_object": "ProfileAttachment"
+              }
+            ],
+            "errors": [
+              400,
+              401,
+              403,
+              409,
+              422,
+              429,
+              500
+            ],
+            "impl": {
+              "kind": "Generated",
+              "repo_method": "Create",
+              "service_method": "Create",
+              "handler_name": "CreateProfileAttachment"
+            }
+          },
+          {
+            "name": "Search",
+            "summary": "Search ProfileAttachments with filters.",
+            "method": "QUERY",
+            "path": "",
+            "pattern": "QUERY /api/v1/profile-attachments",
+            "alias_patterns": [
+              "POST /api/v1/profile-attachments/_search"
+            ],
+            "operation_id": "searchProfileAttachments",
+            "permission": "profile_attachment.read",
+            "request": {
+              "content_type": "application/json",
+              "query_params": [
+                {
+                  "name": "Limit",
+                  "wire": "limit",
+                  "description": "Maximum rows to return.",
+                  "type": "Int",
+                  "type_kind": "Primitive",
+                  "go_type": "int",
+                  "default": "50"
+                },
+                {
+                  "name": "Offset",
+                  "wire": "offset",
+                  "description": "Rows to skip before the first returned row.",
+                  "type": "Int",
+                  "type_kind": "Primitive",
+                  "go_type": "int",
+                  "default": "0"
+                }
+              ],
+              "body_params": [
+                {
+                  "name": "Filter",
+                  "wire": "filter",
+                  "description": "Conditions rows must satisfy.",
+                  "type": "ProfileAttachmentFilter",
+                  "type_kind": "Object",
+                  "go_type": "ProfileAttachmentFilter"
+                }
+              ]
+            },
+            "responses": [
+              {
+                "status_code": 200,
+                "description": "A page of matching ProfileAttachments.",
+                "content_type": "application/json",
+                "body_object": "ProfileAttachmentListResponse"
+              }
+            ],
+            "errors": [
+              400,
+              401,
+              403,
+              422,
+              429,
+              500
+            ],
+            "impl": {
+              "kind": "Generated",
+              "repo_method": "List",
+              "service_method": "Search",
+              "handler_name": "SearchProfileAttachments"
+            }
+          },
+          {
+            "name": "Delete",
+            "summary": "Delete a ProfileAttachment.",
+            "method": "DELETE",
+            "path": "/{id}",
+            "pattern": "DELETE /api/v1/profile-attachments/{id}",
+            "operation_id": "deleteProfileAttachment",
+            "permission": "profile_attachment.delete",
+            "request": {
+              "path_params": [
+                {
+                  "name": "ID",
+                  "wire": "id",
+                  "description": "Identifier of the ProfileAttachment.",
+                  "type": "UUID",
+                  "type_kind": "Primitive",
+                  "go_type": "uuid.UUID"
+                }
+              ]
+            },
+            "responses": [
+              {
+                "status_code": 204,
+                "description": "The ProfileAttachment was deleted."
+              }
+            ],
+            "errors": [
+              400,
+              401,
+              403,
+              404,
+              409,
+              429,
+              500
+            ],
+            "impl": {
+              "kind": "Generated",
+              "repo_method": "Delete",
+              "service_method": "Delete",
+              "handler_name": "DeleteProfileAttachment"
+            }
+          },
+          {
+            "name": "Get",
+            "summary": "Fetch one ProfileAttachment by identifier.",
+            "method": "GET",
+            "path": "/{id}",
+            "pattern": "GET /api/v1/profile-attachments/{id}",
+            "operation_id": "getProfileAttachment",
+            "permission": "profile_attachment.read",
+            "request": {
+              "path_params": [
+                {
+                  "name": "ID",
+                  "wire": "id",
+                  "description": "Identifier of the ProfileAttachment.",
+                  "type": "UUID",
+                  "type_kind": "Primitive",
+                  "go_type": "uuid.UUID"
+                }
+              ]
+            },
+            "responses": [
+              {
+                "status_code": 200,
+                "description": "The requested ProfileAttachment.",
+                "content_type": "application/json",
+                "body_object": "ProfileAttachment"
+              }
+            ],
+            "errors": [
+              400,
+              401,
+              403,
+              404,
+              429,
+              500
+            ],
+            "impl": {
+              "kind": "Generated",
+              "repo_method": "Get",
+              "service_method": "Get",
+              "handler_name": "GetProfileAttachment"
+            }
+          },
+          {
+            "name": "Update",
+            "summary": "Update a ProfileAttachment.",
+            "description": "Only the fields present in the body are changed. A field set to null is cleared; a field left out is left alone.",
+            "method": "PATCH",
+            "path": "/{id}",
+            "pattern": "PATCH /api/v1/profile-attachments/{id}",
+            "operation_id": "updateProfileAttachment",
+            "permission": "profile_attachment.write",
+            "request": {
+              "content_type": "application/json",
+              "path_params": [
+                {
+                  "name": "ID",
+                  "wire": "id",
+                  "description": "Identifier of the ProfileAttachment.",
+                  "type": "UUID",
+                  "type_kind": "Primitive",
+                  "go_type": "uuid.UUID"
+                }
+              ],
+              "body_params": [
+                {
+                  "name": "ProfileID",
+                  "wire": "profileId",
+                  "description": "Reached through a composite key carrying the tenant, which is the shape rig recommends wherever the target is tenant-scoped. Its index leads with the tenant, and that is the index the generated queries want.",
+                  "type": "UUID",
+                  "type_kind": "Primitive",
+                  "go_type": "uuid.UUID",
+                  "column": {
+                    "table": "profile_attachment",
+                    "name": "profile_id",
+                    "sql_type": "uuid",
+                    "nullable": false,
+                    "scan": "UUID"
+                  }
+                },
+                {
+                  "name": "DocumentFileID",
+                  "wire": "documentFileId",
+                  "description": "The same shape, deliberately left without an index so the rule has something to say. Before the tenant-carrying form was denormalized onto its column, it had nothing to say about either of these.",
+                  "type": "UUID",
+                  "type_kind": "Primitive",
+                  "go_type": "uuid.UUID",
+                  "column": {
+                    "table": "profile_attachment",
+                    "name": "document_file_id",
+                    "sql_type": "uuid",
+                    "nullable": false,
+                    "scan": "UUID"
+                  }
+                },
+                {
+                  "name": "ThumbnailFileID",
+                  "wire": "thumbnailFileId",
+                  "description": "The control. Named like a file column and pointing at profile instead, so it is not one — and it still gets the ordinary naming advice.",
+                  "type": "UUID",
+                  "type_kind": "Primitive",
+                  "go_type": "*uuid.UUID",
+                  "modifiers": [
+                    "Nullable"
+                  ],
+                  "column": {
+                    "table": "profile_attachment",
+                    "name": "thumbnail_file_id",
+                    "sql_type": "uuid",
+                    "nullable": true,
+                    "scan": "UUID"
+                  }
+                },
+                {
+                  "name": "Caption",
+                  "wire": "caption",
+                  "description": "What the attachment is.",
+                  "type": "String",
+                  "type_kind": "Primitive",
+                  "go_type": "*string",
+                  "modifiers": [
+                    "Nullable"
+                  ],
+                  "column": {
+                    "table": "profile_attachment",
+                    "name": "caption",
+                    "sql_type": "text",
+                    "nullable": true,
+                    "scan": "Direct"
+                  }
+                }
+              ]
+            },
+            "responses": [
+              {
+                "status_code": 200,
+                "description": "The updated ProfileAttachment.",
+                "content_type": "application/json",
+                "body_object": "ProfileAttachment"
+              }
+            ],
+            "errors": [
+              400,
+              401,
+              403,
+              404,
+              409,
+              422,
+              429,
+              500
+            ],
+            "impl": {
+              "kind": "Generated",
+              "repo_method": "Update",
+              "service_method": "Update",
+              "handler_name": "UpdateProfileAttachment"
+            }
+          }
+        ],
+        "storage": {
+          "table": "profile_attachment",
+          "primary_key": [
+            "id"
+          ],
+          "tenant": {
+            "table": "profile_attachment",
+            "name": "tenant_id",
+            "sql_type": "uuid",
+            "nullable": false,
+            "scan": "UUID"
+          },
+          "audit": {
+            "created_at": {
+              "table": "profile_attachment",
+              "name": "created_at",
+              "sql_type": "timestamptz",
+              "nullable": false,
+              "scan": "Timestamptz"
+            }
+          },
+          "default_order": [
+            {
+              "column": "created_at",
+              "desc": true
+            },
+            {
+              "column": "id"
+            }
+          ],
+          "relations": [
+            {
+              "name": "DocumentFile",
+              "kind": "BelongsTo",
+              "target": "RigFile",
+              "local_column": "document_file_id",
+              "foreign_table": "rig_file",
+              "foreign_column": "id"
+            },
+            {
+              "name": "Profile",
+              "kind": "BelongsTo",
+              "target": "Profile",
+              "local_column": "profile_id",
+              "foreign_table": "profile",
+              "foreign_column": "id"
+            },
+            {
+              "name": "ThumbnailFile",
+              "kind": "BelongsTo",
+              "target": "Profile",
+              "local_column": "thumbnail_file_id",
+              "foreign_table": "profile",
+              "foreign_column": "id"
+            }
+          ],
+          "sortable": [
+            "id",
+            "tenant_id",
+            "created_at",
+            "profile_id",
+            "document_file_id",
+            "thumbnail_file_id",
+            "caption"
+          ],
+          "filterable": [
+            "id",
+            "tenant_id",
+            "created_at",
+            "profile_id",
+            "document_file_id",
+            "thumbnail_file_id",
+            "caption"
+          ]
+        }
+      },
+      {
+        "name": "RigFile",
+        "plural": "RigFiles",
+        "path_segment": "rig-files",
+        "description": "One uploaded file. Metadata only — the bytes live in the blob store, and the storage key never leaves the server.",
+        "operations": [
+          "Create",
+          "Get",
+          "List",
+          "Search",
+          "Update",
+          "Delete"
+        ],
+        "fields": [
+          {
+            "name": "ID",
+            "wire": "id",
+            "description": "Unique identifier for this row.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "uuid.UUID",
+            "read_only": true,
+            "column": {
+              "table": "rig_file",
+              "name": "id",
+              "sql_type": "uuid",
+              "nullable": false,
+              "scan": "UUID"
+            },
+            "operations": [
+              "Read"
+            ]
+          },
+          {
+            "name": "TenantID",
+            "wire": "tenantId",
+            "description": "Tenant this row belongs to. Every query is scoped by it.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "uuid.UUID",
+            "read_only": true,
+            "column": {
+              "table": "rig_file",
+              "name": "tenant_id",
+              "sql_type": "uuid",
+              "nullable": false,
+              "scan": "UUID"
+            },
+            "operations": [
+              "Read"
+            ]
+          },
+          {
+            "name": "StorageKey",
+            "wire": "storageKey",
+            "description": "Where the bytes are, derived from the identifier and never from a name.",
+            "type": "String",
+            "type_kind": "Primitive",
+            "go_type": "string",
+            "column": {
+              "table": "rig_file",
+              "name": "storage_key",
+              "sql_type": "text",
+              "nullable": false,
+              "scan": "Direct"
+            },
+            "operations": [
+              "Read",
+              "Create",
+              "Update"
+            ]
+          },
+          {
+            "name": "URL",
+            "wire": "url",
+            "description": "Where the file is served from. It is a column so a synced row carries it and a client can render the file without asking anything first.",
+            "type": "String",
+            "type_kind": "Primitive",
+            "go_type": "string",
+            "column": {
+              "table": "rig_file",
+              "name": "url",
+              "sql_type": "text",
+              "nullable": false,
+              "scan": "Direct"
+            },
+            "operations": [
+              "Read",
+              "Create",
+              "Update"
+            ]
+          },
+          {
+            "name": "FileName",
+            "wire": "fileName",
+            "description": "What the file was called when it arrived.",
+            "type": "String",
+            "type_kind": "Primitive",
+            "go_type": "string",
+            "column": {
+              "table": "rig_file",
+              "name": "file_name",
+              "sql_type": "text",
+              "nullable": false,
+              "scan": "Direct"
+            },
+            "operations": [
+              "Read",
+              "Create",
+              "Update"
+            ]
+          },
+          {
+            "name": "ContentType",
+            "wire": "contentType",
+            "description": "What the bytes were sniffed to be, which is not what the client claimed.",
+            "type": "String",
+            "type_kind": "Primitive",
+            "go_type": "string",
+            "column": {
+              "table": "rig_file",
+              "name": "content_type",
+              "sql_type": "text",
+              "nullable": false,
+              "scan": "Direct"
+            },
+            "operations": [
+              "Read",
+              "Create",
+              "Update"
+            ]
+          },
+          {
+            "name": "SizeBytes",
+            "wire": "sizeBytes",
+            "description": "How large the object is.",
+            "type": "Int64",
+            "type_kind": "Primitive",
+            "go_type": "int64",
+            "column": {
+              "table": "rig_file",
+              "name": "size_bytes",
+              "sql_type": "bigint",
+              "nullable": false,
+              "scan": "Direct"
+            },
+            "operations": [
+              "Read",
+              "Create",
+              "Update"
+            ]
+          },
+          {
+            "name": "UploadedAt",
+            "wire": "uploadedAt",
+            "description": "When the bytes landed. Null means the row was inserted and the upload has not finished, which is what makes an abandoned upload reapable.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "*time.Time",
+            "modifiers": [
+              "Nullable"
+            ],
+            "column": {
+              "table": "rig_file",
+              "name": "uploaded_at",
+              "sql_type": "timestamptz",
+              "nullable": true,
+              "scan": "Timestamptz"
+            },
+            "operations": [
+              "Read",
+              "Create",
+              "Update"
+            ]
+          },
+          {
+            "name": "CreatedAt",
+            "wire": "createdAt",
+            "description": "When this row was created. Set automatically and never changes.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "time.Time",
+            "read_only": true,
+            "column": {
+              "table": "rig_file",
+              "name": "created_at",
+              "sql_type": "timestamptz",
+              "nullable": false,
+              "scan": "Timestamptz"
+            },
+            "operations": [
+              "Read"
+            ]
+          },
+          {
+            "name": "DeletedAt",
+            "wire": "deletedAt",
+            "description": "When this row was soft-deleted. Null while the row is live.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "*time.Time",
+            "modifiers": [
+              "Nullable"
+            ],
+            "read_only": true,
+            "column": {
+              "table": "rig_file",
+              "name": "deleted_at",
+              "sql_type": "timestamptz",
+              "nullable": true,
+              "scan": "Timestamptz"
+            },
+            "operations": [
+              "Read"
+            ]
+          }
+        ],
+        "endpoints": [
+          {
+            "name": "List",
+            "summary": "List RigFiles.",
+            "method": "GET",
+            "path": "",
+            "pattern": "GET /api/v1/rig-files",
+            "operation_id": "listRigFiles",
+            "permission": "rig_file.read",
+            "request": {
+              "query_params": [
+                {
+                  "name": "Limit",
+                  "wire": "limit",
+                  "description": "Maximum rows to return.",
+                  "type": "Int",
+                  "type_kind": "Primitive",
+                  "go_type": "int",
+                  "default": "50"
+                },
+                {
+                  "name": "Offset",
+                  "wire": "offset",
+                  "description": "Rows to skip before the first returned row.",
+                  "type": "Int",
+                  "type_kind": "Primitive",
+                  "go_type": "int",
+                  "default": "0"
+                }
+              ]
+            },
+            "responses": [
+              {
+                "status_code": 200,
+                "description": "A page of RigFiles.",
+                "content_type": "application/json",
+                "body_object": "RigFileListResponse"
+              }
+            ],
+            "errors": [
+              400,
+              401,
+              403,
+              429,
+              500
+            ],
+            "impl": {
+              "kind": "Generated",
+              "repo_method": "List",
+              "service_method": "List",
+              "handler_name": "ListRigFiles"
+            }
+          },
+          {
+            "name": "Create",
+            "summary": "Create a RigFile.",
+            "method": "POST",
+            "path": "",
+            "pattern": "POST /api/v1/rig-files",
+            "operation_id": "createRigFile",
+            "permission": "rig_file.write",
+            "request": {
+              "content_type": "application/json",
+              "body_params": [
+                {
+                  "name": "StorageKey",
+                  "wire": "storageKey",
+                  "description": "Where the bytes are, derived from the identifier and never from a name.",
+                  "type": "String",
+                  "type_kind": "Primitive",
+                  "go_type": "string",
+                  "column": {
+                    "table": "rig_file",
+                    "name": "storage_key",
+                    "sql_type": "text",
+                    "nullable": false,
+                    "scan": "Direct"
+                  }
+                },
+                {
+                  "name": "URL",
+                  "wire": "url",
+                  "description": "Where the file is served from. It is a column so a synced row carries it and a client can render the file without asking anything first.",
+                  "type": "String",
+                  "type_kind": "Primitive",
+                  "go_type": "string",
+                  "column": {
+                    "table": "rig_file",
+                    "name": "url",
+                    "sql_type": "text",
+                    "nullable": false,
+                    "scan": "Direct"
+                  }
+                },
+                {
+                  "name": "FileName",
+                  "wire": "fileName",
+                  "description": "What the file was called when it arrived.",
+                  "type": "String",
+                  "type_kind": "Primitive",
+                  "go_type": "string",
+                  "column": {
+                    "table": "rig_file",
+                    "name": "file_name",
+                    "sql_type": "text",
+                    "nullable": false,
+                    "scan": "Direct"
+                  }
+                },
+                {
+                  "name": "ContentType",
+                  "wire": "contentType",
+                  "description": "What the bytes were sniffed to be, which is not what the client claimed.",
+                  "type": "String",
+                  "type_kind": "Primitive",
+                  "go_type": "string",
+                  "column": {
+                    "table": "rig_file",
+                    "name": "content_type",
+                    "sql_type": "text",
+                    "nullable": false,
+                    "scan": "Direct"
+                  }
+                },
+                {
+                  "name": "SizeBytes",
+                  "wire": "sizeBytes",
+                  "description": "How large the object is.",
+                  "type": "Int64",
+                  "type_kind": "Primitive",
+                  "go_type": "int64",
+                  "column": {
+                    "table": "rig_file",
+                    "name": "size_bytes",
+                    "sql_type": "bigint",
+                    "nullable": false,
+                    "scan": "Direct"
+                  }
+                },
+                {
+                  "name": "UploadedAt",
+                  "wire": "uploadedAt",
+                  "description": "When the bytes landed. Null means the row was inserted and the upload has not finished, which is what makes an abandoned upload reapable.",
+                  "type": "Timestamp",
+                  "type_kind": "Primitive",
+                  "go_type": "*time.Time",
+                  "modifiers": [
+                    "Nullable"
+                  ],
+                  "column": {
+                    "table": "rig_file",
+                    "name": "uploaded_at",
+                    "sql_type": "timestamptz",
+                    "nullable": true,
+                    "scan": "Timestamptz"
+                  }
+                }
+              ]
+            },
+            "responses": [
+              {
+                "status_code": 201,
+                "description": "The created RigFile.",
+                "content_type": "application/json",
+                "body_object": "RigFile"
+              }
+            ],
+            "errors": [
+              400,
+              401,
+              403,
+              409,
+              422,
+              429,
+              500
+            ],
+            "impl": {
+              "kind": "Generated",
+              "repo_method": "Create",
+              "service_method": "Create",
+              "handler_name": "CreateRigFile"
+            }
+          },
+          {
+            "name": "Search",
+            "summary": "Search RigFiles with filters.",
+            "method": "QUERY",
+            "path": "",
+            "pattern": "QUERY /api/v1/rig-files",
+            "alias_patterns": [
+              "POST /api/v1/rig-files/_search"
+            ],
+            "operation_id": "searchRigFiles",
+            "permission": "rig_file.read",
+            "request": {
+              "content_type": "application/json",
+              "query_params": [
+                {
+                  "name": "Limit",
+                  "wire": "limit",
+                  "description": "Maximum rows to return.",
+                  "type": "Int",
+                  "type_kind": "Primitive",
+                  "go_type": "int",
+                  "default": "50"
+                },
+                {
+                  "name": "Offset",
+                  "wire": "offset",
+                  "description": "Rows to skip before the first returned row.",
+                  "type": "Int",
+                  "type_kind": "Primitive",
+                  "go_type": "int",
+                  "default": "0"
+                }
+              ],
+              "body_params": [
+                {
+                  "name": "Filter",
+                  "wire": "filter",
+                  "description": "Conditions rows must satisfy.",
+                  "type": "RigFileFilter",
+                  "type_kind": "Object",
+                  "go_type": "RigFileFilter"
+                }
+              ]
+            },
+            "responses": [
+              {
+                "status_code": 200,
+                "description": "A page of matching RigFiles.",
+                "content_type": "application/json",
+                "body_object": "RigFileListResponse"
+              }
+            ],
+            "errors": [
+              400,
+              401,
+              403,
+              422,
+              429,
+              500
+            ],
+            "impl": {
+              "kind": "Generated",
+              "repo_method": "List",
+              "service_method": "Search",
+              "handler_name": "SearchRigFiles"
+            }
+          },
+          {
+            "name": "ListDeleted",
+            "summary": "List retired RigFiles.",
+            "description": "A deletion stamps the row rather than removing it, so this is what was deleted and can still be brought back. Only rows inside the 30-day restore window appear: past it a row is gone as far as anyone is concerned, so it is not in the trash either.",
+            "method": "GET",
+            "path": "/_deleted",
+            "pattern": "GET /api/v1/rig-files/_deleted",
+            "operation_id": "listDeletedRigFiles",
+            "permission": "rig_file.read",
+            "request": {
+              "query_params": [
+                {
+                  "name": "Limit",
+                  "wire": "limit",
+                  "description": "Maximum rows to return.",
+                  "type": "Int",
+                  "type_kind": "Primitive",
+                  "go_type": "int",
+                  "default": "50"
+                },
+                {
+                  "name": "Offset",
+                  "wire": "offset",
+                  "description": "Rows to skip before the first returned row.",
+                  "type": "Int",
+                  "type_kind": "Primitive",
+                  "go_type": "int",
+                  "default": "0"
+                }
+              ]
+            },
+            "responses": [
+              {
+                "status_code": 200,
+                "description": "A page of retired RigFiles.",
+                "content_type": "application/json",
+                "body_object": "RigFileListResponse"
+              }
+            ],
+            "errors": [
+              400,
+              401,
+              403,
+              429,
+              500
+            ],
+            "impl": {
+              "kind": "Generated",
+              "repo_method": "ListDeleted",
+              "service_method": "ListDeleted",
+              "handler_name": "ListDeletedRigFiles"
+            }
+          },
+          {
+            "name": "Delete",
+            "summary": "Delete a RigFile.",
+            "description": "The row is retired by stamping a deletion time; it stops appearing in reads but can be restored within the retention window.",
+            "method": "DELETE",
+            "path": "/{id}",
+            "pattern": "DELETE /api/v1/rig-files/{id}",
+            "operation_id": "deleteRigFile",
+            "permission": "rig_file.delete",
+            "request": {
+              "path_params": [
+                {
+                  "name": "ID",
+                  "wire": "id",
+                  "description": "Identifier of the RigFile.",
+                  "type": "UUID",
+                  "type_kind": "Primitive",
+                  "go_type": "uuid.UUID"
+                }
+              ]
+            },
+            "responses": [
+              {
+                "status_code": 204,
+                "description": "The RigFile was deleted."
+              }
+            ],
+            "errors": [
+              400,
+              401,
+              403,
+              404,
+              409,
+              429,
+              500
+            ],
+            "impl": {
+              "kind": "Generated",
+              "repo_method": "Delete",
+              "service_method": "Delete",
+              "handler_name": "DeleteRigFile"
+            }
+          },
+          {
+            "name": "Get",
+            "summary": "Fetch one RigFile by identifier.",
+            "method": "GET",
+            "path": "/{id}",
+            "pattern": "GET /api/v1/rig-files/{id}",
+            "operation_id": "getRigFile",
+            "permission": "rig_file.read",
+            "request": {
+              "path_params": [
+                {
+                  "name": "ID",
+                  "wire": "id",
+                  "description": "Identifier of the RigFile.",
+                  "type": "UUID",
+                  "type_kind": "Primitive",
+                  "go_type": "uuid.UUID"
+                }
+              ]
+            },
+            "responses": [
+              {
+                "status_code": 200,
+                "description": "The requested RigFile.",
+                "content_type": "application/json",
+                "body_object": "RigFile"
+              }
+            ],
+            "errors": [
+              400,
+              401,
+              403,
+              404,
+              429,
+              500
+            ],
+            "impl": {
+              "kind": "Generated",
+              "repo_method": "Get",
+              "service_method": "Get",
+              "handler_name": "GetRigFile"
+            }
+          },
+          {
+            "name": "Update",
+            "summary": "Update a RigFile.",
+            "description": "Only the fields present in the body are changed. A field set to null is cleared; a field left out is left alone.",
+            "method": "PATCH",
+            "path": "/{id}",
+            "pattern": "PATCH /api/v1/rig-files/{id}",
+            "operation_id": "updateRigFile",
+            "permission": "rig_file.write",
+            "request": {
+              "content_type": "application/json",
+              "path_params": [
+                {
+                  "name": "ID",
+                  "wire": "id",
+                  "description": "Identifier of the RigFile.",
+                  "type": "UUID",
+                  "type_kind": "Primitive",
+                  "go_type": "uuid.UUID"
+                }
+              ],
+              "body_params": [
+                {
+                  "name": "StorageKey",
+                  "wire": "storageKey",
+                  "description": "Where the bytes are, derived from the identifier and never from a name.",
+                  "type": "String",
+                  "type_kind": "Primitive",
+                  "go_type": "string",
+                  "column": {
+                    "table": "rig_file",
+                    "name": "storage_key",
+                    "sql_type": "text",
+                    "nullable": false,
+                    "scan": "Direct"
+                  }
+                },
+                {
+                  "name": "URL",
+                  "wire": "url",
+                  "description": "Where the file is served from. It is a column so a synced row carries it and a client can render the file without asking anything first.",
+                  "type": "String",
+                  "type_kind": "Primitive",
+                  "go_type": "string",
+                  "column": {
+                    "table": "rig_file",
+                    "name": "url",
+                    "sql_type": "text",
+                    "nullable": false,
+                    "scan": "Direct"
+                  }
+                },
+                {
+                  "name": "FileName",
+                  "wire": "fileName",
+                  "description": "What the file was called when it arrived.",
+                  "type": "String",
+                  "type_kind": "Primitive",
+                  "go_type": "string",
+                  "column": {
+                    "table": "rig_file",
+                    "name": "file_name",
+                    "sql_type": "text",
+                    "nullable": false,
+                    "scan": "Direct"
+                  }
+                },
+                {
+                  "name": "ContentType",
+                  "wire": "contentType",
+                  "description": "What the bytes were sniffed to be, which is not what the client claimed.",
+                  "type": "String",
+                  "type_kind": "Primitive",
+                  "go_type": "string",
+                  "column": {
+                    "table": "rig_file",
+                    "name": "content_type",
+                    "sql_type": "text",
+                    "nullable": false,
+                    "scan": "Direct"
+                  }
+                },
+                {
+                  "name": "SizeBytes",
+                  "wire": "sizeBytes",
+                  "description": "How large the object is.",
+                  "type": "Int64",
+                  "type_kind": "Primitive",
+                  "go_type": "int64",
+                  "column": {
+                    "table": "rig_file",
+                    "name": "size_bytes",
+                    "sql_type": "bigint",
+                    "nullable": false,
+                    "scan": "Direct"
+                  }
+                },
+                {
+                  "name": "UploadedAt",
+                  "wire": "uploadedAt",
+                  "description": "When the bytes landed. Null means the row was inserted and the upload has not finished, which is what makes an abandoned upload reapable.",
+                  "type": "Timestamp",
+                  "type_kind": "Primitive",
+                  "go_type": "*time.Time",
+                  "modifiers": [
+                    "Nullable"
+                  ],
+                  "column": {
+                    "table": "rig_file",
+                    "name": "uploaded_at",
+                    "sql_type": "timestamptz",
+                    "nullable": true,
+                    "scan": "Timestamptz"
+                  }
+                }
+              ]
+            },
+            "responses": [
+              {
+                "status_code": 200,
+                "description": "The updated RigFile.",
+                "content_type": "application/json",
+                "body_object": "RigFile"
+              }
+            ],
+            "errors": [
+              400,
+              401,
+              403,
+              404,
+              409,
+              422,
+              429,
+              500
+            ],
+            "impl": {
+              "kind": "Generated",
+              "repo_method": "Update",
+              "service_method": "Update",
+              "handler_name": "UpdateRigFile"
+            }
+          },
+          {
+            "name": "Restore",
+            "summary": "Bring a retired RigFile back.",
+            "description": "The deletion stamp is cleared and the row appears in reads again. It works for 30 days after the deletion; past that the row is no longer eligible and this answers 409.\n\nRestoring a row that was never deleted is not an error. It is already in the state the caller asked for, and answering otherwise would make a retry of a request whose response went missing look like a failure.\n\nThe request carries no fields. What to do when the world has moved on while the row was retired — a unique value taken by something created since — is the application's decision, and it is made in the restore hook: refuse, or change the row so that it fits.\n\nEvery rule then runs against whatever the hook settled on, not only the ones for fields it touched. The row was not live, so nothing about it has been checked against the world it is returning to.",
+            "method": "POST",
+            "path": "/{id}/_restore",
+            "pattern": "POST /api/v1/rig-files/{id}/_restore",
+            "operation_id": "restoreRigFile",
+            "permission": "rig_file.write",
+            "request": {
+              "path_params": [
+                {
+                  "name": "ID",
+                  "wire": "id",
+                  "description": "Identifier of the RigFile.",
+                  "type": "UUID",
+                  "type_kind": "Primitive",
+                  "go_type": "uuid.UUID"
+                }
+              ]
+            },
+            "responses": [
+              {
+                "status_code": 200,
+                "description": "The restored RigFile.",
+                "content_type": "application/json",
+                "body_object": "RigFile"
+              }
+            ],
+            "errors": [
+              400,
+              401,
+              403,
+              404,
+              409,
+              422,
+              429,
+              500
+            ],
+            "impl": {
+              "kind": "Generated",
+              "repo_method": "Restore",
+              "service_method": "Restore",
+              "handler_name": "RestoreRigFile"
+            }
+          }
+        ],
+        "storage": {
+          "table": "rig_file",
+          "primary_key": [
+            "id"
+          ],
+          "tenant": {
+            "table": "rig_file",
+            "name": "tenant_id",
+            "sql_type": "uuid",
+            "nullable": false,
+            "scan": "UUID"
+          },
+          "audit": {
+            "created_at": {
+              "table": "rig_file",
+              "name": "created_at",
+              "sql_type": "timestamptz",
+              "nullable": false,
+              "scan": "Timestamptz"
+            },
+            "deleted_at": {
+              "table": "rig_file",
+              "name": "deleted_at",
+              "sql_type": "timestamptz",
+              "nullable": true,
+              "scan": "Timestamptz"
+            }
+          },
+          "soft_delete": {
+            "column": {
+              "table": "rig_file",
+              "name": "deleted_at",
+              "sql_type": "timestamptz",
+              "nullable": true,
+              "scan": "Timestamptz"
+            },
+            "restore_window_days": 30
+          },
+          "default_order": [
+            {
+              "column": "created_at",
+              "desc": true
+            },
+            {
+              "column": "id"
+            }
+          ],
+          "relations": [
+            {
+              "name": "BannerFileProfiles",
+              "kind": "HasMany",
+              "target": "Profile",
+              "foreign_table": "profile",
+              "foreign_column": "banner_file_id"
+            },
+            {
+              "name": "DocumentFileProfileAttachments",
+              "kind": "HasMany",
+              "target": "ProfileAttachment",
+              "foreign_table": "profile_attachment",
+              "foreign_column": "document_file_id"
+            },
+            {
+              "name": "ProfileImageFileProfiles",
+              "kind": "HasMany",
+              "target": "Profile",
+              "foreign_table": "profile",
+              "foreign_column": "profile_image_file_id"
+            }
+          ],
+          "sortable": [
+            "id",
+            "tenant_id",
+            "storage_key",
+            "url",
+            "file_name",
+            "content_type",
+            "size_bytes",
+            "uploaded_at",
+            "created_at",
+            "deleted_at"
+          ],
+          "filterable": [
+            "id",
+            "tenant_id",
+            "storage_key",
+            "url",
+            "file_name",
+            "content_type",
+            "size_bytes",
+            "uploaded_at",
+            "created_at",
+            "deleted_at"
+          ]
+        }
+      }
+    ],
+    "permissions": [
+      {
+        "key": "profile.delete",
+        "name": "Delete profiles",
+        "description": "Delete profiles — Somebody's public face, with pictures attached to it.",
+        "resource": "Profile",
+        "action": "delete"
+      },
+      {
+        "key": "profile.read",
+        "name": "Read profiles",
+        "description": "Read profiles — Somebody's public face, with pictures attached to it.",
+        "resource": "Profile",
+        "action": "read"
+      },
+      {
+        "key": "profile.write",
+        "name": "Write profiles",
+        "description": "Create and change profiles — Somebody's public face, with pictures attached to it.",
+        "resource": "Profile",
+        "action": "write"
+      },
+      {
+        "key": "profile_attachment.delete",
+        "name": "Delete profileattachments",
+        "description": "Delete profileattachments — A gallery is a table. Many files against one row is a child table with one file column, not a second mechanism.",
+        "resource": "ProfileAttachment",
+        "action": "delete"
+      },
+      {
+        "key": "profile_attachment.read",
+        "name": "Read profileattachments",
+        "description": "Read profileattachments — A gallery is a table. Many files against one row is a child table with one file column, not a second mechanism.",
+        "resource": "ProfileAttachment",
+        "action": "read"
+      },
+      {
+        "key": "profile_attachment.write",
+        "name": "Write profileattachments",
+        "description": "Create and change profileattachments — A gallery is a table. Many files against one row is a child table with one file column, not a second mechanism.",
+        "resource": "ProfileAttachment",
+        "action": "write"
+      },
+      {
+        "key": "rig_file.delete",
+        "name": "Delete rigfiles",
+        "description": "Delete rigfiles — One uploaded file. Metadata only — the bytes live in the blob store, and the storage key never leaves the server.",
+        "resource": "RigFile",
+        "action": "delete"
+      },
+      {
+        "key": "rig_file.read",
+        "name": "Read rigfiles",
+        "description": "Read rigfiles — One uploaded file. Metadata only — the bytes live in the blob store, and the storage key never leaves the server.",
+        "resource": "RigFile",
+        "action": "read"
+      },
+      {
+        "key": "rig_file.write",
+        "name": "Write rigfiles",
+        "description": "Create and change rigfiles — One uploaded file. Metadata only — the bytes live in the blob store, and the storage key never leaves the server.",
+        "resource": "RigFile",
+        "action": "write"
+      }
+    ]
+  },
+  "schema": {
+    "name": "public",
+    "tables": [
+      {
+        "name": "profile",
+        "comment": "Somebody's public face, with pictures attached to it.",
+        "kind": "Base",
+        "columns": [
+          {
+            "name": "id",
+            "comment": "Unique identifier for this row.",
+            "comment_source": "auto",
+            "sql_type": "uuid",
+            "udt_name": "uuid",
+            "nullable": false,
+            "ordinal": 1,
+            "is_primary_key": true
+          },
+          {
+            "name": "tenant_id",
+            "comment": "Tenant this row belongs to. Every query is scoped by it.",
+            "comment_source": "auto",
+            "sql_type": "uuid",
+            "udt_name": "uuid",
+            "nullable": false,
+            "ordinal": 2
+          },
+          {
+            "name": "created_at",
+            "comment": "When this row was created. Set automatically and never changes.",
+            "comment_source": "auto",
+            "sql_type": "timestamptz",
+            "udt_name": "timestamptz",
+            "nullable": false,
+            "ordinal": 3
+          },
+          {
+            "name": "display_name",
+            "comment": "What to call them.",
+            "comment_source": "config",
+            "sql_type": "text",
+            "udt_name": "text",
+            "nullable": false,
+            "ordinal": 4
+          },
+          {
+            "name": "profile_image_file_id",
+            "comment": "The picture. A <role>_file_id column is the declaration: the role names the endpoints and the permission keys, and rig_file is the only table it could point at, so the naming rule exempts it.",
+            "comment_source": "config",
+            "sql_type": "uuid",
+            "udt_name": "uuid",
+            "nullable": true,
+            "ordinal": 5,
+            "foreign_key": {
+              "table": "rig_file",
+              "column": "id"
+            }
+          },
+          {
+            "name": "banner_file_id",
+            "comment": "A second one on the same table, which is the reason the role is in the name at all. The rule's own suggestion, rig_file_id, allows exactly one.",
+            "comment_source": "config",
+            "sql_type": "uuid",
+            "udt_name": "uuid",
+            "nullable": true,
+            "ordinal": 6,
+            "foreign_key": {
+              "table": "rig_file",
+              "column": "id"
+            }
+          }
+        ],
+        "primary_key": [
+          "id"
+        ],
+        "indexes": [
+          {
+            "name": "profile_banner_idx",
+            "columns": [
+              "banner_file_id"
+            ],
+            "method": "btree"
+          },
+          {
+            "name": "profile_image_idx",
+            "columns": [
+              "profile_image_file_id"
+            ],
+            "method": "btree"
+          },
+          {
+            "name": "profile_pkey",
+            "columns": [
+              "id"
+            ],
+            "unique": true,
+            "method": "btree"
+          },
+          {
+            "name": "profile_tenant_idx",
+            "columns": [
+              "tenant_id"
+            ],
+            "method": "btree"
+          }
+        ],
+        "foreign_keys": [
+          {
+            "name": "profile_banner_fk",
+            "columns": [
+              "banner_file_id"
+            ],
+            "foreign_table": "rig_file",
+            "foreign_columns": [
+              "id"
+            ]
+          },
+          {
+            "name": "profile_image_fk",
+            "columns": [
+              "profile_image_file_id"
+            ],
+            "foreign_table": "rig_file",
+            "foreign_columns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "name": "profile_attachment",
+        "comment": "A gallery is a table. Many files against one row is a child table with one file column, not a second mechanism.",
+        "kind": "Base",
+        "columns": [
+          {
+            "name": "id",
+            "comment": "Unique identifier for this row.",
+            "comment_source": "auto",
+            "sql_type": "uuid",
+            "udt_name": "uuid",
+            "nullable": false,
+            "ordinal": 1,
+            "is_primary_key": true
+          },
+          {
+            "name": "tenant_id",
+            "comment": "Tenant this row belongs to. Every query is scoped by it.",
+            "comment_source": "auto",
+            "sql_type": "uuid",
+            "udt_name": "uuid",
+            "nullable": false,
+            "ordinal": 2
+          },
+          {
+            "name": "created_at",
+            "comment": "When this row was created. Set automatically and never changes.",
+            "comment_source": "auto",
+            "sql_type": "timestamptz",
+            "udt_name": "timestamptz",
+            "nullable": false,
+            "ordinal": 3
+          },
+          {
+            "name": "profile_id",
+            "comment": "Reached through a composite key carrying the tenant, which is the shape rig recommends wherever the target is tenant-scoped. Its index leads with the tenant, and that is the index the generated queries want.",
+            "comment_source": "config",
+            "sql_type": "uuid",
+            "udt_name": "uuid",
+            "nullable": false,
+            "ordinal": 4,
+            "foreign_key": {
+              "table": "profile",
+              "column": "id"
+            }
+          },
+          {
+            "name": "document_file_id",
+            "comment": "The same shape, deliberately left without an index so the rule has something to say. Before the tenant-carrying form was denormalized onto its column, it had nothing to say about either of these.",
+            "comment_source": "config",
+            "sql_type": "uuid",
+            "udt_name": "uuid",
+            "nullable": false,
+            "ordinal": 5,
+            "foreign_key": {
+              "table": "rig_file",
+              "column": "id"
+            }
+          },
+          {
+            "name": "thumbnail_file_id",
+            "comment": "The control. Named like a file column and pointing at profile instead, so it is not one — and it still gets the ordinary naming advice.",
+            "comment_source": "config",
+            "sql_type": "uuid",
+            "udt_name": "uuid",
+            "nullable": true,
+            "ordinal": 6,
+            "foreign_key": {
+              "table": "profile",
+              "column": "id"
+            }
+          },
+          {
+            "name": "caption",
+            "comment": "What the attachment is.",
+            "comment_source": "config",
+            "sql_type": "text",
+            "udt_name": "text",
+            "nullable": true,
+            "ordinal": 7
+          }
+        ],
+        "primary_key": [
+          "id"
+        ],
+        "indexes": [
+          {
+            "name": "profile_attachment_pkey",
+            "columns": [
+              "id"
+            ],
+            "unique": true,
+            "method": "btree"
+          },
+          {
+            "name": "profile_attachment_profile_idx",
+            "columns": [
+              "tenant_id",
+              "profile_id"
+            ],
+            "method": "btree"
+          },
+          {
+            "name": "profile_attachment_thumb_idx",
+            "columns": [
+              "thumbnail_file_id"
+            ],
+            "method": "btree"
+          }
+        ],
+        "foreign_keys": [
+          {
+            "name": "attachment_file_fk",
+            "columns": [
+              "tenant_id",
+              "document_file_id"
+            ],
+            "foreign_table": "rig_file",
+            "foreign_columns": [
+              "tenant_id",
+              "id"
+            ]
+          },
+          {
+            "name": "attachment_profile_fk",
+            "columns": [
+              "tenant_id",
+              "profile_id"
+            ],
+            "foreign_table": "profile",
+            "foreign_columns": [
+              "tenant_id",
+              "id"
+            ]
+          },
+          {
+            "name": "attachment_thumb_fk",
+            "columns": [
+              "thumbnail_file_id"
+            ],
+            "foreign_table": "profile",
+            "foreign_columns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "name": "rig_file",
+        "comment": "One uploaded file. Metadata only — the bytes live in the blob store, and the storage key never leaves the server.",
+        "kind": "Base",
+        "columns": [
+          {
+            "name": "id",
+            "comment": "Unique identifier for this row.",
+            "comment_source": "auto",
+            "sql_type": "uuid",
+            "udt_name": "uuid",
+            "nullable": false,
+            "ordinal": 1,
+            "is_primary_key": true
+          },
+          {
+            "name": "tenant_id",
+            "comment": "Tenant this row belongs to. Every query is scoped by it.",
+            "comment_source": "auto",
+            "sql_type": "uuid",
+            "udt_name": "uuid",
+            "nullable": false,
+            "ordinal": 2
+          },
+          {
+            "name": "storage_key",
+            "comment": "Where the bytes are, derived from the identifier and never from a name.",
+            "comment_source": "config",
+            "sql_type": "text",
+            "udt_name": "text",
+            "nullable": false,
+            "ordinal": 3
+          },
+          {
+            "name": "url",
+            "comment": "Where the file is served from. It is a column so a synced row carries it and a client can render the file without asking anything first.",
+            "comment_source": "config",
+            "sql_type": "text",
+            "udt_name": "text",
+            "nullable": false,
+            "ordinal": 4
+          },
+          {
+            "name": "file_name",
+            "comment": "What the file was called when it arrived.",
+            "comment_source": "config",
+            "sql_type": "text",
+            "udt_name": "text",
+            "nullable": false,
+            "ordinal": 5
+          },
+          {
+            "name": "content_type",
+            "comment": "What the bytes were sniffed to be, which is not what the client claimed.",
+            "comment_source": "config",
+            "sql_type": "text",
+            "udt_name": "text",
+            "nullable": false,
+            "ordinal": 6
+          },
+          {
+            "name": "size_bytes",
+            "comment": "How large the object is.",
+            "comment_source": "config",
+            "sql_type": "bigint",
+            "udt_name": "bigint",
+            "nullable": false,
+            "ordinal": 7
+          },
+          {
+            "name": "uploaded_at",
+            "comment": "When the bytes landed. Null means the row was inserted and the upload has not finished, which is what makes an abandoned upload reapable.",
+            "comment_source": "config",
+            "sql_type": "timestamptz",
+            "udt_name": "timestamptz",
+            "nullable": true,
+            "ordinal": 8
+          },
+          {
+            "name": "created_at",
+            "comment": "When this row was created. Set automatically and never changes.",
+            "comment_source": "auto",
+            "sql_type": "timestamptz",
+            "udt_name": "timestamptz",
+            "nullable": false,
+            "ordinal": 9
+          },
+          {
+            "name": "deleted_at",
+            "comment": "When this row was soft-deleted. Null while the row is live.",
+            "comment_source": "auto",
+            "sql_type": "timestamptz",
+            "udt_name": "timestamptz",
+            "nullable": true,
+            "ordinal": 10
+          }
+        ],
+        "primary_key": [
+          "id"
+        ],
+        "uniques": [
+          [
+            "tenant_id",
+            "id"
+          ]
+        ],
+        "indexes": [
+          {
+            "name": "rig_file_pkey",
+            "columns": [
+              "id"
+            ],
+            "unique": true,
+            "method": "btree"
+          },
+          {
+            "name": "rig_file_tenant_id_key",
+            "columns": [
+              "tenant_id",
+              "id"
+            ],
+            "unique": true,
+            "method": "btree"
+          }
+        ]
+      }
+    ],
+    "enums": []
+  },
+  "valid": false
+}

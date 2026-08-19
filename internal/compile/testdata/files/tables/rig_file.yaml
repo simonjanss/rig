@@ -1,0 +1,22 @@
+table: rig_file
+comment: >-
+  One uploaded file. Metadata only — the bytes live in the blob store, and the
+  storage key never leaves the server.
+restore_window_days: 30
+columns:
+  storage_key:
+    comment: Where the bytes are, derived from the identifier and never from a name.
+  url:
+    comment: >-
+      Where the file is served from. It is a column so a synced row carries it
+      and a client can render the file without asking anything first.
+  file_name:
+    comment: What the file was called when it arrived.
+  content_type:
+    comment: What the bytes were sniffed to be, which is not what the client claimed.
+  size_bytes:
+    comment: How large the object is.
+  uploaded_at:
+    comment: >-
+      When the bytes landed. Null means the row was inserted and the upload has
+      not finished, which is what makes an abandoned upload reapable.

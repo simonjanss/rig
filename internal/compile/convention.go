@@ -211,6 +211,45 @@ func auditActorColumns() []string {
 	}
 }
 
+// FileTable is the managed table every uploaded file has a row in.
+const FileTable = "rig_file"
+
+// fileColumnSuffix is what makes a column a file column.
+const fileColumnSuffix = "_file_id"
+
+// FileRole reports the role a file column names, and whether it is one.
+//
+// The column is the declaration. `profile_image_file_id` says there is one file
+// attached to this row in the role "profile image", and the path segment, the
+// endpoint names, the permission keys and the Go field all follow from it. This
+// is the same kind of fact as `deleted_at` meaning soft-deletable: the migration
+// says what the thing is, and no configuration key can disagree with it.
+//
+// A bare `file_id` has no role to name, and two of them on one table would be
+// indistinguishable, so it is not one of these.
+func FileRole(column string) (role string, ok bool) {
+	role = strings.TrimSuffix(column, fileColumnSuffix)
+	if role == column || role == "" {
+		return "", false
+	}
+	return role, true
+}
+
+// isFileColumn reports whether a column is a file attachment pointing at the
+// managed table.
+//
+// Both halves matter: the name says it is meant to be one, and the target says
+// it is. A `cover_file_id` pointing at some other table is an ordinary foreign
+// key that happens to be named confusingly, and it gets the ordinary naming
+// advice rather than this exemption.
+func isFileColumn(c *ir.Column) bool {
+	if c.ForeignKey == nil || c.ForeignKey.Table != FileTable {
+		return false
+	}
+	_, ok := FileRole(c.Name)
+	return ok
+}
+
 // isAuditActorColumn reports whether a column names who or what performed an
 // action.
 func isAuditActorColumn(name string) bool {

@@ -106,6 +106,39 @@ func usedEnums(schema ir.Schema) []ir.PgEnum {
 	return out
 }
 
+// denormalizableColumn reports which of a foreign key's columns carries its
+// meaning, when one of them does.
+//
+// A single-column key is itself. A two-column key that pairs the tenant with
+// one other column is that other column: the tenant half is a scope, not a
+// reference, and it is already the same column every generated query filters on.
+//
+// Anything else — a genuine composite key over two meaningful columns — has no
+// single column to hang the reference off, and stays on the table where the
+// generators that care can read it whole.
+func denormalizableColumn(fk ir.ForeignKey) (int, bool) {
+	if len(fk.Columns) != len(fk.ForeignColumns) {
+		return 0, false
+	}
+
+	switch len(fk.Columns) {
+	case 1:
+		return 0, true
+	case 2:
+		// Both halves have to be the tenant on both sides. A key pairing
+		// tenant_id with something that lands on a different column over there
+		// is not the shape this is about.
+		for i, name := range fk.Columns {
+			other := 1 - i
+			if name == ColTenantID && fk.ForeignColumns[i] == ColTenantID &&
+				fk.Columns[other] != ColTenantID {
+				return other, true
+			}
+		}
+	}
+	return 0, false
+}
+
 func normalizeTable(t ir.Table, enumNames map[string]bool) (ir.Table, diag.List) {
 	var diags diag.List
 
@@ -133,14 +166,27 @@ func normalizeTable(t ir.Table, enumNames map[string]bool) (ir.Table, diag.List)
 	// Single-column foreign keys are denormalized onto their column: that is
 	// how nearly every generator needs them, and re-deriving it per generator
 	// is how the two views drift apart.
+	//
+	// A two-column key carrying the tenant is denormalized the same way, onto
+	// the column that is not the tenant. `(tenant_id, todo_id) references todo
+	// (tenant_id, id)` says exactly what `todo_id references todo (id)` says and
+	// one thing more — that the row is in this tenant — and it is the shape rig
+	// recommends wherever the target is tenant-scoped, because it turns pointing
+	// at another tenant's row into a constraint violation rather than something
+	// a hook has to remember.
+	//
+	// Reading only the convenient field meant rig failed to recognize precisely
+	// the shape it was recommending: no relation, no filter across it, no naming
+	// check, and no index check either.
 	fkByColumn := make(map[string]*ir.FKRef, len(out.ForeignKeys))
 	for _, fk := range out.ForeignKeys {
-		if len(fk.Columns) != 1 || len(fk.ForeignColumns) != 1 {
+		i, ok := denormalizableColumn(fk)
+		if !ok {
 			continue
 		}
-		fkByColumn[fk.Columns[0]] = &ir.FKRef{
+		fkByColumn[fk.Columns[i]] = &ir.FKRef{
 			Table:    fk.ForeignTable,
-			Column:   fk.ForeignColumns[0],
+			Column:   fk.ForeignColumns[i],
 			OnDelete: fk.OnDelete,
 			OnUpdate: fk.OnUpdate,
 		}

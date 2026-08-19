@@ -376,9 +376,22 @@ func checkIndexes(t *ir.Table, loaded *tableconf.Loaded, fkSev, tenantSev diag.S
 // indexCovers reports whether a column is the first column of some index. Being
 // buried in the middle of a composite index does not help a lookup by that
 // column alone, which is what a foreign key needs.
+//
+// An index leading with the tenant and then this column counts, on a table that
+// has a tenant. Every generated query filters by tenant first, so
+// `(tenant_id, todo_id)` is exactly the index those queries want — and it is the
+// index the recommended composite foreign key would be written beside. Demanding
+// a second one leading with the column alone would be rig warning about the
+// shape it asked for.
 func indexCovers(t *ir.Table, column string) bool {
+	tenanted := t.Column(ColTenantID) != nil && column != ColTenantID
+
 	for _, idx := range t.Indexes {
 		if idx.LeadsWith(column) {
+			return true
+		}
+		if tenanted && idx.Partial == "" && len(idx.Columns) > 1 &&
+			idx.Columns[0] == ColTenantID && idx.Columns[1] == column {
 			return true
 		}
 	}
@@ -440,7 +453,13 @@ func checkColumnNaming(t *ir.Table, loaded *tableconf.Loaded, boolSev, tsSev, da
 		// target obvious rather than to make names long.
 		selfReference := c.ForeignKey != nil && c.ForeignKey.Table == t.Name
 
-		if fkSev != "" && c.ForeignKey != nil && !isAuditActorColumn(c.Name) && !selfReference {
+		// A file column is exempt for the same reason, and it is the third of
+		// these. `<role>_file_id` is the declaration: there is only one table it
+		// could point at, so naming the role says more than naming the target,
+		// and the alternative the rule would demand is either rig_file_id — one
+		// file per table, forever — or profile_image_rig_file_id.
+		if fkSev != "" && c.ForeignKey != nil && !isAuditActorColumn(c.Name) &&
+			!selfReference && !isFileColumn(c) {
 			want := c.ForeignKey.Table + "_id"
 			if c.Name != want && !strings.HasSuffix(c.Name, "_"+want) {
 				diags.AddSeverity(diag.CodeForeignKeyNaming, fkSev, at,
