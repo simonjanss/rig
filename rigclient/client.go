@@ -37,6 +37,10 @@ type Config struct {
 	// HTTPClient is the transport. The default has a thirty-second timeout,
 	// which is a limit on the whole exchange rather than on a stalled read —
 	// use a context for anything finer.
+	//
+	// Thirty seconds is right for a JSON call and wrong for a file, and a
+	// context cannot raise it. A client that uploads or downloads at size wants
+	// [WithTimeout] on those calls rather than a longer ceiling on every one.
 	HTTPClient *http.Client
 
 	// Credential is what authorizes each request: [StaticToken], [APIKey], or a

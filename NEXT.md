@@ -1417,6 +1417,88 @@ and returning megabytes from something whose documentation says events is a lie
 inside an interface. Ship a per-account upload count and a hard per-file byte cap,
 and say out loud that rig does not do storage quotas.
 
+### And what the generated client has to grow
+
+The section above was written as though `server-go` were the only generator these
+endpoints reach. It is not. `go-client` shipped in M5.10, and the day `Expand`
+synthesizes a multipart endpoint it will emit a JSON-only method for it — a client
+that compiles, calls the right route, and sends the wrong thing. So the SDK is half
+of this milestone rather than a milestone after it: uploading a file is one
+capability with two ends, and shipping the server end alone means declaring files
+done while nothing can use them.
+
+**The transport seam landed first and alone**, before any file code, for the same
+reason the two error codes did. `rigclient.Op` grew `Multipart` and `Accept`; `Body`
+was left exactly as it was, because its doc comment states one rule — encoded as
+JSON when it is not nil — and a type switch would have made that comment false in a
+way a reader only discovers by reading `send`. The form is assembled by the
+transport rather than by the generated method, which is the same line the file
+already draws for path escaping: the generated method knows which argument goes
+where, and it does not know what a boundary is.
+
+Two decisions there are worth the words.
+
+**A form is streamed through an `io.Pipe`, so it is sent chunked.** Computing the
+envelope's length up front is possible and buys a header almost nothing needs.
+`bytes.Buffer` is the thing the whole design exists to avoid.
+
+**A retry on 401 seeks the body, and refuses when it cannot.** `rt.do` re-sends when
+a `Reauthorizer` says the credential is worth another try, and a stream cannot be
+re-read. `http.Request.GetBody` is no help — that is `net/http`'s own path for
+redirects, and this loop re-encodes from the `Op`. So every file part is asserted to
+`io.Seeker` and rewound, which covers `*os.File` and therefore the case; anything
+else gets `ErrCannotRetry`, joined to the 401 so the failure still answers
+`IsUnauthorized`. Buffering every upload so that a retry which almost never happens
+is always possible is the wrong trade for a feature whose entire point is that a
+large file never lands in memory. The refusal happens *before* the refresh, so a
+token is not spent on a call that cannot be made.
+
+A download is a third verb, `DoContent`, answering a `Content` whose `Body` is the
+caller's to close — the one fact a caller will get wrong, and the reason the
+generated method's doc comment has to say it even though the document does not. Range
+and conditional requests are `CallOption`s (`WithRange`, `WithIfNoneMatch`) rather
+than generated parameters: the document says nothing about ranges, so nothing
+generated should mention them, and `option.go` already exists for exactly the facts
+that belong to one call rather than to an endpoint. `WithTimeout` is there for a
+duller reason — `DefaultTimeout` caps a whole exchange at thirty seconds and a
+context cannot raise it, so a 200 MB transfer on a default client fails with an
+error naming nothing about files.
+
+**The multipart create is a second generated method, not a wider first one.**
+`CreateWithFiles` beside `Create`, taking a generated `<Resource>CreateFiles` struct
+with one member per file column — a plain `Upload` where the column is not null and a
+pointer where it is, so the one thing the multipart create exists for is a compile
+error rather than a 422. `Create` is the most-called method rig emits and the
+server's change to it is additive byte for byte; adding a parameter to it is not
+additive, and would break every existing caller the day somebody adds a file column
+to a table they already had. A variadic `files ...Upload` is source-compatible and
+worse: it puts two wire shapes behind one call site, with different failure modes,
+so which one went out becomes a runtime property of a slice's length.
+
+**What the IR owes every generator, and does not have yet.** `ContentTypes` says an
+endpoint takes a form and says nothing about what the parts are called. Deriving
+`profileImageFile` from a `uuid.UUID` body param means re-deriving the
+`<role>_file_id` convention by string-sniffing, in a package that cannot import
+`compile.FileRole` — and three generators deriving it separately is exactly the
+failure widening `ContentTypes` was meant to avoid. So `EndpointRequest` carries
+`FileParts []FilePart` — part name, owning field, role, required — and `Expand`
+populates it here. The type and the media constants moved to `pkg/ir` with the
+transport commit; the compiler keeps one-line aliases, because a constant written
+from one package and read from another is a fact with two spellings.
+
+Two things this milestone has to settle for the client, both open in the prose above:
+
+- **`File` or `RigFile`.** The section on `rig_file` says to inject a builtin object
+  the way `Error` and `Pagination` are injected, while `files.expose` projects the
+  table — and the projection produces `RigFile`. If both happen, an exposed project
+  has two structs for one row and the upload method has to pick; if only the
+  projection happens, a project with `expose: false` has uploads and no type to
+  return. The builtin goes in regardless of `expose`, under the name the projection
+  produces.
+- **The upload's success response has to name a `BodyObject`.** `goclient`'s `reach`
+  walks out from responses, so the file type is reached for free if it is named
+  there and not at all if it is not.
+
 ### What rig does not do here
 
 `bytea` stays supported and gains nothing. It works today — the type mapping is

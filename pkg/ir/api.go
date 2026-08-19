@@ -593,6 +593,17 @@ type EndpointRequest struct {
 	// content type takes the first.
 	ContentTypes []string `json:"content_types,omitempty"`
 
+	// FileParts are the file parts a multipart request carries, in the order the
+	// server reads them. Empty on every endpoint that is JSON only.
+	//
+	// It is here because [EndpointRequest.ContentTypes] alone is not enough to
+	// render a multipart request: it says the endpoint takes a form, and says
+	// nothing about what the parts are called. A generator left to work that out
+	// would re-derive the <role>_file_id convention from a field's name — which
+	// is the convention the compiler exists to have already resolved, and which
+	// three generators deriving separately would eventually disagree about.
+	FileParts []FilePart `json:"file_parts,omitempty"`
+
 	Headers     []Field `json:"headers,omitempty"`
 	PathParams  []Field `json:"path_params,omitempty"`
 	QueryParams []Field `json:"query_params,omitempty"`
@@ -600,6 +611,43 @@ type EndpointRequest struct {
 	// BodyObject names a whole object as the body, used instead of BodyParams.
 	BodyObject string `json:"body_object,omitempty"`
 }
+
+// FilePart is one file a multipart request carries.
+type FilePart struct {
+	// Name is the part's name on the wire, for example "profileImageFile". It
+	// is what the server binds the bytes to, so a client that spells it
+	// differently has uploaded a part nobody claimed.
+	Name string `json:"name"`
+	// Field is the Go field on the owning row, for example
+	// "ProfileImageFileID". A generator naming a member after the part rather
+	// than after the column would produce a shape that reads nothing like the
+	// row it belongs to.
+	Field string `json:"field"`
+	// Role is the <role> from <role>_file_id, for example "profileImage".
+	Role string `json:"role"`
+	// Required says the column cannot be null, so the part has to be present.
+	// It is the whole reason a multipart create exists: a not-null file column
+	// is unreachable when the row and its bytes are two requests.
+	Required bool `json:"required,omitempty"`
+}
+
+// The media types rig's own endpoints speak.
+//
+// They live here rather than in the compiler because they are written into the
+// document by one package and read back out of it by every generator that
+// renders a request — an OpenAPI document must not claim application/json for
+// an endpoint whose document says otherwise, and a client must not send JSON to
+// one that takes a form. Until files, every endpoint said JSON, so nothing had
+// ever been asked.
+const (
+	MediaJSON = "application/json"
+	// MediaMultipart is what an upload arrives as, and what a create accepts in
+	// addition to JSON on a table with a file column.
+	MediaMultipart = "multipart/form-data"
+	// MediaOctet is the fallback a download announces when the file's own
+	// sniffed type is not known at generation time — which it never is.
+	MediaOctet = "application/octet-stream"
+)
 
 // EndpointResponse is one possible outcome. An endpoint always lists every
 // status it can return, so 200, 404, and 409 are all first-class.

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -24,6 +25,25 @@ type Op struct {
 	// struct itself both work; nil means no body at all, which is not the same
 	// as an empty object.
 	Body any
+
+	// Multipart is a form body, sent instead of Body.
+	//
+	// The two are exclusive rather than ordered: an Op carrying both is a
+	// generated method with a bug in it, and it is reported rather than resolved
+	// by a precedence somebody would have to look up.
+	//
+	// A form is streamed, so it is sent chunked and carries no Content-Length.
+	// Computing the envelope's length up front is possible and would mean
+	// buffering nothing useful for a header almost nothing needs; an
+	// intermediary that insists on one is a deployment problem, and buffering
+	// every upload to satisfy it is not a trade this makes.
+	Multipart *Multipart
+
+	// Accept is the media type this call will take back. Empty means
+	// application/json, which is every endpoint but a download: a download
+	// answers with whatever the file turned out to be, and a client that
+	// insisted on JSON would be asking for the one thing it is not.
+	Accept string
 
 	// Fallback is the path to POST to when Method is QUERY and something between
 	// here and the server refuses it — the `_search` alias the router mounts
@@ -88,6 +108,10 @@ func (rt *Runtime) do(ctx context.Context, op Op, opts []CallOption) (*http.Resp
 		op = op.asPost()
 	}
 
+	// Where the form's bodies start, taken before anything reads them. See
+	// [Multipart.mark].
+	marks := op.Multipart.mark()
+
 	res, err := rt.send(ctx, op, call)
 	if err != nil {
 		return nil, err
@@ -111,6 +135,15 @@ func (rt *Runtime) do(ctx context.Context, op Op, opts []CallOption) (*http.Resp
 	// blind retry on 401 is a way to lock an account out with a wrong password.
 	if res.StatusCode == http.StatusUnauthorized {
 		if re, ok := rt.Credential().(Reauthorizer); ok && !call.retried {
+			// Before the refresh, not after: an upload the client cannot send
+			// again is a call that has to come back to the caller, and doing it
+			// here means it comes back before a token was spent on it. The 401
+			// travels with it, so the failure still answers IsUnauthorized.
+			if err := op.Multipart.rewind(marks); err != nil {
+				defer res.Body.Close()
+				return nil, errors.Join(readError(res), err)
+			}
+
 			drain(res)
 			done, err := re.Reauthorize(ctx)
 			if err != nil {
@@ -126,6 +159,13 @@ func (rt *Runtime) do(ctx context.Context, op Op, opts []CallOption) (*http.Resp
 		}
 	}
 
+	// A 304 is the answer to a question only a conditional call asked, so it is
+	// a success for that caller and an unexplained failure for anybody else.
+	// Which is why it is gated on the option rather than on the status alone.
+	if res.StatusCode == http.StatusNotModified && call.conditional {
+		return res, nil
+	}
+
 	if res.StatusCode < 200 || res.StatusCode > 299 {
 		defer res.Body.Close()
 		return nil, readError(res)
@@ -135,24 +175,44 @@ func (rt *Runtime) do(ctx context.Context, op Op, opts []CallOption) (*http.Resp
 
 // send builds and performs one HTTP request.
 func (rt *Runtime) send(ctx context.Context, op Op, call *call) (*http.Response, error) {
-	var body io.Reader
-	if op.Body != nil {
+	if op.Body != nil && op.Multipart != nil {
+		return nil, fmt.Errorf("rigclient: %s %s carries both a JSON body and a form; "+
+			"a generated method sends one or the other", op.Method, op.Path)
+	}
+
+	var (
+		body        io.Reader
+		contentType string
+	)
+	switch {
+	case op.Multipart != nil:
+		body, contentType = op.Multipart.stream()
+	case op.Body != nil:
 		encoded, err := json.Marshal(op.Body)
 		if err != nil {
 			return nil, fmt.Errorf("rigclient: encoding the body of %s %s: %w",
 				op.Method, op.Path, err)
 		}
-		body = bytes.NewReader(encoded)
+		body, contentType = bytes.NewReader(encoded), "application/json"
 	}
 
 	req, err := http.NewRequestWithContext(ctx, op.Method, rt.url(op), body)
 	if err != nil {
+		// Do closes the body; nothing else does, and a form's writer is a
+		// goroutine blocked on a pipe nobody will read.
+		if c, ok := body.(io.Closer); ok {
+			c.Close()
+		}
 		return nil, err
 	}
 
-	req.Header.Set("Accept", "application/json")
-	if op.Body != nil {
-		req.Header.Set("Content-Type", "application/json")
+	accept := op.Accept
+	if accept == "" {
+		accept = "application/json"
+	}
+	req.Header.Set("Accept", accept)
+	if contentType != "" {
+		req.Header.Set("Content-Type", contentType)
 	}
 	req.Header.Set("User-Agent", rt.userAgent)
 	if rt.revision != "" {
@@ -181,7 +241,7 @@ func (rt *Runtime) send(ctx context.Context, op Op, call *call) (*http.Response,
 		}
 	}
 
-	return rt.http.Do(req)
+	return call.client(rt.http).Do(req)
 }
 
 // url builds the absolute URL for an operation.

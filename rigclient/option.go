@@ -1,6 +1,10 @@
 package rigclient
 
-import "net/http"
+import (
+	"fmt"
+	"net/http"
+	"time"
+)
 
 // CallOption adjusts one call.
 //
@@ -14,6 +18,22 @@ type call struct {
 	header    http.Header
 	anonymous bool
 	retried   bool
+	timeout   time.Duration
+	// conditional records that the caller asked a question a 304 answers, which
+	// is what makes that status a result rather than a failure.
+	conditional bool
+}
+
+// client is the HTTP client this call goes out on: the runtime's, unless
+// [WithTimeout] asked for a different deadline. The copy is shallow, so the
+// transport and its connection pool are shared.
+func (c *call) client(base *http.Client) *http.Client {
+	if c.timeout == 0 {
+		return base
+	}
+	copied := *base
+	copied.Timeout = c.timeout
+	return &copied
 }
 
 func newCall(opts []CallOption) *call {
@@ -38,6 +58,49 @@ func WithRequestID(id string) CallOption {
 // WithIdempotencyKey marks a retry of a write as the same write.
 func WithIdempotencyKey(key string) CallOption {
 	return func(c *call) { c.header.Set("Idempotency-Key", key) }
+}
+
+// WithRange asks for part of a file, from start to end inclusive. A negative
+// end means the rest of it.
+//
+// It is only meaningful on a download, and it is an option rather than a
+// generated parameter because the document says nothing about ranges: what an
+// endpoint takes is what the document describes, and this is a question about
+// one call. A server that honours it answers 206, which arrives as
+// [Content.Status].
+func WithRange(start, end int64) CallOption {
+	return func(c *call) {
+		spec := fmt.Sprintf("bytes=%d-", start)
+		if end >= 0 {
+			spec = fmt.Sprintf("bytes=%d-%d", start, end)
+		}
+		c.header.Set("Range", spec)
+	}
+}
+
+// WithIfNoneMatch asks for a file only if it has changed, quoting the tag from
+// a previous [Content].
+//
+// The unchanged answer is 304 with no body, and it arrives as a [Content] whose
+// Status says so rather than as an error — a caller who asked the question is
+// owed the answer.
+func WithIfNoneMatch(etag string) CallOption {
+	return func(c *call) {
+		c.header.Set("If-None-Match", etag)
+		c.conditional = true
+	}
+}
+
+// WithTimeout bounds this call, replacing the client's own.
+//
+// [DefaultTimeout] caps a whole exchange at thirty seconds, which is right for
+// a JSON call and wrong for a hundred-megabyte upload. A context deadline
+// cannot help, because [http.Client.Timeout] is a ceiling and not a default —
+// so this takes a shallow copy of the client with a different one, sharing the
+// transport. Raising the default instead would weaken every other route to suit
+// the one that transfers files.
+func WithTimeout(d time.Duration) CallOption {
+	return func(c *call) { c.timeout = d }
 }
 
 // Anonymous sends the call with no credential.
