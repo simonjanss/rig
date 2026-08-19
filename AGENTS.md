@@ -14,6 +14,7 @@ make check   # what that hook runs, and what CI runs
 ```bash
 make fmt-check   # gofmt; `make fmt` rewrites
 make vet
+make godoc-check # exported symbols in the four imported modules have doc comments
 make build
 make test        # the fast suite
 make deps        # go mod tidy, then fail if anything changed
@@ -112,6 +113,54 @@ a named example. Filling one in is deleting the blockquote, not adding a file.
 
 A checked-in `PostToolUse` hook in `.claude/` prints the matching page when one
 of the files above is edited. It reminds; it does not gate.
+
+## Godoc
+
+`runtime/`, `auth/`, `migrate/` and `rigclient/` are separate modules that a
+generated application imports. Their godoc is the only documentation their Go
+surface has: `docs/` covers what somebody writes — `rig.yaml`, a migration, a
+service — and never what they call. So a doc comment there is documentation, not
+commentary, and `make godoc-check` fails on an exported symbol without one.
+**A change to a signature updates its doc comment in the same commit.**
+
+The check asks only whether a symbol has a comment, never what the comment says.
+Two things it deliberately leaves alone, because both are judgement:
+
+- **The form.** Comments here are prose, not `// Foo does...` boilerplate, which
+  is why `ST1000` and `ST1020`–`ST1022` are off in `.golangci.yml`. A presence
+  check that also demanded the form would contradict a decision already made.
+- **Struct fields.** They are documented where the name leaves a question open
+  and not otherwise. Enforcing them would produce a hundred `// ID is the ID.`
+  lines, and the next reader would trust the comments less, not more.
+
+Three ways a comment that exists still fails to render, none of which a compiler
+catches:
+
+**A comment above several one-line declarations documents only the first.**
+`electric.Where` had `// Gt, Gte, Lt, and Lte compare.` over four of them, and
+three of the four were undocumented on pkg.go.dev for as long as it was there.
+`make godoc-check` catches this one.
+
+**A doc link to an unexported symbol renders as literal brackets.** In a comment
+on an *exported* declaration, link only what is exported and name the rest in
+prose. Elsewhere the brackets are harmless, because nothing renders them —
+`[Service.accountFor]` in `auth/account/memory.go` sits on an unexported field
+and reads fine where it is. Nothing catches this, so after a rename:
+
+```bash
+grep -rn '^\s*//.*\[[A-Z][A-Za-z0-9_]*\.[a-z][A-Za-z0-9_]*\]' --include='*.go' \
+  runtime auth migrate rigclient
+```
+
+**A doc on a `const (` block covers every name in it**, so the block is where a
+closed set is explained once rather than a dozen times.
+
+Examples are `Example` functions with an `// Output:` comment, in `example_test.go`
+and the external test package. They render on pkg.go.dev *and* run in `make
+test`, which is the point: an example that has to compile and produce the stated
+output cannot quietly stop being true. The seven packages that have them are all
+in `runtime/` and all pure — one needing Postgres or a live server has no
+deterministic output, and a compile-only example is a weaker promise than none.
 
 ## CI
 

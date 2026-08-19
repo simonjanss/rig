@@ -68,6 +68,11 @@ func UTCSlice(ts []time.Time) []time.Time {
 
 // Conn is what a repository needs from a database. A pool, a connection, and a
 // transaction all satisfy it.
+//
+// The three methods are pgx's own, with pgx's semantics: QueryRow defers its
+// error to Scan, and Exec reports how many rows a write touched. Restating them
+// here rather than taking *pgxpool.Pool is the whole point — the narrower type
+// is what a transaction can also be.
 type Conn interface {
 	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
 	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row

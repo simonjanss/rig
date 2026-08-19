@@ -82,6 +82,10 @@ func Events() []string {
 // Outcome is whether the attempt worked.
 type Outcome string
 
+// The outcomes. Two and no third, because the rate limiter counts these: an
+// "unknown" or "pending" would be a row that is neither a failure to count
+// against a key nor a success that clears the window, and it would age into the
+// audit trail as a question nobody can answer later.
 const (
 	Succeeded Outcome = "Succeeded"
 	Failed    Outcome = "Failed"

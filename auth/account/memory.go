@@ -196,8 +196,8 @@ func (s *MemoryStore) AccountForIdentity(_ context.Context, tenantID, identityID
 
 // AccountsForIdentity implements [Store].
 //
-// Oldest first, which is not decoration: [Service.accountFor] signs somebody in
-// to the tenant they joined first, so the order *is* the contract.
+// Oldest first, which is not decoration: signing in without naming a tenant puts
+// somebody in the one they joined first, so the order *is* the contract.
 func (s *MemoryStore) AccountsForIdentity(_ context.Context, identityID uuid.UUID) ([]*Account, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
