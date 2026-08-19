@@ -3,8 +3,8 @@
 An opinionated Postgres-first web system generator.
 
 You write a good Postgres schema and your business logic. `rig` writes everything else: models,
-repositories, HTTP handlers, routing, filter plumbing, live-sync endpoints, a Go client, OpenAPI,
-a TypeScript client, and an authentication foundation.
+repositories, HTTP handlers, routing, filter plumbing, live-sync endpoints, a typed Go client, and
+an authentication foundation.
 
 ```
    generated            YOU WRITE THIS           generated
@@ -26,10 +26,37 @@ rig validate   # 3. schema conventions and configuration consistency
 rig generate   # 4. compile to one IR, fan out to generators
 ```
 
+## Generators
+
+`rig generators` lists them. All but `go-client` are scaffolded by `rig init`.
+
+| Name | What it writes |
+|---|---|
+| `model-go` | the shared entity, its enums, its query types, and its inputs |
+| `persist-go` | the repository interface and its pgx implementation |
+| `service-go` | API types, service interfaces, and a working default implementation |
+| `server-go` | net/http routing, request decoding, and the handler registration struct |
+| `electric` | live-sync shape endpoints, with the tenant and lifecycle filters built in |
+| `go-client` | a typed Go client: the wire types and one method per endpoint |
+
+## Documentation
+
+[docs/](docs/) is the user documentation — how to build an application with rig.
+
+| | |
+|---|---|
+| [Tutorial](docs/tutorial.md) | An API from an empty directory, in twenty minutes |
+| [Concepts](docs/concepts.md) | The three layers, what is generated, what stays yours |
+| [Design](docs/design.md) | Why rig works this way, and what each choice costs |
+| [Schema](docs/schema.md) | The columns rig recognizes by name |
+| [rig.yaml](docs/rig-yaml.md) · [Tables](docs/tables.md) | The two files you write |
+| [Authentication](docs/auth.md) | Sessions, API keys, OAuth, RBAC |
+
+[examples/](examples/) holds complete applications, built and tested in CI.
+
 ## Status
 
-Early development. See [docs/](docs/) for the tutorial and reference, and [examples/](examples/)
-for complete applications built with rig.
+Early development.
 
 Working on rig itself: run `make hooks` once after cloning, to install the
 pre-push hook that runs the checks. [AGENTS.md](AGENTS.md) has the rest.

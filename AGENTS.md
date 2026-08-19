@@ -67,6 +67,52 @@ that emitted it. When a golden file changes because the change was intended,
 `make update-golden` rewrites the ones under `internal/`, and
 `make update-schema` rewrites the introspection golden from a real Postgres.
 
+## Documentation
+
+`docs/` is **user** documentation: how somebody builds an application with rig.
+Not how rig is built — that is this file — and not what is not built yet, which
+is `NEXT.md`. So `docs/` names what a user writes or imports (`rig.yaml`,
+`migrations/`, `services/*/`, `rig/runtime`, `rig/auth`, `rig/migrate`,
+`rig/rigclient`) and never `internal/`, `pkg/ir`, or a generator package. Second
+person, organised around what somebody is trying to do, and every rule stated
+with the trade it makes.
+
+**A change to rig's user-visible surface updates the page that documents it, in
+the same commit.** The pages are short and the mapping is mechanical:
+
+| A change to | Updates |
+|---|---|
+| `internal/gen/*` — a generator added, removed, renamed | `docs/generators.md`, `README.md` |
+| a generator's `Options` struct | `docs/generators.md` |
+| `internal/project/config.go` — any `rig.yaml` key | `docs/rig-yaml.md` |
+| `internal/tableconf/config.go` — any per-table key | `docs/tables.md` |
+| `internal/cli/*.go` — a command, subcommand, or flag | `docs/cli.md` |
+| `internal/compile/convention.go` — a recognised column or rule | `docs/schema.md` |
+| `internal/compile/builtin.go` — the error codes, the pagination limits | `docs/api.md` |
+| `internal/diag` — a code added, or a severity changed | `docs/diagnostics.md` |
+| `auth/`, or `internal/project/auth.go` | `docs/auth.md` |
+| `runtime/electric`, `internal/gen/electricgo` | `docs/electric.md` |
+| `runtime/serve`, `runtime/dbhook` | `docs/services.md` |
+| `rigclient/`, `internal/gen/goclient` | `docs/clients.md` |
+
+Two rules that are easier to break than the table above:
+
+**A removed feature is removed from every page that names it.** The failure
+documentation actually has is describing something that is gone, not omitting
+something new. Grep for it.
+
+**Nothing that does not exist yet appears in `docs/`.** `README.md` names only
+what `rig generators` would list. Planned work belongs in `NEXT.md`. The root
+README claimed an OpenAPI document and a TypeScript client for several months
+before anybody noticed neither existed.
+
+Several pages are stubs and say so in a blockquote at the top, pointing at the
+authoritative source in the meantime — `rig <cmd> --help`, `rig schema project`,
+a named example. Filling one in is deleting the blockquote, not adding a file.
+
+A checked-in `PostToolUse` hook in `.claude/` prints the matching page when one
+of the files above is edited. It reminds; it does not gate.
+
 ## CI
 
 `.github/workflows/rig.yaml` runs all of the above on every push to `main`, and

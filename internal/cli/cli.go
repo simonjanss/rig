@@ -65,7 +65,7 @@ func newRoot(e *env) *cobra.Command {
 		Use:   "rig",
 		Short: "Generate a web system from a Postgres schema",
 		Long: "rig turns a Postgres schema and a little configuration into models,\n" +
-			"repositories, HTTP handlers, an OpenAPI document, and a TypeScript client.\n\n" +
+			"repositories, HTTP handlers, live-sync endpoints, and a typed Go client.\n\n" +
 			"The usual loop is:\n" +
 			"  rig sync       read the database and write one config file per table\n" +
 			"  rig validate   check the schema and the configuration\n" +
