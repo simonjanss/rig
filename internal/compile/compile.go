@@ -50,12 +50,13 @@ func Compile(raw ir.Schema, set *tableconf.Set, opt Options) (*ir.Document, diag
 	diags.Append(d)
 
 	api, d := Project(schema, ProjectOptions{
-		Name:        cfg.API.Name,
-		Version:     cfg.API.Version,
-		Description: cfg.API.Description,
-		BasePath:    cfg.API.BasePath,
-		Namer:       n,
-		Auth:        cfg.Auth.IR(),
+		Name:           cfg.API.Name,
+		Version:        cfg.API.Version,
+		Description:    cfg.API.Description,
+		BasePath:       cfg.API.BasePath,
+		RevisionHeader: cfg.API.RevisionHeader,
+		Namer:          n,
+		Auth:           cfg.Auth.IR(),
 	})
 	diags.Append(d)
 

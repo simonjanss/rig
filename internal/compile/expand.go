@@ -40,13 +40,14 @@ func Expand(api ir.API, opt ExpandOptions) (ir.API, diag.List) {
 	wire := func(s string) string { return n.JSON(s) }
 
 	out := ir.API{
-		Name:        api.Name,
-		Version:     api.Version,
-		Description: api.Description,
-		BasePath:    api.BasePath,
-		Enums:       slices.Clone(api.Enums),
-		Objects:     slices.Clone(api.Objects),
-		Resources:   make([]ir.Resource, 0, len(api.Resources)),
+		Name:           api.Name,
+		Version:        api.Version,
+		Description:    api.Description,
+		BasePath:       api.BasePath,
+		RevisionHeader: api.RevisionHeader,
+		Enums:          slices.Clone(api.Enums),
+		Objects:        slices.Clone(api.Objects),
+		Resources:      make([]ir.Resource, 0, len(api.Resources)),
 		// Expansion adds endpoints to resources; the authentication foundation
 		// brings its own and is carried through as it arrived.
 		Auth: api.Auth,

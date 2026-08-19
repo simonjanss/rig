@@ -95,6 +95,12 @@ func newIRCmd(e *env) *cobra.Command {
 			doc, d := compileFrom(p, schema)
 			diags.Append(d)
 
+			// What was recorded, not what today would be. Looking at a project
+			// should not be how its revision gets decided.
+			if err := e.readRevision(p.Root, doc); err != nil {
+				return err
+			}
+
 			// The document is written even when validation failed. It is marked
 			// invalid, and generators refuse to run against it, but being able
 			// to inspect a broken project is how it gets fixed.

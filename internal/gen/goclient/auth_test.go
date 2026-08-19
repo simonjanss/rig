@@ -82,7 +82,8 @@ func TestTheClientReadsTheProfile(t *testing.T) {
 
 	for _, want := range []string{
 		"Auth *rigclient.Auth",
-		"rigclient.API{ BasePath: BasePath, Auth: &AuthProfile, }",
+		"rigclient.API{ BasePath: BasePath, Revision: Revision, " +
+			"RevisionHeader: RevisionHeader, Auth: &AuthProfile, }",
 		"c.Auth = rt.Auth()",
 	} {
 		if !strings.Contains(src, collapse(want)) {

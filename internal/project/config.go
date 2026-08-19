@@ -387,6 +387,13 @@ type API struct {
 	Permissions PermissionMode `yaml:"permissions,omitempty" json:"permissions,omitempty" jsonschema:"enum=derived,enum=none" jsonschema_description:"Whether generated handlers check a permission derived from the resource and operation. Defaults to derived."`
 
 	SearchMethod SearchMethod `yaml:"search_method,omitempty" json:"search_method,omitempty" jsonschema:"enum=query,enum=post,enum=both" jsonschema_description:"How the Search operation is exposed. Defaults to both: QUERY with a POST alias."`
+
+	// RevisionHeader carries the revision a client was built against, and the
+	// one the server was generated from on the way back.
+	//
+	// It is configurable because it is a name in a namespace rig does not own:
+	// a gateway in front of the server may already mean something else by it.
+	RevisionHeader string `yaml:"revision_header,omitempty" json:"revision_header,omitempty" jsonschema_description:"Header carrying the API revision, in both directions. Defaults to API-Revision."`
 }
 
 // OpenAPI configures the emitted specification.

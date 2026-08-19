@@ -65,6 +65,19 @@ func (e *emitter) serverType(b *gobuf.Buf) {
 		"and the field is simply absent from error bodies.")
 	b.L("RequestID func(*%s.Request) string", httpPkg)
 	b.NL()
+
+	b.Comment("MinRevision refuses a caller built against an API revision older " +
+		"than this one. The zero value, the default, refuses nothing.\n\n" +
+		"\tMinRevision: apirev.MustParse(\"2026-04-30\"),\n\n" +
+		"This is the end of the story [Revision] starts: you removed a field, you " +
+		"waited, the logs said nobody old was left, and now you close the door. " +
+		"Until somebody decides to, the revision is telemetry and nothing else.\n\n" +
+		"Only a caller that sends a revision older than this is refused. One that " +
+		"sends none is served — an unknown client is not the same as an old one, " +
+		"and turning every curl and every hand-written integration into a 426 is " +
+		"not a door closing, it is an outage.")
+	b.L("MinRevision %s.Revision", b.Import(runtimeModule+"/apirev"))
+	b.NL()
 	b.Comment("OnError turns a service error into a response. Nil uses " +
 		"DefaultErrorMapper, which is the right behavior for almost everyone.")
 	b.L("OnError func(w %s.ResponseWriter, r *%s.Request, rc RequestContext, err error)", httpPkg, httpPkg)
@@ -214,12 +227,22 @@ func (e *emitter) helpers(b *gobuf.Buf) {
 	b.L("Route:      r.Pattern,")
 	b.L("RemoteAddr: r.RemoteAddr,")
 	b.L("UserAgent:  r.UserAgent(),")
+	b.L("ClientRevision: r.Header.Get(RevisionHeader),")
 	b.L("}")
 	b.L("if s.RequestID != nil { rc.RequestID = s.RequestID(r) }")
+	b.NL()
+	b.Comment("Announced on the way out of every response, including the failed " +
+		"ones: a client that is behind should not have to make a successful " +
+		"request to find out.")
+	b.L("if Revision != \"\" { w.Header().Set(RevisionHeader, Revision) }")
 	b.NL()
 	b.L("for _, hook := range s.PreHooks {")
 	b.L("if !hook(w, r) { return nil, %s.Claims{}, rc, false }", tenPkg)
 	b.L("}")
+	b.NL()
+	b.Comment("Before the claims, because being too old to be served is not a " +
+		"question about who you are.")
+	b.L("if !serveRevision(s, w, r, rc) { return nil, %s.Claims{}, rc, false }", tenPkg)
 	b.NL()
 	b.L("claims, err := s.GetClaims(r)")
 	b.L("if err != nil {")
@@ -234,8 +257,32 @@ func (e *emitter) helpers(b *gobuf.Buf) {
 	b.L("}")
 	b.NL()
 	b.L("ctx := %s.NewContext(r.Context(), claims)", tenPkg)
+	b.Comment("So that what only the service method is handed reaches everything " +
+		"under it: a validator and a hook are given a context and nothing else, " +
+		"and the revision the caller was built against is exactly the kind of " +
+		"thing they have to ask about. Before the Context hook, so that hook can " +
+		"see it too.")
+	b.L("ctx = NewContext(ctx, rc)")
 	b.L("if s.Context != nil { ctx = s.Context(ctx, r) }")
 	b.L("return ctx, claims, rc, true")
+	b.L("}")
+	b.NL()
+
+	b.Comment("serveRevision reports whether this caller is new enough to be " +
+		"served, and writes the refusal when it is not.\n\n" +
+		"Both ways of not refusing are the one comparison: an unset MinRevision " +
+		"and a caller that sent no revision each leave one side unknown, and " +
+		"nothing is before an unknown revision. A caller that cannot be shown to " +
+		"be old is served.")
+	b.L("func serveRevision(s Server, w %s.ResponseWriter, r *%s.Request, rc RequestContext) bool {",
+		httpPkg, httpPkg)
+	b.L("if !rc.BuiltBefore(s.MinRevision) { return true }")
+	b.NL()
+	b.L("fail(s, w, r, rc, %s.UpgradeRequired(", errPkg)
+	b.L("%s,", gobuf.Quote("this client was built against API revision %s; "+
+		"this server serves %s and newer"))
+	b.L("rc.ClientRevision, s.MinRevision))")
+	b.L("return false")
 	b.L("}")
 	b.NL()
 

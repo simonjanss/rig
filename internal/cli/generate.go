@@ -10,6 +10,7 @@ import (
 
 	"github.com/simonjanss/rig/internal/diag"
 	"github.com/simonjanss/rig/internal/project"
+	"github.com/simonjanss/rig/internal/revision"
 	"github.com/simonjanss/rig/pkg/gen"
 	"github.com/simonjanss/rig/pkg/ir"
 )
@@ -44,9 +45,27 @@ func newGenerateCmd(e *env) *cobra.Command {
 				return err
 			}
 
+			rev, moved, err := e.stampRevision(p.Root, doc)
+			if err != nil {
+				return err
+			}
+
 			results, deltas, _, err := e.plan(cmd.Context(), p, doc, only)
 			if err != nil {
 				return err
+			}
+
+			// Recorded once every generator has run, and before anything is
+			// written: a write that fails leaves the old revision in the files
+			// and the new one in the record, which the next run corrects by
+			// writing the files it failed to write. Recording it only on the
+			// path where something changed on disk would miss a project whose
+			// generators do not embed the revision at all.
+			if moved {
+				if err := rev.Save(p.Root); err != nil {
+					return err
+				}
+				fmt.Fprintf(e.errOut, "the API surface changed; the revision is now %s\n", rev.Revision)
 			}
 
 			if !gen.NeedsWork(deltas) {
@@ -106,6 +125,13 @@ func newCheckCmd(e *env) *cobra.Command {
 				return err
 			}
 			if err := e.report(&diags); err != nil {
+				return err
+			}
+
+			// The recorded revision, not today's: the whole job here is to
+			// report drift, and a check that dated the document itself would
+			// have to invent the one thing it is checking.
+			if err := e.readRevision(p.Root, doc); err != nil {
 				return err
 			}
 
@@ -215,6 +241,40 @@ func (e *env) compile(ctx context.Context, p *project.Project, schemaPath string
 	}
 	doc, diags := compileFrom(p, schema)
 	return doc, diags, nil
+}
+
+// stampRevision decides the project's API revision and puts it on the document.
+//
+// It is a step after the compiler rather than a field the compiler fills in,
+// because the revision is derived from the finished document's hash: there is
+// nothing to look up until there is a document. It runs before any generator
+// does, so a generator still sees one document that does not change under it.
+//
+// Nothing is written here. The caller decides that, and only `rig generate`
+// does: a `rig check` that recorded today's date would report that everything
+// is up to date on the strength of a change it had just quietly accepted.
+func (e *env) stampRevision(root string, doc *ir.Document) (revision.File, bool, error) {
+	prev, err := revision.Load(root)
+	if err != nil {
+		return revision.File{}, false, err
+	}
+
+	next, moved := revision.Resolve(prev, hashOf(doc), e.clock())
+	doc.SetRevision(next.Revision)
+	return next, moved, nil
+}
+
+// readRevision stamps the document with what is on disk, for the commands that
+// only read. A project that has never generated has no revision, and saying so
+// is more honest than inventing today's date for a document nobody generated
+// from.
+func (e *env) readRevision(root string, doc *ir.Document) error {
+	prev, err := revision.Load(root)
+	if err != nil {
+		return err
+	}
+	doc.SetRevision(prev.Revision)
+	return nil
 }
 
 func hashOf(doc *ir.Document) string {

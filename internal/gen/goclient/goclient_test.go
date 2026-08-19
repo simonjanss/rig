@@ -246,7 +246,38 @@ func TestTheClientIsBuiltFromTheDocument(t *testing.T) {
 		`const BasePath = "/api/v1"`,
 		"Lessons *LessonClient",
 		"func New(cfg rigclient.Config) (*Client, error)",
-		"rt, err := rigclient.New(cfg, rigclient.API{ BasePath: BasePath, })",
+		"rt, err := rigclient.New(cfg, rigclient.API{ BasePath: BasePath, " +
+			"Revision: Revision, RevisionHeader: RevisionHeader, })",
+	} {
+		if !strings.Contains(src, collapse(want)) {
+			t.Errorf("missing %s", want)
+		}
+	}
+}
+
+// A client that does not say what it was built against is a client the server's
+// logs cannot age, which is the one thing this is for. It comes from the
+// document, so nobody has to remember to pass it.
+func TestTheClientCarriesTheRevision(t *testing.T) {
+	t.Parallel()
+
+	doc := gentest.LoadDocument(t, filepath.Join("testdata", fixture))
+	doc.API.RevisionHeader = "X-Demo-Revision"
+	doc.SetRevision("2026-08-01")
+
+	var src string
+	for _, a := range gentest.Run(t, goclient.New(), doc, opts()) {
+		if filepath.Base(a.Path) == "client.gen.go" {
+			src = collapse(string(a.Content))
+		}
+	}
+	if src == "" {
+		t.Fatal("no client.gen.go")
+	}
+
+	for _, want := range []string{
+		`const Revision = "2026-08-01"`,
+		`const RevisionHeader = "X-Demo-Revision"`,
 	} {
 		if !strings.Contains(src, collapse(want)) {
 			t.Errorf("missing %s", want)

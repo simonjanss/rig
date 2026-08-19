@@ -17,7 +17,11 @@ type ProjectOptions struct {
 	Version     string
 	Description string
 	BasePath    string
-	Namer       *naming.Namer
+	// RevisionHeader is the header the API revision travels in. The revision
+	// itself is not here: it is decided from the finished document's hash, so it
+	// is stamped on afterwards.
+	RevisionHeader string
+	Namer          *naming.Namer
 	// Auth is the authentication foundation this API is served with, already
 	// resolved by the project configuration, or nil for a project with none.
 	Auth *ir.Auth
@@ -36,11 +40,12 @@ func Project(schema ir.Schema, opt ProjectOptions) (ir.API, diag.List) {
 	n := namerOrDefault(opt.Namer)
 
 	api := ir.API{
-		Name:        opt.Name,
-		Version:     opt.Version,
-		Description: opt.Description,
-		BasePath:    opt.BasePath,
-		Auth:        opt.Auth,
+		Name:           opt.Name,
+		Version:        opt.Version,
+		Description:    opt.Description,
+		BasePath:       opt.BasePath,
+		RevisionHeader: opt.RevisionHeader,
+		Auth:           opt.Auth,
 	}
 
 	// Enums come first so field types can name them.

@@ -199,3 +199,23 @@ func TestPAndNLBuildALineByHand(t *testing.T) {
 		t.Errorf("Quote should produce a Go literal:\n%s", body)
 	}
 }
+
+// Prose is reflowed and an example is not: the width prose was typed at is
+// nobody's business, and reflowing an example changes what it says.
+func TestCommentKeepsACodeBlock(t *testing.T) {
+	t.Parallel()
+
+	b := gobuf.New("demo")
+	b.Comment("MinRevision refuses a caller older than this one.\n\n" +
+		"\tMinRevision: apirev.MustParse(\"2026-04-30\"),\n\n" +
+		"The zero value refuses nobody.")
+	b.L("type S struct{ MinRevision int }")
+
+	src, err := b.Bytes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(src), "//\tMinRevision: apirev.MustParse(\"2026-04-30\"),") {
+		t.Errorf("the example was reflowed into the prose:\n%s", src)
+	}
+}

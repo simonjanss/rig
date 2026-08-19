@@ -13,6 +13,25 @@ type API struct {
 	// BasePath is the prefix every route sits under, for example "/api/v1".
 	BasePath string `json:"base_path"`
 
+	// Revision is the date this API surface last changed, as YYYY-MM-DD.
+	//
+	// It is not a build stamp and not [Version]: Version is the path segment,
+	// and a build stamp would move on every regeneration, so two identical
+	// clients built a month apart would look a month apart. This moves only
+	// when the document's own hash does, which is what makes "how old is the
+	// oldest client still calling" a question with an answer.
+	//
+	// Empty for a document nobody stamped — [Document.Hash] deliberately does
+	// not see this field, so stamping one never changes the other.
+	Revision string `json:"revision,omitempty"`
+
+	// RevisionHeader is the header Revision travels in, both ways.
+	//
+	// Configurable because it is a name in somebody else's namespace: a proxy
+	// or a gateway may already have claimed it. Empty in a document that
+	// predates the setting; a generator reading it falls back to the default.
+	RevisionHeader string `json:"revision_header,omitempty"`
+
 	Enums     []Enum     `json:"enums"`
 	Objects   []Object   `json:"objects"`
 	Resources []Resource `json:"resources"`

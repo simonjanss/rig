@@ -283,6 +283,107 @@ func TestEmitsOnlyGeneratedFiles(t *testing.T) {
 	}
 }
 
+// The revision is telemetry in both directions: read off every request, and
+// announced on every response so a client that is behind does not have to make
+// a successful call to find out.
+func TestRevisionIsReadAndAnnounced(t *testing.T) {
+	t.Parallel()
+
+	doc := gentest.LoadDocument(t, filepath.Join("testdata", fixture))
+	doc.SetRevision("2026-08-01")
+	src := find(t, gentest.Run(t, servergo.New(), doc, opts()), "server.gen.go")
+
+	resolve, ok := between(src, "func resolve(", "\n}\n")
+	if !ok {
+		t.Fatal("no resolve function")
+	}
+	for _, want := range []string{
+		"ClientRevision: r.Header.Get(RevisionHeader)",
+		`if Revision != "" { w.Header().Set(RevisionHeader, Revision) }`,
+	} {
+		if !strings.Contains(collapse(resolve), collapse(want)) {
+			t.Errorf("resolve is missing %s:\n%s", want, resolve)
+		}
+	}
+}
+
+// The door only closes on callers that can be shown to be behind it. An unknown
+// client is not an old one, and a check that refused every curl the day somebody
+// set MinRevision would be an outage rather than a deprecation.
+func TestMinRevisionRefusesOnlyACallerThatSaidAndSaidOlder(t *testing.T) {
+	t.Parallel()
+
+	doc := gentest.LoadDocument(t, filepath.Join("testdata", fixture))
+	doc.SetRevision("2026-08-01")
+	src := find(t, gentest.Run(t, servergo.New(), doc, opts()), "server.gen.go")
+
+	check, ok := between(src, "func serveRevision(", "\n}\n")
+	if !ok {
+		t.Fatal("no serveRevision function")
+	}
+	// Both ways of not refusing are the one comparison: an unset MinRevision and
+	// a caller that said nothing each leave a side unknown, and nothing is
+	// before an unknown revision.
+	for _, want := range []string{
+		"if !rc.BuiltBefore(s.MinRevision) { return true }",
+		"rigerr.UpgradeRequired(",
+	} {
+		if !strings.Contains(collapse(check), collapse(want)) {
+			t.Errorf("serveRevision is missing %s:\n%s", want, check)
+		}
+	}
+
+	// It refuses through the same path everything else does, so a project's
+	// OnError sees it like any other failure.
+	if !strings.Contains(collapse(check), "fail(s, w, r, rc,") {
+		t.Errorf("the refusal should go through fail:\n%s", check)
+	}
+}
+
+// A date that has to be parsed is a date that can be typed wrong. Typed, the
+// only way to build one is through apirev, which panics at the declaration
+// rather than leaving Register to find out.
+func TestMinRevisionIsATypeRatherThanAString(t *testing.T) {
+	t.Parallel()
+
+	doc := gentest.LoadDocument(t, filepath.Join("testdata", fixture))
+	src := find(t, gentest.Run(t, servergo.New(), doc, opts()), "server.gen.go")
+
+	if !strings.Contains(collapse(src), "MinRevision apirev.Revision") {
+		t.Error("Server.MinRevision should be an apirev.Revision")
+	}
+
+	register, ok := between(src, "func Register(", "\n}\n")
+	if !ok {
+		t.Fatal("no Register function")
+	}
+	if strings.Contains(register, "MinRevision") {
+		t.Errorf("Register still validates MinRevision, which the type now does:\n%s", register)
+	}
+}
+
+// What only the service method is handed has to reach the hooks under it, and
+// before the Context hook, so that hook can see it too.
+func TestTheRequestContextGoesOnTheContext(t *testing.T) {
+	t.Parallel()
+
+	doc := gentest.LoadDocument(t, filepath.Join("testdata", fixture))
+	src := find(t, gentest.Run(t, servergo.New(), doc, opts()), "server.gen.go")
+
+	resolve, ok := between(src, "func resolve(", "\n}\n")
+	if !ok {
+		t.Fatal("no resolve function")
+	}
+	stamped := strings.Index(resolve, "ctx = NewContext(ctx, rc)")
+	hook := strings.Index(resolve, "if s.Context != nil")
+	if stamped < 0 {
+		t.Fatalf("resolve does not put the request context on the context:\n%s", resolve)
+	}
+	if hook >= 0 && stamped > hook {
+		t.Errorf("the request context goes on after the Context hook, which cannot then see it:\n%s", resolve)
+	}
+}
+
 func find(t *testing.T, artifacts []gen.Artifact, name string) string {
 	t.Helper()
 	for _, a := range artifacts {
