@@ -393,26 +393,48 @@ func checkIndexes(t *ir.Table, loaded *tableconf.Loaded, fkSev, tenantSev diag.S
 // buried in the middle of a composite index does not help a lookup by that
 // column alone, which is what a foreign key needs.
 //
-// An index leading with the tenant and then this column counts, on a table that
-// has a tenant. Every generated query filters by tenant first, so
-// `(tenant_id, todo_id)` is exactly the index those queries want — and it is the
-// index the recommended composite foreign key would be written beside. Demanding
-// a second one leading with the column alone would be rig warning about the
-// shape it asked for.
+// An index leading with the tenant and then this column counts, but only where
+// the key itself carries the tenant. `(tenant_id, todo_id) references todo
+// (tenant_id, id)` is enforced on both columns, so `(tenant_id, todo_id)` is the
+// index Postgres uses to check the child rows when a parent is deleted, as well
+// as the one every generated query wants — and demanding a second index leading
+// with the column alone would be rig warning about the shape it asked for.
+//
+// A single-column key gets no such credit. `references todo (id)` is checked
+// with `WHERE todo_id = $1` and nothing else, which a `(tenant_id, todo_id)`
+// index cannot serve, so deleting a parent would scan the child table however
+// well the generated reads are covered.
 func indexCovers(t *ir.Table, column string) bool {
-	tenanted := t.Column(ColTenantID) != nil && column != ColTenantID
+	tenantCarrying := carriesTenantInKey(t, column)
 
 	for _, idx := range t.Indexes {
 		if idx.LeadsWith(column) {
 			return true
 		}
-		if tenanted && idx.Partial == "" && len(idx.Columns) > 1 &&
+		if tenantCarrying && idx.Partial == "" && len(idx.Columns) > 1 &&
 			idx.Columns[0] == ColTenantID && idx.Columns[1] == column {
 			return true
 		}
 	}
 	// A single-column primary key or unique constraint is an index too.
 	return len(t.PrimaryKey) == 1 && t.PrimaryKey[0] == column
+}
+
+// carriesTenantInKey reports whether the foreign key denormalized onto this
+// column is the two-column form pairing it with the tenant.
+//
+// It reads the table's keys rather than the column's [ir.FKRef], because the
+// FKRef is the denormalized view and by design says nothing about how many
+// columns the constraint spans — which is the whole question here.
+func carriesTenantInKey(t *ir.Table, column string) bool {
+	for _, fk := range t.ForeignKeys {
+		i, ok := denormalizableColumn(fk)
+		if !ok || fk.Columns[i] != column {
+			continue
+		}
+		return len(fk.Columns) == 2
+	}
+	return false
 }
 
 func checkColumnNaming(t *ir.Table, loaded *tableconf.Loaded, boolSev, tsSev, dateSev, fkSev diag.Severity) diag.List {
