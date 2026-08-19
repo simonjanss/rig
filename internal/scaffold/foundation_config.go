@@ -294,3 +294,42 @@ expose: false`,
 		},
 	}
 }
+
+// fileConfigs is rig_file's, and it is the one foundation table whose
+// configuration is written for a project that wants it read rather than for one
+// that wants CRUD.
+//
+// Read-only and narrow. A client needs the url to render a file and the name,
+// type and size to describe it; the storage key, the checksum, the declared type
+// and the tenant are the server's bookkeeping and never leave it. The storage
+// key is the one that would actually matter — it is the thing a signed URL is
+// built from, and syncing it is the same class of mistake as syncing a password
+// hash.
+//
+// There is no write path to generate. The endpoints that put a file anywhere are
+// the upload and the delete rig synthesizes against the row that owns it, and a
+// client that could POST a rig_file row with an arbitrary key and no bytes has
+// found a way around all of it.
+func fileConfigs() []tableConfig {
+	return []tableConfig{
+		{
+			table: "rig_file",
+			content: config("rig_file", "File", schemaRef,
+				`# Read-only. Uploading is the nested endpoint on the row that owns the
+# file, which is what makes the upload permissioned and tenant-scoped; a
+# generic POST here would be a way around both.
+operations: [Get, List]`,
+				`# How long a deleted file stays restorable is files.restore_window in
+# rig.yaml, not a key here — rig_file is the framework's table and the
+# sweeper reads one number for all of them.
+columns:
+  storage_key:
+    exclude: true
+  checksum:
+    exclude: true
+  declared_content_type:
+    exclude: true`,
+			),
+		},
+	}
+}
