@@ -52,6 +52,9 @@ func (c *TodoClient) List(ctx context.Context, q TodoListQuery, opts ...rigclien
 // POST /api/v1/todos
 //
 // Operation createTodo.
+//
+// A refusal is read back with [TodoCreateError], whose Fields say what was
+// wrong with each member of the body.
 func (c *TodoClient) Create(ctx context.Context, in TodoCreateInput, opts ...rigclient.CallOption) (*Todo, error) {
 	op := rigclient.Op{
 		Method: http.MethodPost,
@@ -143,6 +146,9 @@ func (c *TodoClient) Get(ctx context.Context, id uuid.UUID, opts ...rigclient.Ca
 // PATCH /api/v1/todos/{id}
 //
 // Operation updateTodo.
+//
+// A refusal is read back with [TodoUpdateError], whose Fields say what was
+// wrong with each member of the body.
 func (c *TodoClient) Update(ctx context.Context, id uuid.UUID, in TodoUpdateInput, opts ...rigclient.CallOption) (*Todo, error) {
 	op := rigclient.Op{
 		Method: http.MethodPatch,
@@ -161,6 +167,9 @@ func (c *TodoClient) Update(ctx context.Context, id uuid.UUID, in TodoUpdateInpu
 // POST /api/v1/todos/{id}/_complete
 //
 // Operation completeTodo.
+//
+// A refusal is read back with [TodoCompleteError], whose Fields say what was
+// wrong with each member of the body.
 func (c *TodoClient) Complete(ctx context.Context, id uuid.UUID, in TodoCompleteBody, opts ...rigclient.CallOption) (*Todo, error) {
 	op := rigclient.Op{
 		Method: http.MethodPost,
@@ -329,7 +338,7 @@ func (c *TodoClient) DownloadCoverFile(ctx context.Context, id uuid.UUID, fileID
 // The row and the bytes are committed together, so a create that fails leaves
 // neither. The JSON body travels as a part named "json", which is the same
 // body Create sends and goes through the same validation — a 422 comes back
-// with the same field errors.
+// with the same field errors, read back the same way with [TodoCreateError].
 //
 // Bound the call: the default thirty-second client timeout covers the whole
 // exchange, and this one carries files.

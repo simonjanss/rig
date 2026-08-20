@@ -298,6 +298,13 @@ func (e *emitter) methodDoc(b *gobuf.Buf, res *ir.Resource, ep *ir.Endpoint) {
 	}
 	doc += "\n\n" + route + "\n\nOperation " + ep.OperationID + "."
 
+	// Named here rather than only where it is declared, because a caller reading
+	// this is holding the error and not looking for the function that reads it.
+	if name := errorFuncName(res, ep); name != "" {
+		doc += "\n\nA refusal is read back with [" + name + "], whose Fields say " +
+			"what was wrong with each member of the body."
+	}
+
 	b.Comment(doc)
 }
 

@@ -42,6 +42,9 @@ func (c *LessonClient) List(ctx context.Context, q LessonListQuery, opts ...rigc
 // POST /api/v1/lessons
 //
 // Operation createLesson.
+//
+// A refusal is read back with [LessonCreateError], whose Fields say what was
+// wrong with each member of the body.
 func (c *LessonClient) Create(ctx context.Context, in LessonCreateInput, opts ...rigclient.CallOption) (*Lesson, error) {
 	op := rigclient.Op{
 		Method: http.MethodPost,
@@ -133,6 +136,9 @@ func (c *LessonClient) Get(ctx context.Context, id uuid.UUID, opts ...rigclient.
 // PATCH /api/v1/lessons/{id}
 //
 // Operation updateLesson.
+//
+// A refusal is read back with [LessonUpdateError], whose Fields say what was
+// wrong with each member of the body.
 func (c *LessonClient) Update(ctx context.Context, id uuid.UUID, in LessonUpdateInput, opts ...rigclient.CallOption) (*Lesson, error) {
 	op := rigclient.Op{
 		Method: http.MethodPatch,
@@ -147,6 +153,9 @@ func (c *LessonClient) Update(ctx context.Context, id uuid.UUID, in LessonUpdate
 // POST /api/v1/lessons/{id}/_publish
 //
 // Operation publishLesson.
+//
+// A refusal is read back with [LessonPublishError], whose Fields say what was
+// wrong with each member of the body.
 func (c *LessonClient) Publish(ctx context.Context, id uuid.UUID, in LessonPublishBody, opts ...rigclient.CallOption) (*Lesson, error) {
 	op := rigclient.Op{
 		Method: http.MethodPost,

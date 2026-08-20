@@ -43,6 +43,24 @@ func (c Config) bind() string {
 	return "127.0.0.1"
 }
 
+// publish is the --publish argument: a fixed host port when there is one, and an
+// empty one — the engine's spelling of "pick a free port" — when there is not.
+func (c Config) publish() string {
+	if c.Port == 0 {
+		return fmt.Sprintf("%s::5432", c.bind())
+	}
+	return fmt.Sprintf("%s:%d:5432", c.bind(), c.Port)
+}
+
+// portDescription is how the port reads in a log line before anything has been
+// published, when under isolation there is no number to print yet.
+func (c Config) portDescription() string {
+	if c.Port == 0 {
+		return "whatever is free"
+	}
+	return strconv.Itoa(c.Port)
+}
+
 func (c Config) startWait() time.Duration {
 	if c.StartWait > 0 {
 		return c.StartWait
@@ -51,6 +69,11 @@ func (c Config) startWait() time.Duration {
 }
 
 // URL is the connection string for the container.
+//
+// The port is the configured one, so this answers for a [Config] and not for a
+// running container: under isolation the port is zero here and the kernel picks
+// the real one. [DB.URL] is what reports that, and is what a caller that has
+// started something should use.
 //
 // TimeZone is pinned rather than inherited. A timestamptz holds an instant and no
 // zone, so nothing about what is *stored* depends on this — but `::date`,
@@ -69,6 +92,10 @@ func (c Config) URL() string {
 type DB struct {
 	cfg     Config
 	runtime Runtime
+	// port is what the container actually publishes on, which is the configured
+	// port unless there was none to configure. Resolved before anything tries to
+	// connect, because under isolation it is the only way to.
+	port int
 }
 
 // Start brings the database up and waits until it accepts connections.
@@ -111,14 +138,60 @@ func Start(ctx context.Context, cfg Config) (*DB, error) {
 		}
 	}
 
+	if err := db.resolvePort(ctx); err != nil {
+		return nil, err
+	}
 	if err := db.waitReady(ctx); err != nil {
 		return nil, err
 	}
 	return db, nil
 }
 
-// URL is the connection string.
-func (d *DB) URL() string { return d.cfg.URL() }
+// Port is the host port the container publishes on.
+func (d *DB) Port() int { return d.port }
+
+// URL is the connection string, on the port the container really has.
+func (d *DB) URL() string {
+	cfg := d.cfg
+	cfg.Port = d.port
+	return cfg.URL()
+}
+
+// resolvePort settles which port to connect on.
+//
+// A configured port is taken as read: it is what was published, and asking the
+// engine to confirm it would be a round trip per command for an answer already
+// on hand. A container published with no port has one the kernel chose, and the
+// engine is the only place that knows it.
+//
+// The poll is for the gap between `run --detach` returning and the binding
+// appearing in the container's network settings. It is normally zero attempts
+// long; a busy daemon makes it one or two.
+func (d *DB) resolvePort(ctx context.Context) error {
+	if d.cfg.Port != 0 {
+		d.port = d.cfg.Port
+		return nil
+	}
+
+	for attempt := range 20 {
+		state, err := d.inspect(ctx)
+		if err != nil {
+			return err
+		}
+		if state != nil && state.Port != 0 {
+			d.port = state.Port
+			return nil
+		}
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(backoff(attempt)):
+		}
+	}
+
+	return fmt.Errorf("container %s published no port that could be read back", d.cfg.Name)
+}
 
 // Runtime is the engine backing this database.
 func (d *DB) Runtime() Runtime { return d.runtime }
@@ -142,8 +215,18 @@ type containerState struct {
 	Port    int
 }
 
+// matches reports whether an existing container is the one asked for.
+//
+// A configured port has to be the one published, or the container is answering
+// somewhere the caller is not going to look. With no port configured there is
+// nothing to disagree with: the kernel chose one, whatever it chose is where this
+// container is, and replacing a perfectly good database to be given a different
+// arbitrary number would throw away the warm container isolation exists to keep.
 func (s containerState) matches(cfg Config) bool {
-	return s.Image == cfg.Image && s.Port == cfg.Port
+	if s.Image != cfg.Image {
+		return false
+	}
+	return cfg.Port == 0 || s.Port == cfg.Port
 }
 
 func (s containerState) mismatch(cfg Config) string {
@@ -151,7 +234,7 @@ func (s containerState) mismatch(cfg Config) string {
 	if s.Image != cfg.Image {
 		reasons = append(reasons, fmt.Sprintf("image is %s, want %s", s.Image, cfg.Image))
 	}
-	if s.Port != cfg.Port {
+	if cfg.Port != 0 && s.Port != cfg.Port {
 		reasons = append(reasons, fmt.Sprintf("port is %d, want %d", s.Port, cfg.Port))
 	}
 	return strings.Join(reasons, "; ")
@@ -223,12 +306,12 @@ func firstHostPort(bindings map[string][]portBinding) int {
 }
 
 func (d *DB) create(ctx context.Context) error {
-	d.logf("creating container %s (%s) on port %d\n", d.cfg.Name, d.cfg.Image, d.cfg.Port)
+	d.logf("creating container %s (%s) on port %s\n", d.cfg.Name, d.cfg.Image, d.cfg.portDescription())
 
 	args := []string{
 		"run", "--detach",
 		"--name", d.cfg.Name,
-		"--publish", fmt.Sprintf("%s:%d:5432", d.cfg.bind(), d.cfg.Port),
+		"--publish", d.cfg.publish(),
 		"--env", "POSTGRES_DB=" + d.cfg.Database,
 		"--env", "POSTGRES_USER=" + d.cfg.User,
 		"--env", "POSTGRES_PASSWORD=" + d.cfg.Password,
@@ -262,7 +345,7 @@ func (d *DB) waitReady(ctx context.Context) error {
 
 	var lastErr error
 	for attempt := 0; time.Now().Before(deadline); attempt++ {
-		conn, err := pgx.Connect(ctx, d.cfg.URL())
+		conn, err := pgx.Connect(ctx, d.URL())
 		if err == nil {
 			pingErr := conn.Ping(ctx)
 			_ = conn.Close(ctx)

@@ -6,6 +6,7 @@ package client
 
 import (
 	"github.com/google/uuid"
+	"github.com/simonjanss/rig/rigclient"
 	"github.com/simonjanss/rig/runtime/patch"
 	"github.com/simonjanss/rig/runtime/rigerr"
 )
@@ -36,14 +37,12 @@ type TodoAttachmentCreateInput struct {
 	Position int `json:"position"`
 }
 
-// TodoAttachmentCreateFields is what a validation failure on a
-// TodoAttachmentCreateInput says, shaped like the input it is about — one
-// member per member, so each message can be put beside the control it belongs
-// to.
+// TodoAttachmentCreateFields is what a validation failure says, shaped like
+// the body it is about — one member per member, so each message can be put
+// beside the control it belongs to.
 //
-// It is read out of a failed call with
-// rigclient.FieldsAs[TodoAttachmentCreateFields], and a member is nil when
-// there was nothing wrong with that field.
+// A member is nil when there was nothing wrong with that field. It arrives as
+// the Fields of the error the call returns.
 type TodoAttachmentCreateFields struct {
 	TodoID           *rigerr.FieldError `json:"todoId,omitempty"`
 	AttachmentFileID *rigerr.FieldError `json:"attachmentFileId,omitempty"`
@@ -52,6 +51,22 @@ type TodoAttachmentCreateFields struct {
 	// Entity carries what was wrong with the request as a whole rather than with
 	// any one field.
 	Entity *rigerr.FieldError `json:"entity,omitempty"`
+}
+
+// TodoAttachmentCreateError reads back what the server said about a refused
+// TodoAttachments.Create: the envelope — Code, Message, RequestID, Status,
+// RetryAfter — and, when the refusal was about the body, Fields shaped like
+// the body that failed.
+//
+//	if refused, ok := TodoAttachmentCreateError(err); ok {
+//		if refused.Fields != nil && refused.Fields.TodoID != nil {
+//
+// Fields is nil for every refusal but a 422: a 404 has a code and a message
+// and nothing to put beside a control. The second value is false for anything
+// that is not a refusal at all, which is where a request that never reached
+// the server ends up.
+func TodoAttachmentCreateError(err error) (*rigclient.Failure[TodoAttachmentCreateFields], bool) {
+	return rigclient.As[TodoAttachmentCreateFields](err)
 }
 
 // TodoAttachmentSearchBody is the request body for TodoAttachment.Search.
@@ -99,14 +114,12 @@ type TodoAttachmentUpdateInput struct {
 	Position patch.Optional[int] `json:"position,omitzero"`
 }
 
-// TodoAttachmentUpdateFields is what a validation failure on a
-// TodoAttachmentUpdateInput says, shaped like the input it is about — one
-// member per member, so each message can be put beside the control it belongs
-// to.
+// TodoAttachmentUpdateFields is what a validation failure says, shaped like
+// the body it is about — one member per member, so each message can be put
+// beside the control it belongs to.
 //
-// It is read out of a failed call with
-// rigclient.FieldsAs[TodoAttachmentUpdateFields], and a member is nil when
-// there was nothing wrong with that field.
+// A member is nil when there was nothing wrong with that field. It arrives as
+// the Fields of the error the call returns.
 type TodoAttachmentUpdateFields struct {
 	TodoID           *rigerr.FieldError `json:"todoId,omitempty"`
 	AttachmentFileID *rigerr.FieldError `json:"attachmentFileId,omitempty"`
@@ -115,4 +128,20 @@ type TodoAttachmentUpdateFields struct {
 	// Entity carries what was wrong with the request as a whole rather than with
 	// any one field.
 	Entity *rigerr.FieldError `json:"entity,omitempty"`
+}
+
+// TodoAttachmentUpdateError reads back what the server said about a refused
+// TodoAttachments.Update: the envelope — Code, Message, RequestID, Status,
+// RetryAfter — and, when the refusal was about the body, Fields shaped like
+// the body that failed.
+//
+//	if refused, ok := TodoAttachmentUpdateError(err); ok {
+//		if refused.Fields != nil && refused.Fields.TodoID != nil {
+//
+// Fields is nil for every refusal but a 422: a 404 has a code and a message
+// and nothing to put beside a control. The second value is false for anything
+// that is not a refusal at all, which is where a request that never reached
+// the server ends up.
+func TodoAttachmentUpdateError(err error) (*rigclient.Failure[TodoAttachmentUpdateFields], bool) {
+	return rigclient.As[TodoAttachmentUpdateFields](err)
 }

@@ -42,6 +42,9 @@ func (c *TodoClient) List(ctx context.Context, q TodoListQuery, opts ...rigclien
 // POST /api/v1/todos
 //
 // Operation createTodo.
+//
+// A refusal is read back with [TodoCreateError], whose Fields say what was
+// wrong with each member of the body.
 func (c *TodoClient) Create(ctx context.Context, in TodoCreateInput, opts ...rigclient.CallOption) (*Todo, error) {
 	op := rigclient.Op{
 		Method: http.MethodPost,
@@ -107,6 +110,9 @@ func (c *TodoClient) Get(ctx context.Context, id uuid.UUID, opts ...rigclient.Ca
 // PATCH /api/v1/todos/{id}
 //
 // Operation updateTodo.
+//
+// A refusal is read back with [TodoUpdateError], whose Fields say what was
+// wrong with each member of the body.
 func (c *TodoClient) Update(ctx context.Context, id uuid.UUID, in TodoUpdateInput, opts ...rigclient.CallOption) (*Todo, error) {
 	op := rigclient.Op{
 		Method: http.MethodPatch,

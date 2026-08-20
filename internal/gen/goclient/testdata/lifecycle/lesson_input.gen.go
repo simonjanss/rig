@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/simonjanss/rig/rigclient"
 	"github.com/simonjanss/rig/runtime/patch"
 	"github.com/simonjanss/rig/runtime/rigerr"
 )
@@ -45,12 +46,12 @@ type LessonCreateInput struct {
 	Tags []string `json:"tags,omitempty"`
 }
 
-// LessonCreateFields is what a validation failure on a LessonCreateInput says,
-// shaped like the input it is about — one member per member, so each message
-// can be put beside the control it belongs to.
+// LessonCreateFields is what a validation failure says, shaped like the body
+// it is about — one member per member, so each message can be put beside the
+// control it belongs to.
 //
-// It is read out of a failed call with rigclient.FieldsAs[LessonCreateFields],
-// and a member is nil when there was nothing wrong with that field.
+// A member is nil when there was nothing wrong with that field. It arrives as
+// the Fields of the error the call returns.
 type LessonCreateFields struct {
 	Title               *rigerr.FieldError `json:"title,omitempty"`
 	Notes               *rigerr.FieldError `json:"notes,omitempty"`
@@ -62,6 +63,22 @@ type LessonCreateFields struct {
 	// Entity carries what was wrong with the request as a whole rather than with
 	// any one field.
 	Entity *rigerr.FieldError `json:"entity,omitempty"`
+}
+
+// LessonCreateError reads back what the server said about a refused
+// Lessons.Create: the envelope — Code, Message, RequestID, Status,
+// RetryAfter — and, when the refusal was about the body, Fields shaped like
+// the body that failed.
+//
+//	if refused, ok := LessonCreateError(err); ok {
+//		if refused.Fields != nil && refused.Fields.Title != nil {
+//
+// Fields is nil for every refusal but a 422: a 404 has a code and a message
+// and nothing to put beside a control. The second value is false for anything
+// that is not a refusal at all, which is where a request that never reached
+// the server ends up.
+func LessonCreateError(err error) (*rigclient.Failure[LessonCreateFields], bool) {
+	return rigclient.As[LessonCreateFields](err)
 }
 
 // LessonSearchBody is the request body for Lesson.Search.
@@ -115,12 +132,12 @@ type LessonUpdateInput struct {
 	Tags patch.Nullable[[]string] `json:"tags,omitzero"`
 }
 
-// LessonUpdateFields is what a validation failure on a LessonUpdateInput says,
-// shaped like the input it is about — one member per member, so each message
-// can be put beside the control it belongs to.
+// LessonUpdateFields is what a validation failure says, shaped like the body
+// it is about — one member per member, so each message can be put beside the
+// control it belongs to.
 //
-// It is read out of a failed call with rigclient.FieldsAs[LessonUpdateFields],
-// and a member is nil when there was nothing wrong with that field.
+// A member is nil when there was nothing wrong with that field. It arrives as
+// the Fields of the error the call returns.
 type LessonUpdateFields struct {
 	Title               *rigerr.FieldError `json:"title,omitempty"`
 	Notes               *rigerr.FieldError `json:"notes,omitempty"`
@@ -134,10 +151,55 @@ type LessonUpdateFields struct {
 	Entity *rigerr.FieldError `json:"entity,omitempty"`
 }
 
+// LessonUpdateError reads back what the server said about a refused
+// Lessons.Update: the envelope — Code, Message, RequestID, Status,
+// RetryAfter — and, when the refusal was about the body, Fields shaped like
+// the body that failed.
+//
+//	if refused, ok := LessonUpdateError(err); ok {
+//		if refused.Fields != nil && refused.Fields.Title != nil {
+//
+// Fields is nil for every refusal but a 422: a 404 has a code and a message
+// and nothing to put beside a control. The second value is false for anything
+// that is not a refusal at all, which is where a request that never reached
+// the server ends up.
+func LessonUpdateError(err error) (*rigclient.Failure[LessonUpdateFields], bool) {
+	return rigclient.As[LessonUpdateFields](err)
+}
+
 // LessonPublishBody is the request body for Lesson.Publish.
 type LessonPublishBody struct {
 	// Whether guardians are notified as well.
 	NotifyGuardians bool `json:"notifyGuardians"`
+}
+
+// LessonPublishFields is what a validation failure says, shaped like the body
+// it is about — one member per member, so each message can be put beside the
+// control it belongs to.
+//
+// A member is nil when there was nothing wrong with that field. It arrives as
+// the Fields of the error the call returns.
+type LessonPublishFields struct {
+	NotifyGuardians *rigerr.FieldError `json:"notifyGuardians,omitempty"`
+	// Entity carries what was wrong with the request as a whole rather than with
+	// any one field.
+	Entity *rigerr.FieldError `json:"entity,omitempty"`
+}
+
+// LessonPublishError reads back what the server said about a refused
+// Lessons.Publish: the envelope — Code, Message, RequestID, Status,
+// RetryAfter — and, when the refusal was about the body, Fields shaped like
+// the body that failed.
+//
+//	if refused, ok := LessonPublishError(err); ok {
+//		if refused.Fields != nil && refused.Fields.NotifyGuardians != nil {
+//
+// Fields is nil for every refusal but a 422: a 404 has a code and a message
+// and nothing to put beside a control. The second value is false for anything
+// that is not a refusal at all, which is where a request that never reached
+// the server ends up.
+func LessonPublishError(err error) (*rigclient.Failure[LessonPublishFields], bool) {
+	return rigclient.As[LessonPublishFields](err)
 }
 
 // LessonRevertBody is the request body for Lesson.Revert.

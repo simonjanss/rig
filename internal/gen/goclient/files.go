@@ -151,7 +151,8 @@ func (e *emitter) createWithFilesMethod(b *gobuf.Buf, res *ir.Resource, ep *ir.E
 		"The row and the bytes are committed together, so a create that fails " +
 		"leaves neither. The JSON body travels as a part named \"json\", which is " +
 		"the same body Create sends and goes through the same validation — a 422 " +
-		"comes back with the same field errors.\n\n" +
+		"comes back with the same field errors, read back the same way with [" +
+		errorFuncName(res, ep) + "].\n\n" +
 		"Bound the call: the default thirty-second client timeout covers the whole " +
 		"exchange, and this one carries files.")
 	b.L("func (c *%sClient) CreateWithFiles(%s) %s {", res.Name, params, sig.results)

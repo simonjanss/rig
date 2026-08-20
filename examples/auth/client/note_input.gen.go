@@ -7,6 +7,7 @@ package client
 import (
 	"time"
 
+	"github.com/simonjanss/rig/rigclient"
 	"github.com/simonjanss/rig/runtime/patch"
 	"github.com/simonjanss/rig/runtime/rigerr"
 	"github.com/simonjanss/rig/runtime/tenancy"
@@ -42,12 +43,12 @@ type NoteCreateInput struct {
 	PublishAt *time.Time `json:"publishAt,omitempty"`
 }
 
-// NoteCreateFields is what a validation failure on a NoteCreateInput says,
-// shaped like the input it is about — one member per member, so each message
-// can be put beside the control it belongs to.
+// NoteCreateFields is what a validation failure says, shaped like the body it
+// is about — one member per member, so each message can be put beside the
+// control it belongs to.
 //
-// It is read out of a failed call with rigclient.FieldsAs[NoteCreateFields],
-// and a member is nil when there was nothing wrong with that field.
+// A member is nil when there was nothing wrong with that field. It arrives as
+// the Fields of the error the call returns.
 type NoteCreateFields struct {
 	Title     *rigerr.FieldError `json:"title,omitempty"`
 	Body      *rigerr.FieldError `json:"body,omitempty"`
@@ -55,6 +56,22 @@ type NoteCreateFields struct {
 	// Entity carries what was wrong with the request as a whole rather than with
 	// any one field.
 	Entity *rigerr.FieldError `json:"entity,omitempty"`
+}
+
+// NoteCreateError reads back what the server said about a refused
+// Notes.Create: the envelope — Code, Message, RequestID, Status, RetryAfter
+// — and, when the refusal was about the body, Fields shaped like the body
+// that failed.
+//
+//	if refused, ok := NoteCreateError(err); ok {
+//		if refused.Fields != nil && refused.Fields.Title != nil {
+//
+// Fields is nil for every refusal but a 422: a 404 has a code and a message
+// and nothing to put beside a control. The second value is false for anything
+// that is not a refusal at all, which is where a request that never reached
+// the server ends up.
+func NoteCreateError(err error) (*rigclient.Failure[NoteCreateFields], bool) {
+	return rigclient.As[NoteCreateFields](err)
 }
 
 // NoteSearchBody is the request body for Note.Search.
@@ -123,12 +140,12 @@ type NoteUpdateInput struct {
 	PublishAt patch.Nullable[time.Time] `json:"publishAt,omitzero"`
 }
 
-// NoteUpdateFields is what a validation failure on a NoteUpdateInput says,
-// shaped like the input it is about — one member per member, so each message
-// can be put beside the control it belongs to.
+// NoteUpdateFields is what a validation failure says, shaped like the body it
+// is about — one member per member, so each message can be put beside the
+// control it belongs to.
 //
-// It is read out of a failed call with rigclient.FieldsAs[NoteUpdateFields],
-// and a member is nil when there was nothing wrong with that field.
+// A member is nil when there was nothing wrong with that field. It arrives as
+// the Fields of the error the call returns.
 type NoteUpdateFields struct {
 	Title     *rigerr.FieldError `json:"title,omitempty"`
 	Body      *rigerr.FieldError `json:"body,omitempty"`
@@ -136,4 +153,20 @@ type NoteUpdateFields struct {
 	// Entity carries what was wrong with the request as a whole rather than with
 	// any one field.
 	Entity *rigerr.FieldError `json:"entity,omitempty"`
+}
+
+// NoteUpdateError reads back what the server said about a refused
+// Notes.Update: the envelope — Code, Message, RequestID, Status, RetryAfter
+// — and, when the refusal was about the body, Fields shaped like the body
+// that failed.
+//
+//	if refused, ok := NoteUpdateError(err); ok {
+//		if refused.Fields != nil && refused.Fields.Title != nil {
+//
+// Fields is nil for every refusal but a 422: a 404 has a code and a message
+// and nothing to put beside a control. The second value is false for anything
+// that is not a refusal at all, which is where a request that never reached
+// the server ends up.
+func NoteUpdateError(err error) (*rigclient.Failure[NoteUpdateFields], bool) {
+	return rigclient.As[NoteUpdateFields](err)
 }

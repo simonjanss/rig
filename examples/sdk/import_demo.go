@@ -309,10 +309,11 @@ func idempotencyKey(in row) string {
 // arrives shaped like the input that caused it, so the report can say which
 // column was wrong rather than quoting a sentence about the request.
 func explainRow(err error) string {
-	fields, ok := rigclient.FieldsAs[client.TodoCreateFields](err)
-	if !ok {
+	refused, ok := client.TodoCreateError(err)
+	if !ok || refused.Fields == nil {
 		return err.Error()
 	}
+	fields := refused.Fields
 
 	// One entry per member of the input, because that is what the shape is: a
 	// column nobody complained about is nil, and the rest name themselves.

@@ -55,6 +55,14 @@ type RigNotification struct {
 	// the audience late. Null is the ordinary case; a list here skips the question
 	// entirely, for an audience that genuinely cannot be re-derived.
 	AccountIds []uuid.UUID `json:"accountIds,omitempty"`
+	// When a dispatcher took this to resolve. Past notifications.claim_ttl another
+	// may, which is what makes a crashed process recoverable.
+	ClaimedAt *time.Time `json:"claimedAt,omitempty"`
+	// Which process holds the lease, so a stuck one traces to a pod rather than to
+	// a mystery.
+	ClaimedBy *uuid.UUID `json:"claimedBy,omitempty"`
+	// How many times resolving this has been attempted.
+	Attempts int `json:"attempts"`
 }
 
 // TableRigNotification is the table this entity is stored in.
@@ -75,7 +83,10 @@ const (
 	ColumnRigNotificationPayload            = "payload"
 	ColumnRigNotificationGroupKey           = "group_key"
 	ColumnRigNotificationAccountIds         = "account_ids"
+	ColumnRigNotificationClaimedAt          = "claimed_at"
+	ColumnRigNotificationClaimedBy          = "claimed_by"
+	ColumnRigNotificationAttempts           = "attempts"
 )
 
 // RigNotificationColumns is every column, in the order the row is scanned.
-var RigNotificationColumns = []string{"id", "tenant_id", "created_at", "created_by_account_id", "created_by_api_key_id", "updated_at", "kind", "state", "deliver_at", "resolved_at", "payload", "group_key", "account_ids"}
+var RigNotificationColumns = []string{"id", "tenant_id", "created_at", "created_by_account_id", "created_by_api_key_id", "updated_at", "kind", "state", "deliver_at", "resolved_at", "payload", "group_key", "account_ids", "claimed_at", "claimed_by", "attempts"}

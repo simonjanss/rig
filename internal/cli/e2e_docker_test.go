@@ -333,10 +333,15 @@ func goRun(dir string, env []string, args ...string) (string, error) {
 	return strings.TrimSpace(string(out)), err
 }
 
+// removeContainer clears whatever a previous run left behind.
+//
+// The name is qualified the same way the CLI qualifies it, or under isolation
+// this would remove the unsuffixed container — which belongs to nobody here and
+// possibly to a checkout next door.
 func removeContainer(t *testing.T, name string) {
 	t.Helper()
 	// A container that was never created is not an error.
-	_ = exec.Command("docker", "rm", "-f", "-v", name).Run()
+	_ = exec.Command("docker", "rm", "-f", "-v", dockerdb.Qualify(name)).Run()
 }
 
 // step runs one stage of the loop. The stages build on each other, so a

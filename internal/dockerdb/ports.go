@@ -12,6 +12,11 @@ package dockerdb
 // Adding a suite means adding a constant here first. TestPortsAreUnique is what
 // makes that more than an instruction.
 //
+// These numbers keep two suites in one checkout apart. They do nothing about two
+// checkouts, which is a different problem with a different answer — see
+// isolate.go, where a port from this list becomes a request rather than a
+// requirement.
+//
 // The examples are the exception and are listed rather than used: each one's
 // port lives in its own rig.yaml and main.go, in a module that cannot import
 // this one. They are named here so the numbers are still allocated from one

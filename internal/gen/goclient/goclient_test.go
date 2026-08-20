@@ -212,6 +212,72 @@ func TestAValidationFailureHasAShape(t *testing.T) {
 			t.Errorf("missing %s:\n%s", want, fields)
 		}
 	}
+
+	// A custom endpoint's body can be refused the same way, and used not to be —
+	// which left the one endpoint a project wrote itself as the one whose client
+	// had to parse prose.
+	body, ok := between(src, "type LessonPublishFields struct {", "\n}")
+	if !ok {
+		t.Fatalf("no LessonPublishFields:\n%s", src)
+	}
+	if !strings.Contains(collapse(body), collapse(
+		"NotifyGuardians *rigerr.FieldError `json:\"notifyGuardians,omitempty\"`")) {
+		t.Errorf("the custom body's shape is not mirrored:\n%s", body)
+	}
+}
+
+// The shape alone still has to be named by hand, and naming the wrong one is not
+// an error: every member is optional, so the wrong shape decodes into an empty
+// one. A reader per call is what removes the choice, in one line at the call
+// site.
+func TestEveryCallWithABodySaysHowItFails(t *testing.T) {
+	t.Parallel()
+
+	input := find(t, "lesson_input.gen.go")
+	for _, want := range []string{
+		"func LessonCreateError(err error) (*rigclient.Failure[LessonCreateFields], bool) { " +
+			"return rigclient.As[LessonCreateFields](err) }",
+		"func LessonUpdateError(err error) (*rigclient.Failure[LessonUpdateFields], bool) { " +
+			"return rigclient.As[LessonUpdateFields](err) }",
+		"func LessonPublishError(err error) (*rigclient.Failure[LessonPublishFields], bool) { " +
+			"return rigclient.As[LessonPublishFields](err) }",
+	} {
+		if !strings.Contains(collapse(input), collapse(want)) {
+			t.Errorf("missing %s:\n%s", want, input)
+		}
+	}
+
+	// The methods are untouched: reading a refusal is a second way to look at the
+	// error they already returned, not a different error.
+	client := find(t, "lesson_client.gen.go")
+	for _, want := range []string{
+		"return rigclient.Do[Lesson](ctx, c.rt, op, opts...)",
+		"return rigclient.Do[LessonListResponse](ctx, c.rt, op, opts...)",
+	} {
+		if !strings.Contains(collapse(client), collapse(want)) {
+			t.Errorf("missing %s:\n%s", want, client)
+		}
+	}
+
+	// A read sends no body, so there is nothing for it to be wrong about, and a
+	// search's body is a filter nothing validates — a reader for either would be
+	// a function per resource that can only ever answer nil.
+	//
+	// A revert is the one that would have been worse than useless. It has a body
+	// of its own and a 422 to go with it, but the refusal comes from the update
+	// rules it replays and arrives in LessonUpdateFields — so a reader named after
+	// the revert body would decode those into a shape with one member nobody
+	// complained about and hand back a struct that is entirely nil, which is the
+	// wrong-shape read this whole file exists to make unwritable.
+	for _, gone := range []string{
+		"LessonGetError", "LessonGetFields", "LessonListFields",
+		"LessonSearchError", "LessonSearchFields",
+		"LessonRevertError", "LessonRevertFields",
+	} {
+		if strings.Contains(input, gone) || strings.Contains(client, gone) {
+			t.Errorf("%s exists, and nothing can produce what it reads", gone)
+		}
+	}
 }
 
 // The error vocabulary is rigerr's, so a program talking to two rig APIs

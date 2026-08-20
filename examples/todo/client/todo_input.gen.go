@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/simonjanss/rig/rigclient"
 	"github.com/simonjanss/rig/runtime/patch"
 	"github.com/simonjanss/rig/runtime/rigerr"
 )
@@ -42,12 +43,12 @@ type TodoCreateInput struct {
 	CoverFileID *uuid.UUID `json:"coverFileId,omitempty"`
 }
 
-// TodoCreateFields is what a validation failure on a TodoCreateInput says,
-// shaped like the input it is about — one member per member, so each message
-// can be put beside the control it belongs to.
+// TodoCreateFields is what a validation failure says, shaped like the body it
+// is about — one member per member, so each message can be put beside the
+// control it belongs to.
 //
-// It is read out of a failed call with rigclient.FieldsAs[TodoCreateFields],
-// and a member is nil when there was nothing wrong with that field.
+// A member is nil when there was nothing wrong with that field. It arrives as
+// the Fields of the error the call returns.
 type TodoCreateFields struct {
 	Title       *rigerr.FieldError `json:"title,omitempty"`
 	Notes       *rigerr.FieldError `json:"notes,omitempty"`
@@ -58,6 +59,22 @@ type TodoCreateFields struct {
 	// Entity carries what was wrong with the request as a whole rather than with
 	// any one field.
 	Entity *rigerr.FieldError `json:"entity,omitempty"`
+}
+
+// TodoCreateError reads back what the server said about a refused
+// Todos.Create: the envelope — Code, Message, RequestID, Status, RetryAfter
+// — and, when the refusal was about the body, Fields shaped like the body
+// that failed.
+//
+//	if refused, ok := TodoCreateError(err); ok {
+//		if refused.Fields != nil && refused.Fields.Title != nil {
+//
+// Fields is nil for every refusal but a 422: a 404 has a code and a message
+// and nothing to put beside a control. The second value is false for anything
+// that is not a refusal at all, which is where a request that never reached
+// the server ends up.
+func TodoCreateError(err error) (*rigclient.Failure[TodoCreateFields], bool) {
+	return rigclient.As[TodoCreateFields](err)
 }
 
 // TodoSearchBody is the request body for Todo.Search.
@@ -109,12 +126,12 @@ type TodoUpdateInput struct {
 	CoverFileID patch.Nullable[uuid.UUID] `json:"coverFileId,omitzero"`
 }
 
-// TodoUpdateFields is what a validation failure on a TodoUpdateInput says,
-// shaped like the input it is about — one member per member, so each message
-// can be put beside the control it belongs to.
+// TodoUpdateFields is what a validation failure says, shaped like the body it
+// is about — one member per member, so each message can be put beside the
+// control it belongs to.
 //
-// It is read out of a failed call with rigclient.FieldsAs[TodoUpdateFields],
-// and a member is nil when there was nothing wrong with that field.
+// A member is nil when there was nothing wrong with that field. It arrives as
+// the Fields of the error the call returns.
 type TodoUpdateFields struct {
 	Title       *rigerr.FieldError `json:"title,omitempty"`
 	Notes       *rigerr.FieldError `json:"notes,omitempty"`
@@ -127,10 +144,55 @@ type TodoUpdateFields struct {
 	Entity *rigerr.FieldError `json:"entity,omitempty"`
 }
 
+// TodoUpdateError reads back what the server said about a refused
+// Todos.Update: the envelope — Code, Message, RequestID, Status, RetryAfter
+// — and, when the refusal was about the body, Fields shaped like the body
+// that failed.
+//
+//	if refused, ok := TodoUpdateError(err); ok {
+//		if refused.Fields != nil && refused.Fields.Title != nil {
+//
+// Fields is nil for every refusal but a 422: a 404 has a code and a message
+// and nothing to put beside a control. The second value is false for anything
+// that is not a refusal at all, which is where a request that never reached
+// the server ends up.
+func TodoUpdateError(err error) (*rigclient.Failure[TodoUpdateFields], bool) {
+	return rigclient.As[TodoUpdateFields](err)
+}
+
 // TodoCompleteBody is the request body for Todo.Complete.
 type TodoCompleteBody struct {
 	// What was done, appended to the task's notes.
 	Note *string `json:"note,omitempty"`
+}
+
+// TodoCompleteFields is what a validation failure says, shaped like the body
+// it is about — one member per member, so each message can be put beside the
+// control it belongs to.
+//
+// A member is nil when there was nothing wrong with that field. It arrives as
+// the Fields of the error the call returns.
+type TodoCompleteFields struct {
+	Note *rigerr.FieldError `json:"note,omitempty"`
+	// Entity carries what was wrong with the request as a whole rather than with
+	// any one field.
+	Entity *rigerr.FieldError `json:"entity,omitempty"`
+}
+
+// TodoCompleteError reads back what the server said about a refused
+// Todos.Complete: the envelope — Code, Message, RequestID, Status,
+// RetryAfter — and, when the refusal was about the body, Fields shaped like
+// the body that failed.
+//
+//	if refused, ok := TodoCompleteError(err); ok {
+//		if refused.Fields != nil && refused.Fields.Note != nil {
+//
+// Fields is nil for every refusal but a 422: a 404 has a code and a message
+// and nothing to put beside a control. The second value is false for anything
+// that is not a refusal at all, which is where a request that never reached
+// the server ends up.
+func TodoCompleteError(err error) (*rigclient.Failure[TodoCompleteFields], bool) {
+	return rigclient.As[TodoCompleteFields](err)
 }
 
 // TodoRevertBody is the request body for Todo.Revert.

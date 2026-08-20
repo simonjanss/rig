@@ -124,6 +124,46 @@ func bodyTypeName(res *ir.Resource, ep *ir.Endpoint) string {
 	return res.Name + ep.Name + "Body"
 }
 
+// fieldsTypeName is the shape a validation failure on this endpoint's body
+// arrives in, and is empty when there is no body to be wrong about.
+//
+// Two kinds of body are left out. A body that is a named object is shared
+// between endpoints, so its failure shape would have to be too, and nothing on
+// the server emits one to fill in. And a generated endpoint whose body is its
+// own — a search, a revert — is refused in some other shape than that body's: a
+// search's filter is a question nothing validates, and a revert replays the
+// version through the update path, so what comes back is the update's field
+// errors and not one about a version identifier. A shape per call there would be
+// the wrong shape, which decodes to an empty one rather than failing. Both fail
+// as a plain rigclient.Error, which is what everything did before any of this
+// existed.
+//
+// A create and an update are generated too and are not left out: their bodies
+// are the model's inputs, and the validator that refuses one is generated beside
+// them.
+func fieldsTypeName(res *ir.Resource, ep *ir.Endpoint) string {
+	if ep.Request.BodyObject != "" || len(ep.Request.BodyParams) == 0 {
+		return ""
+	}
+	if ep.Impl.Kind == ir.EndpointGenerated && !genutil.UsesModelInput(ep) {
+		return ""
+	}
+	return res.Name + ep.Name + "Fields"
+}
+
+// errorFuncName reads back what a refused call said.
+//
+// Named for the call rather than for the input, which is the difference between
+// the two halves: by the time a caller holds the error the input is gone, and
+// what they are asking about is the method they called. The server names the
+// same JSON after the value that failed, because a validator is holding one.
+func errorFuncName(res *ir.Resource, ep *ir.Endpoint) string {
+	if fieldsTypeName(res, ep) == "" {
+		return ""
+	}
+	return res.Name + ep.Name + "Error"
+}
+
 // inputTypeName is the create or update input an endpoint takes, or empty when
 // its body is a shape of its own.
 func inputTypeName(res *ir.Resource, ep *ir.Endpoint) string {

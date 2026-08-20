@@ -52,6 +52,9 @@ func (c *TodoAttachmentClient) List(ctx context.Context, q TodoAttachmentListQue
 // POST /api/v1/todo-attachments
 //
 // Operation createTodoAttachment.
+//
+// A refusal is read back with [TodoAttachmentCreateError], whose Fields say
+// what was wrong with each member of the body.
 func (c *TodoAttachmentClient) Create(ctx context.Context, in TodoAttachmentCreateInput, opts ...rigclient.CallOption) (*TodoAttachment, error) {
 	op := rigclient.Op{
 		Method: http.MethodPost,
@@ -143,6 +146,9 @@ func (c *TodoAttachmentClient) Get(ctx context.Context, id uuid.UUID, opts ...ri
 // PATCH /api/v1/todo-attachments/{id}
 //
 // Operation updateTodoAttachment.
+//
+// A refusal is read back with [TodoAttachmentUpdateError], whose Fields say
+// what was wrong with each member of the body.
 func (c *TodoAttachmentClient) Update(ctx context.Context, id uuid.UUID, in TodoAttachmentUpdateInput, opts ...rigclient.CallOption) (*TodoAttachment, error) {
 	op := rigclient.Op{
 		Method: http.MethodPatch,
@@ -256,7 +262,8 @@ func (c *TodoAttachmentClient) DownloadAttachmentFile(ctx context.Context, id uu
 // The row and the bytes are committed together, so a create that fails leaves
 // neither. The JSON body travels as a part named "json", which is the same
 // body Create sends and goes through the same validation — a 422 comes back
-// with the same field errors.
+// with the same field errors, read back the same way with
+// [TodoAttachmentCreateError].
 //
 // Bound the call: the default thirty-second client timeout covers the whole
 // exchange, and this one carries files.

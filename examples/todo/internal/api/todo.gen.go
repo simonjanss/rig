@@ -5,8 +5,11 @@
 package api
 
 import (
+	"strings"
+
 	"github.com/google/uuid"
 	"github.com/simonjanss/rig/examples/todo/internal/model"
+	"github.com/simonjanss/rig/runtime/rigerr"
 )
 
 // A page of Todos.
@@ -79,6 +82,54 @@ type TodoCompleteBody struct {
 	// What was done, appended to the task's notes.
 	Note *string `json:"note,omitempty"`
 }
+
+// TodoCompleteBodyError says what was wrong with each field of a
+// TodoCompleteBody.
+//
+// Its shape is the body's shape, so a client can attach every message to the
+// field it is about without matching on strings. A member is nil when that
+// field was fine, and the whole value is nil when the body was. It is what the
+// 422 carries, and returning one from Todo.Complete is how that endpoint
+// refuses a field rather than a request.
+type TodoCompleteBodyError struct {
+	// What was done, appended to the task's notes.
+	Note *rigerr.FieldError `json:"note,omitempty"`
+
+	// Entity is a problem with the body as a whole rather than with one field.
+	Entity *rigerr.FieldError `json:"entity,omitempty"`
+}
+
+// Empty reports whether anything went wrong. A validator that found nothing
+// returns nil rather than one of these.
+func (e *TodoCompleteBodyError) Empty() bool {
+	if e == nil {
+		return true
+	}
+
+	return e.Note == nil && e.Entity == nil
+}
+
+// Error implements error. The sentence is for logs and for a person; the
+// structure above is what a client acts on.
+func (e *TodoCompleteBodyError) Error() string {
+	var parts []string
+	if e.Note != nil {
+		parts = append(parts, "note "+e.Note.Error())
+	}
+	if e.Entity != nil {
+		parts = append(parts, e.Entity.Error())
+	}
+
+	return "the request is not valid: " + strings.Join(parts, "; ")
+}
+
+// ErrorCode implements [rigerr.Coder]: the request was understood and its
+// content is what is wrong, which is 422 and not 400.
+func (e *TodoCompleteBodyError) ErrorCode() rigerr.Code { return rigerr.CodeUnprocessableEntity }
+
+// ErrorFields implements [rigerr.FieldReporter], which is how the HTTP layer
+// finds this and answers with it rather than with prose.
+func (e *TodoCompleteBodyError) ErrorFields() any { return e }
 
 // Path parameters for Todo.Restore.
 type TodoRestorePath struct {

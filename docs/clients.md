@@ -1,8 +1,7 @@
 # Clients
 
 > **Not written yet.** This page will document the generated Go client — how to
-> configure it, how it authenticates, how it paginates, and what it does with
-> errors.
+> configure it, how it authenticates, and how it paginates.
 >
 > Until it exists, [examples/sdk](../examples/sdk) is a working program that
 > calls two rig applications through their generated clients, and
@@ -26,6 +25,69 @@ The generated half is the wire types and one method per endpoint. The other half
 — the transport, credentials, retries, pagination, error decoding — is the
 `rig/rigclient` module, which your client imports. A program that *calls* a rig
 application depends on `rig/rigclient`; it never depends on rig itself.
+
+## When a call is refused
+
+Every method that sends a body has a reader of its own, named after the call. It
+takes the error the method returned and hands back everything the server said:
+
+```go
+todo, err := client.Todos.Create(ctx, client.TodoCreateInput{Title: "   "})
+
+if refused, ok := client.TodoCreateError(err); ok {
+    if refused.Fields != nil && refused.Fields.Title != nil {
+        form.Title.Problem = refused.Fields.Title.Message
+    }
+    log.Printf("%s (%d) request %s", refused.Code, refused.Status, refused.RequestID)
+}
+```
+
+`Fields` is shaped like the input you sent — one member per member, nil where
+nothing was wrong — so each message goes beside the control it belongs to
+instead of being parsed out of a sentence. `Code`, `Message`, `RequestID`,
+`Status` and `RetryAfter` are the envelope, on the same value, because a caller
+who wants one usually wants both.
+
+**The shape comes from the call, not from you.** `rigclient.FieldsAs` still
+works, and is what a request made by hand through `client.Runtime()` uses — but
+it asks you to name the shape, and naming the wrong one is not an error. Every
+member of a field shape is optional, so `FieldsAs[client.TodoUpdateFields]` on a
+failed create decodes perfectly and hands back an empty struct with `ok` true.
+`client.TodoCreateError` cannot be given the wrong shape: there is only one that
+compiles.
+
+**`Fields` is nil for every refusal but a 422.** A 404 has a code and a message
+and nothing to put beside a control, and a zero-valued shape there would read as
+a body nobody complained about. The second value is false for anything that is
+not a refusal at all — a DNS failure, a cancelled context — because there is no
+envelope for a code or a field to have come from.
+
+Nothing about the error itself changed, so everything written before this keeps
+answering; the reader is a second way to look at it rather than a different
+error:
+
+```go
+rigclient.IsInvalid(err)     // still true
+rigclient.CodeOf(err)        // still the code
+errors.As(err, &rigErr)      // still finds *rigclient.Error
+```
+
+Three calls have no reader. A read sends no body, so nothing about a `Get` can be
+wrong per field. A search's body is a filter — a question rather than something
+filled in field by field — which nothing validates, so a reader for it would be a
+function per resource that could only ever answer nil. And a revert is refused by
+the update rules it replays: its 422 arrives shaped like
+`client.TodoUpdateFields`, not like the version identifier it was asked about, so
+read one back with `client.TodoUpdateError`.
+
+### The other half of the shape
+
+A custom endpoint gets the same treatment, and its server half is generated
+beside the body: `LessonPublishBodyError` in your API package has one member per
+member of `LessonPublishBody`, and returning it from the service is what makes
+`client.LessonPublishError(err)` answer with fields rather than with prose.
+Nothing generated fills it in — only your service knows what its own body means
+— which is why it comes with `Empty()` and no validator.
 
 ## Bounding one call
 

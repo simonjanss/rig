@@ -43,6 +43,9 @@ func (c *NoteClient) List(ctx context.Context, q NoteListQuery, opts ...rigclien
 // POST /api/v1/notes
 //
 // Operation createNote.
+//
+// A refusal is read back with [NoteCreateError], whose Fields say what was
+// wrong with each member of the body.
 func (c *NoteClient) Create(ctx context.Context, in NoteCreateInput, opts ...rigclient.CallOption) (*Note, error) {
 	op := rigclient.Op{
 		Method: http.MethodPost,
@@ -140,6 +143,9 @@ func (c *NoteClient) Get(ctx context.Context, id uuid.UUID, q NoteGetQuery, opts
 // PATCH /api/v1/notes/{id}
 //
 // Operation updateNote.
+//
+// A refusal is read back with [NoteUpdateError], whose Fields say what was
+// wrong with each member of the body.
 func (c *NoteClient) Update(ctx context.Context, id uuid.UUID, in NoteUpdateInput, opts ...rigclient.CallOption) (*Note, error) {
 	op := rigclient.Op{
 		Method: http.MethodPatch,

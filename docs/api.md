@@ -76,7 +76,9 @@ Every failure carries a machine-readable code from a closed set of eight:
 
 `fields` is present when the failure was validation, and is shaped like the
 request body that failed — one member per field — so a client can put each
-message beside the control it belongs to.
+message beside the control it belongs to. A generated Go client reads it back
+already decoded, with one function per call; see
+[clients.md](clients.md#when-a-call-is-refused).
 
 Note that a row belonging to another tenant is a **404**, not a 403. A 403 would
 confirm the row exists.

@@ -117,13 +117,15 @@ func startDatabase() (*pgxpool.Pool, error) {
 
 	// A schema left behind by an earlier run would make every one of these
 	// tests pass for the wrong reason.
-	_ = exec.Command("docker", "rm", "-f", "-v", containerName).Run()
+	_ = exec.Command("docker", "rm", "-f", "-v", dockerdb.Qualify(containerName)).Run()
 
 	cfg := dockerdb.Config{
-		Image: "postgres:17-alpine", Name: containerName, Port: containerPort,
+		Image: "postgres:17-alpine",
+		Name:  dockerdb.Qualify(containerName), Port: dockerdb.HostPort(containerPort),
 		Database: "rig", User: "rig", Password: "rig",
 	}
-	if _, err := dockerdb.Start(ctx, cfg); err != nil {
+	db, err := dockerdb.Start(ctx, cfg)
+	if err != nil {
 		return nil, err
 	}
 
@@ -151,12 +153,12 @@ func startDatabase() (*pgxpool.Pool, error) {
 	}
 
 	if _, err := dockerdb.Migrate(ctx, dockerdb.MigrateOptions{
-		Dir: migrations, Table: "rig_auth_migrations", URL: cfg.URL(),
+		Dir: migrations, Table: "rig_auth_migrations", URL: db.URL(),
 	}); err != nil {
 		return nil, err
 	}
 
-	return pgxpool.New(ctx, cfg.URL())
+	return pgxpool.New(ctx, db.URL())
 }
 
 type notifier struct {
