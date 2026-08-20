@@ -134,6 +134,12 @@ auth:
 // that wrote a file `rig validate` then refused would be worse than no check —
 // and it has to stay quiet for everything else, because it is standing between
 // a person and their own schema.
+//
+// `escapable` is the other half of the answer, and the callers act on it: a
+// reserved resource name is what a table projects to by default and a
+// `resource:` key moves it, so refusing one outright would make `table: file`
+// with `resource: Document` — which the diagnostic allows — impossible to
+// scaffold. Nothing moves a table off the prefix.
 func TestReservedAnswersFromANameAlone(t *testing.T) {
 	t.Parallel()
 
@@ -145,26 +151,31 @@ func TestReservedAnswersFromANameAlone(t *testing.T) {
 	for _, tc := range []struct {
 		table string
 		want  string
+		// escape is whether a `resource:` key answers it.
+		escape bool
 	}{
-		{"account", "rig_account"},
-		{"file", "rig_file"},
-		{"api_key", "rig_api_key"},
+		{"account", "rig_account", true},
+		{"file", "rig_file", true},
+		{"api_key", "rig_api_key", true},
 		// The notification part arrived after this rule did and reserved its
 		// names without anybody editing a list. These are the proof.
-		{"notification", "rig_notification"},
-		{"notification_recipient", "rig_notification_recipient"},
-		{"notification_device", "rig_notification_device"},
-		{"notification_setting", "rig_notification_setting"},
-		{"notification_delivery", "rig_notification_delivery"},
-		{"rig_leaderboard", "prefix"},
-		{"rig_api_key", "setup-project"},
+		{"notification", "rig_notification", true},
+		{"notification_recipient", "rig_notification_recipient", true},
+		{"notification_device", "rig_notification_device", true},
+		{"notification_setting", "rig_notification_setting", true},
+		{"notification_delivery", "rig_notification_delivery", true},
+		// The prefix, which no configuration key answers. The second names a
+		// table rig's own foundation creates, so the advice is the migration
+		// filename `Managed` reads rather than a rename.
+		{"rig_leaderboard", "prefix", false},
+		{"rig_api_key", "_rig_apikeys.sql", false},
 		// Everything else, which is the case that matters most.
-		{"todo", ""},
-		{"accounts", ""},
-		{"account_role", ""},
-		{"bookmark", ""},
+		{"todo", "", false},
+		{"accounts", "", false},
+		{"account_role", "", false},
+		{"bookmark", "", false},
 	} {
-		got := compile.Reserved(p, nil, tc.table)
+		got, escapable := compile.Reserved(p, nil, tc.table)
 		switch {
 		case tc.want == "" && got != "":
 			t.Errorf("%s was refused: %s", tc.table, got)
@@ -172,6 +183,9 @@ func TestReservedAnswersFromANameAlone(t *testing.T) {
 			t.Errorf("%s was allowed, want a refusal mentioning %q", tc.table, tc.want)
 		case tc.want != "" && !strings.Contains(got, tc.want):
 			t.Errorf("%s: %q, want it to mention %q", tc.table, got, tc.want)
+		}
+		if escapable != tc.escape {
+			t.Errorf("%s: escapable = %v, want %v", tc.table, escapable, tc.escape)
 		}
 	}
 }

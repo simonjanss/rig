@@ -72,19 +72,30 @@ func newSyncCmd(e *env) *cobra.Command {
 
 			// A table under a name rig keeps gets no file. Sync is deliberately
 			// tolerant of a project that does not yet validate — it exists to
-			// repair one — so this is not a refusal; but writing a configuration
-			// for a table that can never compile sends somebody down a path they
-			// then have to undo, and the rename is the only way out of it.
+			// repair one — so this is not a refusal; but the file it would write
+			// here names the resource rig's own table takes, so it could never
+			// compile, and writing it sends somebody down a path they then have to
+			// undo.
+			//
+			// Which is why the way out is spelled differently for the two halves
+			// of the rule. Nothing moves a table off the `rig_` prefix. A reserved
+			// resource name is answered by a `resource:` key — but sync cannot
+			// write that file, because the name it would fill in is the one that
+			// is taken.
 			var skipped int
 			changes = slices.DeleteFunc(changes, func(c tablesync.Change) bool {
 				if c.Kind != tablesync.ChangeCreate {
 					return false
 				}
-				why := compile.Reserved(p, foundation, c.Table)
+				why, escapable := compile.Reserved(p, foundation, c.Table)
 				if why == "" {
 					return false
 				}
-				fmt.Fprintf(e.errOut, "skip    %s: %s — rename the table\n", p.Rel(c.Path), why)
+				fix := "rename the table"
+				if escapable {
+					fix = "rename the table, or write this file by hand with a `resource:` of its own"
+				}
+				fmt.Fprintf(e.errOut, "skip    %s: %s — %s\n", p.Rel(c.Path), why, fix)
 				skipped++
 				return true
 			})

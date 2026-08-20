@@ -32,9 +32,12 @@ scaffolds a whole table with the conventional columns already in place:
 rig migration new create_todo --table todo --soft-delete
 ```
 
-`--table` refuses a name rig keeps for itself — see
+`--table` refuses a name under the `rig_` prefix and warns about one that
+projects to a resource name rig keeps — see
 [Names rig reserves](#names-rig-reserves) — so you find out before the file
-exists rather than from the next `rig validate`.
+exists rather than from the next `rig validate`. A warning rather than a refusal,
+because a `resource:` key answers that half of the rule and the table name may be
+the one you want.
 
 ## The two required columns
 
@@ -329,6 +332,11 @@ resource: Document
 
 That is the whole escape. It is deliberately not a switch: renaming the resource
 is a decision about your API, and it is visible in the file that describes it.
+
+This one file is written by hand. `rig sync` skips it and says so, because the
+name it would fill in is the reserved one; `rig migration new --table file`
+warns and writes the migration anyway. Nothing here applies to the `rig_`
+prefix, which no key answers.
 
 **Turning it off.** `auth.own: true` ([rig-yaml.md](rig-yaml.md#auth)) stops
 both rules. A project that has forked the foundation owns those tables and their

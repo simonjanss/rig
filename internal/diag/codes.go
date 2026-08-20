@@ -80,8 +80,8 @@ var (
 		"Set `plural:` on the table, or add an entry to `naming.plurals`.")
 
 	CodeReservedName = newCode("RIG2003", SeverityError,
-		"A parameter or field uses a name rig reserves.",
-		"Rename it — `name:` for an endpoint's parameter, `field:` for a column.")
+		"An endpoint's parameter uses a name rig reserves.",
+		"Rename it with the `name:` key.")
 
 	CodeReservedResource = newCode("RIG2004", SeverityError,
 		"A table projects to a resource name rig's own tables take.",

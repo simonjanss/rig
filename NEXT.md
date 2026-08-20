@@ -236,7 +236,8 @@ reversible.
     Two codes, both errors and neither configurable: **RIG2004** for a table
     projecting to a name one of rig's own tables takes, **RIG2005** for a table
     under the prefix. RIG2003's summary and hint were narrowed to what it
-    actually reports, which is a parameter or a field and never a table.
+    actually reports, which is an endpoint's parameter — its one call site is the
+    `scope` query parameter — and never a field or a table.
 
     The reserved set is **derived, not listed**. `config()` in
     `internal/scaffold` now returns the whole `tableConfig` rather than the
@@ -277,6 +278,22 @@ reversible.
     a one-way door. `rig migration new --table` asks the same question before it
     writes anything, and `rig sync` skips rather than refuses, because sync
     exists to repair a project that does not yet validate.
+
+    The two halves are not equally final, which is why `Reserved` returns
+    `escapable` and both commands read it. Nothing moves a table off the prefix,
+    so that is a refusal. A reserved resource name is only what a table projects
+    to by *default*, and RIG2004's own hint offers the `resource:` key that moves
+    it — so `--table account` warns and names that key rather than refusing, or
+    `table: file` with `resource: Document` would be a table rig's rules allow
+    and rig cannot scaffold. Sync still skips the file, because the name it would
+    fill in is the taken one; it now says the other way out too.
+
+    RIG2005's advice for a foundation table nobody scaffolded is the migration
+    filename `Managed` reads, not `rig setup-project`. That command decides what
+    to write from those same filenames and never from the database, so telling
+    somebody whose `rig_account` was hand-written or squashed to run it would
+    have produced a second `CREATE TABLE` for a table that already exists, and a
+    `rig db up` that fails.
 
 ---
 

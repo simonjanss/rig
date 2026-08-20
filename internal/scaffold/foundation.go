@@ -176,6 +176,22 @@ func PartTables(part string) []string {
 	}
 }
 
+// PartOf names the part that creates a table, or "" for a table the foundation
+// does not create.
+//
+// The inverse of [PartTables], and it exists for a diagnostic. A project whose
+// rig_account arrived through a migration [Managed] cannot recognise has to be
+// told which name that migration needs, and the part is that name: `Managed`
+// matches on the `_rig_<part>.sql` suffix and nothing else.
+func PartOf(table string) string {
+	for _, part := range Parts() {
+		if slices.Contains(PartTables(part), table) {
+			return part
+		}
+	}
+	return ""
+}
+
 // Tables are every table the foundation creates.
 func Tables() []string {
 	var out []string

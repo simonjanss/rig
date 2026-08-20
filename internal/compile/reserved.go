@@ -55,7 +55,8 @@ func checkReserved(doc *ir.Document, set *tableconf.Set, p *project.Project, fou
 }
 
 // Reserved reports why rig will not let a project have a table by this name, or
-// "" when nothing stands in the way.
+// "" when nothing stands in the way. `escapable` is whether a `resource:` key
+// still answers it.
 //
 // It asks the two questions [checkReserved] asks, from a name alone: the
 // commands that write a file — `rig migration new --table`, `rig sync` — call it
@@ -63,24 +64,30 @@ func checkReserved(doc *ir.Document, set *tableconf.Set, p *project.Project, fou
 // from the next `rig validate`. The compile stage deliberately does not call it,
 // because by then the resource name has been through configuration and the
 // frozen document is the better source.
-func Reserved(p *project.Project, foundation []string, table string) string {
+//
+// The two halves of the rule are not equally final, and a caller that could not
+// tell them apart would have to refuse both. The `rig_` prefix is rig's and
+// nothing moves a table off it. A reserved resource name is only what the table
+// projects to *by default*, so a `resource:` of its own answers it — which is
+// what [diag.CodeReservedResource]'s hint offers, and a caller here must not
+// turn that into a refusal: a table rig's own rules allow would then be one rig
+// cannot scaffold.
+func Reserved(p *project.Project, foundation []string, table string) (why string, escapable bool) {
 	if p.Config.Auth.Own {
-		return ""
+		return "", false
 	}
 
 	if d, bad := checkReservedTable(&ir.Table{Name: table}, nil, p, foundation); bad {
-		return d.All()[0].Message
+		return d.All()[0].Message, false
 	}
 
-	// The name a table projects to before any configuration touches it. A
-	// `resource:` key could still move it off a reserved name, which is why this
-	// is advice at the moment a file is written and the diagnostic is the rule.
+	// The name a table projects to before any configuration touches it.
 	resource := p.Namer().Go(table)
 	if owner, taken := scaffold.ReservedResources()[resource]; taken && owner != table {
 		return fmt.Sprintf("a table named %q projects to the resource name %q, which rig's own %s takes",
-			table, resource, owner)
+			table, resource, owner), true
 	}
-	return ""
+	return "", false
 }
 
 // checkReservedTable reports a table under the `rig_` prefix that rig did not
@@ -110,11 +117,20 @@ func checkReservedTable(
 	}
 
 	// The message differs because the fix does. A name rig uses is most often
-	// somebody who wrote the foundation's DDL by hand instead of scaffolding it.
-	if slices.Contains(scaffold.Tables(), t.Name) {
+	// somebody who wrote the foundation's DDL by hand, or squashed the migration
+	// that created it: the table is rig's, and what is missing is only the
+	// filename that says so.
+	//
+	// Which is why the advice is that filename and not `rig setup-project`. That
+	// command reads the same filenames to decide what to write — see
+	// [scaffold.Foundation] — so it would answer a table that already exists with
+	// a second CREATE TABLE for it, and the next `rig db up` would fail.
+	if part := scaffold.PartOf(t.Name); part != "" {
 		diags.Add(diag.CodeReservedTablePrefix, at(loaded, t),
 			"table %q is one rig's own foundation creates, and no migration here created it; "+
-				"rename it, or run `rig setup-project`", t.Name)
+				"rename the table, or — if it is rig's — rename the migration that creates it to end "+
+				"in `_rig_%s.sql`, which is how rig recognises the %s part",
+			t.Name, part, part)
 		return diags, true
 	}
 
