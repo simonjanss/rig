@@ -7,6 +7,7 @@
 package rigclient_test
 
 import (
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -143,6 +144,79 @@ func TestSomethingThatNeverReachedTheServerIsNotARefusal(t *testing.T) {
 
 	if refused, ok := todoCreateError(err); ok {
 		t.Errorf("refused = %+v, want false: there was no envelope", refused)
+	}
+}
+
+// A validation failure grows with the request, and the widest inputs used to be
+// the ones whose refusals said the least: a body over the read limit was
+// truncated into JSON that would not parse, which loses the code and the message
+// along with the fields it was too big for.
+func TestALargeValidationFailureSurvives(t *testing.T) {
+	long := strings.Repeat("far too long. ", 4000) // ~56 KiB, past the plain limit
+	body, err := json.Marshal(map[string]any{
+		"code":      "UnprocessableEntity",
+		"message":   "todo is not valid",
+		"requestId": "req-9",
+		"fields": map[string]any{
+			"title": map[string]string{"code": "TooLong", "message": long},
+			"notes": map[string]string{"code": "CannotBeEmpty", "message": "cannot be empty"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	refused, ok := todoCreateError(create(t, refuses(http.StatusUnprocessableEntity, string(body))))
+	if !ok {
+		t.Fatal("a large refusal did not read back at all")
+	}
+	if refused.Code != rigerr.CodeUnprocessableEntity {
+		t.Errorf("code = %q, want UnprocessableEntity: the body was too big to parse", refused.Code)
+	}
+	if refused.Message != "todo is not valid" || refused.RequestID != "req-9" {
+		t.Errorf("message = %q, request = %q, want both kept", refused.Message, refused.RequestID)
+	}
+	if refused.Fields == nil {
+		t.Fatal("no fields, and they are what made the body large")
+	}
+	if refused.Fields.Title == nil || len(refused.Fields.Title.Message) != len(long) {
+		t.Error("the long message did not survive whole")
+	}
+	if refused.Fields.Notes == nil {
+		t.Error("the field after the long one is gone, so the body was cut")
+	}
+
+	// The excerpt is bounded even though the read was not: whatever the body
+	// carried is in Fields by now.
+	if len(refused.Body) > 8<<10 {
+		t.Errorf("Body is %d bytes, want it cut to the plain limit", len(refused.Body))
+	}
+}
+
+// The widened limit follows the content type, which is a claim rather than a
+// promise — so anything that is not the server's envelope is read as narrowly as
+// it ever was.
+func TestSomethingThatIsNotJSONIsStillReadNarrowly(t *testing.T) {
+	page := strings.Repeat("<html>502 Bad Gateway</html>", 4000) // ~112 KiB
+	rt := newClient(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		w.WriteHeader(http.StatusBadGateway)
+		io.WriteString(w, page)
+	}), rigclient.Config{})
+
+	_, err := rigclient.Do[todo](t.Context(), rt, rigclient.Op{
+		Method: http.MethodGet, Path: "/todos",
+	})
+
+	var e *rigclient.Error
+	if !errors.As(err, &e) {
+		t.Fatalf("err = %v, want a *rigclient.Error", err)
+	}
+	if e.Status != http.StatusBadGateway {
+		t.Errorf("status = %d, want 502", e.Status)
+	}
+	if len(e.Body) != 8<<10 {
+		t.Errorf("read %d bytes of the page, want it stopped at the plain limit", len(e.Body))
 	}
 }
 

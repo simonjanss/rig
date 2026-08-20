@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime"
 	"net/http"
 	"strconv"
 	"strings"
@@ -41,8 +42,10 @@ type Error struct {
 	// RetryAfter is how long the server asked the caller to wait, from the
 	// header of the same name. Zero when it said nothing.
 	RetryAfter time.Duration
-	// Body is the raw response, kept for a failure that decoded into nothing
-	// useful. Bounded: a proxy's HTML error page is not worth megabytes.
+	// Body is the start of the raw response, kept for a failure that decoded
+	// into nothing useful — a proxy's HTML error page, say. It is bounded even
+	// where the read was not, so a large validation failure is complete in
+	// Fields and cut short here.
 	Body string
 }
 
@@ -210,9 +213,48 @@ func IsUnsupportedMediaType(err error) bool {
 // handler swallows.
 func IsUpgradeRequired(err error) bool { return CodeOf(err) == rigerr.CodeUpgradeRequired }
 
-// maxErrorBody bounds what is kept from a failure nobody can parse. Enough to
-// recognize a gateway's error page, not enough to be a memory problem.
+// maxErrorBody bounds what is read from a failure that does not claim to be the
+// server's. Enough to recognize a gateway's error page, not enough to be a
+// memory problem.
 const maxErrorBody = 8 << 10
+
+// maxJSONErrorBody bounds a failure that says it is the server's own envelope.
+//
+// It is larger because a validation failure grows with the request: one entry
+// per field of the body, and a wide table's create is a lot of fields. Reading
+// one under the limit above truncated it into JSON that would not parse — and a
+// body that does not parse loses the code and the message along with the fields,
+// so the widest inputs were the ones whose refusals said the least.
+//
+// Still bounded, because a content type is a claim and not a promise: something
+// answering application/json can stream for as long as it likes.
+const maxJSONErrorBody = 1 << 20
+
+// isJSON reports whether a response claims to carry the server's envelope.
+//
+// A claim is all it is, which is why it only widens what will be read and never
+// what will be believed: a proxy that labels its HTML page application/json gets
+// a bigger read and the same failure to decode.
+func isJSON(contentType string) bool {
+	media, _, err := mime.ParseMediaType(contentType)
+	if err != nil {
+		return false
+	}
+	return media == "application/json" || strings.HasSuffix(media, "+json")
+}
+
+// excerpt is what is kept on the error for a body that decoded into nothing
+// useful.
+//
+// Bounded even where the read was not. Whatever a large body was carrying is in
+// the decoded fields by now, and nobody diagnosing a gateway needs its second
+// megabyte held for the lifetime of the error.
+func excerpt(raw []byte) string {
+	if len(raw) > maxErrorBody {
+		return string(raw[:maxErrorBody])
+	}
+	return string(raw)
+}
 
 // errorBody is the envelope the generated server sends on every failure.
 type errorBody struct {
@@ -228,9 +270,13 @@ type errorBody struct {
 // load balancer is not JSON and is not the server's fault, and a client that
 // panicked on it would be reporting the wrong bug.
 func readError(res *http.Response) error {
-	raw, _ := io.ReadAll(io.LimitReader(res.Body, maxErrorBody))
+	limit := int64(maxErrorBody)
+	if isJSON(res.Header.Get("Content-Type")) {
+		limit = maxJSONErrorBody
+	}
+	raw, _ := io.ReadAll(io.LimitReader(res.Body, limit))
 
-	e := &Error{Status: res.StatusCode, Body: string(raw)}
+	e := &Error{Status: res.StatusCode, Body: excerpt(raw)}
 	if after := res.Header.Get("Retry-After"); after != "" {
 		if seconds, err := strconv.Atoi(after); err == nil {
 			e.RetryAfter = time.Duration(seconds) * time.Second
