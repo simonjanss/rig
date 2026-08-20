@@ -20,107 +20,48 @@ import (
 	"github.com/simonjanss/rig/runtime/tenancy"
 )
 
-// RigNotificationRepository reads and writes rig_notification rows.
+// RigNotificationDeliveryRepository reads and writes rig_notification_delivery
+// rows.
 //
 // Every method scopes to the caller's tenant. There is no way to ask it not to
 // from a request handler, which is the point.
-type RigNotificationRepository interface {
+type RigNotificationDeliveryRepository interface {
 	// Get returns one row by identifier.
 	//
 	// A lookup by primary key deliberately ignores the lifecycle filters: it
 	// returns the row whether it is live, deleted, or a snapshot, because a caller
 	// holding an identifier is usually asking about that exact row.
-	Get(ctx context.Context, id uuid.UUID, opts ...readopt.Option) (*model.RigNotification, error)
+	Get(ctx context.Context, id uuid.UUID, opts ...readopt.Option) (*model.RigNotificationDelivery, error)
 
 	// List returns matching rows and the total ignoring pagination.
 	//
 	// The filter says which rows and the page says how many of them, in what
 	// order. They are separate arguments because they arrive separately: the
 	// filter is a request body, the page is two query parameters.
-	List(ctx context.Context, f model.RigNotificationFilter, page model.RigNotificationPage, opts ...readopt.Option) ([]*model.RigNotification, int64, error)
+	List(ctx context.Context, f model.RigNotificationDeliveryFilter, page model.RigNotificationDeliveryPage, opts ...readopt.Option) ([]*model.RigNotificationDelivery, int64, error)
 
 	// Create inserts a row, stamping the identifier, tenant and audit columns.
 	//
 	// It takes an envelope rather than the input alone: the rules that check the
 	// input and the callbacks that run around the write belong to the same unit of
 	// work as the write itself.
-	Create(ctx context.Context, in dbhook.Create[model.RigNotificationCreateInput, model.RigNotification]) (*model.RigNotification, error)
+	Create(ctx context.Context, in dbhook.Create[model.RigNotificationDeliveryCreateInput, model.RigNotificationDelivery]) (*model.RigNotificationDelivery, error)
 
 	// Update changes the fields the input mentions and leaves the rest alone.
-	Update(ctx context.Context, id uuid.UUID, in dbhook.Update[model.RigNotificationUpdateInput, model.RigNotification]) (*model.RigNotification, error)
+	Update(ctx context.Context, id uuid.UUID, in dbhook.Update[model.RigNotificationDeliveryUpdateInput, model.RigNotificationDelivery]) (*model.RigNotificationDelivery, error)
 
 	// Delete removes a row.
-	Delete(ctx context.Context, in dbhook.Delete[model.RigNotificationDeleteInput, model.RigNotification]) error
+	Delete(ctx context.Context, in dbhook.Delete[model.RigNotificationDeliveryDeleteInput, model.RigNotificationDelivery]) error
 }
 
-// rigNotificationTodosFilter collects the conditions written on a
-// RigNotification's Todos.
-//
-// The bool is whether there were any: a relation nobody mentioned is not a
-// condition that everything satisfies, it is no condition at all.
-func rigNotificationTodosFilter(f model.RigNotificationFilter) (model.TodoFilter, bool) {
-	var (
-		sub   model.TodoFilter
-		asked bool
-	)
-
-	if p := f.Equals; p != nil && p.Todos != nil {
-		sub.Equals, asked = p.Todos, true
-	}
-	if p := f.NotEquals; p != nil && p.Todos != nil {
-		sub.NotEquals, asked = p.Todos, true
-	}
-	if p := f.GreaterThan; p != nil && p.Todos != nil {
-		sub.GreaterThan, asked = p.Todos, true
-	}
-	if p := f.SmallerThan; p != nil && p.Todos != nil {
-		sub.SmallerThan, asked = p.Todos, true
-	}
-	if p := f.GreaterOrEqual; p != nil && p.Todos != nil {
-		sub.GreaterOrEqual, asked = p.Todos, true
-	}
-	if p := f.SmallerOrEqual; p != nil && p.Todos != nil {
-		sub.SmallerOrEqual, asked = p.Todos, true
-	}
-	if p := f.Contains; p != nil && p.Todos != nil {
-		sub.Contains, asked = p.Todos, true
-	}
-	if p := f.NotContains; p != nil && p.Todos != nil {
-		sub.NotContains, asked = p.Todos, true
-	}
-	if p := f.Like; p != nil && p.Todos != nil {
-		sub.Like, asked = p.Todos, true
-	}
-	if p := f.NotLike; p != nil && p.Todos != nil {
-		sub.NotLike, asked = p.Todos, true
-	}
-	if p := f.Null; p != nil && p.Todos != nil {
-		sub.Null, asked = p.Todos, true
-	}
-	if p := f.NotNull; p != nil && p.Todos != nil {
-		sub.NotNull, asked = p.Todos, true
-	}
-
-	if !asked {
-		return sub, false
-	}
-
-	// The connective comes down with them, and it has to: under OR the caller
-	// asked for a related row satisfying either condition, and one subquery whose
-	// inside is a disjunction is exactly that. Under AND it is the same row
-	// satisfying both, which is the part a subquery per operator could not say.
-	sub.OrCondition = f.OrCondition
-	return sub, true
-}
-
-// rigNotificationGroup turns a filter into the condition tree the runtime
-// renders.
+// rigNotificationDeliveryGroup turns a filter into the condition tree the
+// runtime renders.
 //
 // The scope carries what a condition needs besides the filter itself: who is
 // asking, which alias this level's columns belong to, and how deep the nesting
 // has gone. It is a value rather than three parameters because every relation
 // passes a changed copy of it down.
-func rigNotificationGroup(f model.RigNotificationFilter, sc filterScope) (query.Group, error) {
+func rigNotificationDeliveryGroup(f model.RigNotificationDeliveryFilter, sc filterScope) (query.Group, error) {
 	if err := sc.ok(); err != nil {
 		return query.Group{}, err
 	}
@@ -131,20 +72,26 @@ func rigNotificationGroup(f model.RigNotificationFilter, sc filterScope) (query.
 		if p.ID != nil {
 			g.Add(sc.at(query.Eq("id", *p.ID)))
 		}
+		if p.RecipientID != nil {
+			g.Add(sc.at(query.Eq("recipient_id", *p.RecipientID)))
+		}
+		if p.AccountID != nil {
+			g.Add(sc.at(query.Eq("account_id", *p.AccountID)))
+		}
 		if p.CreatedAt != nil {
 			g.Add(sc.at(query.Eq("created_at", *p.CreatedAt)))
-		}
-		if p.CreatedByAccountID != nil {
-			g.Add(sc.at(query.Eq("created_by_account_id", p.CreatedByAccountID)))
-		}
-		if p.CreatedByAPIKeyID != nil {
-			g.Add(sc.at(query.Eq("created_by_api_key_id", p.CreatedByAPIKeyID)))
 		}
 		if p.UpdatedAt != nil {
 			g.Add(sc.at(query.Eq("updated_at", p.UpdatedAt)))
 		}
+		if p.Channel != nil {
+			g.Add(sc.at(query.Eq("channel", *p.Channel)))
+		}
 		if p.Kind != nil {
 			g.Add(sc.at(query.Eq("kind", *p.Kind)))
+		}
+		if p.Digest != nil {
+			g.Add(sc.at(query.Eq("digest", *p.Digest)))
 		}
 		if p.State != nil {
 			g.Add(sc.at(query.Eq("state", *p.State)))
@@ -152,17 +99,14 @@ func rigNotificationGroup(f model.RigNotificationFilter, sc filterScope) (query.
 		if p.DeliverAt != nil {
 			g.Add(sc.at(query.Eq("deliver_at", *p.DeliverAt)))
 		}
-		if p.ResolvedAt != nil {
-			g.Add(sc.at(query.Eq("resolved_at", p.ResolvedAt)))
+		if p.SentAt != nil {
+			g.Add(sc.at(query.Eq("sent_at", p.SentAt)))
 		}
-		if p.Payload != nil {
-			g.Add(sc.at(query.Eq("payload", *p.Payload)))
+		if p.FailedReason != nil {
+			g.Add(sc.at(query.Eq("failed_reason", p.FailedReason)))
 		}
-		if p.GroupKey != nil {
-			g.Add(sc.at(query.Eq("group_key", p.GroupKey)))
-		}
-		if p.AccountIds != nil {
-			g.Add(sc.at(query.Eq("account_ids", p.AccountIds)))
+		if p.Attempts != nil {
+			g.Add(sc.at(query.Eq("attempts", *p.Attempts)))
 		}
 		if p.ClaimedAt != nil {
 			g.Add(sc.at(query.Eq("claimed_at", p.ClaimedAt)))
@@ -170,28 +114,31 @@ func rigNotificationGroup(f model.RigNotificationFilter, sc filterScope) (query.
 		if p.ClaimedBy != nil {
 			g.Add(sc.at(query.Eq("claimed_by", p.ClaimedBy)))
 		}
-		if p.Attempts != nil {
-			g.Add(sc.at(query.Eq("attempts", *p.Attempts)))
-		}
 	}
 	if p := f.NotEquals; p != nil {
 		if p.ID != nil {
 			g.Add(sc.at(query.Ne("id", *p.ID)))
 		}
+		if p.RecipientID != nil {
+			g.Add(sc.at(query.Ne("recipient_id", *p.RecipientID)))
+		}
+		if p.AccountID != nil {
+			g.Add(sc.at(query.Ne("account_id", *p.AccountID)))
+		}
 		if p.CreatedAt != nil {
 			g.Add(sc.at(query.Ne("created_at", *p.CreatedAt)))
-		}
-		if p.CreatedByAccountID != nil {
-			g.Add(sc.at(query.Ne("created_by_account_id", p.CreatedByAccountID)))
-		}
-		if p.CreatedByAPIKeyID != nil {
-			g.Add(sc.at(query.Ne("created_by_api_key_id", p.CreatedByAPIKeyID)))
 		}
 		if p.UpdatedAt != nil {
 			g.Add(sc.at(query.Ne("updated_at", p.UpdatedAt)))
 		}
+		if p.Channel != nil {
+			g.Add(sc.at(query.Ne("channel", *p.Channel)))
+		}
 		if p.Kind != nil {
 			g.Add(sc.at(query.Ne("kind", *p.Kind)))
+		}
+		if p.Digest != nil {
+			g.Add(sc.at(query.Ne("digest", *p.Digest)))
 		}
 		if p.State != nil {
 			g.Add(sc.at(query.Ne("state", *p.State)))
@@ -199,26 +146,20 @@ func rigNotificationGroup(f model.RigNotificationFilter, sc filterScope) (query.
 		if p.DeliverAt != nil {
 			g.Add(sc.at(query.Ne("deliver_at", *p.DeliverAt)))
 		}
-		if p.ResolvedAt != nil {
-			g.Add(sc.at(query.Ne("resolved_at", p.ResolvedAt)))
+		if p.SentAt != nil {
+			g.Add(sc.at(query.Ne("sent_at", p.SentAt)))
 		}
-		if p.Payload != nil {
-			g.Add(sc.at(query.Ne("payload", *p.Payload)))
+		if p.FailedReason != nil {
+			g.Add(sc.at(query.Ne("failed_reason", p.FailedReason)))
 		}
-		if p.GroupKey != nil {
-			g.Add(sc.at(query.Ne("group_key", p.GroupKey)))
-		}
-		if p.AccountIds != nil {
-			g.Add(sc.at(query.Ne("account_ids", p.AccountIds)))
+		if p.Attempts != nil {
+			g.Add(sc.at(query.Ne("attempts", *p.Attempts)))
 		}
 		if p.ClaimedAt != nil {
 			g.Add(sc.at(query.Ne("claimed_at", p.ClaimedAt)))
 		}
 		if p.ClaimedBy != nil {
 			g.Add(sc.at(query.Ne("claimed_by", p.ClaimedBy)))
-		}
-		if p.Attempts != nil {
-			g.Add(sc.at(query.Ne("attempts", *p.Attempts)))
 		}
 	}
 	if p := f.GreaterThan; p != nil {
@@ -231,14 +172,14 @@ func rigNotificationGroup(f model.RigNotificationFilter, sc filterScope) (query.
 		if p.DeliverAt != nil {
 			g.Add(sc.at(query.Gt("deliver_at", *p.DeliverAt)))
 		}
-		if p.ResolvedAt != nil {
-			g.Add(sc.at(query.Gt("resolved_at", p.ResolvedAt)))
-		}
-		if p.ClaimedAt != nil {
-			g.Add(sc.at(query.Gt("claimed_at", p.ClaimedAt)))
+		if p.SentAt != nil {
+			g.Add(sc.at(query.Gt("sent_at", p.SentAt)))
 		}
 		if p.Attempts != nil {
 			g.Add(sc.at(query.Gt("attempts", *p.Attempts)))
+		}
+		if p.ClaimedAt != nil {
+			g.Add(sc.at(query.Gt("claimed_at", p.ClaimedAt)))
 		}
 	}
 	if p := f.SmallerThan; p != nil {
@@ -251,14 +192,14 @@ func rigNotificationGroup(f model.RigNotificationFilter, sc filterScope) (query.
 		if p.DeliverAt != nil {
 			g.Add(sc.at(query.Lt("deliver_at", *p.DeliverAt)))
 		}
-		if p.ResolvedAt != nil {
-			g.Add(sc.at(query.Lt("resolved_at", p.ResolvedAt)))
-		}
-		if p.ClaimedAt != nil {
-			g.Add(sc.at(query.Lt("claimed_at", p.ClaimedAt)))
+		if p.SentAt != nil {
+			g.Add(sc.at(query.Lt("sent_at", p.SentAt)))
 		}
 		if p.Attempts != nil {
 			g.Add(sc.at(query.Lt("attempts", *p.Attempts)))
+		}
+		if p.ClaimedAt != nil {
+			g.Add(sc.at(query.Lt("claimed_at", p.ClaimedAt)))
 		}
 	}
 	if p := f.GreaterOrEqual; p != nil {
@@ -271,14 +212,14 @@ func rigNotificationGroup(f model.RigNotificationFilter, sc filterScope) (query.
 		if p.DeliverAt != nil {
 			g.Add(sc.at(query.Gte("deliver_at", *p.DeliverAt)))
 		}
-		if p.ResolvedAt != nil {
-			g.Add(sc.at(query.Gte("resolved_at", p.ResolvedAt)))
-		}
-		if p.ClaimedAt != nil {
-			g.Add(sc.at(query.Gte("claimed_at", p.ClaimedAt)))
+		if p.SentAt != nil {
+			g.Add(sc.at(query.Gte("sent_at", p.SentAt)))
 		}
 		if p.Attempts != nil {
 			g.Add(sc.at(query.Gte("attempts", *p.Attempts)))
+		}
+		if p.ClaimedAt != nil {
+			g.Add(sc.at(query.Gte("claimed_at", p.ClaimedAt)))
 		}
 	}
 	if p := f.SmallerOrEqual; p != nil {
@@ -291,34 +232,40 @@ func rigNotificationGroup(f model.RigNotificationFilter, sc filterScope) (query.
 		if p.DeliverAt != nil {
 			g.Add(sc.at(query.Lte("deliver_at", *p.DeliverAt)))
 		}
-		if p.ResolvedAt != nil {
-			g.Add(sc.at(query.Lte("resolved_at", p.ResolvedAt)))
-		}
-		if p.ClaimedAt != nil {
-			g.Add(sc.at(query.Lte("claimed_at", p.ClaimedAt)))
+		if p.SentAt != nil {
+			g.Add(sc.at(query.Lte("sent_at", p.SentAt)))
 		}
 		if p.Attempts != nil {
 			g.Add(sc.at(query.Lte("attempts", *p.Attempts)))
+		}
+		if p.ClaimedAt != nil {
+			g.Add(sc.at(query.Lte("claimed_at", p.ClaimedAt)))
 		}
 	}
 	if p := f.Contains; p != nil {
 		if len(p.ID) > 0 {
 			g.Add(sc.at(query.In("id", p.ID)))
 		}
+		if len(p.RecipientID) > 0 {
+			g.Add(sc.at(query.In("recipient_id", p.RecipientID)))
+		}
+		if len(p.AccountID) > 0 {
+			g.Add(sc.at(query.In("account_id", p.AccountID)))
+		}
 		if len(p.CreatedAt) > 0 {
 			g.Add(sc.at(query.In("created_at", p.CreatedAt)))
-		}
-		if len(p.CreatedByAccountID) > 0 {
-			g.Add(sc.at(query.In("created_by_account_id", p.CreatedByAccountID)))
-		}
-		if len(p.CreatedByAPIKeyID) > 0 {
-			g.Add(sc.at(query.In("created_by_api_key_id", p.CreatedByAPIKeyID)))
 		}
 		if len(p.UpdatedAt) > 0 {
 			g.Add(sc.at(query.In("updated_at", p.UpdatedAt)))
 		}
+		if len(p.Channel) > 0 {
+			g.Add(sc.at(query.In("channel", p.Channel)))
+		}
 		if len(p.Kind) > 0 {
 			g.Add(sc.at(query.In("kind", p.Kind)))
+		}
+		if len(p.Digest) > 0 {
+			g.Add(sc.at(query.In("digest", p.Digest)))
 		}
 		if len(p.State) > 0 {
 			g.Add(sc.at(query.In("state", p.State)))
@@ -326,14 +273,14 @@ func rigNotificationGroup(f model.RigNotificationFilter, sc filterScope) (query.
 		if len(p.DeliverAt) > 0 {
 			g.Add(sc.at(query.In("deliver_at", p.DeliverAt)))
 		}
-		if len(p.ResolvedAt) > 0 {
-			g.Add(sc.at(query.In("resolved_at", p.ResolvedAt)))
+		if len(p.SentAt) > 0 {
+			g.Add(sc.at(query.In("sent_at", p.SentAt)))
 		}
-		if len(p.Payload) > 0 {
-			g.Add(sc.at(query.In("payload", p.Payload)))
+		if len(p.FailedReason) > 0 {
+			g.Add(sc.at(query.In("failed_reason", p.FailedReason)))
 		}
-		if len(p.GroupKey) > 0 {
-			g.Add(sc.at(query.In("group_key", p.GroupKey)))
+		if len(p.Attempts) > 0 {
+			g.Add(sc.at(query.In("attempts", p.Attempts)))
 		}
 		if len(p.ClaimedAt) > 0 {
 			g.Add(sc.at(query.In("claimed_at", p.ClaimedAt)))
@@ -341,28 +288,31 @@ func rigNotificationGroup(f model.RigNotificationFilter, sc filterScope) (query.
 		if len(p.ClaimedBy) > 0 {
 			g.Add(sc.at(query.In("claimed_by", p.ClaimedBy)))
 		}
-		if len(p.Attempts) > 0 {
-			g.Add(sc.at(query.In("attempts", p.Attempts)))
-		}
 	}
 	if p := f.NotContains; p != nil {
 		if len(p.ID) > 0 {
 			g.Add(sc.at(query.NotIn("id", p.ID)))
 		}
+		if len(p.RecipientID) > 0 {
+			g.Add(sc.at(query.NotIn("recipient_id", p.RecipientID)))
+		}
+		if len(p.AccountID) > 0 {
+			g.Add(sc.at(query.NotIn("account_id", p.AccountID)))
+		}
 		if len(p.CreatedAt) > 0 {
 			g.Add(sc.at(query.NotIn("created_at", p.CreatedAt)))
-		}
-		if len(p.CreatedByAccountID) > 0 {
-			g.Add(sc.at(query.NotIn("created_by_account_id", p.CreatedByAccountID)))
-		}
-		if len(p.CreatedByAPIKeyID) > 0 {
-			g.Add(sc.at(query.NotIn("created_by_api_key_id", p.CreatedByAPIKeyID)))
 		}
 		if len(p.UpdatedAt) > 0 {
 			g.Add(sc.at(query.NotIn("updated_at", p.UpdatedAt)))
 		}
+		if len(p.Channel) > 0 {
+			g.Add(sc.at(query.NotIn("channel", p.Channel)))
+		}
 		if len(p.Kind) > 0 {
 			g.Add(sc.at(query.NotIn("kind", p.Kind)))
+		}
+		if len(p.Digest) > 0 {
+			g.Add(sc.at(query.NotIn("digest", p.Digest)))
 		}
 		if len(p.State) > 0 {
 			g.Add(sc.at(query.NotIn("state", p.State)))
@@ -370,14 +320,14 @@ func rigNotificationGroup(f model.RigNotificationFilter, sc filterScope) (query.
 		if len(p.DeliverAt) > 0 {
 			g.Add(sc.at(query.NotIn("deliver_at", p.DeliverAt)))
 		}
-		if len(p.ResolvedAt) > 0 {
-			g.Add(sc.at(query.NotIn("resolved_at", p.ResolvedAt)))
+		if len(p.SentAt) > 0 {
+			g.Add(sc.at(query.NotIn("sent_at", p.SentAt)))
 		}
-		if len(p.Payload) > 0 {
-			g.Add(sc.at(query.NotIn("payload", p.Payload)))
+		if len(p.FailedReason) > 0 {
+			g.Add(sc.at(query.NotIn("failed_reason", p.FailedReason)))
 		}
-		if len(p.GroupKey) > 0 {
-			g.Add(sc.at(query.NotIn("group_key", p.GroupKey)))
+		if len(p.Attempts) > 0 {
+			g.Add(sc.at(query.NotIn("attempts", p.Attempts)))
 		}
 		if len(p.ClaimedAt) > 0 {
 			g.Add(sc.at(query.NotIn("claimed_at", p.ClaimedAt)))
@@ -385,41 +335,24 @@ func rigNotificationGroup(f model.RigNotificationFilter, sc filterScope) (query.
 		if len(p.ClaimedBy) > 0 {
 			g.Add(sc.at(query.NotIn("claimed_by", p.ClaimedBy)))
 		}
-		if len(p.Attempts) > 0 {
-			g.Add(sc.at(query.NotIn("attempts", p.Attempts)))
-		}
 	}
 	if p := f.Like; p != nil {
 		if p.Kind != nil {
 			g.Add(sc.at(query.Like("kind", *p.Kind)))
 		}
-		if p.GroupKey != nil {
-			g.Add(sc.at(query.Like("group_key", *p.GroupKey)))
+		if p.FailedReason != nil {
+			g.Add(sc.at(query.Like("failed_reason", *p.FailedReason)))
 		}
 	}
 	if p := f.NotLike; p != nil {
 		if p.Kind != nil {
 			g.Add(sc.at(query.NotLike("kind", *p.Kind)))
 		}
-		if p.GroupKey != nil {
-			g.Add(sc.at(query.NotLike("group_key", *p.GroupKey)))
+		if p.FailedReason != nil {
+			g.Add(sc.at(query.NotLike("failed_reason", *p.FailedReason)))
 		}
 	}
 	if p := f.Null; p != nil {
-		if p.CreatedByAccountID != nil {
-			if *p.CreatedByAccountID {
-				g.Add(sc.at(query.IsNull("created_by_account_id")))
-			} else {
-				g.Add(sc.at(query.NotNull("created_by_account_id")))
-			}
-		}
-		if p.CreatedByAPIKeyID != nil {
-			if *p.CreatedByAPIKeyID {
-				g.Add(sc.at(query.IsNull("created_by_api_key_id")))
-			} else {
-				g.Add(sc.at(query.NotNull("created_by_api_key_id")))
-			}
-		}
 		if p.UpdatedAt != nil {
 			if *p.UpdatedAt {
 				g.Add(sc.at(query.IsNull("updated_at")))
@@ -427,25 +360,18 @@ func rigNotificationGroup(f model.RigNotificationFilter, sc filterScope) (query.
 				g.Add(sc.at(query.NotNull("updated_at")))
 			}
 		}
-		if p.ResolvedAt != nil {
-			if *p.ResolvedAt {
-				g.Add(sc.at(query.IsNull("resolved_at")))
+		if p.SentAt != nil {
+			if *p.SentAt {
+				g.Add(sc.at(query.IsNull("sent_at")))
 			} else {
-				g.Add(sc.at(query.NotNull("resolved_at")))
+				g.Add(sc.at(query.NotNull("sent_at")))
 			}
 		}
-		if p.GroupKey != nil {
-			if *p.GroupKey {
-				g.Add(sc.at(query.IsNull("group_key")))
+		if p.FailedReason != nil {
+			if *p.FailedReason {
+				g.Add(sc.at(query.IsNull("failed_reason")))
 			} else {
-				g.Add(sc.at(query.NotNull("group_key")))
-			}
-		}
-		if p.AccountIds != nil {
-			if *p.AccountIds {
-				g.Add(sc.at(query.IsNull("account_ids")))
-			} else {
-				g.Add(sc.at(query.NotNull("account_ids")))
+				g.Add(sc.at(query.NotNull("failed_reason")))
 			}
 		}
 		if p.ClaimedAt != nil {
@@ -464,20 +390,6 @@ func rigNotificationGroup(f model.RigNotificationFilter, sc filterScope) (query.
 		}
 	}
 	if p := f.NotNull; p != nil {
-		if p.CreatedByAccountID != nil {
-			if *p.CreatedByAccountID {
-				g.Add(sc.at(query.NotNull("created_by_account_id")))
-			} else {
-				g.Add(sc.at(query.IsNull("created_by_account_id")))
-			}
-		}
-		if p.CreatedByAPIKeyID != nil {
-			if *p.CreatedByAPIKeyID {
-				g.Add(sc.at(query.NotNull("created_by_api_key_id")))
-			} else {
-				g.Add(sc.at(query.IsNull("created_by_api_key_id")))
-			}
-		}
 		if p.UpdatedAt != nil {
 			if *p.UpdatedAt {
 				g.Add(sc.at(query.NotNull("updated_at")))
@@ -485,25 +397,18 @@ func rigNotificationGroup(f model.RigNotificationFilter, sc filterScope) (query.
 				g.Add(sc.at(query.IsNull("updated_at")))
 			}
 		}
-		if p.ResolvedAt != nil {
-			if *p.ResolvedAt {
-				g.Add(sc.at(query.NotNull("resolved_at")))
+		if p.SentAt != nil {
+			if *p.SentAt {
+				g.Add(sc.at(query.NotNull("sent_at")))
 			} else {
-				g.Add(sc.at(query.IsNull("resolved_at")))
+				g.Add(sc.at(query.IsNull("sent_at")))
 			}
 		}
-		if p.GroupKey != nil {
-			if *p.GroupKey {
-				g.Add(sc.at(query.NotNull("group_key")))
+		if p.FailedReason != nil {
+			if *p.FailedReason {
+				g.Add(sc.at(query.NotNull("failed_reason")))
 			} else {
-				g.Add(sc.at(query.IsNull("group_key")))
-			}
-		}
-		if p.AccountIds != nil {
-			if *p.AccountIds {
-				g.Add(sc.at(query.NotNull("account_ids")))
-			} else {
-				g.Add(sc.at(query.IsNull("account_ids")))
+				g.Add(sc.at(query.IsNull("failed_reason")))
 			}
 		}
 		if p.ClaimedAt != nil {
@@ -522,40 +427,8 @@ func rigNotificationGroup(f model.RigNotificationFilter, sc filterScope) (query.
 		}
 	}
 
-	if sub, ok := rigNotificationTodosFilter(f); ok {
-		inner, from, on := sc.throughLink("todo_notification", "notification_id", "todo", "todo_id", "id")
-		where, err := todoGroup(sub, inner)
-		if err != nil {
-			return query.Group{}, err
-		}
-
-		// The far side is scoped whatever the read asked for. A read option widens
-		// what this query returns, not what it may look through to decide.
-		where.Add(inner.tenant("tenant_id"))
-		where.Add(inner.live("deleted_at"))
-		where.Add(inner.original("version_type", model.TodoVersionTypeOriginal))
-
-		g.Add(query.Related(query.Exists{From: from, On: on, Where: where}))
-	}
-
-	if p := f.Without; p != nil && p.Todos != nil {
-		inner, from, on := sc.throughLink("todo_notification", "notification_id", "todo", "todo_id", "id")
-		where, err := todoGroup(*p.Todos, inner)
-		if err != nil {
-			return query.Group{}, err
-		}
-
-		// The far side is scoped whatever the read asked for. A read option widens
-		// what this query returns, not what it may look through to decide.
-		where.Add(inner.tenant("tenant_id"))
-		where.Add(inner.live("deleted_at"))
-		where.Add(inner.original("version_type", model.TodoVersionTypeOriginal))
-
-		g.Add(query.Related(query.Exists{From: from, On: on, Where: where, Not: true}))
-	}
-
 	for _, n := range f.NestedFilters {
-		nested, err := rigNotificationGroup(n, sc)
+		nested, err := rigNotificationDeliveryGroup(n, sc)
 		if err != nil {
 			return query.Group{}, err
 		}
@@ -564,17 +437,18 @@ func rigNotificationGroup(f model.RigNotificationFilter, sc filterScope) (query.
 	return g, nil
 }
 
-// rigNotificationSortable reports whether a column can be ordered by.
-func rigNotificationSortable(column string) bool {
+// rigNotificationDeliverySortable reports whether a column can be ordered by.
+func rigNotificationDeliverySortable(column string) bool {
 	switch column {
-	case "id", "tenant_id", "created_at", "created_by_account_id", "created_by_api_key_id", "updated_at", "kind", "state", "deliver_at", "resolved_at", "payload", "group_key", "claimed_at", "claimed_by", "attempts":
+	case "id", "tenant_id", "recipient_id", "account_id", "created_at", "updated_at", "channel", "kind", "digest", "state", "deliver_at", "sent_at", "failed_reason", "attempts", "claimed_at", "claimed_by":
 		return true
 	}
 	return false
 }
 
-// rigNotificationOrder converts the model's ordering terms into the runtime's.
-func rigNotificationOrder(terms []model.RigNotificationOrder, sc filterScope) ([]query.Order, []query.Join, error) {
+// rigNotificationDeliveryOrder converts the model's ordering terms into the
+// runtime's.
+func rigNotificationDeliveryOrder(terms []model.RigNotificationDeliveryOrder, sc filterScope) ([]query.Order, []query.Join, error) {
 	if len(terms) == 0 {
 		return nil, nil, nil
 	}
@@ -584,8 +458,8 @@ func rigNotificationOrder(terms []model.RigNotificationOrder, sc filterScope) ([
 	for _, t := range terms {
 		// A column this table cannot be ordered by is the caller's mistake, not a
 		// column name to paste into a statement.
-		if !rigNotificationSortable(t.Column) {
-			return nil, nil, rigerr.Invalid("a RigNotification cannot be ordered by %q", t.Column)
+		if !rigNotificationDeliverySortable(t.Column) {
+			return nil, nil, rigerr.Invalid("a RigNotificationDelivery cannot be ordered by %q", t.Column)
 		}
 		out = append(out, query.Order{Table: sc.as, Column: t.Column, Desc: t.Desc})
 	}
@@ -593,31 +467,31 @@ func rigNotificationOrder(terms []model.RigNotificationOrder, sc filterScope) ([
 	return out, nil, nil
 }
 
-type rigNotificationRepo struct {
+type rigNotificationDeliveryRepo struct {
 	db *Store
 }
 
-var _ RigNotificationRepository = (*rigNotificationRepo)(nil)
+var _ RigNotificationDeliveryRepository = (*rigNotificationDeliveryRepo)(nil)
 
-const rigNotificationRepoSelect = "rig_notification.id, rig_notification.tenant_id, rig_notification.created_at, rig_notification.created_by_account_id, rig_notification.created_by_api_key_id, rig_notification.updated_at, rig_notification.kind, rig_notification.state, rig_notification.deliver_at, rig_notification.resolved_at, rig_notification.payload, rig_notification.group_key, rig_notification.account_ids, rig_notification.claimed_at, rig_notification.claimed_by, rig_notification.attempts"
+const rigNotificationDeliveryRepoSelect = "rig_notification_delivery.id, rig_notification_delivery.tenant_id, rig_notification_delivery.recipient_id, rig_notification_delivery.account_id, rig_notification_delivery.created_at, rig_notification_delivery.updated_at, rig_notification_delivery.channel, rig_notification_delivery.kind, rig_notification_delivery.digest, rig_notification_delivery.state, rig_notification_delivery.deliver_at, rig_notification_delivery.sent_at, rig_notification_delivery.failed_reason, rig_notification_delivery.attempts, rig_notification_delivery.claimed_at, rig_notification_delivery.claimed_by"
 
-// scanRigNotification reads one row in the order rigNotificationRepoSelect
-// lists.
-func scanRigNotification(row pgx.Row) (*model.RigNotification, error) {
-	var m model.RigNotification
-	if err := row.Scan(&m.ID, &m.TenantID, &m.CreatedAt, &m.CreatedByAccountID, &m.CreatedByAPIKeyID, &m.UpdatedAt, &m.Kind, &m.State, &m.DeliverAt, &m.ResolvedAt, &m.Payload, &m.GroupKey, &m.AccountIds, &m.ClaimedAt, &m.ClaimedBy, &m.Attempts); err != nil {
+// scanRigNotificationDelivery reads one row in the order
+// rigNotificationDeliveryRepoSelect lists.
+func scanRigNotificationDelivery(row pgx.Row) (*model.RigNotificationDelivery, error) {
+	var m model.RigNotificationDelivery
+	if err := row.Scan(&m.ID, &m.TenantID, &m.RecipientID, &m.AccountID, &m.CreatedAt, &m.UpdatedAt, &m.Channel, &m.Kind, &m.Digest, &m.State, &m.DeliverAt, &m.SentAt, &m.FailedReason, &m.Attempts, &m.ClaimedAt, &m.ClaimedBy); err != nil {
 		return nil, err
 	}
 	m.CreatedAt = dbx.UTC(m.CreatedAt)
 	m.UpdatedAt = dbx.UTCPtr(m.UpdatedAt)
 	m.DeliverAt = dbx.UTC(m.DeliverAt)
-	m.ResolvedAt = dbx.UTCPtr(m.ResolvedAt)
+	m.SentAt = dbx.UTCPtr(m.SentAt)
 	m.ClaimedAt = dbx.UTCPtr(m.ClaimedAt)
 	return &m, nil
 }
 
-// Get implements RigNotificationRepository.
-func (r *rigNotificationRepo) Get(ctx context.Context, id uuid.UUID, opts ...readopt.Option) (*model.RigNotification, error) {
+// Get implements RigNotificationDeliveryRepository.
+func (r *rigNotificationDeliveryRepo) Get(ctx context.Context, id uuid.UUID, opts ...readopt.Option) (*model.RigNotificationDelivery, error) {
 	cfg, err := readopt.Apply(opts)
 	if err != nil {
 		return nil, err
@@ -635,24 +509,24 @@ func (r *rigNotificationRepo) Get(ctx context.Context, id uuid.UUID, opts ...rea
 		where += " AND tenant_id = $2"
 	}
 
-	sql := fmt.Sprintf("SELECT %s FROM rig_notification WHERE %s", rigNotificationRepoSelect, where)
-	m, err := scanRigNotification(r.db.conn().QueryRow(ctx, sql, args...))
+	sql := fmt.Sprintf("SELECT %s FROM rig_notification_delivery WHERE %s", rigNotificationDeliveryRepoSelect, where)
+	m, err := scanRigNotificationDelivery(r.db.conn().QueryRow(ctx, sql, args...))
 	if dbx.IsNoRows(err) {
-		return nil, rigerr.NotFound("no RigNotification with id %s", id)
+		return nil, rigerr.NotFound("no RigNotificationDelivery with id %s", id)
 	}
 	if err != nil {
-		return nil, rigerr.Internal(err, "read rig_notification")
+		return nil, rigerr.Internal(err, "read rig_notification_delivery")
 	}
 	return m, nil
 }
 
-// List implements RigNotificationRepository.
-func (r *rigNotificationRepo) List(ctx context.Context, f model.RigNotificationFilter, page model.RigNotificationPage, opts ...readopt.Option) ([]*model.RigNotification, int64, error) {
+// List implements RigNotificationDeliveryRepository.
+func (r *rigNotificationDeliveryRepo) List(ctx context.Context, f model.RigNotificationDeliveryFilter, page model.RigNotificationDeliveryPage, opts ...readopt.Option) ([]*model.RigNotificationDelivery, int64, error) {
 	return r.list(ctx, f, page, opts)
 }
 
 // list is the body of every read that takes a filter.
-func (r *rigNotificationRepo) list(ctx context.Context, f model.RigNotificationFilter, page model.RigNotificationPage, opts []readopt.Option) ([]*model.RigNotification, int64, error) {
+func (r *rigNotificationDeliveryRepo) list(ctx context.Context, f model.RigNotificationDeliveryFilter, page model.RigNotificationDeliveryPage, opts []readopt.Option) ([]*model.RigNotificationDelivery, int64, error) {
 	cfg, err := readopt.Apply(opts)
 	if err != nil {
 		return nil, 0, err
@@ -667,14 +541,14 @@ func (r *rigNotificationRepo) list(ctx context.Context, f model.RigNotificationF
 	// every column with the table it belongs to. The qualification is not
 	// decoration — an ordering that reaches a related table brings a second
 	// tenant_id into scope, and an unqualified one is then ambiguous.
-	sc := newFilterScope(claims, "rig_notification")
+	sc := newFilterScope(claims, "rig_notification_delivery")
 
 	scope := query.Group{}
 	if !cfg.SkipTenantScope {
 		scope.Add(sc.at(query.Eq("tenant_id", claims.TenantID)))
 	}
 
-	group, err := rigNotificationGroup(f, sc)
+	group, err := rigNotificationDeliveryGroup(f, sc)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -688,18 +562,18 @@ func (r *rigNotificationRepo) list(ctx context.Context, f model.RigNotificationF
 	if countWhere != "" {
 		countWhere = " WHERE " + countWhere
 	}
-	countSQL := fmt.Sprintf("SELECT count(*) FROM rig_notification%s", countWhere)
+	countSQL := fmt.Sprintf("SELECT count(*) FROM rig_notification_delivery%s", countWhere)
 	var total int64
 	if err := r.db.conn().QueryRow(ctx, countSQL, countArgs.Values()...).Scan(&total); err != nil {
-		return nil, 0, rigerr.Internal(err, "count rig_notification")
+		return nil, 0, rigerr.Internal(err, "count rig_notification_delivery")
 	}
 
-	order, joins, err := rigNotificationOrder(page.OrderBy, sc)
+	order, joins, err := rigNotificationDeliveryOrder(page.OrderBy, sc)
 	if err != nil {
 		return nil, 0, err
 	}
 	if len(order) == 0 {
-		order = RigNotificationDefaultOrder
+		order = RigNotificationDeliveryDefaultOrder
 	}
 	window := query.Page{Limit: page.Limit, Offset: page.Offset}.Clamp(DefaultLimit, MaxLimit)
 
@@ -712,35 +586,36 @@ func (r *rigNotificationRepo) list(ctx context.Context, f model.RigNotificationF
 		where = " WHERE " + where
 	}
 
-	listSQL := fmt.Sprintf("SELECT %s FROM rig_notification%s%s%s%s", rigNotificationRepoSelect, joinSQL, where, query.OrderSQL(order), window.SQL(args))
+	listSQL := fmt.Sprintf("SELECT %s FROM rig_notification_delivery%s%s%s%s", rigNotificationDeliveryRepoSelect, joinSQL, where, query.OrderSQL(order), window.SQL(args))
 	rows, err := r.db.conn().Query(ctx, listSQL, args.Values()...)
 	if err != nil {
-		return nil, 0, rigerr.Internal(err, "list rig_notification")
+		return nil, 0, rigerr.Internal(err, "list rig_notification_delivery")
 	}
 	defer rows.Close()
 
-	out := make([]*model.RigNotification, 0, window.Limit)
+	out := make([]*model.RigNotificationDelivery, 0, window.Limit)
 	for rows.Next() {
-		m, err := scanRigNotification(rows)
+		m, err := scanRigNotificationDelivery(rows)
 		if err != nil {
-			return nil, 0, rigerr.Internal(err, "read rig_notification")
+			return nil, 0, rigerr.Internal(err, "read rig_notification_delivery")
 		}
 		out = append(out, m)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, 0, rigerr.Internal(err, "list rig_notification")
+		return nil, 0, rigerr.Internal(err, "list rig_notification_delivery")
 	}
 	return out, total, nil
 }
 
-// RigNotificationDefaultOrder is the ordering used when a query asks for none.
+// RigNotificationDeliveryDefaultOrder is the ordering used when a query asks
+// for none.
 //
 // It always ends with the primary key, so the order is total and a page
 // boundary cannot repeat or skip a row.
-var RigNotificationDefaultOrder = []query.Order{{Table: "rig_notification", Column: "created_at", Desc: true}, {Table: "rig_notification", Column: "id", Desc: false}}
+var RigNotificationDeliveryDefaultOrder = []query.Order{{Table: "rig_notification_delivery", Column: "created_at", Desc: true}, {Table: "rig_notification_delivery", Column: "id", Desc: false}}
 
-// Create implements RigNotificationRepository.
-func (r *rigNotificationRepo) Create(ctx context.Context, in dbhook.Create[model.RigNotificationCreateInput, model.RigNotification]) (*model.RigNotification, error) {
+// Create implements RigNotificationDeliveryRepository.
+func (r *rigNotificationDeliveryRepo) Create(ctx context.Context, in dbhook.Create[model.RigNotificationDeliveryCreateInput, model.RigNotificationDelivery]) (*model.RigNotificationDelivery, error) {
 	// Who is asking, first of all. A write from a request carrying no identity is
 	// refused here — before a rule runs, before a column notices — which is
 	// what lets every hook below take the claims as a value rather than something
@@ -789,7 +664,7 @@ func (r *rigNotificationRepo) Create(ctx context.Context, in dbhook.Create[model
 	// nothing.
 	needsTx := in.Hooks.Before != nil || in.Hooks.After != nil
 
-	var m *model.RigNotification
+	var m *model.RigNotificationDelivery
 	err = dbx.InTxIf(ctx, r.db.pool, r.db.conn(), needsTx, func(ctx context.Context, tx dbx.Conn) error {
 		if in.Hooks.Before != nil {
 			if err := in.Hooks.Before(ctx, claims, &in.Input); err != nil {
@@ -797,14 +672,14 @@ func (r *rigNotificationRepo) Create(ctx context.Context, in dbhook.Create[model
 			}
 		}
 
-		columns := []string{"id", "tenant_id", "created_at", "created_by_account_id", "created_by_api_key_id", "kind", "state", "deliver_at", "resolved_at", "payload", "group_key", "account_ids", "claimed_at", "claimed_by", "attempts"}
-		values := []any{id, claims.TenantID, now, claims.Actor(), claims.ActorKey(), in.Input.Kind, in.Input.State, in.Input.DeliverAt, in.Input.ResolvedAt, in.Input.Payload, in.Input.GroupKey, in.Input.AccountIds, in.Input.ClaimedAt, in.Input.ClaimedBy, in.Input.Attempts}
+		columns := []string{"id", "tenant_id", "created_at", "recipient_id", "account_id", "channel", "kind", "digest", "state", "deliver_at", "sent_at", "failed_reason", "attempts", "claimed_at", "claimed_by"}
+		values := []any{id, claims.TenantID, now, in.Input.RecipientID, in.Input.AccountID, in.Input.Channel, in.Input.Kind, in.Input.Digest, in.Input.State, in.Input.DeliverAt, in.Input.SentAt, in.Input.FailedReason, in.Input.Attempts, in.Input.ClaimedAt, in.Input.ClaimedBy}
 
-		sql := fmt.Sprintf("INSERT INTO rig_notification (%s) VALUES (%s) RETURNING %s", joinColumns(columns), placeholders(len(values)), rigNotificationRepoSelect)
+		sql := fmt.Sprintf("INSERT INTO rig_notification_delivery (%s) VALUES (%s) RETURNING %s", joinColumns(columns), placeholders(len(values)), rigNotificationDeliveryRepoSelect)
 
-		created, err := scanRigNotification(tx.QueryRow(ctx, sql, values...))
+		created, err := scanRigNotificationDelivery(tx.QueryRow(ctx, sql, values...))
 		if err != nil {
-			return writeError(err, "rig_notification")
+			return writeError(err, "rig_notification_delivery")
 		}
 		m = created
 
@@ -828,8 +703,8 @@ func (r *rigNotificationRepo) Create(ctx context.Context, in dbhook.Create[model
 	return m, nil
 }
 
-// Update implements RigNotificationRepository.
-func (r *rigNotificationRepo) Update(ctx context.Context, id uuid.UUID, in dbhook.Update[model.RigNotificationUpdateInput, model.RigNotification]) (*model.RigNotification, error) {
+// Update implements RigNotificationDeliveryRepository.
+func (r *rigNotificationDeliveryRepo) Update(ctx context.Context, id uuid.UUID, in dbhook.Update[model.RigNotificationDeliveryUpdateInput, model.RigNotificationDelivery]) (*model.RigNotificationDelivery, error) {
 	in.Input.Normalize()
 
 	claims, err := tenancy.FromContext(ctx)
@@ -838,7 +713,7 @@ func (r *rigNotificationRepo) Update(ctx context.Context, id uuid.UUID, in dbhoo
 	}
 	_ = claims
 
-	var updated, prev *model.RigNotification
+	var updated, prev *model.RigNotificationDelivery
 	err = dbx.InTx(ctx, r.db.pool, func(ctx context.Context, tx dbx.Conn) error {
 		prev, err = r.Get(ctx, id)
 		if err != nil {
@@ -872,8 +747,24 @@ func (r *rigNotificationRepo) Update(ctx context.Context, id uuid.UUID, in dbhoo
 		columns := []string{}
 		values := []any{}
 
+		if v, ok := in.Input.RecipientID.Get(); ok {
+			columns = append(columns, "recipient_id")
+			values = append(values, v)
+		}
+		if v, ok := in.Input.AccountID.Get(); ok {
+			columns = append(columns, "account_id")
+			values = append(values, v)
+		}
+		if v, ok := in.Input.Channel.Get(); ok {
+			columns = append(columns, "channel")
+			values = append(values, v)
+		}
 		if v, ok := in.Input.Kind.Get(); ok {
 			columns = append(columns, "kind")
+			values = append(values, v)
+		}
+		if v, ok := in.Input.Digest.Get(); ok {
+			columns = append(columns, "digest")
 			values = append(values, v)
 		}
 		if v, ok := in.Input.State.Get(); ok {
@@ -884,21 +775,17 @@ func (r *rigNotificationRepo) Update(ctx context.Context, id uuid.UUID, in dbhoo
 			columns = append(columns, "deliver_at")
 			values = append(values, v)
 		}
-		if in.Input.ResolvedAt.Touched() {
-			columns = append(columns, "resolved_at")
-			values = append(values, in.Input.ResolvedAt.Ptr())
+		if in.Input.SentAt.Touched() {
+			columns = append(columns, "sent_at")
+			values = append(values, in.Input.SentAt.Ptr())
 		}
-		if v, ok := in.Input.Payload.Get(); ok {
-			columns = append(columns, "payload")
+		if in.Input.FailedReason.Touched() {
+			columns = append(columns, "failed_reason")
+			values = append(values, in.Input.FailedReason.Ptr())
+		}
+		if v, ok := in.Input.Attempts.Get(); ok {
+			columns = append(columns, "attempts")
 			values = append(values, v)
-		}
-		if in.Input.GroupKey.Touched() {
-			columns = append(columns, "group_key")
-			values = append(values, in.Input.GroupKey.Ptr())
-		}
-		if in.Input.AccountIds.Touched() {
-			columns = append(columns, "account_ids")
-			values = append(values, in.Input.AccountIds.Ptr())
 		}
 		if in.Input.ClaimedAt.Touched() {
 			columns = append(columns, "claimed_at")
@@ -907,10 +794,6 @@ func (r *rigNotificationRepo) Update(ctx context.Context, id uuid.UUID, in dbhoo
 		if in.Input.ClaimedBy.Touched() {
 			columns = append(columns, "claimed_by")
 			values = append(values, in.Input.ClaimedBy.Ptr())
-		}
-		if v, ok := in.Input.Attempts.Get(); ok {
-			columns = append(columns, "attempts")
-			values = append(values, v)
 		}
 
 		if len(columns) == 0 {
@@ -925,11 +808,11 @@ func (r *rigNotificationRepo) Update(ctx context.Context, id uuid.UUID, in dbhoo
 		values = append(values, time.Now().UTC())
 
 		values = append(values, id)
-		sql := fmt.Sprintf("UPDATE rig_notification SET %s WHERE id = $%d RETURNING %s", assignments(columns), len(values), rigNotificationRepoSelect)
+		sql := fmt.Sprintf("UPDATE rig_notification_delivery SET %s WHERE id = $%d RETURNING %s", assignments(columns), len(values), rigNotificationDeliveryRepoSelect)
 
-		updated, err = scanRigNotification(tx.QueryRow(ctx, sql, values...))
+		updated, err = scanRigNotificationDelivery(tx.QueryRow(ctx, sql, values...))
 		if err != nil {
-			return writeError(err, "rig_notification")
+			return writeError(err, "rig_notification_delivery")
 		}
 
 		if in.Hooks.After != nil {
@@ -952,15 +835,15 @@ func (r *rigNotificationRepo) Update(ctx context.Context, id uuid.UUID, in dbhoo
 	return updated, nil
 }
 
-// Delete implements RigNotificationRepository.
-func (r *rigNotificationRepo) Delete(ctx context.Context, in dbhook.Delete[model.RigNotificationDeleteInput, model.RigNotification]) error {
+// Delete implements RigNotificationDeliveryRepository.
+func (r *rigNotificationDeliveryRepo) Delete(ctx context.Context, in dbhook.Delete[model.RigNotificationDeliveryDeleteInput, model.RigNotificationDelivery]) error {
 	claims, err := tenancy.FromContext(ctx)
 	if err != nil {
 		return err
 	}
 	_ = claims
 
-	var prev *model.RigNotification
+	var prev *model.RigNotificationDelivery
 	err = dbx.InTx(ctx, r.db.pool, func(ctx context.Context, tx dbx.Conn) error {
 		prev, err = r.Get(ctx, in.Input.ID)
 		if err != nil {
@@ -973,8 +856,8 @@ func (r *rigNotificationRepo) Delete(ctx context.Context, in dbhook.Delete[model
 			}
 		}
 
-		if _, err := tx.Exec(ctx, "DELETE FROM rig_notification WHERE id = $1", in.Input.ID); err != nil {
-			return writeError(err, "rig_notification")
+		if _, err := tx.Exec(ctx, "DELETE FROM rig_notification_delivery WHERE id = $1", in.Input.ID); err != nil {
+			return writeError(err, "rig_notification_delivery")
 		}
 		if in.Hooks.After != nil {
 			if err := in.Hooks.After(ctx, claims, prev); err != nil {

@@ -155,7 +155,10 @@ type Store struct {
 	pool *pgxpool.Pool
 
 	RigNotifications          RigNotificationRepository
+	RigNotificationDeliveries RigNotificationDeliveryRepository
+	RigNotificationDevices    RigNotificationDeviceRepository
 	RigNotificationRecipients RigNotificationRecipientRepository
+	RigNotificationSettings   RigNotificationSettingRepository
 	Todos                     TodoRepository
 	TodoAttachments           TodoAttachmentRepository
 }
@@ -164,7 +167,10 @@ type Store struct {
 func New(pool *pgxpool.Pool, _ Config) *Store {
 	s := &Store{pool: pool}
 	s.RigNotifications = &rigNotificationRepo{db: s}
+	s.RigNotificationDeliveries = &rigNotificationDeliveryRepo{db: s}
+	s.RigNotificationDevices = &rigNotificationDeviceRepo{db: s}
 	s.RigNotificationRecipients = &rigNotificationRecipientRepo{db: s}
+	s.RigNotificationSettings = &rigNotificationSettingRepo{db: s}
 	s.Todos = &todoRepo{db: s}
 	s.TodoAttachments = &todoAttachmentRepo{db: s}
 	return s
