@@ -45,6 +45,12 @@ Next:
   channels an application implements, per-account settings with a window each,
   digests, and a dispatcher every replica can run because the claim is a lease
   rather than a lock.
+- ~~**M13.1** — the send timeout.~~ Shipped, out of the question "do we need a
+  circuit breaker somewhere": `notifications.send_timeout` bounding the one
+  outbound call rig does not make itself, a pass that stops when its lease is
+  spent rather than outliving it, and the missing-sender guard `ErrNoSender` was
+  written for and never wired to. See *M13.1* below; the breaker itself is a
+  stated non-goal in M13's list.
 
 ### Modules
 
@@ -3909,6 +3915,18 @@ silent failure mode and the only place it becomes visible.
 - **No rate limiting per recipient.** `throttle` counts requests against a credential,
   which is not the same question as "this person has had forty notifications this hour",
   and answering the second one properly is a milestone rather than a column.
+- **No circuit breaker per channel.** Asked directly, and the answer turned out to be
+  that the question named the wrong mechanism. A breaker trips on counted failures, and
+  the thing that actually hurt here produces no failure to count: a `Sender` that never
+  returns. `send_timeout` is what that needed, and it is below.
+
+  What a breaker would add on top is avoiding N doomed calls to a provider already known
+  to be down — real, but second-order next to `max_attempts` and the backoff, and a
+  *fleet*-level mechanism in a milestone that rejected a leader specifically to degrade
+  per-row. The shape if it is ever wanted: skip a channel for the rest of a pass after
+  *k* consecutive failures on it, releasing rather than marking those rows so a dead
+  provider does not burn their `attempts`. In-process, no table, no config, a counter
+  reset each pass. `DispatchReport` would owe it a `Tripped` count.
 
 ### Verification
 
@@ -3981,6 +3999,128 @@ boot, and documenting the relationship to the channel timeout as the one
 misconfiguration worth understanding before deploying this — but a default that assumes
 mail may be wrong for a project whose only channel is a websocket push that either
 works in 200ms or does not.
+
+---
+
+## M13.1 — the send timeout (shipped)
+
+**Where it came from.** The question was "do we need a circuit breaker in rig
+somewhere". Reading the delivery path to answer it turned up something worse than
+the thing a breaker would have addressed, and the answer is that the question
+named the wrong mechanism — a breaker trips on counted failures, and a `Sender`
+that never returns produces no failure to count.
+
+### What was wrong
+
+`Sender.Send` was called with `context.Background()`. Every other outbound call in
+rig bounds itself — three seconds for the breach check, ten for a token exchange,
+thirty in `rigclient`, four budgets in `serve` — and this was the only one that did
+not, because it is the only one rig does not make. The far side is application
+code calling SMTP or APNs, and Go's default `http.Client` has no timeout.
+
+A pass is one goroutine, and `run` resolves before it dispatches. So one hung
+sender:
+
+1. **stopped every channel on that replica**, not just the wedged one — the exact
+   single-point-of-stall the lease was chosen over a leader to avoid, reintroduced
+   at the replica level by a serial loop;
+2. **stopped the inbox with it.** `Resolve` writes the recipient rows and never ran
+   again. The M13 note above says "the inbox is live either way … this is about
+   email and push latency and nothing else" — true of a *skipped* nudge, not of a
+   wedged one. The cron dispatcher is what kept it from being data loss, which is
+   exactly the guarantee it was introduced as;
+3. **left the leases stranded.** `Close` waits on `e.done`, which never closed, so
+   it returned `ctx.Err()` at its budget and never reached `ReleaseClaims` — the
+   one outcome that section says must not happen.
+
+And it needed no hang at all. A hundred rows against a thirty-second provider,
+serially, is fifty minutes against a five-minute lease. `MinClaimTTL` guards that
+ratio for *one* send and cannot see the batch multiplier.
+
+### Three things, and the third was a crash
+
+**`notifications.send_timeout`**, thirty seconds, resolved where the other three
+delivery numbers are and carried through `ir.Notifications` into the generated
+wiring. It makes `claim_ttl`'s own advice checkable rather than advisory:
+`claim_ttl`'s comment said "the number that matters is the slowest channel's own
+timeout, which rig cannot know", and now rig knows it, so `checkNotifications`
+refuses the pair instead of describing it. `NewEngine` panics on the same
+relationship for a caller that builds an `EngineConfig` by hand.
+
+**A pass budget, not a smaller batch.** Bounding each send is not enough — a
+hundred timeouts still outlive the lease. The pass gets a context worth
+`claim_ttl`, started *before* the claim because that is when the lease starts, and
+stops while a whole `send_timeout` still fits inside what is left — the question
+being whether the next send fits, not whether the budget has already run out,
+because a send begun with a millisecond left is a call in flight as the lease
+expires. This is why `claimBatch` is still a hundred: shrinking it to
+`claim_ttl / send_timeout` would have been the same arithmetic paid by every
+healthy channel, and a provider answering in a hundred milliseconds should still
+get all hundred in one pass. `DispatchReport.Abandoned` is what says the batch
+stopped fitting.
+
+The rows it did not reach are handed back by `abandon` rather than by the
+deferred release, for one reason: `claim` charges every row in the batch an
+attempt before anything is sent, so a row released without a send would have paid
+for one it never got, and `max_attempts` of those would Fail a delivery no channel
+had ever been asked about. `abandon` gives the attempt back and `ReleaseClaims`
+deliberately does not, because the send *it* gives up on was made. `claimed_by` is
+in its WHERE clause: past a lease that expired anyway the row may be somebody
+else's, and the attempt to give back would be theirs.
+
+**The missing-sender guard.** `e.senders[m.Channel].Send(...)` indexed a map with
+no `ok`, and `claim` does not filter by channel. A deploy that dropped a channel
+from the map while `Pending` rows existed for it produced a nil `Sender`, a method
+call on it, and a panic in a goroutine with no `recover` above it — the process,
+not the delivery. `ErrNoSender` had been declared for this and never used, which
+is the tell. Those rows now fail like any other undeliverable copy.
+
+### Verification
+
+Three tests in `examples/auth/dispatch_docker_test.go`, beside the concurrency
+claims they belong with. A sender that waits on its context returns, the pass
+returns, and the rows come back unclaimed — bounded from the outside too, because
+a test that just called `Dispatch` would hang the suite rather than fail it, and
+asserting the sender's deadline actually fired is what makes it a test of the
+deadline rather than of the sender. Email rows against an engine that can only
+send Mobile: not an empty map, which `Dispatch` already short-circuits, but a map
+with the wrong channel in it. That one completing at all is the assertion. And the
+budget, in real seconds because a lease under a minute is refused: three Immediate
+rows, a four-second send and a fifty-six-second timeout inside a one-minute lease,
+so exactly one fits — one sent, two abandoned, nothing still claimed, and
+`attempts` back at zero on the two nothing was tried on.
+
+Plus the unit half: the boot check three ways — longer, equal, and an ordinary
+pair — the defaults building an engine, because a default pair this package
+refuses would be a panic on a configuration nobody wrote, and the report line
+naming every count. On the configuration side the same relationship, plus the
+floor a seconds-resolution document needs: `500ms` resolves to zero, zero reads as
+unset, and unset is thirty seconds, so it is refused rather than silently
+multiplied by sixty.
+
+### What this did not do
+
+No breaker, and M13's non-goal list now says why rather than leaving it unasked.
+Two other unbounded calls turned up while reading and are **not** fixed here,
+because they are different modules and one of them is a different argument:
+
+- **`auth/oauth/flow.go`'s token exchange has no timeout at all.** `cfg.Exchange`
+  is handed the request context and no `oauth2.HTTPClient`, so `x/oauth2` falls
+  back to `http.DefaultClient`. The only place the repo sets that key is a test.
+  `providers.go` sets ten seconds on the very next call, which is what makes this
+  look like an oversight rather than a decision — a hung IdP parks a goroutine per
+  callback, and `WriteTimeout` does not cancel a handler.
+- **`auth/account`'s `Notifier` is called inline in the request path**
+  (`service.go`, password reset and verification resend) with no timeout, no
+  retry and no outbox, and the rate-limit budget is spent *before* the send — so a
+  provider outage burns somebody's five-an-hour on mail that never left. The
+  engine three directories over solves this exact problem properly; the asymmetry
+  is worth a milestone rather than a patch.
+
+Two smaller ones, same class: the delivery backoff has **no jitter**, so a hundred
+failures in one pass retry in lockstep for all five attempts; and `files/sweep.go`
+returns on its first error, so one un-deletable object stalls every pass behind it
+— where `notify`'s `address()` deliberately swallows to avoid precisely that.
 
 ---
 

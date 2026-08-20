@@ -65,6 +65,22 @@ const (
 	DefaultBackoffBase = time.Minute
 )
 
+// DefaultSendTimeout bounds one call into a channel.
+//
+// Thirty seconds, which is the number rigclient already chose for a whole
+// request, and it is here because a [Sender] is the one seam in rig where the
+// code on the other side belongs to somebody else. Every other outbound call rig
+// makes bounds itself — three seconds for the breach check, ten for a token
+// exchange — and this one could not, because rig does not make it.
+//
+// What it prevents is not a slow provider, which the backoff already handles. It
+// is a provider that never answers at all: an http.Client with no Timeout, which
+// is Go's default, dialling a host that black-holes the packets. A pass is a
+// single goroutine, so one such call used to stop this replica dispatching
+// anything ever again — on every channel, and the inbox with it, since a pass
+// resolves before it dispatches.
+const DefaultSendTimeout = 30 * time.Second
+
 // claimBatch bounds how many deliveries one pass takes.
 const claimBatch = 100
 
@@ -89,13 +105,25 @@ type DispatchReport struct {
 	// Released is how many claims a clean shutdown gave back rather than
 	// leaving to expire.
 	Released int
+	// Abandoned is how many the pass did not reach because the lease ran out
+	// before it got to them.
+	//
+	// It is the number that says a channel is slow enough to be a problem. Zero
+	// is the ordinary case and a steady non-zero one means the batch cannot be
+	// sent inside a claim — either the provider got slower or claim_ttl and
+	// send_timeout no longer fit each other. Those rows are Pending again, with
+	// the attempt the claim charged them given back, so nothing is lost; what is
+	// lost is the assumption that a pass drains what it claims.
+	Abandoned int
 }
 
 // String is the one line a pass is worth in a log: every count, zeros included.
 func (r DispatchReport) String() string {
 	return fmt.Sprintf(
-		"notify: claimed %d, sent %d, failed %d, retrying %d, held %d, digested %d, released %d",
-		r.Claimed, r.Sent, r.Failed, r.Retrying, r.Held, r.Digested, r.Released)
+		"notify: claimed %d, sent %d, failed %d, retrying %d, held %d, digested %d, "+
+			"released %d, abandoned %d",
+		r.Claimed, r.Sent, r.Failed, r.Retrying, r.Held, r.Digested, r.Released,
+		r.Abandoned)
 }
 
 // Dispatch is one pass: claim what is due, send it, mark it.
@@ -111,6 +139,19 @@ func (e *Engine) Dispatch(ctx context.Context) (DispatchReport, error) {
 		return report, nil
 	}
 
+	// The pass gets the lease's worth of time and no more. Bounding each send is
+	// not enough on its own: a batch of a hundred against a channel that takes
+	// the full timeout every time is a hundred timeouts long, which outlives the
+	// claim by a wide margin, and every row in it is then claimed a second time
+	// by a replica that was right to think the lease had expired.
+	//
+	// Started before the claim rather than after it, because the lease starts
+	// when the claim stamps it. A budget begun after the claim and the addressing
+	// queries would end that much later than the lease it is standing in for,
+	// which is the one thing it exists to prevent.
+	pass, endPass := context.WithTimeout(ctx, e.claimTTL)
+	defer endPass()
+
 	claimed, err := e.claim(ctx, claimBatch)
 	if err != nil {
 		return report, err
@@ -123,16 +164,116 @@ func (e *Engine) Dispatch(ctx context.Context) (DispatchReport, error) {
 	e.hold(claimed)
 	defer e.release(ctx, &report)
 
+	// The pass stops when what is left of the lease cannot fit another send, and
+	// the rows it did not reach are handed back rather than left claimed until
+	// the TTL. Bounding the pass rather than shrinking the batch is what keeps a
+	// healthy channel fast: a provider answering in a hundred milliseconds still
+	// gets all hundred in one pass.
+	var abandoned []Delivery
+
 	for _, m := range e.messages(ctx, claimed, &report) {
+		if !e.budgetFor(pass) {
+			// Not enough lease left to send inside it. Whatever is left is owed
+			// again and the next pass takes it, which is the same sentence as
+			// every other partial pass here.
+			abandoned = append(abandoned, m.Deliveries...)
+			continue
+		}
+
+		sender, ok := e.senders[m.Channel]
+		if !ok || sender == nil {
+			// A channel that had a sender when these rows were written and does
+			// not now — a deploy that dropped one from the map, most often. The
+			// rows exist and nothing can take them, so they retry and then fail
+			// like any other undeliverable copy.
+			//
+			// Guarded rather than indexed straight into, because a nil Sender is
+			// a panic in a goroutine with no recover above it, which takes the
+			// process rather than the delivery.
+			err := fmt.Errorf("%w: %s", ErrNoSender, m.Channel)
+			if markErr := e.mark(ctx, m, err, &report); markErr != nil {
+				return report, markErr
+			}
+			continue
+		}
+
 		// The send, with no transaction open at all. This is the whole reason
 		// the claim is a lease: a provider that hangs holds nothing but its own
 		// lease, and the pool is untouched.
-		err := e.senders[m.Channel].Send(ctx, m)
+		//
+		// Bounded, because "holds nothing but its own lease" was not true of the
+		// goroutine doing the holding. A Sender that ignores this deadline hangs
+		// anyway — Go cannot prevent that, and [Sender] says so.
+		send, endSend := context.WithTimeout(pass, e.sendTimeout)
+		err := sender.Send(send, m)
+		endSend()
+
+		// Marked on ctx and not on pass: the pass deadline is for the provider,
+		// and a write that recorded a successful send is not something to abandon
+		// because the lease ran out while it was being made.
 		if markErr := e.mark(ctx, m, err, &report); markErr != nil {
 			return report, markErr
 		}
 	}
+
+	if err := e.abandon(ctx, abandoned, &report); err != nil {
+		return report, err
+	}
 	return report, nil
+}
+
+// budgetFor reports whether the pass has room for one whole send.
+//
+// The question is whether the *next* send fits, not whether the budget has
+// already run out: a send started with a millisecond left runs to the pass
+// deadline and no further, which is a call still in flight as the lease expires —
+// the case [NewEngine] refuses a configuration over. So a pass ends with the
+// send timeout unspent, and that is the point.
+func (e *Engine) budgetFor(pass context.Context) bool {
+	if pass.Err() != nil {
+		return false
+	}
+	deadline, ok := pass.Deadline()
+	return !ok || time.Until(deadline) >= e.sendTimeout
+}
+
+// abandon gives back a row the pass never reached: the claim and the attempt
+// both.
+//
+// The attempt is the part worth spelling out. `claim` charges every row in the
+// batch an attempt before anything is sent, so a row released without a send
+// would have paid for one it never got — and max_attempts of those, on a channel
+// slow enough to abandon the tail of every batch, would Fail a delivery that no
+// channel had ever been asked about. This is the one thing [Engine.ReleaseClaims]
+// deliberately does not do, because the send it gives up on was made.
+//
+// `claimed_by` is in the WHERE clause for the same reason: past a lease that
+// expired anyway, the row may be somebody else's now, and the attempt to give
+// back would be theirs.
+func (e *Engine) abandon(ctx context.Context, abandoned []Delivery, report *DispatchReport) error {
+	if len(abandoned) == 0 {
+		return nil
+	}
+
+	ids := make([]uuid.UUID, 0, len(abandoned))
+	for _, d := range abandoned {
+		ids = append(ids, d.ID)
+	}
+
+	const q = `UPDATE ` + DeliveryTable + ` SET
+			attempts = greatest(attempts - 1, 0), claimed_at = NULL, updated_at = now()
+		WHERE id = ANY($1) AND claimed_by = $2 AND state = 'Pending'`
+	if _, err := e.store.conn(ctx).Exec(ctx, q, ids, e.claimedBy); err != nil {
+		return fmt.Errorf("notify: abandon deliveries: %w", err)
+	}
+
+	// Forgotten only now, so that a failure above leaves them to the deferred
+	// release: a lease given back late is better than one left to expire.
+	for _, id := range ids {
+		e.forget(id)
+	}
+	report.Abandoned += len(ids)
+	return nil
 }
 
 // claim takes the due rows, in the one statement that makes this contention-free.

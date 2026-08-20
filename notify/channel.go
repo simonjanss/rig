@@ -171,6 +171,19 @@ type Message struct {
 // Returning an error retries with backoff until max_attempts. Returning nil
 // means the provider accepted it, which is not the same as it arriving, and rig
 // does not pretend to know the difference.
+//
+// **The context carries a deadline — notifications.send_timeout, thirty seconds
+// by default — and honouring it is this method's job.** rig cannot enforce it,
+// for the same reason it cannot enforce that [Delivery.ID] reaches the provider:
+// what happens after this call is application code. Pass ctx to the request, and
+// do not hand a provider SDK a client with no timeout of its own.
+//
+// What a Sender that ignores it costs is worth stating, because the shape hides
+// it. A pass is one goroutine and it resolves before it dispatches, so a call
+// that never returns stops this replica writing inbox lines and sending on
+// *every* channel — not just this one — until the process is restarted. The
+// deadline exists to make that a failed delivery instead. It is the only
+// protection there is, and it is cooperative.
 type Sender interface {
 	Send(ctx context.Context, m Message) error
 }
