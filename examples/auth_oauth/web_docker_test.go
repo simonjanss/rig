@@ -17,6 +17,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"golang.org/x/oauth2"
 )
 
 // Which tenant a request is for, decided by nothing but the host.
@@ -347,7 +348,7 @@ func newBrowserAt(t *testing.T, primary string) *browser {
 	if err != nil {
 		t.Fatal(err)
 	}
-	srv.Config.Handler = handler
+	srv.Config.Handler = onOneListener(handler, srv.Listener.Addr().String())
 	srv.Start()
 	t.Cleanup(srv.Close)
 
@@ -367,13 +368,40 @@ func newBrowserAt(t *testing.T, primary string) *browser {
 			// *.localhost resolves to 127.0.0.1 on macOS and on glibc, but a test
 			// that depended on the resolver would be a test that fails on
 			// somebody's machine for a reason that has nothing to do with rig.
-			Transport: &http.Transport{
-				DialContext: func(ctx context.Context, network, _ string) (net.Conn, error) {
-					return (&net.Dialer{}).DialContext(ctx, network, srv.Listener.Addr().String())
-				},
-			},
+			Transport: toListener(srv.Listener.Addr().String()),
 		},
 	}
+}
+
+// toListener is a transport that dials one address whatever host it is given.
+func toListener(addr string) *http.Transport {
+	return &http.Transport{
+		DialContext: func(ctx context.Context, network, _ string) (net.Conn, error) {
+			return (&net.Dialer{}).DialContext(ctx, network, addr)
+		},
+	}
+}
+
+// onOneListener puts the application's own calls to the provider on the same
+// listener the browser reaches.
+//
+// The browser's transport covers what the browser fetches, and the token
+// exchange and the userinfo read are neither: they are made by the server, to
+// `http://acme.localhost:<port>/idp/…`, because the stand-in provider is served
+// by this same application. Those go through the resolver, and the resolver is
+// exactly what the browser's transport exists to avoid — a machine that does not
+// answer for `*.localhost` fails these tests as "Demo refused the authorization
+// code", which names the provider for something the network did.
+//
+// oauth2 reads its HTTP client off the context, so one middleware covers both
+// calls: [oauth2.Config.Exchange] and the client [oauth2.Config.Client] builds
+// for the profile both take it from there.
+func onOneListener(next http.Handler, addr string) http.Handler {
+	client := &http.Client{Transport: toListener(addr)}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		next.ServeHTTP(w, r.WithContext(
+			context.WithValue(r.Context(), oauth2.HTTPClient, client)))
+	})
 }
 
 func (b *browser) url(host, path string) string {
