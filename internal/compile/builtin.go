@@ -14,6 +14,15 @@ const (
 	// of the two has to win — an exposed project with two structs for one row
 	// would leave the upload method picking between them.
 	ObjectRigFile = "RigFile"
+	// ObjectAuthLogEntry is one recorded authentication event, as GET /auth/audit
+	// answers it.
+	//
+	// Named after the log rather than after "audit", which the endpoint's path
+	// uses: the audit log and its tables were removed in favour of snapshots, and
+	// a builtin `AuditEntry` in every model package would read as that coming
+	// back. This is authentication only — what happened to a credential, never
+	// what happened to a row.
+	ObjectAuthLogEntry = "AuthLogEntry"
 )
 
 // ErrorCode pairs an HTTP status with the machine-readable code clients switch
@@ -143,6 +152,107 @@ func rigFileObject(wire func(string) string) ir.Object {
 				Name: "SizeBytes", Wire: wire("SizeBytes"),
 				Type: ir.TypeInt64, TypeKind: ir.TypeKindPrimitive, GoType: "int64",
 				Description: "How large the file is, in bytes.",
+			},
+		},
+	}
+}
+
+// authLogEntryObject is one authentication event, as the trail endpoint answers
+// it.
+//
+// **This object is a declaration, and `authwire.AuthLogEntryView` is the
+// implementation.** The endpoint that answers with it is hand-written, in a
+// module that cannot import a project's generated model package, so there is no
+// way for the two to be one type today. What keeps them from drifting is
+// TestTheAuthLogEntryObjectMatchesTheWire, which reads the wire struct's tags
+// back with reflection and fails the build when they disagree. Both spellings
+// die the day the /auth/* routes reach the IR, and then this is the survivor.
+//
+// The wire names are literal rather than run through the namer, which every
+// other object here does. That is not an oversight: `api.json_case` shapes the
+// keys rig *generates*, and these keys are not generated. The auth module is one
+// hand-written module shared by every project, so it answers camelCase whatever
+// a project would rather have, and an object claiming otherwise would be
+// describing a response nobody receives.
+//
+// There is no tenant member because there is nothing it could say — the reader
+// answers within one tenant and cannot be asked to do otherwise. The entries
+// that resolved to *no* tenant are absent for a stronger reason: they are what
+// the rate limiter counts, and no tenant has the standing to read them.
+func authLogEntryObject() ir.Object {
+	return ir.Object{
+		Name: ObjectAuthLogEntry,
+		Description: "One recorded authentication event: a sign-in, a failure, a lockout, " +
+			"a refresh, a key use. Read through the authentication trail endpoint.",
+		Origin: ir.OriginBuiltin,
+		Fields: []ir.Field{
+			{
+				Name: "ID", Wire: "id",
+				Type: ir.TypeUUID, TypeKind: ir.TypeKindPrimitive, GoType: "uuid.UUID",
+				Description: "Identifier of the entry.",
+			},
+			{
+				Name: "At", Wire: "at",
+				Type: ir.TypeTimestamp, TypeKind: ir.TypeKindPrimitive, GoType: "time.Time",
+				Description: "When it happened, in UTC.",
+			},
+			{
+				Name: "Event", Wire: "event",
+				Type: ir.TypeString, TypeKind: ir.TypeKindPrimitive, GoType: "string",
+				Description: "What happened. One of the authentication events rig records.",
+			},
+			{
+				Name: "Outcome", Wire: "outcome",
+				Type: ir.TypeString, TypeKind: ir.TypeKindPrimitive, GoType: "string",
+				Description: "Whether it worked: Succeeded or Failed, and no third value.",
+			},
+			{
+				Name: "AccountID", Wire: "accountId",
+				Type: ir.TypeUUID, TypeKind: ir.TypeKindPrimitive, GoType: "*uuid.UUID",
+				Modifiers: []string{ir.ModifierNullable},
+				Description: "Who it happened to, absent when the attempt never resolved to an " +
+					"account — which is what an unknown address looks like.",
+			},
+			{
+				Name: "EmailAddress", Wire: "emailAddress",
+				Type: ir.TypeString, TypeKind: ir.TypeKindPrimitive, GoType: "string",
+				Description: "The address as presented, lowercased. Present even when no account " +
+					"matched.",
+			},
+			{
+				Name: "IPAddress", Wire: "ipAddress",
+				Type: ir.TypeString, TypeKind: ir.TypeKindPrimitive, GoType: "string",
+				Description: "Where the attempt came from.",
+			},
+			{
+				Name: "UserAgent", Wire: "userAgent",
+				Type: ir.TypeString, TypeKind: ir.TypeKindPrimitive, GoType: "string",
+				Description: "What made the attempt.",
+			},
+			{
+				Name: "APIKeyID", Wire: "apiKeyId",
+				Type: ir.TypeUUID, TypeKind: ir.TypeKindPrimitive, GoType: "*uuid.UUID",
+				Modifiers:   []string{ir.ModifierNullable},
+				Description: "The key involved, when one was.",
+			},
+			{
+				Name: "APIKeyRef", Wire: "apiKeyRef",
+				Type: ir.TypeString, TypeKind: ir.TypeKindPrimitive, GoType: "string",
+				Description: "The public half of a key as presented, whether or not it resolved " +
+					"to one that exists.",
+			},
+			{
+				Name: "SessionID", Wire: "sessionId",
+				Type: ir.TypeUUID, TypeKind: ir.TypeKindPrimitive, GoType: "*uuid.UUID",
+				Modifiers:   []string{ir.ModifierNullable},
+				Description: "The session involved, for grouping a family's events together.",
+			},
+			{
+				Name: "Detail", Wire: "detail",
+				Type: ir.TypeJSON, TypeKind: ir.TypeKindPrimitive, GoType: "map[string]any",
+				Modifiers: []string{ir.ModifierNullable},
+				Description: "Whatever else was worth recording — the addresses a replayed token " +
+					"was used from, the administrator who ended a session.",
 			},
 		},
 	}

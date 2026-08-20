@@ -195,7 +195,7 @@ naming:
 
 | Key | Default | |
 |---|---|---|
-| `json_case` | `camel` | `camel`, `pascal`, or `snake`. The shape of generated JSON keys. |
+| `json_case` | `camel` | `camel`, `pascal`, or `snake`. The shape of generated JSON keys. It shapes the keys rig *generates*: the `/auth/*` endpoints come from a hand-written module shared by every project and answer camelCase whatever this says. |
 | `initialisms` | — | Extra acronyms that stay uppercase in Go identifiers. Added to the built-in list. |
 | `plurals` | — | Plural overrides keyed by table name, for the words English inflection gets wrong. |
 
@@ -293,6 +293,12 @@ because they affect code generation:
 |---|---|
 | `expose` | Foundation tables (`rig_account`, …) to generate a model, repository, and API for anyway — for an administration screen. |
 | `own` | Generate for every foundation table, for a project that has forked the schema and no longer imports `rig/auth`. Also stops rig reserving the `rig_` prefix and the names its tables project to ([schema.md](schema.md#names-rig-reserves)). A one-way door. |
+
+And one that writes a subcommand:
+
+| Key | |
+|---|---|
+| `log_retention` | How long an authentication log entry is kept, for example `90d`. Absent keeps everything. Setting it writes an `AuthLogPruner` task into your API package, and refuses a window shorter than the longest rate-limit window — those limits are counted from that table ([auth.md](auth.md#retention)). |
 
 ---
 

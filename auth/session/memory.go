@@ -104,12 +104,25 @@ func (s *MemoryStore) RevokeFamily(_ context.Context, rootID uuid.UUID, at time.
 
 // Families implements [Store].
 func (s *MemoryStore) Families(_ context.Context, tenantID, accountID uuid.UUID) ([]Family, error) {
+	return s.families(tenantID, &accountID), nil
+}
+
+// TenantFamilies implements [Store].
+func (s *MemoryStore) TenantFamilies(_ context.Context, tenantID uuid.UUID) ([]Family, error) {
+	return s.families(tenantID, nil), nil
+}
+
+// families groups a tenant's tokens into sessions, optionally for one account.
+func (s *MemoryStore) families(tenantID uuid.UUID, accountID *uuid.UUID) []Family {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	byRoot := map[uuid.UUID]*Family{}
 	for _, t := range s.tokens {
-		if t.TenantID != tenantID || t.AccountID != accountID {
+		if t.TenantID != tenantID {
+			continue
+		}
+		if accountID != nil && t.AccountID != *accountID {
 			continue
 		}
 		f, ok := byRoot[t.RootTokenID]
@@ -137,7 +150,7 @@ func (s *MemoryStore) Families(_ context.Context, tenantID, accountID uuid.UUID)
 	sort.Slice(out, func(i, j int) bool {
 		return out[i].Root.CreatedAt.After(out[j].Root.CreatedAt)
 	})
-	return out, nil
+	return out
 }
 
 // InTx implements [Store]. There is no transaction to open in one map.

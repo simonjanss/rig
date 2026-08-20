@@ -45,6 +45,25 @@ Raising the default instead would weaken every other route to suit the one that
 transfers files. `WithTimeout` takes a shallow copy of your client with a
 different deadline, so the transport and its connection pool are still shared.
 
+## Asking for the whole tenant
+
+A read that normally answers with the caller's own rows widens with `Wide()`:
+
+```go
+sessions, err := client.Auth.Sessions(ctx, rigclient.Wide())   // needs session.read.all
+trail, err := client.Auth.AuditLog(ctx, rigclient.AuditQuery{}, rigclient.Wide())
+```
+
+It sets the `scope` parameter [`tenancy.Scope`](auth.md) describes, and asking for
+more than the credential holds is a **403** rather than a smaller answer — a
+narrower result would leave the caller unable to tell "you may not see that" from
+"there is nothing else". A generated read carries the same thing as a typed field
+on its query, which is the same request written the other way.
+
+`Auth.AuditLogAll` walks the authentication trail page by page, stopping at the
+first failure — which arrives as the second value of the last pair, so a loop that
+ignores it is a loop that silently stops early.
+
 ## Sending files
 
 These methods appear on a generated client once your project has a file column.

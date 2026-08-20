@@ -12,6 +12,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"testing"
 	"time"
 
@@ -54,6 +55,31 @@ func TestTheBasePathIsPrefixed(t *testing.T) {
 	}
 	if want := "/api/v1/todos/1"; got != want {
 		t.Errorf("path = %q, want %q", got, want)
+	}
+}
+
+// An option's parameter reaches the URL, and it beats the one the method built:
+// the typed arguments came first and the option is the caller saying something
+// about this one call afterwards.
+func TestAnOptionCanSetAQueryParameter(t *testing.T) {
+	var got url.Values
+	rt := newClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = r.URL.Query()
+		w.Write([]byte(`{"id":"1","title":"x"}`))
+	}), rigclient.Config{})
+
+	if _, err := rigclient.Do[todo](t.Context(), rt, rigclient.Op{
+		Method: http.MethodGet, Path: "/todos",
+		Query: url.Values{"scope": {"own"}, "limit": {"10"}},
+	}, rigclient.Wide()); err != nil {
+		t.Fatal(err)
+	}
+
+	if got.Get("scope") != "all" {
+		t.Errorf("scope = %q, want the option's value", got.Get("scope"))
+	}
+	if got.Get("limit") != "10" {
+		t.Errorf("limit = %q, want the operation's own parameter kept", got.Get("limit"))
 	}
 }
 

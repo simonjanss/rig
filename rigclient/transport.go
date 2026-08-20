@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"net/url"
 	"strings"
@@ -196,7 +197,7 @@ func (rt *Runtime) send(ctx context.Context, op Op, call *call) (*http.Response,
 		body, contentType = bytes.NewReader(encoded), "application/json"
 	}
 
-	req, err := http.NewRequestWithContext(ctx, op.Method, rt.url(op), body)
+	req, err := http.NewRequestWithContext(ctx, op.Method, rt.url(op, call.query), body)
 	if err != nil {
 		// Do closes the body; nothing else does, and a form's writer is a
 		// goroutine blocked on a pipe nobody will read.
@@ -245,7 +246,12 @@ func (rt *Runtime) send(ctx context.Context, op Op, call *call) (*http.Response,
 }
 
 // url builds the absolute URL for an operation.
-func (rt *Runtime) url(op Op) string {
+//
+// extra is what a [CallOption] added, and it wins where the two name the same
+// parameter: the operation's own query came from the typed arguments of a
+// generated method, and an option is the caller saying something about this one
+// call afterwards.
+func (rt *Runtime) url(op Op, extra url.Values) string {
 	base := rt.api.BasePath
 	if op.Root {
 		base = ""
@@ -253,6 +259,15 @@ func (rt *Runtime) url(op Op) string {
 
 	u := *rt.base
 	u.Path = strings.TrimRight(u.Path, "/") + base + op.Path
+
+	if len(extra) > 0 {
+		merged := url.Values{}
+		maps.Copy(merged, op.Query)
+		maps.Copy(merged, extra)
+		u.RawQuery = merged.Encode()
+		return u.String()
+	}
+
 	if len(op.Query) > 0 {
 		u.RawQuery = op.Query.Encode()
 	}

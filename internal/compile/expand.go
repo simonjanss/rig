@@ -82,6 +82,21 @@ func Expand(api ir.API, opt ExpandOptions) (ir.API, diag.List) {
 		out.Objects = append(out.Objects, paginationObject(wire))
 	}
 
+	// The authentication trail's shape, for a project that has authentication at
+	// all. Here rather than after the resource loop — where the file shape is —
+	// because the projection has to lose this one: an exposed rig_auth_log
+	// projects to a resource named AuthLog and a table of a project's own could
+	// project to AuthLogEntry, and neither is the row this describes. The file
+	// shape is the opposite case, where both spellings are the same row.
+	//
+	// Nothing in the document refers to it, because no /auth/* route does: those
+	// are mounted by a hand-written module and have never reached the IR. It is
+	// here so that a client and an OpenAPI document can describe the trail
+	// endpoint the day they can describe any of them.
+	if out.Auth != nil && !have(ObjectAuthLogEntry) {
+		out.Objects = append(out.Objects, authLogEntryObject())
+	}
+
 	// Which resources a relation may point at. A filter is the wire shape, so a
 	// relation to a table the API does not expose is not one a client gets to
 	// ask about.

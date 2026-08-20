@@ -257,9 +257,7 @@ func Grants(pool *pgxpool.Pool) func(context.Context, uuid.UUID, uuid.UUID) ([]s
 // inviting somebody and minting a key — which are unioned in here so a caller
 // passes only its own and still ends up with a complete table.
 func SyncPermissions(ctx context.Context, pool *pgxpool.Pool, keys []string) error {
-	for _, p := range authhttp.Permissions() {
-		keys = append(keys, p.Key)
-	}
+	keys = append(keys, AuthKeys()...)
 	for _, key := range keys {
 		if _, err := pool.Exec(ctx, `
 			INSERT INTO permission (id, created_at, key, name, description)
@@ -269,6 +267,22 @@ func SyncPermissions(ctx context.Context, pool *pgxpool.Pool, keys []string) err
 		}
 	}
 	return nil
+}
+
+// AuthKeys is every permission the authentication endpoints check.
+//
+// Derived from authhttp.Permissions() rather than listed, which is the same
+// argument api.PermissionKeys() makes for the application's own: rig adding an
+// endpoint with a permission behind it — reading the authentication trail, ending
+// somebody else's session — should land in this example's Owner role without
+// anybody noticing it had to. A key nobody holds is an endpoint that answers 403
+// and looks like a policy decision.
+func AuthKeys() []string {
+	out := make([]string, 0, len(authhttp.Permissions()))
+	for _, p := range authhttp.Permissions() {
+		out = append(out, p.Key)
+	}
+	return out
 }
 
 // SeedFor is the tenant hook: the roles a new tenant starts with.

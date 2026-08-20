@@ -9,8 +9,6 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/simonjanss/rig/auth/account"
-	"github.com/simonjanss/rig/auth/authhttp"
 	"github.com/simonjanss/rig/examples/auth/internal/api"
 	"github.com/simonjanss/rig/examples/auth/services/authz"
 )
@@ -231,9 +229,7 @@ func (h *Handler) invite(w http.ResponseWriter, r *http.Request) {
 		Role string    `json:"role"`
 	}
 	if err := json.Unmarshal(out, &made); err == nil && made.ID != uuid.Nil {
-		grants := append(api.PermissionKeys(),
-			account.PermissionProvision,
-			authhttp.PermissionManageAPIKeys, authhttp.PermissionOwnAPIKey)
+		grants := append(api.PermissionKeys(), authz.AuthKeys()...)
 		if err := authz.GrantLevel(r.Context(), h.pool, s.TenantID, made.ID, made.Role, grants); err != nil {
 			h.redirect(w, r, "invited, but the role could not be granted: "+err.Error())
 			return

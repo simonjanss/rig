@@ -188,13 +188,28 @@ func TestTheInterface(t *testing.T) {
 
 	t.Run("the trail records it", func(t *testing.T) {
 		page := ui.get(t, "/ui")
+
+		// The panel reads GET /auth/audit?scope=all, which needs
+		// authlog.read.all — so this is also the assertion that the endpoint
+		// answers the question the hand-written query it replaced was written to
+		// answer, and that the Owner role holds the key for it. Without this the
+		// page would quietly render "Refused" and every check below would still
+		// pass on the words being elsewhere.
+		panel, ok := between(page, "Auth log", "Outbox")
+		if !ok {
+			t.Fatalf("no auth log panel:\n%s", excerpt(page))
+		}
+		if strings.Contains(panel, "Refused:") {
+			t.Errorf("the owner holds authlog.read.all and was refused:\n%s", panel)
+		}
+
 		// No LoginSucceeded yet, and that is right: creating a tenant is register
 		// then create, and neither is a sign-in. The sub-tests below do sign in and
 		// the event turns up there.
 		for _, want := range []string{
 			"AccountProvisioned", "InvitationSent", "InvitationRevoked",
 		} {
-			if !strings.Contains(page, want) {
+			if !strings.Contains(panel, want) {
 				t.Errorf("the auth log should show %q", want)
 			}
 		}

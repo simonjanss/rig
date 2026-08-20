@@ -779,7 +779,15 @@
       the lockout counts. Six wrong passwords for one address and the next attempt
       is a 429 — worth trying from the sign-in form.
     </p>
+    <p class="note">
+      Read through <code>GET /auth/audit?scope=all</code>, which needs
+      <code>authlog.read.all</code>. Without it the same endpoint answers your own
+      events and nothing else. What no scope reaches is the attempts that resolved
+      to no tenant — a sign-in naming none, an address nobody has — which are
+      recorded, are what the limit most needs, and belong to no tenant to read.
+    </p>
     <ul class="rows">
+      {{with index $.Refused "log"}}<li class="empty">Refused: {{.}}</li>{{end}}
       {{range .Log}}
         <li class="line">
           <span class="dim mono" style="flex:0 0 5rem">{{clock .At}}</span>

@@ -10,7 +10,6 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/simonjanss/rig/auth/apikey"
-	"github.com/simonjanss/rig/auth/authlog"
 	"github.com/simonjanss/rig/runtime/dbx"
 )
 
@@ -130,40 +129,6 @@ func scanKey(row scanner) (*apikey.Key, error) {
 	k.LastUsedAt = dbx.UTCPtr(k.LastUsedAt)
 	k.RevokedAt = dbx.UTCPtr(k.RevokedAt)
 	return &k, nil
-}
-
-// Log writes to rig_auth_log.
-type Log struct{ db dbx.Conn }
-
-var _ authlog.Log = (*Log)(nil)
-
-// Write implements [authlog.Log].
-//
-// A failure here is swallowed, deliberately. A login that succeeded and then
-// returned 500 because the log was unreachable has turned an observability
-// problem into an outage — and the rate limiter reading a slightly incomplete
-// log is a smaller harm than the alternative.
-func (l *Log) Write(ctx context.Context, e authlog.Entry) {
-	// An entry with no tenant is written, not dropped. It used to be dropped on
-	// the grounds that every row is tenant-scoped, and that was a mistake worth
-	// naming: a sign-in that names no tenant and a guess at an address nobody
-	// has both resolve to no tenant, and both are exactly what the lockout counts.
-	// Dropping them removed the rate limit for the attempts that most need one.
-	id, err := uuid.NewV7()
-	if err != nil {
-		return
-	}
-
-	// Deliberately not through conn(): an entry describing a failed attempt
-	// must survive the rollback of whatever transaction noticed it.
-	_, _ = l.db.Exec(ctx, `
-		INSERT INTO rig_auth_log
-			(id, tenant_id, created_at, event, outcome, account_id, api_key_id,
-			 email_address, api_key_ref, ip_address, user_agent, token_root_id, detail)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
-		id, e.TenantID, e.At, e.Event, string(e.Outcome), e.AccountID, e.APIKeyID,
-		nullable(e.EmailAddress), nullable(e.APIKeyRef), addrValue(e.IPAddress),
-		nullable(e.UserAgent), e.TokenRootID, e.Detail)
 }
 
 // nullable turns an empty string into a NULL, so an unknown value is stored as

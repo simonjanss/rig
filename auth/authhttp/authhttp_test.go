@@ -33,10 +33,15 @@ func (c *clock) advance(d time.Duration) { c.at = c.at.Add(d) }
 type recorder struct {
 	entries []authlog.Entry
 	counter *throttle.Memory
+	// trail is what the audit endpoint reads. The same writes reach both, so a
+	// test can assert on the entry that was written and on what a caller is
+	// shown, and notice when those two disagree.
+	trail *authlog.Memory
 }
 
-func (r *recorder) Write(_ context.Context, e authlog.Entry) {
+func (r *recorder) Write(ctx context.Context, e authlog.Entry) {
 	r.entries = append(r.entries, e)
+	r.trail.Write(ctx, e)
 	if e.EmailAddress != "" {
 		r.counter.Record(e.Event, throttle.Email(e.EmailAddress), e.At)
 	}
@@ -46,6 +51,17 @@ func (r *recorder) Write(_ context.Context, e authlog.Entry) {
 	if e.AccountID != nil {
 		r.counter.Record(e.Event, throttle.Account(e.AccountID.String()), e.At)
 	}
+}
+
+// last is the newest entry of one event, for a test asserting on what was
+// recorded rather than on what an endpoint answered.
+func (r *recorder) last(event string) (authlog.Entry, bool) {
+	for i := len(r.entries) - 1; i >= 0; i-- {
+		if r.entries[i].Event == event {
+			return r.entries[i], true
+		}
+	}
+	return authlog.Entry{}, false
 }
 
 type notifier struct{ reset, verify, invite string }
@@ -78,13 +94,14 @@ type fixture struct {
 	account    *account.Account
 	sessions   *session.Manager
 	identities *session.IdentityManager
+	log        *recorder
 }
 
 func setup(t *testing.T) *fixture {
 	t.Helper()
 
 	c := &clock{at: time.Date(2026, 3, 1, 12, 0, 0, 0, time.UTC)}
-	log := &recorder{counter: throttle.NewMemory()}
+	log := &recorder{counter: throttle.NewMemory(), trail: authlog.NewMemory()}
 	store := account.NewMemoryStore()
 	notify := &notifier{}
 
@@ -121,7 +138,7 @@ func setup(t *testing.T) *fixture {
 	f := &fixture{
 		store: store, keys: keys, notify: notify, clock: c,
 		grants: map[uuid.UUID]grants{}, tenant: uuid.New(),
-		sessions: sessions, identities: identities,
+		sessions: sessions, identities: identities, log: log,
 	}
 
 	f.handler, err = authhttp.New(authhttp.Config{
@@ -129,6 +146,7 @@ func setup(t *testing.T) *fixture {
 		Sessions:   sessions,
 		Identities: identities,
 		APIKeys:    keys,
+		AuditLog:   log.trail,
 		Tenant:     func(*http.Request) (uuid.UUID, error) { return f.tenant, nil },
 		Grants: func(_ context.Context, _, accountID uuid.UUID) (roles, permissions []string, err error) {
 			g := f.grants[accountID]

@@ -64,7 +64,7 @@ func TestABadRowIsCaughtBeforeItIsSent(t *testing.T) {
 	// Nothing was sent for it: four rows parsed, and one of those is refused by
 	// the server rather than here.
 	var creates int
-	for _, req := range rec.requests {
+	for _, req := range rec.seen() {
 		if req.method == http.MethodPost && !strings.HasSuffix(req.path, "/_search") {
 			creates++
 		}
@@ -209,8 +209,8 @@ func TestADryRunSendsNothingAtAll(t *testing.T) {
 	job := &importJob{client: c, workers: 2, attempts: 1, dryRun: true, skipExisting: true}
 	rep := job.run(t.Context(), strings.NewReader(importable))
 
-	if len(rec.requests) != 0 {
-		t.Errorf("a dry run made %d requests", len(rec.requests))
+	if made := rec.seen(); len(made) != 0 {
+		t.Errorf("a dry run made %d requests", len(made))
 	}
 	if rep.parsed != 4 || rep.failed != 1 {
 		t.Errorf("checked %d and failed %d, want 4 and 1", rep.parsed, rep.failed)

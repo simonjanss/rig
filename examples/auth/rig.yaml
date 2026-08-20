@@ -32,6 +32,14 @@ auth:
   tenant:
     from: [query, header]
 
+  # Ninety days of authentication trail, then `auth prune-auth-log` takes it. The
+  # window has a floor rig refuses to go under: the rate limits are counted from
+  # rig_auth_log, so pruning inside one of their windows would clear a lockout by
+  # deleting the failures it counts. Leaving this out keeps everything, which is
+  # the default because how long a trail has to survive is a compliance question
+  # and not rig's to answer.
+  log_retention: 90d
+
 # The inbox. `enabled` is what makes server-go write the engine, the dispatcher
 # and the routes under /notifications; a project without this block carries none
 # of it.

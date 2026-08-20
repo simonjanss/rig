@@ -24,16 +24,18 @@ built, where it departed from that plan, and what is still to come.
 
 Next:
 
-- **M5.9** — files: a `rig_file` table, a storage adapter, and an upload and a
-  download endpoint per file column, nested under the row that owns them. Before
-  M6 because it adds two error codes, and the code set is baked into an OpenAPI
-  document and a TypeScript union the moment those ship.
+- ~~**M5.9** — files.~~ Shipped: a `rig_file` table, the blob seam, an upload and a
+  download endpoint per file column nested under the row that owns them, and the two
+  error codes M6 was waiting on. The S3 adapter and its MinIO suite did not ship —
+  `blob` has `memory` only, and `files.backend: s3` is still the honest gap.
 - ~~**M5.11** — referential actions.~~ Shipped: a table that points at a row gets a
   function call when that row is deleted, inside the same transaction, and can refuse
   it. The other half of the sentence RIG6040 already started.
-- **M5.12** — the auth log and who is signed in: a read endpoint over
-  `rig_auth_log`, and `GET /auth/sessions` widened past the caller's own. The
-  events have been recorded since M4 and nothing has ever served them. (Was
+- ~~**M5.12** — the auth log and who is signed in.~~ Shipped: `GET /auth/audit`
+  answering the caller's own events without a permission and the tenant's with
+  one, `scope=all` on both session routes, the `AuthLogEntry` shape declared in
+  the IR ahead of the client that will read it, and `auth.log_retention` with a
+  prune task that refuses a window the rate limits could not survive. (Was
   M5.11; referential actions had already taken it.)
 - ~~**M12** — notifications, the engine and the inbox.~~ Shipped: a
   `rig_notification` table a project links its own tables to, two generated
@@ -994,7 +996,7 @@ its provider construction — 90 lines that are now six lines of YAML.
 
 ---
 
-## M5.9 — files
+## M5.9 — files (shipped)
 
 **Goal.** Uploads and downloads that are tenant-scoped, permissioned per field,
 and reachable from a synced row — without a polymorphic attachment table, and
@@ -2076,11 +2078,57 @@ implements it and waits.
 
 ---
 
-## M5.12 — the auth log and who is signed in
+## M5.12 — the auth log and who is signed in (shipped)
 
 **Goal.** A tenant can read its own authentication trail and see every session
 open inside it, and a person can read their own, through endpoints rig serves
 rather than a query the application writes.
+
+**What shipped**, against the design below. `authlog` gained `Record`, `Query`,
+`Reader` and `Pruner` beside `Log`, and a `Memory` double that is all four;
+`authpg`'s writer moved out of `apikey.go` into an `authlog.go` of its own and
+grew the read, the count and a batched prune. `session.Store` gained
+`TenantFamilies`, `Manager` gained `ListTenant` and `FindSession`.
+`authhttp` mounts `GET /auth/audit` when a reader is configured and answers
+`scope` on it and on both session routes, through one `scope` helper that every
+endpoint here shares. `authwire` gained `Page[T]`, `Pagination` and
+`AuthLogEntryView`; `rigclient` gained `AuditLog`, `AuditLogAll`, `AuditQuery`,
+and `Wide()` — which needed a per-call query parameter the transport did not
+have. `internal/compile` injects `AuthLogEntry` for any document with an `auth:`
+block. `auth.log_retention` in rig.yaml writes an `AuthLogPruner` task, and both
+the compiler and `auth.New` refuse a window shorter than the longest rate-limit
+window.
+
+Four departures from the design below, all deliberate:
+
+1. **`Manager.Revoke` never stamped a tenant, so every `Logout` entry was
+   invisible to the trail.** `rig_auth_log.tenant_id` is nullable for the
+   attempts that resolved to nobody, and every reader filters on it — so the one
+   event this milestone most obviously needs to show was the one event it could
+   not have shown. `RevokeBy` reads the root token before revoking and stamps the
+   tenant, the account, and the address; `Revoke` is it with no actor. The bug
+   was invisible for as long as nothing read the table, which is the argument for
+   this milestone in one sentence.
+
+2. **`SessionView` gained `AccountID`.** "See every session open in the tenant"
+   is not answerable without knowing whose each one is, and the narrow list fills
+   it in too — a member present for one reading of an endpoint and absent for
+   another is a member no client can rely on.
+
+3. **The IR object's wire names are literal, not run through the namer.**
+   `api.json_case` shapes the keys rig *generates*, and `authwire` is
+   hand-written and shared by every project, so `/auth/*` answers camelCase
+   whatever a project sets. An object rendered through the namer would describe a
+   response nobody receives. A reflection test compares the object's field order
+   and wire names against the struct's json tags, which is what makes declaring a
+   shape nothing reads yet safe rather than aspirational.
+
+4. **The example derives the auth permission keys instead of listing them.**
+   `authz.AuthKeys()` reads `authhttp.Permissions()`, so the three new keys
+   reached the seeded Owner role without anybody editing three call sites — which
+   is the same argument `api.PermissionKeys()` already made for the application's
+   own. The demo page now reads the trail through the endpoint and shows the
+   refusal when the permission is missing, the way it already did for notes.
 
 `rig_auth_log` has been recording since M4 and it records nearly everything: 22
 events across sign-in, lockout, logout, refresh, token replay, key
@@ -2292,9 +2340,21 @@ was written to answer or the page stops working.
 paragraph on the tenant-less rows under what the log does not show, and a note in
 the status-code section that the 404-not-403 rule survives the widening.
 
-### Open question for you
+### Open question, answered
 
 **Should the auth log reach the IR, or is `authhttp` its home for good?**
+
+**Answered: the shape is declared now.** `AuthLogEntry` is injected as a builtin
+for any document with an `auth:` block, so the day `openapi` and `ts-client` can
+describe an `/auth/*` route, the trail is already in the document they read.
+Nothing consumes it yet — no generator emits it, because none of them iterate
+builtin objects and no endpoint references it — so the cost is one object in two
+golden files and the risk is drift, which the reflection test closes. The lean
+below was the other way; what changed it is that the guard test makes the
+declaration checkable, which was the whole objection to declaring a shape early.
+
+The reasoning below stands otherwise, and the conversion it describes is still
+the milestone it always was.
 
 Every route `auth` mounts is invisible to `openapi`, to `ts-client` and to
 `go-client`, and M5.10 put a number on what that costs: `rigclient/auth.go` is

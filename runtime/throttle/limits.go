@@ -97,6 +97,39 @@ func Standard() Defaults {
 	}
 }
 
+// All is the six limits, in a slice.
+//
+// For anything that has to reason about the set rather than pick one out of it —
+// documenting them, or checking a retention window against them.
+func (d Defaults) All() []Limit {
+	return []Limit{
+		d.LoginByEmail, d.LoginByIP, d.PasswordReset,
+		d.VerificationResend, d.Refresh, d.APIKeyFailures,
+	}
+}
+
+// LongestWindow is the furthest back any of these limits counts, and the name of
+// the limit it belongs to.
+//
+// It exists for one caller and the reason is worth stating where the answer is:
+// the limits are counted from rig_auth_log, so anything that deletes from that
+// table must not delete inside this window. A retention policy that did would
+// clear a lockout by removing the failures it was adding up to — a limit that
+// silently stops limiting, which is the failure nobody notices until it is being
+// exploited. The name comes back with the duration so a refusal can say which
+// limit it would have broken rather than only how short the window was.
+func (d Defaults) LongestWindow() (time.Duration, string) {
+	var longest time.Duration
+	var name string
+
+	for _, l := range d.All() {
+		if l.Window > longest {
+			longest, name = l.Window, l.Name
+		}
+	}
+	return longest, name
+}
+
 // Email builds a key from an address.
 //
 // The address is not normalized here: the caller has already lowercased it to

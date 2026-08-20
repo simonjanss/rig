@@ -34,6 +34,16 @@ type Auth struct {
 	// Empty means none, and an address is then read from the connection.
 	TrustedProxies []string `json:"trusted_proxies,omitempty"`
 
+	// LogRetention is how long an authentication log entry is kept. Zero keeps
+	// everything, which is the default because nothing prunes the table unless a
+	// project says to.
+	//
+	// It is never shorter than the longest window in Limits: those limits are
+	// counted from this table, so a shorter window would delete the rows a
+	// lockout is adding up to. The configuration refuses one rather than clamping
+	// it, and the server refuses to start on one assembled by hand.
+	LogRetention Duration `json:"log_retention,omitempty"`
+
 	// OAuth is nil when no provider sign-in is configured, which is also when
 	// the provider routes do not exist.
 	OAuth *AuthOAuth `json:"oauth,omitempty"`

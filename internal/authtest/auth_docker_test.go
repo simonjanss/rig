@@ -278,6 +278,8 @@ func setup(t *testing.T) *harness {
 	h.mount = func(accounts *account.Service) {
 		handler, err := authhttp.New(authhttp.Config{
 			Accounts: accounts, Sessions: sessions, APIKeys: keys,
+			// The store that has been writing since M4, handed over as a reader.
+			AuditLog: h.stores.Log,
 			// Header first, falling back to the harness's own tenant. Most tests do
 			// not care and want the fallback; the ones about signing in with no
 			// tenant send the nil identifier, which is what "unspecified" is.

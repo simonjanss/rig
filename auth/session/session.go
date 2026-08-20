@@ -434,17 +434,80 @@ func (m *Manager) Rotate(ctx context.Context, presented string) (Pair, error) {
 
 // Revoke ends one session.
 func (m *Manager) Revoke(ctx context.Context, rootID uuid.UUID) error {
+	return m.RevokeBy(ctx, rootID, uuid.Nil)
+}
+
+// RevokeBy ends one session and records who ended it.
+//
+// The administrative half of [Manager.Revoke], for a session somebody else is
+// holding: a lost phone, or a departure. `by` is the account that asked, and
+// uuid.Nil means the holder ended their own — which is what Revoke passes and
+// what a logout is.
+//
+// It reads the root token before revoking, and not only for the identifier. The
+// entry needs the tenant and the account, and an entry without a tenant is
+// invisible to every reader of the trail: `rig_auth_log.tenant_id` is nullable
+// for the attempts that resolved to nobody, and the readers filter on it. A
+// logout stamped with no tenant is a logout the tenant's own audit screen can
+// never show, which is how this went unnoticed for as long as nothing read the
+// table.
+func (m *Manager) RevokeBy(ctx context.Context, rootID, by uuid.UUID) error {
 	now := m.now()
+
+	// A read on a path that is not hot, in exchange for an entry that can be
+	// found. A session nobody has is still revoked — the statement affects
+	// nothing — and the entry is written with what little is known.
+	root, err := m.store.Find(ctx, rootID)
+	if err != nil {
+		return err
+	}
+
 	if _, err := m.store.RevokeFamily(ctx, rootID, now); err != nil {
 		return err
 	}
-	m.record(ctx, authlog.Entry{
+
+	entry := authlog.Entry{
 		At:          now,
 		Event:       authlog.EventLogout,
 		Outcome:     authlog.Succeeded,
 		TokenRootID: &rootID,
-	})
+	}
+	if root != nil {
+		entry.TenantID = &root.TenantID
+		entry.AccountID = &root.AccountID
+		entry.IPAddress = root.IPAddress
+		entry.UserAgent = root.UserAgent
+	}
+	if by != uuid.Nil && (root == nil || by != root.AccountID) {
+		// Only when somebody else did it. "revokedBy: me" on every logout would
+		// be a field a reader has to compare before it means anything.
+		entry.Detail = map[string]any{"revokedBy": by.String()}
+	}
+	m.record(ctx, entry)
 	return nil
+}
+
+// FindSession returns the root token of a live session in a tenant, or nil when
+// there is none.
+//
+// The tenant is an argument rather than something the caller checks afterwards,
+// because "does this session exist" and "does this session exist *here*" are
+// questions with different answers and only the second one is ever safe to
+// answer. A session that has been revoked or has expired is nil too: it is not
+// there to be acted on, and saying otherwise would let an old identifier be
+// told apart from an invented one.
+func (m *Manager) FindSession(ctx context.Context, tenantID, rootID uuid.UUID) (*Token, error) {
+	found, err := m.store.Find(ctx, rootID)
+	if err != nil {
+		return nil, err
+	}
+	if found == nil || found.TenantID != tenantID || found.ID != found.RootTokenID {
+		return nil, nil
+	}
+	if !found.Live(m.now()) {
+		return nil, nil
+	}
+	return found, nil
 }
 
 // RevokeAll ends every session an account has.
@@ -471,6 +534,15 @@ func (m *Manager) RevokeAll(ctx context.Context, tenantID, accountID uuid.UUID) 
 // List returns an account's live sessions, newest first.
 func (m *Manager) List(ctx context.Context, tenantID, accountID uuid.UUID) ([]Family, error) {
 	return m.store.Families(ctx, tenantID, accountID)
+}
+
+// ListTenant returns every live session in a tenant, newest first.
+//
+// This is the wide answer, and holding it is a permission somebody was granted:
+// it says who is signed in across the whole tenant, which is what makes ending
+// the session of somebody who left possible at all.
+func (m *Manager) ListTenant(ctx context.Context, tenantID uuid.UUID) ([]Family, error) {
+	return m.store.TenantFamilies(ctx, tenantID)
 }
 
 // tokenSpec is what every token needs at birth.

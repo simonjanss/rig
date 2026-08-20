@@ -71,6 +71,121 @@
     ],
     "objects": [
       {
+        "name": "AuthLogEntry",
+        "description": "One recorded authentication event: a sign-in, a failure, a lockout, a refresh, a key use. Read through the authentication trail endpoint.",
+        "fields": [
+          {
+            "name": "ID",
+            "wire": "id",
+            "description": "Identifier of the entry.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "uuid.UUID"
+          },
+          {
+            "name": "At",
+            "wire": "at",
+            "description": "When it happened, in UTC.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "time.Time"
+          },
+          {
+            "name": "Event",
+            "wire": "event",
+            "description": "What happened. One of the authentication events rig records.",
+            "type": "String",
+            "type_kind": "Primitive",
+            "go_type": "string"
+          },
+          {
+            "name": "Outcome",
+            "wire": "outcome",
+            "description": "Whether it worked: Succeeded or Failed, and no third value.",
+            "type": "String",
+            "type_kind": "Primitive",
+            "go_type": "string"
+          },
+          {
+            "name": "AccountID",
+            "wire": "accountId",
+            "description": "Who it happened to, absent when the attempt never resolved to an account — which is what an unknown address looks like.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "*uuid.UUID",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "EmailAddress",
+            "wire": "emailAddress",
+            "description": "The address as presented, lowercased. Present even when no account matched.",
+            "type": "String",
+            "type_kind": "Primitive",
+            "go_type": "string"
+          },
+          {
+            "name": "IPAddress",
+            "wire": "ipAddress",
+            "description": "Where the attempt came from.",
+            "type": "String",
+            "type_kind": "Primitive",
+            "go_type": "string"
+          },
+          {
+            "name": "UserAgent",
+            "wire": "userAgent",
+            "description": "What made the attempt.",
+            "type": "String",
+            "type_kind": "Primitive",
+            "go_type": "string"
+          },
+          {
+            "name": "APIKeyID",
+            "wire": "apiKeyId",
+            "description": "The key involved, when one was.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "*uuid.UUID",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "APIKeyRef",
+            "wire": "apiKeyRef",
+            "description": "The public half of a key as presented, whether or not it resolved to one that exists.",
+            "type": "String",
+            "type_kind": "Primitive",
+            "go_type": "string"
+          },
+          {
+            "name": "SessionID",
+            "wire": "sessionId",
+            "description": "The session involved, for grouping a family's events together.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "*uuid.UUID",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "Detail",
+            "wire": "detail",
+            "description": "Whatever else was worth recording — the addresses a replayed token was used from, the administrator who ended a session.",
+            "type": "JSON",
+            "type_kind": "Primitive",
+            "go_type": "map[string]any",
+            "modifiers": [
+              "Nullable"
+            ]
+          }
+        ],
+        "origin": "Builtin"
+      },
+      {
         "name": "BlogPost",
         "description": "A post, which people are told about when it goes live.",
         "fields": [

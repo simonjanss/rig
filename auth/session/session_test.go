@@ -704,6 +704,45 @@ func TestListIsScopedToTheTenant(t *testing.T) {
 	}
 }
 
+// The wide list is what "who is signed in" needs: every account's sessions,
+// still only inside one tenant.
+func TestListTenantReachesEveryAccount(t *testing.T) {
+	t.Parallel()
+
+	f := setup(t)
+	f.issue(t)
+
+	somebodyElse := uuid.New()
+	if _, err := f.m.Issue(context.Background(), session.IssueInput{
+		TenantID: f.tenant, AccountID: somebodyElse, Client: session.ClientMobile,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// Another tenant's session, which the wide list must not reach either. The
+	// widening is across accounts and never across tenants.
+	if _, err := f.m.Issue(context.Background(), session.IssueInput{
+		TenantID: uuid.New(), AccountID: uuid.New(), Client: session.ClientWeb,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	all, err := f.m.ListTenant(context.Background(), f.tenant)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(all) != 2 {
+		t.Fatalf("got %d sessions in the tenant, want 2", len(all))
+	}
+
+	mine, err := f.m.List(context.Background(), f.tenant, f.account)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(mine) != 1 {
+		t.Errorf("got %d sessions for one account, want 1: the narrow list should not have widened", len(mine))
+	}
+}
+
 // A payload is the application's own context for one session. These four tests
 // are the whole contract: it is stored, it survives rotation, a hook can replace
 // it, and a hook that fails fails the refresh rather than quietly emptying it.

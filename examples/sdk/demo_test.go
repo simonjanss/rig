@@ -12,6 +12,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"slices"
+	"sync"
 	"testing"
 
 	"github.com/google/uuid"
@@ -25,9 +27,21 @@ import (
 // recorder is a server that remembers what it was asked and answers whatever the
 // test needs.
 type recorder struct {
-	t        *testing.T
+	t *testing.T
+	// mu guards the log. The import job runs its workers concurrently, so this
+	// handler is called from several goroutines at once — appending without it is
+	// a lost request, and a lost request reads as one the client never sent.
+	mu       sync.Mutex
 	requests []request
 	handler  func(w http.ResponseWriter, r *http.Request, body []byte)
+}
+
+// seen is the requests recorded so far, copied so a caller can read it while
+// nothing else is writing.
+func (rec *recorder) seen() []request {
+	rec.mu.Lock()
+	defer rec.mu.Unlock()
+	return slices.Clone(rec.requests)
 }
 
 type request struct {
@@ -39,9 +53,13 @@ type request struct {
 
 func (rec *recorder) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	body, _ := io.ReadAll(r.Body)
+
+	rec.mu.Lock()
 	rec.requests = append(rec.requests, request{
 		method: r.Method, path: r.URL.Path, query: r.URL.RawQuery, body: string(body),
 	})
+	rec.mu.Unlock()
+
 	rec.handler(w, r, body)
 }
 

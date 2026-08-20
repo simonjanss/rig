@@ -32,6 +32,33 @@ type List[T any] struct {
 	Data []T `json:"data"`
 }
 
+// Pagination is where a returned page sits in the full result set.
+//
+// The same three members, with the same names, the generated endpoints answer
+// with. Two shapes for one idea would mean a client holding two decoders for
+// what is visibly the same thing.
+type Pagination struct {
+	// Offset is how many rows were skipped before this page.
+	Offset int `json:"offset"`
+	// Limit is the most rows this page could have held.
+	Limit int `json:"limit"`
+	// Total is every row matching the query, ignoring pagination. It is what
+	// tells a caller whether there is another page.
+	Total int64 `json:"total"`
+}
+
+// Page is the envelope for a collection here that is too big to answer whole.
+//
+// Most of this package's lists are [List] instead, and that is not an
+// oversight: a tenant's keys, invitations and tenants are a handful of rows, and
+// paginating four endpoints that will never need it costs four handlers and four
+// sets of tests. The authentication trail is millions of rows and cannot borrow
+// that argument.
+type Page[T any] struct {
+	Data       []T        `json:"data"`
+	Pagination Pagination `json:"pagination"`
+}
+
 // TokenPair is what every endpoint that starts or continues a session returns.
 type TokenPair struct {
 	AccessToken  string    `json:"accessToken,omitempty"`
@@ -118,7 +145,7 @@ type RegisterRequest struct {
 	Password     string `json:"password"`
 }
 
-// SessionView is one of the caller's sessions.
+// SessionView is one session, as somebody reviewing it sees it.
 type SessionView struct {
 	ID         uuid.UUID `json:"id"`
 	CreatedAt  time.Time `json:"createdAt"`
@@ -126,11 +153,64 @@ type SessionView struct {
 	ExpiresAt  time.Time `json:"expiresAt"`
 	IPAddress  string    `json:"ipAddress,omitempty"`
 	UserAgent  string    `json:"userAgent,omitempty"`
-	Client     string    `json:"client"`
+	// AccountID is whose session it is. Always filled in, including in the
+	// caller's own list where it is the caller: a member that is present for one
+	// reading of an endpoint and absent for another is a member a client cannot
+	// rely on.
+	AccountID uuid.UUID `json:"accountId"`
+	Client    string    `json:"client"`
 	// Current marks the session making this request, so an interface can label
 	// it rather than inviting somebody to revoke the tab they are looking at
 	// without warning.
 	Current bool `json:"current"`
+}
+
+// AuthLogEntryView is one recorded authentication event.
+//
+// There is no tenant member, because there is nothing it could say: the reader
+// behind this shape answers within one tenant and cannot be asked to do
+// otherwise. What is missing for a subtler reason is the events that resolved to
+// *no* tenant — an attempt that named none, or one against an address with no
+// account anywhere. Those are recorded, they are what a rate limit most needs,
+// and no tenant has the standing to read them.
+//
+// The keys are camelCase here and stay camelCase whatever a project sets
+// `api.json_case` to. That setting shapes the keys rig *generates*; this module
+// is hand-written and shared by every project, so its shape cannot vary with
+// one project's preference.
+type AuthLogEntryView struct {
+	ID uuid.UUID `json:"id"`
+	// At is when it happened, in UTC.
+	At time.Time `json:"at"`
+	// Event is what happened — one of the values of the rig_auth_event enum.
+	Event string `json:"event"`
+	// Outcome is whether it worked: Succeeded or Failed, and no third value.
+	Outcome string `json:"outcome"`
+
+	// AccountID is who it happened to, absent when the attempt never resolved
+	// to an account — which is what a wrong address looks like.
+	AccountID *uuid.UUID `json:"accountId,omitempty"`
+	// EmailAddress is the address as presented, lowercased. Present even when no
+	// account matched, which is the case worth reading.
+	EmailAddress string `json:"emailAddress,omitempty"`
+
+	IPAddress string `json:"ipAddress,omitempty"`
+	UserAgent string `json:"userAgent,omitempty"`
+
+	// APIKeyID is the key involved, when one was.
+	APIKeyID *uuid.UUID `json:"apiKeyId,omitempty"`
+	// APIKeyRef is the public half of a key as presented, whether or not it
+	// resolved to a row.
+	APIKeyRef string `json:"apiKeyRef,omitempty"`
+
+	// SessionID is the session family involved, named the way [TokenPair] names
+	// it rather than after the root token it is stored as.
+	SessionID *uuid.UUID `json:"sessionId,omitempty"`
+
+	// Detail is whatever else was worth recording. Reuse detection puts the
+	// original and current address and user agent here, which is what turns
+	// "somebody replayed a token" into "somebody replayed it from Frankfurt".
+	Detail map[string]any `json:"detail,omitempty"`
 }
 
 // TenantView is one tenant somebody belongs to.
