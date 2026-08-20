@@ -50,9 +50,18 @@ func Unmarshal(b []byte) (*Document, error) {
 // time it was set, which would move the revision, which would move the hash. It
 // is cleared here rather than by each caller because there is no caller for whom
 // the other behavior is right.
+//
+// [API.EmbeddedFoundation] is cleared for a different reason, and the two are
+// worth telling apart. It is in the document because a generator has to know
+// where rig's own migrations come from — but no client can tell, and the revision
+// is what a client reads to decide whether it is talking to an API it was built
+// against. Moving a project's DDL from its own directory into the modules that
+// own it changes nothing anybody could observe over HTTP, so it must not spend a
+// revision saying otherwise.
 func (d *Document) Hash() (string, error) {
 	unstamped := *d
 	unstamped.API.Revision = ""
+	unstamped.API.EmbeddedFoundation = false
 
 	b, err := Marshal(&unstamped)
 	if err != nil {

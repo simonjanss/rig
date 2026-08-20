@@ -110,6 +110,16 @@ var (
 		"A configuration file is misplaced, unreadable, or duplicated.",
 		"")
 
+	CodeFoundationMode = newCode("RIG3004", SeverityError,
+		"`migrations.foundation` contradicts the migrations on disk, or `auth.own`.",
+		"Pick the mode when the project is set up and leave it alone. The two modes "+
+			"record what they applied in different tables, so switching after there is "+
+			"a database would re-apply a schema that is already there — which fails "+
+			"partway through `rig db up` rather than at the top. To change it, start "+
+			"from an empty database. `auth.own` is the same contradiction stated the "+
+			"other way: a project maintaining rig's tables itself cannot also leave "+
+			"them to the modules.")
+
 	CodeUnmentionedColumn = newCode("RIG3100", SeverityWarning,
 		"A column exists in the database but is not mentioned in the table configuration.",
 		"Run `rig sync` to add it, then replace the placeholder comment.")

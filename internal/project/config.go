@@ -440,12 +440,54 @@ type Database struct {
 	URL string `yaml:"url,omitempty" json:"url,omitempty" jsonschema_description:"Connection URL of an existing database. Set this to skip the throwaway container entirely."`
 }
 
-// Migrations says where migration files live.
+// FoundationMode selects how rig's own tables reach the database.
+//
+// rig owns a dozen tables — the identities, the tokens, the file rows, the
+// notifications — and their DDL has to get there somehow. There are two readings
+// and the difference is who keeps the file.
+type FoundationMode string
+
+const (
+	// FoundationVendored copies rig's migrations into the project's own
+	// migrations directory, numbered into its sequence and recorded in its
+	// bookkeeping table. It is the default, and the reason is readability: the
+	// directory is then the whole truth about the database, and somebody can read
+	// it at three in the morning without knowing which version of rig is
+	// installed.
+	//
+	// Upgrades arrive as new files. rig's sets are append-only, so a project three
+	// versions behind gets three migrations it can read the diff of before
+	// applying.
+	FoundationVendored FoundationMode = "vendored"
+
+	// FoundationEmbedded leaves the DDL in the modules that own it — rig/auth,
+	// rig/files, rig/notify — each applying and recording its own set. The
+	// project's migrations directory then holds only the project's own schema.
+	//
+	// What it buys is that rig's tables stop being a thousand lines of somebody
+	// else's SQL in the repository, and that an upgrade is a module version rather
+	// than a file to copy. What it costs is that the migrations directory no
+	// longer says what is in the database on its own.
+	FoundationEmbedded FoundationMode = "embedded"
+)
+
+// Migrations says where migration files live, and whose they are.
 type Migrations struct {
 	Dir string `yaml:"dir,omitempty" json:"dir,omitempty" jsonschema_description:"Directory holding goose migration files."`
 	// Table is the goose bookkeeping table.
 	Table string `yaml:"table,omitempty" json:"table,omitempty" jsonschema_description:"Name of the migration bookkeeping table."`
+	// Foundation is who keeps rig's own migrations. See [FoundationMode].
+	//
+	// It is chosen once. The two modes record their history in different tables,
+	// so a project that switches after it has a database would re-apply a schema
+	// that is already there — which rig refuses to discover in psql, and says so
+	// from `rig validate` instead.
+	Foundation FoundationMode `yaml:"foundation,omitempty" json:"foundation,omitempty" jsonschema:"enum=vendored,enum=embedded" jsonschema_description:"Who keeps rig's own migrations. vendored copies them into this project's migrations directory; embedded leaves each module to apply its own. Defaults to vendored, and cannot be changed once the database exists."`
 }
+
+// Vendored reports whether rig's own migrations live in this project's migrations
+// directory. It is the default, so an unset mode is this one.
+func (m Migrations) Vendored() bool { return m.Foundation != FoundationEmbedded }
 
 // Files is where uploaded bytes are kept, and what an upload may be.
 //

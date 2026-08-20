@@ -54,7 +54,7 @@ func newSyncCmd(e *env) *cobra.Command {
 			// miss every enum and write a configuration file for every join
 			// table — neither of which the compiler would ever read.
 			schema, _ := compile.Normalize(raw, compile.NormalizeOptions{
-				IgnoreTables: append([]string{p.Config.Migrations.Table}, ignore...),
+				IgnoreTables: append(compile.Bookkeeping(p), ignore...),
 			})
 
 			// Configuration is loaded but its diagnostics are held back: sync

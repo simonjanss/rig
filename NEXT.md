@@ -45,6 +45,13 @@ Next:
   channels an application implements, per-account settings with a window each,
   digests, and a dispatcher every replica can run because the claim is a lease
   rather than a lock.
+- ~~**M14** — the foundation gets a version.~~ Shipped: rig's own DDL moved out of
+  a Go const and into append-only `.sql` sets the owning modules carry, each with
+  its own bookkeeping table, and `migrations.foundation: vendored | embedded` for
+  who keeps the file. Vendored stays the default and now has an upgrade path,
+  which is the bug this actually fixed: `alreadyApplied` matched a filename, so
+  no schema change to rig's tables had ever been able to reach an existing
+  project.
 
 ### Modules
 
@@ -3981,6 +3988,239 @@ boot, and documenting the relationship to the channel timeout as the one
 misconfiguration worth understanding before deploying this — but a default that assumes
 mail may be wrong for a project whose only channel is a websocket push that either
 works in 200ms or does not.
+
+---
+
+## M14 — the foundation gets a version (shipped)
+
+**The bug it fixed, which was not the one asked for.** The request was to stop
+vendoring rig's migrations into the project's repository. Looking at why that was
+awkward turned up something worse: rig could not ship a schema change to its own
+tables at all. `setup-project` decided what to write by matching a filename —
+
+```go
+func alreadyApplied(existing []string, part string) bool {
+	suffix := "_rig_" + part + ".sql"
+```
+
+— so editing `tenancySQL` reached exactly nobody who had already run it. The
+foundation had no version. M5.12 had already added columns to `rig_auth_log` and
+there was no way to get them to a project set up the month before. Harmless while
+nothing is published; the first support issue after tagging.
+
+Both answers to that need the same missing piece, which is why this milestone is
+one thing and not two: an append-only, versioned set. Vendoring then means copying
+whatever is not already there, and embedding means not copying at all.
+
+### Where the DDL lives now
+
+Six Go consts in `internal/scaffold/foundation_sql.go` became `.sql` files behind
+a `go:embed`, in a leaf package per owning module: `auth/foundation` (tenancy,
+apikeys, sessions, oauth), `files/foundation`, `notify/foundation`. The extraction
+was byte-exact, and a test holds it that way — see Verification.
+
+`runtime/dbschema` describes a set: the filesystem, the order, the tables each
+migration creates, and the table it records itself in. It is in `runtime` because
+`runtime` is the one module every generated application already imports, so a set
+declared in those terms costs nobody a dependency. It holds no migration engine:
+applying is `rig/migrate`'s, and a module carrying schema should not thereby carry
+goose.
+
+**The cross-module edge, which is real.** `rig_notification_recipient.account_id`
+references `rig_account`, and `rig_account` is auth's *tenancy* migration. So
+`examples/todo` — notifications, no `auth:` block — needs `auth/foundation`. It
+pays one go.mod line and ~30KB of SQL text, not `rig/auth`'s code, because
+`auth/foundation` imports nothing but `embed` and `dbschema`. That constraint is
+why the packages are leaves, and it is load-bearing rather than tidiness.
+`files/foundation` has no such edge: `rig_file.tenant_id` carries no reference to
+`rig_tenant`, deliberately, so uploads work with no authentication at all.
+
+The part boundaries did not move. They describe schema already applied to real
+databases; resplitting `tenancy` because `rig_account` is shared would be a
+migration, not a refactor.
+
+### A table per set, and it is not tidiness
+
+| set | records itself in |
+|---|---|
+| the project's own | `rig_migrations` |
+| `auth/foundation` | `rig_auth_migrations` |
+| `files/foundation` | `rig_files_migrations` |
+| `notify/foundation` | `rig_notify_migrations` |
+
+The three modules are tagged separately. One shared table would mean one numbering
+sequence across three release cadences, and two modules adding a migration in the
+same release would collide on a version — which goose refuses outright rather than
+resolves (`provider_collect.go:71,155`). So each numbers from one in its own
+namespace. `migrate.Source`, `UpAll`, `PendingAll`, `ApplyAll` and `RequireAll`
+take an ordered list, and `checkSources` refuses two sets that would record
+themselves as one, because that failure is silent: one set's version 2 marks the
+other's as applied and the migration that never ran never runs.
+
+Named for the module rather than the tables (`rig_notify_migrations`, not
+`rig_notification_migrations`), and with rig's own word rather than goose's —
+`DefaultTable` is already `rig_migrations` and not `goose_db_version`, so the
+engine's name does not leak into rig's schema and should not start.
+
+Sequential rather than concurrent is not a weakness: goose's session lock is a
+single fixed identifier, so replicas starting together still serialise across all
+of it. The per-set tables are bookkeeping, never a concurrency boundary.
+
+### Order is one rule, and it holds
+
+rig's DDL never references a project's table; a project's routinely references
+rig's — `examples/todo/migrations/00008_notify_about_todos.sql` points at both
+`rig_notification` and `rig_tenant`. So: all of rig's, then the project's. That
+holds under upgrades too, and within rig's own the existing `Requires()` graph
+already states it.
+
+### The evidence moved, and that is what actually broke
+
+Everything downstream hangs off `scaffold.Managed()`, which read the migrations
+directory. Under `embedded` it returns nothing, and then `checkReservedTable`
+fires **RIG2005 on all fifteen rig tables**, the ignore list empties, and three
+"foundation present" checks invert and tell a working project to run
+`setup-project`. So `scaffold.Wanted{...}.Parts()` is the second reading — the
+parts a configuration brings, expanded through `Requires()` — and
+`foundationParts` in `internal/cli/load.go` picks by mode.
+
+**Brings, not asks for, which the first draft got wrong.** A set is applied whole
+because goose reads a directory, so `Wanted.Parts()` answering with the narrow ask
+while `SetsFor()` applied whole sets meant `rig db up` created tables the very next
+`rig validate` did not recognise: **RIG2005 on `rig_identity_oauth`** for any
+`auth:` block with no provider configured, and on all five of auth's session and
+key tables for an inbox in a project with no `auth:` block. With advice nothing in
+that mode could follow — rename the migration that creates it — and, had the code
+not been refused, the table missing from the ignore list too, so a resource
+projected over it. `examples/auth_oauth` happens to configure providers, which is
+why `make examples` was green. The widening now lives inside `Wanted.Parts()`
+rather than in each caller, so there is one answer to "which of rig's tables does
+this project have" and no narrower one to reach for by mistake;
+`TestEveryTableASetCreatesIsAccountedFor` holds the two ends together.
+
+It is weaker than the vendored reading in exactly one way worth writing down: with
+no migration in the project to point at, it cannot tell rig's `rig_account` from a
+hand-written one. What stands in for the missing evidence is that the mode is
+declared, and `auth.own` is still how to say the opposite — loudly enough that the
+two together are refused rather than reconciled.
+
+**And the four bookkeeping tables are `rig_`-prefixed tables no migration
+creates.** Introspection returns everything in the schema, so without care they
+draw RIG2005 and then get projected — a generated PATCH on `is_applied`. The
+exemption already existed for one name and became `compile.Bookkeeping`, read by
+both `Compile` and `rig sync`.
+
+### The two silent failures the CLI had to keep away from
+
+`rig generate` introspects a live database, so under `embedded` the CLI must apply
+the module sets too. Not doing so does not fail — it succeeds and generates the
+wrong code: `e.doc.Table("rig_api_key") == nil` drops the "cannot be changed with
+an API key" guard from *every* user repository
+(`internal/gen/persistgo/repository.go:156`), and `rig_notification` leaving the
+schema un-notifiables every table (`internal/compile/project.go:189`). One place
+changed — `(*env).migrate` — and both are asserted.
+
+### The mode is a one-way door
+
+The two modes record their history in different tables, so flipping a live project
+finds the new mode's bookkeeping empty, re-applies a schema that is there, and
+dies partway through `rig db up`. **RIG3004** refuses `embedded` with rig's
+migrations still on disk. The reverse direction is deliberately *not* a second
+diagnostic: `checkFoundationPresent`, `checkFilesFoundation` and
+`checkNotificationsFoundation` already report it, naming the block that wants the
+part, which is the better message. Two diagnostics for one mistake is noise.
+
+RIG3004 also refuses `embedded` with **`auth.own`**, which is the same
+contradiction stated the other way: `own` says the project forked rig's migrations
+and maintains those tables, `embedded` says the modules do. Silencing the mode
+check for `auth.own` — the first draft — left `foundationSources` applying the
+modules' sets over the forked ones, so `rig db up` stopped on `relation
+"rig_tenant" already exists`. Refused rather than resolved in favour of one of
+them, because whichever won would be silent about the other; and `foundationSources`
+returns nothing under `auth.own` regardless, since `rig db up` runs no diagnostics
+and the rule has to hold where the schema is applied as well as where it is
+checked.
+
+Adopting an existing schema into a fresh bookkeeping table is a real feature and
+is not here. goose has no baseline command; what there is, is a refusal naming the
+one supported move.
+
+### `server-go` writes the wiring, and only when there is any
+
+`api.MigrationSources(project migrate.Source) []migrate.Source` — the module sets
+in order, with the project's own last. Emitted only under `embedded`, which is the
+rule `auth.gen.go` already follows and what keeps goose out of a vendored
+project's API package. The project's own set is an argument rather than generated
+because it is the project's to describe: the filesystem is its embed directive,
+the directory and table are its rig.yaml. Which the doc comment on the generated
+function has to say out loud, because `UpAll` reads `Dir` and `Table` off each
+`Source` and ignores the ones on `Options` — so a project that changed
+`migrations.table` and set it in `Options`, which is what `docs/rig-yaml.md` tells
+a vendored project to do, would record its own set in `rig_migrations` while `rig db
+up` used the configured name. `RequireAll` then refuses to start, saying the
+database is behind. Loud, but for the wrong reason, and one line of example prevents
+it.
+
+That needed one IR field, `API.EmbeddedFoundation`, and **it is cleared before
+hashing**. The revision is what a client reads to decide whether it is talking to
+an API it was built against, and moving DDL from a directory into a module changes
+nothing observable over HTTP. Caught by flipping `examples/auth_oauth` and
+watching its revision move; worth remembering that any field added to `ir.API` is
+in the hash by default.
+
+### Verification
+
+- **The two modes cannot drift.** `TestVendoredMigrationsStillMatchTheirSets`
+  holds every `_rig_*.sql` committed in an example byte-identical to the set's
+  copy. `make examples` would not catch this — a migration is copied once and then
+  owned, never regenerated — and it is also the append-only rule from the other
+  end: editing a shipped migration fails here, which is correct, because those
+  files have been applied.
+- **Append-only, mechanically.** `dbschema.Set.Validate` refuses a gap, a repeat, a
+  manifest entry with no file, and — the dangerous direction — a `.sql` file the
+  manifest does not name, which goose would apply and every other reader would
+  miss. Each owning module calls it. A golden per module holds the shipped list.
+- **Ordering, against a real database.** `TestUpAllAppliesSetsInOrder`: two sets
+  both numbered from one, the second referencing a table the first creates.
+- **What is applied and what is recognised are one list.**
+  `TestEveryTableASetCreatesIsAccountedFor` walks every configuration shape and
+  asserts `TablesFor(Wanted.Parts())` is exactly the tables `SetsFor(Wanted.Parts())`
+  creates — both directions, because a gap either way is a table rig refuses or a
+  table rig claims and nothing made. `TestEmbeddedAcceptsEveryTableItsSetsCreate`
+  is the same property from the command line, on the two shapes that actually broke.
+- **`examples/auth_oauth` is `embedded`**, `examples/auth` stays vendored, so both
+  readings are generated, built and run on every `make examples`. Neither would have
+  caught the widening bug on its own: `auth_oauth` configures providers, so its
+  narrow list and its wide one happen to agree.
+
+### What came out differently
+
+- The module bookkeeping constants live in each `foundation` package rather than
+  beside `migrate.DefaultTable`. The set's owner is the obvious home and a second
+  spelling would be a second thing to keep in step.
+- `runtime/dbschema` was not in the plan. Without a shared type there is no
+  `[]Set` to iterate, and `internal/scaffold`, the CLI and the generator would
+  each need three code paths instead of one.
+- A migration may create no tables. An upgrade that only alters what an earlier
+  one created is the ordinary shape, and the first draft of `Validate` refused it.
+
+### Honest gaps
+
+- Nothing proves an upgrade against a database set up by an *older* rig binary,
+  because there is no older binary to run. The append-only test is the substitute
+  and it is weaker.
+- Version skew is sharper than before: a project pinning `rig/notify v1.2` with a
+  `rig` binary shipping v1.3's set has the CLI migrate a schema the application
+  cannot reproduce. `RequireAll` refuses to serve, which turns it into a startup
+  failure rather than a silent one, but `rig validate` comparing each set's applied
+  version against the binary's is the check that would catch it earlier. Cheap now
+  that the manifests exist.
+- The examples share Docker container names and ports across Conductor
+  workspaces, and a sibling still on `vendored` populates `rig-oauth-db` with
+  rig's migrations under `rig_migrations`. The embedded example then fails on
+  `relation "rig_tenant" already exists` — which is the mode-drift failure working
+  exactly as designed, on a database two workspaces disagree about. `rig db reset`
+  is the fix; the collision is the pre-existing hazard, now with a louder symptom.
 
 ---
 

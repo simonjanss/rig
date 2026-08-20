@@ -90,14 +90,32 @@ func Reserved(p *project.Project, foundation []string, table string) (why string
 	return "", false
 }
 
+// Bookkeeping are the tables no project ever gets a resource for: the migration
+// histories.
+//
+// The project's own is named in rig.yaml. The rest belong to the foundation's
+// sets, one per module that can carry its own schema, and they exist only in a
+// project whose `migrations.foundation` is `embedded` — but they are listed in
+// every mode, because a table that used to be there after somebody switched off
+// embedded is still not an API.
+//
+// Introspection returns all of them like any other table, so both the ignore list
+// and the reserved-prefix rule have to know the names. A resource over a migration
+// history would be a generated PATCH on `is_applied`.
+func Bookkeeping(p *project.Project) []string {
+	return append([]string{p.Config.Migrations.Table}, scaffold.BookkeepingTables()...)
+}
+
 // checkReservedTable reports a table under the `rig_` prefix that rig did not
 // create.
 //
-// Which tables rig created is read from the project's migrations, not from the
-// names — see [scaffold.Managed]. The bookkeeping table is exempt because it is
-// rig's own and arrives through a different door: a project that renamed
-// `migrations.table` and left the old one behind should not be told its
-// migration history is illegal.
+// Which tables rig created is read from the project's own evidence, not from the
+// names — see [scaffold.Managed] and [scaffold.Wanted.Parts]. The bookkeeping
+// tables are exempt because they are rig's own and arrive through a different
+// door: goose writes them, no migration creates them, so a project that renamed
+// `migrations.table` and left the old one behind should not be told its migration
+// history is illegal. That is now four tables rather than one — the project's, and
+// one per module that can carry its own schema.
 func checkReservedTable(
 	t *ir.Table,
 	loaded *tableconf.Loaded,
@@ -112,7 +130,8 @@ func checkReservedTable(
 	if slices.Contains(foundation, t.Name) {
 		return diags, false
 	}
-	if t.Name == p.Config.Migrations.Table || t.Name == project.DefaultMigrationsTable {
+	if t.Name == p.Config.Migrations.Table || t.Name == project.DefaultMigrationsTable ||
+		slices.Contains(scaffold.BookkeepingTables(), t.Name) {
 		return diags, false
 	}
 

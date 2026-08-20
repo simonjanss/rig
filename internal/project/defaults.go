@@ -50,6 +50,12 @@ const (
 	// constants that happen to match today would not.
 	DefaultMigrationsTable = migrate.DefaultTable
 
+	// DefaultFoundation keeps rig's own migrations in the project's own
+	// directory. It is the conservative half of the choice: the directory stays
+	// the whole truth about the database, which is worth more than saving a
+	// thousand lines of SQL until somebody asks to trade it.
+	DefaultFoundation = FoundationVendored
+
 	DefaultJSONCase = "camel"
 
 	// DefaultTenantQuery is the parameter the query tenant source reads.
@@ -195,6 +201,13 @@ func (p *Project) applyDefaults() {
 
 	setDefault(&c.Migrations.Dir, DefaultMigrationsDir)
 	setDefault(&c.Migrations.Table, DefaultMigrationsTable)
+	if c.Migrations.Foundation == "" {
+		// Resolved here rather than read as a zero value later, so that every
+		// caller asking which mode a project is in gets the same answer — the
+		// mode decides which migrations get applied, and a zero meaning
+		// "something else decides" would be two behaviours behind one blank key.
+		c.Migrations.Foundation = DefaultFoundation
+	}
 
 	setDefault(&c.Naming.JSONCase, DefaultJSONCase)
 

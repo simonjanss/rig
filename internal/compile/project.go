@@ -30,6 +30,9 @@ type ProjectOptions struct {
 	Files *ir.Files
 	// Notifications is the resolved inbox, or nil for a project with none.
 	Notifications *ir.Notifications
+	// EmbeddedFoundation is `migrations.foundation: embedded` — rig's own
+	// migrations stay in the modules that own them.
+	EmbeddedFoundation bool
 }
 
 // Project turns a normalized schema into a naked API surface.
@@ -53,6 +56,10 @@ func Project(schema ir.Schema, opt ProjectOptions) (ir.API, diag.List) {
 		Auth:           opt.Auth,
 		Files:          opt.Files,
 		Notifications:  opt.Notifications,
+
+		// Who keeps rig's own migrations. Carried from here to the generators
+		// untouched: it is a fact about the project, not about the schema.
+		EmbeddedFoundation: opt.EmbeddedFoundation,
 	}
 
 	// Enums come first so field types can name them.

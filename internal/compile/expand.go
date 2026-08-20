@@ -50,9 +50,10 @@ func Expand(api ir.API, opt ExpandOptions) (ir.API, diag.List) {
 		Resources:      make([]ir.Resource, 0, len(api.Resources)),
 		// Expansion adds endpoints to resources; the authentication foundation
 		// brings its own and is carried through as it arrived.
-		Auth:          api.Auth,
-		Files:         api.Files,
-		Notifications: api.Notifications,
+		Auth:               api.Auth,
+		Files:              api.Files,
+		Notifications:      api.Notifications,
+		EmbeddedFoundation: api.EmbeddedFoundation,
 	}
 
 	have := func(name string) bool {

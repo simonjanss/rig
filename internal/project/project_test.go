@@ -50,6 +50,9 @@ func TestParseAppliesDefaults(t *testing.T) {
 	if c.Migrations.Dir != "migrations" {
 		t.Errorf("migrations.dir = %q", c.Migrations.Dir)
 	}
+	if c.Migrations.Foundation != project.FoundationVendored {
+		t.Errorf("migrations.foundation = %q, want vendored", c.Migrations.Foundation)
+	}
 	if c.Naming.JSONCase != "camel" {
 		t.Errorf("json_case = %q", c.Naming.JSONCase)
 	}
@@ -199,6 +202,53 @@ func TestPluralOverrideReachesTheLayout(t *testing.T) {
 	}
 	if got := p.Rel(p.TableDir("person")); got != "services/people" {
 		t.Errorf("TableDir(person) = %q, want services/people", got)
+	}
+}
+
+// Who keeps rig's own migrations. Vendored is the default and the unset value,
+// because a project that never heard of the key has the migrations in its
+// directory and must keep having them.
+func TestTheFoundationModeIsReadAndDefaulted(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name     string
+		yaml     string
+		want     project.FoundationMode
+		vendored bool
+	}{
+		{"unset", minimal, project.FoundationVendored, true},
+		{
+			"vendored spelled out",
+			minimal + "\nmigrations:\n  foundation: vendored\n",
+			project.FoundationVendored, true,
+		},
+		{
+			"embedded",
+			minimal + "\nmigrations:\n  foundation: embedded\n",
+			project.FoundationEmbedded, false,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p, diags := project.Parse("/proj/rig.yaml", []byte(tc.yaml))
+			if diags.HasErrors() {
+				t.Fatal(diags.String())
+			}
+			if got := p.Config.Migrations.Foundation; got != tc.want {
+				t.Errorf("foundation = %q, want %q", got, tc.want)
+			}
+			if got := p.Config.Migrations.Vendored(); got != tc.vendored {
+				t.Errorf("Vendored() = %v, want %v", got, tc.vendored)
+			}
+		})
+	}
+
+	// A mode rig does not know is refused by the schema rather than silently read
+	// as vendored — the two modes apply different migrations, so guessing is the
+	// one thing that must not happen.
+	_, diags := project.Parse("/proj/rig.yaml", []byte(minimal+"\nmigrations:\n  foundation: whatever\n"))
+	if !diags.HasErrors() {
+		t.Error("an unknown foundation mode should be refused")
 	}
 }
 

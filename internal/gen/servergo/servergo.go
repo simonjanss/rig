@@ -123,6 +123,19 @@ func (g *Generator) Generate(_ context.Context, doc *ir.Document, opts gen.Optio
 		artifacts = append(artifacts, auth)
 	}
 
+	// The migration wiring, for a project whose modules carry their own schema.
+	// A project that vendored the foundation gets no file: its migrations are
+	// already files in its own directory, and this is the only thing in the API
+	// package that would name rig/migrate, so not writing it is what keeps goose
+	// out of the module.
+	if doc.API.EmbeddedFoundation {
+		foundation, err := (&foundationEmitter{doc: doc, cfg: cfg}).foundationFile()
+		if err != nil {
+			return nil, err
+		}
+		artifacts = append(artifacts, foundation)
+	}
+
 	// The file wiring, when there is any to write. A project with no `files:`
 	// block gets no file, which is what keeps its API package — and so its
 	// module — free of a blob store and a multipart reader.

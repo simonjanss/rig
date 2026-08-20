@@ -10,6 +10,8 @@ import (
 	"github.com/simonjanss/rig/internal/dockerdb"
 	"github.com/simonjanss/rig/internal/introspect"
 	"github.com/simonjanss/rig/internal/project"
+	"github.com/simonjanss/rig/internal/scaffold"
+	"github.com/simonjanss/rig/migrate"
 	"github.com/simonjanss/rig/pkg/ir"
 )
 
@@ -45,12 +47,18 @@ func (e *env) database(ctx context.Context, p *project.Project) (url string, err
 	return db.URL(), nil
 }
 
-// migrate applies pending migrations.
+// migrate applies pending migrations: rig's own sets first, then the project's.
 func (e *env) migrate(ctx context.Context, p *project.Project, url string) error {
+	foundation, err := foundationSources(p)
+	if err != nil {
+		return err
+	}
+
 	applied, err := dockerdb.Migrate(ctx, dockerdb.MigrateOptions{
-		Dir:   p.MigrationsDir(),
-		Table: p.Config.Migrations.Table,
-		URL:   url,
+		Dir:        p.MigrationsDir(),
+		Table:      p.Config.Migrations.Table,
+		Foundation: foundation,
+		URL:        url,
 	})
 	if err != nil {
 		return err
@@ -59,6 +67,42 @@ func (e *env) migrate(ctx context.Context, p *project.Project, url string) error
 		fmt.Fprintf(e.errOut, "applied %d migration(s)\n", applied)
 	}
 	return nil
+}
+
+// foundationSources are rig's own migration sets for this project, in apply
+// order.
+//
+// None under `vendored`, because those migrations are already files in the
+// project's own directory: applying them from the modules as well would be the
+// same DDL under two histories, and the second would fail on the first CREATE
+// TABLE.
+//
+// None under `auth.own` either. That project forked rig's migrations and
+// maintains those tables itself, so applying the modules' sets over them stops on
+// a table that already exists. RIG3004 refuses the combination, but `rig db up`
+// runs no diagnostics, so the rule has to hold here as well as there.
+//
+// Under `embedded` this is the only place they come from, and it is why the CLI
+// has to know about the mode at all. `rig generate` introspects a live database,
+// so a set that never got applied is a table missing from the schema — and the
+// two failures that produces are silent ones: every user repository loses its
+// "cannot be changed with an API key" guard, and every notifiable table quietly
+// stops being one.
+func foundationSources(p *project.Project) ([]migrate.Source, error) {
+	if p.Config.Migrations.Vendored() || p.Config.Auth.Own {
+		return nil, nil
+	}
+
+	parts, err := foundationParts(p)
+	if err != nil {
+		return nil, err
+	}
+
+	var out []migrate.Source
+	for _, s := range scaffold.SetsFor(parts) {
+		out = append(out, migrate.Source{Name: s.Module, FS: s.FS, Dir: s.Dir, Table: s.Table})
+	}
+	return out, nil
 }
 
 // readSchema brings the database up to date and reads it back.

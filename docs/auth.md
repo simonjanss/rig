@@ -2,9 +2,15 @@
 
 Four credentials, one door, and a rule for which is which.
 
-Everything below is served by `rig/auth` over the tables `rig setup-project`
-wrote — every one of them named `rig_…`, so a project can tell them from its own.
-Nothing about it is generated, and nothing about it is yours to maintain.
+Everything below is served by `rig/auth` over tables named `rig_…`, so a project
+can tell them from its own. Nothing about it is generated, and nothing about it is
+yours to maintain.
+
+Where those tables come from is a choice: `rig setup-project` writes their
+migrations into your own `migrations/` directory, or `rig/auth` carries them and
+applies them itself. That is `migrations.foundation`, and
+[rig-yaml.md](rig-yaml.md#who-keeps-rigs-migrations) has the trade. Either way the
+tables are the same and everything on this page reads the same.
 
 Both the prefix and the names those tables project to — `Account`, `Tenant`,
 `File` and the rest — are reserved, so your own schema cannot land on either.

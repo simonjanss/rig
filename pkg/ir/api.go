@@ -61,6 +61,20 @@ type API struct {
 	// none. Here for the reason [API.Auth] and [API.Files] are.
 	Notifications *Notifications `json:"notifications,omitempty"`
 
+	// EmbeddedFoundation says rig's own migrations are carried by the modules
+	// that own them rather than vendored into this project's migrations
+	// directory.
+	//
+	// It is here because a generator has to know. The application applies its
+	// own schema, so a project whose modules carry theirs needs the code that
+	// hands those sets to rig/migrate in the right order — and a project that
+	// vendored them must not get it, because then the same DDL would be applied
+	// twice under two histories.
+	//
+	// A bool rather than the mode's spelling: vendored is the default and the
+	// absence, so false is what a document written before the key existed means.
+	EmbeddedFoundation bool `json:"embedded_foundation,omitempty"`
+
 	// Permissions is every permission this API's endpoints require, computed once
 	// at Freeze from the endpoints themselves.
 	//

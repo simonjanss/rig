@@ -90,6 +90,10 @@
           "type": "array",
           "description": "CIDR ranges whose X-Forwarded-For may be believed, for example 10.0.0.0/8. Empty trusts none of them."
         },
+        "log_retention": {
+          "$ref": "#/$defs/Duration",
+          "description": "How long an entry in rig_auth_log is kept, for example 90d. Zero, the default, keeps everything. It cannot be shorter than the longest rate-limit window, because this table is what the limits count."
+        },
         "oauth": {
           "$ref": "#/$defs/AuthOAuth",
           "description": "Provider sign-in. No providers means the provider routes are not mounted."
@@ -487,6 +491,14 @@
         "table": {
           "type": "string",
           "description": "Name of the migration bookkeeping table."
+        },
+        "foundation": {
+          "type": "string",
+          "enum": [
+            "vendored",
+            "embedded"
+          ],
+          "description": "Who keeps rig's own migrations. vendored copies them into this project's migrations directory; embedded leaves each module to apply its own. Defaults to vendored, and cannot be changed once the database exists."
         }
       },
       "additionalProperties": false,

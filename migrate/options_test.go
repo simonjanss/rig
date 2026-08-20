@@ -97,6 +97,99 @@ func TestTheTableDefaultIsTheOneTheCLIUses(t *testing.T) {
 	}
 }
 
+// Two sets recording themselves in one table is refused rather than allowed to
+// half-work. They are numbered independently, so one set's version 2 would mark
+// the other's as applied and the migration that never ran would never run.
+func TestTwoSetsCannotShareABookkeepingTable(t *testing.T) {
+	t.Parallel()
+
+	db := unopened(t)
+	srcs := []migrate.Source{
+		{Name: "rig/auth", FS: fstest.MapFS{}, Dir: ".", Table: "rig_auth_migrations"},
+		{Name: "rig/notify", FS: fstest.MapFS{}, Dir: ".", Table: "rig_auth_migrations"},
+	}
+
+	_, err := migrate.UpAll(t.Context(), db, srcs, migrate.Options{})
+	if err == nil {
+		t.Fatal("two sets sharing a table is an error, not something to sort out later")
+	}
+	for _, want := range []string{"rig/auth", "rig/notify", "rig_auth_migrations"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("err = %v, should name %s", err, want)
+		}
+	}
+}
+
+// The project's own set is the one that may leave Table empty, so it collides
+// with a module's set only if that module named the project's table.
+func TestAnUnnamedTableIsTheProjectsOwn(t *testing.T) {
+	t.Parallel()
+
+	db := unopened(t)
+	srcs := []migrate.Source{
+		{Name: "rig/auth", FS: fstest.MapFS{}, Dir: ".", Table: "rig_auth_migrations"},
+		{Name: "the project", FS: fstest.MapFS{}},
+	}
+	if _, err := migrate.UpAll(t.Context(), db, srcs, migrate.Options{}); err != nil {
+		t.Fatalf("an unnamed table beside a named one is the ordinary case: %v", err)
+	}
+
+	clash := []migrate.Source{
+		{Name: "rig/auth", FS: fstest.MapFS{}, Dir: ".", Table: migrate.DefaultTable},
+		{Name: "the project", FS: fstest.MapFS{}},
+	}
+	if _, err := migrate.UpAll(t.Context(), db, clash, migrate.Options{}); err == nil {
+		t.Error("a module writing into the project's own table is the collision that matters")
+	}
+}
+
+// No sources at all is a caller mistake, not an empty run: it would report
+// success having applied nothing, which is the one answer nobody can act on.
+func TestNoSourcesIsRefused(t *testing.T) {
+	t.Parallel()
+
+	if _, err := migrate.UpAll(t.Context(), unopened(t), nil, migrate.Options{}); err == nil {
+		t.Error("no sources should be an error")
+	}
+	if _, err := migrate.PendingAll(t.Context(), unopened(t), nil, migrate.Options{}); err == nil {
+		t.Error("no sources should be an error")
+	}
+}
+
+// Each set reads its own directory whatever the shared Options say, because Dir
+// is a per-set fact: a module's set sits at the root of its own embedded
+// filesystem, the project's under `migrations/`, and one Dir for both would empty
+// whichever one lost.
+//
+// Checked without a database by what happens next. A set with nothing in its
+// directory returns early and cannot fail; a set with a file in it builds a
+// provider and then cannot connect. So the connection error is the evidence that
+// Dir came from the [migrate.Source] — see the Docker suite for the same property
+// asserted against a database that answers.
+func TestASourceReadsItsOwnDir(t *testing.T) {
+	t.Parallel()
+
+	sql := fstest.MapFS{"00001_files.sql": &fstest.MapFile{Data: []byte("-- +goose Up\nSELECT 1;\n")}}
+	shared := migrate.Options{Dir: "somewhere-else", Table: "rig_migrations"}
+
+	// Dir "." is where the file is. Options names a directory that does not exist.
+	found := []migrate.Source{{Name: "rig/files", FS: sql, Dir: ".", Table: "rig_files_migrations"}}
+	if _, err := migrate.PendingAll(t.Context(), unopened(t), found, shared); err == nil {
+		t.Error("the set's own Dir was not read: a migration was there to find")
+	}
+
+	// And the other way: a set whose own Dir is empty finds nothing, however many
+	// files sit elsewhere in the same filesystem.
+	empty := []migrate.Source{{Name: "rig/files", FS: sql, Dir: "nowhere", Table: "rig_files_migrations"}}
+	pending, err := migrate.PendingAll(t.Context(), unopened(t), empty, shared)
+	if err != nil {
+		t.Errorf("an empty directory is a new set, not a failure: %v", err)
+	}
+	if len(pending) != 0 {
+		t.Errorf("pending = %v, want nothing", pending)
+	}
+}
+
 // unopened is a handle that has not connected to anything. Everything before
 // the first query works on it, which is exactly the part with no database.
 func unopened(t *testing.T) *sql.DB {
