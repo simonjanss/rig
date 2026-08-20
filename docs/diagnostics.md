@@ -23,7 +23,7 @@ services/todo/todo.yaml
 | Range | About |
 |---|---|
 | `RIG1xxx` | Types: a Postgres type with no Go mapping, an empty enum, a relation rig cannot project |
-| `RIG2xxx` | Naming: two things projecting to the same API name, a plural that cannot be derived, a collision with a reserved name |
+| `RIG2xxx` | Naming: two things projecting to the same API name, a plural that cannot be derived, a collision with a name or table prefix rig reserves |
 | `RIG3xxx` | Configuration: invalid YAML, a key that does not match the schema, a column or enum the configuration names that no longer exists |
 | `RIG4xxx` | Notes: a hand-written endpoint replacing a generated one |
 | `RIG5xxx` | Structure: no primary key, a partial snapshot triple, a missing `restore_window_days`, an enum nullable in one place and not another, an `on_delete.order` rig cannot resolve |
@@ -47,4 +47,5 @@ a pull request. `--format json` is for anything else that has to read them.
 ## See also
 
 - [schema.md](schema.md#naming-rules-rig-checks) — what the convention rules want
+- [schema.md](schema.md#names-rig-reserves) — the names and the table prefix that are rig's
 - [rig-yaml.md](rig-yaml.md#validate) — setting severities

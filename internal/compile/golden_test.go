@@ -135,14 +135,41 @@ func compileFixture(t *testing.T, dir string) (*ir.Document, []diag.Diagnostic) 
 	set, tdiags := tableconf.LoadDir(tablePaths)
 
 	doc, cdiags := compile.Compile(schema, set, compile.Options{
-		Project: p,
-		Tool:    "rig (test)",
+		Project:    p,
+		Tool:       "rig (test)",
+		Foundation: readFoundation(t, dir),
 	})
 
 	var all diag.List
 	all.Append(tdiags)
 	all.Append(cdiags)
 	return doc, all.All()
+}
+
+// readFoundation is a fixture's answer to "which rig_ tables did this project
+// scaffold", one name per line in an optional foundation.txt.
+//
+// In a real project rig derives that from the migrations directory, and there is
+// no directory here. The file stands in for it: without one, a fixture holding
+// rig_file would be refused for using a prefix it is entitled to.
+func readFoundation(t *testing.T, dir string) []string {
+	t.Helper()
+
+	b, err := os.ReadFile(filepath.Join(dir, "foundation.txt"))
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var out []string
+	for line := range strings.Lines(string(b)) {
+		if name := strings.TrimSpace(line); name != "" {
+			out = append(out, name)
+		}
+	}
+	return out
 }
 
 func readSchema(t *testing.T, path string) ir.Schema {

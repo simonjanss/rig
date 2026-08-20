@@ -80,8 +80,20 @@ var (
 		"Set `plural:` on the table, or add an entry to `naming.plurals`.")
 
 	CodeReservedName = newCode("RIG2003", SeverityError,
-		"A projected name collides with one rig reserves.",
-		"Rename the field with the `field:` key.")
+		"A parameter or field uses a name rig reserves.",
+		"Rename it — `name:` for an endpoint's parameter, `field:` for a column.")
+
+	CodeReservedResource = newCode("RIG2004", SeverityError,
+		"A table projects to a resource name rig's own tables take.",
+		"Rename the table, or give it a `resource:` of its own. The names are "+
+			"reserved whether or not this project exposes rig's tables, so that "+
+			"turning on `auth.expose` later never forces the rename then.")
+
+	CodeReservedTablePrefix = newCode("RIG2005", SeverityError,
+		"A table name uses the `rig_` prefix, which rig keeps for its own tables.",
+		"Rename the table. The prefix is what tells a reader which tables arrived "+
+			"with the foundation, and the next part rig adds may create one by that "+
+			"name outright.")
 )
 
 // Reading the table configuration: RIG3xxx.

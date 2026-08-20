@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -8,6 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/simonjanss/rig/internal/compile"
 	"github.com/simonjanss/rig/internal/project"
 	"github.com/simonjanss/rig/internal/scaffold"
 )
@@ -113,6 +115,20 @@ func newMigrationCmd(e *env) *cobra.Command {
 			p, err := e.mustProject()
 			if err != nil {
 				return err
+			}
+
+			// Before anything is created. The same rule `rig validate` enforces,
+			// asked here because this is the last moment the fix is a different
+			// word on a command line rather than a migration, a rename in every
+			// client, and a deprecation window.
+			if table != "" {
+				_, foundation, err := foundationTables(p)
+				if err != nil {
+					return err
+				}
+				if why := compile.Reserved(p, foundation, table); why != "" {
+					return errors.New(why)
+				}
 			}
 
 			dir := p.MigrationsDir()

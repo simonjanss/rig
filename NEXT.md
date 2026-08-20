@@ -224,6 +224,60 @@ reversible.
     is where `Server.MinRevision` used to check itself from inside `Register`
     before the type made that impossible to get wrong.
 
+17. **The `rig_` prefix and the names it strips to are reserved.** The prefix was
+    documentation until now: `PartTables` said it existed "so a project can tell
+    at a glance which tables arrived with the foundation and is free to have an
+    `account` or a `tenant` of its own". That freedom was a bill nobody had paid
+    yet. A project with its own `account` finds out on the day it sets
+    `auth.expose: [rig_account]` — RIG2001, two tables projecting to `Account` —
+    and the fix that day is a migration plus a rename in every client that reads
+    the resource. Reserving the name now makes that day one line in `rig.yaml`.
+
+    Two codes, both errors and neither configurable: **RIG2004** for a table
+    projecting to a name one of rig's own tables takes, **RIG2005** for a table
+    under the prefix. RIG2003's summary and hint were narrowed to what it
+    actually reports, which is a parameter or a field and never a table.
+
+    The reserved set is **derived, not listed**. `config()` in
+    `internal/scaffold` now returns the whole `tableConfig` rather than the
+    file's text, so `ReservedResources()` reads the resource name back out of the
+    configurations `setup-project` writes — a part added to the foundation
+    reserves its names by existing, and a guard test in `reserved_test.go` makes
+    that a build failure rather than something somebody has to remember.
+
+    `plannedResources` is the escape from that, for a name decided before its
+    table exists — reserving early is the cheaper mistake, because a project that
+    took the name pays a migration and a rename in every client on the day the
+    part lands. It is **empty now**, and empty is the healthy state. It held
+    `Notification` and `NotificationRecipient` while M12 was being written; M12
+    and M13 then shipped five notification tables whose configurations reserve
+    all five names on their own, and the entries became a second copy of the
+    answer. `TestPlannedNamesAreNotBuiltYet` is what makes leaving one behind a
+    failure rather than dead weight shadowing the derived set.
+
+    The notification part is also the proof the derivation was worth it: it
+    arrived after this rule did, and it reserved five names without anybody
+    editing a list. The only edits it needed were a `foundation.txt` for the
+    `notify` fixture and the five `config()` call sites it had written in the old
+    two-value form.
+
+    Two things this needed that were not obvious. The rule runs **after
+    `Freeze`**, not beside the RIG2001 collision in `Project`: the frozen
+    document holds the name that won, and `resource: Account` on some other
+    table is written by `ApplyConfig`, which runs later. And `IgnoreTables`
+    could not answer "is this rig's table" — `auth.expose` takes a table *out* of
+    that list while leaving it rig's, and `auth.own` empties it, which is also
+    exactly what a project that never scaffolded looks like. Hence
+    `Options.Foundation`, and hence `foundationTables` returning two lists from
+    one reading of the migrations directory. The compiler's fixtures have no
+    migrations directory, so an optional `foundation.txt` stands in for one.
+
+    `auth.own: true` turns both rules off. A project that has forked the
+    foundation owns those tables and owns `Account` with them, and it was already
+    a one-way door. `rig migration new --table` asks the same question before it
+    writes anything, and `rig sync` skips rather than refuses, because sync
+    exists to repair a project that does not yet validate.
+
 ---
 
 ## M5.5 — the model layer (shipped)

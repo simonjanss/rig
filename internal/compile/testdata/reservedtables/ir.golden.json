@@ -1,0 +1,2940 @@
+{
+  "ir_version": 1,
+  "generated_by": "rig (test)",
+  "api": {
+    "name": "demo",
+    "version": "v1",
+    "base_path": "/api/v1",
+    "revision_header": "API-Revision",
+    "enums": [
+      {
+        "name": "ErrorCode",
+        "description": "Machine-readable reason a request failed.",
+        "values": [
+          {
+            "name": "BadRequest",
+            "wire": "BadRequest",
+            "description": "The request was malformed or a parameter could not be parsed."
+          },
+          {
+            "name": "Unauthorized",
+            "wire": "Unauthorized",
+            "description": "No valid session or API key was presented."
+          },
+          {
+            "name": "Forbidden",
+            "wire": "Forbidden",
+            "description": "The caller is known but not permitted to do this."
+          },
+          {
+            "name": "NotFound",
+            "wire": "NotFound",
+            "description": "No such resource, or it belongs to another tenant."
+          },
+          {
+            "name": "Conflict",
+            "wire": "Conflict",
+            "description": "The request conflicts with the current state of the resource."
+          },
+          {
+            "name": "UnprocessableEntity",
+            "wire": "UnprocessableEntity",
+            "description": "The request was well-formed but failed validation."
+          },
+          {
+            "name": "RateLimited",
+            "wire": "RateLimited",
+            "description": "Too many requests. Retry after the interval in the Retry-After header."
+          },
+          {
+            "name": "TooLarge",
+            "wire": "TooLarge",
+            "description": "The request body is larger than this endpoint accepts."
+          },
+          {
+            "name": "UnsupportedMediaType",
+            "wire": "UnsupportedMediaType",
+            "description": "The body's content type is not one this endpoint accepts."
+          },
+          {
+            "name": "UpgradeRequired",
+            "wire": "UpgradeRequired",
+            "description": "The client was built against an API revision this server no longer serves."
+          },
+          {
+            "name": "Internal",
+            "wire": "Internal",
+            "description": "Something went wrong on the server."
+          }
+        ]
+      }
+    ],
+    "objects": [
+      {
+        "name": "Account",
+        "description": "A project's own table, under a name rig's rig_account takes.",
+        "fields": [
+          {
+            "name": "ID",
+            "wire": "id",
+            "description": "Identifier.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "uuid.UUID",
+            "read_only": true,
+            "column": {
+              "table": "account",
+              "name": "id",
+              "sql_type": "uuid",
+              "nullable": false,
+              "scan": "UUID"
+            }
+          },
+          {
+            "name": "TenantID",
+            "wire": "tenantId",
+            "description": "Who it belongs to.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "uuid.UUID",
+            "read_only": true,
+            "column": {
+              "table": "account",
+              "name": "tenant_id",
+              "sql_type": "uuid",
+              "nullable": false,
+              "scan": "UUID"
+            }
+          },
+          {
+            "name": "CreatedAt",
+            "wire": "createdAt",
+            "description": "When it was written.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "time.Time",
+            "read_only": true,
+            "column": {
+              "table": "account",
+              "name": "created_at",
+              "sql_type": "timestamptz",
+              "nullable": false,
+              "scan": "Timestamptz"
+            }
+          },
+          {
+            "name": "UpdatedAt",
+            "wire": "updatedAt",
+            "description": "When it last changed.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "*time.Time",
+            "modifiers": [
+              "Nullable"
+            ],
+            "read_only": true,
+            "column": {
+              "table": "account",
+              "name": "updated_at",
+              "sql_type": "timestamptz",
+              "nullable": true,
+              "scan": "Timestamptz"
+            }
+          }
+        ],
+        "origin": "Projected"
+      },
+      {
+        "name": "AccountFilter",
+        "description": "Conditions a Account must satisfy to match a search.",
+        "fields": [
+          {
+            "name": "Equals",
+            "wire": "equals",
+            "description": "Fields that must equal the given value.",
+            "type": "AccountFilterEquals",
+            "type_kind": "Object",
+            "go_type": "*AccountFilterEquals",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "NotEquals",
+            "wire": "notEquals",
+            "description": "Fields that must not equal the given value.",
+            "type": "AccountFilterEquals",
+            "type_kind": "Object",
+            "go_type": "*AccountFilterEquals",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "GreaterThan",
+            "wire": "greaterThan",
+            "description": "Fields that must be greater than the given value.",
+            "type": "AccountFilterRange",
+            "type_kind": "Object",
+            "go_type": "*AccountFilterRange",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "SmallerThan",
+            "wire": "smallerThan",
+            "description": "Fields that must be less than the given value.",
+            "type": "AccountFilterRange",
+            "type_kind": "Object",
+            "go_type": "*AccountFilterRange",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "GreaterOrEqual",
+            "wire": "greaterOrEqual",
+            "description": "Fields that must be greater than or equal to the given value.",
+            "type": "AccountFilterRange",
+            "type_kind": "Object",
+            "go_type": "*AccountFilterRange",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "SmallerOrEqual",
+            "wire": "smallerOrEqual",
+            "description": "Fields that must be less than or equal to the given value.",
+            "type": "AccountFilterRange",
+            "type_kind": "Object",
+            "go_type": "*AccountFilterRange",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "Contains",
+            "wire": "contains",
+            "description": "Fields that must be one of the given values.",
+            "type": "AccountFilterContains",
+            "type_kind": "Object",
+            "go_type": "*AccountFilterContains",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "NotContains",
+            "wire": "notContains",
+            "description": "Fields that must not be one of the given values.",
+            "type": "AccountFilterContains",
+            "type_kind": "Object",
+            "go_type": "*AccountFilterContains",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "Like",
+            "wire": "like",
+            "description": "Text fields that must match the given pattern.",
+            "type": "AccountFilterLike",
+            "type_kind": "Object",
+            "go_type": "*AccountFilterLike",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "NotLike",
+            "wire": "notLike",
+            "description": "Text fields that must not match the given pattern.",
+            "type": "AccountFilterLike",
+            "type_kind": "Object",
+            "go_type": "*AccountFilterLike",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "Null",
+            "wire": "null",
+            "description": "Fields that must be null.",
+            "type": "AccountFilterNull",
+            "type_kind": "Object",
+            "go_type": "*AccountFilterNull",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "NotNull",
+            "wire": "notNull",
+            "description": "Fields that must not be null.",
+            "type": "AccountFilterNull",
+            "type_kind": "Object",
+            "go_type": "*AccountFilterNull",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "OrCondition",
+            "wire": "orCondition",
+            "description": "Combine this filter's conditions with OR instead of AND.",
+            "type": "Bool",
+            "type_kind": "Primitive",
+            "go_type": "bool"
+          },
+          {
+            "name": "NestedFilters",
+            "wire": "nestedFilters",
+            "description": "Sub-filters combined with this one, so that AND and OR can be mixed to any depth.",
+            "type": "AccountFilter",
+            "type_kind": "Object",
+            "go_type": "[]AccountFilter",
+            "modifiers": [
+              "Array"
+            ]
+          }
+        ],
+        "origin": "Filter"
+      },
+      {
+        "name": "AccountFilterContains",
+        "description": "Set-membership conditions on Account fields.",
+        "fields": [
+          {
+            "name": "ID",
+            "wire": "id",
+            "description": "Identifier.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "[]uuid.UUID",
+            "modifiers": [
+              "Array"
+            ]
+          },
+          {
+            "name": "CreatedAt",
+            "wire": "createdAt",
+            "description": "When it was written.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "[]time.Time",
+            "modifiers": [
+              "Array"
+            ]
+          },
+          {
+            "name": "UpdatedAt",
+            "wire": "updatedAt",
+            "description": "When it last changed.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "[]time.Time",
+            "modifiers": [
+              "Array"
+            ]
+          }
+        ],
+        "origin": "Filter"
+      },
+      {
+        "name": "AccountFilterEquals",
+        "description": "Exact-match conditions on Account fields.",
+        "fields": [
+          {
+            "name": "ID",
+            "wire": "id",
+            "description": "Identifier.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "*uuid.UUID",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "CreatedAt",
+            "wire": "createdAt",
+            "description": "When it was written.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "*time.Time",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "UpdatedAt",
+            "wire": "updatedAt",
+            "description": "When it last changed.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "*time.Time",
+            "modifiers": [
+              "Nullable"
+            ]
+          }
+        ],
+        "origin": "Filter"
+      },
+      {
+        "name": "AccountFilterLike",
+        "description": "Pattern conditions on Account text fields.",
+        "fields": null,
+        "origin": "Filter"
+      },
+      {
+        "name": "AccountFilterNull",
+        "description": "Presence conditions on nullable Account fields.",
+        "fields": [
+          {
+            "name": "UpdatedAt",
+            "wire": "updatedAt",
+            "description": "When it last changed.",
+            "type": "Bool",
+            "type_kind": "Primitive",
+            "go_type": "*bool",
+            "modifiers": [
+              "Nullable"
+            ]
+          }
+        ],
+        "origin": "Filter"
+      },
+      {
+        "name": "AccountFilterRange",
+        "description": "Ordering conditions on Account fields that can be compared.",
+        "fields": [
+          {
+            "name": "CreatedAt",
+            "wire": "createdAt",
+            "description": "When it was written.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "*time.Time",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "UpdatedAt",
+            "wire": "updatedAt",
+            "description": "When it last changed.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "*time.Time",
+            "modifiers": [
+              "Nullable"
+            ]
+          }
+        ],
+        "origin": "Filter"
+      },
+      {
+        "name": "AccountListResponse",
+        "description": "A page of Accounts.",
+        "fields": [
+          {
+            "name": "Data",
+            "wire": "data",
+            "description": "The rows in this page.",
+            "type": "Account",
+            "type_kind": "Resource",
+            "go_type": "[]Account",
+            "modifiers": [
+              "Array"
+            ]
+          },
+          {
+            "name": "Pagination",
+            "wire": "pagination",
+            "description": "Where this page sits in the full result set.",
+            "type": "Pagination",
+            "type_kind": "Object",
+            "go_type": "Pagination"
+          }
+        ],
+        "origin": "Projected"
+      },
+      {
+        "name": "Error",
+        "description": "Returned whenever a request fails.",
+        "fields": [
+          {
+            "name": "Code",
+            "wire": "code",
+            "description": "Machine-readable reason the request failed.",
+            "type": "ErrorCode",
+            "type_kind": "Enum",
+            "go_type": "ErrorCode"
+          },
+          {
+            "name": "Message",
+            "wire": "message",
+            "description": "Human-readable explanation. Not intended for clients to parse.",
+            "type": "String",
+            "type_kind": "Primitive",
+            "go_type": "string"
+          },
+          {
+            "name": "RequestID",
+            "wire": "requestId",
+            "description": "Identifier of this request, for correlating with server logs.",
+            "type": "String",
+            "type_kind": "Primitive",
+            "go_type": "string",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "Fields",
+            "wire": "fields",
+            "description": "Present when the failure was validation. It is shaped like the request body that failed — one member per field, holding the problem with that field — so a client can put each message beside the control it belongs to.",
+            "type": "JSON",
+            "type_kind": "Primitive",
+            "go_type": "any",
+            "modifiers": [
+              "Nullable"
+            ]
+          }
+        ],
+        "origin": "Builtin"
+      },
+      {
+        "name": "Pagination",
+        "description": "Where the returned page sits within the full result set.",
+        "fields": [
+          {
+            "name": "Offset",
+            "wire": "offset",
+            "description": "Number of rows skipped before this page.",
+            "type": "Int",
+            "type_kind": "Primitive",
+            "go_type": "int"
+          },
+          {
+            "name": "Limit",
+            "wire": "limit",
+            "description": "Maximum number of rows in this page.",
+            "type": "Int",
+            "type_kind": "Primitive",
+            "go_type": "int"
+          },
+          {
+            "name": "Total",
+            "wire": "total",
+            "description": "Total number of rows matching the query, ignoring pagination.",
+            "type": "Int64",
+            "type_kind": "Primitive",
+            "go_type": "int64"
+          }
+        ],
+        "origin": "Builtin"
+      },
+      {
+        "name": "RigLeaderboard",
+        "description": "A table under a prefix rig keeps, by a name rig does not use.",
+        "fields": [
+          {
+            "name": "ID",
+            "wire": "id",
+            "description": "Identifier.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "uuid.UUID",
+            "read_only": true,
+            "column": {
+              "table": "rig_leaderboard",
+              "name": "id",
+              "sql_type": "uuid",
+              "nullable": false,
+              "scan": "UUID"
+            }
+          },
+          {
+            "name": "TenantID",
+            "wire": "tenantId",
+            "description": "Who it belongs to.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "uuid.UUID",
+            "read_only": true,
+            "column": {
+              "table": "rig_leaderboard",
+              "name": "tenant_id",
+              "sql_type": "uuid",
+              "nullable": false,
+              "scan": "UUID"
+            }
+          },
+          {
+            "name": "CreatedAt",
+            "wire": "createdAt",
+            "description": "When it was written.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "time.Time",
+            "read_only": true,
+            "column": {
+              "table": "rig_leaderboard",
+              "name": "created_at",
+              "sql_type": "timestamptz",
+              "nullable": false,
+              "scan": "Timestamptz"
+            }
+          },
+          {
+            "name": "UpdatedAt",
+            "wire": "updatedAt",
+            "description": "When it last changed.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "*time.Time",
+            "modifiers": [
+              "Nullable"
+            ],
+            "read_only": true,
+            "column": {
+              "table": "rig_leaderboard",
+              "name": "updated_at",
+              "sql_type": "timestamptz",
+              "nullable": true,
+              "scan": "Timestamptz"
+            }
+          }
+        ],
+        "origin": "Projected"
+      },
+      {
+        "name": "RigLeaderboardFilter",
+        "description": "Conditions a RigLeaderboard must satisfy to match a search.",
+        "fields": [
+          {
+            "name": "Equals",
+            "wire": "equals",
+            "description": "Fields that must equal the given value.",
+            "type": "RigLeaderboardFilterEquals",
+            "type_kind": "Object",
+            "go_type": "*RigLeaderboardFilterEquals",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "NotEquals",
+            "wire": "notEquals",
+            "description": "Fields that must not equal the given value.",
+            "type": "RigLeaderboardFilterEquals",
+            "type_kind": "Object",
+            "go_type": "*RigLeaderboardFilterEquals",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "GreaterThan",
+            "wire": "greaterThan",
+            "description": "Fields that must be greater than the given value.",
+            "type": "RigLeaderboardFilterRange",
+            "type_kind": "Object",
+            "go_type": "*RigLeaderboardFilterRange",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "SmallerThan",
+            "wire": "smallerThan",
+            "description": "Fields that must be less than the given value.",
+            "type": "RigLeaderboardFilterRange",
+            "type_kind": "Object",
+            "go_type": "*RigLeaderboardFilterRange",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "GreaterOrEqual",
+            "wire": "greaterOrEqual",
+            "description": "Fields that must be greater than or equal to the given value.",
+            "type": "RigLeaderboardFilterRange",
+            "type_kind": "Object",
+            "go_type": "*RigLeaderboardFilterRange",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "SmallerOrEqual",
+            "wire": "smallerOrEqual",
+            "description": "Fields that must be less than or equal to the given value.",
+            "type": "RigLeaderboardFilterRange",
+            "type_kind": "Object",
+            "go_type": "*RigLeaderboardFilterRange",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "Contains",
+            "wire": "contains",
+            "description": "Fields that must be one of the given values.",
+            "type": "RigLeaderboardFilterContains",
+            "type_kind": "Object",
+            "go_type": "*RigLeaderboardFilterContains",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "NotContains",
+            "wire": "notContains",
+            "description": "Fields that must not be one of the given values.",
+            "type": "RigLeaderboardFilterContains",
+            "type_kind": "Object",
+            "go_type": "*RigLeaderboardFilterContains",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "Like",
+            "wire": "like",
+            "description": "Text fields that must match the given pattern.",
+            "type": "RigLeaderboardFilterLike",
+            "type_kind": "Object",
+            "go_type": "*RigLeaderboardFilterLike",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "NotLike",
+            "wire": "notLike",
+            "description": "Text fields that must not match the given pattern.",
+            "type": "RigLeaderboardFilterLike",
+            "type_kind": "Object",
+            "go_type": "*RigLeaderboardFilterLike",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "Null",
+            "wire": "null",
+            "description": "Fields that must be null.",
+            "type": "RigLeaderboardFilterNull",
+            "type_kind": "Object",
+            "go_type": "*RigLeaderboardFilterNull",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "NotNull",
+            "wire": "notNull",
+            "description": "Fields that must not be null.",
+            "type": "RigLeaderboardFilterNull",
+            "type_kind": "Object",
+            "go_type": "*RigLeaderboardFilterNull",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "OrCondition",
+            "wire": "orCondition",
+            "description": "Combine this filter's conditions with OR instead of AND.",
+            "type": "Bool",
+            "type_kind": "Primitive",
+            "go_type": "bool"
+          },
+          {
+            "name": "NestedFilters",
+            "wire": "nestedFilters",
+            "description": "Sub-filters combined with this one, so that AND and OR can be mixed to any depth.",
+            "type": "RigLeaderboardFilter",
+            "type_kind": "Object",
+            "go_type": "[]RigLeaderboardFilter",
+            "modifiers": [
+              "Array"
+            ]
+          }
+        ],
+        "origin": "Filter"
+      },
+      {
+        "name": "RigLeaderboardFilterContains",
+        "description": "Set-membership conditions on RigLeaderboard fields.",
+        "fields": [
+          {
+            "name": "ID",
+            "wire": "id",
+            "description": "Identifier.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "[]uuid.UUID",
+            "modifiers": [
+              "Array"
+            ]
+          },
+          {
+            "name": "CreatedAt",
+            "wire": "createdAt",
+            "description": "When it was written.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "[]time.Time",
+            "modifiers": [
+              "Array"
+            ]
+          },
+          {
+            "name": "UpdatedAt",
+            "wire": "updatedAt",
+            "description": "When it last changed.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "[]time.Time",
+            "modifiers": [
+              "Array"
+            ]
+          }
+        ],
+        "origin": "Filter"
+      },
+      {
+        "name": "RigLeaderboardFilterEquals",
+        "description": "Exact-match conditions on RigLeaderboard fields.",
+        "fields": [
+          {
+            "name": "ID",
+            "wire": "id",
+            "description": "Identifier.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "*uuid.UUID",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "CreatedAt",
+            "wire": "createdAt",
+            "description": "When it was written.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "*time.Time",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "UpdatedAt",
+            "wire": "updatedAt",
+            "description": "When it last changed.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "*time.Time",
+            "modifiers": [
+              "Nullable"
+            ]
+          }
+        ],
+        "origin": "Filter"
+      },
+      {
+        "name": "RigLeaderboardFilterLike",
+        "description": "Pattern conditions on RigLeaderboard text fields.",
+        "fields": null,
+        "origin": "Filter"
+      },
+      {
+        "name": "RigLeaderboardFilterNull",
+        "description": "Presence conditions on nullable RigLeaderboard fields.",
+        "fields": [
+          {
+            "name": "UpdatedAt",
+            "wire": "updatedAt",
+            "description": "When it last changed.",
+            "type": "Bool",
+            "type_kind": "Primitive",
+            "go_type": "*bool",
+            "modifiers": [
+              "Nullable"
+            ]
+          }
+        ],
+        "origin": "Filter"
+      },
+      {
+        "name": "RigLeaderboardFilterRange",
+        "description": "Ordering conditions on RigLeaderboard fields that can be compared.",
+        "fields": [
+          {
+            "name": "CreatedAt",
+            "wire": "createdAt",
+            "description": "When it was written.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "*time.Time",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "UpdatedAt",
+            "wire": "updatedAt",
+            "description": "When it last changed.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "*time.Time",
+            "modifiers": [
+              "Nullable"
+            ]
+          }
+        ],
+        "origin": "Filter"
+      },
+      {
+        "name": "RigLeaderboardListResponse",
+        "description": "A page of RigLeaderboards.",
+        "fields": [
+          {
+            "name": "Data",
+            "wire": "data",
+            "description": "The rows in this page.",
+            "type": "RigLeaderboard",
+            "type_kind": "Resource",
+            "go_type": "[]RigLeaderboard",
+            "modifiers": [
+              "Array"
+            ]
+          },
+          {
+            "name": "Pagination",
+            "wire": "pagination",
+            "description": "Where this page sits in the full result set.",
+            "type": "Pagination",
+            "type_kind": "Object",
+            "go_type": "Pagination"
+          }
+        ],
+        "origin": "Projected"
+      },
+      {
+        "name": "Tenant",
+        "description": "An ordinary table whose configuration reaches for a reserved name.",
+        "fields": [
+          {
+            "name": "ID",
+            "wire": "id",
+            "description": "Identifier.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "uuid.UUID",
+            "read_only": true,
+            "column": {
+              "table": "bookmark",
+              "name": "id",
+              "sql_type": "uuid",
+              "nullable": false,
+              "scan": "UUID"
+            }
+          },
+          {
+            "name": "TenantID",
+            "wire": "tenantId",
+            "description": "Who it belongs to.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "uuid.UUID",
+            "read_only": true,
+            "column": {
+              "table": "bookmark",
+              "name": "tenant_id",
+              "sql_type": "uuid",
+              "nullable": false,
+              "scan": "UUID"
+            }
+          },
+          {
+            "name": "CreatedAt",
+            "wire": "createdAt",
+            "description": "When it was written.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "time.Time",
+            "read_only": true,
+            "column": {
+              "table": "bookmark",
+              "name": "created_at",
+              "sql_type": "timestamptz",
+              "nullable": false,
+              "scan": "Timestamptz"
+            }
+          },
+          {
+            "name": "UpdatedAt",
+            "wire": "updatedAt",
+            "description": "When it last changed.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "*time.Time",
+            "modifiers": [
+              "Nullable"
+            ],
+            "read_only": true,
+            "column": {
+              "table": "bookmark",
+              "name": "updated_at",
+              "sql_type": "timestamptz",
+              "nullable": true,
+              "scan": "Timestamptz"
+            }
+          }
+        ],
+        "origin": "Projected"
+      },
+      {
+        "name": "TenantFilter",
+        "description": "Conditions a Tenant must satisfy to match a search.",
+        "fields": [
+          {
+            "name": "Equals",
+            "wire": "equals",
+            "description": "Fields that must equal the given value.",
+            "type": "TenantFilterEquals",
+            "type_kind": "Object",
+            "go_type": "*TenantFilterEquals",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "NotEquals",
+            "wire": "notEquals",
+            "description": "Fields that must not equal the given value.",
+            "type": "TenantFilterEquals",
+            "type_kind": "Object",
+            "go_type": "*TenantFilterEquals",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "GreaterThan",
+            "wire": "greaterThan",
+            "description": "Fields that must be greater than the given value.",
+            "type": "TenantFilterRange",
+            "type_kind": "Object",
+            "go_type": "*TenantFilterRange",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "SmallerThan",
+            "wire": "smallerThan",
+            "description": "Fields that must be less than the given value.",
+            "type": "TenantFilterRange",
+            "type_kind": "Object",
+            "go_type": "*TenantFilterRange",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "GreaterOrEqual",
+            "wire": "greaterOrEqual",
+            "description": "Fields that must be greater than or equal to the given value.",
+            "type": "TenantFilterRange",
+            "type_kind": "Object",
+            "go_type": "*TenantFilterRange",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "SmallerOrEqual",
+            "wire": "smallerOrEqual",
+            "description": "Fields that must be less than or equal to the given value.",
+            "type": "TenantFilterRange",
+            "type_kind": "Object",
+            "go_type": "*TenantFilterRange",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "Contains",
+            "wire": "contains",
+            "description": "Fields that must be one of the given values.",
+            "type": "TenantFilterContains",
+            "type_kind": "Object",
+            "go_type": "*TenantFilterContains",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "NotContains",
+            "wire": "notContains",
+            "description": "Fields that must not be one of the given values.",
+            "type": "TenantFilterContains",
+            "type_kind": "Object",
+            "go_type": "*TenantFilterContains",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "Like",
+            "wire": "like",
+            "description": "Text fields that must match the given pattern.",
+            "type": "TenantFilterLike",
+            "type_kind": "Object",
+            "go_type": "*TenantFilterLike",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "NotLike",
+            "wire": "notLike",
+            "description": "Text fields that must not match the given pattern.",
+            "type": "TenantFilterLike",
+            "type_kind": "Object",
+            "go_type": "*TenantFilterLike",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "Null",
+            "wire": "null",
+            "description": "Fields that must be null.",
+            "type": "TenantFilterNull",
+            "type_kind": "Object",
+            "go_type": "*TenantFilterNull",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "NotNull",
+            "wire": "notNull",
+            "description": "Fields that must not be null.",
+            "type": "TenantFilterNull",
+            "type_kind": "Object",
+            "go_type": "*TenantFilterNull",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "OrCondition",
+            "wire": "orCondition",
+            "description": "Combine this filter's conditions with OR instead of AND.",
+            "type": "Bool",
+            "type_kind": "Primitive",
+            "go_type": "bool"
+          },
+          {
+            "name": "NestedFilters",
+            "wire": "nestedFilters",
+            "description": "Sub-filters combined with this one, so that AND and OR can be mixed to any depth.",
+            "type": "TenantFilter",
+            "type_kind": "Object",
+            "go_type": "[]TenantFilter",
+            "modifiers": [
+              "Array"
+            ]
+          }
+        ],
+        "origin": "Filter"
+      },
+      {
+        "name": "TenantFilterContains",
+        "description": "Set-membership conditions on Tenant fields.",
+        "fields": [
+          {
+            "name": "ID",
+            "wire": "id",
+            "description": "Identifier.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "[]uuid.UUID",
+            "modifiers": [
+              "Array"
+            ]
+          },
+          {
+            "name": "CreatedAt",
+            "wire": "createdAt",
+            "description": "When it was written.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "[]time.Time",
+            "modifiers": [
+              "Array"
+            ]
+          },
+          {
+            "name": "UpdatedAt",
+            "wire": "updatedAt",
+            "description": "When it last changed.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "[]time.Time",
+            "modifiers": [
+              "Array"
+            ]
+          }
+        ],
+        "origin": "Filter"
+      },
+      {
+        "name": "TenantFilterEquals",
+        "description": "Exact-match conditions on Tenant fields.",
+        "fields": [
+          {
+            "name": "ID",
+            "wire": "id",
+            "description": "Identifier.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "*uuid.UUID",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "CreatedAt",
+            "wire": "createdAt",
+            "description": "When it was written.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "*time.Time",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "UpdatedAt",
+            "wire": "updatedAt",
+            "description": "When it last changed.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "*time.Time",
+            "modifiers": [
+              "Nullable"
+            ]
+          }
+        ],
+        "origin": "Filter"
+      },
+      {
+        "name": "TenantFilterLike",
+        "description": "Pattern conditions on Tenant text fields.",
+        "fields": null,
+        "origin": "Filter"
+      },
+      {
+        "name": "TenantFilterNull",
+        "description": "Presence conditions on nullable Tenant fields.",
+        "fields": [
+          {
+            "name": "UpdatedAt",
+            "wire": "updatedAt",
+            "description": "When it last changed.",
+            "type": "Bool",
+            "type_kind": "Primitive",
+            "go_type": "*bool",
+            "modifiers": [
+              "Nullable"
+            ]
+          }
+        ],
+        "origin": "Filter"
+      },
+      {
+        "name": "TenantFilterRange",
+        "description": "Ordering conditions on Tenant fields that can be compared.",
+        "fields": [
+          {
+            "name": "CreatedAt",
+            "wire": "createdAt",
+            "description": "When it was written.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "*time.Time",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "UpdatedAt",
+            "wire": "updatedAt",
+            "description": "When it last changed.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "*time.Time",
+            "modifiers": [
+              "Nullable"
+            ]
+          }
+        ],
+        "origin": "Filter"
+      },
+      {
+        "name": "TenantListResponse",
+        "description": "A page of Tenants.",
+        "fields": [
+          {
+            "name": "Data",
+            "wire": "data",
+            "description": "The rows in this page.",
+            "type": "Tenant",
+            "type_kind": "Resource",
+            "go_type": "[]Tenant",
+            "modifiers": [
+              "Array"
+            ]
+          },
+          {
+            "name": "Pagination",
+            "wire": "pagination",
+            "description": "Where this page sits in the full result set.",
+            "type": "Pagination",
+            "type_kind": "Object",
+            "go_type": "Pagination"
+          }
+        ],
+        "origin": "Projected"
+      }
+    ],
+    "resources": [
+      {
+        "name": "Account",
+        "plural": "Accounts",
+        "path_segment": "accounts",
+        "description": "A project's own table, under a name rig's rig_account takes.",
+        "operations": [
+          "Create",
+          "Get",
+          "List",
+          "Search",
+          "Update",
+          "Delete"
+        ],
+        "fields": [
+          {
+            "name": "ID",
+            "wire": "id",
+            "description": "Identifier.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "uuid.UUID",
+            "read_only": true,
+            "column": {
+              "table": "account",
+              "name": "id",
+              "sql_type": "uuid",
+              "nullable": false,
+              "scan": "UUID"
+            },
+            "operations": [
+              "Read"
+            ]
+          },
+          {
+            "name": "TenantID",
+            "wire": "tenantId",
+            "description": "Who it belongs to.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "uuid.UUID",
+            "read_only": true,
+            "column": {
+              "table": "account",
+              "name": "tenant_id",
+              "sql_type": "uuid",
+              "nullable": false,
+              "scan": "UUID"
+            },
+            "operations": [
+              "Read"
+            ]
+          },
+          {
+            "name": "CreatedAt",
+            "wire": "createdAt",
+            "description": "When it was written.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "time.Time",
+            "read_only": true,
+            "column": {
+              "table": "account",
+              "name": "created_at",
+              "sql_type": "timestamptz",
+              "nullable": false,
+              "scan": "Timestamptz"
+            },
+            "operations": [
+              "Read"
+            ]
+          },
+          {
+            "name": "UpdatedAt",
+            "wire": "updatedAt",
+            "description": "When it last changed.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "*time.Time",
+            "modifiers": [
+              "Nullable"
+            ],
+            "read_only": true,
+            "column": {
+              "table": "account",
+              "name": "updated_at",
+              "sql_type": "timestamptz",
+              "nullable": true,
+              "scan": "Timestamptz"
+            },
+            "operations": [
+              "Read"
+            ]
+          }
+        ],
+        "endpoints": [
+          {
+            "name": "List",
+            "summary": "List Accounts.",
+            "method": "GET",
+            "path": "",
+            "pattern": "GET /api/v1/accounts",
+            "operation_id": "listAccounts",
+            "permission": "account.read",
+            "request": {
+              "query_params": [
+                {
+                  "name": "Limit",
+                  "wire": "limit",
+                  "description": "Maximum rows to return.",
+                  "type": "Int",
+                  "type_kind": "Primitive",
+                  "go_type": "int",
+                  "default": "50"
+                },
+                {
+                  "name": "Offset",
+                  "wire": "offset",
+                  "description": "Rows to skip before the first returned row.",
+                  "type": "Int",
+                  "type_kind": "Primitive",
+                  "go_type": "int",
+                  "default": "0"
+                }
+              ]
+            },
+            "responses": [
+              {
+                "status_code": 200,
+                "description": "A page of Accounts.",
+                "content_types": [
+                  "application/json"
+                ],
+                "body_object": "AccountListResponse"
+              }
+            ],
+            "errors": [
+              400,
+              401,
+              403,
+              429,
+              500
+            ],
+            "impl": {
+              "kind": "Generated",
+              "repo_method": "List",
+              "service_method": "List",
+              "handler_name": "ListAccounts"
+            }
+          },
+          {
+            "name": "Create",
+            "summary": "Create a Account.",
+            "method": "POST",
+            "path": "",
+            "pattern": "POST /api/v1/accounts",
+            "operation_id": "createAccount",
+            "permission": "account.write",
+            "request": {
+              "content_types": [
+                "application/json"
+              ]
+            },
+            "responses": [
+              {
+                "status_code": 201,
+                "description": "The created Account.",
+                "content_types": [
+                  "application/json"
+                ],
+                "body_object": "Account"
+              }
+            ],
+            "errors": [
+              400,
+              401,
+              403,
+              409,
+              422,
+              429,
+              500
+            ],
+            "impl": {
+              "kind": "Generated",
+              "repo_method": "Create",
+              "service_method": "Create",
+              "handler_name": "CreateAccount"
+            }
+          },
+          {
+            "name": "Search",
+            "summary": "Search Accounts with filters.",
+            "method": "QUERY",
+            "path": "",
+            "pattern": "QUERY /api/v1/accounts",
+            "alias_patterns": [
+              "POST /api/v1/accounts/_search"
+            ],
+            "operation_id": "searchAccounts",
+            "permission": "account.read",
+            "request": {
+              "content_types": [
+                "application/json"
+              ],
+              "query_params": [
+                {
+                  "name": "Limit",
+                  "wire": "limit",
+                  "description": "Maximum rows to return.",
+                  "type": "Int",
+                  "type_kind": "Primitive",
+                  "go_type": "int",
+                  "default": "50"
+                },
+                {
+                  "name": "Offset",
+                  "wire": "offset",
+                  "description": "Rows to skip before the first returned row.",
+                  "type": "Int",
+                  "type_kind": "Primitive",
+                  "go_type": "int",
+                  "default": "0"
+                }
+              ],
+              "body_params": [
+                {
+                  "name": "Filter",
+                  "wire": "filter",
+                  "description": "Conditions rows must satisfy.",
+                  "type": "AccountFilter",
+                  "type_kind": "Object",
+                  "go_type": "AccountFilter"
+                }
+              ]
+            },
+            "responses": [
+              {
+                "status_code": 200,
+                "description": "A page of matching Accounts.",
+                "content_types": [
+                  "application/json"
+                ],
+                "body_object": "AccountListResponse"
+              }
+            ],
+            "errors": [
+              400,
+              401,
+              403,
+              422,
+              429,
+              500
+            ],
+            "impl": {
+              "kind": "Generated",
+              "repo_method": "List",
+              "service_method": "Search",
+              "handler_name": "SearchAccounts"
+            }
+          },
+          {
+            "name": "Delete",
+            "summary": "Delete a Account.",
+            "method": "DELETE",
+            "path": "/{id}",
+            "pattern": "DELETE /api/v1/accounts/{id}",
+            "operation_id": "deleteAccount",
+            "permission": "account.delete",
+            "request": {
+              "path_params": [
+                {
+                  "name": "ID",
+                  "wire": "id",
+                  "description": "Identifier of the Account.",
+                  "type": "UUID",
+                  "type_kind": "Primitive",
+                  "go_type": "uuid.UUID"
+                }
+              ]
+            },
+            "responses": [
+              {
+                "status_code": 204,
+                "description": "The Account was deleted."
+              }
+            ],
+            "errors": [
+              400,
+              401,
+              403,
+              404,
+              409,
+              429,
+              500
+            ],
+            "impl": {
+              "kind": "Generated",
+              "repo_method": "Delete",
+              "service_method": "Delete",
+              "handler_name": "DeleteAccount"
+            }
+          },
+          {
+            "name": "Get",
+            "summary": "Fetch one Account by identifier.",
+            "method": "GET",
+            "path": "/{id}",
+            "pattern": "GET /api/v1/accounts/{id}",
+            "operation_id": "getAccount",
+            "permission": "account.read",
+            "request": {
+              "path_params": [
+                {
+                  "name": "ID",
+                  "wire": "id",
+                  "description": "Identifier of the Account.",
+                  "type": "UUID",
+                  "type_kind": "Primitive",
+                  "go_type": "uuid.UUID"
+                }
+              ]
+            },
+            "responses": [
+              {
+                "status_code": 200,
+                "description": "The requested Account.",
+                "content_types": [
+                  "application/json"
+                ],
+                "body_object": "Account"
+              }
+            ],
+            "errors": [
+              400,
+              401,
+              403,
+              404,
+              429,
+              500
+            ],
+            "impl": {
+              "kind": "Generated",
+              "repo_method": "Get",
+              "service_method": "Get",
+              "handler_name": "GetAccount"
+            }
+          },
+          {
+            "name": "Update",
+            "summary": "Update a Account.",
+            "description": "Only the fields present in the body are changed. A field set to null is cleared; a field left out is left alone.",
+            "method": "PATCH",
+            "path": "/{id}",
+            "pattern": "PATCH /api/v1/accounts/{id}",
+            "operation_id": "updateAccount",
+            "permission": "account.write",
+            "request": {
+              "content_types": [
+                "application/json"
+              ],
+              "path_params": [
+                {
+                  "name": "ID",
+                  "wire": "id",
+                  "description": "Identifier of the Account.",
+                  "type": "UUID",
+                  "type_kind": "Primitive",
+                  "go_type": "uuid.UUID"
+                }
+              ]
+            },
+            "responses": [
+              {
+                "status_code": 200,
+                "description": "The updated Account.",
+                "content_types": [
+                  "application/json"
+                ],
+                "body_object": "Account"
+              }
+            ],
+            "errors": [
+              400,
+              401,
+              403,
+              404,
+              409,
+              422,
+              429,
+              500
+            ],
+            "impl": {
+              "kind": "Generated",
+              "repo_method": "Update",
+              "service_method": "Update",
+              "handler_name": "UpdateAccount"
+            }
+          }
+        ],
+        "storage": {
+          "table": "account",
+          "primary_key": [
+            "id"
+          ],
+          "tenant": {
+            "table": "account",
+            "name": "tenant_id",
+            "sql_type": "uuid",
+            "nullable": false,
+            "scan": "UUID"
+          },
+          "audit": {
+            "created_at": {
+              "table": "account",
+              "name": "created_at",
+              "sql_type": "timestamptz",
+              "nullable": false,
+              "scan": "Timestamptz"
+            },
+            "updated_at": {
+              "table": "account",
+              "name": "updated_at",
+              "sql_type": "timestamptz",
+              "nullable": true,
+              "scan": "Timestamptz"
+            }
+          },
+          "default_order": [
+            {
+              "column": "created_at",
+              "desc": true
+            },
+            {
+              "column": "id"
+            }
+          ],
+          "sortable": [
+            "id",
+            "tenant_id",
+            "created_at",
+            "updated_at"
+          ],
+          "filterable": [
+            "id",
+            "tenant_id",
+            "created_at",
+            "updated_at"
+          ]
+        }
+      },
+      {
+        "name": "RigLeaderboard",
+        "plural": "RigLeaderboards",
+        "path_segment": "rig-leaderboards",
+        "description": "A table under a prefix rig keeps, by a name rig does not use.",
+        "operations": [
+          "Create",
+          "Get",
+          "List",
+          "Search",
+          "Update",
+          "Delete"
+        ],
+        "fields": [
+          {
+            "name": "ID",
+            "wire": "id",
+            "description": "Identifier.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "uuid.UUID",
+            "read_only": true,
+            "column": {
+              "table": "rig_leaderboard",
+              "name": "id",
+              "sql_type": "uuid",
+              "nullable": false,
+              "scan": "UUID"
+            },
+            "operations": [
+              "Read"
+            ]
+          },
+          {
+            "name": "TenantID",
+            "wire": "tenantId",
+            "description": "Who it belongs to.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "uuid.UUID",
+            "read_only": true,
+            "column": {
+              "table": "rig_leaderboard",
+              "name": "tenant_id",
+              "sql_type": "uuid",
+              "nullable": false,
+              "scan": "UUID"
+            },
+            "operations": [
+              "Read"
+            ]
+          },
+          {
+            "name": "CreatedAt",
+            "wire": "createdAt",
+            "description": "When it was written.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "time.Time",
+            "read_only": true,
+            "column": {
+              "table": "rig_leaderboard",
+              "name": "created_at",
+              "sql_type": "timestamptz",
+              "nullable": false,
+              "scan": "Timestamptz"
+            },
+            "operations": [
+              "Read"
+            ]
+          },
+          {
+            "name": "UpdatedAt",
+            "wire": "updatedAt",
+            "description": "When it last changed.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "*time.Time",
+            "modifiers": [
+              "Nullable"
+            ],
+            "read_only": true,
+            "column": {
+              "table": "rig_leaderboard",
+              "name": "updated_at",
+              "sql_type": "timestamptz",
+              "nullable": true,
+              "scan": "Timestamptz"
+            },
+            "operations": [
+              "Read"
+            ]
+          }
+        ],
+        "endpoints": [
+          {
+            "name": "List",
+            "summary": "List RigLeaderboards.",
+            "method": "GET",
+            "path": "",
+            "pattern": "GET /api/v1/rig-leaderboards",
+            "operation_id": "listRigLeaderboards",
+            "permission": "rig_leaderboard.read",
+            "request": {
+              "query_params": [
+                {
+                  "name": "Limit",
+                  "wire": "limit",
+                  "description": "Maximum rows to return.",
+                  "type": "Int",
+                  "type_kind": "Primitive",
+                  "go_type": "int",
+                  "default": "50"
+                },
+                {
+                  "name": "Offset",
+                  "wire": "offset",
+                  "description": "Rows to skip before the first returned row.",
+                  "type": "Int",
+                  "type_kind": "Primitive",
+                  "go_type": "int",
+                  "default": "0"
+                }
+              ]
+            },
+            "responses": [
+              {
+                "status_code": 200,
+                "description": "A page of RigLeaderboards.",
+                "content_types": [
+                  "application/json"
+                ],
+                "body_object": "RigLeaderboardListResponse"
+              }
+            ],
+            "errors": [
+              400,
+              401,
+              403,
+              429,
+              500
+            ],
+            "impl": {
+              "kind": "Generated",
+              "repo_method": "List",
+              "service_method": "List",
+              "handler_name": "ListRigLeaderboards"
+            }
+          },
+          {
+            "name": "Create",
+            "summary": "Create a RigLeaderboard.",
+            "method": "POST",
+            "path": "",
+            "pattern": "POST /api/v1/rig-leaderboards",
+            "operation_id": "createRigLeaderboard",
+            "permission": "rig_leaderboard.write",
+            "request": {
+              "content_types": [
+                "application/json"
+              ]
+            },
+            "responses": [
+              {
+                "status_code": 201,
+                "description": "The created RigLeaderboard.",
+                "content_types": [
+                  "application/json"
+                ],
+                "body_object": "RigLeaderboard"
+              }
+            ],
+            "errors": [
+              400,
+              401,
+              403,
+              409,
+              422,
+              429,
+              500
+            ],
+            "impl": {
+              "kind": "Generated",
+              "repo_method": "Create",
+              "service_method": "Create",
+              "handler_name": "CreateRigLeaderboard"
+            }
+          },
+          {
+            "name": "Search",
+            "summary": "Search RigLeaderboards with filters.",
+            "method": "QUERY",
+            "path": "",
+            "pattern": "QUERY /api/v1/rig-leaderboards",
+            "alias_patterns": [
+              "POST /api/v1/rig-leaderboards/_search"
+            ],
+            "operation_id": "searchRigLeaderboards",
+            "permission": "rig_leaderboard.read",
+            "request": {
+              "content_types": [
+                "application/json"
+              ],
+              "query_params": [
+                {
+                  "name": "Limit",
+                  "wire": "limit",
+                  "description": "Maximum rows to return.",
+                  "type": "Int",
+                  "type_kind": "Primitive",
+                  "go_type": "int",
+                  "default": "50"
+                },
+                {
+                  "name": "Offset",
+                  "wire": "offset",
+                  "description": "Rows to skip before the first returned row.",
+                  "type": "Int",
+                  "type_kind": "Primitive",
+                  "go_type": "int",
+                  "default": "0"
+                }
+              ],
+              "body_params": [
+                {
+                  "name": "Filter",
+                  "wire": "filter",
+                  "description": "Conditions rows must satisfy.",
+                  "type": "RigLeaderboardFilter",
+                  "type_kind": "Object",
+                  "go_type": "RigLeaderboardFilter"
+                }
+              ]
+            },
+            "responses": [
+              {
+                "status_code": 200,
+                "description": "A page of matching RigLeaderboards.",
+                "content_types": [
+                  "application/json"
+                ],
+                "body_object": "RigLeaderboardListResponse"
+              }
+            ],
+            "errors": [
+              400,
+              401,
+              403,
+              422,
+              429,
+              500
+            ],
+            "impl": {
+              "kind": "Generated",
+              "repo_method": "List",
+              "service_method": "Search",
+              "handler_name": "SearchRigLeaderboards"
+            }
+          },
+          {
+            "name": "Delete",
+            "summary": "Delete a RigLeaderboard.",
+            "method": "DELETE",
+            "path": "/{id}",
+            "pattern": "DELETE /api/v1/rig-leaderboards/{id}",
+            "operation_id": "deleteRigLeaderboard",
+            "permission": "rig_leaderboard.delete",
+            "request": {
+              "path_params": [
+                {
+                  "name": "ID",
+                  "wire": "id",
+                  "description": "Identifier of the RigLeaderboard.",
+                  "type": "UUID",
+                  "type_kind": "Primitive",
+                  "go_type": "uuid.UUID"
+                }
+              ]
+            },
+            "responses": [
+              {
+                "status_code": 204,
+                "description": "The RigLeaderboard was deleted."
+              }
+            ],
+            "errors": [
+              400,
+              401,
+              403,
+              404,
+              409,
+              429,
+              500
+            ],
+            "impl": {
+              "kind": "Generated",
+              "repo_method": "Delete",
+              "service_method": "Delete",
+              "handler_name": "DeleteRigLeaderboard"
+            }
+          },
+          {
+            "name": "Get",
+            "summary": "Fetch one RigLeaderboard by identifier.",
+            "method": "GET",
+            "path": "/{id}",
+            "pattern": "GET /api/v1/rig-leaderboards/{id}",
+            "operation_id": "getRigLeaderboard",
+            "permission": "rig_leaderboard.read",
+            "request": {
+              "path_params": [
+                {
+                  "name": "ID",
+                  "wire": "id",
+                  "description": "Identifier of the RigLeaderboard.",
+                  "type": "UUID",
+                  "type_kind": "Primitive",
+                  "go_type": "uuid.UUID"
+                }
+              ]
+            },
+            "responses": [
+              {
+                "status_code": 200,
+                "description": "The requested RigLeaderboard.",
+                "content_types": [
+                  "application/json"
+                ],
+                "body_object": "RigLeaderboard"
+              }
+            ],
+            "errors": [
+              400,
+              401,
+              403,
+              404,
+              429,
+              500
+            ],
+            "impl": {
+              "kind": "Generated",
+              "repo_method": "Get",
+              "service_method": "Get",
+              "handler_name": "GetRigLeaderboard"
+            }
+          },
+          {
+            "name": "Update",
+            "summary": "Update a RigLeaderboard.",
+            "description": "Only the fields present in the body are changed. A field set to null is cleared; a field left out is left alone.",
+            "method": "PATCH",
+            "path": "/{id}",
+            "pattern": "PATCH /api/v1/rig-leaderboards/{id}",
+            "operation_id": "updateRigLeaderboard",
+            "permission": "rig_leaderboard.write",
+            "request": {
+              "content_types": [
+                "application/json"
+              ],
+              "path_params": [
+                {
+                  "name": "ID",
+                  "wire": "id",
+                  "description": "Identifier of the RigLeaderboard.",
+                  "type": "UUID",
+                  "type_kind": "Primitive",
+                  "go_type": "uuid.UUID"
+                }
+              ]
+            },
+            "responses": [
+              {
+                "status_code": 200,
+                "description": "The updated RigLeaderboard.",
+                "content_types": [
+                  "application/json"
+                ],
+                "body_object": "RigLeaderboard"
+              }
+            ],
+            "errors": [
+              400,
+              401,
+              403,
+              404,
+              409,
+              422,
+              429,
+              500
+            ],
+            "impl": {
+              "kind": "Generated",
+              "repo_method": "Update",
+              "service_method": "Update",
+              "handler_name": "UpdateRigLeaderboard"
+            }
+          }
+        ],
+        "storage": {
+          "table": "rig_leaderboard",
+          "primary_key": [
+            "id"
+          ],
+          "tenant": {
+            "table": "rig_leaderboard",
+            "name": "tenant_id",
+            "sql_type": "uuid",
+            "nullable": false,
+            "scan": "UUID"
+          },
+          "audit": {
+            "created_at": {
+              "table": "rig_leaderboard",
+              "name": "created_at",
+              "sql_type": "timestamptz",
+              "nullable": false,
+              "scan": "Timestamptz"
+            },
+            "updated_at": {
+              "table": "rig_leaderboard",
+              "name": "updated_at",
+              "sql_type": "timestamptz",
+              "nullable": true,
+              "scan": "Timestamptz"
+            }
+          },
+          "default_order": [
+            {
+              "column": "created_at",
+              "desc": true
+            },
+            {
+              "column": "id"
+            }
+          ],
+          "sortable": [
+            "id",
+            "tenant_id",
+            "created_at",
+            "updated_at"
+          ],
+          "filterable": [
+            "id",
+            "tenant_id",
+            "created_at",
+            "updated_at"
+          ]
+        }
+      },
+      {
+        "name": "Tenant",
+        "plural": "Tenants",
+        "path_segment": "tenants",
+        "description": "An ordinary table whose configuration reaches for a reserved name.",
+        "operations": [
+          "Create",
+          "Get",
+          "List",
+          "Search",
+          "Update",
+          "Delete"
+        ],
+        "fields": [
+          {
+            "name": "ID",
+            "wire": "id",
+            "description": "Identifier.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "uuid.UUID",
+            "read_only": true,
+            "column": {
+              "table": "bookmark",
+              "name": "id",
+              "sql_type": "uuid",
+              "nullable": false,
+              "scan": "UUID"
+            },
+            "operations": [
+              "Read"
+            ]
+          },
+          {
+            "name": "TenantID",
+            "wire": "tenantId",
+            "description": "Who it belongs to.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "uuid.UUID",
+            "read_only": true,
+            "column": {
+              "table": "bookmark",
+              "name": "tenant_id",
+              "sql_type": "uuid",
+              "nullable": false,
+              "scan": "UUID"
+            },
+            "operations": [
+              "Read"
+            ]
+          },
+          {
+            "name": "CreatedAt",
+            "wire": "createdAt",
+            "description": "When it was written.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "time.Time",
+            "read_only": true,
+            "column": {
+              "table": "bookmark",
+              "name": "created_at",
+              "sql_type": "timestamptz",
+              "nullable": false,
+              "scan": "Timestamptz"
+            },
+            "operations": [
+              "Read"
+            ]
+          },
+          {
+            "name": "UpdatedAt",
+            "wire": "updatedAt",
+            "description": "When it last changed.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "*time.Time",
+            "modifiers": [
+              "Nullable"
+            ],
+            "read_only": true,
+            "column": {
+              "table": "bookmark",
+              "name": "updated_at",
+              "sql_type": "timestamptz",
+              "nullable": true,
+              "scan": "Timestamptz"
+            },
+            "operations": [
+              "Read"
+            ]
+          }
+        ],
+        "endpoints": [
+          {
+            "name": "List",
+            "summary": "List Tenants.",
+            "method": "GET",
+            "path": "",
+            "pattern": "GET /api/v1/tenants",
+            "operation_id": "listTenants",
+            "permission": "bookmark.read",
+            "request": {
+              "query_params": [
+                {
+                  "name": "Limit",
+                  "wire": "limit",
+                  "description": "Maximum rows to return.",
+                  "type": "Int",
+                  "type_kind": "Primitive",
+                  "go_type": "int",
+                  "default": "50"
+                },
+                {
+                  "name": "Offset",
+                  "wire": "offset",
+                  "description": "Rows to skip before the first returned row.",
+                  "type": "Int",
+                  "type_kind": "Primitive",
+                  "go_type": "int",
+                  "default": "0"
+                }
+              ]
+            },
+            "responses": [
+              {
+                "status_code": 200,
+                "description": "A page of Tenants.",
+                "content_types": [
+                  "application/json"
+                ],
+                "body_object": "TenantListResponse"
+              }
+            ],
+            "errors": [
+              400,
+              401,
+              403,
+              429,
+              500
+            ],
+            "impl": {
+              "kind": "Generated",
+              "repo_method": "List",
+              "service_method": "List",
+              "handler_name": "ListTenants"
+            }
+          },
+          {
+            "name": "Create",
+            "summary": "Create a Tenant.",
+            "method": "POST",
+            "path": "",
+            "pattern": "POST /api/v1/tenants",
+            "operation_id": "createTenant",
+            "permission": "bookmark.write",
+            "request": {
+              "content_types": [
+                "application/json"
+              ]
+            },
+            "responses": [
+              {
+                "status_code": 201,
+                "description": "The created Tenant.",
+                "content_types": [
+                  "application/json"
+                ],
+                "body_object": "Tenant"
+              }
+            ],
+            "errors": [
+              400,
+              401,
+              403,
+              409,
+              422,
+              429,
+              500
+            ],
+            "impl": {
+              "kind": "Generated",
+              "repo_method": "Create",
+              "service_method": "Create",
+              "handler_name": "CreateTenant"
+            }
+          },
+          {
+            "name": "Search",
+            "summary": "Search Tenants with filters.",
+            "method": "QUERY",
+            "path": "",
+            "pattern": "QUERY /api/v1/tenants",
+            "alias_patterns": [
+              "POST /api/v1/tenants/_search"
+            ],
+            "operation_id": "searchTenants",
+            "permission": "bookmark.read",
+            "request": {
+              "content_types": [
+                "application/json"
+              ],
+              "query_params": [
+                {
+                  "name": "Limit",
+                  "wire": "limit",
+                  "description": "Maximum rows to return.",
+                  "type": "Int",
+                  "type_kind": "Primitive",
+                  "go_type": "int",
+                  "default": "50"
+                },
+                {
+                  "name": "Offset",
+                  "wire": "offset",
+                  "description": "Rows to skip before the first returned row.",
+                  "type": "Int",
+                  "type_kind": "Primitive",
+                  "go_type": "int",
+                  "default": "0"
+                }
+              ],
+              "body_params": [
+                {
+                  "name": "Filter",
+                  "wire": "filter",
+                  "description": "Conditions rows must satisfy.",
+                  "type": "TenantFilter",
+                  "type_kind": "Object",
+                  "go_type": "TenantFilter"
+                }
+              ]
+            },
+            "responses": [
+              {
+                "status_code": 200,
+                "description": "A page of matching Tenants.",
+                "content_types": [
+                  "application/json"
+                ],
+                "body_object": "TenantListResponse"
+              }
+            ],
+            "errors": [
+              400,
+              401,
+              403,
+              422,
+              429,
+              500
+            ],
+            "impl": {
+              "kind": "Generated",
+              "repo_method": "List",
+              "service_method": "Search",
+              "handler_name": "SearchTenants"
+            }
+          },
+          {
+            "name": "Delete",
+            "summary": "Delete a Tenant.",
+            "method": "DELETE",
+            "path": "/{id}",
+            "pattern": "DELETE /api/v1/tenants/{id}",
+            "operation_id": "deleteTenant",
+            "permission": "bookmark.delete",
+            "request": {
+              "path_params": [
+                {
+                  "name": "ID",
+                  "wire": "id",
+                  "description": "Identifier of the Tenant.",
+                  "type": "UUID",
+                  "type_kind": "Primitive",
+                  "go_type": "uuid.UUID"
+                }
+              ]
+            },
+            "responses": [
+              {
+                "status_code": 204,
+                "description": "The Tenant was deleted."
+              }
+            ],
+            "errors": [
+              400,
+              401,
+              403,
+              404,
+              409,
+              429,
+              500
+            ],
+            "impl": {
+              "kind": "Generated",
+              "repo_method": "Delete",
+              "service_method": "Delete",
+              "handler_name": "DeleteTenant"
+            }
+          },
+          {
+            "name": "Get",
+            "summary": "Fetch one Tenant by identifier.",
+            "method": "GET",
+            "path": "/{id}",
+            "pattern": "GET /api/v1/tenants/{id}",
+            "operation_id": "getTenant",
+            "permission": "bookmark.read",
+            "request": {
+              "path_params": [
+                {
+                  "name": "ID",
+                  "wire": "id",
+                  "description": "Identifier of the Tenant.",
+                  "type": "UUID",
+                  "type_kind": "Primitive",
+                  "go_type": "uuid.UUID"
+                }
+              ]
+            },
+            "responses": [
+              {
+                "status_code": 200,
+                "description": "The requested Tenant.",
+                "content_types": [
+                  "application/json"
+                ],
+                "body_object": "Tenant"
+              }
+            ],
+            "errors": [
+              400,
+              401,
+              403,
+              404,
+              429,
+              500
+            ],
+            "impl": {
+              "kind": "Generated",
+              "repo_method": "Get",
+              "service_method": "Get",
+              "handler_name": "GetTenant"
+            }
+          },
+          {
+            "name": "Update",
+            "summary": "Update a Tenant.",
+            "description": "Only the fields present in the body are changed. A field set to null is cleared; a field left out is left alone.",
+            "method": "PATCH",
+            "path": "/{id}",
+            "pattern": "PATCH /api/v1/tenants/{id}",
+            "operation_id": "updateTenant",
+            "permission": "bookmark.write",
+            "request": {
+              "content_types": [
+                "application/json"
+              ],
+              "path_params": [
+                {
+                  "name": "ID",
+                  "wire": "id",
+                  "description": "Identifier of the Tenant.",
+                  "type": "UUID",
+                  "type_kind": "Primitive",
+                  "go_type": "uuid.UUID"
+                }
+              ]
+            },
+            "responses": [
+              {
+                "status_code": 200,
+                "description": "The updated Tenant.",
+                "content_types": [
+                  "application/json"
+                ],
+                "body_object": "Tenant"
+              }
+            ],
+            "errors": [
+              400,
+              401,
+              403,
+              404,
+              409,
+              422,
+              429,
+              500
+            ],
+            "impl": {
+              "kind": "Generated",
+              "repo_method": "Update",
+              "service_method": "Update",
+              "handler_name": "UpdateTenant"
+            }
+          }
+        ],
+        "storage": {
+          "table": "bookmark",
+          "primary_key": [
+            "id"
+          ],
+          "tenant": {
+            "table": "bookmark",
+            "name": "tenant_id",
+            "sql_type": "uuid",
+            "nullable": false,
+            "scan": "UUID"
+          },
+          "audit": {
+            "created_at": {
+              "table": "bookmark",
+              "name": "created_at",
+              "sql_type": "timestamptz",
+              "nullable": false,
+              "scan": "Timestamptz"
+            },
+            "updated_at": {
+              "table": "bookmark",
+              "name": "updated_at",
+              "sql_type": "timestamptz",
+              "nullable": true,
+              "scan": "Timestamptz"
+            }
+          },
+          "default_order": [
+            {
+              "column": "created_at",
+              "desc": true
+            },
+            {
+              "column": "id"
+            }
+          ],
+          "sortable": [
+            "id",
+            "tenant_id",
+            "created_at",
+            "updated_at"
+          ],
+          "filterable": [
+            "id",
+            "tenant_id",
+            "created_at",
+            "updated_at"
+          ]
+        }
+      }
+    ],
+    "permissions": [
+      {
+        "key": "account.delete",
+        "name": "Delete accounts",
+        "description": "Delete accounts — A project's own table, under a name rig's rig_account takes.",
+        "resource": "Account",
+        "action": "delete"
+      },
+      {
+        "key": "account.read",
+        "name": "Read accounts",
+        "description": "Read accounts — A project's own table, under a name rig's rig_account takes.",
+        "resource": "Account",
+        "action": "read"
+      },
+      {
+        "key": "account.write",
+        "name": "Write accounts",
+        "description": "Create and change accounts — A project's own table, under a name rig's rig_account takes.",
+        "resource": "Account",
+        "action": "write"
+      },
+      {
+        "key": "bookmark.delete",
+        "name": "Delete tenants",
+        "description": "Delete tenants — An ordinary table whose configuration reaches for a reserved name.",
+        "resource": "Tenant",
+        "action": "delete"
+      },
+      {
+        "key": "bookmark.read",
+        "name": "Read tenants",
+        "description": "Read tenants — An ordinary table whose configuration reaches for a reserved name.",
+        "resource": "Tenant",
+        "action": "read"
+      },
+      {
+        "key": "bookmark.write",
+        "name": "Write tenants",
+        "description": "Create and change tenants — An ordinary table whose configuration reaches for a reserved name.",
+        "resource": "Tenant",
+        "action": "write"
+      },
+      {
+        "key": "rig_leaderboard.delete",
+        "name": "Delete rigleaderboards",
+        "description": "Delete rigleaderboards — A table under a prefix rig keeps, by a name rig does not use.",
+        "resource": "RigLeaderboard",
+        "action": "delete"
+      },
+      {
+        "key": "rig_leaderboard.read",
+        "name": "Read rigleaderboards",
+        "description": "Read rigleaderboards — A table under a prefix rig keeps, by a name rig does not use.",
+        "resource": "RigLeaderboard",
+        "action": "read"
+      },
+      {
+        "key": "rig_leaderboard.write",
+        "name": "Write rigleaderboards",
+        "description": "Create and change rigleaderboards — A table under a prefix rig keeps, by a name rig does not use.",
+        "resource": "RigLeaderboard",
+        "action": "write"
+      }
+    ]
+  },
+  "schema": {
+    "name": "public",
+    "tables": [
+      {
+        "name": "account",
+        "comment": "A project's own table, under a name rig's rig_account takes.",
+        "kind": "Base",
+        "columns": [
+          {
+            "name": "id",
+            "comment": "Identifier.",
+            "comment_source": "database",
+            "sql_type": "uuid",
+            "udt_name": "uuid",
+            "nullable": false,
+            "ordinal": 1,
+            "is_primary_key": true
+          },
+          {
+            "name": "tenant_id",
+            "comment": "Who it belongs to.",
+            "comment_source": "database",
+            "sql_type": "uuid",
+            "udt_name": "uuid",
+            "nullable": false,
+            "ordinal": 2
+          },
+          {
+            "name": "created_at",
+            "comment": "When it was written.",
+            "comment_source": "database",
+            "sql_type": "timestamptz",
+            "udt_name": "timestamptz",
+            "nullable": false,
+            "ordinal": 3
+          },
+          {
+            "name": "updated_at",
+            "comment": "When it last changed.",
+            "comment_source": "database",
+            "sql_type": "timestamptz",
+            "udt_name": "timestamptz",
+            "nullable": true,
+            "ordinal": 4
+          }
+        ],
+        "primary_key": [
+          "id"
+        ],
+        "indexes": [
+          {
+            "name": "account_pkey",
+            "columns": [
+              "id"
+            ],
+            "unique": true,
+            "method": "btree"
+          },
+          {
+            "name": "account_tenant_created_idx",
+            "columns": [
+              "tenant_id",
+              "created_at"
+            ],
+            "method": "btree"
+          }
+        ]
+      },
+      {
+        "name": "bookmark",
+        "comment": "An ordinary table whose configuration reaches for a reserved name.",
+        "kind": "Base",
+        "columns": [
+          {
+            "name": "id",
+            "comment": "Identifier.",
+            "comment_source": "database",
+            "sql_type": "uuid",
+            "udt_name": "uuid",
+            "nullable": false,
+            "ordinal": 1,
+            "is_primary_key": true
+          },
+          {
+            "name": "tenant_id",
+            "comment": "Who it belongs to.",
+            "comment_source": "database",
+            "sql_type": "uuid",
+            "udt_name": "uuid",
+            "nullable": false,
+            "ordinal": 2
+          },
+          {
+            "name": "created_at",
+            "comment": "When it was written.",
+            "comment_source": "database",
+            "sql_type": "timestamptz",
+            "udt_name": "timestamptz",
+            "nullable": false,
+            "ordinal": 3
+          },
+          {
+            "name": "updated_at",
+            "comment": "When it last changed.",
+            "comment_source": "database",
+            "sql_type": "timestamptz",
+            "udt_name": "timestamptz",
+            "nullable": true,
+            "ordinal": 4
+          }
+        ],
+        "primary_key": [
+          "id"
+        ],
+        "indexes": [
+          {
+            "name": "bookmark_pkey",
+            "columns": [
+              "id"
+            ],
+            "unique": true,
+            "method": "btree"
+          },
+          {
+            "name": "bookmark_tenant_created_idx",
+            "columns": [
+              "tenant_id",
+              "created_at"
+            ],
+            "method": "btree"
+          }
+        ]
+      },
+      {
+        "name": "rig_leaderboard",
+        "comment": "A table under a prefix rig keeps, by a name rig does not use.",
+        "kind": "Base",
+        "columns": [
+          {
+            "name": "id",
+            "comment": "Identifier.",
+            "comment_source": "database",
+            "sql_type": "uuid",
+            "udt_name": "uuid",
+            "nullable": false,
+            "ordinal": 1,
+            "is_primary_key": true
+          },
+          {
+            "name": "tenant_id",
+            "comment": "Who it belongs to.",
+            "comment_source": "database",
+            "sql_type": "uuid",
+            "udt_name": "uuid",
+            "nullable": false,
+            "ordinal": 2
+          },
+          {
+            "name": "created_at",
+            "comment": "When it was written.",
+            "comment_source": "database",
+            "sql_type": "timestamptz",
+            "udt_name": "timestamptz",
+            "nullable": false,
+            "ordinal": 3
+          },
+          {
+            "name": "updated_at",
+            "comment": "When it last changed.",
+            "comment_source": "database",
+            "sql_type": "timestamptz",
+            "udt_name": "timestamptz",
+            "nullable": true,
+            "ordinal": 4
+          }
+        ],
+        "primary_key": [
+          "id"
+        ],
+        "indexes": [
+          {
+            "name": "rig_leaderboard_pkey",
+            "columns": [
+              "id"
+            ],
+            "unique": true,
+            "method": "btree"
+          },
+          {
+            "name": "rig_leaderboard_tenant_created_idx",
+            "columns": [
+              "tenant_id",
+              "created_at"
+            ],
+            "method": "btree"
+          }
+        ]
+      }
+    ],
+    "enums": []
+  },
+  "valid": false
+}

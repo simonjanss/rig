@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -42,7 +43,7 @@ func newSyncCmd(e *env) *cobra.Command {
 			// configuration file for one would be a file describing a table rig
 			// generates nothing from, and the next `rig validate` would report it
 			// as belonging to the auth module.
-			ignore, err := foundationTables(p)
+			ignore, foundation, err := foundationTables(p)
 			if err != nil {
 				return err
 			}
@@ -69,8 +70,29 @@ func newSyncCmd(e *env) *cobra.Command {
 				return err
 			}
 
+			// A table under a name rig keeps gets no file. Sync is deliberately
+			// tolerant of a project that does not yet validate — it exists to
+			// repair one — so this is not a refusal; but writing a configuration
+			// for a table that can never compile sends somebody down a path they
+			// then have to undo, and the rename is the only way out of it.
+			var skipped int
+			changes = slices.DeleteFunc(changes, func(c tablesync.Change) bool {
+				if c.Kind != tablesync.ChangeCreate {
+					return false
+				}
+				why := compile.Reserved(p, foundation, c.Table)
+				if why == "" {
+					return false
+				}
+				fmt.Fprintf(e.errOut, "skip    %s: %s — rename the table\n", p.Rel(c.Path), why)
+				skipped++
+				return true
+			})
+
 			if len(changes) == 0 {
-				fmt.Fprintln(e.errOut, "table configuration is already up to date")
+				if skipped == 0 {
+					fmt.Fprintln(e.errOut, "table configuration is already up to date")
+				}
 				return nil
 			}
 

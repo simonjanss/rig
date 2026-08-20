@@ -32,6 +32,10 @@ scaffolds a whole table with the conventional columns already in place:
 rig migration new create_todo --table todo --soft-delete
 ```
 
+`--table` refuses a name rig keeps for itself — see
+[Names rig reserves](#names-rig-reserves) — so you find out before the file
+exists rather than from the next `rig validate`.
+
 ## The two required columns
 
 Every table rig generates for needs both of these.
@@ -270,6 +274,66 @@ column records when something *happened*, and only `timestamptz` can — a bare
 `timestamp` is a clock reading with nothing to anchor it, so two of them cannot
 be ordered across a daylight-saving change. `timestamp` is the right type for a
 birthday or for opening hours, and the wrong one for an event.
+
+## Names rig reserves
+
+Everything above is a convention you can turn off. This is the one naming rule
+you cannot, and there are two halves to it.
+
+**The `rig_` prefix is rig's.** Your tables cannot use it. It is what tells you,
+in psql, which tables arrived with `rig setup-project` and which you wrote — and
+it is what lets rig add a table to the foundation without landing on one of
+yours.
+
+**The names those tables project to are reserved too**, whether or not you
+expose them:
+
+| Reserved | Taken by |
+|---|---|
+| `Tenant`, `Identity`, `IdentityCredential`, `IdentityVerification`, `Account` | the tenancy tables |
+| `APIKey` | `rig_api_key` |
+| `AccountToken`, `AuthLog`, `IdentitySession` | the session tables |
+| `IdentityOAuth` | `rig_identity_oauth` |
+| `File` | `rig_file` |
+| `Notification`, `NotificationRecipient`, `NotificationDevice`, `NotificationSetting`, `NotificationDelivery` | the [notification](notifications.md) tables |
+
+So you cannot have a table called `account`, or `file`, or `notification`
+([RIG2004](diagnostics.md)) — nor a table under the prefix
+([RIG2005](diagnostics.md)).
+
+The list grows when rig's foundation does, and it grows on its own: a name is
+reserved by a foundation table's configuration asking for it, not by an entry in
+a list somebody has to remember. That is why turning `notifications.enabled` on
+does not change what is reserved — those five names were already rig's the moment
+the part existed.
+
+**The trade.** You give up a handful of common table names. What you get back is
+that `auth.expose: [rig_account]` stays one line in `rig.yaml` forever. Without
+the reservation it works until the day you turn it on, and the fix that day is a
+migration, a rename in every client that reads the resource, and a deprecation
+window for anybody already calling it.
+
+Names are sometimes reserved before the tables exist, which is the same bet made
+earlier. `Notification` was reserved while the notification part was still being
+designed: a name costs you one alternative today, and finding out on the day the
+part lands costs you the migration.
+
+**Keeping the table name.** Only the projected name is reserved, so a table you
+genuinely want to call `file` can keep its name and answer to something else:
+
+```yaml
+# services/file/file.yaml
+table: file
+resource: Document
+```
+
+That is the whole escape. It is deliberately not a switch: renaming the resource
+is a decision about your API, and it is visible in the file that describes it.
+
+**Turning it off.** `auth.own: true` ([rig-yaml.md](rig-yaml.md#auth)) stops
+both rules. A project that has forked the foundation owns those tables and their
+names, so there is nothing left to reserve them from. It is the same one-way
+door it already was — you are maintaining the auth schema yourself from then on.
 
 ## Next
 

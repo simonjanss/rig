@@ -62,7 +62,7 @@ restore_window_days: 30
 | Key | |
 |---|---|
 | `table` | The physical table name. Must match where the file is, so a renamed table is caught rather than silently ignored. |
-| `resource` | API resource name. Defaults to the table name in PascalCase. |
+| `resource` | API resource name. Defaults to the table name in PascalCase. Some names are rig's — see [schema.md](schema.md#names-rig-reserves). |
 | `plural` | Defaults to an inflection of the resource name. |
 | `path_segment` | URL segment. Defaults to the kebab-case plural. |
 | `comment` | What the table is for. Becomes the Go doc comment and the API description. |

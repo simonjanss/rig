@@ -1,0 +1,3 @@
+error[RIG2004] account: table "account" projects to the resource name "Account", which rig's own rig_account takes — reserved whether or not this project exposes that table, so that exposing it later is never a rename
+error[RIG2005] rig_leaderboard: table "rig_leaderboard" uses the rig_ prefix, which rig keeps for the tables it creates
+error[RIG2004] testdata/reservedtables/tables/bookmark.yaml:7:1: table "bookmark" projects to the resource name "Tenant", which rig's own rig_tenant takes — reserved whether or not this project exposes that table, so that exposing it later is never a rename

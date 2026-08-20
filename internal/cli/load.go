@@ -49,7 +49,7 @@ func compileFrom(p *project.Project, schema ir.Schema) (*ir.Document, diag.List)
 	set, d := loadTables(p)
 	diags.Append(d)
 
-	ignore, err := foundationTables(p)
+	ignore, foundation, err := foundationTables(p)
 	if err != nil {
 		diags.Add(diag.CodeConfigFile, diag.Anchor{}, "%v", err)
 	}
@@ -61,38 +61,46 @@ func compileFrom(p *project.Project, schema ir.Schema) (*ir.Document, diag.List)
 		Project:      p,
 		Tool:         "rig " + Version,
 		IgnoreTables: ignore,
+		Foundation:   foundation,
 	})
 	diags.Append(d)
 
 	return doc, diags
 }
 
-// foundationTables are the tables rig generates nothing for.
+// foundationTables answers two questions from one reading of the migrations.
 //
-// They are the authentication foundation's, and they are recognised by the
-// project's own migration files rather than by name alone: `rig_account` is the
-// auth module's table in a project that scaffolded it, and an ordinary table in
-// a project that wrote its own. Guessing from the name would silently stop
-// generating a repository somebody depends on.
-func foundationTables(p *project.Project) ([]string, error) {
-	if p.Config.Auth.Own {
-		// The project has taken the schema over, so there is nothing to leave
-		// out and every rule applies to all of it.
-		return nil, nil
-	}
-
+// `ignore` are the tables rig generates nothing for. `foundation` are the ones
+// rig created at all, exposed or not — which is a wider set, because exposing a
+// table takes it out of the first list and leaves it rig's. That difference is
+// the whole reason for two return values: it is what tells a scaffolded
+// rig_account from one somebody wrote by hand, and nothing else can.
+//
+// Both are recognised by the project's own migration files rather than by name
+// alone. Guessing from the name would silently stop generating a repository
+// somebody depends on.
+func foundationTables(p *project.Project) (ignore, foundation []string, err error) {
 	names, err := migrationNames(p.MigrationsDir())
 	if err != nil {
 		if os.IsNotExist(err) {
 			// No migrations directory means no foundation, which is the state of
 			// a project between `rig init` and its first migration.
-			return nil, nil
+			return nil, nil, nil
 		}
-		return nil, err
+		return nil, nil, err
+	}
+	foundation = scaffold.Managed(names)
+
+	if p.Config.Auth.Own {
+		// The project has taken the schema over, so there is nothing to leave
+		// out and every rule applies to all of it. `foundation` is still true and
+		// simply unused: the reserved-name rules read `auth.own` themselves and
+		// stop before they ask.
+		return nil, foundation, nil
 	}
 
 	var out []string
-	for _, table := range scaffold.Managed(names) {
+	for _, table := range foundation {
 		// rig_file has a switch of its own rather than a place in that list,
 		// because the reason to expose it is not the reason to expose any of the
 		// others. The url lives on the row, so a client that cannot read
@@ -132,7 +140,7 @@ func foundationTables(p *project.Project) ([]string, error) {
 		}
 		out = append(out, table)
 	}
-	return out, nil
+	return out, foundation, nil
 }
 
 // checkFilesFoundation reports a files block whose table is not there, and an

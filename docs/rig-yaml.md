@@ -292,7 +292,7 @@ because they affect code generation:
 | Key | |
 |---|---|
 | `expose` | Foundation tables (`rig_account`, …) to generate a model, repository, and API for anyway — for an administration screen. |
-| `own` | Generate for every foundation table, for a project that has forked the schema and no longer imports `rig/auth`. A one-way door. |
+| `own` | Generate for every foundation table, for a project that has forked the schema and no longer imports `rig/auth`. Also stops rig reserving the `rig_` prefix and the names its tables project to ([schema.md](schema.md#names-rig-reserves)). A one-way door. |
 
 ---
 
