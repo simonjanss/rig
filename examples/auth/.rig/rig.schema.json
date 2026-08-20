@@ -558,6 +558,10 @@
           "$ref": "#/$defs/Duration",
           "description": "How long a dispatcher's claim on a delivery is honoured before another may take it. Set it longer than your slowest channel's timeout. Defaults to 5m, and under 1m is refused."
         },
+        "send_timeout": {
+          "$ref": "#/$defs/Duration",
+          "description": "How long one call into a channel may take before it is treated as failed. Has to be shorter than claim_ttl. Defaults to 30s, and under 1s is refused."
+        },
         "max_attempts": {
           "type": "integer",
           "description": "How many times a delivery is tried before it is marked failed. Defaults to 5."
