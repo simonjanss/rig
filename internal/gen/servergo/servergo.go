@@ -134,6 +134,16 @@ func (g *Generator) Generate(_ context.Context, doc *ir.Document, opts gen.Optio
 		artifacts = append(artifacts, files)
 	}
 
+	// The inbox wiring, when there is an inbox. A project with no
+	// `notifications:` block gets no dispatcher and no routes.
+	if e.hasNotifications() {
+		notifications, err := e.notificationsFile()
+		if err != nil {
+			return nil, err
+		}
+		artifacts = append(artifacts, notifications)
+	}
+
 	return artifacts, nil
 }
 

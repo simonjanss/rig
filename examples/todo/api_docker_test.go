@@ -33,6 +33,7 @@ import (
 	"github.com/simonjanss/rig/examples/todo/internal/store"
 	"github.com/simonjanss/rig/examples/todo/services/todo"
 	todo_attachment "github.com/simonjanss/rig/examples/todo/services/todo_attachment"
+	rignotify "github.com/simonjanss/rig/notify"
 	"github.com/simonjanss/rig/runtime/dbhook"
 	"github.com/simonjanss/rig/runtime/rigerr"
 	"github.com/simonjanss/rig/runtime/tenancy"
@@ -367,7 +368,7 @@ func newHandler(pool *pgxpool.Pool, notifier todo.Notifier) http.Handler {
 
 	return api.Register(api.Handlers{
 		Server:         api.Server{GetClaims: headerClaims},
-		Todo:           todo.New(repos.Todos, files, notifier, nil),
+		Todo:           todo.New(repos.Todos, files, notifier, nil, pool, nil),
 		TodoAttachment: todo_attachment.New(repos.TodoAttachments, files),
 	})
 }
@@ -1089,6 +1090,10 @@ func newScopedHandler(
 				Read: dbhook.ReadHooks[model.TodoFilter, model.Todo]{Narrow: narrow, Rows: rows},
 			},
 			Endpoints: svc,
+			// Required, because todo is joined to rig_notification. This test is
+			// about read hooks and tells nobody anything, so it answers both
+			// questions with the emptiest true answers there are.
+			Notify: silentNotify{},
 		},
 		api.NewFiles(pool),
 	)
@@ -1145,4 +1150,18 @@ func TestTheTenantCannotBeAskedFor(t *testing.T) {
 			t.Errorf("%s: another tenant saw %d rows", name, theirs.Pagination.Total)
 		}
 	}
+}
+
+// silentNotify answers the two questions a notifiable table owes without
+// producing a notification.
+//
+// Due, because a notification that is never due would leave rows in Cancelled
+// and say nothing about this test; and nobody to tell, because this test is
+// about what a read answers with.
+type silentNotify struct{}
+
+func (silentNotify) NotifyAt(*model.Todo, string) (time.Time, bool) { return time.Time{}, true }
+
+func (silentNotify) NotifyWho(context.Context, *rignotify.Notification, *model.Todo) ([]uuid.UUID, error) {
+	return nil, nil
 }

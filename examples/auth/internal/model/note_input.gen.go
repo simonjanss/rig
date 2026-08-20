@@ -7,6 +7,7 @@ package model
 import (
 	"context"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/simonjanss/rig/runtime/patch"
@@ -23,6 +24,9 @@ type NoteCreateInput struct {
 	Title string `json:"title"`
 	// The note itself, or null while it is just a title.
 	Body *string `json:"body"`
+	// When the note goes live, or null while it is a draft. Notifications about it
+	// are due then.
+	PublishAt *time.Time `json:"publishAt"`
 }
 
 // Normalize tidies what was given before anything checks it.
@@ -50,6 +54,9 @@ type NoteCreateInputError struct {
 	Title *rigerr.FieldError `json:"title,omitempty"`
 	// The note itself, or null while it is just a title.
 	Body *rigerr.FieldError `json:"body,omitempty"`
+	// When the note goes live, or null while it is a draft. Notifications about it
+	// are due then.
+	PublishAt *rigerr.FieldError `json:"publishAt,omitempty"`
 
 	// Entity is a problem with the row as a whole rather than with one field: what
 	// the Entity rule said.
@@ -63,7 +70,7 @@ func (e *NoteCreateInputError) Empty() bool {
 		return true
 	}
 
-	return e.Title == nil && e.Body == nil && e.Entity == nil
+	return e.Title == nil && e.Body == nil && e.PublishAt == nil && e.Entity == nil
 }
 
 // Error implements error. The sentence is for logs and for a person; the
@@ -75,6 +82,9 @@ func (e *NoteCreateInputError) Error() string {
 	}
 	if e.Body != nil {
 		parts = append(parts, "body "+e.Body.Error())
+	}
+	if e.PublishAt != nil {
+		parts = append(parts, "publishAt "+e.PublishAt.Error())
 	}
 	if e.Entity != nil {
 		parts = append(parts, e.Entity.Error())
@@ -123,6 +133,9 @@ type NoteUpdateInput struct {
 	Title patch.Optional[string] `json:"title"`
 	// The note itself, or null while it is just a title.
 	Body patch.Nullable[string] `json:"body"`
+	// When the note goes live, or null while it is a draft. Notifications about it
+	// are due then.
+	PublishAt patch.Nullable[time.Time] `json:"publishAt"`
 }
 
 // Normalize tidies the fields this request actually carries.
@@ -159,6 +172,9 @@ func (i NoteUpdateInput) Merged(prev *Note) Note {
 	if i.Body.Touched() {
 		out.Body = i.Body.Ptr()
 	}
+	if i.PublishAt.Touched() {
+		out.PublishAt = i.PublishAt.Ptr()
+	}
 
 	return out
 }
@@ -175,6 +191,9 @@ type NoteUpdateInputError struct {
 	Title *rigerr.FieldError `json:"title,omitempty"`
 	// The note itself, or null while it is just a title.
 	Body *rigerr.FieldError `json:"body,omitempty"`
+	// When the note goes live, or null while it is a draft. Notifications about it
+	// are due then.
+	PublishAt *rigerr.FieldError `json:"publishAt,omitempty"`
 
 	// Entity is a problem with the row as a whole rather than with one field: what
 	// the Entity rule said.
@@ -188,7 +207,7 @@ func (e *NoteUpdateInputError) Empty() bool {
 		return true
 	}
 
-	return e.Title == nil && e.Body == nil && e.Entity == nil
+	return e.Title == nil && e.Body == nil && e.PublishAt == nil && e.Entity == nil
 }
 
 // Error implements error. The sentence is for logs and for a person; the
@@ -200,6 +219,9 @@ func (e *NoteUpdateInputError) Error() string {
 	}
 	if e.Body != nil {
 		parts = append(parts, "body "+e.Body.Error())
+	}
+	if e.PublishAt != nil {
+		parts = append(parts, "publishAt "+e.PublishAt.Error())
 	}
 	if e.Entity != nil {
 		parts = append(parts, e.Entity.Error())
@@ -290,6 +312,9 @@ func (c *NoteValidatorContext) TitleChanged() bool { return c.changed[ColumnNote
 // BodyChanged reports whether this request set body.
 func (c *NoteValidatorContext) BodyChanged() bool { return c.changed[ColumnNoteBody] }
 
+// PublishAtChanged reports whether this request set publish_at.
+func (c *NoteValidatorContext) PublishAtChanged() bool { return c.changed[ColumnNotePublishAt] }
+
 // NoteCreateValidator is the rules for bringing a Note into existence: what
 // the schema cannot express.
 //
@@ -306,6 +331,9 @@ type NoteCreateValidator struct {
 	Title func(ctx context.Context, c *NoteValidatorContext, value string) error
 	// The note itself, or null while it is just a title.
 	Body func(ctx context.Context, c *NoteValidatorContext, value *string) error
+	// When the note goes live, or null while it is a draft. Notifications about it
+	// are due then.
+	PublishAt func(ctx context.Context, c *NoteValidatorContext, value *time.Time) error
 
 	// Entity runs after the per-field hooks, for a rule that is about the row
 	// rather than about one column.
@@ -326,6 +354,8 @@ func (v NoteCreateValidator) RunCreate(ctx context.Context, claims tenancy.Claim
 	c.changed[ColumnNoteTitle] = true
 	c.Values.Body = i.Body
 	c.changed[ColumnNoteBody] = true
+	c.Values.PublishAt = i.PublishAt
+	c.changed[ColumnNotePublishAt] = true
 
 	failed, err := v.run(ctx, c)
 	if err != nil {
@@ -367,6 +397,15 @@ func (v NoteCreateValidator) run(ctx context.Context, c *NoteValidatorContext) (
 			failed.Body = field
 		}
 	}
+	if v.PublishAt != nil {
+		if err := v.PublishAt(ctx, c, c.Values.PublishAt); err != nil {
+			field, ok := rigerr.AsFieldError(err)
+			if !ok {
+				return nil, rigerr.Wrap(err, "validate publish_at")
+			}
+			failed.PublishAt = field
+		}
+	}
 
 	if v.Entity != nil {
 		if err := v.Entity(ctx, c); err != nil {
@@ -400,6 +439,9 @@ type NoteUpdateValidator struct {
 	Title func(ctx context.Context, c *NoteValidatorContext, value string) error
 	// The note itself, or null while it is just a title.
 	Body func(ctx context.Context, c *NoteValidatorContext, value *string) error
+	// When the note goes live, or null while it is a draft. Notifications about it
+	// are due then.
+	PublishAt func(ctx context.Context, c *NoteValidatorContext, value *time.Time) error
 
 	// Entity runs after the per-field hooks, for a rule that is about the row
 	// rather than about one column.
@@ -419,6 +461,7 @@ func (v NoteUpdateValidator) RunUpdate(ctx context.Context, claims tenancy.Claim
 	}
 	c.changed[ColumnNoteTitle] = i.Title.IsSet()
 	c.changed[ColumnNoteBody] = i.Body.Touched()
+	c.changed[ColumnNotePublishAt] = i.PublishAt.Touched()
 
 	failed, err := v.run(ctx, c)
 	if err != nil {
@@ -446,6 +489,7 @@ func (v NoteUpdateValidator) RunRestore(ctx context.Context, claims tenancy.Clai
 	}
 	c.changed[ColumnNoteTitle] = true
 	c.changed[ColumnNoteBody] = true
+	c.changed[ColumnNotePublishAt] = true
 
 	failed, err := v.run(ctx, c)
 	if err != nil {
@@ -485,6 +529,15 @@ func (v NoteUpdateValidator) run(ctx context.Context, c *NoteValidatorContext) (
 				return nil, rigerr.Wrap(err, "validate body")
 			}
 			failed.Body = field
+		}
+	}
+	if v.PublishAt != nil {
+		if err := v.PublishAt(ctx, c, c.Values.PublishAt); err != nil {
+			field, ok := rigerr.AsFieldError(err)
+			if !ok {
+				return nil, rigerr.Wrap(err, "validate publish_at")
+			}
+			failed.PublishAt = field
 		}
 	}
 

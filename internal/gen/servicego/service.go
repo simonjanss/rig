@@ -12,6 +12,7 @@ func (e *emitter) serviceFile(res *ir.Resource) (gen.Artifact, error) {
 	b := gobuf.New(e.cfg.Package)
 
 	e.serviceInterface(b, res)
+	e.childDeletesType(b, res)
 	e.writerType(b, res)
 	e.defaultService(b, res)
 
@@ -46,6 +47,20 @@ func (e *emitter) serviceInterface(b *gobuf.Buf, res *ir.Resource) {
 			"body is only valid until the next one is asked for — so there is no " +
 			"point at which the whole form could be handed over at once.")
 		b.L("Files() *%s.Service", b.Import(filesModule))
+	}
+
+	if hasParents(res) {
+		b.NL()
+		b.Comment("ParentHooks is what this resource does when a row it points at " +
+			"is deleted. [Link] reads it and hands it to the parent, which is the " +
+			"only caller: the parent never sees this service, only the closures.")
+		b.L("ParentHooks() %sParentHooks", res.Name)
+	}
+	if e.hasChildren(res) {
+		b.NL()
+		b.Comment("AdoptChildren receives the hooks of the tables referencing this " +
+			"one. [Link] calls it.")
+		b.L("AdoptChildren(%s)", childDeletesAlias(res))
 	}
 
 	b.L("}")
@@ -159,15 +174,29 @@ func (e *emitter) writerType(b *gobuf.Buf, res *ir.Resource) {
 	b.L("type %s struct {", name)
 	b.L("repo %s.%sRepository", store, res.Name)
 	b.L("hooks %sHooks", res.Name)
+	if e.hasChildren(res) {
+		b.Comment("children is what the tables referencing this one want to happen " +
+			"when a row goes. It is a pointer because it is filled in after the " +
+			"writer exists: services are built one at a time and in no particular " +
+			"order, and a child cannot register with a parent that is not " +
+			"constructed yet.")
+		b.L("children *%s", childDeletesAlias(res))
+	}
 	b.L("}")
 	b.NL()
 
 	b.Comment("New" + name + " pairs a repository with the rules that apply to it.")
 	b.L("func New%s(repo %s.%sRepository, hooks %sHooks) %s {",
 		name, store, res.Name, res.Name, name)
-	b.L("return %s{repo: repo, hooks: hooks}", name)
+	if e.hasChildren(res) {
+		b.L("return %s{repo: repo, hooks: hooks, children: new(%s)}", name, childDeletesAlias(res))
+	} else {
+		b.L("return %s{repo: repo, hooks: hooks}", name)
+	}
 	b.L("}")
 	b.NL()
+
+	e.adoptChildren(b, res, name)
 
 	b.Comment("Create inserts a row, running the create rules and hooks.")
 	b.L("func (w %s) Create(ctx %s.Context, in %s.%sCreateInput) (*%s, error) {",
@@ -188,8 +217,19 @@ func (e *emitter) writerType(b *gobuf.Buf, res *ir.Resource) {
 	b.Comment("Delete removes a row, running the delete hooks.")
 	b.L("func (w %s) Delete(ctx %s.Context, in %s.%sDeleteInput) error {",
 		name, ctxPkg, model, res.Name)
-	b.L("return w.repo.Delete(ctx, %s.Delete[%s.%sDeleteInput, %s]{Input: in, Hooks: w.hooks.Delete})",
-		hookPkg, model, res.Name, entity)
+	if e.hasChildren(res) {
+		b.Comment("The children are read here rather than captured when the writer " +
+			"was built, so a delete runs whatever is registered now. Before [Link] " +
+			"has run there is nothing registered, and a delete is exactly what it " +
+			"was before rig propagated anything.")
+		b.L("hooks := w.hooks.Delete")
+		b.L("hooks.Children = *w.children")
+		b.L("return w.repo.Delete(ctx, %s.Delete[%s.%sDeleteInput, %s]{Input: in, Hooks: hooks})",
+			hookPkg, model, res.Name, entity)
+	} else {
+		b.L("return w.repo.Delete(ctx, %s.Delete[%s.%sDeleteInput, %s]{Input: in, Hooks: w.hooks.Delete})",
+			hookPkg, model, res.Name, entity)
+	}
 	b.L("}")
 	b.NL()
 
@@ -242,6 +282,12 @@ func (e *emitter) rulesInterface(b *gobuf.Buf, res *ir.Resource) {
 		b.L("%sEndpoints", res.Name)
 		b.NL()
 	}
+	if notifiable(res) {
+		b.Comment("The two questions notifications ask of this table, which it " +
+			"declared by being joined to rig_notification.")
+		b.L("%sNotify", res.Name)
+		b.NL()
+	}
 	b.Comment("Hooks is everything that happens around a write, plus what a read " +
 		"answers with. It is called once, during construction.")
 	b.L("Hooks() %sHooks", res.Name)
@@ -267,11 +313,11 @@ func (e *emitter) rulesInterface(b *gobuf.Buf, res *ir.Resource) {
 	b.L("func New%sService(repo %s.%sRepository, rules %s%s) Default%sService {",
 		res.Name, store, res.Name, name, front, res.Name)
 	if len(customEndpoints(res)) > 0 {
-		b.L("svc := NewDefault%sService(repo, %sContract{Hooks: rules.Hooks(), Endpoints: rules}%s)",
-			res.Name, res.Name, frontArg(res))
+		b.L("svc := NewDefault%sService(repo, %sContract{Hooks: rules.Hooks(), Endpoints: rules%s}%s)",
+			res.Name, res.Name, notifyArg(res), frontArg(res))
 	} else {
-		b.L("svc := NewDefault%sService(repo, %sContract{Hooks: rules.Hooks()}%s)",
-			res.Name, res.Name, frontArg(res))
+		b.L("svc := NewDefault%sService(repo, %sContract{Hooks: rules.Hooks()%s}%s)",
+			res.Name, res.Name, notifyArg(res), frontArg(res))
 	}
 	b.L("rules.Bind(svc.Writer())")
 	b.L("return svc")
@@ -312,6 +358,7 @@ func (e *emitter) defaultService(b *gobuf.Buf, res *ir.Resource) {
 
 	e.contractStruct(b, res)
 	e.endpointsInterface(b, res)
+	e.notifyInterface(b, res)
 	e.hooksStruct(b, res)
 	e.rulesInterface(b, res)
 
@@ -335,6 +382,18 @@ func (e *emitter) defaultService(b *gobuf.Buf, res *ir.Resource) {
 			"finding that out from a caller.")
 		b.L("if contract.Endpoints == nil {")
 		b.L("panic(\"api.NewDefault%sService: Contract.Endpoints is required: %s declares custom endpoints\")",
+			res.Name, res.Storage.Table)
+		b.L("}")
+		b.NL()
+	}
+
+	if notifiable(res) {
+		b.Comment("Likewise. A nil one is not a table nobody notifies about; it is " +
+			"one whose every announcement resolves to an audience of nobody, in a " +
+			"background job, hours later — which is the failure mode this whole " +
+			"design is arranged to make visible rather than the one to introduce here.")
+		b.L("if contract.Notify == nil {")
+		b.L("panic(\"api.NewDefault%sService: Contract.Notify is required: %s is joined to rig_notification\")",
 			res.Name, res.Storage.Table)
 		b.L("}")
 		b.NL()
@@ -364,6 +423,20 @@ func (e *emitter) defaultService(b *gobuf.Buf, res *ir.Resource) {
 	b.L("func (s Default%sService) Writer() %sWriter { return s.write }", res.Name, res.Name)
 	b.NL()
 
+	if hasParents(res) {
+		b.Comment("ParentHooks implements " + res.Name + "Service.")
+		b.L("func (s Default%sService) ParentHooks() %sParentHooks { return s.contract.Hooks.Parents }",
+			res.Name, res.Name)
+		b.NL()
+	}
+	if e.hasChildren(res) {
+		b.Comment("AdoptChildren implements " + res.Name + "Service.")
+		b.L("func (s Default%sService) AdoptChildren(cs %s) { s.write.AdoptChildren(cs) }",
+			res.Name, childDeletesAlias(res))
+		b.NL()
+	}
+
+	e.notifySubject(b, res)
 	e.readHelpers(b, res)
 
 	if hasFiles(res) {
@@ -450,6 +523,14 @@ func (e *emitter) contractStruct(b *gobuf.Buf, res *ir.Resource) {
 			"declares one has no working answer without it.")
 		b.L("Endpoints %sEndpoints", res.Name)
 	}
+	if notifiable(res) {
+		b.NL()
+		b.Comment("Notify answers when notifications about a row are due and who " +
+			"should hear about them. It is required, because this table declared " +
+			"itself notifiable by being joined to rig_notification, and a nil one " +
+			"would be an audience of nobody discovered hours later in a job.")
+		b.L("Notify %sNotify", res.Name)
+	}
 	b.L("}")
 	b.NL()
 }
@@ -491,8 +572,18 @@ func (e *emitter) hooksStruct(b *gobuf.Buf, res *ir.Resource) {
 		b.L("Restore %s.RestoreHooks[%s.%sUpdateInput, %s.%s]",
 			hookPkg, model, res.Name, model, res.Name)
 	}
+	if hasParents(res) {
+		b.NL()
+		b.Comment("Parents is one field pair per foreign key this table has to " +
+			"another resource: what to do when the row it points at is deleted. " +
+			"They are here rather than under Delete because they are about " +
+			"somebody else's delete, not this one's.")
+		b.L("Parents %sParentHooks", res.Name)
+	}
 	b.L("}")
 	b.NL()
+
+	e.parentHooksStruct(b, res)
 }
 
 func (e *emitter) defaultMethod(b *gobuf.Buf, res *ir.Resource, ep *ir.Endpoint, ctxPkg, store string) {

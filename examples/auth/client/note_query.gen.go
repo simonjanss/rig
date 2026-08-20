@@ -72,6 +72,9 @@ type NoteFilterContains struct {
 	// API key this row was soft-deleted through, when it was an integration rather
 	// than a person.
 	DeletedByAPIKeyID []uuid.UUID `json:"deletedByApiKeyId,omitempty"`
+	// When the note goes live, or null while it is a draft. Notifications about it
+	// are due then.
+	PublishAt []time.Time `json:"publishAt,omitempty"`
 }
 
 // Exact-match conditions on Note fields.
@@ -103,6 +106,9 @@ type NoteFilterEquals struct {
 	// API key this row was soft-deleted through, when it was an integration rather
 	// than a person.
 	DeletedByAPIKeyID *uuid.UUID `json:"deletedByApiKeyId,omitempty"`
+	// When the note goes live, or null while it is a draft. Notifications about it
+	// are due then.
+	PublishAt *time.Time `json:"publishAt,omitempty"`
 }
 
 // Pattern conditions on Note text fields.
@@ -136,6 +142,9 @@ type NoteFilterNull struct {
 	// API key this row was soft-deleted through, when it was an integration rather
 	// than a person.
 	DeletedByAPIKeyID *bool `json:"deletedByApiKeyId,omitempty"`
+	// When the note goes live, or null while it is a draft. Notifications about it
+	// are due then.
+	PublishAt *bool `json:"publishAt,omitempty"`
 }
 
 // Ordering conditions on Note fields that can be compared.
@@ -146,6 +155,9 @@ type NoteFilterRange struct {
 	UpdatedAt *time.Time `json:"updatedAt,omitempty"`
 	// When this row was soft-deleted. Null while the row is live.
 	DeletedAt *time.Time `json:"deletedAt,omitempty"`
+	// When the note goes live, or null while it is a draft. Notifications about it
+	// are due then.
+	PublishAt *time.Time `json:"publishAt,omitempty"`
 }
 
 // NewNoteFilter builds an empty filter, which matches every row the caller is

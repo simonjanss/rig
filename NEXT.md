@@ -28,25 +28,21 @@ Next:
   download endpoint per file column, nested under the row that owns them. Before
   M6 because it adds two error codes, and the code set is baked into an OpenAPI
   document and a TypeScript union the moment those ship.
-- **M5.11** — referential actions: a table that points at a row gets a function call
-  when that row is deleted, inside the same transaction, and can refuse it. The other
-  half of the sentence RIG6040 already started. (Was M5.10; `go-client` shipped into
-  the number while this was being written.)
+- ~~**M5.11** — referential actions.~~ Shipped: a table that points at a row gets a
+  function call when that row is deleted, inside the same transaction, and can refuse
+  it. The other half of the sentence RIG6040 already started.
 - **M5.12** — the auth log and who is signed in: a read endpoint over
   `rig_auth_log`, and `GET /auth/sessions` widened past the caller's own. The
   events have been recorded since M4 and nothing has ever served them. (Was
   M5.11; referential actions had already taken it.)
-- **M12** — notifications, the engine and the inbox: a `rig_notification` table a
-  project links its own tables to, two generated callbacks that say when a
-  notification is due and — at the moment it is sent, not when it was written — who
-  should get it, and an inbox somebody can empty. After M5.11 because the delete
-  propagation it generates is that milestone's registry with one child hardcoded, and
-  the two should not be built twice.
-- **M13** — notification delivery: Desktop, Mobile and Email as channels an
-  application implements, per-account settings with a window each, digests, and a
-  dispatcher every replica can run because the claim is a lease rather than a lock.
-  Split from M12 because M12's schema is the part that cannot be changed later and
-  this is the part whose shape depends on what somebody asks for.
+- ~~**M12** — notifications, the engine and the inbox.~~ Shipped: a
+  `rig_notification` table a project links its own tables to, two generated
+  callbacks that say when a notification is due and — at the moment it is sent,
+  not when it was written — who should get it, and an inbox somebody can empty.
+- ~~**M13** — notification delivery.~~ Shipped: Desktop, Mobile and Email as
+  channels an application implements, per-account settings with a window each,
+  digests, and a dispatcher every replica can run because the claim is a lease
+  rather than a lock.
 
 ### Modules
 
@@ -1702,11 +1698,17 @@ report naming the line of everything that did not go in.
 
 ---
 
-## M5.11 — referential actions
+## M5.11 — referential actions (shipped)
 
 **Goal.** When a row is deleted, every table pointing at it gets a function call —
 inside the same transaction, before the row goes and again after it is committed — so
 a child can refuse the delete, clean itself up, or do nothing, in code it wrote.
+
+Shipped as one milestone, which answers the last open question below: the closure
+argument held up, so there was never a separate registry to land first. Two things
+came out differently from the sketch and both are noted where they belong — the
+registry is assembled in `api.Register` rather than at `Bind`, and a parent must
+offer `Delete` for its children to get hooks at all.
 
 ### rig already wrote the argument and never finished the sentence
 
@@ -1965,32 +1967,41 @@ does not want this feature.
 Honest gap: nothing here tests that the *scaffold* teaches the difference between the fast
 body and the correct one, and that is the part most likely to be got wrong in the field.
 
-### Open questions for you
+### The questions, answered
 
-**Is the parent row enough, or does the child want its own rows?** I lean the parent — it is
-one call, the child knows how to find its rows, and the alternative is rig doing a query on
-the child's behalf that the child may not want. The counter is that "for each of my rows
-affected by this" is what people actually write, and every one of them will write the same
-`SELECT` first.
+**The child gets the parent row, not its own rows.** One call per relation. The
+alternative — rig running a `SELECT` on the child's behalf — is a query the child may not
+want, and the generated doc comment says instead what the two bodies cost, because the fast
+one and the correct one are both one line and do not look different.
 
-**Is the derived sibling order worth it, or should the parent just always say?** The
-topological sort is right, and it is also invisible: reading a project tells you nothing
-about what order its hooks run in unless you go and build the graph in your head. The
-alternative is requiring `on_delete.order` on any parent with more than one child — noisier,
-but the sequence is then written down where somebody debugging it will look. I lean derived,
-with `rig ir` able to print the resolved order, so the answer exists somewhere you can ask
-for it rather than in nobody's head.
+**The sibling order is derived, and `rig ir` prints it.** `Resource.Children` carries the
+resolved sequence, so the answer exists somewhere you can ask for it rather than in nobody's
+head. `on_delete.order` overrides it; a cycle among siblings falls back to schema order and
+says so as RIG5060 rather than silently picking.
 
-**Should `Deleting` also fire for a restore?** A child that nulled a link on a hard delete
-has nothing to undo, but a child that archived rows might want the symmetric call. I lean no
-for now — `Restore` is already the one path that deliberately does not walk anything — but
-it is the obvious next request and it is worth deciding before the hook names are baked into
-generated code.
+**`Deleting` does not fire for a restore.** `Restore` stays the one path that deliberately
+walks nothing. It is still the obvious next request.
 
-**And is this one milestone or two?** The registry is small precisely because closures carry
-their own repositories, so I no longer think this needs the dependency-injection change I
-would have proposed for a declarative cascade. If that holds up in the first hour of
-implementation, it is one milestone. If it does not, the registry lands first and alone.
+**One milestone.** The closure argument held: nothing had to be injected backwards, so there
+was no dependency-injection change to land separately.
+
+### Two departures worth reading before changing either
+
+**The registry is assembled in `api.Register`, not at `Bind`.** `Bind` was the sketch's
+answer and it cannot work as written: `Default<Res>Service` is a value, `Handlers` holds it
+in an interface, and a value in an interface cannot be addressed — so a child constructed
+after its parent has nothing to register with. `Register` sees every service at once and
+runs before anything is served, and `Handlers` already has one field per resource, so the
+compile-time check survives. The writer holds `children *<Res>ChildDeletes` and reads it at
+delete time; `Link` is exported for the program that builds services and serves them some
+other way.
+
+**A parent has to offer `Delete`.** Being exposed is not enough, and the case that forces
+the distinction is `rig_file`: with `files.expose` it is a resource, and it is
+`operations: [Get, List]` — the write path is the upload endpoint on the row that owns the
+file. A `RigFileDeleting` field on every table with a file column would be a hook nothing
+can ever reach, and a field that can never fire is worse than no field, because somebody
+implements it and waits.
 
 ---
 
@@ -2734,7 +2745,7 @@ thing that unblocks M11 rather than something M11 works around.
 
 ---
 
-## M12 — notifications: the engine and the inbox
+## M12 — notifications: the engine and the inbox (shipped)
 
 **Goal.** A project declares that one of its tables is worth notifying people about,
 answers two questions rig asks it — when, and who — and gets an inbox: a row per
@@ -3316,7 +3327,64 @@ ticket is a doc comment. A `DispatchReport` that logs resolutions with zero reci
 the way `SweepReport` logs its zeros, is the cheapest thing that would catch it in the
 field, and it belongs in M13 with the rest of the reporting.
 
-### Open questions for you
+### What came out differently, and why
+
+Four departures, each forced by something the milestone could not have known
+without building it.
+
+**`NotifyAt` is not on the registry, and the dispatcher never asks it.** The
+sketch had the engine ask a subject when its notification was due, which would
+have meant reading the row back — and a generated `Get` goes to the pool, not to
+the transaction on the context, so a hook that announced inside its own write's
+transaction would have asked about a row that had not committed. The time comes
+from the announcement instead, asked where the row is already in hand. The
+registry is down to one question: who. `api.Announce<Res>` asks `NotifyAt` for
+you, because that is the line to forget and forgetting it makes every draft go
+out the moment somebody saves it.
+
+**The two methods are an interface on the contract, not fields on the hooks
+struct.** Both are required, and a field that could be left nil moves the failure
+from the constructor to a background job — where it arrives as an audience of
+nobody, hours later. `<Res>Notify` is refused at construction the way
+`<Res>Endpoints` already is.
+
+**`Deleted` leaves the notification row.** A notification can be about rows in
+two tables, and deleting it from inside one table's delete would fail on the
+other table's link — aborting a delete that had already succeeded. The link rows
+and the inbox lines go; the notification is left for the retention sweep, which
+is the second thing that sweep is for.
+
+**`notifications.enabled` does not require `auth.enabled`.** What an inbox needs
+is `rig_account`, which is a question about migrations. `examples/todo` has an
+inbox and reads its claims from two headers.
+
+Two things this closed on the way through, both holes rather than decisions. The
+Electric shape builder ignored `ResourceStorage.Owner`, so any owner-scoped table
+with a shape streamed the whole tenant unless the application remembered to
+narrow it in the stub. And RIG3250 claimed an unexposed resource's live-sync
+endpoint would never be served, which was never true — the electric generator
+mounts its own routes and has never read `expose`.
+
+### The questions, answered
+
+**`NotifyWho` gets the whole `notify.Notification`**, payload included, and the
+documentation says that depending on the payload is the case `AccountIDs` covers
+better — a recipient list smuggled through a jsonb column is the thing late
+resolution exists to prevent, and it would arrive without the honesty of a name
+that says what it is doing.
+
+**The inbox routes hand back identifiers.** A line carries the notification's id
+and its kind, not the subject row. `notifications.expose` is the answer for
+anybody who wants otherwise, and it is named as the limitation it is.
+
+**The boilerplate question is still open**, and now has one data point: two real
+services, and their `NotifyWho`s are both "everybody in the tenant except whoever
+caused the change". A third that looks the same would be the argument for
+`notify.Column("assignee_account_id")` — a helper the method can return, which
+closes it without touching the contract because it is still a function returning
+accounts.
+
+### The original open questions
 
 **Does `NotifyWho` get the notification's `payload` as well as the row?** It gets the row
 and the kind as written above. An announcement might reasonably want to carry "and here
@@ -3347,7 +3415,24 @@ means guessing which shape recurs.
 
 ---
 
-## M13 — notification delivery
+## M13 — notification delivery (shipped)
+
+### What came out differently
+
+**A `digest` column on the delivery row.** The plan grouped a claimed batch by
+account and channel, which folds an Immediate account's three simultaneous copies
+into one message as readily as an Hourly account's three — and "tell me as things
+happen" and "give me a summary" are different requests. The setting that decided
+it is copied onto the row, so a claim knows without a join, and an Immediate row
+is sent on its own.
+
+**The propagation orders its deletes.** A delivery points at an inbox line, so a
+subject's hard delete removes the copies first; a soft delete marks the pending
+ones Skipped rather than deleting them, because what was owed is a fact and
+anything already Sent cannot be recalled.
+
+**The retention sweep runs in the dispatch task**, the way the file sweeper's two
+rules share one, and it has the two rules the plan named and no third.
 
 **Goal.** M12's inbox reaches somebody who has the application open. This is
 everybody else: three channels an application implements, per-account settings with a

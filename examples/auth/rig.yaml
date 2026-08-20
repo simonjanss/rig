@@ -32,6 +32,18 @@ auth:
   tenant:
     from: [query, header]
 
+# The inbox. `enabled` is what makes server-go write the engine, the dispatcher
+# and the routes under /notifications; a project without this block carries none
+# of it.
+#
+# `expose` is off, which is the ordinary case: the hand-written routes serve the
+# inbox, and rig's two tables keep their model and their repository and get no
+# endpoints of their own. Turning it on would add a projected resource beside
+# them, with the filter grammar and a typed client — both stay, and the
+# difference between them is the point.
+notifications:
+  enabled: true
+
 # A throwaway Postgres, created on demand. The port is explicit so this example
 # can run alongside the others.
 database:

@@ -26,7 +26,7 @@ services/todo/todo.yaml
 | `RIG2xxx` | Naming: two things projecting to the same API name, a plural that cannot be derived, a collision with a reserved name |
 | `RIG3xxx` | Configuration: invalid YAML, a key that does not match the schema, a column or enum the configuration names that no longer exists |
 | `RIG4xxx` | Notes: a hand-written endpoint replacing a generated one |
-| `RIG5xxx` | Structure: no primary key, a partial snapshot triple, a missing `restore_window_days`, an enum nullable in one place and not another |
+| `RIG5xxx` | Structure: no primary key, a partial snapshot triple, a missing `restore_window_days`, an enum nullable in one place and not another, an `on_delete.order` rig cannot resolve |
 | `RIG6xxx` | Conventions: missing comments, unindexed foreign keys, naming rules, `ON DELETE CASCADE`, migration filenames |
 | `RIG9xxx` | Internal invariants. Seeing one of these is a bug in rig |
 

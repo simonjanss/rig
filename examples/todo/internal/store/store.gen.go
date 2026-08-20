@@ -154,13 +154,17 @@ type Config struct{}
 type Store struct {
 	pool *pgxpool.Pool
 
-	Todos           TodoRepository
-	TodoAttachments TodoAttachmentRepository
+	RigNotifications          RigNotificationRepository
+	RigNotificationRecipients RigNotificationRecipientRepository
+	Todos                     TodoRepository
+	TodoAttachments           TodoAttachmentRepository
 }
 
 // New builds a store over a connection pool.
 func New(pool *pgxpool.Pool, _ Config) *Store {
 	s := &Store{pool: pool}
+	s.RigNotifications = &rigNotificationRepo{db: s}
+	s.RigNotificationRecipients = &rigNotificationRecipientRepo{db: s}
 	s.Todos = &todoRepo{db: s}
 	s.TodoAttachments = &todoAttachmentRepo{db: s}
 	return s

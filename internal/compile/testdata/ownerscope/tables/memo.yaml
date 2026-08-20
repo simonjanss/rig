@@ -19,3 +19,10 @@ columns:
     comment: Who last changed it.
   deleted_by_account_id:
     comment: Who retired it.
+
+# A live-sync shape over an owner-scoped table, which is the case the shape
+# builder ignored until the inbox needed it: without the owner predicate this
+# streams the whole tenant to every subscriber, and the scope stub below is the
+# one narrowing an application should never have been responsible for.
+electric:
+  enabled: true

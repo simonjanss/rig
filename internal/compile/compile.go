@@ -58,6 +58,7 @@ func Compile(raw ir.Schema, set *tableconf.Set, opt Options) (*ir.Document, diag
 		Namer:          n,
 		Auth:           cfg.Auth.IR(),
 		Files:          cfg.Files.IR(),
+		Notifications:  cfg.Notifications.IR(),
 	})
 	diags.Append(d)
 
@@ -65,6 +66,7 @@ func Compile(raw ir.Schema, set *tableconf.Set, opt Options) (*ir.Document, diag
 		Namer:                 n,
 		UnmentionedColumn:     p.Severity(cfg.Validate.UnmentionedColumn, diag.CodeUnmentionedColumn),
 		Ignored:               opt.IgnoreTables,
+		Notifications:         cfg.Notifications.IR(),
 		FileRestoreWindowDays: fileRestoreWindowDays(p),
 	})
 	diags.Append(d)

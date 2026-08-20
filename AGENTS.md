@@ -45,8 +45,8 @@ make test-docker   # the suite behind the `docker` build tag
 make examples      # regenerate all four examples and run them for real
 ```
 
-`make test-docker` covers `.`, `runtime`, `auth`, `files`, `migrate` and
-`rigclient`.
+`make test-docker` covers `.`, `runtime`, `auth`, `files`, `notify`, `migrate`
+and `rigclient`.
 Most of it starts its own Postgres on a port of its own and cleans up after
 itself. The `migrate` module is the exception: it expects a database at
 `localhost:55440`, or wherever `DATABASE_URL` points, and **skips itself
@@ -100,6 +100,7 @@ the same commit.** The pages are short and the mapping is mechanical:
 | `internal/diag` — a code added, or a severity changed | `docs/diagnostics.md` |
 | `auth/`, or `internal/project/auth.go` | `docs/auth.md` |
 | `runtime/electric`, `internal/gen/electricgo` | `docs/electric.md` |
+| `notify/`, `internal/project/notifications.go` | `docs/notifications.md` |
 | `runtime/serve`, `runtime/dbhook` | `docs/services.md` |
 | `rigclient/`, `internal/gen/goclient` | `docs/clients.md` |
 
@@ -123,7 +124,8 @@ of the files above is edited. It reminds; it does not gate.
 
 ## Godoc
 
-`runtime/`, `auth/`, `files/`, `migrate/` and `rigclient/` are separate modules
+`runtime/`, `auth/`, `files/`, `notify/`, `migrate/` and `rigclient/` are separate
+modules
 that a generated application imports. Their godoc is the only documentation
 their Go surface has: `docs/` covers what somebody writes — `rig.yaml`, a
 migration, a service — and never what they call. So a doc comment there is

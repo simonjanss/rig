@@ -44,7 +44,8 @@ func Validate(doc *ir.Document, set *tableconf.Set, p *project.Project) diag.Lis
 		diags.Append(checkAuditColumns(t, loaded))
 		diags.Append(checkSnapshotColumns(doc, t, loaded))
 		if !unreadable {
-			diags.Append(checkRestoreWindow(t, res, loaded, fileRestoreWindowDays(p)))
+			diags.Append(checkRestoreWindow(t, res, loaded, fileRestoreWindowDays(p),
+				p.Config.Notifications.Enabled))
 			diags.Append(checkSnapshotIgnore(t, res, loaded))
 		}
 
@@ -232,7 +233,7 @@ func checkSnapshotColumns(doc *ir.Document, t *ir.Table, loaded *tableconf.Loade
 // when no files block governs it. Where it applies it replaces the key rather
 // than defaulting it: one number decides how long the bytes are kept, and a
 // second one in services/rig_file could only ever disagree with it.
-func checkRestoreWindow(t *ir.Table, res *ir.Resource, loaded *tableconf.Loaded, fileWindow int) diag.List {
+func checkRestoreWindow(t *ir.Table, res *ir.Resource, loaded *tableconf.Loaded, fileWindow int, notifications bool) diag.List {
 	var diags diag.List
 	if res == nil {
 		return diags
@@ -243,6 +244,23 @@ func checkRestoreWindow(t *ir.Table, res *ir.Resource, loaded *tableconf.Loaded,
 	var configured *int
 	if loaded != nil {
 		configured = loaded.File.RestoreWindowDays
+	}
+
+	// The inbox is soft-deletable — dismissing a line is a soft delete against
+	// the recipient row, so that one person clearing their inbox changes nothing
+	// anybody else sees — and it has no table configuration in an ordinary
+	// project to declare a window in. How long a dismissed line is kept is
+	// `notifications.retention`, one number for every project, and a second copy
+	// of it in a YAML file could only ever disagree.
+	if t.Name == NotificationRecipientTable && notifications {
+		if configured != nil {
+			diags.Add(diag.CodeRestoreWindowForbidden, at(loaded, t, "restore_window_days"),
+				"restore_window_days is set on %q, whose retention is notifications.retention "+
+					"in rig.yaml: it is how long a dismissed line is kept as well as how long "+
+					"it could be brought back, so there is one number and this is not where it "+
+					"lives", t.Name)
+		}
+		return diags
 	}
 
 	if t.Name == FileTable && fileWindow > 0 {
@@ -496,8 +514,30 @@ func checkColumnNaming(t *ir.Table, loaded *tableconf.Loaded, boolSev, tsSev, da
 		// could point at, so naming the role says more than naming the target,
 		// and the alternative the rule would demand is either rig_file_id — one
 		// file per table, forever — or profile_image_rig_file_id.
+		// And a link to a notification is exempt for the same reason again. The
+		// rule wants rig_notification_id; the column is notification_id, on a
+		// join table whose other column names the subject, and the prefix is
+		// there so a project can tell rig's tables from its own in psql rather
+		// than so a foreign key has to repeat it.
+		notificationLink := c.ForeignKey != nil && c.ForeignKey.Table == NotificationTable &&
+			c.Name == "notification_id"
+
+		// And the inbox's own account_id, for the third time and the same
+		// reason. The rule wants rig_account_id; the column is the one
+		// `access.owner` narrows on, it is spelled the way an application would
+		// spell its own, and the rig_ prefix is there so a project can tell
+		// rig's tables from its own in psql rather than so a foreign key has to
+		// carry it.
+		inboxOwner := t.Name == NotificationRecipientTable &&
+			c.Name == NotificationRecipientOwner
+
+		// And every column of rig's own two tables, which a project cannot
+		// rename and did not write. The rule is advice about a schema somebody
+		// is writing, and this is not one of those.
+		rigsOwn := isNotificationTable(t.Name)
+
 		if fkSev != "" && c.ForeignKey != nil && !isAuditActorColumn(c.Name) &&
-			!selfReference && !isFileColumn(t, c) {
+			!selfReference && !isFileColumn(t, c) && !notificationLink && !inboxOwner && !rigsOwn {
 			want := c.ForeignKey.Table + "_id"
 			if c.Name != want && !strings.HasSuffix(c.Name, "_"+want) {
 				diags.AddSeverity(diag.CodeForeignKeyNaming, fkSev, at,
@@ -588,10 +628,14 @@ func checkCustomEndpoints(doc *ir.Document, set *tableconf.Set) diag.List {
 					"%s is not exposed, so its %d endpoint(s) would never be served",
 					r.Name, len(r.Endpoints))
 			}
-			if r.Electric != nil {
-				diags.Add(diag.CodeUnexposedConflict, anchorForTable(loaded, tableOf(r), "expose"),
-					"%s is not exposed, so its live-sync endpoint would never be served", r.Name)
-			}
+			// A live-sync shape is deliberately not one of these, and the
+			// rule used to say it was. The electric generator mounts its own
+			// routes and has never consulted `expose`, so the shape is served
+			// either way — and the combination is not a contradiction but a
+			// shape somebody wants: the inbox has no CRUD surface at all and
+			// goes live the moment a row commits. What `expose` decides is
+			// whether there are REST endpoints; what `electric` decides is
+			// whether there is a stream, and those are different questions.
 			continue
 		}
 

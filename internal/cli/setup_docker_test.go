@@ -58,6 +58,10 @@ func TestSetupProject(t *testing.T) {
 			"00002_rig_apikeys.sql",
 			"00003_rig_sessions.sql",
 			"00004_rig_oauth.sql",
+			"00005_rig_files.sql",
+			// Last, and after tenancy for a reason of its own: an inbox line
+			// names an account.
+			"00006_rig_notifications.sql",
 		} {
 			if !strings.Contains(stderr, want) {
 				t.Errorf("expected %s to be written:\n%s", want, stderr)

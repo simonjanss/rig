@@ -1188,13 +1188,16 @@ func (e *emitter) deleteMethod(b *gobuf.Buf, res *ir.Resource, typeName string) 
 	b.L("prev, err = %s.Get(ctx, in.Input.ID)", repo)
 	b.L("if err != nil { return err }")
 	b.NL()
+	e.enterDelete(b, res)
 
 	if !s.IsSoftDeletable() {
 		e.beforeDelete(b)
+		e.childrenDeleting(b, res)
 		b.L("if _, err := tx.Exec(ctx, \"DELETE FROM %s WHERE id = $1\", in.Input.ID); err != nil {", s.Table)
 		b.L("return writeError(err, %s)", gobuf.Quote(s.Table))
 		b.L("}")
 		e.afterDelete(b)
+		e.childrenDeleted(b, res)
 		b.L("return nil")
 		b.L("})")
 		b.L("if err != nil { return err }")
@@ -1219,6 +1222,7 @@ func (e *emitter) deleteMethod(b *gobuf.Buf, res *ir.Resource, typeName string) 
 	b.NL()
 
 	e.beforeDelete(b)
+	e.childrenDeleting(b, res)
 
 	b.L("if in.Input.Hard {")
 	if s.IsSnapshotable() {
@@ -1232,6 +1236,7 @@ func (e *emitter) deleteMethod(b *gobuf.Buf, res *ir.Resource, typeName string) 
 	b.L("return writeError(err, %s)", gobuf.Quote(s.Table))
 	b.L("}")
 	e.afterDelete(b)
+	e.childrenDeleted(b, res)
 	b.L("return nil")
 	b.L("}")
 	b.NL()
@@ -1258,6 +1263,7 @@ func (e *emitter) deleteMethod(b *gobuf.Buf, res *ir.Resource, typeName string) 
 	b.L("return writeError(err, %s)", gobuf.Quote(s.Table))
 	b.L("}")
 	e.afterDelete(b)
+	e.childrenDeleted(b, res)
 	b.L("return nil")
 	b.L("})")
 	b.L("if err != nil { return err }")
@@ -1274,6 +1280,78 @@ func (e *emitter) beforeDelete(b *gobuf.Buf) {
 	b.L("if in.Hooks.Before != nil {")
 	b.L("if err := in.Hooks.Before(ctx, claims, &in.Input, prev); err != nil { return err }")
 	b.L("}")
+	b.NL()
+}
+
+// childrenDeleting emits the second step of a delete: every table pointing at
+// this one, in the order the document settled.
+//
+// After the row's own Before and before the row is touched. The parent's own
+// veto coming first is deliberate — "this team may not be deleted while the
+// season is open" is the cheapest and most specific rule in the building, and it
+// should not require running every child's cleanup before it gets to say so.
+//
+// A child that deletes its own rows by calling its own Delete triggers their
+// children the same way, so depth is the call stack. Termination is the visited
+// set and the depth cap on the context, which is why this is bracketed by
+// [dbx.EnterDelete] rather than trusting the schema to be acyclic.
+func (e *emitter) childrenDeleting(b *gobuf.Buf, res *ir.Resource) {
+	if len(res.Children) == 0 {
+		return
+	}
+	fmtPkg := b.Import("fmt")
+
+	b.Comment("Every table that references this one, in the derived order. An " +
+		"error from any of them unwinds the whole transaction, including whatever " +
+		"the children before it already did.")
+	b.L("for _, child := range in.Hooks.Children {")
+	b.L("if child.Deleting == nil { continue }")
+	b.L("if err := child.Deleting(ctx, claims, prev, in.Input); err != nil {")
+	b.Comment("Named, because the whole reason this is better than a 23503 is " +
+		"that the answer can say which relation refused.")
+	b.L("return %s.Errorf(\"%%s: %%w\", child.Child, err)", fmtPkg)
+	b.L("}")
+	b.L("}")
+	b.NL()
+}
+
+// childrenDeleted queues the after-commit half.
+//
+// Onto dbx.AfterCommit rather than run here, so it fires once the outermost
+// transaction has landed and in the same order Deleting ran. It returns nothing
+// and a panic in it is contained: the row is gone, and unwinding a request that
+// succeeded would report a failure that did not occur.
+func (e *emitter) childrenDeleted(b *gobuf.Buf, res *ir.Resource) {
+	if len(res.Children) == 0 {
+		return
+	}
+	dbxPkg := b.Import(runtimeModule + "/dbx")
+
+	b.L("for _, child := range in.Hooks.Children {")
+	b.L("if child.Deleted == nil { continue }")
+	b.L("done, row, input := child.Deleted, prev, in.Input")
+	b.L("%s.AfterCommit(ctx, func() { done(ctx, claims, row, input) })", dbxPkg)
+	b.L("}")
+	b.NL()
+}
+
+// enterDelete emits the cycle guard.
+//
+// A second visit to the same row inside one transaction is a no-op rather than
+// an error: the row is going, which is what the caller asked for, and refusing
+// would turn a legal schema into a runtime failure. Passing the depth cap is a
+// different answer and is an error, because finishing halfway through a
+// propagation would leave the transaction in a state nobody asked for.
+func (e *emitter) enterDelete(b *gobuf.Buf, res *ir.Resource) {
+	if len(res.Children) == 0 {
+		return
+	}
+	dbxPkg := b.Import(runtimeModule + "/dbx")
+
+	b.L("ctx, more, err := %s.EnterDelete(ctx, %s, in.Input.ID.String())",
+		dbxPkg, gobuf.Quote(res.Storage.Table))
+	b.L("if err != nil { return err }")
+	b.L("if !more { return nil }")
 	b.NL()
 }
 

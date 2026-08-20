@@ -369,7 +369,7 @@ func newBrowser(t *testing.T) *browser {
 	// The same function main uses, so what the test drives is what runs.
 	srv := httptest.NewUnstartedServer(nil)
 
-	handler, err := newAPI(context.Background(), pool)
+	handler, _, err := newAPI(context.Background(), pool)
 	if err != nil {
 		t.Fatal(err)
 	}

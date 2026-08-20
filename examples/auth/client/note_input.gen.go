@@ -5,6 +5,8 @@
 package client
 
 import (
+	"time"
+
 	"github.com/simonjanss/rig/runtime/patch"
 	"github.com/simonjanss/rig/runtime/rigerr"
 	"github.com/simonjanss/rig/runtime/tenancy"
@@ -35,6 +37,9 @@ type NoteCreateInput struct {
 	Title string `json:"title"`
 	// The note itself, or null while it is just a title.
 	Body *string `json:"body,omitempty"`
+	// When the note goes live, or null while it is a draft. Notifications about it
+	// are due then.
+	PublishAt *time.Time `json:"publishAt,omitempty"`
 }
 
 // NoteCreateFields is what a validation failure on a NoteCreateInput says,
@@ -44,8 +49,9 @@ type NoteCreateInput struct {
 // It is read out of a failed call with rigclient.FieldsAs[NoteCreateFields],
 // and a member is nil when there was nothing wrong with that field.
 type NoteCreateFields struct {
-	Title *rigerr.FieldError `json:"title,omitempty"`
-	Body  *rigerr.FieldError `json:"body,omitempty"`
+	Title     *rigerr.FieldError `json:"title,omitempty"`
+	Body      *rigerr.FieldError `json:"body,omitempty"`
+	PublishAt *rigerr.FieldError `json:"publishAt,omitempty"`
 	// Entity carries what was wrong with the request as a whole rather than with
 	// any one field.
 	Entity *rigerr.FieldError `json:"entity,omitempty"`
@@ -112,6 +118,9 @@ type NoteUpdateInput struct {
 	Title patch.Optional[string] `json:"title,omitzero"`
 	// The note itself, or null while it is just a title.
 	Body patch.Nullable[string] `json:"body,omitzero"`
+	// When the note goes live, or null while it is a draft. Notifications about it
+	// are due then.
+	PublishAt patch.Nullable[time.Time] `json:"publishAt,omitzero"`
 }
 
 // NoteUpdateFields is what a validation failure on a NoteUpdateInput says,
@@ -121,8 +130,9 @@ type NoteUpdateInput struct {
 // It is read out of a failed call with rigclient.FieldsAs[NoteUpdateFields],
 // and a member is nil when there was nothing wrong with that field.
 type NoteUpdateFields struct {
-	Title *rigerr.FieldError `json:"title,omitempty"`
-	Body  *rigerr.FieldError `json:"body,omitempty"`
+	Title     *rigerr.FieldError `json:"title,omitempty"`
+	Body      *rigerr.FieldError `json:"body,omitempty"`
+	PublishAt *rigerr.FieldError `json:"publishAt,omitempty"`
 	// Entity carries what was wrong with the request as a whole rather than with
 	// any one field.
 	Entity *rigerr.FieldError `json:"entity,omitempty"`

@@ -237,7 +237,7 @@ func newUI(t *testing.T) *client {
 	t.Cleanup(pool.Close)
 
 	repos := store.New(pool, store.Config{})
-	svc := todo.New(repos.Todos, api.NewFiles(pool), quiet{},
+	svc := todo.New(repos.Todos, api.NewFiles(pool), quiet{}, nil, pool,
 		slog.New(slog.NewTextHandler(io.Discard, nil)))
 
 	// A tenant of its own, so one run's rows are invisible to the next and two

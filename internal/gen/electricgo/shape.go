@@ -176,6 +176,27 @@ func (e *emitter) handler(b *gobuf.Buf, res *ir.Resource) {
 			"tenant. It is the first condition, and nothing below can remove it.")
 		b.L("where.Eq(%s, claims.TenantID.String())", gobuf.Quote(storage.Tenant.Name))
 	}
+	if storage.Owner != nil {
+		errPkg := b.Import(runtimeModule + "/rigerr")
+		uuidPkg := b.Import("github.com/google/uuid")
+
+		b.Comment("This table is owner-scoped, so a subscriber sees its own rows " +
+			"and nothing else. Here rather than in the scope function below, for " +
+			"the reason the repository does not make anybody remember it: a " +
+			"narrowing the application has to add by hand is a narrowing somebody " +
+			"eventually does not.")
+		b.Comment("A caller with no account is refused rather than narrowed. An " +
+			"API key and a system credential both have a nil identifier, and " +
+			"comparing against one matches nothing *silently* — which is the wrong " +
+			"kind of correct, because a subscriber handed an empty stream cannot " +
+			"tell it from having nothing to receive.")
+		b.L("if claims.AccountID == %s.Nil {", uuidPkg)
+		b.L("fail(s, w, r, %s.Forbidden(%s))", errPkg,
+			gobuf.Quote("this shape is scoped to one account, and this credential is not one"))
+		b.L("return")
+		b.L("}")
+		b.L("where.Eq(%s, claims.AccountID.String())", gobuf.Quote(storage.Owner.Name))
+	}
 	if storage.IsSoftDeletable() {
 		b.Comment("A retired row stops appearing in reads, so it stops appearing " +
 			"in a live stream too.")

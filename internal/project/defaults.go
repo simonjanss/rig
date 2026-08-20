@@ -80,6 +80,40 @@ const (
 	// out of reach together.
 	DefaultFilesRestoreWindow = 30 * 24 * time.Hour
 
+	// DefaultNotificationDigest is Immediate: an account that has said nothing
+	// hears about things when they happen. Anything else would be rig deciding
+	// on somebody's behalf that they wanted less mail than the application
+	// thought it was sending.
+	DefaultNotificationDigest = DigestImmediate
+
+	// DefaultClaimTTL is five minutes, which is the wrong number for somebody
+	// and has to be some number.
+	//
+	// It is chosen for the slowest channel most applications have, which is
+	// mail: an SMTP conversation or a provider API call that has not finished in
+	// five minutes has failed. A project whose only channel is a websocket push
+	// that either works in 200ms or does not should set this far lower, and one
+	// with a provider that retries internally for ten minutes has to set it
+	// higher — the relationship to the channel's own timeout is the one
+	// misconfiguration here worth understanding.
+	DefaultClaimTTL = 5 * time.Minute
+
+	// DefaultMaxAttempts is five, after which a delivery is Failed and stops
+	// being claimed. Without a cap a permanently broken address consumes a lease
+	// and a log line forever.
+	DefaultMaxAttempts = 5
+
+	// DefaultBackoffBase is a minute, doubling: one, two, four, eight, sixteen.
+	// Five attempts therefore span about half an hour, which outlasts the
+	// ordinary provider blip and does not outlast anybody's patience.
+	DefaultBackoffBase = time.Minute
+
+	// DefaultNotificationRetention is ninety days. Long enough that "what was I
+	// told in the spring" has an answer, and short enough that the busiest table
+	// in the schema does not grow forever — which every other table in rig
+	// currently does, and which is named as known and unfixed.
+	DefaultNotificationRetention = 90 * 24 * time.Hour
+
 	// The AWS SDK's own variable names, so a deployment that already has
 	// credentials in the environment needs no configuration at all.
 	DefaultAccessKeyEnv = "AWS_ACCESS_KEY_ID"
@@ -166,6 +200,24 @@ func (p *Project) applyDefaults() {
 
 	p.applyAuthDefaults()
 	p.applyFilesDefaults()
+	p.applyNotificationsDefaults()
+}
+
+// applyNotificationsDefaults resolves every value the notifications block leaves
+// out, for the same reason applyFilesDefaults does.
+func (p *Project) applyNotificationsDefaults() {
+	n := &p.Config.Notifications
+	if !n.Enabled {
+		return
+	}
+
+	setDefault(&n.DefaultDigest, DefaultNotificationDigest)
+	setDuration(&n.ClaimTTL, DefaultClaimTTL)
+	setDuration(&n.BackoffBase, DefaultBackoffBase)
+	setDuration(&n.Retention, DefaultNotificationRetention)
+	if n.MaxAttempts == 0 {
+		n.MaxAttempts = DefaultMaxAttempts
+	}
 }
 
 // applyFilesDefaults resolves every value the files block leaves out, for the
@@ -351,6 +403,7 @@ func (p *Project) check() diag.List {
 
 	diags.Append(p.checkAuth())
 	diags.Append(p.checkFiles())
+	diags.Append(p.checkNotifications())
 
 	return diags
 }

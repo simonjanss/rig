@@ -2307,6 +2307,20 @@
             }
           }
         ],
+        "parents": [
+          {
+            "name": "HomeTeam",
+            "parent": "Team",
+            "table": "team",
+            "column": "home_team_id"
+          },
+          {
+            "name": "AwayTeam",
+            "parent": "Team",
+            "table": "team",
+            "column": "away_team_id"
+          }
+        ],
         "storage": {
           "table": "fixture",
           "primary_key": [
@@ -3290,6 +3304,22 @@
               "service_method": "Update",
               "handler_name": "UpdateTeam"
             }
+          }
+        ],
+        "children": [
+          {
+            "name": "HomeFixtures",
+            "child": "Fixture",
+            "table": "fixture",
+            "column": "home_team_id",
+            "hook": "HomeTeam"
+          },
+          {
+            "name": "AwayFixtures",
+            "child": "Fixture",
+            "table": "fixture",
+            "column": "away_team_id",
+            "hook": "AwayTeam"
           }
         ],
         "storage": {

@@ -1060,6 +1060,14 @@ func (r *todoRepo) Delete(ctx context.Context, in dbhook.Delete[model.TodoDelete
 			return err
 		}
 
+		ctx, more, err := dbx.EnterDelete(ctx, "todo", in.Input.ID.String())
+		if err != nil {
+			return err
+		}
+		if !more {
+			return nil
+		}
+
 		// Deleting an already-deleted row is not an error: the caller asked for it to
 		// be gone, and it is. Nothing happens, so no hook runs either — a hook that
 		// fires on a no-op is a notification about nothing.
@@ -1070,6 +1078,20 @@ func (r *todoRepo) Delete(ctx context.Context, in dbhook.Delete[model.TodoDelete
 		if in.Hooks.Before != nil {
 			if err := in.Hooks.Before(ctx, claims, &in.Input, prev); err != nil {
 				return err
+			}
+		}
+
+		// Every table that references this one, in the derived order. An error from
+		// any of them unwinds the whole transaction, including whatever the children
+		// before it already did.
+		for _, child := range in.Hooks.Children {
+			if child.Deleting == nil {
+				continue
+			}
+			if err := child.Deleting(ctx, claims, prev, in.Input); err != nil {
+				// Named, because the whole reason this is better than a 23503 is that the
+				// answer can say which relation refused.
+				return fmt.Errorf("%s: %w", child.Child, err)
 			}
 		}
 
@@ -1086,6 +1108,14 @@ func (r *todoRepo) Delete(ctx context.Context, in dbhook.Delete[model.TodoDelete
 					return err
 				}
 			}
+			for _, child := range in.Hooks.Children {
+				if child.Deleted == nil {
+					continue
+				}
+				done, row, input := child.Deleted, prev, in.Input
+				dbx.AfterCommit(ctx, func() { done(ctx, claims, row, input) })
+			}
+
 			return nil
 		}
 
@@ -1106,6 +1136,14 @@ func (r *todoRepo) Delete(ctx context.Context, in dbhook.Delete[model.TodoDelete
 				return err
 			}
 		}
+		for _, child := range in.Hooks.Children {
+			if child.Deleted == nil {
+				continue
+			}
+			done, row, input := child.Deleted, prev, in.Input
+			dbx.AfterCommit(ctx, func() { done(ctx, claims, row, input) })
+		}
+
 		return nil
 	})
 	if err != nil {

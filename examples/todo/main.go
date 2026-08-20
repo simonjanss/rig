@@ -14,6 +14,7 @@ import (
 	"cmp"
 	"context"
 	"embed"
+	"fmt"
 	"net/http"
 	"os"
 	"time"
@@ -28,6 +29,11 @@ import (
 	todo_attachment "github.com/simonjanss/rig/examples/todo/services/todo_attachment"
 	"github.com/simonjanss/rig/examples/todo/web"
 	"github.com/simonjanss/rig/migrate"
+	// Aliased, because this example already has a package called notify: a
+	// recorder that prints what it is handed, which exists to demonstrate the
+	// shape of a background dependency. The two are worth telling apart — that
+	// one is this application's own, and this one is rig's inbox.
+	rignotify "github.com/simonjanss/rig/notify"
 	"github.com/simonjanss/rig/runtime/rigerr"
 	"github.com/simonjanss/rig/runtime/serve"
 	"github.com/simonjanss/rig/runtime/tenancy"
@@ -80,6 +86,11 @@ func main() {
 			"sweep-files": func(ctx context.Context, pool *pgxpool.Pool) error {
 				return api.FileSweeper(api.NewFiles(pool))(ctx, pool)
 			},
+			// The guarantee behind the inbox, for everything the in-process
+			// engine did not get to. It builds its own object graph because it
+			// needs the same one the server does: the audience is a method on a
+			// service, which is the honest cost of computing it late.
+			"dispatch-notifications": dispatchNotifications,
 		},
 
 		// The server does not apply them. It refuses to start without them,
@@ -114,10 +125,36 @@ func main() {
 		// rig.yaml, so none of it is a number in this file.
 		fileSvc := api.NewFiles(app.Pool)
 
+		// The inbox, and the knot in building it: a service needs the notify
+		// service to announce anything, and the dispatcher needs the service to
+		// ask who should be told. So the registry is made first and empty, and
+		// filled once the service it points at exists.
+		//
+		// This is the whole of what a project without authentication has to do
+		// differently, which is nothing: a notification is addressed to an
+		// account, and where the claims naming that account come from — here, a
+		// header — is not this wiring's business.
+		reg := rignotify.NewRegistry()
+		inbox := api.NewNotifications(app.Pool, reg)
+
 		// One field per resource is the whole registration surface: adding a
 		// table and forgetting to wire it up does not compile.
-		svc := todo.New(repos.Todos, fileSvc, notifier, app.Logger)
+		svc := todo.New(repos.Todos, fileSvc, notifier, inbox, app.Pool, app.Logger)
 		attachments := todo_attachment.New(repos.TodoAttachments, fileSvc)
+
+		reg.Register(api.NewTodoSubject(svc))
+
+		// A dependency with a shutdown of its own, registered beside the line
+		// that builds it. The engine is latency — it turns a notification into
+		// an inbox line in milliseconds rather than by the next tick — and the
+		// task below is the guarantee.
+		// No channels, deliberately. This example has no mail and no push, and
+		// the inbox works anyway — it is not a channel, which is the whole
+		// reason it cannot be turned off. examples/auth has the other half.
+		engine := api.NewNotificationEngine(app.Pool, reg, nil)
+		engine.Start()
+		app.Drain("notifications", engine.StopClaiming)
+		app.CloseWithin("notifications", 15*time.Second, engine.Close)
 
 		mux := api.Register(api.Handlers{
 			Server: api.Server{
@@ -135,6 +172,7 @@ func main() {
 			},
 			Todo:           svc,
 			TodoAttachment: attachments,
+			Notifications:  inbox,
 		})
 
 		// A second caller of the same service, on the same mux. The UI renders
@@ -190,4 +228,22 @@ func headerClaims(r *http.Request) (tenancy.Claims, error) {
 		claims.AccountID = accountID
 	}
 	return claims, nil
+}
+
+// dispatchNotifications is the inbox's cron half.
+//
+// It assembles what the server assembles, because the question it answers —
+// who should hear about this row — is a method on a service and there is no
+// other way to reach one from a task.
+func dispatchNotifications(ctx context.Context, pool *pgxpool.Pool) error {
+	repos := store.New(pool, store.Config{})
+
+	reg := rignotify.NewRegistry()
+	inbox := api.NewNotifications(pool, reg)
+	svc := todo.New(repos.Todos, api.NewFiles(pool), nil, inbox, pool, nil)
+	reg.Register(api.NewTodoSubject(svc))
+
+	report, err := api.NewNotificationEngine(pool, reg, nil).Resolve(ctx)
+	fmt.Fprintln(os.Stdout, report)
+	return err
 }

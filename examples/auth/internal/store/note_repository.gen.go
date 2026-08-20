@@ -114,6 +114,9 @@ func noteGroup(f model.NoteFilter, sc filterScope) (query.Group, error) {
 		if p.DeletedByAPIKeyID != nil {
 			g.Add(sc.at(query.Eq("deleted_by_api_key_id", p.DeletedByAPIKeyID)))
 		}
+		if p.PublishAt != nil {
+			g.Add(sc.at(query.Eq("publish_at", p.PublishAt)))
+		}
 	}
 	if p := f.NotEquals; p != nil {
 		if p.ID != nil {
@@ -152,6 +155,9 @@ func noteGroup(f model.NoteFilter, sc filterScope) (query.Group, error) {
 		if p.DeletedByAPIKeyID != nil {
 			g.Add(sc.at(query.Ne("deleted_by_api_key_id", p.DeletedByAPIKeyID)))
 		}
+		if p.PublishAt != nil {
+			g.Add(sc.at(query.Ne("publish_at", p.PublishAt)))
+		}
 	}
 	if p := f.GreaterThan; p != nil {
 		if p.CreatedAt != nil {
@@ -162,6 +168,9 @@ func noteGroup(f model.NoteFilter, sc filterScope) (query.Group, error) {
 		}
 		if p.DeletedAt != nil {
 			g.Add(sc.at(query.Gt("deleted_at", p.DeletedAt)))
+		}
+		if p.PublishAt != nil {
+			g.Add(sc.at(query.Gt("publish_at", p.PublishAt)))
 		}
 	}
 	if p := f.SmallerThan; p != nil {
@@ -174,6 +183,9 @@ func noteGroup(f model.NoteFilter, sc filterScope) (query.Group, error) {
 		if p.DeletedAt != nil {
 			g.Add(sc.at(query.Lt("deleted_at", p.DeletedAt)))
 		}
+		if p.PublishAt != nil {
+			g.Add(sc.at(query.Lt("publish_at", p.PublishAt)))
+		}
 	}
 	if p := f.GreaterOrEqual; p != nil {
 		if p.CreatedAt != nil {
@@ -185,6 +197,9 @@ func noteGroup(f model.NoteFilter, sc filterScope) (query.Group, error) {
 		if p.DeletedAt != nil {
 			g.Add(sc.at(query.Gte("deleted_at", p.DeletedAt)))
 		}
+		if p.PublishAt != nil {
+			g.Add(sc.at(query.Gte("publish_at", p.PublishAt)))
+		}
 	}
 	if p := f.SmallerOrEqual; p != nil {
 		if p.CreatedAt != nil {
@@ -195,6 +210,9 @@ func noteGroup(f model.NoteFilter, sc filterScope) (query.Group, error) {
 		}
 		if p.DeletedAt != nil {
 			g.Add(sc.at(query.Lte("deleted_at", p.DeletedAt)))
+		}
+		if p.PublishAt != nil {
+			g.Add(sc.at(query.Lte("publish_at", p.PublishAt)))
 		}
 	}
 	if p := f.Contains; p != nil {
@@ -234,6 +252,9 @@ func noteGroup(f model.NoteFilter, sc filterScope) (query.Group, error) {
 		if len(p.DeletedByAPIKeyID) > 0 {
 			g.Add(sc.at(query.In("deleted_by_api_key_id", p.DeletedByAPIKeyID)))
 		}
+		if len(p.PublishAt) > 0 {
+			g.Add(sc.at(query.In("publish_at", p.PublishAt)))
+		}
 	}
 	if p := f.NotContains; p != nil {
 		if len(p.ID) > 0 {
@@ -271,6 +292,9 @@ func noteGroup(f model.NoteFilter, sc filterScope) (query.Group, error) {
 		}
 		if len(p.DeletedByAPIKeyID) > 0 {
 			g.Add(sc.at(query.NotIn("deleted_by_api_key_id", p.DeletedByAPIKeyID)))
+		}
+		if len(p.PublishAt) > 0 {
+			g.Add(sc.at(query.NotIn("publish_at", p.PublishAt)))
 		}
 	}
 	if p := f.Like; p != nil {
@@ -353,6 +377,13 @@ func noteGroup(f model.NoteFilter, sc filterScope) (query.Group, error) {
 				g.Add(sc.at(query.NotNull("deleted_by_api_key_id")))
 			}
 		}
+		if p.PublishAt != nil {
+			if *p.PublishAt {
+				g.Add(sc.at(query.IsNull("publish_at")))
+			} else {
+				g.Add(sc.at(query.NotNull("publish_at")))
+			}
+		}
 	}
 	if p := f.NotNull; p != nil {
 		if p.Body != nil {
@@ -418,6 +449,13 @@ func noteGroup(f model.NoteFilter, sc filterScope) (query.Group, error) {
 				g.Add(sc.at(query.IsNull("deleted_by_api_key_id")))
 			}
 		}
+		if p.PublishAt != nil {
+			if *p.PublishAt {
+				g.Add(sc.at(query.NotNull("publish_at")))
+			} else {
+				g.Add(sc.at(query.IsNull("publish_at")))
+			}
+		}
 	}
 
 	for _, n := range f.NestedFilters {
@@ -433,7 +471,7 @@ func noteGroup(f model.NoteFilter, sc filterScope) (query.Group, error) {
 // noteSortable reports whether a column can be ordered by.
 func noteSortable(column string) bool {
 	switch column {
-	case "id", "tenant_id", "title", "body", "created_at", "created_by_account_id", "updated_at", "updated_by_account_id", "deleted_at", "deleted_by_account_id", "created_by_api_key_id", "updated_by_api_key_id", "deleted_by_api_key_id":
+	case "id", "tenant_id", "title", "body", "created_at", "created_by_account_id", "updated_at", "updated_by_account_id", "deleted_at", "deleted_by_account_id", "created_by_api_key_id", "updated_by_api_key_id", "deleted_by_api_key_id", "publish_at":
 		return true
 	}
 	return false
@@ -465,17 +503,18 @@ type noteRepo struct {
 
 var _ NoteRepository = (*noteRepo)(nil)
 
-const noteRepoSelect = "note.id, note.tenant_id, note.title, note.body, note.created_at, note.created_by_account_id, note.updated_at, note.updated_by_account_id, note.deleted_at, note.deleted_by_account_id, note.created_by_api_key_id, note.updated_by_api_key_id, note.deleted_by_api_key_id"
+const noteRepoSelect = "note.id, note.tenant_id, note.title, note.body, note.created_at, note.created_by_account_id, note.updated_at, note.updated_by_account_id, note.deleted_at, note.deleted_by_account_id, note.created_by_api_key_id, note.updated_by_api_key_id, note.deleted_by_api_key_id, note.publish_at"
 
 // scanNote reads one row in the order noteRepoSelect lists.
 func scanNote(row pgx.Row) (*model.Note, error) {
 	var m model.Note
-	if err := row.Scan(&m.ID, &m.TenantID, &m.Title, &m.Body, &m.CreatedAt, &m.CreatedByAccountID, &m.UpdatedAt, &m.UpdatedByAccountID, &m.DeletedAt, &m.DeletedByAccountID, &m.CreatedByAPIKeyID, &m.UpdatedByAPIKeyID, &m.DeletedByAPIKeyID); err != nil {
+	if err := row.Scan(&m.ID, &m.TenantID, &m.Title, &m.Body, &m.CreatedAt, &m.CreatedByAccountID, &m.UpdatedAt, &m.UpdatedByAccountID, &m.DeletedAt, &m.DeletedByAccountID, &m.CreatedByAPIKeyID, &m.UpdatedByAPIKeyID, &m.DeletedByAPIKeyID, &m.PublishAt); err != nil {
 		return nil, err
 	}
 	m.CreatedAt = dbx.UTC(m.CreatedAt)
 	m.UpdatedAt = dbx.UTCPtr(m.UpdatedAt)
 	m.DeletedAt = dbx.UTCPtr(m.DeletedAt)
+	m.PublishAt = dbx.UTCPtr(m.PublishAt)
 	return &m, nil
 }
 
@@ -688,8 +727,8 @@ func (r *noteRepo) Create(ctx context.Context, in dbhook.Create[model.NoteCreate
 			}
 		}
 
-		columns := []string{"id", "tenant_id", "created_at", "created_by_account_id", "created_by_api_key_id", "title", "body"}
-		values := []any{id, claims.TenantID, now, claims.Actor(), claims.ActorKey(), in.Input.Title, in.Input.Body}
+		columns := []string{"id", "tenant_id", "created_at", "created_by_account_id", "created_by_api_key_id", "title", "body", "publish_at"}
+		values := []any{id, claims.TenantID, now, claims.Actor(), claims.ActorKey(), in.Input.Title, in.Input.Body, in.Input.PublishAt}
 
 		sql := fmt.Sprintf("INSERT INTO note (%s) VALUES (%s) RETURNING %s", joinColumns(columns), placeholders(len(values)), noteRepoSelect)
 
@@ -774,6 +813,10 @@ func (r *noteRepo) Update(ctx context.Context, id uuid.UUID, in dbhook.Update[mo
 		if in.Input.Body.Touched() {
 			columns = append(columns, "body")
 			values = append(values, in.Input.Body.Ptr())
+		}
+		if in.Input.PublishAt.Touched() {
+			columns = append(columns, "publish_at")
+			values = append(values, in.Input.PublishAt.Ptr())
 		}
 
 		if len(columns) == 0 {
@@ -964,6 +1007,10 @@ func (r *noteRepo) Restore(ctx context.Context, id uuid.UUID, in dbhook.Restore[
 		if in.Input.Body.Touched() {
 			columns = append(columns, "body")
 			values = append(values, in.Input.Body.Ptr())
+		}
+		if in.Input.PublishAt.Touched() {
+			columns = append(columns, "publish_at")
+			values = append(values, in.Input.PublishAt.Ptr())
 		}
 
 		// The row changed, so it is stamped as changed. A restore that left the update

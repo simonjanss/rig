@@ -57,6 +57,10 @@ type API struct {
 	// client's expectations from each carrying their own copy of the answer.
 	Files *Files `json:"files,omitempty"`
 
+	// Notifications is the inbox this API serves, or nil for a project with
+	// none. Here for the reason [API.Auth] and [API.Files] are.
+	Notifications *Notifications `json:"notifications,omitempty"`
+
 	// Permissions is every permission this API's endpoints require, computed once
 	// at Freeze from the endpoints themselves.
 	//
@@ -114,6 +118,30 @@ type Files struct {
 	// CookieDownloads accepts the session cookie on file GET routes, so a
 	// stored URL works in an img or a download link.
 	CookieDownloads bool `json:"cookie_downloads,omitempty"`
+}
+
+// Notifications is the resolved notifications block: whether this project has an
+// inbox, and the numbers the engine that fills it runs on.
+type Notifications struct {
+	// Enabled says this project has an inbox. It is what makes server-go write
+	// the wiring, and what keeps rig's notification tables in the schema.
+	Enabled bool `json:"enabled"`
+	// Expose says the inbox is projected as a resource as well, so it gets the
+	// filter grammar and a generated client. The hand-written routes exist
+	// either way.
+	Expose bool `json:"expose,omitempty"`
+
+	// DefaultDigest is what an account with no setting for a channel gets.
+	DefaultDigest string `json:"default_digest"`
+
+	// ClaimTTLSeconds is how long a dispatcher's claim is honoured, and the rest
+	// of the retry arithmetic beside it. Seconds because a document is JSON and
+	// a Go duration in one is either unreadable or has to be parsed by everybody.
+	ClaimTTLSeconds    int64 `json:"claim_ttl_seconds"`
+	MaxAttempts        int   `json:"max_attempts"`
+	BackoffBaseSeconds int64 `json:"backoff_base_seconds"`
+	// RetentionSeconds is how long a read and deleted inbox line is kept.
+	RetentionSeconds int64 `json:"retention_seconds"`
 }
 
 // Origin records why an object exists, so a generator can treat hand-declared
@@ -390,10 +418,67 @@ type Resource struct {
 	// already settled.
 	Files []FileColumn `json:"files,omitempty"`
 
+	// Notifiable says this table is joined to rig_notification by a link table,
+	// so notifications can be about its rows.
+	//
+	// It is derived from the schema rather than declared: any link table one
+	// side of which is rig_notification makes the other side notifiable, so the
+	// recommended name — blog_post_notification — is a recommendation and
+	// nothing depends on it. There is nothing for a name to say here that the
+	// foreign key does not.
+	//
+	// A notifiable resource's rules interface grows two required methods: when
+	// notifications about a row are due, and — at the moment of sending — who
+	// should hear about it.
+	Notifiable bool `json:"notifiable,omitempty"`
+
+	// Parents are the resources this one points at, one per foreign key, in the
+	// order the columns appear on the table. Each becomes a pair of hook fields
+	// the service layer may fill in.
+	Parents []ParentLink `json:"parents,omitempty"`
+
+	// Children are the resources that point at this one, in the order they are
+	// told about a delete.
+	//
+	// The order is derived — referencing tables before referenced ones — and
+	// resolved here rather than in a generator, because it is a fact about the
+	// whole schema and a generator holds one resource at a time.
+	Children []ChildLink `json:"children,omitempty"`
+
 	// Storage is nil for a virtual resource with no table behind it.
 	Storage *ResourceStorage `json:"storage,omitempty"`
 	// Electric is set when the resource exposes a live-sync shape endpoint.
 	Electric *ElectricEndpoint `json:"electric,omitempty"`
+}
+
+// ParentLink is one foreign key from a resource to another resource.
+//
+// Only a foreign key to a table rig generates a service for is here. A column
+// pointing at rig_file or at an audit actor has no service to declare a hook in,
+// and rig should not pretend it can call one.
+type ParentLink struct {
+	// Name is the accessor, matching the BelongsTo relation: HomeTeam out of
+	// home_team_id. It is what the two hook fields are named after.
+	Name string `json:"name"`
+	// Parent is the resource name, Table the physical table behind it.
+	Parent string `json:"parent"`
+	Table  string `json:"table"`
+	// Column is the foreign key on this resource's own table.
+	Column string `json:"column"`
+}
+
+// ChildLink is one foreign key pointing at a resource, from the parent's side.
+type ChildLink struct {
+	// Name is the HasMany accessor: HomeFixtures out of fixture.home_team_id.
+	Name string `json:"name"`
+	// Child is the resource name, Table the physical table behind it.
+	Child string `json:"child"`
+	Table string `json:"table"`
+	// Column is the foreign key on the child's table.
+	Column string `json:"column"`
+	// Hook is the field on the child's parent-hooks struct this edge fills:
+	// HomeTeam, matching the child's own [ParentLink.Name].
+	Hook string `json:"hook"`
 }
 
 // Supports reports whether the resource has the given operation.

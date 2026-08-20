@@ -225,8 +225,14 @@ projects set `fk_needs_index: error`.
 **`ON DELETE CASCADE` is refused** ([RIG6040](diagnostics.md)). It is an error
 rather than a warning, because a cascade is a delete your application never
 sees: no hook runs, nothing is notified, nothing is snapshotted, and the rows
-are gone. What you probably want is soft delete on the child, or an explicit
-delete in your service layer that says what should happen.
+are gone.
+
+What to do instead is a plain foreign key and a
+[parent hook](services.md#when-a-row-you-point-at-is-deleted) on the child. It
+runs inside the transaction that is deleting the parent and can clear the link,
+delete the rows through your own service, or refuse the delete outright — three
+bodies where the keyword offered three words, and a fourth case the keyword
+could not have said at all.
 
 ## Comments are documentation
 

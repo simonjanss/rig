@@ -19,8 +19,11 @@ type Config struct {
 	Migrations Migrations  `yaml:"migrations,omitempty" json:"migrations,omitempty" jsonschema_description:"Migration file location."`
 	Auth       Auth        `yaml:"auth,omitempty" json:"auth,omitempty" jsonschema_description:"How the authentication foundation's tables are treated."`
 	Files      Files       `yaml:"files,omitempty" json:"files,omitempty" jsonschema_description:"Where uploaded files are kept, and what an upload may be."`
-	Naming     Naming      `yaml:"naming,omitempty" json:"naming,omitempty" jsonschema_description:"How database names become Go and JSON names."`
-	Validate   Validate    `yaml:"validate,omitempty" json:"validate,omitempty" jsonschema_description:"Severity of each configurable convention rule."`
+
+	Notifications Notifications `yaml:"notifications,omitempty" json:"notifications,omitempty" jsonschema_description:"The inbox, and how notifications are delivered."`
+
+	Naming   Naming   `yaml:"naming,omitempty" json:"naming,omitempty" jsonschema_description:"How database names become Go and JSON names."`
+	Validate Validate `yaml:"validate,omitempty" json:"validate,omitempty" jsonschema_description:"Severity of each configurable convention rule."`
 
 	Generators []Generator `yaml:"generators,omitempty" json:"generators,omitempty" jsonschema_description:"Generators to run, in order."`
 }

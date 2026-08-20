@@ -2210,6 +2210,14 @@
             }
           }
         ],
+        "parents": [
+          {
+            "name": "Author",
+            "parent": "Author",
+            "table": "author",
+            "column": "writer"
+          }
+        ],
         "storage": {
           "table": "article",
           "primary_key": [
@@ -2726,6 +2734,15 @@
               "service_method": "Update",
               "handler_name": "UpdateAuthor"
             }
+          }
+        ],
+        "children": [
+          {
+            "name": "Articles",
+            "child": "Article",
+            "table": "article",
+            "column": "writer",
+            "hook": "Author"
           }
         ],
         "storage": {

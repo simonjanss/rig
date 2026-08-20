@@ -71,7 +71,22 @@ type TeamService interface {
 	// for fields it touched. The row was not live, so nothing about it has been
 	// checked against the world it is returning to.
 	Restore(ctx context.Context, r Request[TeamRestorePath, struct{}, struct{}]) (*model.Team, error)
+
+	// AdoptChildren receives the hooks of the tables referencing this one. [Link]
+	// calls it.
+	AdoptChildren(TeamChildDeletes)
 }
+
+// TeamChildDeletes is what the tables referencing Team want to happen when one
+// is deleted, in the order they are told.
+//
+// The order is rig's and is derived from the schema: referencing tables before
+// referenced ones, which is the order the rows themselves would have to go in.
+// It does not matter for correctness — everything is in one transaction, so
+// a refusal unwinds everything before it — and it matters for what one
+// sibling can see of another and for which error a caller gets when two of
+// them would both refuse. `on_delete.order` overrides it.
+type TeamChildDeletes = []dbhook.ChildDelete[model.TeamDeleteInput, model.Team]
 
 // TeamWriter writes a Team with the service's rules attached.
 //
@@ -82,12 +97,26 @@ type TeamService interface {
 type TeamWriter struct {
 	repo  store.TeamRepository
 	hooks TeamHooks
+	// children is what the tables referencing this one want to happen when a row
+	// goes. It is a pointer because it is filled in after the writer exists:
+	// services are built one at a time and in no particular order, and a child
+	// cannot register with a parent that is not constructed yet.
+	children *TeamChildDeletes
 }
 
 // NewTeamWriter pairs a repository with the rules that apply to it.
 func NewTeamWriter(repo store.TeamRepository, hooks TeamHooks) TeamWriter {
-	return TeamWriter{repo: repo, hooks: hooks}
+	return TeamWriter{repo: repo, hooks: hooks, children: new(TeamChildDeletes)}
 }
+
+// AdoptChildren receives the hooks of every table referencing Team, already in
+// order.
+//
+// [Link] calls it, and Register calls Link, so an ordinary server needs
+// nothing here. A program that builds services and serves them some other way
+// has to call Link itself: until it does, a delete runs this resource's own
+// hooks and none of its children's.
+func (w TeamWriter) AdoptChildren(cs TeamChildDeletes) { *w.children = cs }
 
 // Create inserts a row, running the create rules and hooks.
 func (w TeamWriter) Create(ctx context.Context, in model.TeamCreateInput) (*model.Team, error) {
@@ -101,7 +130,13 @@ func (w TeamWriter) Update(ctx context.Context, id uuid.UUID, in model.TeamUpdat
 
 // Delete removes a row, running the delete hooks.
 func (w TeamWriter) Delete(ctx context.Context, in model.TeamDeleteInput) error {
-	return w.repo.Delete(ctx, dbhook.Delete[model.TeamDeleteInput, model.Team]{Input: in, Hooks: w.hooks.Delete})
+	// The children are read here rather than captured when the writer was built,
+	// so a delete runs whatever is registered now. Before [Link] has run there is
+	// nothing registered, and a delete is exactly what it was before rig
+	// propagated anything.
+	hooks := w.hooks.Delete
+	hooks.Children = *w.children
+	return w.repo.Delete(ctx, dbhook.Delete[model.TeamDeleteInput, model.Team]{Input: in, Hooks: hooks})
 }
 
 // Restore brings a retired row back, running the restore hooks. The input
@@ -212,6 +247,9 @@ func NewDefaultTeamService(repo store.TeamRepository, contract TeamContract) Def
 // It is a method rather than something the service layer holds because there
 // is then nothing to wire, and nothing to wire wrongly.
 func (s DefaultTeamService) Writer() TeamWriter { return s.write }
+
+// AdoptChildren implements TeamService.
+func (s DefaultTeamService) AdoptChildren(cs TeamChildDeletes) { s.write.AdoptChildren(cs) }
 
 // readFilter combines the caller's filter with whatever the read hook narrows
 // to.

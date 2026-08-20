@@ -11,6 +11,10 @@
             "own"
           ],
           "description": "Default read width: tenant (every row) or own (rows the caller created)."
+        },
+        "owner": {
+          "type": "string",
+          "description": "Column an owner-scoped read filters on. Defaults to created_by_account_id. Must be a NOT NULL uuid referencing rig_account."
         }
       },
       "additionalProperties": false,
@@ -290,6 +294,19 @@
       "additionalProperties": false,
       "type": "object"
     },
+    "OnDelete": {
+      "properties": {
+        "order": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "description": "Child tables in the order they are told about a delete. Anything unlisted runs after."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
+    },
     "Param": {
       "properties": {
         "name": {
@@ -400,6 +417,10 @@
     "access": {
       "$ref": "#/$defs/Access",
       "description": "How wide a read of this table reaches by default."
+    },
+    "on_delete": {
+      "$ref": "#/$defs/OnDelete",
+      "description": "The order tables referencing this one are told about a delete."
     },
     "columns": {
       "additionalProperties": {

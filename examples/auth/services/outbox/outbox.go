@@ -16,12 +16,15 @@ package outbox
 
 import (
 	"context"
+	"errors"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/google/uuid"
 
 	"github.com/simonjanss/rig/auth/account"
+	"github.com/simonjanss/rig/notify"
 )
 
 // Kind is what a delivered link is for.
@@ -129,4 +132,44 @@ func (b *Box) Pending() []Message {
 		}
 	}
 	return out
+}
+
+// NotificationSender is what a rig notification is delivered through here: the
+// same ring buffer, so the interface can show a mail nobody sent.
+//
+// It is the shape a real channel has and none of the substance. What a real one
+// adds is a transport and one obligation: hand [notify.Delivery.ID] to the
+// provider as its own idempotency key. rig cannot enforce that — the send and
+// the bookkeeping are two systems and no transaction spans both — so a channel
+// that ignores it is a channel that sends a duplicate every time a process dies
+// mid-send, and nothing will tell you.
+//
+// It records rather than sends for the reason the rest of this package does, and
+// the same caveat applies with more force: what is on the screen here is what
+// somebody was told, and in a real application that is somebody's mail.
+func (b *Box) NotificationSender() notify.Sender {
+	return notify.SenderFunc(func(_ context.Context, m notify.Message) error {
+		if m.EmailAddress == "" && len(m.Devices) == 0 {
+			// Nowhere to send is the channel's answer to give, not rig's: rig
+			// knows who is owed what, and where somebody can be reached is the
+			// channel's own question.
+			return errors.New("outbox: nowhere to deliver this notification")
+		}
+
+		kinds := make([]string, 0, len(m.Deliveries))
+		for _, d := range m.Deliveries {
+			kinds = append(kinds, d.Kind)
+		}
+
+		b.add(Message{
+			Kind: Kind("Notification"),
+			To:   m.EmailAddress,
+			// One line whether this is one notification or a digest of nine,
+			// because that is what a channel is handed and what it decides what
+			// to say with. rig writes no template, here or anywhere.
+			DisplayName: strings.Join(kinds, ", "),
+			At:          time.Now().UTC(),
+		})
+		return nil
+	})
 }

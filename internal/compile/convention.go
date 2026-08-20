@@ -215,6 +215,48 @@ func auditActorColumns() []string {
 // FileTable is the managed table every uploaded file has a row in.
 const FileTable = "rig_file"
 
+// AccountTable is the managed table an owner column has to point at. A tenant's
+// membership row, and what every claim carries the identifier of.
+const AccountTable = "rig_account"
+
+// The two managed tables the inbox is made of.
+//
+// NotificationTable is what happened; NotificationRecipientTable is one person's
+// line about it. They are separate because one person clearing their inbox must
+// not change what anybody else sees, and because ten events collapse into one
+// line on the second and never on the first.
+const (
+	NotificationTable          = "rig_notification"
+	NotificationRecipientTable = "rig_notification_recipient"
+
+	// And the three delivery carries: where a push can reach somebody, what
+	// they want told to them, and one copy on its way.
+	NotificationDeviceTable   = "rig_notification_device"
+	NotificationSettingTable  = "rig_notification_setting"
+	NotificationDeliveryTable = "rig_notification_delivery"
+)
+
+// NotificationTables are all five, in dependency order.
+func NotificationTables() []string {
+	return []string{
+		NotificationTable, NotificationRecipientTable,
+		NotificationDeviceTable, NotificationSettingTable, NotificationDeliveryTable,
+	}
+}
+
+// isNotificationTable reports whether a table is one of rig's own.
+func isNotificationTable(name string) bool {
+	return slices.Contains(NotificationTables(), name)
+}
+
+// NotificationRecipientOwner is the column an inbox read narrows to.
+//
+// Not the created-by audit column every other owner-scoped table filters on: an
+// inbox line is not owned by whoever caused it, it is owned by the person it is
+// addressed to. That distinction is what `access.owner` exists for, and this is
+// the table it was written against.
+const NotificationRecipientOwner = "account_id"
+
 // fileColumnSuffix is what makes a column a file column.
 const fileColumnSuffix = "_file_id"
 

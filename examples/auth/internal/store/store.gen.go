@@ -151,10 +151,15 @@ type Config struct{}
 type Store struct {
 	pool *pgxpool.Pool
 
-	AccountRoles AccountRoleRepository
-	Notes        NoteRepository
-	Permissions  PermissionRepository
-	Roles        RoleRepository
+	AccountRoles              AccountRoleRepository
+	Notes                     NoteRepository
+	Permissions               PermissionRepository
+	RigNotifications          RigNotificationRepository
+	RigNotificationDeliveries RigNotificationDeliveryRepository
+	RigNotificationDevices    RigNotificationDeviceRepository
+	RigNotificationRecipients RigNotificationRecipientRepository
+	RigNotificationSettings   RigNotificationSettingRepository
+	Roles                     RoleRepository
 }
 
 // New builds a store over a connection pool.
@@ -163,6 +168,11 @@ func New(pool *pgxpool.Pool, _ Config) *Store {
 	s.AccountRoles = &accountRoleRepo{db: s}
 	s.Notes = &noteRepo{db: s}
 	s.Permissions = &permissionRepo{db: s}
+	s.RigNotifications = &rigNotificationRepo{db: s}
+	s.RigNotificationDeliveries = &rigNotificationDeliveryRepo{db: s}
+	s.RigNotificationDevices = &rigNotificationDeviceRepo{db: s}
+	s.RigNotificationRecipients = &rigNotificationRecipientRepo{db: s}
+	s.RigNotificationSettings = &rigNotificationSettingRepo{db: s}
 	s.Roles = &roleRepo{db: s}
 	return s
 }

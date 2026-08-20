@@ -9,11 +9,12 @@ import (
 // Foundation parts. Each is one migration and its table configuration, so
 // skipping one leaves a project that still applies and still validates.
 const (
-	PartTenancy  = "tenancy"
-	PartSessions = "sessions"
-	PartAPIKeys  = "apikeys"
-	PartOAuth    = "oauth"
-	PartFiles    = "files"
+	PartTenancy       = "tenancy"
+	PartSessions      = "sessions"
+	PartAPIKeys       = "apikeys"
+	PartOAuth         = "oauth"
+	PartFiles         = "files"
+	PartNotifications = "notifications"
 )
 
 // Parts in the order they must be applied.
@@ -22,11 +23,17 @@ const (
 // table is not: keys add a column to tokens rather than tokens depending on
 // keys, so a project that skips keys is still coherent.
 //
-// Files come last and depend on nothing. They are the one part that is useful
-// in a project with no authentication at all, which is why rig_file's tenant
-// column carries no reference to rig_tenant.
+// Files come after those and depend on nothing. They are the one part that is
+// useful in a project with no authentication at all, which is why rig_file's
+// tenant column carries no reference to rig_tenant.
+//
+// Notifications come last and are the opposite case: a notification is addressed
+// to an account, so they need the tenancy part and say so in [Requires]. They do
+// not need sessions — an application that reads its inbox through a header is a
+// perfectly ordinary one — which is why the dependency is the narrow half of the
+// foundation rather than all of it.
 func Parts() []string {
-	return []string{PartTenancy, PartAPIKeys, PartSessions, PartOAuth, PartFiles}
+	return []string{PartTenancy, PartAPIKeys, PartSessions, PartOAuth, PartFiles, PartNotifications}
 }
 
 // FoundationOptions describe what to scaffold.
@@ -155,6 +162,12 @@ func PartTables(part string) []string {
 		return []string{"rig_identity_oauth"}
 	case PartFiles:
 		return []string{"rig_file"}
+	case PartNotifications:
+		return []string{
+			"rig_notification", "rig_notification_recipient",
+			"rig_notification_device", "rig_notification_setting",
+			"rig_notification_delivery",
+		}
 	default:
 		return nil
 	}
@@ -200,6 +213,11 @@ func Requires(part string) []string {
 		return []string{PartTenancy, PartAPIKeys}
 	case PartAPIKeys, PartOAuth:
 		return []string{PartTenancy}
+	case PartNotifications:
+		// An inbox line names an account, and rig_account is the tenancy part.
+		// Not sessions: reading your own inbox needs claims, and where those
+		// come from is not this foundation's business.
+		return []string{PartTenancy}
 	default:
 		return nil
 	}
@@ -227,6 +245,8 @@ func foundationPart(name string) part {
 		return part{migration: oauthSQL, configs: oauthConfigs()}
 	case PartFiles:
 		return part{migration: filesSQL, configs: fileConfigs()}
+	case PartNotifications:
+		return part{migration: notificationsSQL, configs: notificationConfigs()}
 	default:
 		return part{}
 	}

@@ -521,6 +521,47 @@
       "additionalProperties": false,
       "type": "object"
     },
+    "Notifications": {
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Whether this project has an inbox. The server-go generator writes the wiring only when it is set."
+        },
+        "expose": {
+          "type": "boolean",
+          "description": "Project the inbox as a generated resource as well, for the filter grammar and a typed client. The hand-written routes exist either way."
+        },
+        "default_digest": {
+          "type": "string",
+          "enum": [
+            "Immediate",
+            "Hourly",
+            "Daily",
+            "Weekly",
+            "Off"
+          ],
+          "description": "What an account gets on a channel it has no setting for. Defaults to Immediate."
+        },
+        "claim_ttl": {
+          "$ref": "#/$defs/Duration",
+          "description": "How long a dispatcher's claim on a delivery is honoured before another may take it. Set it longer than your slowest channel's timeout. Defaults to 5m, and under 1m is refused."
+        },
+        "max_attempts": {
+          "type": "integer",
+          "description": "How many times a delivery is tried before it is marked failed. Defaults to 5."
+        },
+        "backoff_base": {
+          "$ref": "#/$defs/Duration",
+          "description": "Delay before the first retry. Each attempt doubles it. Defaults to 1m."
+        },
+        "retention": {
+          "$ref": "#/$defs/Duration",
+          "description": "How long a read and deleted inbox line is kept before it is pruned. Has to outlive the longest digest window. Defaults to 2160h (90 days)."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
+    },
     "OpenAPI": {
       "properties": {
         "version": {
@@ -686,6 +727,10 @@
     "files": {
       "$ref": "#/$defs/Files",
       "description": "Where uploaded files are kept, and what an upload may be."
+    },
+    "notifications": {
+      "$ref": "#/$defs/Notifications",
+      "description": "The inbox, and how notifications are delivered."
     },
     "naming": {
       "$ref": "#/$defs/Naming",

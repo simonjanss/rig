@@ -6,11 +6,14 @@ package api
 
 import (
 	"context"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/simonjanss/rig/examples/auth/internal/model"
 	"github.com/simonjanss/rig/examples/auth/internal/store"
+	"github.com/simonjanss/rig/notify"
 	"github.com/simonjanss/rig/runtime/dbhook"
+	"github.com/simonjanss/rig/runtime/readopt"
 	"github.com/simonjanss/rig/runtime/tenancy"
 )
 
@@ -71,7 +74,22 @@ type NoteService interface {
 	// for fields it touched. The row was not live, so nothing about it has been
 	// checked against the world it is returning to.
 	Restore(ctx context.Context, r Request[NoteRestorePath, struct{}, struct{}]) (*model.Note, error)
+
+	// AdoptChildren receives the hooks of the tables referencing this one. [Link]
+	// calls it.
+	AdoptChildren(NoteChildDeletes)
 }
+
+// NoteChildDeletes is what the tables referencing Note want to happen when one
+// is deleted, in the order they are told.
+//
+// The order is rig's and is derived from the schema: referencing tables before
+// referenced ones, which is the order the rows themselves would have to go in.
+// It does not matter for correctness — everything is in one transaction, so
+// a refusal unwinds everything before it — and it matters for what one
+// sibling can see of another and for which error a caller gets when two of
+// them would both refuse. `on_delete.order` overrides it.
+type NoteChildDeletes = []dbhook.ChildDelete[model.NoteDeleteInput, model.Note]
 
 // NoteWriter writes a Note with the service's rules attached.
 //
@@ -82,12 +100,26 @@ type NoteService interface {
 type NoteWriter struct {
 	repo  store.NoteRepository
 	hooks NoteHooks
+	// children is what the tables referencing this one want to happen when a row
+	// goes. It is a pointer because it is filled in after the writer exists:
+	// services are built one at a time and in no particular order, and a child
+	// cannot register with a parent that is not constructed yet.
+	children *NoteChildDeletes
 }
 
 // NewNoteWriter pairs a repository with the rules that apply to it.
 func NewNoteWriter(repo store.NoteRepository, hooks NoteHooks) NoteWriter {
-	return NoteWriter{repo: repo, hooks: hooks}
+	return NoteWriter{repo: repo, hooks: hooks, children: new(NoteChildDeletes)}
 }
+
+// AdoptChildren receives the hooks of every table referencing Note, already in
+// order.
+//
+// [Link] calls it, and Register calls Link, so an ordinary server needs
+// nothing here. A program that builds services and serves them some other way
+// has to call Link itself: until it does, a delete runs this resource's own
+// hooks and none of its children's.
+func (w NoteWriter) AdoptChildren(cs NoteChildDeletes) { *w.children = cs }
 
 // Create inserts a row, running the create rules and hooks.
 func (w NoteWriter) Create(ctx context.Context, in model.NoteCreateInput) (*model.Note, error) {
@@ -101,7 +133,13 @@ func (w NoteWriter) Update(ctx context.Context, id uuid.UUID, in model.NoteUpdat
 
 // Delete removes a row, running the delete hooks.
 func (w NoteWriter) Delete(ctx context.Context, in model.NoteDeleteInput) error {
-	return w.repo.Delete(ctx, dbhook.Delete[model.NoteDeleteInput, model.Note]{Input: in, Hooks: w.hooks.Delete})
+	// The children are read here rather than captured when the writer was built,
+	// so a delete runs whatever is registered now. Before [Link] has run there is
+	// nothing registered, and a delete is exactly what it was before rig
+	// propagated anything.
+	hooks := w.hooks.Delete
+	hooks.Children = *w.children
+	return w.repo.Delete(ctx, dbhook.Delete[model.NoteDeleteInput, model.Note]{Input: in, Hooks: hooks})
 }
 
 // Restore brings a retired row back, running the restore hooks. The input
@@ -137,6 +175,57 @@ type NoteContract struct {
 	// the rules for creating a row and for changing one are different questions
 	// asked about different fields.
 	Hooks NoteHooks
+
+	// Notify answers when notifications about a row are due and who should hear
+	// about them. It is required, because this table declared itself notifiable by
+	// being joined to rig_notification, and a nil one would be an audience of
+	// nobody discovered hours later in a job.
+	Notify NoteNotify
+}
+
+// NoteNotify is what rig asks about notifications concerning a Note: when they
+// are due, and who should hear about them.
+//
+// Both are required, because this table declared itself notifiable by being
+// joined to rig_notification. A project that declares one and does not answer
+// these does not compile — not a default at runtime, a build failure, which
+// is the mechanism a declared endpoint already uses.
+type NoteNotify interface {
+	// NotifyAt says when notifications about a row are due, and whether they are
+	// due at all.
+	//
+	// Returning false cancels anything still pending about the row — a
+	// publish_at that was cleared, a post put back to draft. The zero time with
+	// true means now, which is the ordinary case and is not a special path: an
+	// immediate notification and one scheduled for Friday differ by one column and
+	// run the same code.
+	//
+	// rig calls it after every create and every update, so a date that moves takes
+	// its notifications with it and there is no hook to remember.
+	NotifyAt(row *model.Note, kind string) (time.Time, bool)
+
+	// NotifyWho answers, at the moment of sending, which accounts should hear
+	// about a row.
+	//
+	// It runs in the dispatcher rather than in a request, under System claims for
+	// the row's own tenant, and that is what makes the answer current: an account
+	// added to the group after the notification was written is in this list,
+	// because this list is built now.
+	//
+	// It must be a pure read, and it may be called more than once for the same
+	// notification — a dispatcher that resolved and died before committing, two
+	// replicas racing the same nudge. rig makes a repeat harmless with a unique
+	// index on the inbox line; a method with side effects would make it visible.
+	//
+	// One thing about those claims is surprising and is the one trap in writing
+	// one of these. AccountID is the nil identifier, because there is no caller
+	// — so an owner-scoped read inside this method returns nothing until it is
+	// given readopt.WithoutOwnerScope(). It fails as an empty audience rather than
+	// as an error, and an empty audience is the hardest bug in this system to
+	// notice: a notification nobody was told about looks exactly like a
+	// notification nobody was owed. The dispatcher counts them, which is the only
+	// thing standing between that and a support ticket.
+	NotifyWho(ctx context.Context, n *notify.Notification, row *model.Note) ([]uuid.UUID, error)
 }
 
 // NoteHooks are the callbacks that run around each generated write.
@@ -167,6 +256,10 @@ type NoteHooks struct {
 // up without an implementation of it, and the failure is at the call to the
 // constructor rather than on the route.
 type NoteRules interface {
+	// The two questions notifications ask of this table, which it declared by
+	// being joined to rig_notification.
+	NoteNotify
+
 	// Hooks is everything that happens around a write, plus what a read answers
 	// with. It is called once, during construction.
 	Hooks() NoteHooks
@@ -187,7 +280,7 @@ type NoteRules interface {
 // writer back. The service layer never has to hold a half-built value or name
 // the type it is part of.
 func NewNoteService(repo store.NoteRepository, rules NoteRules) DefaultNoteService {
-	svc := NewDefaultNoteService(repo, NoteContract{Hooks: rules.Hooks()})
+	svc := NewDefaultNoteService(repo, NoteContract{Hooks: rules.Hooks(), Notify: rules})
 	rules.Bind(svc.Writer())
 	return svc
 }
@@ -199,6 +292,14 @@ func NewNoteService(repo store.NoteRepository, rules NoteRules) DefaultNoteServi
 // site would have said so. An empty NoteContract is still allowed — it is
 // just a thing somebody wrote down.
 func NewDefaultNoteService(repo store.NoteRepository, contract NoteContract) DefaultNoteService {
+	// Likewise. A nil one is not a table nobody notifies about; it is one whose
+	// every announcement resolves to an audience of nobody, in a background job,
+	// hours later — which is the failure mode this whole design is arranged to
+	// make visible rather than the one to introduce here.
+	if contract.Notify == nil {
+		panic("api.NewDefaultNoteService: Contract.Notify is required: note is joined to rig_notification")
+	}
+
 	return DefaultNoteService{repo: repo, contract: contract, write: NewNoteWriter(repo, contract.Hooks)}
 }
 
@@ -212,6 +313,62 @@ func NewDefaultNoteService(repo store.NoteRepository, contract NoteContract) Def
 // It is a method rather than something the service layer holds because there
 // is then nothing to wire, and nothing to wire wrongly.
 func (s DefaultNoteService) Writer() NoteWriter { return s.write }
+
+// AdoptChildren implements NoteService.
+func (s DefaultNoteService) AdoptChildren(cs NoteChildDeletes) { s.write.AdoptChildren(cs) }
+
+// NoteSubject is how the dispatcher reaches Note's answers.
+//
+// It is registered where the service is already wired, so adding a link table
+// and forgetting to register does not compile.
+type NoteSubject struct {
+	svc DefaultNoteService
+}
+
+// NewNoteSubject adapts a service to the dispatcher's interface.
+func NewNoteSubject(svc DefaultNoteService) NoteSubject { return NoteSubject{svc: svc} }
+
+// Table implements notify.Subjects.
+func (s NoteSubject) Table() string { return "note" }
+
+// Audience implements notify.Subjects.
+func (s NoteSubject) Audience(ctx context.Context, n *notify.Notification, id uuid.UUID) ([]uuid.UUID, error) {
+	row, err := s.svc.repo.Get(ctx, id, readopt.WithoutOwnerScope())
+	if err != nil {
+		return nil, err
+	}
+	return s.svc.contract.Notify.NotifyWho(ctx, n, row)
+}
+
+// NotifyAboutNote names the row an announcement is about.
+//
+// Use it rather than building the value by hand: the table and the join are
+// written here from the schema, so nothing a request carries reaches a
+// statement.
+func NotifyAboutNote(id uuid.UUID) notify.Subject {
+	return notify.Subject{
+		Table:     "note",
+		LinkTable: "note_notification",
+		Column:    "note_id",
+		ID:        id,
+	}
+}
+
+// AnnounceNote builds the announcement, asking this resource's own NotifyAt
+// when it is due.
+//
+// One call rather than three lines, because the middle one is the one to
+// forget: an announcement written without asking NotifyAt is due now, and a
+// draft would go out the moment somebody saved it.
+func AnnounceNote(rules NoteNotify, row *model.Note, kind string) notify.Announcement {
+	at, due := rules.NotifyAt(row, kind)
+	return notify.Announcement{
+		Kind:    kind,
+		Subject: NotifyAboutNote(row.ID),
+		At:      at,
+		Due:     due,
+	}
+}
 
 // readFilter combines the caller's filter with whatever the read hook narrows
 // to.

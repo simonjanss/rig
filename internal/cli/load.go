@@ -55,6 +55,7 @@ func compileFrom(p *project.Project, schema ir.Schema) (*ir.Document, diag.List)
 	}
 	diags.Append(checkFoundationPresent(p))
 	diags.Append(checkFilesFoundation(p, set))
+	diags.Append(checkNotificationsFoundation(p, set))
 
 	doc, d := compile.Compile(schema, set, compile.Options{
 		Project:      p,
@@ -108,6 +109,22 @@ func foundationTables(p *project.Project) ([]string, error) {
 			out = append(out, table)
 			continue
 		}
+		// The notification tables are the opposite case, and the difference is
+		// worth reading beside rig_file rather than discovering. They are never
+		// ignored while notifications are on — not even with `expose` off —
+		// because a link table is classified against a map built after the
+		// ignored tables have been dropped. Ignore rig_notification and every
+		// project's `<subject>_notification` silently stops being a link table,
+		// every notifiable resource silently stops being one, and nothing says
+		// why. `notifications.expose` marks them unexposed instead, which keeps
+		// the model and the repository and generates no endpoints.
+		if slices.Contains(compile.NotificationTables(), table) {
+			if p.Config.Notifications.Enabled {
+				continue
+			}
+			out = append(out, table)
+			continue
+		}
 		// An exposed table is projected like any other: the point of the list is
 		// to get a model and a repository back.
 		if slices.Contains(p.Config.Auth.Expose, table) {
@@ -149,6 +166,50 @@ func checkFilesFoundation(p *project.Project, set *tableconf.Set) diag.List {
 			"files.expose projects %s, but there is no table configuration for it, so it would "+
 				"arrive with full CRUD over its storage key; "+
 				"run `rig setup-project --expose %s`", compile.FileTable, compile.FileTable)
+	}
+	return diags
+}
+
+// checkNotificationsFoundation reports a notifications block whose tables are
+// not there, and an exposed inbox with no configuration saying what may be done
+// to it.
+//
+// The second one is the dangerous half, exactly as it is for rig_file. Exposing
+// the inbox is what makes it a resource; the table configuration is what makes
+// that resource read-and-delete. Without it, the inbox would arrive with a
+// generated PATCH over `kind` and `event_count` — which is a way to rewrite what
+// somebody was told, and a POST that could address a notification to anybody.
+func checkNotificationsFoundation(p *project.Project, set *tableconf.Set) diag.List {
+	var diags diag.List
+	if !p.Config.Notifications.Enabled {
+		return diags
+	}
+
+	names, err := migrationNames(p.MigrationsDir())
+	if err != nil && !os.IsNotExist(err) {
+		return diags
+	}
+
+	managed := scaffold.Managed(names)
+	for _, table := range compile.NotificationTables() {
+		if !slices.Contains(managed, table) {
+			diags.Add(diag.CodeConfigInvalid, p.At("notifications", "enabled"),
+				"notifications.enabled is set but this project has no %s migration; "+
+					"run `rig setup-project`", table)
+			return diags
+		}
+	}
+
+	if !p.Config.Notifications.Expose || set == nil {
+		return diags
+	}
+	for _, table := range compile.NotificationTables() {
+		if set.Get(table) == nil {
+			diags.Add(diag.CodeConfigInvalid, p.At("notifications", "expose"),
+				"notifications.expose projects %s, but there is no table configuration for it, "+
+					"so it would arrive with a generated write path over what somebody was told; "+
+					"run `rig setup-project --expose %s`", table, table)
+		}
 	}
 	return diags
 }

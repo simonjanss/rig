@@ -231,6 +231,15 @@ var (
 		"`order_by` names a column that does not exist.",
 		"")
 
+	CodeDeleteOrderCycle = newCode("RIG5060", SeverityWarning,
+		"The tables referencing one table reference each other in a cycle.",
+		"There is no order that tells each child after the tables pointing at it, "+
+			"so they are told in schema order. Settle it with `on_delete.order`.")
+
+	CodeDeleteOrderUnknown = newCode("RIG5061", SeverityError,
+		"`on_delete.order` names a table that does not reference this one.",
+		"")
+
 	CodeTenantColumnShape = newCode("RIG5070", SeverityError,
 		"The tenant column has the wrong type.",
 		"`tenant_id` must be `uuid not null`.")

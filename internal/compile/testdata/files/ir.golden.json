@@ -3522,6 +3522,36 @@
             "segment": "banner-file"
           }
         ],
+        "parents": [
+          {
+            "name": "ProfileImageFile",
+            "parent": "RigFile",
+            "table": "rig_file",
+            "column": "profile_image_file_id"
+          },
+          {
+            "name": "BannerFile",
+            "parent": "RigFile",
+            "table": "rig_file",
+            "column": "banner_file_id"
+          }
+        ],
+        "children": [
+          {
+            "name": "ProfileAttachments",
+            "child": "ProfileAttachment",
+            "table": "profile_attachment",
+            "column": "profile_id",
+            "hook": "Profile"
+          },
+          {
+            "name": "ThumbnailFileProfileAttachments",
+            "child": "ProfileAttachment",
+            "table": "profile_attachment",
+            "column": "thumbnail_file_id",
+            "hook": "ThumbnailFile"
+          }
+        ],
         "storage": {
           "table": "profile",
           "primary_key": [
@@ -4368,6 +4398,26 @@
             "part": "documentFile",
             "segment": "document-file",
             "required": true
+          }
+        ],
+        "parents": [
+          {
+            "name": "Profile",
+            "parent": "Profile",
+            "table": "profile",
+            "column": "profile_id"
+          },
+          {
+            "name": "DocumentFile",
+            "parent": "RigFile",
+            "table": "rig_file",
+            "column": "document_file_id"
+          },
+          {
+            "name": "ThumbnailFile",
+            "parent": "Profile",
+            "table": "profile",
+            "column": "thumbnail_file_id"
           }
         ],
         "storage": {
@@ -5259,6 +5309,29 @@
               "service_method": "Restore",
               "handler_name": "RestoreRigFile"
             }
+          }
+        ],
+        "children": [
+          {
+            "name": "DocumentFileProfileAttachments",
+            "child": "ProfileAttachment",
+            "table": "profile_attachment",
+            "column": "document_file_id",
+            "hook": "DocumentFile"
+          },
+          {
+            "name": "ProfileImageFileProfiles",
+            "child": "Profile",
+            "table": "profile",
+            "column": "profile_image_file_id",
+            "hook": "ProfileImageFile"
+          },
+          {
+            "name": "BannerFileProfiles",
+            "child": "Profile",
+            "table": "profile",
+            "column": "banner_file_id",
+            "hook": "BannerFile"
           }
         ],
         "storage": {

@@ -40,6 +40,11 @@ type FixtureService interface {
 	// Only the fields present in the body are changed. A field set to null is
 	// cleared; a field left out is left alone.
 	Update(ctx context.Context, r Request[FixtureUpdatePath, struct{}, model.FixtureUpdateInput]) (*model.Fixture, error)
+
+	// ParentHooks is what this resource does when a row it points at is deleted.
+	// [Link] reads it and hands it to the parent, which is the only caller: the
+	// parent never sees this service, only the closures.
+	ParentHooks() FixtureParentHooks
 }
 
 // FixtureWriter writes a Fixture with the service's rules attached.
@@ -116,6 +121,53 @@ type FixtureHooks struct {
 	Create dbhook.CreateHooks[model.FixtureCreateInput, model.Fixture]
 	Update dbhook.UpdateHooks[model.FixtureUpdateInput, model.Fixture]
 	Delete dbhook.DeleteHooks[model.FixtureDeleteInput, model.Fixture]
+
+	// Parents is one field pair per foreign key this table has to another
+	// resource: what to do when the row it points at is deleted. They are here
+	// rather than under Delete because they are about somebody else's delete, not
+	// this one's.
+	Parents FixtureParentHooks
+}
+
+// FixtureParentHooks is what Fixture does when a row it points at is deleted.
+//
+// One pair per foreign key. `<Parent>Deleting` runs inside the transaction
+// doing the delete, before that row is touched, and returning an error refuses
+// it and unwinds everything the children before it already did.
+// `<Parent>Deleted` runs once that transaction has committed, in the same
+// order, and returns nothing — the row is gone, so this is where the cache
+// eviction, the search index and the mail belong.
+//
+// Every field is optional and nil does nothing, which is the default and stays
+// supported: a table that declares none behaves exactly as it did before any
+// of this existed — the foreign key refuses, and the 23503 becomes a 409.
+//
+// What a configuration key would have spelled `set_null`, `cascade` and
+// `restrict` are three obvious bodies here: an update that nulls the column, a
+// loop calling this resource's own Delete, and a returned error. The fourth
+// case — "delete the drafts and reassign the published ones" — is the same
+// function with an if in it, and it is the case every vocabulary of four
+// keywords runs out on.
+//
+// Two things about the arguments. The whole parent row arrives and not this
+// table's own rows, so it is one call per relation rather than one per row:
+// nulling ten thousand links is one UPDATE written here, and the loop that
+// gets each row's hooks and snapshots instead costs a statement each — which
+// is the correct price for what it buys, and the two versions do not look
+// different. And the delete input is passed because Hard is the difference
+// between a soft delete the parent can undo and a permanent one: a body that
+// nulls a link on a soft delete has destroyed the only record of what to
+// re-link on a restore.
+type FixtureParentHooks struct {
+	// The Team that home_team_id points at is going, and has not gone yet.
+	HomeTeamDeleting func(ctx context.Context, claims tenancy.Claims, parent *model.Team, in model.TeamDeleteInput) error
+	// It has gone, and the transaction that took it has committed.
+	HomeTeamDeleted func(ctx context.Context, claims tenancy.Claims, parent *model.Team, in model.TeamDeleteInput)
+
+	// The Team that away_team_id points at is going, and has not gone yet.
+	AwayTeamDeleting func(ctx context.Context, claims tenancy.Claims, parent *model.Team, in model.TeamDeleteInput) error
+	// It has gone, and the transaction that took it has committed.
+	AwayTeamDeleted func(ctx context.Context, claims tenancy.Claims, parent *model.Team, in model.TeamDeleteInput)
 }
 
 // FixtureRules is everything the service layer supplies about Fixture.
@@ -171,6 +223,9 @@ func NewDefaultFixtureService(repo store.FixtureRepository, contract FixtureCont
 // It is a method rather than something the service layer holds because there
 // is then nothing to wire, and nothing to wire wrongly.
 func (s DefaultFixtureService) Writer() FixtureWriter { return s.write }
+
+// ParentHooks implements FixtureService.
+func (s DefaultFixtureService) ParentHooks() FixtureParentHooks { return s.contract.Hooks.Parents }
 
 // readFilter combines the caller's filter with whatever the read hook narrows
 // to.

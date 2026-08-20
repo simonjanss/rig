@@ -404,3 +404,54 @@ wrong is deleting somebody's data.
 > **`backend: s3` has not shipped.** The adapter is a module of its own, and
 > `rig generate` refuses the setting rather than writing wiring that would keep
 > every upload in a map a restart empties.
+
+## `notifications`
+
+The inbox. Off by default, and what makes `server-go` write the engine, the
+dispatch task and the routes at all — a project without this block carries none
+of it.
+
+```yaml
+notifications:
+  enabled: true
+  expose: false             # also project the inbox as a generated resource
+  default_digest: Immediate # what an account with no setting gets
+  claim_ttl: 5m             # how long a dispatcher's claim is honoured
+  max_attempts: 5
+  backoff_base: 1m          # doubling: 1m, 2m, 4m, 8m, 16m
+  retention: 2160h          # 90 days, and it has to outlive the longest digest
+```
+
+`enabled` needs the migrations behind it (`rig setup-project` writes them) and
+the tenancy tables they depend on, because a notification is addressed to an
+account. It does **not** need the `auth:` block: where the claims naming that
+account come from is not this block's business.
+
+The block does nothing on its own. A table becomes notifiable by being joined to
+`rig_notification`, and then its service layer owes two methods — see
+[notifications.md](notifications.md).
+
+`expose` is the second answer rather than the only one. Without it the inbox is
+served by the hand-written routes under `/notifications`, which is what most
+applications show in a bell icon; with it, `rig_notification_recipient` is also
+projected as a resource and gets the filter grammar, the sort keys and a typed
+client. Both stay, and the difference between them is the point.
+
+`claim_ttl` is the one number here worth understanding before deploying. A
+dispatcher claims a delivery, sends it outside any transaction, and marks it —
+and the claim exists so that a process which died between the second step and
+the third does not strand the row. Set it **longer than your slowest channel's
+own timeout**: shorter, and every message that channel is still sending is
+claimed a second time under ordinary load, and at-least-once stops being a
+crash-recovery property. Under a minute is refused at boot.
+
+`retention` prunes read-and-dismissed inbox lines, their copies, and the
+notifications left with nothing pointing at them — in the same task that
+dispatches, the way the file sweeper's two rules share one. It has to outlive the
+longest digest window: a weekly digest under a daily retention is assembled from
+rows that were already pruned, and presents as "the weekly mail is sometimes
+empty" rather than as a configuration error.
+
+rig ships **no transport**. Channels are an interface an application implements,
+for the reason the mail notifier already gives — see
+[notifications.md](notifications.md#delivery).

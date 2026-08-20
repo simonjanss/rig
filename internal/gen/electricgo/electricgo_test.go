@@ -112,6 +112,48 @@ func TestTheFilterIsBuiltBeforeAnythingElseRuns(t *testing.T) {
 	}
 }
 
+// An owner-scoped table streams the caller's own rows and nothing else.
+//
+// This was a hole rather than a decision: the shape builder emitted the tenant,
+// soft-delete and snapshot predicates and ignored the owner the IR has carried
+// since owner scoping shipped, so an owner-scoped table with a shape streamed
+// the whole tenant unless the application remembered to narrow it in the stub —
+// the one narrowing a stub should never have been responsible for, because the
+// repository does not make anybody remember it.
+func TestAnOwnerScopedShapeNarrowsToTheCaller(t *testing.T) {
+	t.Parallel()
+
+	doc := gentest.LoadDocument(t, filepath.Join("testdata", "ownerscope.ir.json"))
+	src := find(t, gentest.Run(t, electricgo.New(), doc, opts()), "memo_shape.gen.go")
+
+	body, ok := between(src, "func handleMemoShape(", "\n}")
+	if !ok {
+		t.Fatal("no handler")
+	}
+	collapsed := collapse(body)
+
+	if want := `where.Eq("created_by_account_id", claims.AccountID.String())`; !strings.Contains(collapsed, collapse(want)) {
+		t.Errorf("missing %s:\n%s", want, body)
+	}
+
+	// Before the stub, so the stub can still only narrow.
+	owner := strings.Index(collapsed, "created_by_account_id")
+	scope := strings.Index(collapsed, "scope(r.Context()")
+	if owner < 0 || scope < 0 || owner > scope {
+		t.Error("the owner condition should be added before the application's scope runs")
+	}
+
+	// Refused rather than narrowed. An API key and a system credential both
+	// have a nil identifier, and Eq against one matches nothing *silently* — a
+	// subscriber handed an empty stream cannot tell it from having no rows.
+	if !strings.Contains(collapsed, "if claims.AccountID == uuid.Nil {") {
+		t.Errorf("a caller with no account should be refused:\n%s", body)
+	}
+	if refuse := strings.Index(collapsed, "uuid.Nil"); refuse < 0 || refuse > owner {
+		t.Error("the refusal should come before the predicate it stands in for")
+	}
+}
+
 func TestATableWithNoTenantIsStillFiltered(t *testing.T) {
 	t.Parallel()
 

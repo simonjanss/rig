@@ -53,6 +53,7 @@ import (
 	"github.com/simonjanss/rig/examples/auth/services/outbox"
 	"github.com/simonjanss/rig/examples/auth/web"
 	"github.com/simonjanss/rig/migrate"
+	"github.com/simonjanss/rig/notify"
 	"github.com/simonjanss/rig/runtime/rigerr"
 	"github.com/simonjanss/rig/runtime/serve"
 )
@@ -84,6 +85,14 @@ func main() {
 
 		Tasks: map[string]serve.Task{
 			"migrate": migrate.Apply(migrations, migrate.Options{Log: os.Stdout}),
+			// The guarantee behind the inbox. The engine the server runs is
+			// latency — it turns a notification into an inbox line in
+			// milliseconds rather than by the next tick — and this is what takes
+			// everything it did not: a process that died mid-pass, a note whose
+			// publish_at is next Friday. A subcommand rather than a goroutine, so
+			// it is a cron job rather than something racing itself in every
+			// replica.
+			"dispatch-notifications": dispatchNotifications,
 			// `auth seed` makes a tenant, an account to sign in as, and the role
 			// that lets it write. There is no registration endpoint in this
 			// example: who may create an account is a product decision, and the
@@ -92,8 +101,39 @@ func main() {
 		},
 		Migrate: migrate.Require(migrations, migrate.Options{}),
 	}, func(ctx context.Context, app *serve.App) (http.Handler, error) {
-		return newAPI(ctx, app.Pool)
+		mux, engine, err := newAPI(ctx, app.Pool)
+		if err != nil {
+			return nil, err
+		}
+
+		// A dependency with a shutdown of its own, registered beside the line
+		// that built it. Draining stops it taking new work while the server is
+		// still answering, which is the right order: the requests in flight are
+		// the last ones whose commits will nudge it, and what is left of the
+		// window is better spent finishing than starting. Closing runs before
+		// the pool does, because what is in flight is a write.
+		engine.Start()
+		app.Drain("notifications", engine.StopClaiming)
+		app.CloseWithin("notifications", 15*time.Second, engine.Close)
+
+		return mux, nil
 	})
+}
+
+// dispatchNotifications is the task, built the same way the server builds it.
+//
+// It needs the same object graph the server does — the audience is a method on
+// a service — which is the honest cost of computing it late, and the reason this
+// file has a constructor both callers share instead of building services inside
+// the mount closure.
+func dispatchNotifications(ctx context.Context, pool *pgxpool.Pool) error {
+	_, engine, err := newAPI(ctx, pool)
+	if err != nil {
+		return err
+	}
+	report, err := engine.Resolve(ctx)
+	fmt.Fprintln(os.Stdout, report)
+	return err
 }
 
 // newAPI is everything this server is made of.
@@ -103,13 +143,34 @@ func main() {
 // the wiring — that the generated handlers and the auth endpoints agree about
 // who the caller is — and a test that assembled its own would be testing
 // something else.
-func newAPI(ctx context.Context, pool *pgxpool.Pool) (http.Handler, error) {
+func newAPI(ctx context.Context, pool *pgxpool.Pool) (http.Handler, *notify.Engine, error) {
 	repos := store.New(pool, store.Config{})
+
+	// The inbox, and the two halves of it that have to be built in this order.
+	//
+	// The registry is how the dispatcher reaches each notifiable table's
+	// answers, and it is populated below with the service that has them —
+	// which is the whole reason this file has a constructor the server and
+	// the task both call rather than building services inside the mount
+	// closure. The audience is computed without a request, so the code that
+	// computes it has to be reachable from a job.
+	reg := notify.NewRegistry()
+	notifier := api.NewNotifications(pool, reg)
+	notes := note.New(repos.Notes, notifier, pool)
+	reg.Register(api.NewNoteSubject(notes))
 
 	// The mail this example would have sent. A Notifier delivers the single-use
 	// links the auth package mints; this one keeps them in memory so the
 	// interface can show an invitation without a mail server standing by.
 	mail := outbox.New(20)
+
+	// One channel, and it records rather than sends — the same ring buffer the
+	// auth links go into, so the interface can show a mail nobody sent. rig
+	// ships no transport: what it knows is who is owed what and when, and every
+	// provider decision after that is one it would get wrong.
+	engine := api.NewNotificationEngine(pool, reg, map[notify.Channel]notify.Sender{
+		notify.ChannelEmail: mail.NotificationSender(),
+	})
 
 	// The whole foundation, over the tables `rig setup-project` wrote, wired from
 	// the auth block in rig.yaml.
@@ -167,7 +228,7 @@ func newAPI(ctx context.Context, pool *pgxpool.Pool) (http.Handler, error) {
 		// like a 401 from anywhere else.
 	})
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	// One resource, because the application has one table. The foundation's
@@ -188,7 +249,8 @@ func newAPI(ctx context.Context, pool *pgxpool.Pool) (http.Handler, error) {
 			RequestID: func(r *http.Request) string { return r.Header.Get("X-Request-Id") },
 		},
 
-		Note: note.New(repos.Notes),
+		Note:          notes,
+		Notifications: notifier,
 	})
 
 	// The permission table, made to match what the handlers check.
@@ -203,7 +265,7 @@ func newAPI(ctx context.Context, pool *pgxpool.Pool) (http.Handler, error) {
 	// tables. It is here rather than inside auth.New because construction does no
 	// I/O.
 	if err := authz.SyncPermissions(ctx, pool, api.PermissionKeys()); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	// And the interface, which is a client of everything above rather than a
@@ -212,7 +274,7 @@ func newAPI(ctx context.Context, pool *pgxpool.Pool) (http.Handler, error) {
 	// to be the one thing it reached past the API for.
 	ui, err := web.New(mux, pool, mail)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	ui.Mount(mux)
 
@@ -222,7 +284,7 @@ func newAPI(ctx context.Context, pool *pgxpool.Pool) (http.Handler, error) {
 		http.Redirect(w, r, "/ui", http.StatusFound)
 	})
 
-	return mux, nil
+	return mux, engine, nil
 }
 
 // accountService builds the account service on its own, for the work that

@@ -24,6 +24,18 @@ type ConfigOptions struct {
 	// and "no such table" would send somebody looking for a migration that is
 	// not the problem.
 	Ignored []string
+	// Notifications is the resolved notifications block, or nil for a project
+	// with no inbox.
+	//
+	// It arrives here for the reason FileRestoreWindowDays does: rig's two
+	// notification tables have no table configuration in an ordinary project,
+	// and the two things that have to be true of them — that an inbox read
+	// narrows to the caller and that the inbox is the only one of them with a
+	// live-sync shape — are the same decision in every project. A copy of them
+	// in a YAML file could only ever disagree with this one, and the way it
+	// would disagree is by streaming somebody else's inbox.
+	Notifications *ir.Notifications
+
 	// FileRestoreWindowDays is how long a deleted rig_file row stays
 	// restorable, resolved from `files.restore_window` in rig.yaml.
 	//
@@ -70,8 +82,9 @@ func ApplyConfig(api ir.API, schema ir.Schema, set *tableconf.Set, opt ConfigOpt
 		// file handling, so both are carried through untouched. They are named
 		// rather than left out because this copy is field by field, and a field
 		// nobody listed is a field silently dropped.
-		Auth:  api.Auth,
-		Files: api.Files,
+		Auth:          api.Auth,
+		Files:         api.Files,
+		Notifications: api.Notifications,
 	}
 
 	tableIndex := make(map[string]int, len(outSchema.Tables))
@@ -143,8 +156,73 @@ func ApplyConfig(api ir.API, schema ir.Schema, set *tableconf.Set, opt ConfigOpt
 	}
 
 	retypeEnums(&outAPI, renamed)
+	pruneCascade(&outAPI)
 
 	return outAPI, outSchema, diags
+}
+
+// pruneCascade drops every delete-propagation edge that has nowhere to land.
+//
+// It runs after configuration rather than during projection because `expose` is
+// a configuration key: at projection time nothing is unexposed yet. An unexposed
+// resource has a model and a repository and no service — service-go skips it —
+// so there is no rules interface to declare a hook in and no writer to run one
+// from. rig calls the tables it generates a service for, and this is where that
+// sentence is enforced rather than restated.
+//
+// A parent also has to offer Delete, which is a second question from being
+// exposed and settles the case that would otherwise be confusing: rig_file is a
+// resource in a project with `files.expose`, and it is `operations: [Get, List]`
+// — the write path is the upload endpoint on the row that owns the file, not a
+// POST to the file table. A `<RigFile>Deleting` field on every table with a file
+// column would be a hook nothing can ever reach, and a field that can never fire
+// is worse than no field: somebody implements it and waits.
+// It also refreshes the resource name on every surviving edge. The links were
+// derived before configuration had its say, and `resource:` renames a resource —
+// rig_notification_recipient arrives as NotificationRecipient — so a generator
+// handed the projected name would emit a type that does not exist. Tables are
+// what the edges are keyed by, because a physical name is the one thing
+// configuration cannot move.
+func pruneCascade(api *ir.API) {
+	var (
+		// serviced is a table rig writes a service layer for, so a hook has
+		// somewhere to be declared.
+		serviced = make(map[string]string, len(api.Resources))
+		// deletable is a table whose delete a hook could actually be reached by.
+		deletable = make(map[string]bool, len(api.Resources))
+	)
+	for i := range api.Resources {
+		res := &api.Resources[i]
+		if res.Unexposed || res.Storage == nil {
+			continue
+		}
+		serviced[res.Storage.Table] = res.Name
+		deletable[res.Storage.Table] = res.Supports(ir.OpDelete)
+	}
+
+	for i := range api.Resources {
+		res := &api.Resources[i]
+		if res.Storage == nil || serviced[res.Storage.Table] == "" {
+			res.Parents, res.Children = nil, nil
+			continue
+		}
+		res.Parents = slices.DeleteFunc(res.Parents, func(p ir.ParentLink) bool {
+			return !deletable[p.Table]
+		})
+		for j := range res.Parents {
+			res.Parents[j].Parent = serviced[res.Parents[j].Table]
+		}
+		if !res.Supports(ir.OpDelete) {
+			res.Children = nil
+			continue
+		}
+		res.Children = slices.DeleteFunc(res.Children, func(c ir.ChildLink) bool {
+			return serviced[c.Table] == ""
+		})
+		for j := range res.Children {
+			res.Children[j].Child = serviced[res.Children[j].Table]
+		}
+	}
 }
 
 // retypeEnums points every field at an enum's configured name.
@@ -219,6 +297,17 @@ func applyTableConfig(
 		cfg = *loaded.File
 	}
 
+	// Except rig's own notification tables, which are projected so that link
+	// tables can find them and which almost no project writes a configuration
+	// for. The rule exists to catch a migration that added a column nobody
+	// documented; here the migration is rig's, every column is already
+	// commented in it, and the warning is one a project cannot act on. A
+	// warning nobody can act on is one everybody learns to skip, and the ones
+	// worth reading go with it.
+	if loaded == nil && isNotificationTable(t.Name) && opt.Notifications != nil {
+		opt.UnmentionedColumn = ""
+	}
+
 	out := res
 	out.Fields = slices.Clone(res.Fields)
 	out.Endpoints = slices.Clone(res.Endpoints)
@@ -284,6 +373,8 @@ func applyTableConfig(
 	}
 
 	diags.Append(applyAccessConfig(loaded, &out, cfg))
+	applyNotificationTable(&out, t, opt)
+	diags.Append(applyOnDeleteConfig(loaded, &out, cfg))
 	diags.Append(applyColumnConfig(loaded, t, &out, cfg, n, opt))
 	diags.Append(applyRelationConfig(loaded, &out, cfg))
 	diags.Append(applyElectricConfig(loaded, &out, cfg, n))
@@ -574,10 +665,21 @@ func applyRelationConfig(loaded *tableconf.Loaded, res *ir.Resource, cfg tableco
 
 // applyAccessConfig resolves the column an owner-scoped read filters on.
 //
-// The column is not configurable. It is the created-by audit column, which every
-// generated write already stamps — so what a read narrows to and what a write
-// records are the same fact, and there is no way to point the filter at a column
-// nothing maintains.
+// It defaults to the created-by audit column, which every generated write
+// already stamps — so what a read narrows to and what a write records are the
+// same fact. That used to be the only answer, on the argument that there was no
+// way to point the filter at a column nothing maintains.
+//
+// `access.owner` breaks that premise honestly rather than quietly. Nothing
+// audits an inbox line's account_id — it is not who acted — but it is NOT NULL,
+// it is written by the engine and by nothing else, and it is therefore not a
+// column nothing maintains. The premise was about columns a caller can leave
+// empty, and the checks below are what keep it to that: a named column must be a
+// uuid referencing rig_account, and it must not be nullable. The nullability the
+// audit column is allowed to have — "a row created by a migration or by a
+// service has no account behind it… invisible to a narrow read, which is the
+// correct answer and a surprising one" — is exactly what a column like this must
+// not have, and here it can be checked rather than tolerated.
 func applyAccessConfig(loaded *tableconf.Loaded, res *ir.Resource, cfg tableconf.File) diag.List {
 	var diags diag.List
 	if cfg.Access == nil {
@@ -601,9 +703,19 @@ func applyAccessConfig(loaded *tableconf.Loaded, res *ir.Resource, cfg tableconf
 			"access.scope: own needs a table to filter, and %s is not stored as one", res.Name)
 		return diags
 	}
+	if named := cfg.Access.Owner; named != "" {
+		owner, d := ownerColumn(loaded, res, named)
+		diags.Append(d)
+		if owner != nil {
+			res.Storage.Owner = owner
+		}
+		return diags
+	}
+
 	if res.Storage.Audit == nil || res.Storage.Audit.CreatedBy == nil {
 		diags.Add(diag.CodeConfigInvalid, at,
-			"access.scope: own filters on who created a row, so %s needs a created_by_account_id column",
+			"access.scope: own filters on who created a row, so %s needs a created_by_account_id "+
+				"column — or an `access.owner` naming the column that says who the row is for",
 			res.Storage.Table)
 		return diags
 	}
@@ -616,6 +728,185 @@ func applyAccessConfig(loaded *tableconf.Loaded, res *ir.Resource, cfg tableconf
 	owner := *res.Storage.Audit.CreatedBy
 	res.Storage.Owner = &owner
 	return diags
+}
+
+// applyOnDeleteConfig moves the named children to the front of the derived
+// order.
+//
+// Listing some of them rather than all is the ordinary case: the reason to write
+// this key at all is one pair whose derived order is wrong, and demanding the
+// whole sequence would mean a list that has to be edited every time a table is
+// added — and, worse, a list that silently stops mentioning one.
+func applyOnDeleteConfig(loaded *tableconf.Loaded, res *ir.Resource, cfg tableconf.File) diag.List {
+	var diags diag.List
+	if cfg.OnDelete == nil || len(cfg.OnDelete.Order) == 0 {
+		return diags
+	}
+
+	known := make(map[string]bool, len(res.Children))
+	for _, c := range res.Children {
+		known[c.Table] = true
+	}
+
+	var (
+		front []ir.ChildLink
+		taken = make(map[string]bool, len(cfg.OnDelete.Order))
+	)
+	for i, table := range cfg.OnDelete.Order {
+		at := loaded.At("on_delete", "order")
+		if !known[table] {
+			diags.Add(diag.CodeDeleteOrderUnknown, at,
+				"on_delete.order names %q, which has no foreign key to %s; the order is over "+
+					"the tables that reference this one", table, res.Storage.Table)
+			continue
+		}
+		if taken[table] {
+			diags.Add(diag.CodeDeleteOrderUnknown, at,
+				"on_delete.order names %q twice; position %d is the one that would win", table, i+1)
+			continue
+		}
+		taken[table] = true
+		for _, c := range res.Children {
+			if c.Table == table {
+				front = append(front, c)
+			}
+		}
+	}
+
+	rest := make([]ir.ChildLink, 0, len(res.Children))
+	for _, c := range res.Children {
+		if !taken[c.Table] {
+			rest = append(rest, c)
+		}
+	}
+	res.Children = append(front, rest...)
+	return diags
+}
+
+// applyNotificationTable settles what is true of rig's own two notification
+// tables in every project, from the one block that configures them.
+//
+// Three things, and each is somewhere a table configuration would be the wrong
+// home. **The tables stay in the schema whenever notifications are enabled**,
+// and `expose` marks them unexposed instead of dropping them — a departure from
+// how `files.expose` works, and the one trap in this milestone: link tables are
+// classified against a map built after the ignored tables have been removed, so
+// a dropped rig_notification would make every project's link tables silently
+// stop being link tables and every notifiable resource silently stop being one.
+//
+// **The inbox narrows to the caller**, on account_id rather than on the audit
+// column, because an inbox line belongs to the person it is addressed to.
+//
+// **The inbox is the only one with a live-sync shape.** That is a security
+// statement rather than a convenience: rig_notification holds rows that are
+// pending for people who are not recipients yet and may never be, so a
+// tenant-scoped shape over it would stream Friday's unpublished announcement to
+// the whole tenant on Monday. The recipient row carries its own copy of `kind`
+// so a subscriber never needs the join.
+func applyNotificationTable(res *ir.Resource, t *ir.Table, opt ConfigOptions) {
+	cfg := opt.Notifications
+	if cfg == nil || !cfg.Enabled || res.Storage == nil {
+		return
+	}
+	if !isNotificationTable(t.Name) {
+		return
+	}
+
+	if !cfg.Expose {
+		res.Unexposed = true
+		res.Operations = nil
+	}
+
+	if t.Name != NotificationRecipientTable {
+		return
+	}
+
+	if res.Storage.Owner == nil {
+		for i := range res.Fields {
+			c := res.Fields[i].Column
+			if c == nil || c.Name != NotificationRecipientOwner {
+				continue
+			}
+			owner := *c
+			res.Storage.Owner = &owner
+			break
+		}
+	}
+
+	if res.Electric == nil {
+		res.Electric = &ir.ElectricEndpoint{
+			Auth: ir.ElectricAuthTenant,
+			Path: "/electric/" + res.Storage.Table,
+		}
+	}
+}
+
+// ownerColumn resolves and checks a named `access.owner`.
+//
+// Three checks, and each of them is a way the read would otherwise fail quietly.
+// A column that is not on the table is a typo that would narrow to nothing. One
+// that is not a uuid referencing rig_account is a filter comparing an account
+// identifier against something else, which matches no rows and says so nowhere.
+// And a nullable one is a row every narrow read is blind to — which is tolerable
+// for an audit column, because "nobody created this" is a real state, and is not
+// tolerable for a column whose whole job is to say whose row this is.
+func ownerColumn(loaded *tableconf.Loaded, res *ir.Resource, name string) (*ir.ColumnRef, diag.List) {
+	var diags diag.List
+	at := loaded.At("access", "owner")
+
+	var owner *ir.ColumnRef
+	for i := range res.Fields {
+		if c := res.Fields[i].Column; c != nil && c.Name == name {
+			ref := *c
+			ref.Table = res.Storage.Table
+			owner = &ref
+			break
+		}
+	}
+	if owner == nil {
+		diags.Add(diag.CodeUnknownColumn, at,
+			"access.owner names %q, and %s has no such column", name, res.Storage.Table)
+		return nil, diags
+	}
+
+	if owner.SQLType != "uuid" {
+		diags.Add(diag.CodeConfigInvalid, at,
+			"access.owner names %s.%s, which is %s; an owner column holds an account "+
+				"identifier and has to be uuid", res.Storage.Table, name, owner.SQLType)
+		return nil, diags
+	}
+
+	if !referencesAccounts(res, name) {
+		diags.Add(diag.CodeConfigInvalid, at,
+			"access.owner names %s.%s, which does not reference rig_account; the filter compares "+
+				"it against the caller's account, so a column pointing somewhere else matches "+
+				"nothing and reports nothing", res.Storage.Table, name)
+		return nil, diags
+	}
+
+	if owner.Nullable {
+		diags.Add(diag.CodeConfigInvalid, at,
+			"access.owner names %s.%s, which is nullable; a row with no owner is invisible to "+
+				"every narrow read and nothing reports it, so the column has to be NOT NULL",
+			res.Storage.Table, name)
+		return nil, diags
+	}
+
+	return owner, diags
+}
+
+// referencesAccounts reports whether a column is a foreign key to rig_account.
+//
+// Read off the resource's own relations rather than the table's constraints,
+// because the relations are where the composite tenant-carrying form has already
+// been denormalized onto the column that carries the meaning.
+func referencesAccounts(res *ir.Resource, column string) bool {
+	for _, rel := range res.Storage.Relations {
+		if rel.Kind == ir.RelationBelongsTo && rel.LocalColumn == column {
+			return rel.ForeignTable == AccountTable
+		}
+	}
+	return false
 }
 
 func applyElectricConfig(loaded *tableconf.Loaded, res *ir.Resource, cfg tableconf.File, n *naming.Namer) diag.List {

@@ -980,6 +980,14 @@ func (r *teamRepo) Delete(ctx context.Context, in dbhook.Delete[model.TeamDelete
 			return err
 		}
 
+		ctx, more, err := dbx.EnterDelete(ctx, "team", in.Input.ID.String())
+		if err != nil {
+			return err
+		}
+		if !more {
+			return nil
+		}
+
 		// Deleting an already-deleted row is not an error: the caller asked for it to
 		// be gone, and it is. Nothing happens, so no hook runs either — a hook that
 		// fires on a no-op is a notification about nothing.
@@ -993,6 +1001,20 @@ func (r *teamRepo) Delete(ctx context.Context, in dbhook.Delete[model.TeamDelete
 			}
 		}
 
+		// Every table that references this one, in the derived order. An error from
+		// any of them unwinds the whole transaction, including whatever the children
+		// before it already did.
+		for _, child := range in.Hooks.Children {
+			if child.Deleting == nil {
+				continue
+			}
+			if err := child.Deleting(ctx, claims, prev, in.Input); err != nil {
+				// Named, because the whole reason this is better than a 23503 is that the
+				// answer can say which relation refused.
+				return fmt.Errorf("%s: %w", child.Child, err)
+			}
+		}
+
 		if in.Input.Hard {
 			if _, err := tx.Exec(ctx, "DELETE FROM team WHERE id = $1", in.Input.ID); err != nil {
 				return writeError(err, "team")
@@ -1002,6 +1024,14 @@ func (r *teamRepo) Delete(ctx context.Context, in dbhook.Delete[model.TeamDelete
 					return err
 				}
 			}
+			for _, child := range in.Hooks.Children {
+				if child.Deleted == nil {
+					continue
+				}
+				done, row, input := child.Deleted, prev, in.Input
+				dbx.AfterCommit(ctx, func() { done(ctx, claims, row, input) })
+			}
+
 			return nil
 		}
 
@@ -1022,6 +1052,14 @@ func (r *teamRepo) Delete(ctx context.Context, in dbhook.Delete[model.TeamDelete
 				return err
 			}
 		}
+		for _, child := range in.Hooks.Children {
+			if child.Deleted == nil {
+				continue
+			}
+			done, row, input := child.Deleted, prev, in.Input
+			dbx.AfterCommit(ctx, func() { done(ctx, claims, row, input) })
+		}
+
 		return nil
 	})
 	if err != nil {
