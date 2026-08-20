@@ -27,22 +27,35 @@ func (e *env) database(ctx context.Context, p *project.Project) (url string, err
 		return p.DatabaseURL(), nil
 	}
 
-	cfg := p.Config.Database
-	db, err := dockerdb.Start(ctx, dockerdb.Config{
-		Image:     cfg.Image,
-		Name:      cfg.ContainerName,
-		Port:      cfg.Port,
-		Database:  cfg.Name,
-		User:      cfg.User,
-		Password:  cfg.Password,
-		Runtime:   containerRuntime,
-		Log:       e.errOut,
-		StartWait: 90 * time.Second,
-	})
+	cfg := containerConfig(p)
+	cfg.Log = e.errOut
+	cfg.StartWait = 90 * time.Second
+
+	db, err := dockerdb.Start(ctx, cfg)
 	if err != nil {
 		return "", err
 	}
 	return db.URL(), nil
+}
+
+// containerConfig is the throwaway database this project asks for.
+//
+// The name and the port come from the configuration and then through
+// [dockerdb.Qualify] and [dockerdb.HostPort], which are what one checkout of a
+// project does not to collide with another. Both are the identity function
+// unless somebody said there is more than one checkout, so a project sees the
+// name and port it wrote down.
+func containerConfig(p *project.Project) dockerdb.Config {
+	cfg := p.Config.Database
+	return dockerdb.Config{
+		Image:    cfg.Image,
+		Name:     dockerdb.Qualify(cfg.ContainerName),
+		Port:     dockerdb.HostPort(cfg.Port),
+		Database: cfg.Name,
+		User:     cfg.User,
+		Password: cfg.Password,
+		Runtime:  containerRuntime,
+	}
 }
 
 // migrate applies pending migrations.

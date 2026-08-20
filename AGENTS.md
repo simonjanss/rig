@@ -56,14 +56,34 @@ silently** when there is none — so a green run there does not mean it ran.
 `rig generate` and `rig check` in each example, then builds and tests it; the
 examples are real projects, so a generator change that breaks one breaks it
 visibly. `rig generate` starts and migrates the database each example names in
-its own `rig.yaml`, so do not have something else listening on those ports
-(todo 55440, fantasyfootball 55441, auth 55442, auth_oauth 55443).
+its own `rig.yaml`.
 
 Every port a suite or an example pins is named in `internal/dockerdb/ports.go`,
 and a test there refuses two suites on one number. A new suite takes its port
 from that file rather than by grepping for one that looks free — the examples
 are listed there too, even though their own configuration is where the number
 actually lives.
+
+**Two checkouts of rig on one machine do not share a database.** The Makefile
+exports `RIG_DB_ISOLATE=$(CURDIR)`, and rig answers by suffixing every container
+name with a digest of it and letting the kernel pick the host port — so this
+clone gets `todo-db-88c55d79` on whatever was free rather than `todo-db` on
+55440. Without it, the second clone to run adopts the first's container and
+migrates its own branch on top, and what arrives is not a collision: it is `rig
+check` reporting tables this branch never introduced, or `apply migrations:
+detected 4 missing (out-of-order) migrations`. Diagnostics about the current
+branch, produced by somebody else's schema. `internal/dockerdb/isolate.go` is
+the mechanism and the reasoning.
+
+Two consequences. Run the Docker suites through `make`, because a bare `go test
+-tags docker ./internal/authtest` has no `RIG_DB_ISOLATE` and goes back to
+sharing. And a container per example per checkout adds up on a machine with
+several workspaces open — `make db-down` stops this checkout's, and the next
+command rebuilds from the migrations.
+
+The ports in `ports.go` are what a single checkout gets, so `psql
+postgres://rig:rig@localhost:55440/rig` is still the todo example when nothing
+is isolated. Under isolation, ask: `cd examples/todo && ../../bin/rig db url`.
 
 Expect `make examples` to take a few minutes. It is worth it for any change
 under `internal/gen/` or `internal/compile/`.

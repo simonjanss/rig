@@ -61,7 +61,7 @@ func newDBCmd(e *env) *cobra.Command {
 				if err := db.Stop(cmd.Context()); err != nil {
 					return err
 				}
-				fmt.Fprintf(e.errOut, "stopped %s\n", p.Config.Database.ContainerName)
+				fmt.Fprintf(e.errOut, "stopped %s\n", dockerdb.Qualify(p.Config.Database.ContainerName))
 				return nil
 			},
 		},
@@ -102,13 +102,25 @@ func newDBCmd(e *env) *cobra.Command {
 		&cobra.Command{
 			Use:   "url",
 			Short: "Print the connection string",
-			Args:  cobra.NoArgs,
+			Long: "The port is the one in rig.yaml, so this answers without touching Docker.\n" +
+				"Under " + dockerdb.IsolateEnv + " there is no port until a container has one, so\n" +
+				"this starts the database the same way `rig db up` would.",
+			Args: cobra.NoArgs,
 			RunE: func(cmd *cobra.Command, _ []string) error {
 				p, err := e.mustProject()
 				if err != nil {
 					return err
 				}
-				fmt.Fprintln(e.out, p.DatabaseURL())
+				if !dockerdb.Isolated() || !p.UsesContainer() {
+					fmt.Fprintln(e.out, p.DatabaseURL())
+					return nil
+				}
+
+				url, err := e.database(cmd.Context(), p)
+				if err != nil {
+					return err
+				}
+				fmt.Fprintln(e.out, url)
 				return nil
 			},
 		},
@@ -145,15 +157,7 @@ func newDBCmd(e *env) *cobra.Command {
 
 // containerFor builds a handle to the project's container without starting it.
 func containerFor(ctx context.Context, e *env, p *project.Project) (*dockerdb.DB, error) {
-	cfg := p.Config.Database
-	return dockerdb.Attach(ctx, dockerdb.Config{
-		Image:    cfg.Image,
-		Name:     cfg.ContainerName,
-		Port:     cfg.Port,
-		Database: cfg.Name,
-		User:     cfg.User,
-		Password: cfg.Password,
-		Runtime:  containerRuntime,
-		Log:      e.errOut,
-	})
+	cfg := containerConfig(p)
+	cfg.Log = e.errOut
+	return dockerdb.Attach(ctx, cfg)
 }

@@ -70,11 +70,12 @@ func hostBind() string {
 func start() (*pgxpool.Pool, string, error) {
 	ctx := context.Background()
 
-	remove(pgName)
-	remove(syncName)
+	pg, sync := dockerdb.Qualify(pgName), dockerdb.Qualify(syncName)
+	remove(pg)
+	remove(sync)
 
 	cfg := dockerdb.Config{
-		Image: "postgres:17-alpine", Name: pgName, Port: pgPort,
+		Image: "postgres:17-alpine", Name: pg, Port: dockerdb.HostPort(pgPort),
 		Database: "rig", User: "rig", Password: "rig",
 		// Logical replication is how the sync service follows changes, and it
 		// cannot be turned on after the server has started.
@@ -86,11 +87,12 @@ func start() (*pgxpool.Pool, string, error) {
 		// is why publishing on loopback is enough on a Mac and not on CI.
 		Bind: hostBind(),
 	}
-	if _, err := dockerdb.Start(ctx, cfg); err != nil {
+	db, err := dockerdb.Start(ctx, cfg)
+	if err != nil {
 		return nil, "", err
 	}
 
-	p, err := pgxpool.New(ctx, cfg.URL())
+	p, err := pgxpool.New(ctx, db.URL())
 	if err != nil {
 		return nil, "", err
 	}
@@ -101,10 +103,13 @@ func start() (*pgxpool.Pool, string, error) {
 	// The sync service reaches Postgres over the container network, so it needs
 	// the host's address rather than the loopback the test uses.
 	out, err := exec.Command("docker", "run", "--detach",
-		"--name", syncName,
-		"--publish", fmt.Sprintf("127.0.0.1:%d:3000", syncPort),
+		"--name", sync,
+		"--publish", dockerdb.Publish("127.0.0.1", syncPort, 3000),
 		"--add-host", "host.docker.internal:host-gateway",
-		"--env", fmt.Sprintf("DATABASE_URL=postgresql://rig:rig@host.docker.internal:%d/rig?sslmode=disable", pgPort),
+		// The port the database really publishes, which under isolation is not
+		// the one in the constant: the sibling has to reach the same container
+		// this test does.
+		"--env", fmt.Sprintf("DATABASE_URL=postgresql://rig:rig@host.docker.internal:%d/rig?sslmode=disable", db.Port()),
 		"--env", "ELECTRIC_INSECURE=true",
 		"electricsql/electric:1.6.9",
 	).CombinedOutput()
@@ -112,9 +117,14 @@ func start() (*pgxpool.Pool, string, error) {
 		return nil, "", fmt.Errorf("start the sync service: %w\n%s", err, out)
 	}
 
-	url := fmt.Sprintf("http://127.0.0.1:%d", syncPort)
+	published, err := dockerdb.PortOf(ctx, "docker", sync)
+	if err != nil {
+		return nil, "", fmt.Errorf("read the sync service's port: %w", err)
+	}
+
+	url := fmt.Sprintf("http://127.0.0.1:%d", published)
 	if err := waitReady(ctx, url); err != nil {
-		logs, _ := exec.Command("docker", "logs", "--tail", "40", syncName).CombinedOutput()
+		logs, _ := exec.Command("docker", "logs", "--tail", "40", sync).CombinedOutput()
 		return nil, "", fmt.Errorf("%w\n%s", err, logs)
 	}
 	return p, url, nil

@@ -50,8 +50,11 @@ func schema(t *testing.T) ir.Schema {
 }
 
 var (
-	once      sync.Once
-	shared    ir.Schema
+	once   sync.Once
+	shared ir.Schema
+	// sharedURL is where the corpus ended up, which under isolation is the only
+	// way a second connection finds the same container.
+	sharedURL string
 	sharedErr error
 )
 
@@ -61,8 +64,8 @@ func read() (ir.Schema, error) {
 
 	db, err := dockerdb.Start(ctx, dockerdb.Config{
 		Image:     "postgres:17-alpine",
-		Name:      containerName,
-		Port:      containerPort,
+		Name:      dockerdb.Qualify(containerName),
+		Port:      dockerdb.HostPort(containerPort),
 		Database:  "rig",
 		User:      "rig",
 		Password:  "rig",
@@ -72,6 +75,7 @@ func read() (ir.Schema, error) {
 	if err != nil {
 		return ir.Schema{}, err
 	}
+	sharedURL = db.URL()
 
 	// A leftover container from a previous run would already have the corpus
 	// applied, so the migration is a no-op rather than a failure.
@@ -300,9 +304,7 @@ func TestViewsExcludedByDefault(t *testing.T) {
 	// Reuse the container the shared read already started.
 	_ = schema(t)
 
-	conn, err := pgx.Connect(ctx, dockerdb.Config{
-		Port: containerPort, Database: "rig", User: "rig", Password: "rig",
-	}.URL())
+	conn, err := pgx.Connect(ctx, sharedURL)
 	if err != nil {
 		t.Fatal(err)
 	}

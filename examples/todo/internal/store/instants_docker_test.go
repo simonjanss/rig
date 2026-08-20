@@ -4,6 +4,7 @@ package store_test
 
 import (
 	"context"
+	"net/url"
 	"os"
 	"testing"
 	"time"
@@ -25,13 +26,13 @@ import (
 // then the API's JSON carries +01:00 on a laptop and Z in a container, and a
 // golden file or a log comparison starts depending on where it ran.
 func TestAScannedInstantIsUTC(t *testing.T) {
-	dsn := os.Getenv("DATABASE_URL")
-	if dsn == "" {
-		dsn = "postgres://rig:rig@localhost:55440/rig?sslmode=disable"
-	}
 	// A session in a zone that is not UTC, and one whose offset is not zero at
 	// any time of year, so a wrong location cannot pass by coincidence.
-	dsn += "&TimeZone=Asia/Kolkata"
+	//
+	// Set rather than appended: `rig db url` pins TimeZone=UTC, and a second
+	// TimeZone after it is not the one that wins — appending left this test
+	// running in UTC, which is the one session it cannot prove anything in.
+	dsn := inZone(t, "Asia/Kolkata")
 
 	ctx := context.Background()
 	pool, err := pgxpool.New(ctx, dsn)
@@ -93,4 +94,30 @@ func TestAScannedInstantIsUTC(t *testing.T) {
 	if !read.CreatedAt.Equal(made.CreatedAt) {
 		t.Error("the write and the read should describe the same instant")
 	}
+}
+
+// inZone is the example's database with the session time zone set to zone.
+//
+// Set rather than appended, because $DATABASE_URL already carries one: `rig db
+// url` pins TimeZone=UTC deliberately, and libpq keeps the first value it is
+// given for a parameter. Appending produced a URL that read as a request for
+// Asia/Kolkata and connected in UTC.
+func inZone(t *testing.T, zone string) string {
+	t.Helper()
+
+	dsn := os.Getenv("DATABASE_URL")
+	if dsn == "" {
+		// The port only holds without RIG_DB_ISOLATE. With it, the kernel chose
+		// one and `rig db url` is what knows which — the Makefile passes it in.
+		dsn = "postgres://rig:rig@localhost:55440/rig?sslmode=disable"
+	}
+
+	u, err := url.Parse(dsn)
+	if err != nil {
+		t.Fatalf("$DATABASE_URL is not a URL: %v", err)
+	}
+	q := u.Query()
+	q.Set("TimeZone", zone)
+	u.RawQuery = q.Encode()
+	return u.String()
 }

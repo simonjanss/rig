@@ -2,6 +2,18 @@
 
 GO       ?= go
 
+# One checkout's throwaway containers, kept out of every other checkout's.
+#
+# rig names a container after the project and publishes it on the port in
+# rig.yaml, which is right for a project and wrong for two clones of rig on one
+# machine: they agree on both, so whichever runs second adopts the other's
+# database and migrates its own branch on top. What arrives is not a collision —
+# it is `rig check` reporting tables this branch never introduced, or a migration
+# numbered below the database version. This variable is what tells rig there is
+# more than one of us; see internal/dockerdb/isolate.go. Exported, so every
+# recipe below and everything they run inherits it.
+export RIG_DB_ISOLATE := $(CURDIR)
+
 # The modules rig is written in, and the modules that only exercise it. Lint,
 # vulnerability scanning and the Docker suite run over the first group only:
 # the examples are mostly generated output, and their Docker tests are already
@@ -69,10 +81,26 @@ test-docker:
 ##           This is the strongest regression test in the repository: the
 ##           examples are real projects, so a generator change that breaks one
 ##           breaks it visibly rather than in a golden file nobody reads.
+##           Each example's tests are handed $DATABASE_URL rather than left to
+##           the fallback compiled into them: under RIG_DB_ISOLATE the port is
+##           the kernel's to choose, so `rig db url` is the only thing that
+##           knows it.
 examples: build
 	@for e in $(EXAMPLES); do \
 		(cd examples/$$e && ../../bin/rig generate && ../../bin/rig check) || exit 1; \
-		(cd examples/$$e && $(GO) build ./... && $(GO) test -tags docker ./...) || exit 1; \
+		(cd examples/$$e && DATABASE_URL=$$(../../bin/rig db url) \
+			$(GO) build ./... && DATABASE_URL=$$(../../bin/rig db url) \
+			$(GO) test -tags docker ./...) || exit 1; \
+	done
+
+## db-down: stop every example's database
+##          Isolation means a container per example per checkout, so a machine
+##          with a dozen workspaces open accumulates them. Stopping is enough:
+##          the data is on a tmpfs, and the next command rebuilds it from the
+##          migrations.
+db-down: build
+	@for e in $(EXAMPLES); do \
+		(cd examples/$$e && ../../bin/rig db down) || true; \
 	done
 
 ## update-schema: rewrite the introspection golden from a real Postgres
@@ -144,4 +172,4 @@ vulncheck:
 	@GOBIN=$(CURDIR)/bin $(GO) install golang.org/x/vuln/cmd/govulncheck@$(GOVULNCHECK_VERSION)
 	$(eachcore) $(CURDIR)/bin/govulncheck ./...) || exit 1; done
 
-.PHONY: help check hooks build test test-docker examples update-schema update-golden vet godoc-check fmt fmt-check tidy deps lint vulncheck
+.PHONY: help check hooks build test test-docker examples db-down update-schema update-golden vet godoc-check fmt fmt-check tidy deps lint vulncheck
