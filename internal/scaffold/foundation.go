@@ -4,10 +4,21 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+
+	authfnd "github.com/simonjanss/rig/auth/foundation"
+	filesfnd "github.com/simonjanss/rig/files/foundation"
+	notifyfnd "github.com/simonjanss/rig/notify/foundation"
+	"github.com/simonjanss/rig/runtime/dbschema"
 )
 
 // Foundation parts. Each is one migration and its table configuration, so
 // skipping one leaves a project that still applies and still validates.
+//
+// A part's name is the name of the migration that creates it, inside the module
+// that owns it — see [Sets]. That is what makes a vendored `00009_rig_tenancy.sql`
+// recognisable as auth's `tenancy` however it was numbered on the way in, and it
+// is why [Managed] can read a project's migrations directory and say which parts
+// arrived with the foundation.
 const (
 	PartTenancy       = "tenancy"
 	PartSessions      = "sessions"
@@ -17,23 +28,200 @@ const (
 	PartNotifications = "notifications"
 )
 
+// Sets are the foundation's migration sets, in the order they apply.
+//
+// Three of them, because the schema belongs to the three modules that write SQL
+// against it, and each records how far it has been applied in a table of its own.
+// The private table is what lets those modules be tagged separately: a shared one
+// would mean a shared numbering sequence, and two modules adding a migration in
+// the same release would collide on a version number.
+//
+// The order is the dependency order, and each set says why in its own package
+// documentation. auth first because everything references its tenancy migration;
+// files next because rig_file references nothing at all, deliberately, so that
+// uploads work in a project with no authentication; notify last because an inbox
+// line names an account, which auth creates.
+func Sets() []dbschema.Set {
+	return []dbschema.Set{authfnd.Set(), filesfnd.Set(), notifyfnd.Set()}
+}
+
 // Parts in the order they must be applied.
 //
-// Sessions come before API keys because the key table is optional and the token
-// table is not: keys add a column to tokens rather than tokens depending on
-// keys, so a project that skips keys is still coherent.
-//
-// Files come after those and depend on nothing. They are the one part that is
-// useful in a project with no authentication at all, which is why rig_file's
-// tenant column carries no reference to rig_tenant.
-//
-// Notifications come last and are the opposite case: a notification is addressed
-// to an account, so they need the tenancy part and say so in [Requires]. They do
-// not need sessions — an application that reads its inbox through a header is a
-// perfectly ordinary one — which is why the dependency is the narrow half of the
-// foundation rather than all of it.
+// Derived from [Sets] rather than listed, so a migration added to one of those
+// modules is a part here without anybody having to say so twice. The consts above
+// name the parts that exist today; this is the list, and it is the modules that
+// decide what is on it.
 func Parts() []string {
-	return []string{PartTenancy, PartAPIKeys, PartSessions, PartOAuth, PartFiles, PartNotifications}
+	var out []string
+	for _, s := range Sets() {
+		for _, m := range s.Migrations {
+			out = append(out, m.Name)
+		}
+	}
+	return out
+}
+
+// SetOf names the set that carries a part, and whether any does.
+//
+// Callers that have to apply a part, or write down which module a project depends
+// on for it, ask here rather than matching on the part name — the mapping is the
+// sets' to state and this is the one place that reads it.
+func SetOf(part string) (dbschema.Set, bool) {
+	for _, s := range Sets() {
+		if _, ok := s.Find(part); ok {
+			return s, true
+		}
+	}
+	return dbschema.Set{}, false
+}
+
+// SetsFor are the sets a list of parts needs, in apply order.
+//
+// A set appears once however many of its parts are named, because a migration set
+// is applied whole: goose reads the directory, so asking for `sessions` and not
+// `oauth` is not something a set can express. That is a real limit of leaving the
+// schema to the modules, and the honest place to state it — a project that wants
+// a subset of auth's tables vendors the foundation and skips the parts it does not
+// want.
+func SetsFor(parts []string) []dbschema.Set {
+	var out []dbschema.Set
+	for _, s := range Sets() {
+		for _, m := range s.Migrations {
+			if slices.Contains(parts, m.Name) {
+				out = append(out, s)
+				break
+			}
+		}
+	}
+	return out
+}
+
+// ImportPath is where a set's Go package lives, for generated code that has to
+// name it in an import.
+//
+// Derived from the module rather than listed, because the layout is a convention
+// this repository keeps: `rig/auth`'s set is `rig/auth/foundation`. Deriving it
+// means a fourth module carrying a set needs nothing here.
+func ImportPath(s dbschema.Set) string {
+	return modulePrefix + s.Module + "/foundation"
+}
+
+// modulePrefix is where rig's modules live. Spelled once so that the derived
+// import paths and a future move stay one edit.
+const modulePrefix = "github.com/simonjanss/"
+
+// BookkeepingTables are the tables the foundation's sets record themselves in.
+//
+// They carry the `rig_` prefix like everything else rig creates, and introspection
+// returns them like any other table — but they arrive through a different door:
+// goose writes them, no migration creates them. So two rules have to know about
+// them. The reserved prefix would otherwise refuse them as tables under rig's
+// prefix that no migration created, and the ignore list would otherwise let rig
+// project a CRUD resource over its own migration history.
+//
+// The project's own bookkeeping table is not here. It is named in rig.yaml and
+// [github.com/simonjanss/rig/internal/compile] reads it from there.
+func BookkeepingTables() []string {
+	var out []string
+	for _, s := range Sets() {
+		out = append(out, s.Table)
+	}
+	return out
+}
+
+// Wanted says which of the foundation's features a project's configuration turns
+// on. It is the input to [Wanted.Parts].
+type Wanted struct {
+	// Auth is an `auth:` block, which needs identities, tokens and keys.
+	Auth bool
+	// OAuth is a provider configured under `auth.oauth`.
+	//
+	// It brings no part [Wanted.Auth] does not: oauth is a migration in auth's
+	// set, and a set is applied whole. Read rather than assumed all the same,
+	// because it is what the configuration says.
+	OAuth bool
+	// Files is `files.enabled`.
+	Files bool
+	// Notifications is `notifications.enabled`.
+	Notifications bool
+}
+
+// Parts names the parts these features bring, in apply order, with [Requires]
+// expanded and every named set taken whole.
+//
+// This is the other answer to the question [Managed] answers. A project that
+// vendored the foundation says which parts it has by having their migrations; a
+// project that left them to the modules has only its configuration to say so, and
+// this is that reading. `rig setup-project` decides what to write the same way,
+// which is what keeps the two from disagreeing about a project it set up.
+//
+// **Brings, not asks for, and the difference is the whole of it.** A set is
+// applied whole — goose reads a directory, so `sessions but not oauth` is not
+// something a set can express — so an `auth:` block with no provider configured
+// still ends up with rig_identity_oauth in the database, and a project with an
+// inbox and no authentication ends up with all of auth's. Answering with the
+// narrower list would have rig report RIG2005 on a table it created itself one
+// command earlier, and then, with the table missing from the ignore list, project
+// a resource over it. So the widening happens here rather than in each caller:
+// there is one answer to "which of rig's tables does this project have", and no
+// way to reach for the wrong one.
+func (w Wanted) Parts() []string {
+	want := map[string]bool{}
+	// Declared before it is assigned because it recurses: a part pulls in what it
+	// requires, and what those require in turn.
+	var add func(parts ...string)
+	add = func(parts ...string) {
+		for _, p := range parts {
+			if want[p] {
+				continue
+			}
+			want[p] = true
+			add(Requires(p)...)
+		}
+	}
+
+	if w.Auth {
+		// Keys and sessions come with authentication rather than as questions of
+		// their own: the token table and the log declare their key columns where
+		// they are created, so a project with sessions and no rig_api_key would
+		// need a second shape of the same table.
+		add(PartTenancy, PartAPIKeys, PartSessions)
+	}
+	if w.OAuth {
+		add(PartOAuth)
+	}
+	if w.Files {
+		add(PartFiles)
+	}
+	if w.Notifications {
+		add(PartNotifications)
+	}
+
+	// To a fixed point rather than once, because a part that arrives with its set
+	// may require one whose set is not here yet — which is exactly the shape of
+	// the cross-module edge notifications already has.
+	for {
+		before := len(want)
+		for _, s := range SetsFor(inApplyOrder(want)) {
+			for _, m := range s.Migrations {
+				add(m.Name)
+			}
+		}
+		if len(want) == before {
+			return inApplyOrder(want)
+		}
+	}
+}
+
+// inApplyOrder turns a set of part names into the order they apply in.
+func inApplyOrder(want map[string]bool) []string {
+	var out []string
+	for _, p := range Parts() {
+		if want[p] {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 // FoundationOptions describe what to scaffold.
@@ -64,7 +252,24 @@ type FoundationOptions struct {
 	// this, a second run would write the same tables again under fresh
 	// numbers, and `rig db up` would fail on the first CREATE TABLE — which is
 	// a poor way to learn that the command was not idempotent.
+	//
+	// It is also the upgrade path. The sets are append-only, so a module that has
+	// gained a migration since this project was set up has a part nothing here
+	// matches, and it is written at the next free number — leaving what is already
+	// applied exactly as it was.
 	Existing []string
+	// ConfigsOnly leaves the migrations out and writes only the table
+	// configurations for whatever [FoundationOptions.Expose] names.
+	//
+	// It is `migrations.foundation: embedded`: the modules carry the schema, so
+	// there is no migration for this project to keep. Exposing a table is still a
+	// question for the project, because it is about rig.yaml rather than about
+	// DDL — a project can leave the tables to the modules and still want a model
+	// and a repository for one of them.
+	//
+	// False is vendored, which is the default, so the zero value writes the
+	// migrations as it always has.
+	ConfigsOnly bool
 }
 
 // Foundation returns the files `rig setup-project` writes.
@@ -100,7 +305,7 @@ func Foundation(opt FoundationOptions) []File {
 		// long after the migration landed, so `--expose rig_account` on a project
 		// that already has the foundation has to write that one file rather than
 		// finding the part done and doing nothing.
-		if !alreadyApplied(opt.Existing, part) {
+		if !opt.ConfigsOnly && !alreadyApplied(opt.Existing, part) {
 			files = append(files, File{
 				Path:    MigrationFilename(opt.MigrationsDir, number, "rig_"+part),
 				Content: p.migration,
@@ -146,34 +351,18 @@ func alreadyApplied(existing []string, part string) bool {
 // ([ReservedResources]), so no project has an `account` or a `tenant` of its
 // own and exposing this one later is never a rename.
 //
-// Written out rather than parsed from the SQL, so that adding a table to the
-// foundation is a decision somebody makes here as well — a heuristic would
-// quietly start or stop treating one as the auth module's, and which side of
-// that line a table falls on decides whether rig generates code for it.
+// The names come from the owning module's manifest, where they are written out
+// rather than parsed from the SQL — so that adding a table to the foundation is a
+// decision somebody makes there as well. A heuristic would quietly start or stop
+// treating one as the module's, and which side of that line a table falls on
+// decides whether rig generates code for it.
 func PartTables(part string) []string {
-	switch part {
-	case PartTenancy:
-		return []string{
-			"rig_tenant", "rig_identity", "rig_identity_credential",
-			"rig_identity_verification", "rig_account",
+	for _, s := range Sets() {
+		if m, ok := s.Find(part); ok {
+			return m.Tables
 		}
-	case PartAPIKeys:
-		return []string{"rig_api_key"}
-	case PartSessions:
-		return []string{"rig_account_token", "rig_auth_log", "rig_identity_session"}
-	case PartOAuth:
-		return []string{"rig_identity_oauth"}
-	case PartFiles:
-		return []string{"rig_file"}
-	case PartNotifications:
-		return []string{
-			"rig_notification", "rig_notification_recipient",
-			"rig_notification_device", "rig_notification_setting",
-			"rig_notification_delivery",
-		}
-	default:
-		return nil
 	}
+	return nil
 }
 
 // PartOf names the part that creates a table, or "" for a table the foundation
@@ -201,25 +390,45 @@ func Tables() []string {
 	return out
 }
 
-// Managed are the foundation tables a project has actually applied.
+// AppliedParts are the parts a project's own migration files show it has, in
+// apply order.
 //
-// The evidence is the migration files: a part rig wrote is named for itself, so
-// a project that ran `setup-project` says so in its own migrations directory.
-// That matters twice over. It decides whether rig generates a model and a
-// repository for a table, and it is what tells a `rig_account` rig created from
-// one somebody wrote by hand — which is refused rather than generated for, now
-// that [TablePrefix] is reserved.
+// The evidence is the filenames: a part rig wrote is named for itself, so a
+// project that vendored the foundation says which parts it has in its own
+// migrations directory. That matters twice over. It decides whether rig generates
+// a model and a repository for a table, and it is what tells a `rig_account` rig
+// created from one somebody wrote by hand — which is refused rather than
+// generated for, now that [TablePrefix] is reserved.
 //
 // A name alone cannot answer either question, which is why this reads the
-// directory. `auth.own` is the exception and it turns the whole thing off: a
-// project that has taken the schema over owns those tables and their names.
-func Managed(existing []string) []string {
+// directory. [Wanted.Parts] is the other reading, for a project whose modules
+// carry their own schema and which therefore has no files here to read.
+func AppliedParts(existing []string) []string {
 	var out []string
 	for _, part := range Parts() {
-		if !alreadyApplied(existing, part) {
-			continue
+		if alreadyApplied(existing, part) {
+			out = append(out, part)
 		}
-		out = append(out, PartTables(part)...)
+	}
+	return out
+}
+
+// Managed are the foundation tables a project has actually applied, read from its
+// own migration files. It is [AppliedParts] in terms of tables.
+//
+// `auth.own` is the exception and it turns the whole thing off: a project that has
+// taken the schema over owns those tables and their names.
+func Managed(existing []string) []string {
+	return TablesFor(AppliedParts(existing))
+}
+
+// TablesFor are the tables a list of parts creates, in apply order.
+func TablesFor(parts []string) []string {
+	var out []string
+	for _, part := range Parts() {
+		if slices.Contains(parts, part) {
+			out = append(out, PartTables(part)...)
+		}
 	}
 	return out
 }
@@ -258,23 +467,52 @@ type tableConfig struct {
 	content  string
 }
 
+// migrationSQL is every part's DDL, read once out of the sets.
+//
+// Read at init because a part named in a manifest with no file behind it is a
+// build-time mistake rather than a condition to handle: both halves ship in the
+// same package, and every module carrying a set calls [dbschema.Set.Validate] in
+// a test of its own. Reaching the panic would mean somebody shipped a set that
+// could not have passed it.
+var migrationSQL = func() map[string]string {
+	out := map[string]string{}
+	for _, s := range Sets() {
+		for _, m := range s.Migrations {
+			b, err := s.Read(m.Name)
+			if err != nil {
+				panic(fmt.Sprintf("scaffold: %v", err))
+			}
+			out[m.Name] = string(b)
+		}
+	}
+	return out
+}()
+
+// foundationPart pairs a part's DDL with the table configurations that describe
+// it.
+//
+// The two halves come from different places on purpose. The migration belongs to
+// the module whose code depends on the schema, so it travels with that module.
+// The configuration is rig.yaml — how a project would expose the table if it
+// wanted to — so it stays here, next to the resource names [ReservedResources]
+// reads back out of it.
 func foundationPart(name string) part {
+	p := part{migration: migrationSQL[name]}
 	switch name {
 	case PartTenancy:
-		return part{migration: tenancySQL, configs: tenancyConfigs()}
+		p.configs = tenancyConfigs()
 	case PartSessions:
-		return part{migration: sessionsSQL, configs: sessionConfigs()}
+		p.configs = sessionConfigs()
 	case PartAPIKeys:
-		return part{migration: apiKeysSQL, configs: apiKeyConfigs()}
+		p.configs = apiKeyConfigs()
 	case PartOAuth:
-		return part{migration: oauthSQL, configs: oauthConfigs()}
+		p.configs = oauthConfigs()
 	case PartFiles:
-		return part{migration: filesSQL, configs: fileConfigs()}
+		p.configs = fileConfigs()
 	case PartNotifications:
-		return part{migration: notificationsSQL, configs: notificationConfigs()}
-	default:
-		return part{}
+		p.configs = notificationConfigs()
 	}
+	return p
 }
 
 // config renders a table configuration file, and is the one place either name

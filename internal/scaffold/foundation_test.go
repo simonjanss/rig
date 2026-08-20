@@ -1,11 +1,14 @@
 package scaffold_test
 
 import (
+	"fmt"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
 
+	"github.com/simonjanss/rig/internal/project"
 	"github.com/simonjanss/rig/internal/scaffold"
 	"github.com/simonjanss/rig/internal/tableconf"
 )
@@ -303,6 +306,334 @@ func TestOnlyAppliedPartsAreManaged(t *testing.T) {
 	}
 	if got, want := len(scaffold.Managed(all)), len(scaffold.Tables()); got != want {
 		t.Errorf("%d tables managed, want all %d", got, want)
+	}
+}
+
+// Under `embedded` the modules carry the schema, so there is nothing for the
+// project to keep — and the migrations are the only thing that changes. A table
+// configuration is about rig.yaml rather than DDL, so exposing one is still a
+// question a project in this mode can answer.
+func TestConfigsOnlyWritesNoMigrations(t *testing.T) {
+	t.Parallel()
+
+	opt := options()
+	opt.ConfigsOnly = true
+	opt.Expose = []string{"rig_account"}
+
+	files := scaffold.Foundation(opt)
+	if len(files) != 1 {
+		t.Fatalf("want just the one configuration, got %d files", len(files))
+	}
+	if !strings.HasSuffix(files[0].Path, ".yaml") {
+		t.Errorf("wrote %s, want only a table configuration", files[0].Path)
+	}
+
+	// And with nothing exposed it writes nothing at all, which is the ordinary
+	// case for this mode rather than a failure to do anything.
+	opt.Expose = nil
+	if files := scaffold.Foundation(opt); len(files) != 0 {
+		t.Errorf("want no files, got %v", files)
+	}
+}
+
+// The upgrade path, which is what the append-only sets are for. A module that
+// has gained a migration since this project was set up has a part nothing in the
+// directory matches, so it is written at the next free number — and what is
+// already applied is left exactly as it was.
+func TestAnUnseenPartIsWrittenAtTheNextNumber(t *testing.T) {
+	t.Parallel()
+
+	// A project that vendored everything except the last part, as though that
+	// part had not existed when it was set up.
+	parts := scaffold.Parts()
+	old, latest := parts[:len(parts)-1], parts[len(parts)-1]
+
+	var existing []string
+	for i, part := range old {
+		existing = append(existing, fmt.Sprintf("%05d_rig_%s.sql", i+1, part))
+	}
+
+	opt := options()
+	opt.Existing = existing
+	opt.FirstNumber = len(existing) + 1
+
+	files := scaffold.Foundation(opt)
+	if len(files) != 1 {
+		t.Fatalf("want only the part this project has never seen, got %d files", len(files))
+	}
+
+	want := fmt.Sprintf("%05d_rig_%s.sql", len(existing)+1, latest)
+	if filepath.Base(files[0].Path) != want {
+		t.Errorf("wrote %s, want %s", filepath.Base(files[0].Path), want)
+	}
+
+	// Nothing already applied is rewritten, which is the half that matters:
+	// somebody's database has run those, and a second copy under a fresh number
+	// would fail on the first CREATE TABLE.
+	for _, name := range existing {
+		for _, f := range files {
+			if strings.HasSuffix(f.Path, name) {
+				t.Errorf("%s was written again", name)
+			}
+		}
+	}
+}
+
+// Every set the foundation is assembled from has to be coherent on its own terms.
+// Each owning module asserts this too; here it is asserted about the three
+// together, which is the arrangement rig actually uses.
+func TestEverySetIsCoherent(t *testing.T) {
+	t.Parallel()
+
+	for _, s := range scaffold.Sets() {
+		if err := s.Validate(); err != nil {
+			t.Errorf("%s: %v", s.Module, err)
+		}
+	}
+}
+
+// A part name has to identify one migration across all three sets, because that
+// is what a vendored `_rig_<name>.sql` file claims and what [scaffold.SetOf]
+// answers from. Two modules shipping a `tenancy` would make both ambiguous, and
+// the ambiguity would land in somebody's migrations directory.
+func TestPartNamesAreUniqueAcrossSets(t *testing.T) {
+	t.Parallel()
+
+	owner := map[string]string{}
+	for _, s := range scaffold.Sets() {
+		for _, m := range s.Migrations {
+			if prev, taken := owner[m.Name]; taken {
+				t.Errorf("both %s and %s ship a migration named %q", prev, s.Module, m.Name)
+			}
+			owner[m.Name] = s.Module
+		}
+	}
+
+	for _, part := range scaffold.Parts() {
+		s, ok := scaffold.SetOf(part)
+		if !ok {
+			t.Errorf("part %q belongs to no set", part)
+			continue
+		}
+		if s.Module != owner[part] {
+			t.Errorf("SetOf(%q) = %s, want %s", part, s.Module, owner[part])
+		}
+	}
+}
+
+// Each set records itself somewhere of its own, and nowhere near the project's.
+// Two sets sharing a table would share a numbering sequence, which is the
+// collision the separation exists to prevent; a set writing into the project's
+// table would make rig's history and the project's indistinguishable.
+func TestEverySetRecordsItselfSeparately(t *testing.T) {
+	t.Parallel()
+
+	seen := map[string]string{}
+	for _, s := range scaffold.Sets() {
+		if s.Table == project.DefaultMigrationsTable {
+			t.Errorf("%s records itself in the project's own bookkeeping table", s.Module)
+		}
+		if prev, taken := seen[s.Table]; taken {
+			t.Errorf("%s and %s both record themselves in %s", prev, s.Module, s.Table)
+		}
+		seen[s.Table] = s.Module
+	}
+}
+
+// A part cannot require one that is applied after it. [scaffold.Requires] is
+// hand-written — a dependency between two CREATE TABLEs is not something to
+// derive by parsing — so this is what keeps it agreeing with the order the sets
+// are applied in.
+func TestRequirementsComeFirst(t *testing.T) {
+	t.Parallel()
+
+	parts := scaffold.Parts()
+	for i, part := range parts {
+		for _, needs := range scaffold.Requires(part) {
+			j := slices.Index(parts, needs)
+			if j < 0 {
+				t.Errorf("%s requires %q, which is not a part", part, needs)
+				continue
+			}
+			if j >= i {
+				t.Errorf("%s requires %s, which is applied later", part, needs)
+			}
+		}
+	}
+}
+
+// The parts a configuration brings, which is how a project that did not vendor
+// the foundation says which of it it has.
+//
+// Brings and not asks for: a set is applied whole, so every part of every set a
+// feature reaches comes with it. `auth:` with no provider configured still brings
+// oauth, and an inbox in a project with no authentication brings the whole of
+// auth's set on its way to rig_account.
+func TestWantedExpandsToPartsInOrder(t *testing.T) {
+	t.Parallel()
+
+	everything := []string{"tenancy", "apikeys", "sessions", "oauth", "notifications"}
+
+	cases := []struct {
+		name  string
+		want  scaffold.Wanted
+		parts []string
+	}{
+		{"nothing", scaffold.Wanted{}, nil},
+		{
+			// files' set is one migration, so this is the one case where what a
+			// project asks for and what it gets are the same list.
+			"files alone",
+			scaffold.Wanted{Files: true},
+			[]string{"files"},
+		},
+		{
+			// oauth is not a question a project in this mode gets to answer: it is
+			// a migration in auth's set, and goose reads a directory.
+			"auth without oauth brings oauth anyway",
+			scaffold.Wanted{Auth: true},
+			[]string{"tenancy", "apikeys", "sessions", "oauth"},
+		},
+		{
+			"auth with oauth is the same list",
+			scaffold.Wanted{Auth: true, OAuth: true},
+			[]string{"tenancy", "apikeys", "sessions", "oauth"},
+		},
+		{
+			// The cross-module edge: an inbox line names an account, so auth's set
+			// comes along even though nothing asked for authentication — and all of
+			// it, not just the tenancy migration that creates rig_account.
+			"notifications alone",
+			scaffold.Wanted{Notifications: true},
+			everything,
+		},
+		{
+			"everything",
+			scaffold.Wanted{Auth: true, OAuth: true, Files: true, Notifications: true},
+			scaffold.Parts(),
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := c.want.Parts()
+			if !slices.Equal(got, c.parts) {
+				t.Errorf("Parts() = %v, want %v", got, c.parts)
+			}
+		})
+	}
+}
+
+// The invariant the case above is one reading of, asserted directly: the tables a
+// configuration is told it has are exactly the tables the sets it applies create.
+//
+// This is the bug that shipped in the first draft. `Wanted.Parts` answered with
+// the parts asked for while `SetsFor` applied whole sets, so `rig db up` created
+// rig_identity_oauth and the next `rig validate` reported RIG2005 on it — a table
+// under rig's prefix that, as far as the narrower list knew, rig had not created.
+// Advice included, which nothing in that mode could follow: rename the migration
+// that creates it.
+func TestEveryTableASetCreatesIsAccountedFor(t *testing.T) {
+	t.Parallel()
+
+	for _, w := range []scaffold.Wanted{
+		{Auth: true},
+		{Auth: true, OAuth: true},
+		{Files: true},
+		{Notifications: true},
+		{Auth: true, Files: true, Notifications: true},
+	} {
+		parts := w.Parts()
+		known := scaffold.TablesFor(parts)
+
+		var applied []string
+		for _, s := range scaffold.SetsFor(parts) {
+			applied = append(applied, s.Tables()...)
+		}
+
+		for _, table := range applied {
+			if !slices.Contains(known, table) {
+				t.Errorf("%+v applies a set that creates %s, which TablesFor does not "+
+					"list: rig would refuse a table it had just created", w, table)
+			}
+		}
+		for _, table := range known {
+			if !slices.Contains(applied, table) {
+				t.Errorf("%+v is told it has %s, which no set it applies creates", w, table)
+			}
+		}
+	}
+}
+
+// The sets a list of parts needs, each once — a set is applied whole, because
+// goose reads a directory rather than a list.
+func TestSetsForNamesEachSetOnce(t *testing.T) {
+	t.Parallel()
+
+	got := scaffold.SetsFor([]string{"tenancy", "sessions", "notifications"})
+	if len(got) != 2 {
+		t.Fatalf("want auth and notify, got %d sets", len(got))
+	}
+	if got[0].Module != "rig/auth" || got[1].Module != "rig/notify" {
+		t.Errorf("got %s then %s, want rig/auth then rig/notify", got[0].Module, got[1].Module)
+	}
+
+	if got := scaffold.SetsFor(nil); len(got) != 0 {
+		t.Errorf("no parts, yet %d sets", len(got))
+	}
+}
+
+// The two modes cannot describe different schemas, because there is one copy of
+// the SQL and both read it.
+//
+// Vendoring writes what the set carries, so this asserts the thing that can
+// actually break: every `_rig_<name>.sql` already committed in an example is still
+// byte-identical to the migration of that name in the module's set. `make
+// examples` regenerates generated code and would not notice — a migration file is
+// not regenerated, it is copied once and then owned.
+//
+// Which is also the append-only rule seen from the other end. Editing a shipped
+// migration is exactly what this fails on, and the reason it must: those files have
+// been applied.
+func TestVendoredMigrationsStillMatchTheirSets(t *testing.T) {
+	t.Parallel()
+
+	vendored, err := filepath.Glob(filepath.Join("..", "..", "examples", "*", "migrations", "*_rig_*.sql"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(vendored) == 0 {
+		t.Skip("no example vendors the foundation")
+	}
+
+	for _, path := range vendored {
+		base := filepath.Base(path)
+		// `00007_rig_notifications.sql` names the part `notifications`.
+		name := strings.TrimSuffix(base, ".sql")
+		if i := strings.Index(name, "_rig_"); i >= 0 {
+			name = name[i+len("_rig_"):]
+		}
+
+		set, ok := scaffold.SetOf(name)
+		if !ok {
+			t.Errorf("%s: no set ships a migration named %q", path, name)
+			continue
+		}
+		want, err := set.Read(name)
+		if err != nil {
+			t.Errorf("%s: %v", path, err)
+			continue
+		}
+		got, err := os.ReadFile(path)
+		if err != nil {
+			t.Errorf("%s: %v", path, err)
+			continue
+		}
+		if string(got) != string(want) {
+			t.Errorf("%s has drifted from %s's %q: a migration that has been applied "+
+				"cannot be edited, so this is either an accidental change here or an "+
+				"upgrade that should have been a new migration", path, set.Module, name)
+		}
 	}
 }
 

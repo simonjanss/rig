@@ -60,6 +60,11 @@ func newSetupProjectCmd(e *env) *cobra.Command {
 				return err
 			}
 
+			// Under `embedded` the modules carry the schema, so there is no
+			// migration for this project to keep and the only thing left to write
+			// is a configuration for whatever --expose named.
+			embedded := !p.Config.Migrations.Vendored()
+
 			files := scaffold.Foundation(scaffold.FoundationOptions{
 				Skip:          skip,
 				Expose:        expose,
@@ -67,6 +72,7 @@ func newSetupProjectCmd(e *env) *cobra.Command {
 				MigrationsDir: dir,
 				ConfigPath:    p.TableConfigPath,
 				Existing:      existing,
+				ConfigsOnly:   embedded,
 			})
 
 			if dryRun {
@@ -85,6 +91,29 @@ func newSetupProjectCmd(e *env) *cobra.Command {
 			}
 			for _, path := range skipped {
 				fmt.Fprintf(e.errOut, "kept    %s (already exists)\n", p.Rel(path))
+			}
+
+			if embedded {
+				// Nothing was written unless --expose asked for it, and that is the
+				// whole point of the mode rather than a failure to do anything. It
+				// still has to say where the schema is, because "created nothing"
+				// and "the modules have it" look identical from here.
+				fmt.Fprintf(e.errOut, "\nmigrations.foundation is embedded, so rig's own tables "+
+					"stay in the modules that\nown them — rig/auth, rig/files, rig/notify — and "+
+					"nothing was written here for them.\n\nTurn on what you want in rig.yaml:\n"+
+					"  auth:\n"+
+					"    enabled: true\n\n"+
+					"and the parts that block needs are applied by `rig db up` from the modules,\n"+
+					"before this project's own migrations. Then:\n\n"+
+					"  rig db up        apply them\n"+
+					"  rig validate     check it\n"+
+					"  rig generate     write your own tables, and the auth wiring\n")
+				if len(expose) > 0 {
+					fmt.Fprintf(e.errOut, "\nAdd this to rig.yaml, or the configuration "+
+						"it just wrote names a table rig leaves out:\n%s",
+						exposeAdvice(expose))
+				}
+				return nil
 			}
 
 			if len(written) == 0 {

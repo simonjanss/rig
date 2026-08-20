@@ -53,6 +53,7 @@ func compileFrom(p *project.Project, schema ir.Schema) (*ir.Document, diag.List)
 	if err != nil {
 		diags.Add(diag.CodeConfigFile, diag.Anchor{}, "%v", err)
 	}
+	diags.Append(checkFoundationMode(p))
 	diags.Append(checkFoundationPresent(p))
 	diags.Append(checkFilesFoundation(p, set))
 	diags.Append(checkNotificationsFoundation(p, set))
@@ -68,7 +69,62 @@ func compileFrom(p *project.Project, schema ir.Schema) (*ir.Document, diag.List)
 	return doc, diags
 }
 
-// foundationTables answers two questions from one reading of the migrations.
+// foundationParts names the parts of rig's foundation this project has, by
+// whichever evidence its mode leaves available.
+//
+// Vendored — the default — reads the migration files, because a part rig wrote is
+// named for itself. That is the stronger reading, and the reason is that it can
+// tell a scaffolded rig_account from one somebody wrote by hand: the migration is
+// there or it is not.
+//
+// Embedded reads the configuration instead, because there are no files here to
+// read — the modules carry the schema, so what a project has is what it turned
+// on. Turned on and everything that came with it: [scaffold.Wanted.Parts] widens
+// a configuration to whole sets, because that is what `rig db up` applies from
+// [foundationSources], and the two readings have to be the same one. They were
+// not once, and the symptom was RIG2005 on a table rig had created a command
+// earlier.
+//
+// It is weaker than the vendored reading in exactly one way worth naming: with no
+// migration in the project to point at, it cannot tell rig's rig_account from a
+// hand-written one, and a project that wrote its own would have it silently
+// treated as the auth module's. What stands in for the missing evidence is that
+// the mode itself is declared — `foundation: embedded` says the modules own those
+// tables, and `auth.own` says the opposite loudly enough that the two together are
+// refused rather than reconciled ([checkFoundationMode]).
+func foundationParts(p *project.Project) ([]string, error) {
+	if !p.Config.Migrations.Vendored() {
+		return scaffold.Wanted{
+			Auth:          p.Config.Auth.Enabled,
+			OAuth:         len(p.Config.Auth.OAuth.Providers) > 0,
+			Files:         p.Config.Files.Enabled,
+			Notifications: p.Config.Notifications.Enabled,
+		}.Parts(), nil
+	}
+
+	names, err := migrationNames(p.MigrationsDir())
+	if err != nil {
+		if os.IsNotExist(err) {
+			// No migrations directory means no foundation, which is the state of
+			// a project between `rig init` and its first migration.
+			return nil, nil
+		}
+		return nil, err
+	}
+	return scaffold.AppliedParts(names), nil
+}
+
+// foundationManaged are the tables rig's foundation creates in this project,
+// whichever way [foundationParts] found out about them.
+func foundationManaged(p *project.Project) ([]string, error) {
+	parts, err := foundationParts(p)
+	if err != nil {
+		return nil, err
+	}
+	return scaffold.TablesFor(parts), nil
+}
+
+// foundationTables answers two questions from one reading of the foundation.
 //
 // `ignore` are the tables rig generates nothing for. `foundation` are the ones
 // rig created at all, exposed or not — which is a wider set, because exposing a
@@ -76,20 +132,13 @@ func compileFrom(p *project.Project, schema ir.Schema) (*ir.Document, diag.List)
 // the whole reason for two return values: it is what tells a scaffolded
 // rig_account from one somebody wrote by hand, and nothing else can.
 //
-// Both are recognised by the project's own migration files rather than by name
-// alone. Guessing from the name would silently stop generating a repository
-// somebody depends on.
+// Neither is guessed from the table's name. Guessing would silently stop
+// generating a repository somebody depends on.
 func foundationTables(p *project.Project) (ignore, foundation []string, err error) {
-	names, err := migrationNames(p.MigrationsDir())
+	foundation, err = foundationManaged(p)
 	if err != nil {
-		if os.IsNotExist(err) {
-			// No migrations directory means no foundation, which is the state of
-			// a project between `rig init` and its first migration.
-			return nil, nil, nil
-		}
 		return nil, nil, err
 	}
-	foundation = scaffold.Managed(names)
 
 	if p.Config.Auth.Own {
 		// The project has taken the schema over, so there is nothing to leave
@@ -143,6 +192,75 @@ func foundationTables(p *project.Project) (ignore, foundation []string, err erro
 	return out, foundation, nil
 }
 
+// checkFoundationMode reports a `migrations.foundation` that contradicts the
+// migrations directory.
+//
+// The mode is chosen once, and this is what makes that a statement rather than
+// advice. The two modes record what they applied in different tables — the
+// project's own under `vendored`, one per module under `embedded` — so a project
+// that switches after it has a database finds the new mode's bookkeeping empty and
+// re-applies a schema that is already there. That fails partway through `rig db up`
+// on a CREATE TABLE, having already run whatever came before it, and the recovery
+// is not obvious from the error.
+//
+// The contradiction worth its own code is one way round: `embedded` with rig's
+// migrations still in the directory, which is a project that was vendored and had
+// its mode changed under it.
+//
+// `auth.own` with `embedded` is the other contradiction, and it is refused here
+// too rather than resolved in favour of one of them. The two keys say opposite
+// things about who maintains rig's tables, so whichever won would be silent about
+// the other — and the way that shows up is `rig db up` applying the modules' sets
+// over the migrations the project forked, stopping on a table that already exists.
+//
+// The reverse — `vendored` with none of them while a block that needs them is on —
+// is already reported, and better, by [checkFoundationPresent],
+// [checkFilesFoundation] and [checkNotificationsFoundation]: each names the block
+// that wants the part and tells you to run `setup-project`, which in that mode is
+// exactly right. Saying it a second time here would be two diagnostics for one
+// mistake.
+//
+// Adopting an existing schema into a fresh bookkeeping table is a real feature and
+// this is deliberately not it. There is no baseline command; what there is, is a
+// refusal naming the one supported move.
+func checkFoundationMode(p *project.Project) diag.List {
+	var diags diag.List
+
+	if p.Config.Migrations.Vendored() {
+		return diags
+	}
+
+	// `auth.own` says the project forked rig's migrations and maintains those
+	// tables itself, which is the opposite of what `embedded` says. Reported
+	// before the directory is read, because it is the stronger contradiction: it
+	// holds however the forked migrations happen to be named, and those names are
+	// the only thing the check below can see.
+	if p.Config.Auth.Own {
+		diags.Add(diag.CodeFoundationMode, p.At("migrations", "foundation"),
+			"migrations.foundation is embedded but auth.own is set, and they say opposite "+
+				"things about who maintains rig's tables; the modules would apply their own "+
+				"schema over the migrations this project forked. Leave the mode vendored, or "+
+				"drop auth.own")
+		return diags
+	}
+
+	names, err := migrationNames(p.MigrationsDir())
+	if err != nil {
+		// No directory is a project between `rig init` and its first migration,
+		// which contradicts nothing. Any other read error is foundationTables'.
+		return diags
+	}
+
+	if applied := scaffold.AppliedParts(names); len(applied) > 0 {
+		diags.Add(diag.CodeFoundationMode, p.At("migrations", "foundation"),
+			"migrations.foundation is embedded, but %s still holds rig's own migrations "+
+				"(%s); the modules would re-apply that schema under their own bookkeeping "+
+				"and fail on a table that already exists",
+			p.Config.Migrations.Dir, strings.Join(applied, ", "))
+	}
+	return diags
+}
+
 // checkFilesFoundation reports a files block whose table is not there, and an
 // exposed rig_file with no configuration saying what may be done to it.
 //
@@ -157,12 +275,12 @@ func checkFilesFoundation(p *project.Project, set *tableconf.Set) diag.List {
 		return diags
 	}
 
-	names, err := migrationNames(p.MigrationsDir())
-	if err != nil && !os.IsNotExist(err) {
+	managed, err := foundationManaged(p)
+	if err != nil {
 		return diags
 	}
 
-	if !slices.Contains(scaffold.Managed(names), compile.FileTable) {
+	if !slices.Contains(managed, compile.FileTable) {
 		diags.Add(diag.CodeConfigInvalid, p.At("files", "enabled"),
 			"files.enabled is set but this project has no %s migration; "+
 				"run `rig setup-project`", compile.FileTable)
@@ -193,12 +311,11 @@ func checkNotificationsFoundation(p *project.Project, set *tableconf.Set) diag.L
 		return diags
 	}
 
-	names, err := migrationNames(p.MigrationsDir())
-	if err != nil && !os.IsNotExist(err) {
+	managed, err := foundationManaged(p)
+	if err != nil {
 		return diags
 	}
 
-	managed := scaffold.Managed(names)
 	for _, table := range compile.NotificationTables() {
 		if !slices.Contains(managed, table) {
 			diags.Add(diag.CodeConfigInvalid, p.At("notifications", "enabled"),
@@ -235,16 +352,13 @@ func checkFoundationPresent(p *project.Project) diag.List {
 		return diags
 	}
 
-	names, err := migrationNames(p.MigrationsDir())
+	managed, err := foundationManaged(p)
 	if err != nil {
-		// A missing migrations directory is itself the answer, and any other read
-		// error has already been reported by foundationTables.
-		if !os.IsNotExist(err) {
-			return diags
-		}
+		// Any read error has already been reported by foundationTables.
+		return diags
 	}
 
-	if len(scaffold.Managed(names)) == 0 {
+	if len(managed) == 0 {
 		diags.Add(diag.CodeConfigInvalid, p.At("auth", "enabled"),
 			"auth.enabled is set but this project has no foundation migrations; "+
 				"run `rig setup-project`, or set auth.own if you maintain the tables yourself")

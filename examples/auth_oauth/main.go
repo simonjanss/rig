@@ -53,6 +53,30 @@ import (
 //go:embed migrations/*.sql
 var migrations embed.FS
 
+// migrationSources is every set this example applies, in the order they go.
+//
+// `migrations.foundation` is `embedded` in rig.yaml, so rig's own tables are
+// carried by rig/auth rather than vendored into the directory above — and
+// api.MigrationSources is the wiring `rig generate` writes for that. It returns
+// the module's set first and this example's last, which is the order that matters:
+// this example's `00005_demo_oauth_provider.sql` references rig_tenant.
+//
+// Each set records itself in its own bookkeeping table, so `rig db up` here and a
+// deployment of this binary agree about what has run. Which is why the directory
+// and the table are named on the Source rather than on migrate.Options: they are
+// per-set facts, so UpAll and RequireAll read them from each Source and ignore the
+// ones on Options. This example leaves both at rig's defaults and says so anyway,
+// because a project that changed `migrations.dir` or `migrations.table` in rig.yaml
+// has to change them here and nowhere else.
+func migrationSources() []migrate.Source {
+	return api.MigrationSources(migrate.Source{
+		Name:  "auth_oauth",
+		FS:    migrations,
+		Dir:   "migrations",
+		Table: migrate.DefaultTable,
+	})
+}
+
 // localDSN is what `rig db url` prints for this project. Its own port, so this and
 // examples/auth can both be up.
 const localDSN = "postgres://rig:rig@localhost:55443/rig?sslmode=disable&TimeZone=UTC"
@@ -81,13 +105,13 @@ func main() {
 		MaxShutdown: 20 * time.Second,
 
 		Tasks: map[string]serve.Task{
-			"migrate": migrate.Apply(migrations, migrate.Options{Log: os.Stdout}),
+			"migrate": migrate.ApplyAll(migrationSources(), migrate.Options{Log: os.Stdout}),
 			// Two tenants and one person with a password, so both interesting
 			// sign-ins are reachable: a stranger joining, and an existing account
 			// being linked.
 			"seed": seed,
 		},
-		Migrate: migrate.Require(migrations, migrate.Options{}),
+		Migrate: migrate.RequireAll(migrationSources(), migrate.Options{}),
 	}, func(ctx context.Context, app *serve.App) (http.Handler, error) {
 		return newAPI(ctx, app.Pool, baseURL())
 	})

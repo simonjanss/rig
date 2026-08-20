@@ -491,6 +491,14 @@
         "table": {
           "type": "string",
           "description": "Name of the migration bookkeeping table."
+        },
+        "foundation": {
+          "type": "string",
+          "enum": [
+            "vendored",
+            "embedded"
+          ],
+          "description": "Who keeps rig's own migrations. vendored copies them into this project's migrations directory; embedded leaves each module to apply its own. Defaults to vendored, and cannot be changed once the database exists."
         }
       },
       "additionalProperties": false,

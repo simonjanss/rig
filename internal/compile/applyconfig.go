@@ -82,9 +82,10 @@ func ApplyConfig(api ir.API, schema ir.Schema, set *tableconf.Set, opt ConfigOpt
 		// file handling, so both are carried through untouched. They are named
 		// rather than left out because this copy is field by field, and a field
 		// nobody listed is a field silently dropped.
-		Auth:          api.Auth,
-		Files:         api.Files,
-		Notifications: api.Notifications,
+		Auth:               api.Auth,
+		Files:              api.Files,
+		Notifications:      api.Notifications,
+		EmbeddedFoundation: api.EmbeddedFoundation,
 	}
 
 	tableIndex := make(map[string]int, len(outSchema.Tables))
