@@ -90,6 +90,10 @@
           "type": "array",
           "description": "CIDR ranges whose X-Forwarded-For may be believed, for example 10.0.0.0/8. Empty trusts none of them."
         },
+        "log_retention": {
+          "$ref": "#/$defs/Duration",
+          "description": "How long an entry in rig_auth_log is kept, for example 90d. Zero, the default, keeps everything. It cannot be shorter than the longest rate-limit window, because this table is what the limits count."
+        },
         "oauth": {
           "$ref": "#/$defs/AuthOAuth",
           "description": "Provider sign-in. No providers means the provider routes are not mounted."
@@ -545,6 +549,10 @@
         "claim_ttl": {
           "$ref": "#/$defs/Duration",
           "description": "How long a dispatcher's claim on a delivery is honoured before another may take it. Set it longer than your slowest channel's timeout. Defaults to 5m, and under 1m is refused."
+        },
+        "send_timeout": {
+          "$ref": "#/$defs/Duration",
+          "description": "How long one call into a channel may take before it is treated as failed. Has to be shorter than claim_ttl. Defaults to 30s, and under 1s is refused."
         },
         "max_attempts": {
           "type": "integer",

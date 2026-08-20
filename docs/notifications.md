@@ -267,6 +267,20 @@ transaction spans both, so a process that handed a message over and died will
 hand it over again — the inbox cannot duplicate, and a channel that ignores the
 key can.
 
+**Your sender is given a deadline, and honouring it is its job.** The context
+carries `notifications.send_timeout` — thirty seconds by default — and rig cannot
+enforce it any more than it can enforce the idempotency key: what happens inside
+`Send` is your code. Pass the context to your request, and do not hand a provider
+SDK an `http.Client` with no timeout of its own, which is Go's default.
+
+What a sender that ignores it costs is worth knowing, because the shape hides it.
+A pass is one goroutine and it resolves before it dispatches, so a call that never
+returns stops that replica writing inbox lines and sending on **every** channel —
+not just the one that hung — until the process restarts. Your cron dispatcher
+still runs, so nothing is lost; what you lose is the latency the in-process
+dispatcher exists for, silently. The deadline is what turns that into an ordinary
+failed delivery, retried with backoff like any other.
+
 ### Settings
 
 Per account, per channel, and optionally per kind. Resolution is three steps:

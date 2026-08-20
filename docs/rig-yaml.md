@@ -423,6 +423,7 @@ notifications:
   expose: false             # also project the inbox as a generated resource
   default_digest: Immediate # what an account with no setting gets
   claim_ttl: 5m             # how long a dispatcher's claim is honoured
+  send_timeout: 30s         # how long one call into a channel may take
   max_attempts: 5
   backoff_base: 1m          # doubling: 1m, 2m, 4m, 8m, 16m
   retention: 2160h          # 90 days, and it has to outlive the longest digest
@@ -443,13 +444,26 @@ applications show in a bell icon; with it, `rig_notification_recipient` is also
 projected as a resource and gets the filter grammar, the sort keys and a typed
 client. Both stay, and the difference between them is the point.
 
-`claim_ttl` is the one number here worth understanding before deploying. A
-dispatcher claims a delivery, sends it outside any transaction, and marks it —
-and the claim exists so that a process which died between the second step and
-the third does not strand the row. Set it **longer than your slowest channel's
-own timeout**: shorter, and every message that channel is still sending is
-claimed a second time under ordinary load, and at-least-once stops being a
-crash-recovery property. Under a minute is refused at boot.
+`claim_ttl` and `send_timeout` are the two numbers here worth understanding
+before deploying, and they are one decision. A dispatcher claims a delivery,
+sends it outside any transaction, and marks it — the claim exists so that a
+process which died between the second step and the third does not strand the row.
+So `send_timeout` has to be **shorter than `claim_ttl`**: a send still running
+when its own lease expires is a send whose row another dispatcher has already
+taken, and at-least-once stops being about crashes and becomes ordinary load.
+rig refuses the pair rather than explaining it, and refuses a `claim_ttl` under a
+minute outright.
+
+`send_timeout` is the deadline on the context your sender is handed, and it is
+cooperative — a sender that ignores it hangs its dispatcher anyway. See
+[notifications.md](notifications.md) for what that costs. Raise it for a provider
+that is legitimately slow, and raise `claim_ttl` with it. Under a second is
+refused rather than rounded: these numbers are carried to your application in
+whole seconds, and `500ms` would arrive as no value at all.
+
+A dispatch pass takes what it can send inside one lease and hands the rest back,
+so a `send_timeout` that no longer fits the batch shows up as a count in the
+dispatch log — `abandoned` — rather than as messages sent twice.
 
 `retention` prunes read-and-dismissed inbox lines, their copies, and the
 notifications left with nothing pointing at them — in the same task that

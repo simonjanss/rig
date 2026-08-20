@@ -77,6 +77,22 @@ type Notifications struct {
 	// that long while healthy replicas walk past it.
 	ClaimTTL Duration `yaml:"claim_ttl,omitempty" json:"claim_ttl,omitempty" jsonschema_description:"How long a dispatcher's claim on a delivery is honoured before another may take it. Set it longer than your slowest channel's timeout. Defaults to 5m, and under 1m is refused."`
 
+	// SendTimeout bounds one call into a channel.
+	//
+	// It is the deadline on the context a channel is handed, and the answer to
+	// the relationship ClaimTTL's own comment above calls the one
+	// misconfiguration worth understanding: rig could not know the slowest
+	// channel's timeout while the channel owned it, and now the channel is told
+	// what it is. Shorter than ClaimTTL, necessarily — a send that may outlive
+	// the lease protecting it is a send whose row somebody else has already
+	// taken.
+	//
+	// A channel is the only outbound call rig does not make itself, which is why
+	// this is the only such value in this file. It is also cooperative: a Sender
+	// that ignores the deadline hangs its dispatcher anyway, and the interface
+	// documentation says so.
+	SendTimeout Duration `yaml:"send_timeout,omitempty" json:"send_timeout,omitempty" jsonschema_description:"How long one call into a channel may take before it is treated as failed. Has to be shorter than claim_ttl. Defaults to 30s, and under 1s is refused."`
+
 	// MaxAttempts is how many times a delivery is tried before it is Failed and
 	// stops being claimed.
 	MaxAttempts int `yaml:"max_attempts,omitempty" json:"max_attempts,omitempty" jsonschema_description:"How many times a delivery is tried before it is marked failed. Defaults to 5."`
@@ -102,6 +118,12 @@ type Notifications struct {
 // under normal load rather than only after a crash. Refused at boot rather than
 // discovered as duplicate mail.
 const MinClaimTTL = time.Minute
+
+// MinSendTimeout is the shortest send timeout the document can carry, which is
+// the only reason there is one: every duration in this block is resolved to whole
+// seconds for the IR, so anything under a second arrives as zero and zero reads
+// as unset.
+const MinSendTimeout = time.Second
 
 // LongestDigestWindow is the widest window a digest can wait for, and therefore
 // the floor under [Notifications.Retention].
@@ -149,6 +171,33 @@ func (p *Project) checkNotifications() diag.List {
 			n.ClaimTTL, MinClaimTTL)
 	}
 
+	// The same misconfiguration as the one above, stated as arithmetic rather
+	// than as advice. `claim_ttl`'s own documentation says to set it longer than
+	// the slowest channel's timeout; with that timeout a key here, the pair can
+	// be refused instead of explained. Both values are fine alone, which is what
+	// makes this a check and not a range — the shape the retention and digest
+	// window check below has.
+	if ttl, send := n.ClaimTTL.Duration(), n.SendTimeout.Duration(); ttl > 0 && send > 0 && send >= ttl {
+		diags.Add(diag.CodeConfigInvalid, p.At("notifications", "send_timeout"),
+			"notifications.send_timeout is %s and notifications.claim_ttl is %s, so a channel may "+
+				"still be sending when the lease protecting its row expires and another dispatcher "+
+				"takes it — every slow message would be sent twice. Set send_timeout below claim_ttl",
+			n.SendTimeout, n.ClaimTTL)
+	}
+
+	// A floor, because the document carries this in seconds. `500ms` is a value
+	// somebody could reasonably want for a webhook and there is no room for it
+	// here: it resolves to zero, the generated wiring passes zero, and rig/notify
+	// reads zero as "unset" and uses thirty seconds — sixty times what was asked
+	// for, quietly. Refused rather than rounded, because the two are
+	// indistinguishable afterwards.
+	if send := n.SendTimeout.Duration(); send > 0 && send < MinSendTimeout {
+		diags.Add(diag.CodeConfigInvalid, p.At("notifications", "send_timeout"),
+			"notifications.send_timeout is %s, and under %s cannot be carried: the value is "+
+				"resolved in seconds and would arrive as none at all, which reads as unset and "+
+				"becomes the %s default", n.SendTimeout, MinSendTimeout, DefaultNotificationSendTimeout)
+	}
+
 	if n.MaxAttempts < 0 {
 		diags.Add(diag.CodeConfigInvalid, p.At("notifications", "max_attempts"),
 			"notifications.max_attempts is %d; a negative count sends nothing", n.MaxAttempts)
@@ -192,6 +241,7 @@ func (n Notifications) IR() *ir.Notifications {
 		Expose:             n.Expose,
 		DefaultDigest:      n.DefaultDigest,
 		ClaimTTLSeconds:    int64(n.ClaimTTL.Duration().Seconds()),
+		SendTimeoutSeconds: int64(n.SendTimeout.Duration().Seconds()),
 		MaxAttempts:        n.MaxAttempts,
 		BackoffBaseSeconds: int64(n.BackoffBase.Duration().Seconds()),
 		RetentionSeconds:   int64(n.Retention.Duration().Seconds()),

@@ -57,6 +57,7 @@ func NewNotificationEngine(db notify.DB, reg *notify.Registry, senders map[notif
 		// function nobody diffs.
 		Senders:       senders,
 		ClaimTTL:      300 * time.Second,
+		SendTimeout:   30 * time.Second,
 		MaxAttempts:   5,
 		BackoffBase:   60 * time.Second,
 		DefaultDigest: notify.Digest("Immediate"),

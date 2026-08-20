@@ -4249,6 +4249,7 @@
       "enabled": true,
       "default_digest": "Immediate",
       "claim_ttl_seconds": 300,
+      "send_timeout_seconds": 30,
       "max_attempts": 5,
       "backoff_base_seconds": 60,
       "retention_seconds": 7776000
