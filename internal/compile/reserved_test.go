@@ -15,6 +15,7 @@ import (
 	"github.com/simonjanss/rig/internal/compile"
 	"github.com/simonjanss/rig/internal/diag"
 	"github.com/simonjanss/rig/internal/project"
+	"github.com/simonjanss/rig/internal/scaffold"
 	"github.com/simonjanss/rig/internal/tableconf"
 	"github.com/simonjanss/rig/pkg/ir"
 )
@@ -202,5 +203,100 @@ func TestTheMigrationsTableIsNotRefused(t *testing.T) {
 	if slices.Contains(got, diag.CodeReservedTablePrefix.ID) {
 		t.Errorf("codes = %v, want no %s for %s",
 			got, diag.CodeReservedTablePrefix.ID, project.DefaultMigrationsTable)
+	}
+}
+
+// A module that carries its own schema records how far it got in a table of its
+// own, and goose writes that table rather than a migration creating it. So it is
+// under rig's prefix with nothing in the project to say who made it, which is
+// exactly the shape RIG2005 refuses — and the exemption is the same one the
+// project's own bookkeeping has.
+//
+// Both modes, because a project that switched off embedded still has the table.
+func TestEverySetsBookkeepingTableIsNotRefused(t *testing.T) {
+	t.Parallel()
+
+	for _, mode := range []string{"vendored", "embedded"} {
+		src := defaultProject + "\nmigrations:\n  foundation: " + mode + "\n"
+
+		for _, table := range scaffold.BookkeepingTables() {
+			schema := renameTable(t, reservedSchema(t), "rig_leaderboard", table)
+
+			got := compileReserved(t, schema, tableconf.NewSet(), src, nil)
+			if slices.Contains(got, diag.CodeReservedTablePrefix.ID) {
+				t.Errorf("%s/%s: codes = %v, want no %s",
+					mode, table, got, diag.CodeReservedTablePrefix.ID)
+			}
+		}
+	}
+}
+
+// And it is not projected either. Refusing it and then generating a resource over
+// it would be two bugs cancelling out; the table has to be ignored, so that a
+// generated PATCH on `is_applied` is not something a project can be handed.
+func TestBookkeepingTablesAreNotProjected(t *testing.T) {
+	t.Parallel()
+
+	p, pdiags := project.Parse("rig.yaml", []byte(defaultProject))
+	if pdiags.HasErrors() {
+		t.Fatal(pdiags.String())
+	}
+
+	ignored := compile.Bookkeeping(p)
+	if !slices.Contains(ignored, project.DefaultMigrationsTable) {
+		t.Errorf("Bookkeeping = %v, should hold the project's own table", ignored)
+	}
+	for _, table := range scaffold.BookkeepingTables() {
+		if !slices.Contains(ignored, table) {
+			t.Errorf("Bookkeeping = %v, should hold %s", ignored, table)
+		}
+	}
+
+	for _, table := range scaffold.BookkeepingTables() {
+		schema := renameTable(t, reservedSchema(t), "rig_leaderboard", table)
+		doc, _ := compile.Compile(schema, tableconf.NewSet(), compile.Options{
+			Project: p,
+			Tool:    "rig (test)",
+		})
+		if doc.Table(table) != nil {
+			t.Errorf("%s reached the document", table)
+		}
+		if doc.ResourceForTable(table) != nil {
+			t.Errorf("%s was projected as a resource", table)
+		}
+	}
+}
+
+// Under embedded, the tables are the modules' and no migration in the project
+// created them — so the evidence has to be the configuration, and RIG2005 must not
+// fire for any of them. This is the failure the whole mode turns on: without it
+// every rig table is a hard error and `rig generate` refuses to run at all.
+func TestEmbeddedFoundationTablesAreNotRefused(t *testing.T) {
+	t.Parallel()
+
+	src := defaultProject + "\nmigrations:\n  foundation: embedded\n"
+
+	// The caller passes the foundation it worked out from the configuration, which
+	// under this mode is every table the enabled parts create.
+	foundation := scaffold.Tables()
+
+	for _, table := range []string{"rig_account", "rig_identity", "rig_file", "rig_notification"} {
+		schema := renameTable(t, reservedSchema(t), "rig_leaderboard", table)
+
+		got := compileReserved(t, schema, tableconf.NewSet(), src, foundation)
+		if slices.Contains(got, diag.CodeReservedTablePrefix.ID) {
+			t.Errorf("%s: codes = %v, want no %s — the modules created it",
+				table, got, diag.CodeReservedTablePrefix.ID)
+		}
+	}
+
+	// And a table that is genuinely nobody's is still refused, in this mode as in
+	// the other. Declaring `embedded` opens the prefix to rig's own tables, not to
+	// the project's.
+	schema := renameTable(t, reservedSchema(t), "rig_leaderboard", "rig_thing")
+	got := compileReserved(t, schema, tableconf.NewSet(), src, foundation)
+	if !slices.Contains(got, diag.CodeReservedTablePrefix.ID) {
+		t.Errorf("codes = %v, want %s for a table rig never creates",
+			got, diag.CodeReservedTablePrefix.ID)
 	}
 }

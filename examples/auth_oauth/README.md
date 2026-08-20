@@ -23,6 +23,27 @@ nothing to register. To use your own Google or Microsoft credentials, see
 [below](#using-your-own-google-or-microsoft-credentials) — including why a
 subdomain of `localhost` is not something either of them will accept.
 
+## rig's migrations are not in this repository
+
+`migrations/` here holds two files, both this example's own. rig's dozen tables —
+identities, tokens, API keys, the log — come from `rig/auth`, which carries their
+DDL and applies it itself. That is one line in `rig.yaml`:
+
+```yaml
+migrations:
+  foundation: embedded
+```
+
+`rig db up` applies the module's set before this example's, and `main.go` does the
+same at startup through `api.MigrationSources`, which `rig generate` wrote. Each
+set records what it applied in its own bookkeeping table, so the two agree.
+
+`examples/auth` is the other half of the pair and vendors those migrations into its
+own directory, which is the default. The trade is readability against a repository
+without a thousand lines of somebody else's SQL in it, and
+[docs/rig-yaml.md](../../docs/rig-yaml.md#who-keeps-rigs-migrations) argues it
+properly. Both are built and run on every `make check`.
+
 ## Why this is its own example
 
 `examples/auth` covers the rest of authentication: sessions, refresh rotation,

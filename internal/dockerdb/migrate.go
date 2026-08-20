@@ -17,11 +17,25 @@ import (
 
 // MigrateOptions describe a migration run.
 type MigrateOptions struct {
-	// Dir holds the migration files.
+	// Dir holds the project's own migration files.
 	Dir string
 	// Table is the bookkeeping table. Naming it per project keeps two rig
 	// projects sharing a database from fighting over one another's history.
 	Table string
+	// Foundation are rig's own migration sets, applied before the project's.
+	//
+	// Empty is the ordinary case, and it is what `migrations.foundation: vendored`
+	// produces: those migrations are already files under Dir, so applying them
+	// from here as well would be applying them twice under two histories.
+	//
+	// Under `embedded` they are the modules' own sets and this is the only place
+	// they come from. They go first because rig's DDL never references a project's
+	// table while a project's routinely references rig's — a join table pointing
+	// at rig_notification, a file column pointing at rig_file. A schema read
+	// without them is a schema rig would then generate the wrong code from, and
+	// quietly: the API-key write guard and every notifiable resource are decided
+	// by whether those tables were there.
+	Foundation []migrate.Source
 	// URL is the database to migrate.
 	URL string
 	// Log receives progress, if set.
@@ -52,11 +66,15 @@ func Migrate(ctx context.Context, opt MigrateOptions) (applied int, err error) {
 		parent = "."
 	}
 
-	names, err := migrate.Up(ctx, db, os.DirFS(parent), migrate.Options{
+	sources := append([]migrate.Source{}, opt.Foundation...)
+	sources = append(sources, migrate.Source{
+		Name:  "the project",
+		FS:    os.DirFS(parent),
 		Dir:   dir,
 		Table: opt.Table,
-		Log:   opt.Log,
 	})
+
+	names, err := migrate.UpAll(ctx, db, sources, migrate.Options{Log: opt.Log})
 	return len(names), err
 }
 

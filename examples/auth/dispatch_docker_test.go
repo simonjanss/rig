@@ -5,6 +5,7 @@ package main
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -212,6 +213,185 @@ func TestMaxAttemptsStopsAPermanentFailure(t *testing.T) {
 	}
 }
 
+// A channel that never answers must not take the dispatcher with it.
+//
+// This is the failure the send timeout exists for, and it is not the same as a
+// slow channel: the backoff handles slow. A provider that accepts the connection
+// and then says nothing — an http.Client with no Timeout of its own, which is
+// Go's default, against a host that black-holes packets — used to park the pass
+// forever. A pass resolves before it dispatches and both run in one goroutine,
+// so that stopped this replica writing inbox lines and sending on every channel,
+// not just the wedged one, until somebody restarted it.
+func TestAHangingSenderDoesNotWedgeThePass(t *testing.T) {
+	w := newDeliveryWorld(t)
+	w.owe(t)
+
+	var deadlines int
+	var mu sync.Mutex
+	hangs := notify.SenderFunc(func(ctx context.Context, _ notify.Message) error {
+		// Exactly what a well-written channel does and a hung one does not:
+		// waits on the context it was given. That it returns at all is the
+		// assertion; the deadline is what makes it return.
+		<-ctx.Done()
+		mu.Lock()
+		deadlines++
+		mu.Unlock()
+		return ctx.Err()
+	})
+
+	engine := w.engineOf(t,
+		map[notify.Channel]notify.Sender{notify.ChannelEmail: hangs}, 10, 50*time.Millisecond, 0)
+
+	// Bounded from the outside too. If the deadline does not work, the pass
+	// never returns, and a test that simply called Dispatch would hang the
+	// suite rather than failing it.
+	done := make(chan error, 1)
+	go func() {
+		_, err := engine.Dispatch(context.Background())
+		done <- err
+	}()
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(30 * time.Second):
+		t.Fatal("the pass did not return, so the send timeout is not bounding the sender")
+	}
+
+	mu.Lock()
+	saw := deadlines
+	mu.Unlock()
+	if saw == 0 {
+		t.Error("no send saw its deadline expire, so this proved nothing")
+	}
+
+	// And the rows are owed again rather than stranded: the lease came back, so
+	// another dispatcher takes them now instead of after claim_ttl.
+	if got := w.claimedRows(t); got != 0 {
+		t.Errorf("%d rows are still claimed after a timed-out pass, want 0", got)
+	}
+	if got := w.countState(t, "Pending"); got == 0 {
+		t.Error("a timed-out send left nothing Pending, so the delivery was lost")
+	}
+}
+
+// A pass that cannot finish its batch inside the lease hands the rest back,
+// attempt included.
+//
+// The lease is what stops two dispatchers sending the same message, and a pass
+// that kept going past it would have every remaining row claimed by a replica
+// that was right to think it had expired. So the pass stops while a whole send
+// still fits, and the rows it did not reach are owed again — with the attempt the
+// claim charged them given back, because a row no channel was ever asked about
+// has not used one of its five. Without that, a channel slow enough to abandon
+// the tail of every batch would Fail a delivery that had never been sent.
+func TestAPassHandsBackWhatItCannotSendInsideTheLease(t *testing.T) {
+	w := newDeliveryWorld(t)
+	w.reader(t, "also told")
+	w.reader(t, "told as well")
+	w.owe(t)
+
+	// Three rows and no more: the seeded tenant has other accounts of its own,
+	// and a count this test states in whole numbers has to be about the three
+	// readers it made.
+	w.onlyFor(t, w.readers...)
+
+	// Three Immediate rows are three messages, and the arithmetic is chosen so
+	// that only the first one fits: a four-second send against a lease of a
+	// minute leaves fifty-six seconds, and a send may not start with less than
+	// its own timeout left. The margin is the four seconds the claim and the
+	// addressing queries would have to take to make the *first* send skip too.
+	var sends int
+	var mu sync.Mutex
+	slow := notify.SenderFunc(func(context.Context, notify.Message) error {
+		mu.Lock()
+		sends++
+		mu.Unlock()
+		time.Sleep(4 * time.Second)
+		return nil
+	})
+
+	engine := w.engineOf(t, map[notify.Channel]notify.Sender{notify.ChannelEmail: slow},
+		5, 56*time.Second, time.Minute)
+
+	report, err := engine.Dispatch(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	mu.Lock()
+	saw := sends
+	mu.Unlock()
+	if saw != 1 {
+		t.Fatalf("%d sends were made, want 1: the pass did not stop at its budget", saw)
+	}
+	if report.Sent != 1 || report.Abandoned != 2 {
+		t.Errorf("report says %d sent and %d abandoned, want 1 and 2: %s",
+			report.Sent, report.Abandoned, report)
+	}
+
+	// Owed again rather than stranded, and owed with a full retry budget: the
+	// claim's attempt is given back to a row nothing was tried on.
+	if got := w.claimedRows(t); got != 0 {
+		t.Errorf("%d rows are still claimed after the pass, want 0", got)
+	}
+	if got := w.countState(t, "Pending"); got != 2 {
+		t.Errorf("%d rows are Pending after the pass, want 2", got)
+	}
+	if got := w.attemptsOf(t, "Pending"); got != 0 {
+		t.Errorf("an abandoned row has %d attempts against it, want 0", got)
+	}
+}
+
+// A channel whose sender went away fails its rows rather than taking the
+// process.
+//
+// The rows exist because the sender existed when they were written — a deploy
+// that dropped one from the map is the ordinary way to get here. Indexing
+// straight into the map yields a nil Sender, and calling a method on it panics
+// in a goroutine with no recover above it, which loses the process rather than
+// the delivery. That this test completes at all is the assertion; a panic would
+// take the whole run down.
+func TestAChannelWhoseSenderWentAwayFailsRatherThanPanicking(t *testing.T) {
+	w := newDeliveryWorld(t)
+	w.owe(t)
+	w.keepOne(t)
+
+	// Email rows on the table, and an engine that can only send Mobile. Not an
+	// empty map, which Dispatch already short-circuits: the case worth covering
+	// is a map with the wrong channel in it.
+	gone := w.engineOf(t, map[notify.Channel]notify.Sender{
+		notify.ChannelMobile: notify.SenderFunc(func(context.Context, notify.Message) error {
+			return nil
+		}),
+	}, 1, 0, 0)
+
+	if _, err := gone.Dispatch(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	// max_attempts is 1, so the first refusal is terminal.
+	if got := w.countState(t, "Failed"); got == 0 {
+		t.Error("a delivery with no sender was not failed")
+	}
+	// And it says why, because "Failed" with no reason is a row nobody can act
+	// on.
+	var reason string
+	if err := w.pool.QueryRow(context.Background(),
+		`SELECT coalesce(failed_reason, '') FROM rig_notification_delivery
+		 WHERE tenant_id = $1 AND state = 'Failed' LIMIT 1`, w.tenant).Scan(&reason); err != nil {
+		t.Fatal(err)
+	}
+	if reason == "" {
+		t.Fatal("no reason was recorded")
+	}
+	if !strings.Contains(reason, notify.ErrNoSender.Error()) {
+		t.Errorf("failed_reason does not say the channel had no sender: %q", reason)
+	}
+}
+
 // An Hourly account gets one message containing several; an Immediate account
 // beside it in the same pass gets one each.
 //
@@ -357,6 +537,17 @@ func (w *deliveryWorld) engineWith(t *testing.T, maxAttempts int, sender notify.
 	if sender != nil {
 		senders[notify.ChannelEmail] = sender
 	}
+	return w.engineOf(t, senders, maxAttempts, 0, 0)
+}
+
+// engineOf is the same builder with the three things a timeout test has an
+// opinion about: which channels have senders at all, how long one call may take,
+// and how long the lease that call has to fit inside is.
+func (w *deliveryWorld) engineOf(
+	t *testing.T, senders map[notify.Channel]notify.Sender,
+	maxAttempts int, sendTimeout, claimTTL time.Duration,
+) *notify.Engine {
+	t.Helper()
 
 	// The same object graph main.go builds, and in the same order.
 	repos := store.New(w.pool, store.Config{})
@@ -371,6 +562,8 @@ func (w *deliveryWorld) engineWith(t *testing.T, maxAttempts int, sender notify.
 
 		Senders:     senders,
 		MaxAttempts: maxAttempts,
+		SendTimeout: sendTimeout,
+		ClaimTTL:    claimTTL,
 		// A millisecond rather than a minute, so a retry test does not wait one
 		// out. The arithmetic is the same; the number is the only thing a test
 		// has an opinion about.
@@ -396,6 +589,20 @@ func (w *deliveryWorld) claimedRows(t *testing.T) int {
 		`SELECT count(*) FROM rig_notification_delivery
 		 WHERE tenant_id = $1 AND claimed_at IS NOT NULL AND state = 'Pending'`,
 		w.tenant).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	return n
+}
+
+// attemptsOf is the highest attempt count against any row in a state, which is
+// what a test asserting an attempt was given back has to ask: one row is enough
+// to have charged for a send nobody made.
+func (w *deliveryWorld) attemptsOf(t *testing.T, state string) int {
+	t.Helper()
+	var n int
+	if err := w.pool.QueryRow(context.Background(),
+		`SELECT coalesce(max(attempts), 0) FROM rig_notification_delivery
+		 WHERE tenant_id = $1 AND state = $2`, w.tenant, state).Scan(&n); err != nil {
 		t.Fatal(err)
 	}
 	return n

@@ -53,7 +53,7 @@ func Compile(raw ir.Schema, set *tableconf.Set, opt Options) (*ir.Document, diag
 	cfg := p.Config
 
 	schema, d := Normalize(raw, NormalizeOptions{
-		IgnoreTables: append([]string{cfg.Migrations.Table}, opt.IgnoreTables...),
+		IgnoreTables: append(Bookkeeping(p), opt.IgnoreTables...),
 	})
 	diags.Append(d)
 
@@ -67,6 +67,8 @@ func Compile(raw ir.Schema, set *tableconf.Set, opt Options) (*ir.Document, diag
 		Auth:           cfg.Auth.IR(),
 		Files:          cfg.Files.IR(),
 		Notifications:  cfg.Notifications.IR(),
+
+		EmbeddedFoundation: !cfg.Migrations.Vendored(),
 	})
 	diags.Append(d)
 

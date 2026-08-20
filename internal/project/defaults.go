@@ -50,6 +50,12 @@ const (
 	// constants that happen to match today would not.
 	DefaultMigrationsTable = migrate.DefaultTable
 
+	// DefaultFoundation keeps rig's own migrations in the project's own
+	// directory. It is the conservative half of the choice: the directory stays
+	// the whole truth about the database, which is worth more than saving a
+	// thousand lines of SQL until somebody asks to trade it.
+	DefaultFoundation = FoundationVendored
+
 	DefaultJSONCase = "camel"
 
 	// DefaultTenantQuery is the parameter the query tenant source reads.
@@ -97,6 +103,19 @@ const (
 	// higher — the relationship to the channel's own timeout is the one
 	// misconfiguration here worth understanding.
 	DefaultClaimTTL = 5 * time.Minute
+
+	// DefaultNotificationSendTimeout bounds one call into a channel.
+	//
+	// Thirty seconds, which is what rigclient allows a whole request. It is the
+	// number that makes DefaultClaimTTL's paragraph above checkable rather than
+	// advisory: the relationship it calls "the one misconfiguration here worth
+	// understanding" is between these two values, and with both of them in this
+	// file rig can refuse the pair instead of describing it.
+	//
+	// A channel is the one outbound call rig does not make itself, so it is the
+	// one that could not bound itself. Everything else already does — three
+	// seconds for the breach check, ten for a token exchange.
+	DefaultNotificationSendTimeout = 30 * time.Second
 
 	// DefaultMaxAttempts is five, after which a delivery is Failed and stops
 	// being claimed. Without a cap a permanently broken address consumes a lease
@@ -195,6 +214,13 @@ func (p *Project) applyDefaults() {
 
 	setDefault(&c.Migrations.Dir, DefaultMigrationsDir)
 	setDefault(&c.Migrations.Table, DefaultMigrationsTable)
+	if c.Migrations.Foundation == "" {
+		// Resolved here rather than read as a zero value later, so that every
+		// caller asking which mode a project is in gets the same answer — the
+		// mode decides which migrations get applied, and a zero meaning
+		// "something else decides" would be two behaviours behind one blank key.
+		c.Migrations.Foundation = DefaultFoundation
+	}
 
 	setDefault(&c.Naming.JSONCase, DefaultJSONCase)
 
@@ -213,6 +239,7 @@ func (p *Project) applyNotificationsDefaults() {
 
 	setDefault(&n.DefaultDigest, DefaultNotificationDigest)
 	setDuration(&n.ClaimTTL, DefaultClaimTTL)
+	setDuration(&n.SendTimeout, DefaultNotificationSendTimeout)
 	setDuration(&n.BackoffBase, DefaultBackoffBase)
 	setDuration(&n.Retention, DefaultNotificationRetention)
 	if n.MaxAttempts == 0 {

@@ -31,7 +31,9 @@ require (
 	github.com/pb33f/ordered-map/v2 v2.3.1 // indirect
 	github.com/sethvargo/go-retry v0.4.0 // indirect
 	github.com/simonjanss/rig/auth v0.0.0
+	github.com/simonjanss/rig/files v0.0.0
 	github.com/simonjanss/rig/migrate v0.0.0
+	github.com/simonjanss/rig/notify v0.0.0
 	github.com/simonjanss/rig/runtime v0.0.0
 	github.com/spf13/pflag v1.0.9 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
@@ -44,3 +46,7 @@ replace github.com/simonjanss/rig/auth => ./auth
 replace github.com/simonjanss/rig/migrate => ./migrate
 
 replace github.com/simonjanss/rig/runtime => ./runtime
+
+replace github.com/simonjanss/rig/files => ./files
+
+replace github.com/simonjanss/rig/notify => ./notify

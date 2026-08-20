@@ -11,6 +11,17 @@ layout:
   table_dir: services/{table}
   config_file: "{table_dir}/{table}.yaml"
 
+# rig's own tables stay in the modules that own them, so migrations/ below holds
+# only this example's two migrations rather than a thousand lines of DDL nobody
+# here wrote. examples/auth is the other half of the pair and vendors them, which
+# is the default — between them both readings are built and run on every check.
+#
+# The cost is admitted rather than argued away: this directory no longer says what
+# is in the database. What is in it is these two files plus whatever `rig/auth`
+# ships, and `rig db up` applies the second set first.
+migrations:
+  foundation: embedded
+
 # Its own throwaway Postgres, so this example and examples/auth can both be up.
 database:
   port: 55443

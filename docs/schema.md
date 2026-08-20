@@ -284,9 +284,16 @@ Everything above is a convention you can turn off. This is the one naming rule
 you cannot, and there are two halves to it.
 
 **The `rig_` prefix is rig's.** Your tables cannot use it. It is what tells you,
-in psql, which tables arrived with `rig setup-project` and which you wrote — and
-it is what lets rig add a table to the foundation without landing on one of
-yours.
+in psql, which tables arrived with the foundation and which you wrote — and it is
+what lets rig add a table to the foundation without landing on one of yours.
+
+Bookkeeping is under the prefix too, and is not a resource in any project:
+`rig_migrations` for your own migrations, and `rig_auth_migrations`,
+`rig_files_migrations` and `rig_notify_migrations` for the sets those modules
+carry when
+[`migrations.foundation` is `embedded`](rig-yaml.md#who-keeps-rigs-migrations).
+goose writes those tables rather than a migration creating them, so rig neither
+refuses them nor generates anything for them.
 
 **The names those tables project to are reserved too**, whether or not you
 expose them:

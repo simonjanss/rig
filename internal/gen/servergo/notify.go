@@ -124,6 +124,7 @@ func (e *emitter) notifyConstructor(b *gobuf.Buf) {
 		"than a literal in a main function nobody diffs.")
 	b.L("Senders: senders,")
 	b.L("ClaimTTL: %d * %s.Second,", cfg.ClaimTTLSeconds, timePkg)
+	b.L("SendTimeout: %d * %s.Second,", cfg.SendTimeoutSeconds, timePkg)
 	b.L("MaxAttempts: %d,", cfg.MaxAttempts)
 	b.L("BackoffBase: %d * %s.Second,", cfg.BackoffBaseSeconds, timePkg)
 	b.L("DefaultDigest: %s.Digest(%s),", notifyPkg, gobuf.Quote(cfg.DefaultDigest))

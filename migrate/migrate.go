@@ -15,6 +15,23 @@
 // library, so `rig db up` in development and this in production apply the
 // schema identically.
 //
+// # More than one set
+//
+// A project may have several. rig owns a dozen tables of its own, and the modules
+// that read them can carry their own DDL rather than have it vendored into the
+// project's migrations directory — see
+// [github.com/simonjanss/rig/runtime/dbschema]. Each set is then numbered from one
+// in its own namespace and records itself in its own table, which is what lets
+// those modules be released without agreeing a migration number.
+//
+// [Source] is one such set and [UpAll], [ApplyAll] and [RequireAll] are the
+// functions that take a list of them. Order is the caller's, and rig's sets come
+// before the project's own: rig's DDL never references a project's table, while a
+// project's routinely references rig's.
+//
+// A project that vendored the foundation has exactly one set and wants [Apply] or
+// [Require], unchanged.
+//
 // # Where to run them
 //
 // There are three answers and they are not equally good.
@@ -109,6 +126,180 @@ type Options struct {
 	// for a database whose user cannot take advisory locks, and it means
 	// arranging by hand that only one runner exists.
 	Unlocked bool
+}
+
+// A Source is one migration set: a filesystem, the directory inside it, and the
+// table recording how far that set has been applied.
+//
+// It exists because a project has more than one. rig's own tables — the
+// identities, the file rows, the notifications — belong to the modules whose code
+// reads them, and a project can leave those modules to carry their own schema
+// instead of vendoring it. Then there are several sets to apply, each numbered
+// from one in its own namespace, and each has to record its progress somewhere of
+// its own: two sets sharing a table would share a numbering sequence, and two
+// separately released modules would eventually collide on a version.
+//
+// The fields restate [github.com/simonjanss/rig/runtime/dbschema.Set] without its
+// manifest, because applying a set needs only these. The conversion is the
+// caller's — usually three lines of generated code — and it is deliberate that
+// the dependency does not exist: a module that carries schema should not thereby
+// carry goose, which is the same reason this package is not part of rig/runtime.
+type Source struct {
+	// Name is who the set belongs to, for a line that has to say whose migration
+	// applied or whose is missing.
+	Name string
+	// FS holds the files, and Dir names the directory inside it. Empty Dir means
+	// "migrations", as in [Options].
+	FS  fs.FS
+	Dir string
+	// Table records the applied versions for this set alone. Empty means
+	// [DefaultTable], which is the project's own; a module's set names its own.
+	Table string
+}
+
+// UpAll applies several sets in the order given and returns everything it
+// applied.
+//
+// The order is the caller's and it matters. rig's sets go first and the project's
+// own last, because rig's DDL never references a project's table while a
+// project's routinely references rig's — a join table pointing at
+// rig_notification, a file column pointing at rig_file. So "all of rig's, then
+// all of yours" is a total order that holds under upgrades too, and there is no
+// need for anything cleverer.
+//
+// [Options.Dir] and [Options.Table] are ignored: those are per-set facts and each
+// [Source] carries its own. Log and Unlocked apply to every set.
+//
+// Applying the sets one after another rather than together is not a weaker
+// arrangement. goose's advisory lock is a single fixed identifier, so several
+// replicas starting at once still serialise across all of it — the per-set tables
+// are bookkeeping, never a concurrency boundary.
+func UpAll(ctx context.Context, db *sql.DB, srcs []Source, opt Options) ([]string, error) {
+	if err := checkSources(srcs); err != nil {
+		return nil, err
+	}
+
+	var applied []string
+	for _, src := range srcs {
+		got, err := Up(ctx, db, src.FS, src.options(opt))
+		applied = append(applied, label(src, got)...)
+		if err != nil {
+			return applied, fmt.Errorf("%s: %w", src.who(), err)
+		}
+	}
+	return applied, nil
+}
+
+// PendingAll is what [UpAll] would apply, without applying it.
+func PendingAll(ctx context.Context, db *sql.DB, srcs []Source, opt Options) ([]string, error) {
+	if err := checkSources(srcs); err != nil {
+		return nil, err
+	}
+
+	var pending []string
+	for _, src := range srcs {
+		got, err := Pending(ctx, db, src.FS, src.options(opt))
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", src.who(), err)
+		}
+		pending = append(pending, label(src, got)...)
+	}
+	return pending, nil
+}
+
+// ApplyAll is [UpAll] as a one-argument function, for wiring straight into a
+// server — [Apply]'s shape for a project whose modules carry their own schema.
+func ApplyAll(srcs []Source, opt Options) func(ctx context.Context, pool *pgxpool.Pool) error {
+	return func(ctx context.Context, pool *pgxpool.Pool) error {
+		db := FromPool(pool)
+		defer db.Close()
+
+		applied, err := UpAll(ctx, db, srcs, opt)
+		if err != nil {
+			return err
+		}
+		if opt.Log != nil && len(applied) == 0 {
+			fmt.Fprintln(opt.Log, "no migrations to apply")
+		}
+		return nil
+	}
+}
+
+// RequireAll is [Require] over several sets: it refuses to start when any of them
+// is behind, and says which.
+//
+// Any rather than the project's own, because being behind on rig's schema is the
+// same failure. A binary pinning a module one version newer than the database has
+// applied is exactly the skew this catches, and it is the skew that gets worse
+// once the modules carry their own migrations.
+func RequireAll(srcs []Source, opt Options) func(ctx context.Context, pool *pgxpool.Pool) error {
+	return func(ctx context.Context, pool *pgxpool.Pool) error {
+		db := FromPool(pool)
+		defer db.Close()
+
+		pending, err := PendingAll(ctx, db, srcs, opt)
+		if err != nil {
+			return err
+		}
+		if len(pending) > 0 {
+			return fmt.Errorf("the database is behind this binary: %d migration(s) not applied, starting with %s",
+				len(pending), pending[0])
+		}
+		return nil
+	}
+}
+
+// options is the per-set view of a run: the shared settings, with this set's own
+// directory and bookkeeping table.
+func (s Source) options(opt Options) Options {
+	opt.Dir = s.Dir
+	opt.Table = s.Table
+	return opt
+}
+
+func (s Source) who() string {
+	if s.Name == "" {
+		return "migrations"
+	}
+	return s.Name
+}
+
+// label prefixes each path with the set it came from, so a message about a
+// pending migration says whose it is. Two sets both numbered from one would
+// otherwise report two different `00001_...` files under the same name.
+func label(src Source, paths []string) []string {
+	if len(paths) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(paths))
+	for _, p := range paths {
+		out = append(out, src.who()+" "+p)
+	}
+	return out
+}
+
+// checkSources refuses a list that would record two sets as one.
+//
+// Sharing a table is not a degraded arrangement, it is a broken one: the two
+// sets are numbered independently, so one's version 2 would mark the other's as
+// applied and the migration that never ran would never run.
+func checkSources(srcs []Source) error {
+	if len(srcs) == 0 {
+		return errors.New("migrate: no migration sources")
+	}
+	seen := map[string]string{}
+	for _, src := range srcs {
+		table := src.Table
+		if table == "" {
+			table = DefaultTable
+		}
+		if prev, taken := seen[table]; taken {
+			return fmt.Errorf("migrate: %s and %s would both record themselves in %s, "+
+				"and they are numbered independently", prev, src.who(), table)
+		}
+		seen[table] = src.who()
+	}
+	return nil
 }
 
 // Up applies every pending migration and returns what it applied.

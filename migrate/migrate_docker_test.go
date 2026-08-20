@@ -192,6 +192,126 @@ func TestRequireRefusesUntilApplied(t *testing.T) {
 	}
 }
 
+// Two sets, both numbered from one, where the second references a table the
+// first creates. This is the arrangement rig's own modules are in — notify's
+// tables reference rig_account, which auth creates — and the whole reason order
+// is the caller's and not goose's.
+func TestUpAllAppliesSetsInOrder(t *testing.T) {
+	db, opt := connect(t, "upall")
+
+	// Deliberately the same number in both sets. One shared bookkeeping table
+	// would make the second look already applied; separate ones are what make
+	// independently numbered sets possible at all.
+	first := fstest.MapFS{"00001_first.sql": &fstest.MapFile{Data: []byte(`-- +goose Up
+CREATE TABLE migrate_test_upall_parent (id int PRIMARY KEY);
+`)}}
+	second := fstest.MapFS{"00001_second.sql": &fstest.MapFile{Data: []byte(`-- +goose Up
+CREATE TABLE migrate_test_upall_child (
+    id        int PRIMARY KEY,
+    parent_id int NOT NULL REFERENCES migrate_test_upall_parent (id)
+);
+`)}}
+
+	srcs := []migrate.Source{
+		{Name: "first/set", FS: first, Dir: ".", Table: opt.Table + "_first"},
+		{Name: "second/set", FS: second, Dir: ".", Table: opt.Table + "_second"},
+	}
+	t.Cleanup(func() {
+		for _, stmt := range []string{
+			`DROP TABLE IF EXISTS migrate_test_upall_child`,
+			`DROP TABLE IF EXISTS migrate_test_upall_parent`,
+			`DROP TABLE IF EXISTS ` + opt.Table + `_first`,
+			`DROP TABLE IF EXISTS ` + opt.Table + `_second`,
+		} {
+			_, _ = db.Exec(stmt)
+		}
+	})
+
+	pending, err := migrate.PendingAll(t.Context(), db, srcs, migrate.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pending) != 2 {
+		t.Fatalf("pending = %v, want one from each set", pending)
+	}
+	// Each line says whose it is. Without that, two sets both numbered from one
+	// report two different files under the same name.
+	if !strings.Contains(pending[0], "first/set") || !strings.Contains(pending[1], "second/set") {
+		t.Errorf("pending = %v, want each named for its set and in order", pending)
+	}
+
+	applied, err := migrate.UpAll(t.Context(), db, srcs, migrate.Options{})
+	if err != nil {
+		t.Fatalf("the second set references the first, so order is the whole test: %v", err)
+	}
+	if len(applied) != 2 {
+		t.Fatalf("applied = %v, want both", applied)
+	}
+
+	var n int
+	if err := db.QueryRow(`SELECT count(*) FROM migrate_test_upall_child`).Scan(&n); err != nil {
+		t.Fatalf("the second set did not run: %v", err)
+	}
+
+	// Each set recorded itself, and separately: two rows in two tables, both at
+	// version 1.
+	for _, table := range []string{opt.Table + "_first", opt.Table + "_second"} {
+		var version int64
+		if err := db.QueryRow(`SELECT max(version_id) FROM ` + table).Scan(&version); err != nil {
+			t.Errorf("%s: %v", table, err)
+			continue
+		}
+		if version != 1 {
+			t.Errorf("%s is at version %d, want 1", table, version)
+		}
+	}
+
+	// And a second run does nothing rather than failing on CREATE TABLE.
+	again, err := migrate.UpAll(t.Context(), db, srcs, migrate.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(again) != 0 {
+		t.Errorf("a second run applied %v, want nothing", again)
+	}
+}
+
+// RequireAll refuses for any set that is behind, not just the project's own —
+// which is the skew that gets worse once the modules carry their own migrations.
+func TestRequireAllNamesTheSetThatIsBehind(t *testing.T) {
+	db, opt := connect(t, "requireall")
+	pool := openPool(t)
+
+	ahead := fstest.MapFS{"00001_ahead.sql": &fstest.MapFile{Data: []byte(`-- +goose Up
+CREATE TABLE migrate_test_requireall_x (id int PRIMARY KEY);
+`)}}
+	srcs := []migrate.Source{{Name: "rig/somemodule", FS: ahead, Dir: ".", Table: opt.Table + "_mod"}}
+	t.Cleanup(func() {
+		_, _ = db.Exec(`DROP TABLE IF EXISTS migrate_test_requireall_x`)
+		_, _ = db.Exec(`DROP TABLE IF EXISTS ` + opt.Table + `_mod`)
+	})
+
+	check := migrate.RequireAll(srcs, migrate.Options{})
+
+	err := check(t.Context(), pool)
+	if err == nil {
+		t.Fatal("a module's set not applied should refuse to start")
+	}
+	if !strings.Contains(err.Error(), "behind this binary") {
+		t.Errorf("the refusal should say what is wrong: %v", err)
+	}
+	if !strings.Contains(err.Error(), "rig/somemodule") {
+		t.Errorf("it should name whose set is missing: %v", err)
+	}
+
+	if _, err := migrate.UpAll(t.Context(), db, srcs, migrate.Options{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := check(t.Context(), pool); err != nil {
+		t.Errorf("with the set applied it should start: %v", err)
+	}
+}
+
 func openPool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
 

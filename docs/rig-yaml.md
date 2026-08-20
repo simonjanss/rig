@@ -167,17 +167,114 @@ already carries its own.
 ```yaml
 migrations:
   dir: migrations
+  foundation: vendored
 ```
 
 | Key | Default | |
 |---|---|---|
 | `dir` | `migrations` | Directory holding your goose migration files. |
 | `table` | `rig_migrations` | The bookkeeping table. |
+| `foundation` | `vendored` | Who keeps rig's own migrations. `vendored` or `embedded`. |
 
 `rig db up` and a binary migrating itself have to agree about which migrations
 have run, so a project that changes `table` passes the same name to
 `migrate.Options` — two bookkeeping tables mean the second reader thinks nothing
 has been applied.
+
+### Who keeps rig's migrations
+
+rig owns about a dozen tables of its own — identities, tokens, API keys, the
+authentication log, file rows, notifications — and their DDL has to reach your
+database somehow. `foundation` is who keeps the file.
+
+**`vendored`, the default.** `rig setup-project` copies rig's migrations into your
+`migrations/` directory, numbered into your own sequence and recorded in your own
+bookkeeping table. You can read them, review them in a pull request, and see the
+whole of your schema in one place.
+
+That last part is the reason it is the default. Your migrations directory is the
+complete truth about your database, and somebody debugging at three in the morning
+does not have to know which version of rig is installed to read it.
+
+Upgrades arrive as new files. rig's migrations are append-only — a shipped one is
+never renumbered or rewritten, because somebody's database has already run it — so
+when a newer rig has more of them, `rig setup-project` writes the ones you do not
+have at the next free number and leaves the rest alone.
+
+**`embedded`.** rig's migrations stay in the modules that own them — `rig/auth`,
+`rig/files`, `rig/notify` — and each applies and records its own. Your migrations
+directory holds only your own schema.
+
+```yaml
+migrations:
+  foundation: embedded
+```
+
+What you get is a repository without a thousand lines of somebody else's SQL in it,
+and upgrades that are a `go get` rather than a file to copy. What you give up is
+the property above: your migrations directory no longer says what is in your
+database on its own.
+
+`rig setup-project` then writes no SQL. Turn on the blocks you want — `auth:`,
+`files:`, `notifications:` — and `rig db up` applies the sets those blocks need,
+from the modules, before your own migrations.
+
+Your application has to apply them too, and rig generates the wiring for that:
+
+```go
+srcs := api.MigrationSources(migrate.Source{
+    Name:  "myapp",
+    FS:    migrations,
+    Dir:   "migrations",     // migrations.dir
+    Table: "rig_migrations", // migrations.table
+})
+
+serve.Config{
+    Migrate: migrate.RequireAll(srcs, migrate.Options{}),
+}
+```
+
+`api.MigrationSources` is generated into your API package, and only for a project
+in this mode — so a vendored project's module never depends on goose. It returns
+the module sets in the order they must be applied, with yours last. That order is
+not cosmetic: rig's DDL never references a table you created, while yours
+routinely references rig's — a join table pointing at `rig_notification`, a file
+column pointing at `rig_file`.
+
+`dir` and `table` go on the `Source`, not on `migrate.Options`. They are per-set
+facts, so `RequireAll` and `ApplyAll` read them from each `Source` and ignore the
+ones on `Options` — which is the note above about `table` restated for this mode:
+set it in the wrong place and your own set records itself in `rig_migrations` while
+`rig db up` used the name you configured, and the server refuses to start saying
+the database is behind.
+
+Each set records itself in a table of its own — `rig_auth_migrations`,
+`rig_files_migrations`, `rig_notify_migrations`. They are separate because those
+modules are released separately: each numbers its migrations from one, and a shared
+table would make two of them collide on a version the first time both shipped a
+migration in the same release.
+
+A set is applied whole, because goose reads a directory. So `auth:` with no
+provider configured still creates `rig_identity_oauth`, and `notifications:` in a
+project with no `auth:` block still creates all of auth's tables — `rig_account` is
+what an inbox line names. They are rig's tables either way: rig generates nothing
+for them and does not ask you to.
+
+### Pick it once
+
+The two modes record what they applied in different places. A project that
+switches after it has a database finds the new mode's bookkeeping empty, re-applies
+a schema that is already there, and fails partway through `rig db up` on a table
+that already exists.
+
+So `rig validate` refuses a mode that contradicts your migrations directory
+(**RIG3004**) rather than letting you find out in psql. There is no adopt step: to
+change the mode, start from an empty database.
+
+`auth.own` and `embedded` are refused together under the same code. `own` says you
+forked rig's migrations and maintain those tables yourself; `embedded` says the
+modules do. Whichever rig believed, the other would be silently ignored — so it
+believes neither and says so.
 
 ---
 
@@ -423,6 +520,7 @@ notifications:
   expose: false             # also project the inbox as a generated resource
   default_digest: Immediate # what an account with no setting gets
   claim_ttl: 5m             # how long a dispatcher's claim is honoured
+  send_timeout: 30s         # how long one call into a channel may take
   max_attempts: 5
   backoff_base: 1m          # doubling: 1m, 2m, 4m, 8m, 16m
   retention: 2160h          # 90 days, and it has to outlive the longest digest
@@ -443,13 +541,26 @@ applications show in a bell icon; with it, `rig_notification_recipient` is also
 projected as a resource and gets the filter grammar, the sort keys and a typed
 client. Both stay, and the difference between them is the point.
 
-`claim_ttl` is the one number here worth understanding before deploying. A
-dispatcher claims a delivery, sends it outside any transaction, and marks it —
-and the claim exists so that a process which died between the second step and
-the third does not strand the row. Set it **longer than your slowest channel's
-own timeout**: shorter, and every message that channel is still sending is
-claimed a second time under ordinary load, and at-least-once stops being a
-crash-recovery property. Under a minute is refused at boot.
+`claim_ttl` and `send_timeout` are the two numbers here worth understanding
+before deploying, and they are one decision. A dispatcher claims a delivery,
+sends it outside any transaction, and marks it — the claim exists so that a
+process which died between the second step and the third does not strand the row.
+So `send_timeout` has to be **shorter than `claim_ttl`**: a send still running
+when its own lease expires is a send whose row another dispatcher has already
+taken, and at-least-once stops being about crashes and becomes ordinary load.
+rig refuses the pair rather than explaining it, and refuses a `claim_ttl` under a
+minute outright.
+
+`send_timeout` is the deadline on the context your sender is handed, and it is
+cooperative — a sender that ignores it hangs its dispatcher anyway. See
+[notifications.md](notifications.md) for what that costs. Raise it for a provider
+that is legitimately slow, and raise `claim_ttl` with it. Under a second is
+refused rather than rounded: these numbers are carried to your application in
+whole seconds, and `500ms` would arrive as no value at all.
+
+A dispatch pass takes what it can send inside one lease and hands the rest back,
+so a `send_timeout` that no longer fits the batch shows up as a count in the
+dispatch log — `abandoned` — rather than as messages sent twice.
 
 `retention` prunes read-and-dismissed inbox lines, their copies, and the
 notifications left with nothing pointing at them — in the same task that

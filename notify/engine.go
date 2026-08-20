@@ -41,6 +41,7 @@ type Engine struct {
 	senders       map[Channel]Sender
 	claimedBy     uuid.UUID
 	claimTTL      time.Duration
+	sendTimeout   time.Duration
 	maxAttempts   int
 	backoffBase   time.Duration
 	defaultDigest Digest
@@ -82,6 +83,14 @@ type EngineConfig struct {
 	// [DefaultClaimTTL]; under [MinClaimTTL] panics.
 	ClaimTTL time.Duration
 
+	// SendTimeout bounds one call into a [Sender]. Zero means
+	// [DefaultSendTimeout]; ClaimTTL or longer panics.
+	//
+	// It is the deadline on the context a channel is handed, and it is the only
+	// thing standing between a provider that never answers and a dispatcher that
+	// never runs again.
+	SendTimeout time.Duration
+
 	// MaxAttempts and BackoffBase are the retry arithmetic. Zero means the
 	// defaults.
 	MaxAttempts int
@@ -120,6 +129,26 @@ func NewEngine(cfg EngineConfig) *Engine {
 			ttl, MinClaimTTL))
 	}
 
+	timeout := cfg.SendTimeout
+	if timeout <= 0 {
+		timeout = DefaultSendTimeout
+	}
+	if timeout >= ttl {
+		// The same check as the one above and the other way round: a send allowed
+		// to run as long as the lease that protects it means every message a
+		// slow channel is still sending has already been claimed by somebody
+		// else. Equal is refused with longer, because a send that ends exactly
+		// when its lease does ends after it in practice: the lease was stamped
+		// before the send started. Refused here rather than found as duplicate
+		// mail, and refused with both numbers because the fix is to change one of
+		// them and the message should not make the reader guess which.
+		panic(fmt.Sprintf(
+			"notify.NewEngine: send_timeout is %s and claim_ttl is %s, so a send may still be "+
+				"running when its own lease expires and another dispatcher takes the row; "+
+				"set send_timeout below claim_ttl",
+			timeout, ttl))
+	}
+
 	attempts := cfg.MaxAttempts
 	if attempts <= 0 {
 		attempts = DefaultMaxAttempts
@@ -143,6 +172,7 @@ func NewEngine(cfg EngineConfig) *Engine {
 		// line, so a lease that is stuck traces to a pod rather than a mystery.
 		claimedBy:     uuid.New(),
 		claimTTL:      ttl,
+		sendTimeout:   timeout,
 		maxAttempts:   attempts,
 		backoffBase:   backoff,
 		defaultDigest: digest,
