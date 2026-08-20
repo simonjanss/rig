@@ -309,8 +309,8 @@ func idempotencyKey(in row) string {
 // arrives shaped like the input that caused it, so the report can say which
 // column was wrong rather than quoting a sentence about the request.
 func explainRow(err error) string {
-	var refused *client.TodoCreateError
-	if !errors.As(err, &refused) {
+	refused, ok := client.TodoCreateError(err)
+	if !ok || refused.Fields == nil {
 		return err.Error()
 	}
 	fields := refused.Fields

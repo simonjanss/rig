@@ -53,15 +53,15 @@ func (c *TodoClient) List(ctx context.Context, q TodoListQuery, opts ...rigclien
 //
 // Operation createTodo.
 //
-// A refusal comes back as a [TodoCreateError], whose Fields say what was wrong
-// with each member of the body.
+// A refusal is read back with [TodoCreateError], whose Fields say what was
+// wrong with each member of the body.
 func (c *TodoClient) Create(ctx context.Context, in TodoCreateInput, opts ...rigclient.CallOption) (*Todo, error) {
 	op := rigclient.Op{
 		Method: http.MethodPost,
 		Path:   "/todos",
 		Body:   in,
 	}
-	return rigclient.DoTyped[Todo, TodoCreateFields](ctx, c.rt, op, opts...)
+	return rigclient.Do[Todo](ctx, c.rt, op, opts...)
 }
 
 // Search Todos with filters.
@@ -71,9 +71,6 @@ func (c *TodoClient) Create(ctx context.Context, in TodoCreateInput, opts ...rig
 // remembered, so it is tried once.
 //
 // Operation searchTodos.
-//
-// A refusal comes back as a [TodoSearchError], whose Fields say what was wrong
-// with each member of the body.
 func (c *TodoClient) Search(ctx context.Context, filter TodoFilter, q TodoSearchQuery, opts ...rigclient.CallOption) (*TodoListResponse, error) {
 	query := url.Values{}
 	rigclient.SetInt(query, "limit", q.Limit)
@@ -86,7 +83,7 @@ func (c *TodoClient) Search(ctx context.Context, filter TodoFilter, q TodoSearch
 		Body:     TodoSearchBody{Filter: filter},
 		Fallback: "/todos/_search",
 	}
-	return rigclient.DoTyped[TodoListResponse, TodoSearchFields](ctx, c.rt, op, opts...)
+	return rigclient.Do[TodoListResponse](ctx, c.rt, op, opts...)
 }
 
 // List retired Todos.
@@ -150,15 +147,15 @@ func (c *TodoClient) Get(ctx context.Context, id uuid.UUID, opts ...rigclient.Ca
 //
 // Operation updateTodo.
 //
-// A refusal comes back as a [TodoUpdateError], whose Fields say what was wrong
-// with each member of the body.
+// A refusal is read back with [TodoUpdateError], whose Fields say what was
+// wrong with each member of the body.
 func (c *TodoClient) Update(ctx context.Context, id uuid.UUID, in TodoUpdateInput, opts ...rigclient.CallOption) (*Todo, error) {
 	op := rigclient.Op{
 		Method: http.MethodPatch,
 		Path:   strings.Replace("/todos/{id}", "{id}", rigclient.PathValue(id.String()), 1),
 		Body:   in,
 	}
-	return rigclient.DoTyped[Todo, TodoUpdateFields](ctx, c.rt, op, opts...)
+	return rigclient.Do[Todo](ctx, c.rt, op, opts...)
 }
 
 // Mark the task as done.
@@ -171,7 +168,7 @@ func (c *TodoClient) Update(ctx context.Context, id uuid.UUID, in TodoUpdateInpu
 //
 // Operation completeTodo.
 //
-// A refusal comes back as a [TodoCompleteError], whose Fields say what was
+// A refusal is read back with [TodoCompleteError], whose Fields say what was
 // wrong with each member of the body.
 func (c *TodoClient) Complete(ctx context.Context, id uuid.UUID, in TodoCompleteBody, opts ...rigclient.CallOption) (*Todo, error) {
 	op := rigclient.Op{
@@ -179,7 +176,7 @@ func (c *TodoClient) Complete(ctx context.Context, id uuid.UUID, in TodoComplete
 		Path:   strings.Replace("/todos/{id}/_complete", "{id}", rigclient.PathValue(id.String()), 1),
 		Body:   in,
 	}
-	return rigclient.DoTyped[Todo, TodoCompleteFields](ctx, c.rt, op, opts...)
+	return rigclient.Do[Todo](ctx, c.rt, op, opts...)
 }
 
 // Bring a retired Todo back.
@@ -223,15 +220,15 @@ func (c *TodoClient) Restore(ctx context.Context, id uuid.UUID, opts ...rigclien
 //
 // Operation revertTodo.
 //
-// A refusal comes back as a [TodoRevertError], whose Fields say what was wrong
-// with each member of the body.
+// A refusal is read back with [TodoRevertError], whose Fields say what was
+// wrong with each member of the body.
 func (c *TodoClient) Revert(ctx context.Context, id uuid.UUID, in TodoRevertBody, opts ...rigclient.CallOption) (*Todo, error) {
 	op := rigclient.Op{
 		Method: http.MethodPost,
 		Path:   strings.Replace("/todos/{id}/_revert", "{id}", rigclient.PathValue(id.String()), 1),
 		Body:   in,
 	}
-	return rigclient.DoTyped[Todo, TodoRevertFields](ctx, c.rt, op, opts...)
+	return rigclient.Do[Todo](ctx, c.rt, op, opts...)
 }
 
 // List a Todo's previous versions.
@@ -344,7 +341,7 @@ func (c *TodoClient) DownloadCoverFile(ctx context.Context, id uuid.UUID, fileID
 // The row and the bytes are committed together, so a create that fails leaves
 // neither. The JSON body travels as a part named "json", which is the same
 // body Create sends and goes through the same validation — a 422 comes back
-// as the same [TodoCreateError].
+// with the same field errors, read back the same way with [TodoCreateError].
 //
 // Bound the call: the default thirty-second client timeout covers the whole
 // exchange, and this one carries files.
@@ -364,7 +361,7 @@ func (c *TodoClient) CreateWithFiles(ctx context.Context, in TodoCreateInput, fi
 		op.Multipart.Files = append(op.Multipart.Files, rigclient.Part("coverFile", *files.CoverFile))
 	}
 
-	return rigclient.DoTyped[Todo, TodoCreateFields](ctx, c.rt, op, opts...)
+	return rigclient.Do[Todo](ctx, c.rt, op, opts...)
 }
 
 // All reads every Todo the query matches, a page at a time.

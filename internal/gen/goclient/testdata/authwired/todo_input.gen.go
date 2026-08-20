@@ -54,52 +54,27 @@ type TodoCreateFields struct {
 	Entity *rigerr.FieldError `json:"entity,omitempty"`
 }
 
-// TodoCreateError is what a refused Todos.Create comes back as: the envelope
-// the server sent — Code, Message, RequestID, Status — with the per-field
-// detail decoded into a [TodoCreateFields] rather than left as bytes.
+// TodoCreateError reads back what the server said about a refused
+// Todos.Create: the envelope — Code, Message, RequestID, Status, RetryAfter
+// — and, when the refusal was about the body, Fields shaped like the body
+// that failed.
 //
-// It is the error the method returns, so there is nothing to name and nothing
-// to name wrongly:
+//	if refused, ok := TodoCreateError(err); ok {
+//		if refused.Fields != nil && refused.Fields.Title != nil {
 //
-//	var refused *TodoCreateError
-//	if errors.As(err, &refused) && refused.Fields.Title != nil {
-//
-// errors.As reaches the rigclient.Error underneath it too, so
-// rigclient.IsInvalid and the rest answer about it unchanged.
-type TodoCreateError = rigclient.Failure[TodoCreateFields]
+// Fields is nil for every refusal but a 422: a 404 has a code and a message
+// and nothing to put beside a control. The second value is false for anything
+// that is not a refusal at all, which is where a request that never reached
+// the server ends up.
+func TodoCreateError(err error) (*rigclient.Failure[TodoCreateFields], bool) {
+	return rigclient.As[TodoCreateFields](err)
+}
 
 // TodoSearchBody is the request body for Todo.Search.
 type TodoSearchBody struct {
 	// Conditions rows must satisfy.
 	Filter TodoFilter `json:"filter"`
 }
-
-// TodoSearchFields is what a validation failure says, shaped like the body it
-// is about — one member per member, so each message can be put beside the
-// control it belongs to.
-//
-// A member is nil when there was nothing wrong with that field. It arrives as
-// the Fields of the error the call returns.
-type TodoSearchFields struct {
-	Filter *rigerr.FieldError `json:"filter,omitempty"`
-	// Entity carries what was wrong with the request as a whole rather than with
-	// any one field.
-	Entity *rigerr.FieldError `json:"entity,omitempty"`
-}
-
-// TodoSearchError is what a refused Todos.Search comes back as: the envelope
-// the server sent — Code, Message, RequestID, Status — with the per-field
-// detail decoded into a [TodoSearchFields] rather than left as bytes.
-//
-// It is the error the method returns, so there is nothing to name and nothing
-// to name wrongly:
-//
-//	var refused *TodoSearchError
-//	if errors.As(err, &refused) && refused.Fields.Filter != nil {
-//
-// errors.As reaches the rigclient.Error underneath it too, so
-// rigclient.IsInvalid and the rest answer about it unchanged.
-type TodoSearchError = rigclient.Failure[TodoSearchFields]
 
 // TodoSearchQuery is the query for Todo.Search.
 //
@@ -145,16 +120,18 @@ type TodoUpdateFields struct {
 	Entity *rigerr.FieldError `json:"entity,omitempty"`
 }
 
-// TodoUpdateError is what a refused Todos.Update comes back as: the envelope
-// the server sent — Code, Message, RequestID, Status — with the per-field
-// detail decoded into a [TodoUpdateFields] rather than left as bytes.
+// TodoUpdateError reads back what the server said about a refused
+// Todos.Update: the envelope — Code, Message, RequestID, Status, RetryAfter
+// — and, when the refusal was about the body, Fields shaped like the body
+// that failed.
 //
-// It is the error the method returns, so there is nothing to name and nothing
-// to name wrongly:
+//	if refused, ok := TodoUpdateError(err); ok {
+//		if refused.Fields != nil && refused.Fields.Title != nil {
 //
-//	var refused *TodoUpdateError
-//	if errors.As(err, &refused) && refused.Fields.Title != nil {
-//
-// errors.As reaches the rigclient.Error underneath it too, so
-// rigclient.IsInvalid and the rest answer about it unchanged.
-type TodoUpdateError = rigclient.Failure[TodoUpdateFields]
+// Fields is nil for every refusal but a 422: a 404 has a code and a message
+// and nothing to put beside a control. The second value is false for anything
+// that is not a refusal at all, which is where a request that never reached
+// the server ends up.
+func TodoUpdateError(err error) (*rigclient.Failure[TodoUpdateFields], bool) {
+	return rigclient.As[TodoUpdateFields](err)
+}

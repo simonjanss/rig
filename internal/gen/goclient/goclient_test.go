@@ -228,44 +228,46 @@ func TestAValidationFailureHasAShape(t *testing.T) {
 
 // The shape alone still has to be named by hand, and naming the wrong one is not
 // an error: every member is optional, so the wrong shape decodes into an empty
-// one. The call's own error type is what removes the choice.
+// one. A reader per call is what removes the choice, in one line at the call
+// site.
 func TestEveryCallWithABodySaysHowItFails(t *testing.T) {
 	t.Parallel()
 
 	input := find(t, "lesson_input.gen.go")
 	for _, want := range []string{
-		"type LessonCreateError = rigclient.Failure[LessonCreateFields]",
-		"type LessonUpdateError = rigclient.Failure[LessonUpdateFields]",
-		"type LessonPublishError = rigclient.Failure[LessonPublishFields]",
-		"type LessonSearchError = rigclient.Failure[LessonSearchFields]",
+		"func LessonCreateError(err error) (*rigclient.Failure[LessonCreateFields], bool) { " +
+			"return rigclient.As[LessonCreateFields](err) }",
+		"func LessonUpdateError(err error) (*rigclient.Failure[LessonUpdateFields], bool) { " +
+			"return rigclient.As[LessonUpdateFields](err) }",
+		"func LessonPublishError(err error) (*rigclient.Failure[LessonPublishFields], bool) { " +
+			"return rigclient.As[LessonPublishFields](err) }",
 	} {
 		if !strings.Contains(collapse(input), collapse(want)) {
 			t.Errorf("missing %s:\n%s", want, input)
 		}
 	}
 
-	// And the method returns it, which is the whole of what ties the two
-	// together — a type declared and never returned would be documentation.
+	// The methods are untouched: reading a refusal is a second way to look at the
+	// error they already returned, not a different error.
 	client := find(t, "lesson_client.gen.go")
 	for _, want := range []string{
-		"return rigclient.DoTyped[Lesson, LessonCreateFields](ctx, c.rt, op, opts...)",
-		"return rigclient.DoTyped[Lesson, LessonUpdateFields](ctx, c.rt, op, opts...)",
-		"return rigclient.DoTyped[LessonListResponse, LessonSearchFields](ctx, c.rt, op, opts...)",
+		"return rigclient.Do[Lesson](ctx, c.rt, op, opts...)",
+		"return rigclient.Do[LessonListResponse](ctx, c.rt, op, opts...)",
 	} {
 		if !strings.Contains(collapse(client), collapse(want)) {
 			t.Errorf("missing %s:\n%s", want, client)
 		}
 	}
 
-	// A read sends no body, so there is nothing for it to be wrong about. A type
-	// per endpoint that says nothing would bury the ones that say something.
-	get, _ := between(client, "func (c *LessonClient) Get(", "\n}")
-	if !strings.Contains(collapse(get), "rigclient.Do[Lesson](") {
-		t.Errorf("a call with no body should stay untyped:\n%s", get)
-	}
-	for _, gone := range []string{"LessonGetError", "LessonGetFields", "LessonListFields"} {
+	// A read sends no body, so there is nothing for it to be wrong about, and a
+	// search's body is a filter nothing validates — a reader for either would be
+	// a function per resource that can only ever answer nil.
+	for _, gone := range []string{
+		"LessonGetError", "LessonGetFields", "LessonListFields",
+		"LessonSearchError", "LessonSearchFields",
+	} {
 		if strings.Contains(input, gone) || strings.Contains(client, gone) {
-			t.Errorf("%s exists, and there is no body for it to be about", gone)
+			t.Errorf("%s exists, and nothing can produce what it reads", gone)
 		}
 	}
 }

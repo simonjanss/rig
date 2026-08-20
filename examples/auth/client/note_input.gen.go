@@ -58,52 +58,27 @@ type NoteCreateFields struct {
 	Entity *rigerr.FieldError `json:"entity,omitempty"`
 }
 
-// NoteCreateError is what a refused Notes.Create comes back as: the envelope
-// the server sent — Code, Message, RequestID, Status — with the per-field
-// detail decoded into a [NoteCreateFields] rather than left as bytes.
+// NoteCreateError reads back what the server said about a refused
+// Notes.Create: the envelope — Code, Message, RequestID, Status, RetryAfter
+// — and, when the refusal was about the body, Fields shaped like the body
+// that failed.
 //
-// It is the error the method returns, so there is nothing to name and nothing
-// to name wrongly:
+//	if refused, ok := NoteCreateError(err); ok {
+//		if refused.Fields != nil && refused.Fields.Title != nil {
 //
-//	var refused *NoteCreateError
-//	if errors.As(err, &refused) && refused.Fields.Title != nil {
-//
-// errors.As reaches the rigclient.Error underneath it too, so
-// rigclient.IsInvalid and the rest answer about it unchanged.
-type NoteCreateError = rigclient.Failure[NoteCreateFields]
+// Fields is nil for every refusal but a 422: a 404 has a code and a message
+// and nothing to put beside a control. The second value is false for anything
+// that is not a refusal at all, which is where a request that never reached
+// the server ends up.
+func NoteCreateError(err error) (*rigclient.Failure[NoteCreateFields], bool) {
+	return rigclient.As[NoteCreateFields](err)
+}
 
 // NoteSearchBody is the request body for Note.Search.
 type NoteSearchBody struct {
 	// Conditions rows must satisfy.
 	Filter NoteFilter `json:"filter"`
 }
-
-// NoteSearchFields is what a validation failure says, shaped like the body it
-// is about — one member per member, so each message can be put beside the
-// control it belongs to.
-//
-// A member is nil when there was nothing wrong with that field. It arrives as
-// the Fields of the error the call returns.
-type NoteSearchFields struct {
-	Filter *rigerr.FieldError `json:"filter,omitempty"`
-	// Entity carries what was wrong with the request as a whole rather than with
-	// any one field.
-	Entity *rigerr.FieldError `json:"entity,omitempty"`
-}
-
-// NoteSearchError is what a refused Notes.Search comes back as: the envelope
-// the server sent — Code, Message, RequestID, Status — with the per-field
-// detail decoded into a [NoteSearchFields] rather than left as bytes.
-//
-// It is the error the method returns, so there is nothing to name and nothing
-// to name wrongly:
-//
-//	var refused *NoteSearchError
-//	if errors.As(err, &refused) && refused.Fields.Filter != nil {
-//
-// errors.As reaches the rigclient.Error underneath it too, so
-// rigclient.IsInvalid and the rest answer about it unchanged.
-type NoteSearchError = rigclient.Failure[NoteSearchFields]
 
 // NoteSearchQuery is the query for Note.Search.
 //
@@ -180,16 +155,18 @@ type NoteUpdateFields struct {
 	Entity *rigerr.FieldError `json:"entity,omitempty"`
 }
 
-// NoteUpdateError is what a refused Notes.Update comes back as: the envelope
-// the server sent — Code, Message, RequestID, Status — with the per-field
-// detail decoded into a [NoteUpdateFields] rather than left as bytes.
+// NoteUpdateError reads back what the server said about a refused
+// Notes.Update: the envelope — Code, Message, RequestID, Status, RetryAfter
+// — and, when the refusal was about the body, Fields shaped like the body
+// that failed.
 //
-// It is the error the method returns, so there is nothing to name and nothing
-// to name wrongly:
+//	if refused, ok := NoteUpdateError(err); ok {
+//		if refused.Fields != nil && refused.Fields.Title != nil {
 //
-//	var refused *NoteUpdateError
-//	if errors.As(err, &refused) && refused.Fields.Title != nil {
-//
-// errors.As reaches the rigclient.Error underneath it too, so
-// rigclient.IsInvalid and the rest answer about it unchanged.
-type NoteUpdateError = rigclient.Failure[NoteUpdateFields]
+// Fields is nil for every refusal but a 422: a 404 has a code and a message
+// and nothing to put beside a control. The second value is false for anything
+// that is not a refusal at all, which is where a request that never reached
+// the server ends up.
+func NoteUpdateError(err error) (*rigclient.Failure[NoteUpdateFields], bool) {
+	return rigclient.As[NoteUpdateFields](err)
+}

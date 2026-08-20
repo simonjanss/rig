@@ -171,41 +171,42 @@ func (e *emitter) fieldErrors(b *gobuf.Buf, name string, fields []ir.Field) {
 	b.NL()
 }
 
-// callError emits the error one call comes back as.
+// callError emits the reader for one call's failure.
 //
-// The whole of the failure in one value: the envelope the server sent, and the
-// per-field detail already decoded into the shape above. It is an alias rather
-// than a struct of its own so that there is one definition of what a refusal is
-// — rigclient.Failure — and one place its unwrapping is tested, instead of a
-// copy per endpoint per project.
+// A function rather than a type, and named for the method rather than for the
+// input, so that reading a refusal is the one line asking the question:
 //
-// The name is the method's, so nothing has to be named by hand at the call site.
-// That is the point of it: rigclient.FieldsAs asks the caller for the shape, and
-// naming the wrong one is not an error — every member of a field shape is
-// optional, so the wrong shape decodes into an empty one and reports success.
+//	refused, ok := client.TodoCreateError(err)
+//
+// The alternative is the caller naming the shape — rigclient.FieldsAs — where
+// naming the wrong one is not an error at all. Every member of a field shape is
+// optional, so the update shape on a failed create decodes perfectly and hands
+// back an empty struct with ok true. Here there is one shape that compiles.
 func (e *emitter) callError(b *gobuf.Buf, res *ir.Resource, ep *ir.Endpoint) {
 	var (
-		name   = errorTypeName(res, ep)
+		name   = errorFuncName(res, ep)
 		fields = fieldsTypeName(res, ep)
 		rig    = e.client(b)
 		call   = res.Plural + "." + ep.Impl.ServiceMethod
 	)
 
-	b.Comment(name + " is what a refused " + call + " comes back as: the envelope " +
-		"the server sent — Code, Message, RequestID, Status — with the per-field " +
-		"detail decoded into a [" + fields + "] rather than left as bytes.\n\n" +
-		"It is the error the method returns, so there is nothing to name and " +
-		"nothing to name wrongly:\n\n" +
-		"\tvar refused *" + name + "\n" +
-		"\tif errors.As(err, &refused) && refused.Fields." + firstFieldName(ep) +
+	b.Comment(name + " reads back what the server said about a refused " + call +
+		": the envelope — Code, Message, RequestID, Status, RetryAfter — and, when " +
+		"the refusal was about the body, Fields shaped like the body that failed.\n\n" +
+		"\tif refused, ok := " + name + "(err); ok {\n" +
+		"\t\tif refused.Fields != nil && refused.Fields." + firstFieldName(ep) +
 		" != nil {\n\n" +
-		"errors.As reaches the rigclient.Error underneath it too, so " +
-		"rigclient.IsInvalid and the rest answer about it unchanged.")
-	b.L("type %s = %s.Failure[%s]", name, rig, fields)
+		"Fields is nil for every refusal but a 422: a 404 has a code and a message " +
+		"and nothing to put beside a control. The second value is false for " +
+		"anything that is not a refusal at all, which is where a request that " +
+		"never reached the server ends up.")
+	b.L("func %s(err error) (*%s.Failure[%s], bool) {", name, rig, fields)
+	b.L("return %s.As[%s](err)", rig, fields)
+	b.L("}")
 	b.NL()
 }
 
-// firstFieldName is a member to show in the example on a call's error, so that
+// firstFieldName is a member to show in the example on a call's reader, so that
 // the comment reads as code somebody could have written rather than as a shape.
 func firstFieldName(ep *ir.Endpoint) string {
 	if len(ep.Request.BodyParams) > 0 {

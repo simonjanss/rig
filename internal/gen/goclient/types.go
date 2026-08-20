@@ -127,24 +127,30 @@ func bodyTypeName(res *ir.Resource, ep *ir.Endpoint) string {
 // fieldsTypeName is the shape a validation failure on this endpoint's body
 // arrives in, and is empty when there is no body to be wrong about.
 //
-// An endpoint whose body is a named object is empty too: the object is shared,
-// so its failure shape would have to be as well, and nothing on the server emits
-// one to fill in. Those calls fail as a plain rigclient.Error, which is what they
-// did before any of this existed.
+// Two kinds of body are left out. A search's is a filter, which is a question
+// rather than something filled in field by field — nothing validates one, so a
+// shape for what was wrong with it would be a struct per resource that is always
+// empty. And a body that is a named object is shared between endpoints, so its
+// failure shape would have to be too, and nothing on the server emits one to fill
+// in. Both fail as a plain rigclient.Error, which is what everything did before
+// any of this existed.
 func fieldsTypeName(res *ir.Resource, ep *ir.Endpoint) string {
 	if ep.Request.BodyObject != "" || len(ep.Request.BodyParams) == 0 {
+		return ""
+	}
+	if ep.Name == ir.OpSearch {
 		return ""
 	}
 	return res.Name + ep.Name + "Fields"
 }
 
-// errorTypeName is what a refused call comes back as.
+// errorFuncName reads back what a refused call said.
 //
 // Named for the call rather than for the input, which is the difference between
 // the two halves: by the time a caller holds the error the input is gone, and
 // what they are asking about is the method they called. The server names the
 // same JSON after the value that failed, because a validator is holding one.
-func errorTypeName(res *ir.Resource, ep *ir.Endpoint) string {
+func errorFuncName(res *ir.Resource, ep *ir.Endpoint) string {
 	if fieldsTypeName(res, ep) == "" {
 		return ""
 	}

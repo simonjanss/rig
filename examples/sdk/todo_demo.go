@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"time"
 
@@ -172,14 +171,15 @@ func showValidationFailure(ctx context.Context, c *client.Client) error {
 		return err
 	}
 
-	// The failure is the call's own error: the envelope and the per-field detail
-	// in one value, shaped like the input that failed, so each message can be put
-	// beside the control it belongs to rather than parsed out of a sentence.
-	var refused *client.TodoCreateError
-	if !errors.As(err, &refused) {
+	// One line, and the shape is the call's rather than something to name: the
+	// envelope and the per-field detail together, shaped like the input that
+	// failed, so each message can be put beside the control it belongs to rather
+	// than parsed out of a sentence.
+	refused, ok := client.TodoCreateError(err)
+	if !ok {
 		return err
 	}
-	if refused.Fields.Title != nil {
+	if refused.Fields != nil && refused.Fields.Title != nil {
 		detail("title: %s (%s)", refused.Fields.Title.Message, refused.Fields.Title.Code)
 	}
 	detail("code %s, status %d, request %s", refused.Code, refused.Status, refused.RequestID)

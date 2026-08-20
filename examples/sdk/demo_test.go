@@ -9,7 +9,6 @@ package main
 
 import (
 	"encoding/json"
-	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -196,9 +195,12 @@ func TestAValidationFailureDecodesIntoItsInputsShape(t *testing.T) {
 		t.Fatalf("err = %v, want a validation failure", err)
 	}
 
-	var refused *client.TodoCreateError
-	if !errors.As(err, &refused) {
-		t.Fatal("the failure is not the one Create says it returns")
+	refused, ok := client.TodoCreateError(err)
+	if !ok {
+		t.Fatal("the failure did not read back as a refusal of Create")
+	}
+	if refused.Fields == nil {
+		t.Fatal("the failure carried no field errors")
 	}
 	if refused.Fields.Title == nil ||
 		refused.Fields.Title.Code != rigerr.FieldCodeCannotBeEmpty {

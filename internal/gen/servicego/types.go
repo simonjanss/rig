@@ -85,8 +85,12 @@ func (e *emitter) endpointTypes(b *gobuf.Buf, res *ir.Resource) {
 // the same thing, and the generated client already declares the shape it decodes
 // into: two hand-written halves would agree until the day somebody renamed a
 // field.
+//
+// A search is left out. Its body is a filter, nothing validates one, and every
+// resource has a search — so the rule that covered it emitted fifty lines per
+// resource for a failure no code can produce.
 func (e *emitter) bodyError(b *gobuf.Buf, res *ir.Resource, ep *ir.Endpoint) {
-	if len(ep.Request.BodyParams) == 0 {
+	if len(ep.Request.BodyParams) == 0 || ep.Name == ir.OpSearch {
 		return
 	}
 

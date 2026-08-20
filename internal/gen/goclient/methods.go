@@ -55,15 +55,10 @@ func (e *emitter) method(b *gobuf.Buf, res *ir.Resource, ep *ir.Endpoint, rig st
 	e.buildQuery(b, ep, rig)
 	e.buildOp(b, ep, sig, rig)
 
-	switch {
-	case sig.returns == "" && sig.fields == "":
+	if sig.returns == "" {
 		b.L("return %s.DoNoContent(ctx, c.rt, op, opts...)", rig)
-	case sig.returns == "":
-		b.L("return %s.DoNoContentTyped[%s](ctx, c.rt, op, opts...)", rig, sig.fields)
-	case sig.fields == "":
+	} else {
 		b.L("return %s.Do[%s](ctx, c.rt, op, opts...)", rig, sig.returns)
-	default:
-		b.L("return %s.DoTyped[%s, %s](ctx, c.rt, op, opts...)", rig, sig.returns, sig.fields)
 	}
 	b.L("}")
 	b.NL()
@@ -76,9 +71,6 @@ type signature struct {
 	// returns is the type a successful call decodes into, or empty when the
 	// endpoint answers with no body.
 	returns string
-	// fields is the shape a validation failure decodes into, or empty when the
-	// call sends no body and so has no field to be wrong about.
-	fields string
 	// body is the expression to send, or empty for a request with no body.
 	body string
 	// path is the Go expression that builds the route.
@@ -126,7 +118,6 @@ func (e *emitter) signature(b *gobuf.Buf, res *ir.Resource, ep *ir.Endpoint, rig
 
 	sig.params = strings.Join(params, ", ")
 	sig.returns = e.successType(ep)
-	sig.fields = fieldsTypeName(res, ep)
 	sig.results = "error"
 	if sig.returns != "" {
 		sig.results = "(*" + sig.returns + ", error)"
@@ -307,11 +298,11 @@ func (e *emitter) methodDoc(b *gobuf.Buf, res *ir.Resource, ep *ir.Endpoint) {
 	}
 	doc += "\n\n" + route + "\n\nOperation " + ep.OperationID + "."
 
-	// Named here rather than only where it is declared, because the error is
-	// reached from the call and a caller reading this is holding one.
-	if name := errorTypeName(res, ep); name != "" {
-		doc += "\n\nA refusal comes back as a [" + name + "], whose Fields say what " +
-			"was wrong with each member of the body."
+	// Named here rather than only where it is declared, because a caller reading
+	// this is holding the error and not looking for the function that reads it.
+	if name := errorFuncName(res, ep); name != "" {
+		doc += "\n\nA refusal is read back with [" + name + "], whose Fields say " +
+			"what was wrong with each member of the body."
 	}
 
 	b.Comment(doc)

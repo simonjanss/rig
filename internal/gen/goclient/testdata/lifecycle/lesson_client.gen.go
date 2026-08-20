@@ -43,7 +43,7 @@ func (c *LessonClient) List(ctx context.Context, q LessonListQuery, opts ...rigc
 //
 // Operation createLesson.
 //
-// A refusal comes back as a [LessonCreateError], whose Fields say what was
+// A refusal is read back with [LessonCreateError], whose Fields say what was
 // wrong with each member of the body.
 func (c *LessonClient) Create(ctx context.Context, in LessonCreateInput, opts ...rigclient.CallOption) (*Lesson, error) {
 	op := rigclient.Op{
@@ -51,7 +51,7 @@ func (c *LessonClient) Create(ctx context.Context, in LessonCreateInput, opts ..
 		Path:   "/lessons",
 		Body:   in,
 	}
-	return rigclient.DoTyped[Lesson, LessonCreateFields](ctx, c.rt, op, opts...)
+	return rigclient.Do[Lesson](ctx, c.rt, op, opts...)
 }
 
 // Search Lessons with filters.
@@ -61,9 +61,6 @@ func (c *LessonClient) Create(ctx context.Context, in LessonCreateInput, opts ..
 // remembered, so it is tried once.
 //
 // Operation searchLessons.
-//
-// A refusal comes back as a [LessonSearchError], whose Fields say what was
-// wrong with each member of the body.
 func (c *LessonClient) Search(ctx context.Context, filter LessonFilter, q LessonSearchQuery, opts ...rigclient.CallOption) (*LessonListResponse, error) {
 	query := url.Values{}
 	rigclient.SetInt(query, "limit", q.Limit)
@@ -76,7 +73,7 @@ func (c *LessonClient) Search(ctx context.Context, filter LessonFilter, q Lesson
 		Body:     LessonSearchBody{Filter: filter},
 		Fallback: "/lessons/_search",
 	}
-	return rigclient.DoTyped[LessonListResponse, LessonSearchFields](ctx, c.rt, op, opts...)
+	return rigclient.Do[LessonListResponse](ctx, c.rt, op, opts...)
 }
 
 // List retired Lessons.
@@ -140,7 +137,7 @@ func (c *LessonClient) Get(ctx context.Context, id uuid.UUID, opts ...rigclient.
 //
 // Operation updateLesson.
 //
-// A refusal comes back as a [LessonUpdateError], whose Fields say what was
+// A refusal is read back with [LessonUpdateError], whose Fields say what was
 // wrong with each member of the body.
 func (c *LessonClient) Update(ctx context.Context, id uuid.UUID, in LessonUpdateInput, opts ...rigclient.CallOption) (*Lesson, error) {
 	op := rigclient.Op{
@@ -148,7 +145,7 @@ func (c *LessonClient) Update(ctx context.Context, id uuid.UUID, in LessonUpdate
 		Path:   strings.Replace("/lessons/{id}", "{id}", rigclient.PathValue(id.String()), 1),
 		Body:   in,
 	}
-	return rigclient.DoTyped[Lesson, LessonUpdateFields](ctx, c.rt, op, opts...)
+	return rigclient.Do[Lesson](ctx, c.rt, op, opts...)
 }
 
 // Publish the lesson to its participants.
@@ -157,7 +154,7 @@ func (c *LessonClient) Update(ctx context.Context, id uuid.UUID, in LessonUpdate
 //
 // Operation publishLesson.
 //
-// A refusal comes back as a [LessonPublishError], whose Fields say what was
+// A refusal is read back with [LessonPublishError], whose Fields say what was
 // wrong with each member of the body.
 func (c *LessonClient) Publish(ctx context.Context, id uuid.UUID, in LessonPublishBody, opts ...rigclient.CallOption) (*Lesson, error) {
 	op := rigclient.Op{
@@ -165,7 +162,7 @@ func (c *LessonClient) Publish(ctx context.Context, id uuid.UUID, in LessonPubli
 		Path:   strings.Replace("/lessons/{id}/_publish", "{id}", rigclient.PathValue(id.String()), 1),
 		Body:   in,
 	}
-	return rigclient.DoTyped[Lesson, LessonPublishFields](ctx, c.rt, op, opts...)
+	return rigclient.Do[Lesson](ctx, c.rt, op, opts...)
 }
 
 // Bring a retired Lesson back.
@@ -209,7 +206,7 @@ func (c *LessonClient) Restore(ctx context.Context, id uuid.UUID, opts ...rigcli
 //
 // Operation revertLesson.
 //
-// A refusal comes back as a [LessonRevertError], whose Fields say what was
+// A refusal is read back with [LessonRevertError], whose Fields say what was
 // wrong with each member of the body.
 func (c *LessonClient) Revert(ctx context.Context, id uuid.UUID, in LessonRevertBody, opts ...rigclient.CallOption) (*Lesson, error) {
 	op := rigclient.Op{
@@ -217,7 +214,7 @@ func (c *LessonClient) Revert(ctx context.Context, id uuid.UUID, in LessonRevert
 		Path:   strings.Replace("/lessons/{id}/_revert", "{id}", rigclient.PathValue(id.String()), 1),
 		Body:   in,
 	}
-	return rigclient.DoTyped[Lesson, LessonRevertFields](ctx, c.rt, op, opts...)
+	return rigclient.Do[Lesson](ctx, c.rt, op, opts...)
 }
 
 // List a Lesson's previous versions.

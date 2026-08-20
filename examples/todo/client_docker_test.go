@@ -285,9 +285,9 @@ func TestClientValidationFailureIsTyped(t *testing.T) {
 		t.Fatalf("err = %v, want a validation failure", err)
 	}
 
-	var refused *client.TodoCreateError
-	if !errors.As(err, &refused) {
-		t.Fatalf("err = %v, want the error Create says it returns", err)
+	refused, ok := client.TodoCreateError(err)
+	if !ok || refused.Fields == nil {
+		t.Fatalf("err = %v, did not read back as a refused create", err)
 	}
 	if refused.Fields.Title == nil {
 		t.Fatalf("nothing was said about the title: %+v", refused.Fields)

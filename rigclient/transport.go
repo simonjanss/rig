@@ -83,18 +83,6 @@ func Do[T any](ctx context.Context, rt *Runtime, op Op, opts ...CallOption) (*T,
 	return &out, nil
 }
 
-// DoTyped is [Do] for an endpoint that sends a body.
-//
-// F is the shape a validation failure on that body arrives in, so a refusal
-// comes back as a *[Failure][F] — the error type the generated client declares
-// for this call. The caller reaches the per-field detail through a type the
-// method already chose, rather than naming one with [FieldsAs] and hoping it is
-// the right one.
-func DoTyped[T, F any](ctx context.Context, rt *Runtime, op Op, opts ...CallOption) (*T, error) {
-	out, err := Do[T](ctx, rt, op, opts...)
-	return out, typed[F](err)
-}
-
 // DoNoContent performs a call that answers with nothing, such as a delete.
 //
 // Any body is drained and discarded rather than parsed: an endpoint that grows
@@ -108,16 +96,6 @@ func DoNoContent(ctx context.Context, rt *Runtime, op Op, opts ...CallOption) er
 
 	_, _ = io.Copy(io.Discard, res.Body)
 	return nil
-}
-
-// DoNoContentTyped is [DoNoContent] for an endpoint that sends a body.
-//
-// No operation rig generates is both — a delete carries nothing — but a custom
-// endpoint that takes a body and answers 204 is expressible, and without this it
-// would be the one call whose failure is untyped for no reason a caller could
-// see.
-func DoNoContentTyped[F any](ctx context.Context, rt *Runtime, op Op, opts ...CallOption) error {
-	return typed[F](DoNoContent(ctx, rt, op, opts...))
 }
 
 // do sends the request, handling the two things every call shares: a credential

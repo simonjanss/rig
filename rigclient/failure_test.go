@@ -1,13 +1,13 @@
-// The typed failure: what a generated method returns when the server refuses it.
+// Reading a refusal back: the envelope and the per-field detail in one value.
 //
 // The shapes here stand in for what the go-client generator emits — a struct
-// with one *rigerr.FieldError per member of the body — so these cases exercise
-// the same thing a real client does without needing one.
+// with one *rigerr.FieldError per member of the body, and a function per call
+// that reads it — so these cases exercise the same thing a real client does
+// without needing one.
 package rigclient_test
 
 import (
 	"errors"
-	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -24,8 +24,11 @@ type todoCreateFields struct {
 	Entity *rigerr.FieldError `json:"entity,omitempty"`
 }
 
-// todoCreateError is the alias the generator emits beside the shape.
-type todoCreateError = rigclient.Failure[todoCreateFields]
+// todoCreateError is the function the generator emits beside the shape: one
+// line, and the shape is not the caller's to name.
+func todoCreateError(err error) (*rigclient.Failure[todoCreateFields], bool) {
+	return rigclient.As[todoCreateFields](err)
+}
 
 // refuses answers every request with the given status and body.
 func refuses(status int, body string) http.Handler {
@@ -43,19 +46,26 @@ const invalidTitle = `{
 	"fields": {"title": {"code": "CannotBeEmpty", "message": "cannot be empty"}}
 }`
 
-func TestARefusalArrivesAsTheCallsOwnError(t *testing.T) {
-	rt := newClient(t, refuses(http.StatusUnprocessableEntity, invalidTitle), rigclient.Config{})
+// create is the call the rest of this file refuses in one way or another.
+func create(t *testing.T, h http.Handler) error {
+	t.Helper()
 
-	_, err := rigclient.DoTyped[todo, todoCreateFields](t.Context(), rt, rigclient.Op{
+	rt := newClient(t, h, rigclient.Config{})
+	_, err := rigclient.Do[todo](t.Context(), rt, rigclient.Op{
 		Method: http.MethodPost, Path: "/todos", Body: map[string]any{},
 	})
+	return err
+}
 
-	var refused *todoCreateError
-	if !errors.As(err, &refused) {
-		t.Fatalf("err = %v, want the call's own error type", err)
+func TestARefusalIsReadBackAsTheCallsOwnShape(t *testing.T) {
+	err := create(t, refuses(http.StatusUnprocessableEntity, invalidTitle))
+
+	refused, ok := todoCreateError(err)
+	if !ok {
+		t.Fatalf("err = %v, want a refusal", err)
 	}
-	if refused.Fields.Title == nil {
-		t.Fatal("title carried no failure, and it is the one that failed")
+	if refused.Fields == nil {
+		t.Fatal("no fields, and the server sent some")
 	}
 	if got := refused.Fields.Title.Code; got != rigerr.FieldCodeCannotBeEmpty {
 		t.Errorf("title code = %q, want CannotBeEmpty", got)
@@ -79,97 +89,75 @@ func TestARefusalArrivesAsTheCallsOwnError(t *testing.T) {
 	}
 }
 
-// The typed error is an addition, not a replacement: everything written against
-// *rigclient.Error before it existed has to keep answering.
-func TestATypedFailureIsStillARefusal(t *testing.T) {
-	rt := newClient(t, refuses(http.StatusUnprocessableEntity, invalidTitle), rigclient.Config{})
-
-	_, err := rigclient.DoTyped[todo, todoCreateFields](t.Context(), rt, rigclient.Op{
-		Method: http.MethodPost, Path: "/todos", Body: map[string]any{},
-	})
+// Nothing about the error a call returns changed, so everything written against
+// it keeps answering. This reads it a second way rather than instead.
+func TestTheErrorItselfIsUntouched(t *testing.T) {
+	err := create(t, refuses(http.StatusUnprocessableEntity, invalidTitle))
 
 	var e *rigclient.Error
 	if !errors.As(err, &e) {
-		t.Fatalf("err = %v, want errors.As to still reach *rigclient.Error", err)
+		t.Fatalf("err = %v, want a *rigclient.Error", err)
 	}
 	if !rigclient.IsInvalid(err) {
 		t.Error("IsInvalid says no")
 	}
-	if got := rigclient.CodeOf(err); got != rigerr.CodeUnprocessableEntity {
-		t.Errorf("CodeOf = %q, want UnprocessableEntity", got)
-	}
-
-	fields, ok := rigclient.FieldsAs[todoCreateFields](err)
-	if !ok || fields.Title == nil {
-		t.Error("FieldsAs no longer reaches the detail through the typed error")
+	if fields, ok := rigclient.FieldsAs[todoCreateFields](err); !ok || fields.Title == nil {
+		t.Error("FieldsAs no longer reaches the detail")
 	}
 }
 
-// A method's error type does not change with the status. A 404 from a call that
-// has a body is still that call's error, with nothing in Fields — otherwise a
-// caller would have to match twice to find out which failure it got.
-func TestAFailureWithNoFieldsIsStillTyped(t *testing.T) {
-	rt := newClient(t, refuses(http.StatusNotFound,
-		`{"code":"NotFound","message":"no such todo"}`), rigclient.Config{})
+// A 404 is a refusal and has a code worth reading, but there is nothing to put
+// beside a control — so Fields is nil rather than a shape nobody complained
+// about, which is the difference between "fine" and "not asked".
+func TestARefusalWithNoFieldsCarriesNone(t *testing.T) {
+	err := create(t, refuses(http.StatusNotFound,
+		`{"code":"NotFound","message":"no such todo"}`))
 
-	_, err := rigclient.DoTyped[todo, todoCreateFields](t.Context(), rt, rigclient.Op{
-		Method: http.MethodPost, Path: "/todos", Body: map[string]any{},
-	})
-
-	var refused *todoCreateError
-	if !errors.As(err, &refused) {
-		t.Fatalf("err = %v, want the call's own error type", err)
+	refused, ok := todoCreateError(err)
+	if !ok {
+		t.Fatalf("err = %v, want a refusal", err)
 	}
-	if refused.Fields.Title != nil || refused.Fields.Entity != nil {
-		t.Errorf("fields = %+v, want the zero value", refused.Fields)
+	if refused.Fields != nil {
+		t.Errorf("fields = %+v, want nil", refused.Fields)
 	}
-	if !rigclient.IsNotFound(err) {
-		t.Error("IsNotFound says no")
+	if refused.Code != rigerr.CodeNotFound {
+		t.Errorf("code = %q, want NotFound", refused.Code)
 	}
 }
 
-// A request that never reached the server has no envelope to type. Wrapping it
-// anyway would produce a failure with no refusal in it, and the first thing to
-// print it would panic.
-func TestSomethingThatNeverReachedTheServerIsNotTyped(t *testing.T) {
+// A request that never reached the server has no envelope, so there is nothing
+// for a code or a field to have come from and the answer is no.
+func TestSomethingThatNeverReachedTheServerIsNotARefusal(t *testing.T) {
 	rt, err := rigclient.New(rigclient.Config{BaseURL: "http://127.0.0.1:1"},
 		rigclient.API{BasePath: "/api/v1"})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	_, err = rigclient.DoTyped[todo, todoCreateFields](t.Context(), rt, rigclient.Op{
+	_, err = rigclient.Do[todo](t.Context(), rt, rigclient.Op{
 		Method: http.MethodPost, Path: "/todos", Body: map[string]any{},
 	})
 	if err == nil {
 		t.Fatal("a call to a closed port succeeded")
 	}
 
-	var refused *todoCreateError
-	if errors.As(err, &refused) {
-		t.Errorf("err = %v, want it left alone: there was no envelope to type", err)
+	if refused, ok := todoCreateError(err); ok {
+		t.Errorf("refused = %+v, want false: there was no envelope", refused)
 	}
-	_ = fmt.Sprint(err) // the panic this is guarding against
 }
 
 // Skew between a client and a server loses the detail. It must not also lose the
 // code and the message, which is what a strict decode would do.
 func TestFieldsThatDoNotFitKeepTheCodeAndTheMessage(t *testing.T) {
-	rt := newClient(t, refuses(http.StatusUnprocessableEntity,
-		`{"code":"UnprocessableEntity","message":"not valid","fields":["title"]}`),
-		rigclient.Config{})
+	err := create(t, refuses(http.StatusUnprocessableEntity,
+		`{"code":"UnprocessableEntity","message":"not valid","fields":["title"]}`))
 
-	_, err := rigclient.DoTyped[todo, todoCreateFields](t.Context(), rt, rigclient.Op{
-		Method: http.MethodPost, Path: "/todos", Body: map[string]any{},
-	})
-
-	var refused *todoCreateError
-	if !errors.As(err, &refused) {
-		t.Fatalf("err = %v, want the call's own error type", err)
+	refused, ok := todoCreateError(err)
+	if !ok {
+		t.Fatalf("err = %v, want a refusal", err)
 	}
-	if refused.Fields.Title != nil {
-		t.Errorf("title = %+v, want nothing: the body did not fit the shape",
-			refused.Fields.Title)
+	if refused.Fields != nil {
+		t.Errorf("fields = %+v, want nil: the body did not fit the shape", refused.Fields)
 	}
 	if refused.Code != rigerr.CodeUnprocessableEntity || refused.Message != "not valid" {
 		t.Errorf("code = %q, message = %q, want both kept", refused.Code, refused.Message)
@@ -179,25 +167,9 @@ func TestFieldsThatDoNotFitKeepTheCodeAndTheMessage(t *testing.T) {
 	}
 }
 
-// What a caller stubbing a client writes. It has no cause, so Unwrap has to fall
-// back to the refusal or the value answers nothing.
-func TestAFailureBuiltByHandIsStillARefusal(t *testing.T) {
-	err := error(&todoCreateError{
-		Refusal: &rigclient.Error{Status: http.StatusNotFound, Code: rigerr.CodeNotFound},
-		Fields:  todoCreateFields{},
-	})
-
-	if !rigclient.IsNotFound(err) {
-		t.Error("IsNotFound says no")
-	}
-	var e *rigclient.Error
-	if !errors.As(err, &e) {
-		t.Error("errors.As does not reach the refusal")
-	}
-}
-
-// The 401 rewind joins two facts, and typing the failure must not drop one.
-func TestATypedUploadThatCannotSeekKeepsBothFacts(t *testing.T) {
+// The 401 rewind joins two facts. Reading one of them back must not cost the
+// other, which is what unwrapping to the refusal alone would have done.
+func TestAnUploadThatCannotSeekIsStillReadable(t *testing.T) {
 	cred := &refresher{token: "stale"}
 	rt := newClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		io.Copy(io.Discard, r.Body)
@@ -205,7 +177,7 @@ func TestATypedUploadThatCannotSeekKeepsBothFacts(t *testing.T) {
 		w.Write([]byte(`{"code":"Unauthorized","message":"expired"}`))
 	}), rigclient.Config{Credential: cred})
 
-	err := rigclient.DoNoContentTyped[todoCreateFields](t.Context(), rt, rigclient.Op{
+	err := rigclient.DoNoContent(t.Context(), rt, rigclient.Op{
 		Method: http.MethodPost, Path: "/todos",
 		Multipart: &rigclient.Multipart{Files: []rigclient.Upload{
 			rigclient.Part("coverFile", rigclient.Upload{
@@ -215,14 +187,25 @@ func TestATypedUploadThatCannotSeekKeepsBothFacts(t *testing.T) {
 		}},
 	})
 
-	var refused *todoCreateError
-	if !errors.As(err, &refused) {
-		t.Fatalf("err = %v, want the call's own error type", err)
+	refused, ok := todoCreateError(err)
+	if !ok {
+		t.Fatalf("err = %v, want a refusal", err)
+	}
+	if refused.Code != rigerr.CodeUnauthorized {
+		t.Errorf("code = %q, want Unauthorized", refused.Code)
 	}
 	if !errors.Is(err, rigclient.ErrCannotRetry) {
-		t.Error("the failure no longer answers ErrCannotRetry, which typing it dropped")
+		t.Error("the caller needs both facts, and one of them is gone")
 	}
-	if !rigclient.IsUnauthorized(err) {
-		t.Error("IsUnauthorized says no")
+}
+
+// A Failure re-returned as an error is still one, so a wrapper that reads a
+// refusal and hands it on does not cost its caller the predicates.
+func TestAFailureIsStillARefusal(t *testing.T) {
+	err := create(t, refuses(http.StatusNotFound, `{"code":"NotFound","message":"gone"}`))
+
+	refused, _ := todoCreateError(err)
+	if !rigclient.IsNotFound(error(refused)) {
+		t.Error("IsNotFound says no about a value that plainly is one")
 	}
 }
