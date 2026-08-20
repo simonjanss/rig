@@ -72,10 +72,13 @@ rigclient.CodeOf(err)        // still the code
 errors.As(err, &rigErr)      // still finds *rigclient.Error
 ```
 
-Two calls have no reader. A read sends no body, so nothing about a `Get` can be
-wrong per field. And a search's body is a filter — a question rather than
-something filled in field by field — which nothing validates, so a reader for it
-would be a function per resource that could only ever answer nil.
+Three calls have no reader. A read sends no body, so nothing about a `Get` can be
+wrong per field. A search's body is a filter — a question rather than something
+filled in field by field — which nothing validates, so a reader for it would be a
+function per resource that could only ever answer nil. And a revert is refused by
+the update rules it replays: its 422 arrives shaped like
+`client.TodoUpdateFields`, not like the version identifier it was asked about, so
+read one back with `client.TodoUpdateError`.
 
 ### The other half of the shape
 

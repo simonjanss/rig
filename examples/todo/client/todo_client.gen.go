@@ -219,9 +219,6 @@ func (c *TodoClient) Restore(ctx context.Context, id uuid.UUID, opts ...rigclien
 // POST /api/v1/todos/{id}/_revert
 //
 // Operation revertTodo.
-//
-// A refusal is read back with [TodoRevertError], whose Fields say what was
-// wrong with each member of the body.
 func (c *TodoClient) Revert(ctx context.Context, id uuid.UUID, in TodoRevertBody, opts ...rigclient.CallOption) (*Todo, error) {
 	op := rigclient.Op{
 		Method: http.MethodPost,

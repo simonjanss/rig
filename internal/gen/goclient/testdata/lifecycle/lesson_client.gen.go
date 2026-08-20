@@ -205,9 +205,6 @@ func (c *LessonClient) Restore(ctx context.Context, id uuid.UUID, opts ...rigcli
 // POST /api/v1/lessons/{id}/_revert
 //
 // Operation revertLesson.
-//
-// A refusal is read back with [LessonRevertError], whose Fields say what was
-// wrong with each member of the body.
 func (c *LessonClient) Revert(ctx context.Context, id uuid.UUID, in LessonRevertBody, opts ...rigclient.CallOption) (*Lesson, error) {
 	op := rigclient.Op{
 		Method: http.MethodPost,

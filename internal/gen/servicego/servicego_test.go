@@ -673,6 +673,16 @@ func TestACustomBodySaysWhatWasWrongWithIt(t *testing.T) {
 			t.Errorf("%s should not exist: the model's input error covers it", gone)
 		}
 	}
+
+	// A generated endpoint with a body of its own gets none either, because the
+	// service method that would return one is generated too: a search's body is a
+	// filter nothing validates, and a revert is refused by the update rules it
+	// replays, in the update input's shape.
+	for _, gone := range []string{"type LessonSearchBodyError", "type LessonRevertBodyError"} {
+		if strings.Contains(types, gone) {
+			t.Errorf("%s should not exist: no hand-written method can return one", gone)
+		}
+	}
 }
 
 // Pagination arrives as query parameters and the filter as a body, so they are

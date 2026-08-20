@@ -262,9 +262,17 @@ func TestEveryCallWithABodySaysHowItFails(t *testing.T) {
 	// A read sends no body, so there is nothing for it to be wrong about, and a
 	// search's body is a filter nothing validates — a reader for either would be
 	// a function per resource that can only ever answer nil.
+	//
+	// A revert is the one that would have been worse than useless. It has a body
+	// of its own and a 422 to go with it, but the refusal comes from the update
+	// rules it replays and arrives in LessonUpdateFields — so a reader named after
+	// the revert body would decode those into a shape with one member nobody
+	// complained about and hand back a struct that is entirely nil, which is the
+	// wrong-shape read this whole file exists to make unwritable.
 	for _, gone := range []string{
 		"LessonGetError", "LessonGetFields", "LessonListFields",
 		"LessonSearchError", "LessonSearchFields",
+		"LessonRevertError", "LessonRevertFields",
 	} {
 		if strings.Contains(input, gone) || strings.Contains(client, gone) {
 			t.Errorf("%s exists, and nothing can produce what it reads", gone)

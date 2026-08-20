@@ -86,11 +86,15 @@ func (e *emitter) endpointTypes(b *gobuf.Buf, res *ir.Resource) {
 // into: two hand-written halves would agree until the day somebody renamed a
 // field.
 //
-// A search is left out. Its body is a filter, nothing validates one, and every
-// resource has a search — so the rule that covered it emitted fifty lines per
-// resource for a failure no code can produce.
+// A generated endpoint is left out even when its body is its own, because the
+// only thing that could return one of these is the service method — and a
+// generated endpoint's is generated too, so there is no hand-written return
+// statement for it to be the subject of. A search and a revert are the two:
+// nothing validates a filter, and a revert is refused by the update rules it
+// replays, in the update input's shape. The rule that covered them emitted fifty
+// lines per resource for a failure no code can produce.
 func (e *emitter) bodyError(b *gobuf.Buf, res *ir.Resource, ep *ir.Endpoint) {
-	if len(ep.Request.BodyParams) == 0 || ep.Name == ir.OpSearch {
+	if len(ep.Request.BodyParams) == 0 || ep.Impl.Kind == ir.EndpointGenerated {
 		return
 	}
 
