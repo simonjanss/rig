@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -42,7 +43,7 @@ func newSyncCmd(e *env) *cobra.Command {
 			// configuration file for one would be a file describing a table rig
 			// generates nothing from, and the next `rig validate` would report it
 			// as belonging to the auth module.
-			ignore, err := foundationTables(p)
+			ignore, foundation, err := foundationTables(p)
 			if err != nil {
 				return err
 			}
@@ -69,8 +70,40 @@ func newSyncCmd(e *env) *cobra.Command {
 				return err
 			}
 
+			// A table under a name rig keeps gets no file. Sync is deliberately
+			// tolerant of a project that does not yet validate — it exists to
+			// repair one — so this is not a refusal; but the file it would write
+			// here names the resource rig's own table takes, so it could never
+			// compile, and writing it sends somebody down a path they then have to
+			// undo.
+			//
+			// Which is why the way out is spelled differently for the two halves
+			// of the rule. Nothing moves a table off the `rig_` prefix. A reserved
+			// resource name is answered by a `resource:` key — but sync cannot
+			// write that file, because the name it would fill in is the one that
+			// is taken.
+			var skipped int
+			changes = slices.DeleteFunc(changes, func(c tablesync.Change) bool {
+				if c.Kind != tablesync.ChangeCreate {
+					return false
+				}
+				why, escapable := compile.Reserved(p, foundation, c.Table)
+				if why == "" {
+					return false
+				}
+				fix := "rename the table"
+				if escapable {
+					fix = "rename the table, or write this file by hand with a `resource:` of its own"
+				}
+				fmt.Fprintf(e.errOut, "skip    %s: %s — %s\n", p.Rel(c.Path), why, fix)
+				skipped++
+				return true
+			})
+
 			if len(changes) == 0 {
-				fmt.Fprintln(e.errOut, "table configuration is already up to date")
+				if skipped == 0 {
+					fmt.Fprintln(e.errOut, "table configuration is already up to date")
+				}
 				return nil
 			}
 

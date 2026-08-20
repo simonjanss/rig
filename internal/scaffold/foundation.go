@@ -140,8 +140,11 @@ func alreadyApplied(existing []string, part string) bool {
 // PartTables are the tables a part creates.
 //
 // Every name carries the `rig_` prefix the migrations create them under, so a
-// project can tell at a glance which tables arrived with the foundation and is
-// free to have an `account` or a `tenant` of its own.
+// project can tell at a glance which tables arrived with the foundation. Both
+// halves of that name are rig's and rig refuses a project either: the prefix
+// itself ([TablePrefix]) and the API name the prefix strips to
+// ([ReservedResources]), so no project has an `account` or a `tenant` of its
+// own and exposing this one later is never a rename.
 //
 // Written out rather than parsed from the SQL, so that adding a table to the
 // foundation is a decision somebody makes here as well — a heuristic would
@@ -173,6 +176,22 @@ func PartTables(part string) []string {
 	}
 }
 
+// PartOf names the part that creates a table, or "" for a table the foundation
+// does not create.
+//
+// The inverse of [PartTables], and it exists for a diagnostic. A project whose
+// rig_account arrived through a migration [Managed] cannot recognise has to be
+// told which name that migration needs, and the part is that name: `Managed`
+// matches on the `_rig_<part>.sql` suffix and nothing else.
+func PartOf(table string) string {
+	for _, part := range Parts() {
+		if slices.Contains(PartTables(part), table) {
+			return part
+		}
+	}
+	return ""
+}
+
 // Tables are every table the foundation creates.
 func Tables() []string {
 	var out []string
@@ -186,9 +205,14 @@ func Tables() []string {
 //
 // The evidence is the migration files: a part rig wrote is named for itself, so
 // a project that ran `setup-project` says so in its own migrations directory.
-// That matters because the answer decides whether rig generates a model and a
-// repository for a table — and a project with a `rig_account` table of its own,
-// which nobody scaffolded, must keep getting them.
+// That matters twice over. It decides whether rig generates a model and a
+// repository for a table, and it is what tells a `rig_account` rig created from
+// one somebody wrote by hand — which is refused rather than generated for, now
+// that [TablePrefix] is reserved.
+//
+// A name alone cannot answer either question, which is why this reads the
+// directory. `auth.own` is the exception and it turns the whole thing off: a
+// project that has taken the schema over owns those tables and their names.
 func Managed(existing []string) []string {
 	var out []string
 	for _, part := range Parts() {
@@ -229,8 +253,9 @@ type part struct {
 }
 
 type tableConfig struct {
-	table   string
-	content string
+	table    string
+	resource string
+	content  string
 }
 
 func foundationPart(name string) part {
@@ -252,7 +277,8 @@ func foundationPart(name string) part {
 	}
 }
 
-// config renders a table configuration file.
+// config renders a table configuration file, and is the one place either name
+// is written.
 //
 // The resource name is written out rather than derived, because the physical
 // name carries the `rig_` prefix and the API name should not: the prefix is
@@ -260,12 +286,17 @@ func foundationPart(name string) part {
 // a client has no business knowing which library created a table. Without it an
 // exposed table would arrive as RigAccount on /rig-accounts.
 //
+// It returns the whole [tableConfig] rather than the file's text so that the
+// resource name survives as a value. [ReservedResources] reads it back, which is
+// what makes a name reserved by being written here and nowhere else — a second
+// list would drift the first time somebody added a part.
+//
 // Column comments are not repeated here: the migrations carry COMMENT ON for
 // every one of them, so they arrive through introspection. Saying them twice
 // would mean two places to edit and one place to forget.
-func config(table, resource, schemaDepth string, body ...string) string {
+func config(table, resource string, body ...string) tableConfig {
 	var b strings.Builder
-	fmt.Fprintf(&b, "# yaml-language-server: $schema=%s\n", schemaDepth)
+	fmt.Fprintf(&b, "# yaml-language-server: $schema=%s\n", schemaRef)
 	fmt.Fprintf(&b, "table: %s\n", table)
 	fmt.Fprintf(&b, "resource: %s\n", resource)
 	for _, s := range body {
@@ -273,7 +304,7 @@ func config(table, resource, schemaDepth string, body ...string) string {
 		b.WriteString(strings.TrimRight(s, "\n"))
 		b.WriteString("\n")
 	}
-	return b.String()
+	return tableConfig{table: table, resource: resource, content: b.String()}
 }
 
 // schemaRef is the editor directive's path back to the generated JSON Schema.

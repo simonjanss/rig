@@ -7,9 +7,15 @@ Each directory is one case:
   schema.json       an ir.Schema, exactly as introspection would hand it over
   rig.yaml          the project configuration (optional; a default is used)
   tables/*.yaml     table configuration (optional)
+  foundation.txt    the rig_ tables this project scaffolded (optional)
   ir.golden.json    the expected document
   diags.golden.txt  the expected diagnostics (omitted when there are none)
 ```
+
+`foundation.txt` stands in for the migrations directory. In a real project rig
+reads which `rig_` tables it created from the migration filenames, and a fixture
+has none — so without it a fixture holding `rig_file` would be refused for using
+a prefix it is entitled to.
 
 The compiler takes its schema by value, so none of this needs Docker or a
 database. That is deliberate: it is what keeps the bulk of rig's test suite

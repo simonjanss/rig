@@ -28,6 +28,14 @@ type Options struct {
 	Tool string
 	// IgnoreTables are never projected; migration bookkeeping lives here.
 	IgnoreTables []string
+	// Foundation names the rig_-prefixed tables this project's own migrations
+	// show rig created, exposed or not.
+	//
+	// Deliberately not [Options.IgnoreTables]. Exposing a foundation table takes
+	// it out of that list while leaving it rig's, and `auth.own` empties the
+	// list entirely — which is also exactly what a project that never scaffolded
+	// looks like. [checkReserved] has to tell those two apart.
+	Foundation []string
 }
 
 // Compile runs every stage after introspection.
@@ -81,6 +89,7 @@ func Compile(raw ir.Schema, set *tableconf.Set, opt Options) (*ir.Document, diag
 	doc, d := Freeze(api, schema, Meta{Tool: opt.Tool, Permissions: cfg.API.Permissions})
 	diags.Append(d)
 
+	diags.Append(checkReserved(doc, set, p, opt.Foundation))
 	diags.Append(Validate(doc, set, p))
 
 	// Validation runs after freezing, so the flag has to be refreshed with what

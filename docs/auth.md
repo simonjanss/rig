@@ -6,6 +6,10 @@ Everything below is served by `rig/auth` over the tables `rig setup-project`
 wrote — every one of them named `rig_…`, so a project can tell them from its own.
 Nothing about it is generated, and nothing about it is yours to maintain.
 
+Both the prefix and the names those tables project to — `Account`, `Tenant`,
+`File` and the rest — are reserved, so your own schema cannot land on either.
+[schema.md](schema.md#names-rig-reserves) says what that costs and what it buys.
+
 What *is* yours is one block in `rig.yaml` — see
 [What you configure](#what-you-configure) — and the two or three functions a file
 cannot hold, under [What you decide](#what-you-decide). `rig generate` writes the
@@ -566,6 +570,12 @@ auth:
   # through its own queries, and a generated repository beside them is a second
   # door into the same rows.
   expose: [rig_account]
+
+  # Take the schema over: generate for every foundation table, and stop
+  # importing rig/auth. It also stops rig reserving the `rig_` prefix and the
+  # names its tables project to, because from here they are yours. A one-way
+  # door — everything on this page becomes code you maintain.
+  own: false
 
   oauth:
     base_url: https://app.example.com  # a provider compares this exactly

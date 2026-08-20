@@ -1,0 +1,7 @@
+table: bookmark
+
+# The other spelling of the same mistake. The table name is the project's own
+# and projects to Bookmark; it is `resource:` that reaches for a name rig's
+# rig_tenant takes, which is why the diagnostic has to anchor here and not on
+# the table.
+resource: Tenant

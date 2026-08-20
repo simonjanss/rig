@@ -27,6 +27,12 @@ claims naming that account come from — a session, an API key, a header — is 
 this feature's business. [examples/todo](../examples/todo) has an inbox and no
 authentication at all.
 
+The five tables are rig's, and so are the names they project to — `Notification`,
+`NotificationRecipient`, `NotificationDevice`, `NotificationSetting`,
+`NotificationDelivery`. They are reserved whether or not you turn this block on,
+so your own table cannot be called `notification`. See
+[Names rig reserves](schema.md#names-rig-reserves).
+
 ## Declare a table notifiable
 
 A join table with `rig_notification` on one side. That is the whole declaration:
@@ -334,6 +340,7 @@ about saying so, and leaving them turns every rollout into a delivery delay.
 ## See also
 
 - [rig-yaml.md](rig-yaml.md#notifications) — every key in the block
+- [schema.md](schema.md#names-rig-reserves) — the names these tables take from yours
 - [services.md](services.md) — where the two methods go
 - [electric.md](electric.md) — the live-sync half
 - [examples/auth](../examples/auth) — scheduled notifications, with accounts and roles

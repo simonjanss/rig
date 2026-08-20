@@ -10,35 +10,24 @@ package scaffold
 
 func tenancyConfigs() []tableConfig {
 	return []tableConfig{
-		{
-			table: "rig_tenant",
-			content: config("rig_tenant", "Tenant", schemaRef,
-				`# Tenants are not tenant-scoped, so the generated queries have nothing to
+		config("rig_tenant", "Tenant",
+			`# Tenants are not tenant-scoped, so the generated queries have nothing to
 # filter by and a generated CRUD interface would be an administrative
 # back door. Manage them from a service you write.
 expose: false`,
-				`restore_window_days: 30`,
-			),
-		},
-		{
-			table: "rig_identity",
-			content: config("rig_identity", "Identity", schemaRef,
-				`# An identity is global, so it has no tenant_id and the generated queries
+			`restore_window_days: 30`,
+		),
+		config("rig_identity", "Identity",
+			`# An identity is global, so it has no tenant_id and the generated queries
 # have nothing to scope by. Reaching one over HTTP would mean reading a
 # person who works at another customer, so nothing here is exposed: the
 # account is what a client sees, and it is tenant-scoped.
 expose: false`,
-				`restore_window_days: 30`,
-			),
-		},
-		{
-			table:   "rig_identity_credential",
-			content: config("rig_identity_credential", "IdentityCredential", schemaRef, notExposed),
-		},
-		{
-			table: "rig_identity_verification",
-			content: config("rig_identity_verification", "IdentityVerification", schemaRef, notExposed,
-				`enums:
+			`restore_window_days: 30`,
+		),
+		config("rig_identity_credential", "IdentityCredential", notExposed),
+		config("rig_identity_verification", "IdentityVerification", notExposed,
+			`enums:
   rig_identity_verification_kind:
     name: IdentityVerificationKind
     description: What a single-use link is for.
@@ -52,18 +41,15 @@ expose: false`,
       Invitation:
         name: Invitation
         description: Brings a person into a tenant, whether or not they already have an identity.`,
-			),
-		},
-		{
-			table: "rig_account",
-			content: config("rig_account", "Account", schemaRef,
-				`# Everything but Create. An account created through plain CRUD would have
+		),
+		config("rig_account", "Account",
+			`# Everything but Create. An account created through plain CRUD would have
 # no identity behind it and no invitation sent, so joining a tenant is an
 # auth endpoint rather than a POST anyone can make.
 operations: [Get, List, Search, Update, Delete]`,
-				`restore_window_days: 30`,
-				`order_by: [-created_at, id]`,
-				`columns:
+			`restore_window_days: 30`,
+			`order_by: [-created_at, id]`,
+			`columns:
   identity_id:
     # Which person this is. Decided when the account is created and never
     # afterwards: moving an account to another person would hand over
@@ -86,7 +72,7 @@ operations: [Get, List, Search, Update, Delete]`,
     # Whatever the person set it to. An unknown zone is not worth refusing a
     # write over: the account package falls back to UTC when it cannot load one.
     operations: [Read, Create, Update]`,
-				`enums:
+			`enums:
   rig_account_kind:
     name: AccountKind
     description: What an account is.
@@ -110,17 +96,14 @@ operations: [Get, List, Search, Update, Delete]`,
       Basic:
         name: Basic
         description: Gets on with the work.`,
-			),
-		},
+		),
 	}
 }
 
 func sessionConfigs() []tableConfig {
 	return []tableConfig{
-		{
-			table: "rig_account_token",
-			content: config("rig_account_token", "AccountToken", schemaRef, notExposed,
-				`enums:
+		config("rig_account_token", "AccountToken", notExposed,
+			`enums:
   rig_account_token_kind:
     name: AccountTokenKind
     description: What a token is for.
@@ -144,20 +127,14 @@ func sessionConfigs() []tableConfig {
       Machine:
         name: Machine
         description: An integration acting through an API key.`,
-			),
-		},
-		{
-			table:   "rig_identity_session",
-			content: config("rig_identity_session", "IdentitySession", schemaRef, notExposed),
-		},
-		{
-			table: "rig_auth_log",
-			content: config("rig_auth_log", "AuthLog", schemaRef,
-				`# Read-only. Entries are written by the auth package as things happen; an
+		),
+		config("rig_identity_session", "IdentitySession", notExposed),
+		config("rig_auth_log", "AuthLog",
+			`# Read-only. Entries are written by the auth package as things happen; an
 # audit trail anybody can post to is not an audit trail.
 operations: [Get, List, Search]`,
-				`order_by: [-created_at, id]`,
-				`enums:
+			`order_by: [-created_at, id]`,
+			`enums:
   rig_auth_event:
     name: AuthEvent
     description: What happened.
@@ -238,21 +215,18 @@ operations: [Get, List, Search]`,
       Failed:
         name: Failed
         description: It did not.`,
-			),
-		},
+		),
 	}
 }
 
 func apiKeyConfigs() []tableConfig {
 	return []tableConfig{
-		{
-			table: "rig_api_key",
-			content: config("rig_api_key", "APIKey", schemaRef,
-				`# Keys are minted and revoked through /auth/api-keys, not through CRUD.
+		config("rig_api_key", "APIKey",
+			`# Keys are minted and revoked through /auth/api-keys, not through CRUD.
 # The secret exists only in the response that created it, and a generic
 # POST could not return it.
 expose: false`,
-				`enums:
+			`enums:
   rig_api_key_kind:
     name: APIKeyKind
     description: Who a key acts as.
@@ -263,20 +237,17 @@ expose: false`,
       Personal:
         name: Personal
         description: A key that acts as the person who made it, for somebody automating their own work.`,
-			),
-		},
+		),
 	}
 }
 
 func oauthConfigs() []tableConfig {
 	return []tableConfig{
-		{
-			table: "rig_identity_oauth",
-			content: config("rig_identity_oauth", "IdentityOAuth", schemaRef,
-				`# Linking and unlinking go through the OAuth flow, which has to talk to the
+		config("rig_identity_oauth", "IdentityOAuth",
+			`# Linking and unlinking go through the OAuth flow, which has to talk to the
 # provider. A row created directly would claim an identity nobody verified.
 expose: false`,
-				`enums:
+			`enums:
   rig_oauth_provider:
     name: OAuthProvider
     description: An external identity provider.
@@ -290,8 +261,7 @@ expose: false`,
       GitHub:
         name: GitHub
         description: GitHub.`,
-			),
-		},
+		),
 	}
 }
 
@@ -312,14 +282,12 @@ expose: false`,
 // found a way around all of it.
 func fileConfigs() []tableConfig {
 	return []tableConfig{
-		{
-			table: "rig_file",
-			content: config("rig_file", "File", schemaRef,
-				`# Read-only. Uploading is the nested endpoint on the row that owns the
+		config("rig_file", "File",
+			`# Read-only. Uploading is the nested endpoint on the row that owns the
 # file, which is what makes the upload permissioned and tenant-scoped; a
 # generic POST here would be a way around both.
 operations: [Get, List]`,
-				`# There is no restore_window_days here, and rig refuses one. How long a
+			`# There is no restore_window_days here, and rig refuses one. How long a
 # deleted file stays restorable is files.restore_window in rig.yaml: that
 # number is how long the bytes are kept as well as how long the row can be
 # brought back, and a second copy of it here could only disagree with it.
@@ -330,8 +298,7 @@ columns:
     exclude: true
   declared_content_type:
     exclude: true`,
-			),
-		},
+		),
 	}
 }
 
@@ -348,10 +315,8 @@ columns:
 // hand-written inbox routes were not enough.
 func notificationConfigs() []tableConfig {
 	return []tableConfig{
-		{
-			table: "rig_notification",
-			content: config("rig_notification", "Notification", schemaRef,
-				`# Read-only, and narrow. A notification is written by the engine and by
+		config("rig_notification", "Notification",
+			`# Read-only, and narrow. A notification is written by the engine and by
 # nothing else: a client that could POST one could announce anything to
 # anybody, and a client that could PATCH one could move a delivery date.
 #
@@ -359,31 +324,22 @@ func notificationConfigs() []tableConfig {
 # people who are not recipients yet and may never be, which is also why it
 # has no live-sync shape.
 operations: [Get, List]`,
-			),
-		},
-		{
-			table: "rig_notification_device",
-			content: config("rig_notification_device", "NotificationDevice", schemaRef,
-				`# Where a push can reach somebody, and the one notification table a
+		),
+		config("rig_notification_device", "NotificationDevice",
+			`# Where a push can reach somebody, and the one notification table a
 # client genuinely writes to: registering a device is something the
 # application it runs on does, and revoking one is something a person does
 # from a list of their own devices.
 operations: [Create, Get, List, Delete]`,
-			),
-		},
-		{
-			table: "rig_notification_setting",
-			content: config("rig_notification_setting", "NotificationSetting", schemaRef,
-				`# What somebody wants told to them, and when. A settings screen is a
+		),
+		config("rig_notification_setting", "NotificationSetting",
+			`# What somebody wants told to them, and when. A settings screen is a
 # CRUD surface over exactly this, which is why it has one — and it is the
 # only table here where a full one is the right answer.
 operations: [Create, Get, List, Update, Delete]`,
-			),
-		},
-		{
-			table: "rig_notification_delivery",
-			content: config("rig_notification_delivery", "NotificationDelivery", schemaRef,
-				`# Read-only, and narrow. A delivery row is the dispatcher's bookkeeping:
+		),
+		config("rig_notification_delivery", "NotificationDelivery",
+			`# Read-only, and narrow. A delivery row is the dispatcher's bookkeeping:
 # retry counts, claim leases and provider errors. A client that could write
 # one could send anything to anybody, and a client that could read them all
 # would be reading a table that says who was told what.
@@ -391,12 +347,9 @@ operations: [Create, Get, List, Update, Delete]`,
 # It is exposed at all because "why did I not get that mail" is a question
 # support has to be able to answer.
 operations: [Get, List]`,
-			),
-		},
-		{
-			table: "rig_notification_recipient",
-			content: config("rig_notification_recipient", "NotificationRecipient", schemaRef,
-				`# The inbox. Read and delete, and nothing else: what a person may change
+		),
+		config("rig_notification_recipient", "NotificationRecipient",
+			`# The inbox. Read and delete, and nothing else: what a person may change
 # about one of these is whether they have read it, and that is the
 # _read endpoint rather than a PATCH that could rewrite the kind.
 #
@@ -404,7 +357,6 @@ operations: [Get, List]`,
 # notifications block in rig.yaml, because they are the same decision for
 # every project and a copy here could only disagree with it.
 operations: [Get, List, Search, Delete]`,
-			),
-		},
+		),
 	}
 }

@@ -278,8 +278,9 @@ func TestPartTablesMatchTheMigrations(t *testing.T) {
 	}
 }
 
-// A part is only managed once its migration is there, so a project with an
-// rig_account table nobody scaffolded keeps getting a model and a repository for it.
+// A part is only managed once its migration is there, which is what separates a
+// rig_account rig created from one somebody wrote by hand — the second is
+// refused for using a prefix rig keeps, not quietly generated for.
 func TestOnlyAppliedPartsAreManaged(t *testing.T) {
 	t.Parallel()
 

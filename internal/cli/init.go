@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -8,6 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/simonjanss/rig/internal/compile"
 	"github.com/simonjanss/rig/internal/project"
 	"github.com/simonjanss/rig/internal/scaffold"
 )
@@ -113,6 +115,32 @@ func newMigrationCmd(e *env) *cobra.Command {
 			p, err := e.mustProject()
 			if err != nil {
 				return err
+			}
+
+			// Before anything is created. The same rule `rig validate` enforces,
+			// asked here because this is the last moment the fix is a different
+			// word on a command line rather than a migration, a rename in every
+			// client, and a deprecation window.
+			//
+			// The prefix is refused and a reserved resource name is not, because a
+			// `resource:` key still answers the second one. Refusing it would make
+			// a table rig's own rules allow — `table: file` with
+			// `resource: Document` — one rig cannot scaffold, so the warning says
+			// what the configuration then has to carry.
+			if table != "" {
+				_, foundation, err := foundationTables(p)
+				if err != nil {
+					return err
+				}
+				why, escapable := compile.Reserved(p, foundation, table)
+				switch {
+				case why != "" && !escapable:
+					return errors.New(why)
+				case why != "":
+					fmt.Fprintf(e.errOut, "warning: %s.\n"+
+						"Give the table a `resource:` of its own in its configuration, or rename it — "+
+						"`rig validate` refuses it otherwise.\n\n", why)
+				}
 			}
 
 			dir := p.MigrationsDir()
