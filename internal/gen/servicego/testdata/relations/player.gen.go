@@ -6,8 +6,10 @@ package api
 
 import (
 	"rigtest/model"
+	"strings"
 
 	"github.com/google/uuid"
+	"github.com/simonjanss/rig/runtime/rigerr"
 )
 
 // A page of Players.
@@ -42,6 +44,54 @@ type PlayerSearchBody struct {
 	// Conditions rows must satisfy.
 	Filter model.PlayerFilter `json:"filter"`
 }
+
+// PlayerSearchBodyError says what was wrong with each field of a
+// PlayerSearchBody.
+//
+// Its shape is the body's shape, so a client can attach every message to the
+// field it is about without matching on strings. A member is nil when that
+// field was fine, and the whole value is nil when the body was. It is what the
+// 422 carries, and returning one from Player.Search is how that endpoint
+// refuses a field rather than a request.
+type PlayerSearchBodyError struct {
+	// Conditions rows must satisfy.
+	Filter *rigerr.FieldError `json:"filter,omitempty"`
+
+	// Entity is a problem with the body as a whole rather than with one field.
+	Entity *rigerr.FieldError `json:"entity,omitempty"`
+}
+
+// Empty reports whether anything went wrong. A validator that found nothing
+// returns nil rather than one of these.
+func (e *PlayerSearchBodyError) Empty() bool {
+	if e == nil {
+		return true
+	}
+
+	return e.Filter == nil && e.Entity == nil
+}
+
+// Error implements error. The sentence is for logs and for a person; the
+// structure above is what a client acts on.
+func (e *PlayerSearchBodyError) Error() string {
+	var parts []string
+	if e.Filter != nil {
+		parts = append(parts, "filter "+e.Filter.Error())
+	}
+	if e.Entity != nil {
+		parts = append(parts, e.Entity.Error())
+	}
+
+	return "the request is not valid: " + strings.Join(parts, "; ")
+}
+
+// ErrorCode implements [rigerr.Coder]: the request was understood and its
+// content is what is wrong, which is 422 and not 400.
+func (e *PlayerSearchBodyError) ErrorCode() rigerr.Code { return rigerr.CodeUnprocessableEntity }
+
+// ErrorFields implements [rigerr.FieldReporter], which is how the HTTP layer
+// finds this and answers with it rather than with prose.
+func (e *PlayerSearchBodyError) ErrorFields() any { return e }
 
 // Path parameters for Player.Delete.
 type PlayerDeletePath struct {

@@ -113,8 +113,10 @@ each one line at the call site:
 // in Go says both.
 c.Todos.Update(ctx, id, client.TodoUpdateInput{Title: patch.NewOptional("new")})
 
-// A failure says which failure it was, and a 422 says it per field.
-fields, ok := rigclient.FieldsAs[client.TodoCreateFields](err)
+// A failure says which failure it was, and a 422 says it per field — on the
+// error the call itself returns, so there is no shape to name by hand.
+var refused *client.TodoCreateError
+errors.As(err, &refused)
 
 // A parameter left nil is not sent, so the server's own default applies.
 c.Todos.List(ctx, client.TodoListQuery{Limit: rigclient.P(10)})

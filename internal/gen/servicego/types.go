@@ -71,8 +71,43 @@ func (e *emitter) endpointTypes(b *gobuf.Buf, res *ir.Resource) {
 		// would be a third copy of the entity to keep in step.
 		if ep.Request.BodyObject == "" && !genutil.UsesModelInput(ep) {
 			e.paramStruct(b, bodyTypeName(res, ep), bodyDoc(res, ep), ep.Request.BodyParams)
+			e.bodyError(b, res, ep)
 		}
 	}
+}
+
+// bodyError emits the typed failure for a custom endpoint's body.
+//
+// Nothing generated fills one in — a custom endpoint's body means whatever the
+// endpoint means, and no generator knows that — so this is the one input error
+// rig emits without also emitting the validator that returns it. It is here
+// because the alternative is every project hand-writing the same struct to say
+// the same thing, and the generated client already declares the shape it decodes
+// into: two hand-written halves would agree until the day somebody renamed a
+// field.
+func (e *emitter) bodyError(b *gobuf.Buf, res *ir.Resource, ep *ir.Endpoint) {
+	if len(ep.Request.BodyParams) == 0 {
+		return
+	}
+
+	var (
+		name = bodyTypeName(res, ep) + "Error"
+		body = bodyTypeName(res, ep)
+	)
+
+	genutil.InputError{
+		Name: name,
+		Doc: name + " says what was wrong with each field of a " + body + ".\n\n" +
+			"Its shape is the body's shape, so a client can attach every message to " +
+			"the field it is about without matching on strings. A member is nil when " +
+			"that field was fine, and the whole value is nil when the body was. It " +
+			"is what the 422 carries, and returning one from " + res.Name + "." +
+			ep.Name + " is how that endpoint refuses a field rather than a request.",
+		Subject: "the request",
+		Entity: "Entity is a problem with the body as a whole rather than with one " +
+			"field.",
+		Fields: ep.Request.BodyParams,
+	}.Emit(b)
 }
 
 func bodyDoc(res *ir.Resource, ep *ir.Endpoint) string {

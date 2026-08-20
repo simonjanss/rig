@@ -6,6 +6,7 @@ package client
 
 import (
 	"github.com/google/uuid"
+	"github.com/simonjanss/rig/rigclient"
 	"github.com/simonjanss/rig/runtime/patch"
 	"github.com/simonjanss/rig/runtime/rigerr"
 )
@@ -36,14 +37,12 @@ type TodoAttachmentCreateInput struct {
 	Position int `json:"position"`
 }
 
-// TodoAttachmentCreateFields is what a validation failure on a
-// TodoAttachmentCreateInput says, shaped like the input it is about — one
-// member per member, so each message can be put beside the control it belongs
-// to.
+// TodoAttachmentCreateFields is what a validation failure says, shaped like
+// the body it is about — one member per member, so each message can be put
+// beside the control it belongs to.
 //
-// It is read out of a failed call with
-// rigclient.FieldsAs[TodoAttachmentCreateFields], and a member is nil when
-// there was nothing wrong with that field.
+// A member is nil when there was nothing wrong with that field. It arrives as
+// the Fields of the error the call returns.
 type TodoAttachmentCreateFields struct {
 	TodoID           *rigerr.FieldError `json:"todoId,omitempty"`
 	AttachmentFileID *rigerr.FieldError `json:"attachmentFileId,omitempty"`
@@ -54,11 +53,54 @@ type TodoAttachmentCreateFields struct {
 	Entity *rigerr.FieldError `json:"entity,omitempty"`
 }
 
+// TodoAttachmentCreateError is what a refused TodoAttachments.Create comes
+// back as: the envelope the server sent — Code, Message, RequestID, Status
+// — with the per-field detail decoded into a [TodoAttachmentCreateFields]
+// rather than left as bytes.
+//
+// It is the error the method returns, so there is nothing to name and nothing
+// to name wrongly:
+//
+//	var refused *TodoAttachmentCreateError
+//	if errors.As(err, &refused) && refused.Fields.TodoID != nil {
+//
+// errors.As reaches the rigclient.Error underneath it too, so
+// rigclient.IsInvalid and the rest answer about it unchanged.
+type TodoAttachmentCreateError = rigclient.Failure[TodoAttachmentCreateFields]
+
 // TodoAttachmentSearchBody is the request body for TodoAttachment.Search.
 type TodoAttachmentSearchBody struct {
 	// Conditions rows must satisfy.
 	Filter TodoAttachmentFilter `json:"filter"`
 }
+
+// TodoAttachmentSearchFields is what a validation failure says, shaped like
+// the body it is about — one member per member, so each message can be put
+// beside the control it belongs to.
+//
+// A member is nil when there was nothing wrong with that field. It arrives as
+// the Fields of the error the call returns.
+type TodoAttachmentSearchFields struct {
+	Filter *rigerr.FieldError `json:"filter,omitempty"`
+	// Entity carries what was wrong with the request as a whole rather than with
+	// any one field.
+	Entity *rigerr.FieldError `json:"entity,omitempty"`
+}
+
+// TodoAttachmentSearchError is what a refused TodoAttachments.Search comes
+// back as: the envelope the server sent — Code, Message, RequestID, Status
+// — with the per-field detail decoded into a [TodoAttachmentSearchFields]
+// rather than left as bytes.
+//
+// It is the error the method returns, so there is nothing to name and nothing
+// to name wrongly:
+//
+//	var refused *TodoAttachmentSearchError
+//	if errors.As(err, &refused) && refused.Fields.Filter != nil {
+//
+// errors.As reaches the rigclient.Error underneath it too, so
+// rigclient.IsInvalid and the rest answer about it unchanged.
+type TodoAttachmentSearchError = rigclient.Failure[TodoAttachmentSearchFields]
 
 // TodoAttachmentSearchQuery is the query for TodoAttachment.Search.
 //
@@ -99,14 +141,12 @@ type TodoAttachmentUpdateInput struct {
 	Position patch.Optional[int] `json:"position,omitzero"`
 }
 
-// TodoAttachmentUpdateFields is what a validation failure on a
-// TodoAttachmentUpdateInput says, shaped like the input it is about — one
-// member per member, so each message can be put beside the control it belongs
-// to.
+// TodoAttachmentUpdateFields is what a validation failure says, shaped like
+// the body it is about — one member per member, so each message can be put
+// beside the control it belongs to.
 //
-// It is read out of a failed call with
-// rigclient.FieldsAs[TodoAttachmentUpdateFields], and a member is nil when
-// there was nothing wrong with that field.
+// A member is nil when there was nothing wrong with that field. It arrives as
+// the Fields of the error the call returns.
 type TodoAttachmentUpdateFields struct {
 	TodoID           *rigerr.FieldError `json:"todoId,omitempty"`
 	AttachmentFileID *rigerr.FieldError `json:"attachmentFileId,omitempty"`
@@ -116,3 +156,18 @@ type TodoAttachmentUpdateFields struct {
 	// any one field.
 	Entity *rigerr.FieldError `json:"entity,omitempty"`
 }
+
+// TodoAttachmentUpdateError is what a refused TodoAttachments.Update comes
+// back as: the envelope the server sent — Code, Message, RequestID, Status
+// — with the per-field detail decoded into a [TodoAttachmentUpdateFields]
+// rather than left as bytes.
+//
+// It is the error the method returns, so there is nothing to name and nothing
+// to name wrongly:
+//
+//	var refused *TodoAttachmentUpdateError
+//	if errors.As(err, &refused) && refused.Fields.TodoID != nil {
+//
+// errors.As reaches the rigclient.Error underneath it too, so
+// rigclient.IsInvalid and the rest answer about it unchanged.
+type TodoAttachmentUpdateError = rigclient.Failure[TodoAttachmentUpdateFields]

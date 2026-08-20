@@ -7,6 +7,7 @@ package client
 import (
 	"time"
 
+	"github.com/simonjanss/rig/rigclient"
 	"github.com/simonjanss/rig/runtime/patch"
 	"github.com/simonjanss/rig/runtime/rigerr"
 	"github.com/simonjanss/rig/runtime/tenancy"
@@ -42,12 +43,12 @@ type NoteCreateInput struct {
 	PublishAt *time.Time `json:"publishAt,omitempty"`
 }
 
-// NoteCreateFields is what a validation failure on a NoteCreateInput says,
-// shaped like the input it is about — one member per member, so each message
-// can be put beside the control it belongs to.
+// NoteCreateFields is what a validation failure says, shaped like the body it
+// is about — one member per member, so each message can be put beside the
+// control it belongs to.
 //
-// It is read out of a failed call with rigclient.FieldsAs[NoteCreateFields],
-// and a member is nil when there was nothing wrong with that field.
+// A member is nil when there was nothing wrong with that field. It arrives as
+// the Fields of the error the call returns.
 type NoteCreateFields struct {
 	Title     *rigerr.FieldError `json:"title,omitempty"`
 	Body      *rigerr.FieldError `json:"body,omitempty"`
@@ -57,11 +58,52 @@ type NoteCreateFields struct {
 	Entity *rigerr.FieldError `json:"entity,omitempty"`
 }
 
+// NoteCreateError is what a refused Notes.Create comes back as: the envelope
+// the server sent — Code, Message, RequestID, Status — with the per-field
+// detail decoded into a [NoteCreateFields] rather than left as bytes.
+//
+// It is the error the method returns, so there is nothing to name and nothing
+// to name wrongly:
+//
+//	var refused *NoteCreateError
+//	if errors.As(err, &refused) && refused.Fields.Title != nil {
+//
+// errors.As reaches the rigclient.Error underneath it too, so
+// rigclient.IsInvalid and the rest answer about it unchanged.
+type NoteCreateError = rigclient.Failure[NoteCreateFields]
+
 // NoteSearchBody is the request body for Note.Search.
 type NoteSearchBody struct {
 	// Conditions rows must satisfy.
 	Filter NoteFilter `json:"filter"`
 }
+
+// NoteSearchFields is what a validation failure says, shaped like the body it
+// is about — one member per member, so each message can be put beside the
+// control it belongs to.
+//
+// A member is nil when there was nothing wrong with that field. It arrives as
+// the Fields of the error the call returns.
+type NoteSearchFields struct {
+	Filter *rigerr.FieldError `json:"filter,omitempty"`
+	// Entity carries what was wrong with the request as a whole rather than with
+	// any one field.
+	Entity *rigerr.FieldError `json:"entity,omitempty"`
+}
+
+// NoteSearchError is what a refused Notes.Search comes back as: the envelope
+// the server sent — Code, Message, RequestID, Status — with the per-field
+// detail decoded into a [NoteSearchFields] rather than left as bytes.
+//
+// It is the error the method returns, so there is nothing to name and nothing
+// to name wrongly:
+//
+//	var refused *NoteSearchError
+//	if errors.As(err, &refused) && refused.Fields.Filter != nil {
+//
+// errors.As reaches the rigclient.Error underneath it too, so
+// rigclient.IsInvalid and the rest answer about it unchanged.
+type NoteSearchError = rigclient.Failure[NoteSearchFields]
 
 // NoteSearchQuery is the query for Note.Search.
 //
@@ -123,12 +165,12 @@ type NoteUpdateInput struct {
 	PublishAt patch.Nullable[time.Time] `json:"publishAt,omitzero"`
 }
 
-// NoteUpdateFields is what a validation failure on a NoteUpdateInput says,
-// shaped like the input it is about — one member per member, so each message
-// can be put beside the control it belongs to.
+// NoteUpdateFields is what a validation failure says, shaped like the body it
+// is about — one member per member, so each message can be put beside the
+// control it belongs to.
 //
-// It is read out of a failed call with rigclient.FieldsAs[NoteUpdateFields],
-// and a member is nil when there was nothing wrong with that field.
+// A member is nil when there was nothing wrong with that field. It arrives as
+// the Fields of the error the call returns.
 type NoteUpdateFields struct {
 	Title     *rigerr.FieldError `json:"title,omitempty"`
 	Body      *rigerr.FieldError `json:"body,omitempty"`
@@ -137,3 +179,17 @@ type NoteUpdateFields struct {
 	// any one field.
 	Entity *rigerr.FieldError `json:"entity,omitempty"`
 }
+
+// NoteUpdateError is what a refused Notes.Update comes back as: the envelope
+// the server sent — Code, Message, RequestID, Status — with the per-field
+// detail decoded into a [NoteUpdateFields] rather than left as bytes.
+//
+// It is the error the method returns, so there is nothing to name and nothing
+// to name wrongly:
+//
+//	var refused *NoteUpdateError
+//	if errors.As(err, &refused) && refused.Fields.Title != nil {
+//
+// errors.As reaches the rigclient.Error underneath it too, so
+// rigclient.IsInvalid and the rest answer about it unchanged.
+type NoteUpdateError = rigclient.Failure[NoteUpdateFields]

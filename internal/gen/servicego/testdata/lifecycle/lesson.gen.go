@@ -6,8 +6,10 @@ package api
 
 import (
 	"rigtest/model"
+	"strings"
 
 	"github.com/google/uuid"
+	"github.com/simonjanss/rig/runtime/rigerr"
 )
 
 // A page of Lessons.
@@ -42,6 +44,54 @@ type LessonSearchBody struct {
 	// Conditions rows must satisfy.
 	Filter model.LessonFilter `json:"filter"`
 }
+
+// LessonSearchBodyError says what was wrong with each field of a
+// LessonSearchBody.
+//
+// Its shape is the body's shape, so a client can attach every message to the
+// field it is about without matching on strings. A member is nil when that
+// field was fine, and the whole value is nil when the body was. It is what the
+// 422 carries, and returning one from Lesson.Search is how that endpoint
+// refuses a field rather than a request.
+type LessonSearchBodyError struct {
+	// Conditions rows must satisfy.
+	Filter *rigerr.FieldError `json:"filter,omitempty"`
+
+	// Entity is a problem with the body as a whole rather than with one field.
+	Entity *rigerr.FieldError `json:"entity,omitempty"`
+}
+
+// Empty reports whether anything went wrong. A validator that found nothing
+// returns nil rather than one of these.
+func (e *LessonSearchBodyError) Empty() bool {
+	if e == nil {
+		return true
+	}
+
+	return e.Filter == nil && e.Entity == nil
+}
+
+// Error implements error. The sentence is for logs and for a person; the
+// structure above is what a client acts on.
+func (e *LessonSearchBodyError) Error() string {
+	var parts []string
+	if e.Filter != nil {
+		parts = append(parts, "filter "+e.Filter.Error())
+	}
+	if e.Entity != nil {
+		parts = append(parts, e.Entity.Error())
+	}
+
+	return "the request is not valid: " + strings.Join(parts, "; ")
+}
+
+// ErrorCode implements [rigerr.Coder]: the request was understood and its
+// content is what is wrong, which is 422 and not 400.
+func (e *LessonSearchBodyError) ErrorCode() rigerr.Code { return rigerr.CodeUnprocessableEntity }
+
+// ErrorFields implements [rigerr.FieldReporter], which is how the HTTP layer
+// finds this and answers with it rather than with prose.
+func (e *LessonSearchBodyError) ErrorFields() any { return e }
 
 // Query parameters for Lesson.ListDeleted.
 type LessonListDeletedQuery struct {
@@ -81,6 +131,54 @@ type LessonPublishBody struct {
 	NotifyGuardians bool `json:"notifyGuardians"`
 }
 
+// LessonPublishBodyError says what was wrong with each field of a
+// LessonPublishBody.
+//
+// Its shape is the body's shape, so a client can attach every message to the
+// field it is about without matching on strings. A member is nil when that
+// field was fine, and the whole value is nil when the body was. It is what the
+// 422 carries, and returning one from Lesson.Publish is how that endpoint
+// refuses a field rather than a request.
+type LessonPublishBodyError struct {
+	// Whether guardians are notified as well.
+	NotifyGuardians *rigerr.FieldError `json:"notifyGuardians,omitempty"`
+
+	// Entity is a problem with the body as a whole rather than with one field.
+	Entity *rigerr.FieldError `json:"entity,omitempty"`
+}
+
+// Empty reports whether anything went wrong. A validator that found nothing
+// returns nil rather than one of these.
+func (e *LessonPublishBodyError) Empty() bool {
+	if e == nil {
+		return true
+	}
+
+	return e.NotifyGuardians == nil && e.Entity == nil
+}
+
+// Error implements error. The sentence is for logs and for a person; the
+// structure above is what a client acts on.
+func (e *LessonPublishBodyError) Error() string {
+	var parts []string
+	if e.NotifyGuardians != nil {
+		parts = append(parts, "notifyGuardians "+e.NotifyGuardians.Error())
+	}
+	if e.Entity != nil {
+		parts = append(parts, e.Entity.Error())
+	}
+
+	return "the request is not valid: " + strings.Join(parts, "; ")
+}
+
+// ErrorCode implements [rigerr.Coder]: the request was understood and its
+// content is what is wrong, which is 422 and not 400.
+func (e *LessonPublishBodyError) ErrorCode() rigerr.Code { return rigerr.CodeUnprocessableEntity }
+
+// ErrorFields implements [rigerr.FieldReporter], which is how the HTTP layer
+// finds this and answers with it rather than with prose.
+func (e *LessonPublishBodyError) ErrorFields() any { return e }
+
 // Path parameters for Lesson.Restore.
 type LessonRestorePath struct {
 	// Identifier of the Lesson.
@@ -98,6 +196,54 @@ type LessonRevertBody struct {
 	// The version to put back, from the Lesson's history.
 	VersionID uuid.UUID `json:"versionId"`
 }
+
+// LessonRevertBodyError says what was wrong with each field of a
+// LessonRevertBody.
+//
+// Its shape is the body's shape, so a client can attach every message to the
+// field it is about without matching on strings. A member is nil when that
+// field was fine, and the whole value is nil when the body was. It is what the
+// 422 carries, and returning one from Lesson.Revert is how that endpoint
+// refuses a field rather than a request.
+type LessonRevertBodyError struct {
+	// The version to put back, from the Lesson's history.
+	VersionID *rigerr.FieldError `json:"versionId,omitempty"`
+
+	// Entity is a problem with the body as a whole rather than with one field.
+	Entity *rigerr.FieldError `json:"entity,omitempty"`
+}
+
+// Empty reports whether anything went wrong. A validator that found nothing
+// returns nil rather than one of these.
+func (e *LessonRevertBodyError) Empty() bool {
+	if e == nil {
+		return true
+	}
+
+	return e.VersionID == nil && e.Entity == nil
+}
+
+// Error implements error. The sentence is for logs and for a person; the
+// structure above is what a client acts on.
+func (e *LessonRevertBodyError) Error() string {
+	var parts []string
+	if e.VersionID != nil {
+		parts = append(parts, "versionId "+e.VersionID.Error())
+	}
+	if e.Entity != nil {
+		parts = append(parts, e.Entity.Error())
+	}
+
+	return "the request is not valid: " + strings.Join(parts, "; ")
+}
+
+// ErrorCode implements [rigerr.Coder]: the request was understood and its
+// content is what is wrong, which is 422 and not 400.
+func (e *LessonRevertBodyError) ErrorCode() rigerr.Code { return rigerr.CodeUnprocessableEntity }
+
+// ErrorFields implements [rigerr.FieldReporter], which is how the HTTP layer
+// finds this and answers with it rather than with prose.
+func (e *LessonRevertBodyError) ErrorFields() any { return e }
 
 // Path parameters for Lesson.Versions.
 type LessonVersionsPath struct {

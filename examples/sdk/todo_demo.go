@@ -172,20 +172,18 @@ func showValidationFailure(ctx context.Context, c *client.Client) error {
 		return err
 	}
 
-	// The failure is shaped like the input that failed, so each message can be
-	// put beside the control it belongs to rather than parsed out of a sentence.
-	fields, ok := rigclient.FieldsAs[client.TodoCreateFields](err)
-	if !ok {
+	// The failure is the call's own error: the envelope and the per-field detail
+	// in one value, shaped like the input that failed, so each message can be put
+	// beside the control it belongs to rather than parsed out of a sentence.
+	var refused *client.TodoCreateError
+	if !errors.As(err, &refused) {
 		return err
 	}
-	if fields.Title != nil {
-		detail("title: %s (%s)", fields.Title.Message, fields.Title.Code)
+	if refused.Fields.Title != nil {
+		detail("title: %s (%s)", refused.Fields.Title.Message, refused.Fields.Title.Code)
 	}
+	detail("code %s, status %d, request %s", refused.Code, refused.Status, refused.RequestID)
 
-	var e *rigclient.Error
-	if errors.As(err, &e) {
-		detail("code %s, status %d, request %s", e.Code, e.Status, e.RequestID)
-	}
 	if rigclient.CodeOf(err) != rigerr.CodeUnprocessableEntity {
 		return err
 	}

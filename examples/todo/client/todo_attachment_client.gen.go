@@ -52,13 +52,16 @@ func (c *TodoAttachmentClient) List(ctx context.Context, q TodoAttachmentListQue
 // POST /api/v1/todo-attachments
 //
 // Operation createTodoAttachment.
+//
+// A refusal comes back as a [TodoAttachmentCreateError], whose Fields say what
+// was wrong with each member of the body.
 func (c *TodoAttachmentClient) Create(ctx context.Context, in TodoAttachmentCreateInput, opts ...rigclient.CallOption) (*TodoAttachment, error) {
 	op := rigclient.Op{
 		Method: http.MethodPost,
 		Path:   "/todo-attachments",
 		Body:   in,
 	}
-	return rigclient.Do[TodoAttachment](ctx, c.rt, op, opts...)
+	return rigclient.DoTyped[TodoAttachment, TodoAttachmentCreateFields](ctx, c.rt, op, opts...)
 }
 
 // Search TodoAttachments with filters.
@@ -68,6 +71,9 @@ func (c *TodoAttachmentClient) Create(ctx context.Context, in TodoAttachmentCrea
 // refuses the method. The fallback is remembered, so it is tried once.
 //
 // Operation searchTodoAttachments.
+//
+// A refusal comes back as a [TodoAttachmentSearchError], whose Fields say what
+// was wrong with each member of the body.
 func (c *TodoAttachmentClient) Search(ctx context.Context, filter TodoAttachmentFilter, q TodoAttachmentSearchQuery, opts ...rigclient.CallOption) (*TodoAttachmentListResponse, error) {
 	query := url.Values{}
 	rigclient.SetInt(query, "limit", q.Limit)
@@ -80,7 +86,7 @@ func (c *TodoAttachmentClient) Search(ctx context.Context, filter TodoAttachment
 		Body:     TodoAttachmentSearchBody{Filter: filter},
 		Fallback: "/todo-attachments/_search",
 	}
-	return rigclient.Do[TodoAttachmentListResponse](ctx, c.rt, op, opts...)
+	return rigclient.DoTyped[TodoAttachmentListResponse, TodoAttachmentSearchFields](ctx, c.rt, op, opts...)
 }
 
 // List retired TodoAttachments.
@@ -143,13 +149,16 @@ func (c *TodoAttachmentClient) Get(ctx context.Context, id uuid.UUID, opts ...ri
 // PATCH /api/v1/todo-attachments/{id}
 //
 // Operation updateTodoAttachment.
+//
+// A refusal comes back as a [TodoAttachmentUpdateError], whose Fields say what
+// was wrong with each member of the body.
 func (c *TodoAttachmentClient) Update(ctx context.Context, id uuid.UUID, in TodoAttachmentUpdateInput, opts ...rigclient.CallOption) (*TodoAttachment, error) {
 	op := rigclient.Op{
 		Method: http.MethodPatch,
 		Path:   strings.Replace("/todo-attachments/{id}", "{id}", rigclient.PathValue(id.String()), 1),
 		Body:   in,
 	}
-	return rigclient.Do[TodoAttachment](ctx, c.rt, op, opts...)
+	return rigclient.DoTyped[TodoAttachment, TodoAttachmentUpdateFields](ctx, c.rt, op, opts...)
 }
 
 // Bring a retired TodoAttachment back.
@@ -256,7 +265,7 @@ func (c *TodoAttachmentClient) DownloadAttachmentFile(ctx context.Context, id uu
 // The row and the bytes are committed together, so a create that fails leaves
 // neither. The JSON body travels as a part named "json", which is the same
 // body Create sends and goes through the same validation — a 422 comes back
-// with the same field errors.
+// as the same [TodoAttachmentCreateError].
 //
 // Bound the call: the default thirty-second client timeout covers the whole
 // exchange, and this one carries files.
@@ -274,7 +283,7 @@ func (c *TodoAttachmentClient) CreateWithFiles(ctx context.Context, in TodoAttac
 
 	op.Multipart.Files = append(op.Multipart.Files, rigclient.Part("attachmentFile", files.AttachmentFile))
 
-	return rigclient.Do[TodoAttachment](ctx, c.rt, op, opts...)
+	return rigclient.DoTyped[TodoAttachment, TodoAttachmentCreateFields](ctx, c.rt, op, opts...)
 }
 
 // All reads every TodoAttachment the query matches, a page at a time.

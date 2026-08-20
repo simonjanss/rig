@@ -285,15 +285,24 @@ func TestClientValidationFailureIsTyped(t *testing.T) {
 		t.Fatalf("err = %v, want a validation failure", err)
 	}
 
-	fields, ok := rigclient.FieldsAs[client.TodoCreateFields](err)
-	if !ok {
-		t.Fatal("the failure carried no field errors")
+	var refused *client.TodoCreateError
+	if !errors.As(err, &refused) {
+		t.Fatalf("err = %v, want the error Create says it returns", err)
 	}
-	if fields.Title == nil {
-		t.Fatalf("nothing was said about the title: %+v", fields)
+	if refused.Fields.Title == nil {
+		t.Fatalf("nothing was said about the title: %+v", refused.Fields)
 	}
-	if fields.Title.Code != rigerr.FieldCodeCannotBeEmpty {
-		t.Errorf("title code = %q, want CannotBeEmpty", fields.Title.Code)
+	if refused.Fields.Title.Code != rigerr.FieldCodeCannotBeEmpty {
+		t.Errorf("title code = %q, want CannotBeEmpty", refused.Fields.Title.Code)
+	}
+
+	// The envelope rides on the same value, which is the difference between one
+	// match and two. The request id is empty here because this server sets no
+	// RequestID hook, and that is the server's choice rather than the client's.
+	if refused.Code != rigerr.CodeUnprocessableEntity ||
+		refused.Status != http.StatusUnprocessableEntity {
+		t.Errorf("code = %q, status = %d, want both off the same value",
+			refused.Code, refused.Status)
 	}
 }
 

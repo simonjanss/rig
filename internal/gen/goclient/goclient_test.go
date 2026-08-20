@@ -212,6 +212,62 @@ func TestAValidationFailureHasAShape(t *testing.T) {
 			t.Errorf("missing %s:\n%s", want, fields)
 		}
 	}
+
+	// A custom endpoint's body can be refused the same way, and used not to be —
+	// which left the one endpoint a project wrote itself as the one whose client
+	// had to parse prose.
+	body, ok := between(src, "type LessonPublishFields struct {", "\n}")
+	if !ok {
+		t.Fatalf("no LessonPublishFields:\n%s", src)
+	}
+	if !strings.Contains(collapse(body), collapse(
+		"NotifyGuardians *rigerr.FieldError `json:\"notifyGuardians,omitempty\"`")) {
+		t.Errorf("the custom body's shape is not mirrored:\n%s", body)
+	}
+}
+
+// The shape alone still has to be named by hand, and naming the wrong one is not
+// an error: every member is optional, so the wrong shape decodes into an empty
+// one. The call's own error type is what removes the choice.
+func TestEveryCallWithABodySaysHowItFails(t *testing.T) {
+	t.Parallel()
+
+	input := find(t, "lesson_input.gen.go")
+	for _, want := range []string{
+		"type LessonCreateError = rigclient.Failure[LessonCreateFields]",
+		"type LessonUpdateError = rigclient.Failure[LessonUpdateFields]",
+		"type LessonPublishError = rigclient.Failure[LessonPublishFields]",
+		"type LessonSearchError = rigclient.Failure[LessonSearchFields]",
+	} {
+		if !strings.Contains(collapse(input), collapse(want)) {
+			t.Errorf("missing %s:\n%s", want, input)
+		}
+	}
+
+	// And the method returns it, which is the whole of what ties the two
+	// together — a type declared and never returned would be documentation.
+	client := find(t, "lesson_client.gen.go")
+	for _, want := range []string{
+		"return rigclient.DoTyped[Lesson, LessonCreateFields](ctx, c.rt, op, opts...)",
+		"return rigclient.DoTyped[Lesson, LessonUpdateFields](ctx, c.rt, op, opts...)",
+		"return rigclient.DoTyped[LessonListResponse, LessonSearchFields](ctx, c.rt, op, opts...)",
+	} {
+		if !strings.Contains(collapse(client), collapse(want)) {
+			t.Errorf("missing %s:\n%s", want, client)
+		}
+	}
+
+	// A read sends no body, so there is nothing for it to be wrong about. A type
+	// per endpoint that says nothing would bury the ones that say something.
+	get, _ := between(client, "func (c *LessonClient) Get(", "\n}")
+	if !strings.Contains(collapse(get), "rigclient.Do[Lesson](") {
+		t.Errorf("a call with no body should stay untyped:\n%s", get)
+	}
+	for _, gone := range []string{"LessonGetError", "LessonGetFields", "LessonListFields"} {
+		if strings.Contains(input, gone) || strings.Contains(client, gone) {
+			t.Errorf("%s exists, and there is no body for it to be about", gone)
+		}
+	}
 }
 
 // The error vocabulary is rigerr's, so a program talking to two rig APIs

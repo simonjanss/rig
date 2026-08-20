@@ -27,6 +27,15 @@ func (e *emitter) inputFile(res *ir.Resource) (gen.Artifact, error) {
 			e.bodyStruct(b, res, ep)
 		}
 
+		// Every endpoint that sends a body says how that body can be wrong, and
+		// says it in one place rather than once per operation that happens to
+		// have one — a create covered and a custom endpoint not is the gap this
+		// closes.
+		if name := fieldsTypeName(res, ep); name != "" {
+			e.fieldErrors(b, name, ep.Request.BodyParams)
+			e.callError(b, res, ep)
+		}
+
 		if len(ep.Request.QueryParams) > 0 {
 			e.queryStruct(b, res, ep)
 		}
@@ -47,8 +56,6 @@ func (e *emitter) createInput(b *gobuf.Buf, res *ir.Resource, ep *ir.Endpoint) {
 	e.structFields(b, ep.Request.BodyParams)
 	b.L("}")
 	b.NL()
-
-	e.fieldErrors(b, name, ep.Request.BodyParams)
 }
 
 // updateInput emits the body of a PATCH.
@@ -81,8 +88,6 @@ func (e *emitter) updateInput(b *gobuf.Buf, res *ir.Resource, ep *ir.Endpoint) {
 	}
 	b.L("}")
 	b.NL()
-
-	e.fieldErrors(b, name, ep.Request.BodyParams)
 }
 
 // bodyStruct emits the body of an endpoint that has one of its own — a custom
@@ -142,20 +147,19 @@ func pointerTo(t string) string {
 	return "*" + t
 }
 
-// fieldErrors emits the shape a 422 for this input arrives in.
+// fieldErrors emits the shape a 422 for this body arrives in.
 //
-// One member per input member, so a client can put each message beside the
-// control it belongs to. Read with rigclient.FieldsAs, which is the only way the
-// generic Fields on an error becomes something typed.
-func (e *emitter) fieldErrors(b *gobuf.Buf, input string, fields []ir.Field) {
-	name := strings.TrimSuffix(input, "Input") + "Fields"
+// One member per body member, so a client can put each message beside the
+// control it belongs to. It is reached through the error the call returns rather
+// than named directly — see callError, which declares that error.
+func (e *emitter) fieldErrors(b *gobuf.Buf, name string, fields []ir.Field) {
 	rigerr := b.Import(genutil.RuntimeModule + "/rigerr")
 
-	b.Comment(name + " is what a validation failure on a " + input + " says, " +
-		"shaped like the input it is about — one member per member, so each " +
-		"message can be put beside the control it belongs to.\n\n" +
-		"It is read out of a failed call with rigclient.FieldsAs[" + name + "], " +
-		"and a member is nil when there was nothing wrong with that field.")
+	b.Comment(name + " is what a validation failure says, shaped like the body it " +
+		"is about — one member per member, so each message can be put beside the " +
+		"control it belongs to.\n\n" +
+		"A member is nil when there was nothing wrong with that field. It arrives " +
+		"as the Fields of the error the call returns.")
 	b.L("type %s struct {", name)
 	for _, f := range fields {
 		b.L("%s *%s.FieldError `json:%s`", f.Name, rigerr, gobuf.Quote(f.Wire+",omitempty"))
@@ -165,4 +169,47 @@ func (e *emitter) fieldErrors(b *gobuf.Buf, input string, fields []ir.Field) {
 	b.L("Entity *%s.FieldError `json:\"entity,omitempty\"`", rigerr)
 	b.L("}")
 	b.NL()
+}
+
+// callError emits the error one call comes back as.
+//
+// The whole of the failure in one value: the envelope the server sent, and the
+// per-field detail already decoded into the shape above. It is an alias rather
+// than a struct of its own so that there is one definition of what a refusal is
+// — rigclient.Failure — and one place its unwrapping is tested, instead of a
+// copy per endpoint per project.
+//
+// The name is the method's, so nothing has to be named by hand at the call site.
+// That is the point of it: rigclient.FieldsAs asks the caller for the shape, and
+// naming the wrong one is not an error — every member of a field shape is
+// optional, so the wrong shape decodes into an empty one and reports success.
+func (e *emitter) callError(b *gobuf.Buf, res *ir.Resource, ep *ir.Endpoint) {
+	var (
+		name   = errorTypeName(res, ep)
+		fields = fieldsTypeName(res, ep)
+		rig    = e.client(b)
+		call   = res.Plural + "." + ep.Impl.ServiceMethod
+	)
+
+	b.Comment(name + " is what a refused " + call + " comes back as: the envelope " +
+		"the server sent — Code, Message, RequestID, Status — with the per-field " +
+		"detail decoded into a [" + fields + "] rather than left as bytes.\n\n" +
+		"It is the error the method returns, so there is nothing to name and " +
+		"nothing to name wrongly:\n\n" +
+		"\tvar refused *" + name + "\n" +
+		"\tif errors.As(err, &refused) && refused.Fields." + firstFieldName(ep) +
+		" != nil {\n\n" +
+		"errors.As reaches the rigclient.Error underneath it too, so " +
+		"rigclient.IsInvalid and the rest answer about it unchanged.")
+	b.L("type %s = %s.Failure[%s]", name, rig, fields)
+	b.NL()
+}
+
+// firstFieldName is a member to show in the example on a call's error, so that
+// the comment reads as code somebody could have written rather than as a shape.
+func firstFieldName(ep *ir.Endpoint) string {
+	if len(ep.Request.BodyParams) > 0 {
+		return ep.Request.BodyParams[0].Name
+	}
+	return "Entity"
 }

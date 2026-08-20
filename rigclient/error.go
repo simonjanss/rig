@@ -32,7 +32,11 @@ type Error struct {
 	RequestID string
 	// Fields is present when the failure was validation, and is shaped like the
 	// request body that failed — one member per field, holding what was wrong
-	// with it. Read it with [FieldsAs].
+	// with it.
+	//
+	// These are the bytes. A call made through a generated method comes back as
+	// that method's own error — client.TodoCreateError, which is a [Failure] —
+	// and has them decoded already. [FieldsAs] is for a call made by hand.
 	Fields json.RawMessage
 	// RetryAfter is how long the server asked the caller to wait, from the
 	// header of the same name. Zero when it said nothing.
@@ -65,6 +69,86 @@ func (e *Error) Error() string {
 	return b.String()
 }
 
+// Refusal is [Error] under a second name, for embedding.
+//
+// A struct that embedded *Error would get a field called Error, and a field at
+// depth zero shadows the promoted method of the same name — so the struct would
+// carry a refusal without being one. The alias is the whole of the fix: the
+// field is called Refusal, Error stays a method, and there is still one error
+// type rather than two that have to be kept in step.
+type Refusal = Error
+
+// Failure is a refused call whose per-field detail has already been decoded.
+//
+// F is the generated shape of the body that went out, so client.TodoCreateError
+// is a Failure[client.TodoCreateFields] and the caller never names the shape —
+// the method that failed named it. Naming it by hand is what [FieldsAs] asks
+// for, and it is the reason this exists: the wrong shape decodes perfectly and
+// answers with an empty struct, because every member of a field-error shape is
+// optional.
+//
+// The envelope is embedded, so Code, Message, RequestID, Status and RetryAfter
+// read exactly as they do on [Error]:
+//
+//	var refused *client.TodoCreateError
+//	if errors.As(err, &refused) && refused.Fields.Title != nil {
+//		form.Title.Problem = refused.Fields.Title.Message
+//	}
+type Failure[F any] struct {
+	*Refusal
+
+	// Fields is what was wrong with each member of the body, and is the zero
+	// value when the failure was not about the body. A 404 from a call that has
+	// one is still this type: an error that changed shape with the status would
+	// have to be matched twice.
+	//
+	// It shadows [Error.Fields], which is the point — the typed value is what a
+	// caller wants, and the bytes are still under Refusal for anything that
+	// wants those.
+	Fields F
+
+	// cause is the error as it arrived, which is not always the refusal alone:
+	// an upload that cannot be rewound arrives joined with [ErrCannotRetry], and
+	// unwrapping to the refusal would drop half of it.
+	cause error
+}
+
+// Unwrap returns what this was built from, so errors.As still reaches [Error]
+// and [CodeOf], [FieldsAs] and the Is predicates keep working unchanged.
+//
+// The fallback matters: a Failure built by hand — which is what a caller
+// stubbing a client will write — has no cause, and without it errors.As would
+// answer nothing about a value that plainly is a refusal.
+func (f *Failure[F]) Unwrap() error {
+	if f.cause != nil {
+		return f.cause
+	}
+	return f.Refusal
+}
+
+// typed re-reports a refusal as the failure for the call that was made.
+//
+// Anything that is not a refusal is returned as it arrived. A request that never
+// reached the server has no envelope to type, and wrapping it would produce a
+// Failure with no Refusal in it — whose promoted Error panics the first time
+// anything prints it.
+func typed[F any](err error) error {
+	var e *Error
+	if err == nil || !errors.As(err, &e) {
+		return err
+	}
+
+	f := &Failure[F]{Refusal: e, cause: err}
+	if len(e.Fields) > 0 {
+		// A body that does not fit the shape leaves the zero value and the raw
+		// bytes where they were. Skew between a client and a server is not a
+		// reason to lose the code and the message as well, which is what
+		// reporting the decode failure instead would do.
+		_ = json.Unmarshal(e.Fields, &f.Fields)
+	}
+	return f
+}
+
 // FieldsAs decodes the per-field failures into the generated shape for the input
 // that failed — TodoCreateFields, say, whose members are the input's members.
 //
@@ -73,6 +157,11 @@ func (e *Error) Error() string {
 //	if fields, ok := rigclient.FieldsAs[client.TodoCreateFields](err); ok {
 //
 // reads as the question it is.
+//
+// This is for a call made by hand through a generated client's Runtime, where
+// nothing chose a shape. A generated method chose one: it fails as a [Failure]
+// that already holds the decoded value, and reaching for that with errors.As
+// cannot name the wrong input by mistake, which this can.
 func FieldsAs[T any](err error) (T, bool) {
 	var out T
 

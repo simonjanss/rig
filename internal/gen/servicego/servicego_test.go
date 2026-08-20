@@ -629,6 +629,52 @@ func TestTheSearchBodyIsTheModelsFilter(t *testing.T) {
 	}
 }
 
+// A custom endpoint refuses a field the same way a create does, or its client
+// has to parse prose for the one endpoint the generator did not cover. Nothing
+// generated returns one — only the service knows what its own body means — so
+// what is emitted is the shape and the four methods that let it be returned.
+func TestACustomBodySaysWhatWasWrongWithIt(t *testing.T) {
+	t.Parallel()
+
+	doc := gentest.LoadDocument(t, filepath.Join("testdata", fixture))
+	types := find(t, gentest.Run(t, servicego.New(), doc, opts()), "lesson.gen.go")
+
+	fields, ok := between(types, "type LessonPublishBodyError struct {", "\n}")
+	if !ok {
+		t.Fatalf("no LessonPublishBodyError:\n%s", types)
+	}
+	for _, want := range []string{
+		"NotifyGuardians *rigerr.FieldError `json:\"notifyGuardians,omitempty\"`",
+		"Entity *rigerr.FieldError `json:\"entity,omitempty\"`",
+	} {
+		if !strings.Contains(collapse(fields), collapse(want)) {
+			t.Errorf("missing %s:\n%s", want, fields)
+		}
+	}
+
+	// The four that make it an error the HTTP layer can answer with. Without
+	// ErrorFields the 422 carries a sentence and nothing else, which is the
+	// failure this whole shape exists to avoid.
+	for _, want := range []string{
+		"func (e *LessonPublishBodyError) Empty() bool",
+		"func (e *LessonPublishBodyError) Error() string",
+		"func (e *LessonPublishBodyError) ErrorCode() rigerr.Code",
+		"func (e *LessonPublishBodyError) ErrorFields() any",
+	} {
+		if !strings.Contains(collapse(types), collapse(want)) {
+			t.Errorf("missing %s:\n%s", want, types)
+		}
+	}
+
+	// The model's inputs have their own, in the model package. A second one here
+	// would be two structs for one body.
+	for _, gone := range []string{"type LessonCreateBodyError", "type LessonUpdateBodyError"} {
+		if strings.Contains(types, gone) {
+			t.Errorf("%s should not exist: the model's input error covers it", gone)
+		}
+	}
+}
+
 // Pagination arrives as query parameters and the filter as a body, so they are
 // separate arguments to the repository. Reading them off the request rather
 // than out of the filter is what lets a client page a search it did not write.

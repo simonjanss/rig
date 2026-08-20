@@ -42,13 +42,16 @@ func (c *LessonClient) List(ctx context.Context, q LessonListQuery, opts ...rigc
 // POST /api/v1/lessons
 //
 // Operation createLesson.
+//
+// A refusal comes back as a [LessonCreateError], whose Fields say what was
+// wrong with each member of the body.
 func (c *LessonClient) Create(ctx context.Context, in LessonCreateInput, opts ...rigclient.CallOption) (*Lesson, error) {
 	op := rigclient.Op{
 		Method: http.MethodPost,
 		Path:   "/lessons",
 		Body:   in,
 	}
-	return rigclient.Do[Lesson](ctx, c.rt, op, opts...)
+	return rigclient.DoTyped[Lesson, LessonCreateFields](ctx, c.rt, op, opts...)
 }
 
 // Search Lessons with filters.
@@ -58,6 +61,9 @@ func (c *LessonClient) Create(ctx context.Context, in LessonCreateInput, opts ..
 // remembered, so it is tried once.
 //
 // Operation searchLessons.
+//
+// A refusal comes back as a [LessonSearchError], whose Fields say what was
+// wrong with each member of the body.
 func (c *LessonClient) Search(ctx context.Context, filter LessonFilter, q LessonSearchQuery, opts ...rigclient.CallOption) (*LessonListResponse, error) {
 	query := url.Values{}
 	rigclient.SetInt(query, "limit", q.Limit)
@@ -70,7 +76,7 @@ func (c *LessonClient) Search(ctx context.Context, filter LessonFilter, q Lesson
 		Body:     LessonSearchBody{Filter: filter},
 		Fallback: "/lessons/_search",
 	}
-	return rigclient.Do[LessonListResponse](ctx, c.rt, op, opts...)
+	return rigclient.DoTyped[LessonListResponse, LessonSearchFields](ctx, c.rt, op, opts...)
 }
 
 // List retired Lessons.
@@ -133,13 +139,16 @@ func (c *LessonClient) Get(ctx context.Context, id uuid.UUID, opts ...rigclient.
 // PATCH /api/v1/lessons/{id}
 //
 // Operation updateLesson.
+//
+// A refusal comes back as a [LessonUpdateError], whose Fields say what was
+// wrong with each member of the body.
 func (c *LessonClient) Update(ctx context.Context, id uuid.UUID, in LessonUpdateInput, opts ...rigclient.CallOption) (*Lesson, error) {
 	op := rigclient.Op{
 		Method: http.MethodPatch,
 		Path:   strings.Replace("/lessons/{id}", "{id}", rigclient.PathValue(id.String()), 1),
 		Body:   in,
 	}
-	return rigclient.Do[Lesson](ctx, c.rt, op, opts...)
+	return rigclient.DoTyped[Lesson, LessonUpdateFields](ctx, c.rt, op, opts...)
 }
 
 // Publish the lesson to its participants.
@@ -147,13 +156,16 @@ func (c *LessonClient) Update(ctx context.Context, id uuid.UUID, in LessonUpdate
 // POST /api/v1/lessons/{id}/_publish
 //
 // Operation publishLesson.
+//
+// A refusal comes back as a [LessonPublishError], whose Fields say what was
+// wrong with each member of the body.
 func (c *LessonClient) Publish(ctx context.Context, id uuid.UUID, in LessonPublishBody, opts ...rigclient.CallOption) (*Lesson, error) {
 	op := rigclient.Op{
 		Method: http.MethodPost,
 		Path:   strings.Replace("/lessons/{id}/_publish", "{id}", rigclient.PathValue(id.String()), 1),
 		Body:   in,
 	}
-	return rigclient.Do[Lesson](ctx, c.rt, op, opts...)
+	return rigclient.DoTyped[Lesson, LessonPublishFields](ctx, c.rt, op, opts...)
 }
 
 // Bring a retired Lesson back.
@@ -196,13 +208,16 @@ func (c *LessonClient) Restore(ctx context.Context, id uuid.UUID, opts ...rigcli
 // POST /api/v1/lessons/{id}/_revert
 //
 // Operation revertLesson.
+//
+// A refusal comes back as a [LessonRevertError], whose Fields say what was
+// wrong with each member of the body.
 func (c *LessonClient) Revert(ctx context.Context, id uuid.UUID, in LessonRevertBody, opts ...rigclient.CallOption) (*Lesson, error) {
 	op := rigclient.Op{
 		Method: http.MethodPost,
 		Path:   strings.Replace("/lessons/{id}/_revert", "{id}", rigclient.PathValue(id.String()), 1),
 		Body:   in,
 	}
-	return rigclient.Do[Lesson](ctx, c.rt, op, opts...)
+	return rigclient.DoTyped[Lesson, LessonRevertFields](ctx, c.rt, op, opts...)
 }
 
 // List a Lesson's previous versions.

@@ -43,13 +43,16 @@ func (c *NoteClient) List(ctx context.Context, q NoteListQuery, opts ...rigclien
 // POST /api/v1/notes
 //
 // Operation createNote.
+//
+// A refusal comes back as a [NoteCreateError], whose Fields say what was wrong
+// with each member of the body.
 func (c *NoteClient) Create(ctx context.Context, in NoteCreateInput, opts ...rigclient.CallOption) (*Note, error) {
 	op := rigclient.Op{
 		Method: http.MethodPost,
 		Path:   "/notes",
 		Body:   in,
 	}
-	return rigclient.Do[Note](ctx, c.rt, op, opts...)
+	return rigclient.DoTyped[Note, NoteCreateFields](ctx, c.rt, op, opts...)
 }
 
 // Search Notes with filters.
@@ -59,6 +62,9 @@ func (c *NoteClient) Create(ctx context.Context, in NoteCreateInput, opts ...rig
 // remembered, so it is tried once.
 //
 // Operation searchNotes.
+//
+// A refusal comes back as a [NoteSearchError], whose Fields say what was wrong
+// with each member of the body.
 func (c *NoteClient) Search(ctx context.Context, filter NoteFilter, q NoteSearchQuery, opts ...rigclient.CallOption) (*NoteListResponse, error) {
 	query := url.Values{}
 	rigclient.SetInt(query, "limit", q.Limit)
@@ -72,7 +78,7 @@ func (c *NoteClient) Search(ctx context.Context, filter NoteFilter, q NoteSearch
 		Body:     NoteSearchBody{Filter: filter},
 		Fallback: "/notes/_search",
 	}
-	return rigclient.Do[NoteListResponse](ctx, c.rt, op, opts...)
+	return rigclient.DoTyped[NoteListResponse, NoteSearchFields](ctx, c.rt, op, opts...)
 }
 
 // List retired Notes.
@@ -140,13 +146,16 @@ func (c *NoteClient) Get(ctx context.Context, id uuid.UUID, q NoteGetQuery, opts
 // PATCH /api/v1/notes/{id}
 //
 // Operation updateNote.
+//
+// A refusal comes back as a [NoteUpdateError], whose Fields say what was wrong
+// with each member of the body.
 func (c *NoteClient) Update(ctx context.Context, id uuid.UUID, in NoteUpdateInput, opts ...rigclient.CallOption) (*Note, error) {
 	op := rigclient.Op{
 		Method: http.MethodPatch,
 		Path:   strings.Replace("/notes/{id}", "{id}", rigclient.PathValue(id.String()), 1),
 		Body:   in,
 	}
-	return rigclient.Do[Note](ctx, c.rt, op, opts...)
+	return rigclient.DoTyped[Note, NoteUpdateFields](ctx, c.rt, op, opts...)
 }
 
 // Bring a retired Note back.

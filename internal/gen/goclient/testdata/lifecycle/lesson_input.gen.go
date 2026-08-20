@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/simonjanss/rig/rigclient"
 	"github.com/simonjanss/rig/runtime/patch"
 	"github.com/simonjanss/rig/runtime/rigerr"
 )
@@ -45,12 +46,12 @@ type LessonCreateInput struct {
 	Tags []string `json:"tags,omitempty"`
 }
 
-// LessonCreateFields is what a validation failure on a LessonCreateInput says,
-// shaped like the input it is about — one member per member, so each message
-// can be put beside the control it belongs to.
+// LessonCreateFields is what a validation failure says, shaped like the body
+// it is about — one member per member, so each message can be put beside the
+// control it belongs to.
 //
-// It is read out of a failed call with rigclient.FieldsAs[LessonCreateFields],
-// and a member is nil when there was nothing wrong with that field.
+// A member is nil when there was nothing wrong with that field. It arrives as
+// the Fields of the error the call returns.
 type LessonCreateFields struct {
 	Title               *rigerr.FieldError `json:"title,omitempty"`
 	Notes               *rigerr.FieldError `json:"notes,omitempty"`
@@ -64,11 +65,54 @@ type LessonCreateFields struct {
 	Entity *rigerr.FieldError `json:"entity,omitempty"`
 }
 
+// LessonCreateError is what a refused Lessons.Create comes back as: the
+// envelope the server sent — Code, Message, RequestID, Status — with the
+// per-field detail decoded into a [LessonCreateFields] rather than left as
+// bytes.
+//
+// It is the error the method returns, so there is nothing to name and nothing
+// to name wrongly:
+//
+//	var refused *LessonCreateError
+//	if errors.As(err, &refused) && refused.Fields.Title != nil {
+//
+// errors.As reaches the rigclient.Error underneath it too, so
+// rigclient.IsInvalid and the rest answer about it unchanged.
+type LessonCreateError = rigclient.Failure[LessonCreateFields]
+
 // LessonSearchBody is the request body for Lesson.Search.
 type LessonSearchBody struct {
 	// Conditions rows must satisfy.
 	Filter LessonFilter `json:"filter"`
 }
+
+// LessonSearchFields is what a validation failure says, shaped like the body
+// it is about — one member per member, so each message can be put beside the
+// control it belongs to.
+//
+// A member is nil when there was nothing wrong with that field. It arrives as
+// the Fields of the error the call returns.
+type LessonSearchFields struct {
+	Filter *rigerr.FieldError `json:"filter,omitempty"`
+	// Entity carries what was wrong with the request as a whole rather than with
+	// any one field.
+	Entity *rigerr.FieldError `json:"entity,omitempty"`
+}
+
+// LessonSearchError is what a refused Lessons.Search comes back as: the
+// envelope the server sent — Code, Message, RequestID, Status — with the
+// per-field detail decoded into a [LessonSearchFields] rather than left as
+// bytes.
+//
+// It is the error the method returns, so there is nothing to name and nothing
+// to name wrongly:
+//
+//	var refused *LessonSearchError
+//	if errors.As(err, &refused) && refused.Fields.Filter != nil {
+//
+// errors.As reaches the rigclient.Error underneath it too, so
+// rigclient.IsInvalid and the rest answer about it unchanged.
+type LessonSearchError = rigclient.Failure[LessonSearchFields]
 
 // LessonSearchQuery is the query for Lesson.Search.
 //
@@ -115,12 +159,12 @@ type LessonUpdateInput struct {
 	Tags patch.Nullable[[]string] `json:"tags,omitzero"`
 }
 
-// LessonUpdateFields is what a validation failure on a LessonUpdateInput says,
-// shaped like the input it is about — one member per member, so each message
-// can be put beside the control it belongs to.
+// LessonUpdateFields is what a validation failure says, shaped like the body
+// it is about — one member per member, so each message can be put beside the
+// control it belongs to.
 //
-// It is read out of a failed call with rigclient.FieldsAs[LessonUpdateFields],
-// and a member is nil when there was nothing wrong with that field.
+// A member is nil when there was nothing wrong with that field. It arrives as
+// the Fields of the error the call returns.
 type LessonUpdateFields struct {
 	Title               *rigerr.FieldError `json:"title,omitempty"`
 	Notes               *rigerr.FieldError `json:"notes,omitempty"`
@@ -134,14 +178,85 @@ type LessonUpdateFields struct {
 	Entity *rigerr.FieldError `json:"entity,omitempty"`
 }
 
+// LessonUpdateError is what a refused Lessons.Update comes back as: the
+// envelope the server sent — Code, Message, RequestID, Status — with the
+// per-field detail decoded into a [LessonUpdateFields] rather than left as
+// bytes.
+//
+// It is the error the method returns, so there is nothing to name and nothing
+// to name wrongly:
+//
+//	var refused *LessonUpdateError
+//	if errors.As(err, &refused) && refused.Fields.Title != nil {
+//
+// errors.As reaches the rigclient.Error underneath it too, so
+// rigclient.IsInvalid and the rest answer about it unchanged.
+type LessonUpdateError = rigclient.Failure[LessonUpdateFields]
+
 // LessonPublishBody is the request body for Lesson.Publish.
 type LessonPublishBody struct {
 	// Whether guardians are notified as well.
 	NotifyGuardians bool `json:"notifyGuardians"`
 }
 
+// LessonPublishFields is what a validation failure says, shaped like the body
+// it is about — one member per member, so each message can be put beside the
+// control it belongs to.
+//
+// A member is nil when there was nothing wrong with that field. It arrives as
+// the Fields of the error the call returns.
+type LessonPublishFields struct {
+	NotifyGuardians *rigerr.FieldError `json:"notifyGuardians,omitempty"`
+	// Entity carries what was wrong with the request as a whole rather than with
+	// any one field.
+	Entity *rigerr.FieldError `json:"entity,omitempty"`
+}
+
+// LessonPublishError is what a refused Lessons.Publish comes back as: the
+// envelope the server sent — Code, Message, RequestID, Status — with the
+// per-field detail decoded into a [LessonPublishFields] rather than left as
+// bytes.
+//
+// It is the error the method returns, so there is nothing to name and nothing
+// to name wrongly:
+//
+//	var refused *LessonPublishError
+//	if errors.As(err, &refused) && refused.Fields.NotifyGuardians != nil {
+//
+// errors.As reaches the rigclient.Error underneath it too, so
+// rigclient.IsInvalid and the rest answer about it unchanged.
+type LessonPublishError = rigclient.Failure[LessonPublishFields]
+
 // LessonRevertBody is the request body for Lesson.Revert.
 type LessonRevertBody struct {
 	// The version to put back, from the Lesson's history.
 	VersionID uuid.UUID `json:"versionId"`
 }
+
+// LessonRevertFields is what a validation failure says, shaped like the body
+// it is about — one member per member, so each message can be put beside the
+// control it belongs to.
+//
+// A member is nil when there was nothing wrong with that field. It arrives as
+// the Fields of the error the call returns.
+type LessonRevertFields struct {
+	VersionID *rigerr.FieldError `json:"versionId,omitempty"`
+	// Entity carries what was wrong with the request as a whole rather than with
+	// any one field.
+	Entity *rigerr.FieldError `json:"entity,omitempty"`
+}
+
+// LessonRevertError is what a refused Lessons.Revert comes back as: the
+// envelope the server sent — Code, Message, RequestID, Status — with the
+// per-field detail decoded into a [LessonRevertFields] rather than left as
+// bytes.
+//
+// It is the error the method returns, so there is nothing to name and nothing
+// to name wrongly:
+//
+//	var refused *LessonRevertError
+//	if errors.As(err, &refused) && refused.Fields.VersionID != nil {
+//
+// errors.As reaches the rigclient.Error underneath it too, so
+// rigclient.IsInvalid and the rest answer about it unchanged.
+type LessonRevertError = rigclient.Failure[LessonRevertFields]

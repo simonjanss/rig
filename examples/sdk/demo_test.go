@@ -9,6 +9,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -195,15 +196,20 @@ func TestAValidationFailureDecodesIntoItsInputsShape(t *testing.T) {
 		t.Fatalf("err = %v, want a validation failure", err)
 	}
 
-	fields, ok := rigclient.FieldsAs[client.TodoCreateFields](err)
-	if !ok {
-		t.Fatal("the failure carried no field errors")
+	var refused *client.TodoCreateError
+	if !errors.As(err, &refused) {
+		t.Fatal("the failure is not the one Create says it returns")
 	}
-	if fields.Title == nil || fields.Title.Code != rigerr.FieldCodeCannotBeEmpty {
-		t.Fatalf("title = %+v, want CannotBeEmpty", fields.Title)
+	if refused.Fields.Title == nil ||
+		refused.Fields.Title.Code != rigerr.FieldCodeCannotBeEmpty {
+		t.Fatalf("title = %+v, want CannotBeEmpty", refused.Fields.Title)
 	}
-	if fields.Notes != nil {
+	if refused.Fields.Notes != nil {
 		t.Error("a field nobody complained about should be nil")
+	}
+	if refused.RequestID != "req-42" {
+		t.Errorf("request id = %q, want req-42: the envelope is on the same value",
+			refused.RequestID)
 	}
 }
 
