@@ -19,6 +19,7 @@ import (
 	"github.com/simonjanss/rig/auth/password"
 	"github.com/simonjanss/rig/auth/session"
 	"github.com/simonjanss/rig/runtime/rigerr"
+	"github.com/simonjanss/rig/runtime/serve"
 	"github.com/simonjanss/rig/runtime/throttle"
 )
 
@@ -137,6 +138,7 @@ func Config(pool *pgxpool.Pool, h Hooks) (auth.Config, error) {
 		OnSessionRefresh: h.OnSessionRefresh,
 		OnError:          h.OnError,
 		Limits:           limits(),
+		LogRetention:     90 * 24 * time.Hour,
 		Now:              h.Now,
 	}
 
@@ -204,4 +206,22 @@ func limits() throttle.Defaults {
 	d.Refresh.Max, d.Refresh.Window = 60, time.Minute
 	d.APIKeyFailures.Max, d.APIKeyFailures.Window = 20, time.Minute
 	return d
+}
+
+// AuthLogPruner deletes authentication log entries older than 90d, which is
+// `auth.log_retention` in rig.yaml.
+//
+// A task rather than a goroutine, so it is a subcommand in a cron job rather
+// than something every replica does at once to the table the whole
+// authentication path writes to. Register it in serve.Config.Tasks and run
+// `<binary> prune-auth-log`.
+//
+// The window is checked against the rate limits before the server starts,
+// because those limits are counted from this table: pruning inside one of
+// their windows would clear a lockout by deleting the failures it counts.
+func AuthLogPruner(front *auth.Auth) serve.Task {
+	return func(ctx context.Context, _ *pgxpool.Pool) error {
+		_, err := front.PruneLog(ctx)
+		return err
+	}
 }

@@ -154,7 +154,11 @@ All take `rig_at_`.
 |---|---|
 | `GET /auth/tenants` | — |
 | `POST /auth/tenants/{id}/switch` | — |
-| `GET /auth/sessions`, `DELETE /auth/sessions/{id}` | — |
+| `GET /auth/sessions`, `DELETE /auth/sessions/{id}` | — for your own |
+| `GET /auth/sessions?scope=all` | `session.read.all` |
+| `DELETE /auth/sessions/{id}?scope=all` | `session.revoke.all` |
+| `GET /auth/audit` | — for your own events |
+| `GET /auth/audit?scope=all` | `authlog.read.all` |
 | `POST /auth/accounts` | `account.provision` |
 | `GET /auth/invitations`, `DELETE /auth/invitations/{id}` | `account.provision` |
 | `GET /auth/api-keys`, `DELETE /auth/api-keys/{id}` | `apikey.own` (yours) or `apikey.manage` (anybody's) |
@@ -480,6 +484,14 @@ Decided in one place, which is what stops them drifting per endpoint.
 | **404** | The row belongs to another tenant, or to another person on an owner-scoped table. Not 403: a distinct "you may not see this" turns every identifier into an existence oracle. |
 | **429** | Any throttle or lockout, always with `Retry-After` and `RateLimit-*`. |
 
+**The 404 survives the widening.** `DELETE /auth/sessions/{id}` answers 404 for a
+session that is not yours, and it keeps answering 404 for a caller who holds
+`session.revoke.all` and names a session in another tenant — the same 404 an
+invented identifier gets. What the permission changes is which sessions you may
+end, never which ones you can find out about. Asking for `scope=all` without
+holding it is refused before the identifier is looked at, so even that 403 says
+nothing about whether the session exists.
+
 ---
 
 ## Rate limits
@@ -510,6 +522,98 @@ The lockout check runs **before** password verification, so a locked request
 neither burns an argon2 hash nor extends its own window. Login is padded to a
 configurable floor (750ms) so response time does not reveal whether an account
 exists.
+
+---
+
+## The authentication trail
+
+Every sign-in, failure, lockout, logout, refresh, replay, key use, impersonation,
+invitation and tenant switch is a row in `rig_auth_log` — twenty-two events,
+written by the foundation as they happen. Two endpoints read them, and which one
+you get depends on what you ask for:
+
+```
+GET /auth/audit                your own events         no permission
+GET /auth/audit?scope=all      the tenant's events     authlog.read.all
+```
+
+One endpoint and a parameter, not two endpoints. `scope` works here the way it
+works on every generated read: the caller says how wide an answer it wants, the
+response says what it got, and asking for more than you hold is a **403** rather
+than a quietly smaller result. A narrower answer would leave a client unable to
+tell "you may not see that" from "there is nothing else."
+
+Your own trail costs nothing to reach, because it is a screen every product
+eventually wants: *where have I signed in from, and did anything fail.* Without
+`scope=own` falling out of the same endpoint that would be a second route with a
+second shape and its own bugs.
+
+Filters, all optional, all refusing a value they do not understand rather than
+answering with fewer rows — a misspelled event that returned an empty page would
+read as "that never happened":
+
+| | |
+|---|---|
+| `accountId` | one person's events. Only with `scope=all`; naming somebody else without it is a 400 |
+| `event` | one of the recorded events. An unknown name is a 400 |
+| `outcome` | `Succeeded` or `Failed` |
+| `since`, `until` | RFC 3339 instants, `since` inclusive and `until` exclusive |
+| `limit`, `offset` | 50 by default, 500 at most |
+
+This is the one `/auth/*` endpoint that pages. The rest answer `{"data": […]}`,
+because a tenant's keys, invitations and tenants are a handful of rows; a trail is
+millions, so it answers `{"data": […], "pagination": {…}}` with the same three
+members and the same bounds every generated list uses. The generated Go client
+walks it with `Auth.AuditLogAll`.
+
+### What it does not show
+
+**The entries that resolved to no tenant.** A sign-in that named none, and an
+attempt against an address with no account anywhere, are both recorded with a null
+`tenant_id` — they are exactly what the rate limiter most needs to count — and no
+tenant can read them. The query is `tenant_id = $1` and nothing else. The tempting
+widening is to match on the email address instead, so a tenant sees failed attempts
+against its own people's addresses even when nobody named the tenant; that hands
+tenant A a record of tenant B's people typing their own addresses into a login
+form. A global view of those attempts is a real need and it is an operator's need:
+query the table.
+
+**Anything about a row.** This is authentication only — what happened to a
+credential. What happened to a row is [snapshots](schema.md), which replaced the
+audit log rig used to have.
+
+### Or expose the table instead
+
+`rig setup-project --expose rig_auth_log` gives you the log as an ordinary
+resource: a model, a repository, and `Get`, `List` and `Search` with the generated
+filters and live sync. Both answers stay, and the difference between them is the
+point. A generated read filters by tenant, so it cannot see the tenant-less rows
+**and has nowhere to explain that it cannot**. The endpoint excludes them
+deliberately, and this page is where it says so. Take the resource if you want the
+log as data; take the endpoint if you want the trail.
+
+### Retention
+
+Nothing prunes `rig_auth_log` unless you say so:
+
+```yaml
+auth:
+  log_retention: 90d
+```
+
+That writes an `AuthLogPruner` task into your API package. Register it in
+`serve.Config.Tasks` and it becomes a subcommand for a cron job — a job rather
+than a goroutine, because housekeeping that schedules itself inside the server is
+housekeeping every replica does at once, to the table the whole authentication
+path is writing to.
+
+> **The window has a floor, and rig refuses to go under it.** The rate limits are
+> counted from this table. A retention window shorter than the longest limit
+> window deletes the failures a lockout is adding up to — so the limiter goes on
+> answering "allowed" with nothing to say it has stopped working. `rig check`
+> refuses such a window naming the limit it would break, and `auth.New` refuses to
+> start on one assembled in Go. It is refused rather than quietly raised, because
+> a number changed behind your back is a number you cannot reason about later.
 
 ---
 
@@ -563,6 +667,12 @@ auth:
     login_by_ip: {max: 50, window: 15m}
 
   trusted_proxies: [10.0.0.0/8]        # empty believes no X-Forwarded-For
+
+  # How long an entry in the authentication trail is kept. Absent keeps
+  # everything, which is the default because how long a trail has to survive is
+  # a compliance question. Setting it writes a `prune-auth-log` subcommand; it
+  # cannot be shorter than the longest window above. See The authentication trail.
+  log_retention: 90d
 
   # Foundation tables to generate a model, a repository and an API for anyway —
   # for an administration screen listing the people in a tenant, most often. It

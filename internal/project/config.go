@@ -96,6 +96,20 @@ type Auth struct {
 	// one is a rate limit an attacker walks around.
 	TrustedProxies []string `yaml:"trusted_proxies,omitempty" json:"trusted_proxies,omitempty" jsonschema_description:"CIDR ranges whose X-Forwarded-For may be believed, for example 10.0.0.0/8. Empty trusts none of them."`
 
+	// LogRetention is how long an entry in rig_auth_log is kept. Zero, the
+	// default, keeps everything.
+	//
+	// Keeping everything is the honest default rather than the good one: nothing
+	// prunes this table today, and the alternative — rig choosing a window — would
+	// be rig deciding how long somebody's compliance obligation runs.
+	//
+	// It cannot be shorter than the longest rate limit window, and that is refused
+	// rather than clamped. This table is what the limiter counts, so deleting rows
+	// inside a window clears the lockout they were adding up to: a limiter that
+	// silently stops limiting, which is the failure nobody notices until it is
+	// being exploited.
+	LogRetention Duration `yaml:"log_retention,omitempty" json:"log_retention,omitempty" jsonschema_description:"How long an entry in rig_auth_log is kept, for example 90d. Zero, the default, keeps everything. It cannot be shorter than the longest rate-limit window, because this table is what the limits count."`
+
 	OAuth AuthOAuth `yaml:"oauth,omitempty" json:"oauth,omitempty" jsonschema_description:"Provider sign-in. No providers means the provider routes are not mounted."`
 
 	// Expose names foundation tables to generate for anyway.

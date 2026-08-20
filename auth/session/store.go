@@ -130,6 +130,15 @@ type Store interface {
 	// Families lists an account's sessions, newest first.
 	Families(ctx context.Context, tenantID, accountID uuid.UUID) ([]Family, error)
 
+	// TenantFamilies lists every session open in a tenant, newest first.
+	//
+	// A second method rather than a nullable account on the first, for the reason
+	// [Store] is small: "every session in the tenant" and "this person's
+	// sessions" are different questions with different authority behind them, and
+	// a nil argument that silently widens a read is the kind of parameter that
+	// gets passed a zero value by accident.
+	TenantFamilies(ctx context.Context, tenantID uuid.UUID) ([]Family, error)
+
 	// InTx runs fn inside one transaction, joining one already in progress.
 	InTx(ctx context.Context, fn func(ctx context.Context) error) error
 }

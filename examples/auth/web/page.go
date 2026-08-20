@@ -151,14 +151,21 @@ type personView struct {
 	JoinedAt  time.Time
 }
 
+// logView is one line of the trail, decoded from what GET /auth/audit answers.
+//
+// The tags are the endpoint's own names. Detail arrives as an object and is
+// rendered as whatever JSON it was, because what is in it depends on the event —
+// the addresses a replayed token was used from, the administrator who ended a
+// session — and a page that showed only the keys it knew about would hide exactly
+// the entries worth reading.
 type logView struct {
-	At        time.Time
-	Event     string
-	Outcome   string
-	Email     string
-	IPAddress string
-	KeyRef    string
-	Detail    string
+	At        time.Time      `json:"at"`
+	Event     string         `json:"event"`
+	Outcome   string         `json:"outcome"`
+	Email     string         `json:"emailAddress"`
+	IPAddress string         `json:"ipAddress"`
+	KeyRef    string         `json:"apiKeyRef"`
+	Detail    map[string]any `json:"detail"`
 }
 
 // lastKey holds a freshly minted secret for exactly one render.
@@ -343,12 +350,25 @@ func (h *Handler) fill(r *http.Request, s sessionCookie, d *data) bool {
 		d.Refused["notes"] = message(status, out)
 	}
 
-	// The two reads with no HTTP surface. Both are the foundation's tables, which
-	// rig generates nothing for: `auth.expose: [account, auth_log]` in rig.yaml
-	// would give them a REST resource with filters and paging, and this is the
-	// other answer — a query, in the application, for a page that needs one.
+	// The one read with no HTTP surface. rig_account is the foundation's table and
+	// rig generates nothing for it: `auth.expose: [account]` in rig.yaml would
+	// give it a REST resource with filters and paging, and this is the other
+	// answer — a query, in the application, for a page that needs one.
 	d.People = h.people(r.Context(), s.TenantID)
-	d.Log = h.authLog(r.Context(), s.TenantID)
+
+	// The trail, through the endpoint rig serves for it — which is why this page
+	// is a regression test and not only a demonstration: the endpoint either
+	// answers the question the query it replaced was written to answer, or this
+	// stops working. `?scope=all` needs authlog.read.all, and the refusal is
+	// shown rather than swallowed, the way the notes list shows its own.
+	if status, out := h.call(r, http.MethodGet, "/auth/audit?scope=all&limit=40", s.Access, ""); status == http.StatusOK {
+		var body struct{ Data []logView }
+		if err := json.Unmarshal(out, &body); err == nil {
+			d.Log = body.Data
+		}
+	} else {
+		d.Refused["log"] = message(status, out)
+	}
 
 	for _, p := range d.People {
 		if p.AccountID == d.Me.AccountID {
@@ -435,33 +455,6 @@ func (h *Handler) people(ctx context.Context, tenantID uuid.UUID) []personView {
 			return out
 		}
 		out = append(out, p)
-	}
-	return out
-}
-
-// authLog reads the trail, newest first.
-func (h *Handler) authLog(ctx context.Context, tenantID uuid.UUID) []logView {
-	rows, err := h.pool.Query(ctx, `
-		SELECT created_at, event, outcome,
-		       coalesce(email_address, ''), coalesce(host(ip_address), ''),
-		       coalesce(api_key_ref, ''), coalesce(detail::text, '')
-		  FROM rig_auth_log
-		 WHERE tenant_id = $1
-		 ORDER BY created_at DESC
-		 LIMIT 40`, tenantID)
-	if err != nil {
-		return nil
-	}
-	defer rows.Close()
-
-	var out []logView
-	for rows.Next() {
-		var l logView
-		if err := rows.Scan(&l.At, &l.Event, &l.Outcome, &l.Email,
-			&l.IPAddress, &l.KeyRef, &l.Detail); err != nil {
-			return out
-		}
-		out = append(out, l)
 	}
 	return out
 }

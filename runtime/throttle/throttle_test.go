@@ -327,3 +327,33 @@ func TestTheIPLimitIsNotClearedByASuccess(t *testing.T) {
 		t.Error("a success from one address should not clear that address's window")
 	}
 }
+
+// The longest window is what anything deleting from the log has to clear, so it
+// comes back with the name of the limit that set it: a refusal that says which
+// limit it would have broken is one somebody can act on.
+func TestTheLongestWindow(t *testing.T) {
+	t.Parallel()
+
+	longest, name := throttle.Standard().LongestWindow()
+	if longest != time.Hour {
+		t.Errorf("longest window = %s, want 1h", longest)
+	}
+	// Two of the standard limits are an hour; the first of them wins, and what
+	// matters is that it is one of them rather than which.
+	if name != "password.reset" && name != "verification.resend" {
+		t.Errorf("longest window belongs to %q, want one of the hourly limits", name)
+	}
+
+	// A project that widened one is measured against what it widened it to.
+	d := throttle.Standard()
+	d.LoginByEmail.Window = 30 * 24 * time.Hour
+	if longest, name = d.LongestWindow(); longest != 30*24*time.Hour || name != "login.email" {
+		t.Errorf("longest window = %s (%s), want 720h (login.email)", longest, name)
+	}
+
+	// All is the set, and it has to stay the whole set: a limit missing from it
+	// is a window nothing checks against.
+	if n := len(throttle.Standard().All()); n != 6 {
+		t.Errorf("All returned %d limits, want the six Defaults has", n)
+	}
+}

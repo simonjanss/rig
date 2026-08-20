@@ -56,8 +56,75 @@ func (p *Project) checkAuth() diag.List {
 		}
 	}
 
+	diags.Append(p.checkAuthRetention(a))
 	diags.Append(p.checkAuthOAuth(a))
 	return diags
+}
+
+// checkAuthRetention refuses a retention window the rate limits cannot survive.
+//
+// An error and not a warning, and refused rather than clamped up to the limit it
+// would break. The limits are counted from rig_auth_log, so a window shorter
+// than one of them deletes the failures a lockout is adding up to: the limit
+// stops limiting and nothing says so. Somebody will set this to fifteen minutes
+// during an incident precisely because they do not know the constraint exists,
+// which is the argument for refusing at the earliest possible moment — the
+// morning they write it, not the night the lockout fails to fire.
+func (p *Project) checkAuthRetention(a Auth) diag.List {
+	var diags diag.List
+
+	// Keeping everything is the default and is always safe: nothing prunes the
+	// table unless this says to. A negative window is not checked here because it
+	// cannot get this far — the schema's duration pattern refuses one — and a
+	// check that never runs is worse than no check, since it reads like coverage.
+	window := a.LogRetention.Duration()
+	if window == 0 {
+		return diags
+	}
+
+	// The limits are resolved before any of these checks run, so every window
+	// here is the number the server will actually enforce rather than a zero
+	// meaning "default".
+	longest, limit := a.Limits.LongestWindow()
+	if window < longest.Duration() {
+		diags.Add(diag.CodeConfigInvalid, p.At("auth", "log_retention"),
+			"auth.log_retention (%s) is shorter than auth.limits.%s's window (%s), and the limits "+
+				"are counted from rig_auth_log — so pruning would clear a lockout by deleting the "+
+				"failures it counts. Keep entries for at least %s",
+			a.LogRetention, limit, longest, longest)
+	}
+	return diags
+}
+
+// LongestWindow is the furthest back any of these limits counts, and the
+// configuration key it belongs to.
+//
+// The key rather than the runtime limit's name, because the answer goes into a
+// diagnostic about a file somebody is editing: "auth.limits.password_reset" is
+// something to go and look at, and "password.reset" is a string they would have
+// to map back to one.
+func (l AuthLimits) LongestWindow() (ir.Duration, string) {
+	var (
+		longest ir.Duration
+		key     string
+	)
+
+	for _, limit := range []struct {
+		key   string
+		limit AuthLimit
+	}{
+		{"login_by_email", l.LoginByEmail},
+		{"login_by_ip", l.LoginByIP},
+		{"password_reset", l.PasswordReset},
+		{"verification_resend", l.VerificationResend},
+		{"refresh", l.Refresh},
+		{"api_key_failures", l.APIKeyFailures},
+	} {
+		if limit.limit.Window.Duration() > longest.Duration() {
+			longest, key = limit.limit.Window.IR(), limit.key
+		}
+	}
+	return longest, key
 }
 
 func (p *Project) checkAuthTenant(t AuthTenant) diag.List {
@@ -229,6 +296,7 @@ func (a Auth) IR() *ir.Auth {
 		AllowTenantCreation:  a.AllowTenantCreation,
 		RequireVerifiedEmail: a.RequireVerifiedEmail,
 		TrustedProxies:       slices.Clone(a.TrustedProxies),
+		LogRetention:         a.LogRetention.IR(),
 	}
 
 	for _, source := range a.Tenant.From {

@@ -41,6 +41,11 @@ auth:
 
   trusted_proxies: [10.0.0.0/8, 192.168.0.0/16]
 
+  # Comfortably above the longest limit window above, which is what the
+  # configuration check insists on: the limits are counted from rig_auth_log, so
+  # a shorter window would prune away the failures a lockout adds up to.
+  log_retention: 90d
+
   oauth:
     base_url: https://app.example.com
     base_url_env: BASE_URL

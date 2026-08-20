@@ -201,6 +201,17 @@ type Config struct {
 	// resets an hour, and so on.
 	Limits throttle.Defaults
 
+	// LogRetention is how long an entry in rig_auth_log is kept, and it is only
+	// read by [Auth.PruneLog]. Zero, the default, keeps everything and makes that
+	// method a no-op.
+	//
+	// It cannot be shorter than the longest window in Limits, and [New] refuses a
+	// configuration where it is rather than clamping it. Those limits are counted
+	// from this table: pruning inside a window deletes the failures a lockout is
+	// adding up to, so the limit stops limiting and nothing says so. Refusing at
+	// startup is the last place that mistake can be caught cheaply.
+	LogRetention time.Duration
+
 	// TrustedProxies are the networks whose X-Forwarded-For may be believed.
 	//
 	// Empty means none, and that is deliberate: an address read from a header a
@@ -273,6 +284,18 @@ type Auth struct {
 	endpoints *authhttp.Handler
 	oauth     *oauth.Handler
 	parts     Parts
+	// retention and clock are what PruneLog needs, kept here rather than read
+	// back out of a stored Config so there is one copy of each.
+	retention time.Duration
+	clock     func() time.Time
+}
+
+// now is the clock, defaulting to the wall.
+func (a *Auth) now() time.Time {
+	if a.clock != nil {
+		return a.clock()
+	}
+	return time.Now()
 }
 
 // Parts are the pieces New built, for a project that needs to reach past the
@@ -293,6 +316,9 @@ type Parts struct {
 func New(cfg Config) (*Auth, error) {
 	if cfg.Pool == nil {
 		return nil, errors.New("auth: no Pool: the foundation lives in the database")
+	}
+	if err := checkRetention(cfg); err != nil {
+		return nil, err
 	}
 
 	stores := authpg.New(cfg.Pool)
@@ -383,12 +409,15 @@ func New(cfg Config) (*Auth, error) {
 	base = strings.TrimRight(base, "/")
 
 	endpoints, err := authhttp.New(authhttp.Config{
-		Accounts:            accounts,
-		Sessions:            sessions,
-		APIKeys:             keys,
-		Tenant:              tenant,
-		Grants:              cfg.Grants,
-		Identities:          identities,
+		Accounts:   accounts,
+		Sessions:   sessions,
+		APIKeys:    keys,
+		Tenant:     tenant,
+		Grants:     cfg.Grants,
+		Identities: identities,
+		// The same store the twenty writers write to, handed over as a reader.
+		// One table, two contracts, and no second place for the trail to be.
+		AuditLog:            stores.Log,
 		AllowRegistration:   cfg.AllowRegistration,
 		AllowTenantCreation: cfg.AllowTenantCreation,
 		BasePath:            base,
@@ -409,6 +438,8 @@ func New(cfg Config) (*Auth, error) {
 			Limiter:    limiter,
 			Stores:     stores,
 		},
+		retention: cfg.LogRetention,
+		clock:     cfg.Now,
 	}
 
 	if len(cfg.OAuth.Providers) > 0 {
@@ -487,6 +518,54 @@ func (a *Auth) Session(r *http.Request) (*session.Token, error) {
 // Parts are the pieces this assembled, for the things an endpoint cannot do for
 // you.
 func (a *Auth) Parts() Parts { return a.parts }
+
+// PruneLog deletes authentication log entries older than
+// [Config.LogRetention] and reports how many went. Zero retention keeps
+// everything and prunes nothing.
+//
+// A task somebody runs, not a goroutine this starts. Housekeeping that schedules
+// itself inside the server is housekeeping every replica does at once, and this
+// one takes a lock on the table the whole authentication path writes to.
+// `serve.Config.Tasks` makes it a subcommand for a cron job; the generated
+// wiring registers it for a project whose rig.yaml set a window.
+func (a *Auth) PruneLog(ctx context.Context) (int, error) {
+	if a.retention <= 0 {
+		return 0, nil
+	}
+	return a.parts.Stores.Log.Prune(ctx, a.now().Add(-a.retention))
+}
+
+// checkRetention refuses a window the rate limits cannot survive.
+//
+// The same rule `rig.yaml` is checked against when a project is compiled, here
+// again for the configuration somebody assembled in Go — which is the whole
+// reason the parts are exported, so it has to hold on that path too. Refused
+// rather than raised to the limit it would break: a value quietly changed to
+// something else is a value nobody can reason about later.
+func checkRetention(cfg Config) error {
+	if cfg.LogRetention == 0 {
+		return nil
+	}
+	if cfg.LogRetention < 0 {
+		return fmt.Errorf("auth: LogRetention is %s; a negative window would delete everything",
+			cfg.LogRetention)
+	}
+
+	limits := cfg.Limits
+	if limits == (throttle.Defaults{}) {
+		// The zero value means the documented set, and it is those windows the
+		// server will enforce — so it is those the retention has to clear.
+		limits = throttle.Standard()
+	}
+
+	if longest, name := limits.LongestWindow(); cfg.LogRetention < longest {
+		return fmt.Errorf("auth: LogRetention (%s) is shorter than the %s rate limit's window (%s), "+
+			"and the limits are counted from rig_auth_log — pruning would clear a lockout by deleting "+
+			"the failures it counts; keep entries for at least %s",
+			cfg.LogRetention, name, longest, longest)
+	}
+	return nil
+}
 
 // TenantFromHeader is the default tenant resolver.
 func TenantFromHeader(r *http.Request) (uuid.UUID, error) {

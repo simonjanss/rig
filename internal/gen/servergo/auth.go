@@ -43,6 +43,7 @@ func (e *authEmitter) authFile() (gen.Artifact, error) {
 	e.configFunc(b)
 	e.tenantFunc(b)
 	e.limitsFunc(b)
+	e.prunerFunc(b)
 	if e.oauth() != nil {
 		e.signingKeyFunc(b)
 		e.providersFunc(b)
@@ -456,6 +457,9 @@ func (e *authEmitter) configFunc(b *gobuf.Buf) {
 	b.L("OnSessionRefresh: h.OnSessionRefresh,")
 	b.L("OnError: h.OnError,")
 	b.L("Limits: limits(),")
+	if a.LogRetention > 0 {
+		b.L("LogRetention: %s,", genutil.GoDuration(b, a.LogRetention))
+	}
 	if hasProxy {
 		b.L("TrustedProxies: trusted,")
 	}
@@ -737,6 +741,40 @@ func (e *authEmitter) limitsFunc(b *gobuf.Buf) {
 			pair.field, pair.field, pair.limit.Max, genutil.GoDuration(b, pair.limit.Window))
 	}
 	b.L("return d")
+	b.L("}")
+	b.NL()
+}
+
+// prunerFunc emits the retention task, for a project that set a window.
+//
+// Nothing at all for a project that did not, rather than a task that does
+// nothing: a subcommand somebody can run and which silently keeps every row is
+// worse than no subcommand, because it looks like retention is handled.
+func (e *authEmitter) prunerFunc(b *gobuf.Buf) {
+	if e.auth.LogRetention <= 0 {
+		return
+	}
+	var (
+		authPkg  = b.Import(authModule)
+		servePkg = b.Import(runtimeModule + "/serve")
+		ctxPkg   = b.Import("context")
+		poolPkg  = b.Import("github.com/jackc/pgx/v5/pgxpool")
+	)
+
+	b.Comment("AuthLogPruner deletes authentication log entries older than " +
+		e.auth.LogRetention.String() + ", which is `auth.log_retention` in rig.yaml.\n\n" +
+		"A task rather than a goroutine, so it is a subcommand in a cron job rather " +
+		"than something every replica does at once to the table the whole " +
+		"authentication path writes to. Register it in serve.Config.Tasks and run " +
+		"`<binary> prune-auth-log`.\n\n" +
+		"The window is checked against the rate limits before the server starts, " +
+		"because those limits are counted from this table: pruning inside one of " +
+		"their windows would clear a lockout by deleting the failures it counts.")
+	b.L("func AuthLogPruner(front *%s.Auth) %s.Task {", authPkg, servePkg)
+	b.L("return func(ctx %s.Context, _ *%s.Pool) error {", ctxPkg, poolPkg)
+	b.L("_, err := front.PruneLog(ctx)")
+	b.L("return err")
+	b.L("}")
 	b.L("}")
 	b.NL()
 }

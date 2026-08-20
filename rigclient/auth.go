@@ -2,7 +2,10 @@ package rigclient
 
 import (
 	"context"
+	"iter"
 	"net/http"
+	"net/url"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/simonjanss/rig/runtime/authwire"
@@ -344,15 +347,104 @@ func (a *Auth) RevokeInvitation(
 
 // Sessions lists the caller's own sessions, with the one making this request
 // marked.
+//
+// Pass [Wide] for every session open in the tenant, which needs
+// `session.read.all`. There is one method rather than two, for the reason the
+// parameter exists at all: two endpoints would let a client written against the
+// narrow one keep working, silently, when its credential was widened.
 func (a *Auth) Sessions(ctx context.Context, opts ...CallOption) ([]authwire.SessionView, error) {
 	return list[authwire.SessionView](ctx, a.rt, a.path("/sessions"), opts)
 }
 
 // RevokeSession ends one of them.
+//
+// Pass [Wide] to end somebody else's, which needs `session.revoke.all`. Without
+// it — and with it, for a session in another tenant — a session that is not the
+// caller's answers NotFound rather than Forbidden, so an identifier cannot be
+// probed for existence.
 func (a *Auth) RevokeSession(ctx context.Context, id uuid.UUID, opts ...CallOption) error {
 	return DoNoContent(ctx, a.rt, Op{
 		Method: http.MethodDelete, Root: true, Path: a.path("/sessions/" + PathValue(id.String())),
 	}, opts...)
+}
+
+// AuditQuery narrows the authentication trail.
+//
+// Every field is optional and a nil one does not narrow. AccountID is only
+// answerable alongside [Wide]: without it the trail is the caller's own and
+// naming somebody else is refused rather than quietly ignored.
+type AuditQuery struct {
+	AccountID *uuid.UUID
+	Event     *string
+	Outcome   *string
+	Since     *time.Time
+	Until     *time.Time
+
+	// Limit is the page size, defaulting to 50 and capped at 500. Offset is
+	// where the page starts.
+	Limit  *int
+	Offset *int
+}
+
+// Values renders the query.
+func (q AuditQuery) Values() url.Values {
+	v := url.Values{}
+	SetUUID(v, "accountId", q.AccountID)
+	SetString(v, "event", q.Event)
+	SetString(v, "outcome", q.Outcome)
+	SetTime(v, "since", q.Since)
+	SetTime(v, "until", q.Until)
+	SetInt(v, "limit", q.Limit)
+	SetInt(v, "offset", q.Offset)
+	return v
+}
+
+// AuditLog reads one page of the authentication trail, newest first.
+//
+// The caller's own events by default, which needs no permission; the whole
+// tenant's with [Wide], which needs `authlog.read.all`. What neither reaches is
+// the attempts that resolved to no tenant — a sign-in that named none, or one
+// against an address with no account anywhere. Those are recorded and no tenant
+// has the standing to read them.
+func (a *Auth) AuditLog(
+	ctx context.Context, q AuditQuery, opts ...CallOption,
+) (*authwire.Page[authwire.AuthLogEntryView], error) {
+	return Do[authwire.Page[authwire.AuthLogEntryView]](ctx, a.rt, Op{
+		Method: http.MethodGet, Root: true, Path: a.path("/audit"), Query: q.Values(),
+	}, opts...)
+}
+
+// AuditLogAll walks the trail a page at a time.
+//
+// The query's own limit is the page size and its offset is where the walk
+// starts. Iteration stops at the first failure, which arrives as the second
+// value of the last pair — so a loop that ignores it is a loop that silently
+// stops early.
+func (a *Auth) AuditLogAll(
+	ctx context.Context, q AuditQuery, opts ...CallOption,
+) iter.Seq2[authwire.AuthLogEntryView, error] {
+	start := 0
+	if q.Offset != nil {
+		start = *q.Offset
+	}
+
+	return Paginate(ctx, start, func(ctx context.Context, offset int) (Page[authwire.AuthLogEntryView], error) {
+		q := q
+		q.Offset = &offset
+
+		res, err := a.AuditLog(ctx, q, opts...)
+		if err != nil {
+			return Page[authwire.AuthLogEntryView]{}, err
+		}
+		if res == nil {
+			return Page[authwire.AuthLogEntryView]{}, nil
+		}
+		return Page[authwire.AuthLogEntryView]{
+			Items:  res.Data,
+			Total:  res.Pagination.Total,
+			Offset: res.Pagination.Offset,
+		}, nil
+	})
 }
 
 // Impersonate issues a session acting as another account, and installs it. What

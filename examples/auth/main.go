@@ -45,7 +45,6 @@ import (
 
 	"github.com/simonjanss/rig/auth/account"
 	"github.com/simonjanss/rig/auth/apikey"
-	"github.com/simonjanss/rig/auth/authhttp"
 	"github.com/simonjanss/rig/examples/auth/internal/api"
 	"github.com/simonjanss/rig/examples/auth/internal/store"
 	"github.com/simonjanss/rig/examples/auth/services/authz"
@@ -93,6 +92,11 @@ func main() {
 			// it is a cron job rather than something racing itself in every
 			// replica.
 			"dispatch-notifications": dispatchNotifications,
+			// Ninety days of authentication trail, and then this takes it. The
+			// window is `auth.log_retention` in rig.yaml, and the task only
+			// exists because that key is set — a project that keeps everything
+			// gets no subcommand rather than one that silently does nothing.
+			"prune-auth-log": pruneAuthLog,
 			// `auth seed` makes a tenant, an account to sign in as, and the role
 			// that lets it write. There is no registration endpoint in this
 			// example: who may create an account is a product decision, and the
@@ -217,9 +221,7 @@ func newAPI(ctx context.Context, pool *pgxpool.Pool) (http.Handler, *notify.Engi
 			// And what else a new tenant needs, in the transaction that made it:
 			// the three roles and their grants. A tenant whose roles failed to seed
 			// is a tenant whose Owner can do nothing, so it rolls back with it.
-			OnCreated: authz.SeedFor(append(api.PermissionKeys(),
-				account.PermissionProvision,
-				authhttp.PermissionManageAPIKeys, authhttp.PermissionOwnAPIKey)),
+			OnCreated: authz.SeedFor(append(api.PermissionKeys(), authz.AuthKeys()...)),
 		},
 
 		// OnError is left out on purpose: the wiring is generated into this API's
@@ -285,6 +287,25 @@ func newAPI(ctx context.Context, pool *pgxpool.Pool) (http.Handler, *notify.Engi
 	})
 
 	return mux, engine, nil
+}
+
+// pruneAuthLog deletes authentication log entries past the retention window.
+//
+// It goes through the generated wiring for the same reason [accountService]
+// does: the window lives in rig.yaml, and `api.New` is what reads it. Building a
+// store by hand here would prune to whatever number this file happened to
+// repeat — and the number is the one thing about this job that must not be
+// guessed, because too short a window clears a lockout by deleting the failures
+// the rate limit counts.
+func pruneAuthLog(ctx context.Context, pool *pgxpool.Pool) error {
+	front, err := api.New(pool, api.Hooks{Grants: authz.Grants(pool)})
+	if err != nil {
+		return err
+	}
+	// The generated task rather than front.PruneLog, the way examples/todo runs
+	// the generated file sweeper: it is the wiring being exercised, and it exists
+	// only because rig.yaml set a window.
+	return api.AuthLogPruner(front)(ctx, pool)
 }
 
 // accountService builds the account service on its own, for the work that
@@ -385,16 +406,15 @@ func seed(ctx context.Context, pool *pgxpool.Pool) error {
 		return fmt.Errorf("account: %w", err)
 	}
 
-	// Two permissions: one the application defines, one the foundation does.
-	// They are the same kind of thing — a key in a table — which is why an API
-	// key's scopes and a role's grants speak one vocabulary.
-	// Derived, not listed. api.PermissionKeys() is every key the generated
-	// handlers check, so adding a table cannot leave the seeded Owner unable to
-	// touch it; the two administrative keys belong to the auth endpoints rather
-	// than to a table, so they are named.
-	keys := append(api.PermissionKeys(),
-		account.PermissionProvision,
-		authhttp.PermissionManageAPIKeys, authhttp.PermissionOwnAPIKey)
+	// Two kinds of permission: the ones the application defines and the ones the
+	// foundation does. They are the same kind of thing — a key in a table — which
+	// is why an API key's scopes and a role's grants speak one vocabulary.
+	//
+	// Both derived, neither listed. api.PermissionKeys() is every key the
+	// generated handlers check, so adding a table cannot leave the seeded Owner
+	// unable to touch it, and authz.AuthKeys() is every key the auth endpoints
+	// check, so the same holds when rig adds one of those.
+	keys := append(api.PermissionKeys(), authz.AuthKeys()...)
 
 	permissions := make(map[string]uuid.UUID, len(keys))
 	for _, key := range keys {

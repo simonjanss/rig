@@ -154,6 +154,66 @@ func TestAuthSessionCombinationsThatCannotBeMeant(t *testing.T) {
 	}
 }
 
+// The retention window is refused rather than clamped, and it is refused
+// against the *resolved* limits — a project that overrode none of them still has
+// windows, and those are the ones the server enforces.
+func TestAuthLogRetentionAgainstTheLimits(t *testing.T) {
+	t.Parallel()
+
+	for _, c := range []struct {
+		name, auth string
+		wantErr    string
+	}{
+		{
+			name: "nothing said keeps everything",
+			auth: "auth:\n  enabled: true\n",
+		},
+		{
+			name: "a window clear of every limit",
+			auth: "auth:\n  enabled: true\n  log_retention: 90d\n",
+		},
+		{
+			name:    "shorter than the default password-reset window",
+			auth:    "auth:\n  enabled: true\n  log_retention: 15m\n",
+			wantErr: "auth.limits.password_reset",
+		},
+		{
+			name: "shorter than a window the project itself widened",
+			auth: "auth:\n  enabled: true\n  log_retention: 6h\n" +
+				"  limits:\n    login_by_email: {max: 5, window: 24h}\n",
+			wantErr: "auth.limits.login_by_email",
+		},
+		{
+			name:    "exactly the longest window is enough",
+			auth:    "auth:\n  enabled: true\n  log_retention: 1h\n",
+			wantErr: "",
+		},
+		{
+			// Refused by the schema's duration pattern rather than by the
+			// retention check, which is why that check does not test for one.
+			name:    "a negative window",
+			auth:    "auth:\n  enabled: true\n  log_retention: -1h\n",
+			wantErr: "does not match pattern",
+		},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+
+			_, diags := project.Parse("rig.yaml", []byte(minimal+c.auth))
+			switch {
+			case c.wantErr == "" && diags.HasErrors():
+				t.Fatalf("%s should be accepted:\n%s", c.name, diags.String())
+			case c.wantErr == "":
+				return
+			case !diags.HasErrors():
+				t.Fatalf("%s should be refused", c.name)
+			case !strings.Contains(diags.String(), c.wantErr):
+				t.Errorf("expected a message naming %q:\n%s", c.wantErr, diags.String())
+			}
+		})
+	}
+}
+
 func TestAuthOAuthValidation(t *testing.T) {
 	t.Parallel()
 

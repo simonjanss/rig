@@ -108,6 +108,19 @@ func (s *SessionStore) RevokeFamily(ctx context.Context, rootID uuid.UUID, at ti
 // than kept in a column, so nothing has to be written on the hot path to keep
 // a "signed in devices" screen honest.
 func (s *SessionStore) Families(ctx context.Context, tenantID, accountID uuid.UUID) ([]session.Family, error) {
+	return s.families(ctx, `tenant_id = $1 AND account_id = $2`, tenantID, accountID)
+}
+
+// TenantFamilies implements [session.Store].
+func (s *SessionStore) TenantFamilies(ctx context.Context, tenantID uuid.UUID) ([]session.Family, error) {
+	return s.families(ctx, `tenant_id = $1`, tenantID)
+}
+
+// families is the grouping query both readers use. The predicate goes in the
+// inner select rather than beside the join, so the aggregate counts the tokens
+// of the sessions being returned and nothing else — filtering after the group
+// would count them and then hide them.
+func (s *SessionStore) families(ctx context.Context, where string, args ...any) ([]session.Family, error) {
 	rows, err := conn(ctx, s.db).Query(ctx, `
 		SELECT `+prefixed("root.", tokenColumns)+`,
 		       family.last_used_at,
@@ -115,12 +128,12 @@ func (s *SessionStore) Families(ctx context.Context, tenantID, accountID uuid.UU
 		FROM (
 			SELECT root_token_id, max(created_at) AS last_used_at, count(*) AS token_count
 			FROM rig_account_token
-			WHERE tenant_id = $1 AND account_id = $2
+			WHERE `+where+`
 			GROUP BY root_token_id
 		) AS family
 		JOIN rig_account_token root ON root.id = family.root_token_id
 		WHERE root.revoked_at IS NULL AND root.expires_at > now()
-		ORDER BY root.created_at DESC`, tenantID, accountID)
+		ORDER BY root.created_at DESC`, args...)
 	if err != nil {
 		return nil, fmt.Errorf("authpg: list sessions: %w", err)
 	}

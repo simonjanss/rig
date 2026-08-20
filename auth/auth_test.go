@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -14,6 +15,7 @@ import (
 	"github.com/simonjanss/rig/auth"
 	"github.com/simonjanss/rig/auth/oauth"
 	"github.com/simonjanss/rig/runtime/rigerr"
+	"github.com/simonjanss/rig/runtime/throttle"
 )
 
 // Assembling the foundation must not need a reachable database.
@@ -59,6 +61,70 @@ func TestNewRefusesWithoutAPool(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "Pool") {
 		t.Errorf("the error should name what is missing: %v", err)
+	}
+}
+
+// The retention window is refused at construction, not clamped, and not left to
+// be discovered the night a lockout does not fire.
+//
+// rig.yaml is checked for the same thing when a project compiles. This is the
+// other door: the parts are exported so a project can assemble the configuration
+// itself, and the rule has to hold on that path too.
+func TestNewRefusesRetentionShorterThanALimit(t *testing.T) {
+	t.Parallel()
+
+	// The default limits reach back an hour, so half of one is inside a window
+	// the lockout counts from.
+	_, err := auth.New(auth.Config{Pool: unconnected(t), LogRetention: 30 * time.Minute})
+	if err == nil {
+		t.Fatal("a retention window inside a rate limit's window should be refused")
+	}
+	for _, want := range []string{"LogRetention", "rig_auth_log", "1h"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the error should mention %q: %v", want, err)
+		}
+	}
+
+	// A window clear of every limit is fine, and so is saying nothing.
+	for _, retention := range []time.Duration{0, 90 * 24 * time.Hour} {
+		if _, err := auth.New(auth.Config{
+			Pool: unconnected(t), LogRetention: retention,
+		}); err != nil {
+			t.Errorf("LogRetention %s should be accepted: %v", retention, err)
+		}
+	}
+
+	// And a project that widened a limit is measured against what it widened it
+	// to, not against rig's defaults — otherwise the check would pass for
+	// exactly the configuration that needs it.
+	limits := throttle.Standard()
+	limits.LoginByEmail.Window = 30 * 24 * time.Hour
+	if _, err := auth.New(auth.Config{
+		Pool: unconnected(t), Limits: limits, LogRetention: 7 * 24 * time.Hour,
+	}); err == nil {
+		t.Error("a retention window inside an overridden limit's window should be refused")
+	}
+}
+
+// Nothing to prune, and nothing to reach the database for: a project that set no
+// window gets a task that is a no-op rather than one that deletes everything
+// older than now.
+func TestPruningWithNoWindowDoesNothing(t *testing.T) {
+	t.Parallel()
+
+	front, err := auth.New(auth.Config{Pool: unconnected(t)})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// The pool is not connected, so a statement here would fail rather than
+	// return zero — which is what makes this an assertion about not running one.
+	n, err := front.PruneLog(t.Context())
+	if err != nil {
+		t.Errorf("pruning with no window should not fail: %v", err)
+	}
+	if n != 0 {
+		t.Errorf("pruned %d entries with no retention window set", n)
 	}
 }
 

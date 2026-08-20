@@ -25,6 +25,7 @@ import (
 
 	"github.com/simonjanss/rig/auth/account"
 	"github.com/simonjanss/rig/auth/apikey"
+	"github.com/simonjanss/rig/auth/authlog"
 	"github.com/simonjanss/rig/auth/session"
 	"github.com/simonjanss/rig/runtime/authwire"
 	"github.com/simonjanss/rig/runtime/rigerr"
@@ -53,6 +54,27 @@ const (
 	PermissionOwnAPIKey = "apikey.own"
 	// PermissionImpersonate is required to act as somebody else.
 	PermissionImpersonate = "account.impersonate"
+
+	// The three wide keys. Each widens an endpoint that answers about the caller
+	// into one that answers about the tenant, and each is checked *in addition*
+	// to whatever the endpoint already required — see
+	// [github.com/simonjanss/rig/runtime/tenancy.RequireScope]. A credential
+	// holding only one of these can read nothing, which is the right shape: one
+	// grant, one thing.
+	//
+	// Three rather than one, because they are three decisions. Reading who is
+	// signed in is a support function; ending somebody else's session is an act;
+	// reading the authentication trail is a compliance function, and a product
+	// may well want an auditor who can do the last and neither of the others.
+
+	// PermissionReadAuthLogAll is required to read the tenant's authentication
+	// trail rather than only your own events.
+	PermissionReadAuthLogAll = "authlog.read.all"
+	// PermissionReadSessionsAll is required to see every session open in the
+	// tenant rather than only your own.
+	PermissionReadSessionsAll = "session.read.all"
+	// PermissionRevokeSessionsAll is required to end somebody else's session.
+	PermissionRevokeSessionsAll = "session.revoke.all"
 )
 
 // Permissions are the keys this package's own endpoints check.
@@ -85,12 +107,41 @@ func Permissions() []tenancy.Permission {
 			Name:        "Invite people",
 			Description: "Bring somebody into a tenant, and withdraw an invitation.",
 		},
+		{
+			Key:  PermissionReadAuthLogAll,
+			Name: "Read the authentication trail",
+			Description: "See every sign-in, failure, lockout and key use in the tenant, " +
+				"not only your own. Anybody can read their own without this.",
+		},
+		{
+			Key:  PermissionReadSessionsAll,
+			Name: "See who is signed in",
+			Description: "List every session open in the tenant, with the device and address " +
+				"each was opened from.",
+		},
+		{
+			Key:  PermissionRevokeSessionsAll,
+			Name: "End anybody's session",
+			Description: "Sign somebody else out of a device, which is what a lost phone or a " +
+				"departure needs. Ending your own needs nothing.",
+		},
 	}
 }
 
 // maxBodyBytes bounds a request body. Login is unauthenticated, so the limit is
 // the only thing between a stranger and the server's memory.
 const maxBodyBytes = 1 << 16
+
+// The page bounds for the one paginated endpoint here. They are the numbers the
+// generated endpoints use — DefaultLimit and MaxLimit in
+// internal/compile/builtin.go — spelled again rather than imported, because this
+// module cannot reach rig's internal packages. Two clients paging two of a
+// project's endpoints should not find that they behave differently, so if those
+// change, change these.
+const (
+	defaultPageLimit = 50
+	maxPageLimit     = 500
+)
 
 // Config builds a handler.
 type Config struct {
@@ -100,6 +151,16 @@ type Config struct {
 	// key presented as a credential is refused, which is the right behavior for
 	// a project that skipped that part of the foundation.
 	APIKeys *apikey.Manager
+
+	// AuditLog reads what was recorded. Nil leaves GET <base>/audit unmounted —
+	// absent rather than answering 403, so there is nothing to probe, which is
+	// the same choice registration and tenant creation make.
+	//
+	// A reader and not the [github.com/simonjanss/rig/auth/authlog.Log] every
+	// other part of this package writes to. The write path discards its failures
+	// on purpose and a read cannot, so they are two interfaces; one
+	// implementation usually satisfies both.
+	AuditLog authlog.Reader
 
 	// Tenant resolves which tenant a request belongs to.
 	//
@@ -232,6 +293,10 @@ func (h *Handler) Mount(mux *http.ServeMux) {
 	route("GET /sessions", h.listSessions)
 	route("DELETE /sessions/{id}", h.revokeSession)
 
+	if h.cfg.AuditLog != nil {
+		route("GET /audit", h.audit)
+	}
+
 	route("POST /impersonate", h.impersonate)
 	route("DELETE /impersonate", h.endImpersonation)
 
@@ -294,23 +359,33 @@ func (h *Handler) Claims(r *http.Request) (tenancy.Claims, error) {
 		if err != nil {
 			return tenancy.Claims{}, err
 		}
-		claims := tenancy.Claims{
-			TenantID:                tok.TenantID,
-			AccountID:               tok.AccountID,
-			Subject:                 tenancy.SubjectAccount,
-			ImpersonatedByAccountID: tok.ImpersonatedByAccountID,
-			// Whatever the application put on this session, read from the same
-			// row the token was verified against — so it costs nothing beyond the
-			// lookup that was happening anyway.
-			Extra: tok.Payload,
-		}
-		return enrich(r.Context(), h.cfg.Grants, claims)
+		return h.claimsFor(r.Context(), tok)
 
 	default:
 		// A refresh token lands here, which is right: it is a credential for
 		// the refresh endpoint and nothing else.
 		return tenancy.Claims{}, rigerr.Unauthorized("the credential is not valid")
 	}
+}
+
+// claimsFor is what a verified session amounts to.
+//
+// Split out of [Handler.Claims] so a handler that needs the token *and* the
+// claims — the session endpoints do, one for the family it belongs to and one
+// for the permission it carries — can have both from one verification instead of
+// paying for two.
+func (h *Handler) claimsFor(ctx context.Context, tok *session.Token) (tenancy.Claims, error) {
+	claims := tenancy.Claims{
+		TenantID:                tok.TenantID,
+		AccountID:               tok.AccountID,
+		Subject:                 tenancy.SubjectAccount,
+		ImpersonatedByAccountID: tok.ImpersonatedByAccountID,
+		// Whatever the application put on this session, read from the same
+		// row the token was verified against — so it costs nothing beyond the
+		// lookup that was happening anyway.
+		Extra: tok.Payload,
+	}
+	return enrich(ctx, h.cfg.Grants, claims)
 }
 
 // Grants answers what an account may do, in the tenant the request is for.

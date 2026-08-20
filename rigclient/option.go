@@ -3,7 +3,10 @@ package rigclient
 import (
 	"fmt"
 	"net/http"
+	"net/url"
 	"time"
+
+	"github.com/simonjanss/rig/runtime/tenancy"
 )
 
 // CallOption adjusts one call.
@@ -15,7 +18,10 @@ type CallOption func(*call)
 
 // call is one request's own settings, laid over the client's.
 type call struct {
-	header    http.Header
+	header http.Header
+	// query is what an option added to the URL, laid over whatever the
+	// operation's own typed arguments rendered.
+	query     url.Values
 	anonymous bool
 	retried   bool
 	timeout   time.Duration
@@ -48,6 +54,33 @@ func newCall(opts []CallOption) *call {
 func WithHeader(key, value string) CallOption {
 	return func(c *call) { c.header.Set(key, value) }
 }
+
+// WithQuery sets a query parameter on this call, replacing one the method built.
+func WithQuery(key, value string) CallOption {
+	return func(c *call) {
+		if c.query == nil {
+			c.query = url.Values{}
+		}
+		c.query.Set(key, value)
+	}
+}
+
+// Wide asks an endpoint for everything in the tenant rather than the caller's
+// own rows.
+//
+// It has to be asked for and it has to be held: the permission is per endpoint —
+// `session.read.all`, `authlog.read.all` — and a caller who asks for more than
+// they hold is refused rather than quietly given less. That refusal is the point.
+// A narrower answer would leave a client unable to tell "you may not see that"
+// from "there is nothing else", and drawing the wrong conclusion from a
+// correct-looking response is worse than an error.
+//
+// An option rather than a parameter, because it applies to a handful of the
+// hand-written authentication endpoints and to every generated read, so a method
+// signature per endpoint would be the same word spelled thirty times. A
+// generated read also carries it as a typed field on its query, which is the
+// same request written the other way.
+func Wide() CallOption { return WithQuery(tenancy.ScopeParam, string(tenancy.ScopeAll)) }
 
 // WithRequestID names this call in the server's logs, overriding
 // [Config.RequestID].
