@@ -98,6 +98,74 @@ func handleRigNotificationRecipientShape(s Server, scope RigNotificationRecipien
 	}
 }
 
+// RigNotificationRecipientDeletedScope narrows the trash shape further.
+//
+// It receives a filter that already carries the tenant and lifecycle
+// conditions, and can only add to it — every condition is joined with AND,
+// so there is nothing a scope can write that widens what the subscriber sees.
+// Add conditions through the Where methods rather than as text: they bind
+// their values, and a shape filter built by string concatenation is an
+// injection point with a streaming response attached.
+//
+// Returning an error refuses the subscription.
+type RigNotificationRecipientDeletedScope func(ctx context.Context, r *http.Request, claims tenancy.Claims, p RigNotificationRecipientShapeParams, w *electric.Where) error
+
+// handleRigNotificationRecipientDeletedShape serves GET
+// /electric/rig_notification_recipient/_deleted.
+func handleRigNotificationRecipientDeletedShape(s Server, scope RigNotificationRecipientDeletedScope) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		claims, where, ok := prepare(s, w, r, false)
+		if !ok {
+			return
+		}
+
+		// Every row this shape can ever carry belongs to the caller's tenant. It is
+		// the first condition, and nothing below can remove it.
+		where.Eq("tenant_id", claims.TenantID.String())
+		// This table is owner-scoped, so a subscriber sees its own rows and nothing
+		// else. Here rather than in the scope function below, for the reason the
+		// repository does not make anybody remember it: a narrowing the application
+		// has to add by hand is a narrowing somebody eventually does not.
+		// A caller with no account is refused rather than narrowed. An API key and a
+		// system credential both have a nil identifier, and comparing against one
+		// matches nothing *silently* — which is the wrong kind of correct, because a
+		// subscriber handed an empty stream cannot tell it from having nothing to
+		// receive.
+		if claims.AccountID == uuid.Nil {
+			fail(s, w, r, rigerr.Forbidden("this shape is scoped to one account, and this credential is not one"))
+			return
+		}
+		where.Eq("account_id", claims.AccountID.String())
+		// The trash, so this shape wants precisely what the live one excludes. A row
+		// deleted while somebody is subscribed to both leaves one stream and arrives
+		// in the other.
+		where.NotNull("deleted_at")
+
+		params, err := parseRigNotificationRecipientShapeParams(r)
+		if err != nil {
+			fail(s, w, r, err)
+			return
+		}
+
+		if scope != nil {
+			if err := scope(r.Context(), r, claims, params, where); err != nil {
+				fail(s, w, r, err)
+				return
+			}
+		}
+
+		s.Proxy.Serve(w, r, electric.Shape{
+			Table:  "rig_notification_recipient",
+			Where:  where.SQL(),
+			Params: where.Params(),
+			// The readable columns, named rather than left to default. A shape carries
+			// every column it names to every subscriber, and a column that is not in the
+			// API has no business in a live stream either.
+			Columns: RigNotificationRecipientShapeColumns,
+		})
+	}
+}
+
 // RigNotificationRecipientShapeColumns are the columns this shape carries.
 //
 // They are the resource's readable fields — the same set a GET returns —

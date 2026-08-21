@@ -60,12 +60,25 @@ func (e *emitter) serverType(b *gobuf.Buf) {
 func (e *emitter) handlersStruct(b *gobuf.Buf, shapes []*ir.Resource) {
 	b.Comment("Handlers is one scoping function per shape, plus the shared behavior.\n\n" +
 		"A nil scope is not an error: it means the shape is filtered by tenant and " +
-		"lifecycle and nothing else, which is exactly right for most tables.")
+		"lifecycle and nothing else, which is exactly right for most tables.\n\n" +
+		"A soft-deletable table has a trash shape here as well as a live one, and a " +
+		"table that keeps its previous versions has a history shape. Neither is " +
+		"configured: the columns are what decide, the same way they decide whether " +
+		"the API has a GET /_deleted.\n\n" +
+		"Those two inherit the live shape's scope while their own field is nil. They " +
+		"carry the same table's rows, so a narrowing that mattered for the live " +
+		"shape almost always matters for the trash and the history too — and a " +
+		"narrowing the application has to remember to repeat on a route rig added " +
+		"is one that eventually does not get repeated. Set the field to scope them " +
+		"differently; setting it replaces the inherited scope rather than adding to " +
+		"it.")
 	b.L("type Handlers struct {")
 	b.L("Server Server")
 	b.NL()
 	for _, res := range shapes {
-		b.L("%s %sScope", res.Name, res.Name)
+		for _, sh := range e.shapesFor(res) {
+			b.L("%s %sScope", sh.name, sh.name)
+		}
 	}
 	b.L("}")
 	b.NL()
@@ -89,12 +102,56 @@ func (e *emitter) registerFunc(b *gobuf.Buf, shapes []*ir.Resource) {
 	b.L("}")
 	b.NL()
 
+	e.inherit(b, shapes)
+
 	for _, res := range shapes {
-		b.L("mux.HandleFunc(%s, handle%sShape(h.Server, h.%s))",
-			gobuf.Quote("GET "+res.Electric.Path), res.Name, res.Name)
+		for _, sh := range e.shapesFor(res) {
+			b.L("mux.HandleFunc(%s, handle%sShape(h.Server, h.%s))",
+				gobuf.Quote("GET "+sh.path), sh.name, sh.name)
+		}
 	}
 	b.L("}")
 	b.NL()
+}
+
+// inherit points a derived shape with no scope of its own at the live one.
+//
+// The trash and the history are the same table's rows, so an application that
+// narrowed the live shape meant something by it, and the narrowing is what
+// decides who may see those rows. Defaulting these to nil would mean a project
+// that regenerates gains two routes that show more than the one it already had,
+// without a line of its own code changing and without failing to compile. This
+// is the same argument the handler makes for building the owner predicate
+// itself: a narrowing somebody has to add by hand is one somebody eventually
+// does not.
+//
+// Inheriting can only ever show less, which is the direction to be wrong in. An
+// application that wants these scoped differently says so by setting the field.
+func (e *emitter) inherit(b *gobuf.Buf, shapes []*ir.Resource) {
+	var wrote bool
+	for _, res := range shapes {
+		for _, sh := range e.shapesFor(res) {
+			if sh.kind == shapeLive {
+				continue
+			}
+			if !wrote {
+				b.Comment("A derived shape falls back to the live shape's scope. Nil " +
+					"stays nil: a table nobody scoped is scoped by tenant and lifecycle " +
+					"on all three of its routes.")
+				wrote = true
+			}
+			b.L("if h.%s == nil {", sh.name)
+			if sh.kind == shapeVersions {
+				b.L("h.%s = versionsFromLive%s(h.%s)", sh.name, res.Name, res.Name)
+			} else {
+				b.L("h.%s = %sScope(h.%s)", sh.name, sh.name, res.Name)
+			}
+			b.L("}")
+		}
+	}
+	if wrote {
+		b.NL()
+	}
 }
 
 // helpers emit the shared request plumbing.

@@ -7,6 +7,14 @@
 // document: the tenant, the soft-delete predicate, the snapshot predicate, and
 // a hook the application can only narrow with.
 //
+// A table gets up to three of them. The live shape is the rows an ordinary read
+// returns. A soft-deletable table also gets a trash shape, and a table that
+// keeps its previous versions also gets a history shape scoped to one row —
+// the two the API already exposes as GET /_deleted and GET /{id}/_versions.
+// Which of them exist is not configured, because the columns already say: the
+// widening a subscriber can ask for is a route rig generated from the schema,
+// never a parameter it sent.
+//
 // It generates into its own package rather than alongside the API layer, so a
 // project can have live sync without the HTTP generator, or the other way
 // round.
@@ -96,11 +104,13 @@ func (g *Generator) Generate(_ context.Context, doc *ir.Document, opts gen.Optio
 		artifacts = append(artifacts, shape)
 
 		if cfg.StubDir != "" {
-			stub, err := e.stubFile(res)
-			if err != nil {
-				return nil, err
+			for _, sh := range e.shapesFor(res) {
+				stub, err := e.stubFile(res, sh)
+				if err != nil {
+					return nil, err
+				}
+				artifacts = append(artifacts, stub)
 			}
-			artifacts = append(artifacts, stub)
 		}
 	}
 	return artifacts, nil

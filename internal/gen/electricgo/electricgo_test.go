@@ -2,9 +2,15 @@ package electricgo_test
 
 import (
 	"flag"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/google/uuid"
 
 	"github.com/simonjanss/rig/internal/gen/electricgo"
 	"github.com/simonjanss/rig/internal/gen/gentest"
@@ -294,6 +300,251 @@ func TestUnknownOptionIsRejected(t *testing.T) {
 	}
 }
 
+// The trash shape is the live one inverted. A row deleted while somebody holds
+// both subscriptions leaves one stream and arrives in the other, which is the
+// whole reason to have it rather than to poll GET /_deleted.
+func TestTheTrashShapeWantsWhatTheLiveShapeExcludes(t *testing.T) {
+	t.Parallel()
+
+	doc := gentest.LoadDocument(t, filepath.Join("testdata", fixture))
+	src := find(t, gentest.Run(t, electricgo.New(), doc, opts()), "lesson_shape.gen.go")
+
+	body, ok := between(src, "func handleLessonDeletedShape(", "\n}")
+	if !ok {
+		t.Fatal("no trash handler")
+	}
+	collapsed := collapse(body)
+
+	for _, want := range []string{
+		`where.Eq("tenant_id", claims.TenantID.String())`,
+		`where.NotNull("deleted_at")`,
+		// Still the live generation of the row: the trash is what was deleted,
+		// not the history of what was deleted.
+		`where.Eq("version_type", "Original")`,
+	} {
+		if !strings.Contains(collapsed, collapse(want)) {
+			t.Errorf("missing %s:\n%s", want, body)
+		}
+	}
+
+	if strings.Contains(collapsed, collapse(`where.IsNull("deleted_at")`)) {
+		t.Errorf("the trash shape should not exclude the rows it exists to carry:\n%s", body)
+	}
+
+	// Same as everywhere else: the scope runs last and can only narrow.
+	deleted := strings.Index(collapsed, "deleted_at")
+	scope := strings.Index(collapsed, "scope(r.Context()")
+	if deleted < 0 || scope < 0 || deleted > scope {
+		t.Error("the lifecycle condition should be added before the application's scope runs")
+	}
+}
+
+// History is per row, matching GET /{id}/_versions and the ListSnapshots it
+// calls. A table-wide stream of every version of everything would be a
+// different and much larger thing than the endpoint it is named after.
+func TestAHistoryShapeIsScopedToOneRow(t *testing.T) {
+	t.Parallel()
+
+	doc := gentest.LoadDocument(t, filepath.Join("testdata", fixture))
+	src := find(t, gentest.Run(t, electricgo.New(), doc, opts()), "lesson_shape.gen.go")
+
+	body, ok := between(src, "func handleLessonVersionsShape(", "\n}")
+	if !ok {
+		t.Fatal("no history handler")
+	}
+	collapsed := collapse(body)
+
+	for _, want := range []string{
+		`id, err := parseUUID("id", r.PathValue("id"))`,
+		`where.Eq("tenant_id", claims.TenantID.String())`,
+		`where.Eq("version_type", "Snapshot")`,
+		`where.Eq("snapshot_from_lesson_id", id.String())`,
+	} {
+		if !strings.Contains(collapsed, collapse(want)) {
+			t.Errorf("missing %s:\n%s", want, body)
+		}
+	}
+
+	// Never the live row. That one is what the live shape is for.
+	if strings.Contains(collapsed, collapse(`where.Eq("version_type", "Original")`)) {
+		t.Errorf("the history shape should not carry the live row:\n%s", body)
+	}
+
+	// The row is bound before the scope runs, so there is nothing a scope can
+	// do to point the shape at somebody else's history.
+	row := strings.Index(collapsed, "snapshot_from_lesson_id")
+	scope := strings.Index(collapsed, "scope(r.Context()")
+	if row < 0 || scope < 0 || row > scope {
+		t.Error("the row condition should be added before the application's scope runs")
+	}
+	if !strings.Contains(collapsed, "scope(r.Context(), r, claims, id, params, where)") {
+		t.Errorf("the scope should receive the row it is the history of:\n%s", body)
+	}
+}
+
+// Which shapes a table has is not configured. The columns decide, the same way
+// they decide whether the API has a GET /_deleted — asking the schema twice is
+// how the two answers get to disagree.
+func TestTheExtraShapesComeFromTheColumns(t *testing.T) {
+	t.Parallel()
+
+	// Memo retires its rows and keeps no previous versions, so it has a trash
+	// shape and no history one.
+	doc := gentest.LoadDocument(t, filepath.Join("testdata", "ownerscope.ir.json"))
+	base := routes(t, find(t, gentest.Run(t, electricgo.New(), doc, opts()), "electric.gen.go"))
+
+	if !strings.Contains(base, `"GET /electric/memo"`) {
+		t.Error("the live shape should be mounted")
+	}
+	if !strings.Contains(base, `"GET /electric/memo/_deleted"`) {
+		t.Errorf("a soft-deletable table should have a trash shape:\n%s", base)
+	}
+	if strings.Contains(base, "_versions") {
+		t.Errorf("a table that keeps no versions has no history to stream:\n%s", base)
+	}
+
+	// And a table with neither has the live shape and nothing else.
+	plain := gentest.LoadDocument(t, filepath.Join("testdata", "ownerscope.ir.json"))
+	plain.Resource("Memo").Storage.SoftDelete = nil
+	only := routes(t, find(t, gentest.Run(t, electricgo.New(), plain, opts()), "electric.gen.go"))
+
+	if !strings.Contains(only, `"GET /electric/memo"`) {
+		t.Error("the live shape should still be mounted")
+	}
+	if strings.Contains(only, "_deleted") || strings.Contains(only, "_versions") {
+		t.Errorf("nothing in the schema asks for an extra shape here:\n%s", only)
+	}
+}
+
+// The owner predicate went missing from shapes once already, and it went
+// missing because somebody wrote the tenant, soft-delete and snapshot ones and
+// stopped. Adding two more routes is exactly the shape of that mistake, so
+// every one of them is checked rather than the first.
+func TestEveryShapeCarriesTheTenantAndOwnerConditions(t *testing.T) {
+	t.Parallel()
+
+	doc := gentest.LoadDocument(t, filepath.Join("testdata", "ownerscope.ir.json"))
+	src := find(t, gentest.Run(t, electricgo.New(), doc, opts()), "memo_shape.gen.go")
+
+	for _, handler := range []string{"handleMemoShape(", "handleMemoDeletedShape("} {
+		body, ok := between(src, "func "+handler, "\n}")
+		if !ok {
+			t.Fatalf("no %s", handler)
+		}
+		collapsed := collapse(body)
+
+		for _, want := range []string{
+			`where.Eq("tenant_id", claims.TenantID.String())`,
+			`where.Eq("created_by_account_id", claims.AccountID.String())`,
+			"if claims.AccountID == uuid.Nil {",
+		} {
+			if !strings.Contains(collapsed, collapse(want)) {
+				t.Errorf("%s is missing %s:\n%s", handler, want, body)
+			}
+		}
+	}
+}
+
+// The columns decide, and the resource's operations deliberately do not — the
+// API needs List for a GET /_deleted and Get for a GET /{id}/_versions, but a
+// shape is its own read surface. rig_notification_recipient is the case that
+// settles it: an unexposed table with no operations at all, subscribed to
+// through a shape because there is no endpoint to read it with. Reading the
+// operations here would give it a live shape and no trash.
+func TestTheExtraShapesIgnoreTheOperations(t *testing.T) {
+	t.Parallel()
+
+	doc := gentest.LoadDocument(t, filepath.Join("testdata", "notify.ir.json"))
+	if ops := doc.Resource("RigNotificationRecipient").Operations; len(ops) != 0 {
+		t.Fatalf("this test needs a resource that exposes no endpoints, got %v", ops)
+	}
+
+	body := routes(t, find(t, gentest.Run(t, electricgo.New(), doc, opts()), "electric.gen.go"))
+
+	for _, want := range []string{
+		`"GET /electric/rig_notification_recipient"`,
+		`"GET /electric/rig_notification_recipient/_deleted"`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("missing %s:\n%s", want, body)
+		}
+	}
+}
+
+// A project that regenerates gains these routes without a line of its own code
+// changing, and a new field on a struct it fills in by name is not a compile
+// error. Defaulting them to no scope would mean whatever narrowing its live
+// shape had — the membership check rig cannot express as a column — stops
+// applying, silently, on two routes that carry the same table's rows.
+func TestADerivedShapeInheritsTheLiveScope(t *testing.T) {
+	t.Parallel()
+
+	doc := gentest.LoadDocument(t, filepath.Join("testdata", fixture))
+	artifacts := gentest.Run(t, electricgo.New(), doc, opts())
+	body := collapse(routes(t, find(t, artifacts, "electric.gen.go")))
+
+	for _, want := range []string{
+		"if h.LessonDeleted == nil { h.LessonDeleted = LessonDeletedScope(h.Lesson) }",
+		"if h.LessonVersions == nil { h.LessonVersions = versionsFromLiveLesson(h.Lesson) }",
+	} {
+		if !strings.Contains(body, collapse(want)) {
+			t.Errorf("missing %s:\n%s", want, body)
+		}
+	}
+
+	// Before the routes are mounted, because a handler closes over the scope it
+	// was given and cannot be told about one later.
+	if fallback, mount := strings.Index(body, "h.LessonDeleted ="), strings.Index(body, "mux.HandleFunc"); fallback > mount {
+		t.Error("the fallback should be wired before the routes are mounted")
+	}
+
+	// And a scope nobody wrote stays nil rather than becoming a closure that
+	// calls one, which would panic on the first subscription.
+	shape := collapse(find(t, artifacts, "lesson_shape.gen.go"))
+	if !strings.Contains(shape, collapse("if live == nil { return nil }")) {
+		t.Errorf("versionsFromLiveLesson should pass nil through:\n%s", shape)
+	}
+}
+
+// A stub is written once and then belongs to the developer, so a shape that
+// shared one with another would have no way to be scoped separately — and a
+// project that regenerates after these shapes existed would find its own file
+// rewritten, which is the one thing CreateOnce promises never happens.
+func TestEachShapeGetsItsOwnStub(t *testing.T) {
+	t.Parallel()
+
+	doc := gentest.LoadDocument(t, filepath.Join("testdata", fixture))
+	artifacts := gentest.Run(t, electricgo.New(), doc, gen.Options{
+		Raw: map[string]any{
+			"package":      "electric",
+			"shape_import": "rigtest/electric",
+			"stub_dir":     "shapes/{table}",
+		},
+	})
+
+	stubs := map[string]string{}
+	for _, a := range artifacts {
+		if a.Mode == gen.CreateOnce {
+			stubs[filepath.Base(a.Path)] = string(a.Content)
+		}
+	}
+
+	for file, want := range map[string]string{
+		"lesson_shape.go":          ".LessonScope = Shape",
+		"lesson_deleted_shape.go":  ".LessonDeletedScope = DeletedShape",
+		"lesson_versions_shape.go": ".LessonVersionsScope = VersionsShape",
+	} {
+		src, ok := stubs[file]
+		if !ok {
+			t.Errorf("no stub named %s", file)
+			continue
+		}
+		if !strings.Contains(src, want) {
+			t.Errorf("%s should assert %q:\n%s", file, want, src)
+		}
+	}
+}
+
 func find(t *testing.T, artifacts []gen.Artifact, name string) string {
 	t.Helper()
 	for _, a := range artifacts {
@@ -303,6 +554,67 @@ func find(t *testing.T, artifacts []gen.Artifact, name string) string {
 	}
 	t.Fatalf("no artifact named %s", name)
 	return ""
+}
+
+// http.ServeMux panics on conflicting patterns, and it does it at registration
+// — so a shape whose route overlaps another's is not a bad response, it is an
+// application that will not start. The generated patterns are mounted here for
+// real rather than reasoned about, because "/x/_deleted" and "/x/{id}/_thing"
+// are exactly the pair where the reasoning is easy to get wrong.
+func TestTheGeneratedRoutesMountOnARealMux(t *testing.T) {
+	t.Parallel()
+
+	doc := gentest.LoadDocument(t, filepath.Join("testdata", fixture))
+	body := routes(t, find(t, gentest.Run(t, electricgo.New(), doc, opts()), "electric.gen.go"))
+
+	patterns := mounted(body)
+	if len(patterns) != 3 {
+		t.Fatalf("got %d routes %v, want the live, trash and history shapes", len(patterns), patterns)
+	}
+
+	mux := http.NewServeMux()
+	for _, p := range patterns {
+		p := p
+		mux.HandleFunc(p, func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = io.WriteString(w, p)
+		})
+	}
+
+	// And each one answers for itself: registering without a panic proves only
+	// that the patterns can coexist, not that they mean different things.
+	for path, want := range map[string]string{
+		"/electric/lesson":                                    "GET /electric/lesson",
+		"/electric/lesson/_deleted":                           "GET /electric/lesson/_deleted",
+		"/electric/lesson/" + uuid.NewString() + "/_versions": "GET /electric/lesson/{id}/_versions",
+	} {
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+
+		if got := rec.Body.String(); got != want {
+			t.Errorf("%s dispatched to %q, want %q", path, got, want)
+		}
+	}
+}
+
+// mounted is the pattern of every mux.HandleFunc in a Register body.
+func mounted(body string) []string {
+	var out []string
+	for _, m := range regexp.MustCompile(`mux\.HandleFunc\("([^"]+)"`).FindAllStringSubmatch(body, -1) {
+		out = append(out, m[1])
+	}
+	return out
+}
+
+// routes is Register's body: the mounted patterns and nothing else. The doc
+// comments around it talk about _deleted in prose, and a test that grepped the
+// whole file would find that and call it a route.
+func routes(t *testing.T, src string) string {
+	t.Helper()
+	body, ok := between(src, "func Register(", "\n}")
+	if !ok {
+		t.Fatal("no Register function")
+	}
+	return body
 }
 
 func collapse(s string) string { return strings.Join(strings.Fields(s), " ") }

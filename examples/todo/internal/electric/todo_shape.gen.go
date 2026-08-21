@@ -13,45 +13,23 @@ import (
 	"github.com/simonjanss/rig/runtime/tenancy"
 )
 
-// LessonShapeParams are the query parameters this shape accepts.
+// TodoShapeParams are the query parameters this shape accepts.
 //
 // They are the application's, not the protocol's: a subscriber uses them to
 // ask for less, and the scoping function turns them into conditions. Nothing
 // here can ask for more.
-type LessonShapeParams struct {
-	// Restrict the shape to one matchday.
-	Matchday int
-	// HasMatchday reports whether it was given, so a zero value can be told from
-	// an absent one.
-	HasMatchday bool
-
-	// Only lessons in this state.
-	Status string
+type TodoShapeParams struct {
+	// This shape declares none.
 }
 
-// parseLessonShapeParams reads the declared parameters.
-func parseLessonShapeParams(r *http.Request) (LessonShapeParams, error) {
-	var p LessonShapeParams
-
-	if raw, ok := optional(r, "matchday"); ok {
-		v, err := parseInt("matchday", raw)
-		if err != nil {
-			return p, err
-		}
-		p.Matchday = v
-		p.HasMatchday = true
-	}
-
-	rawStatus, err := required(r, "status")
-	if err != nil {
-		return p, err
-	}
-	p.Status = rawStatus
+// parseTodoShapeParams reads the declared parameters.
+func parseTodoShapeParams(r *http.Request) (TodoShapeParams, error) {
+	var p TodoShapeParams
 
 	return p, nil
 }
 
-// LessonScope narrows the shape further.
+// TodoScope narrows the shape further.
 //
 // It receives a filter that already carries the tenant and lifecycle
 // conditions, and can only add to it — every condition is joined with AND,
@@ -61,10 +39,10 @@ func parseLessonShapeParams(r *http.Request) (LessonShapeParams, error) {
 // injection point with a streaming response attached.
 //
 // Returning an error refuses the subscription.
-type LessonScope func(ctx context.Context, r *http.Request, claims tenancy.Claims, p LessonShapeParams, w *electric.Where) error
+type TodoScope func(ctx context.Context, r *http.Request, claims tenancy.Claims, p TodoShapeParams, w *electric.Where) error
 
-// handleLessonShape serves GET /electric/lesson.
-func handleLessonShape(s Server, scope LessonScope) http.HandlerFunc {
+// handleTodoShape serves GET /electric/todo.
+func handleTodoShape(s Server, scope TodoScope) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		claims, where, ok := prepare(s, w, r, false)
 		if !ok {
@@ -80,7 +58,7 @@ func handleLessonShape(s Server, scope LessonScope) http.HandlerFunc {
 		// Snapshots are prior versions. A subscriber wants the live row.
 		where.Eq("version_type", "Original")
 
-		params, err := parseLessonShapeParams(r)
+		params, err := parseTodoShapeParams(r)
 		if err != nil {
 			fail(s, w, r, err)
 			return
@@ -94,18 +72,18 @@ func handleLessonShape(s Server, scope LessonScope) http.HandlerFunc {
 		}
 
 		s.Proxy.Serve(w, r, electric.Shape{
-			Table:  "lesson",
+			Table:  "todo",
 			Where:  where.SQL(),
 			Params: where.Params(),
 			// The readable columns, named rather than left to default. A shape carries
 			// every column it names to every subscriber, and a column that is not in the
 			// API has no business in a live stream either.
-			Columns: LessonShapeColumns,
+			Columns: TodoShapeColumns,
 		})
 	}
 }
 
-// LessonDeletedScope narrows the trash shape further.
+// TodoDeletedScope narrows the trash shape further.
 //
 // It receives a filter that already carries the tenant and lifecycle
 // conditions, and can only add to it — every condition is joined with AND,
@@ -115,10 +93,10 @@ func handleLessonShape(s Server, scope LessonScope) http.HandlerFunc {
 // injection point with a streaming response attached.
 //
 // Returning an error refuses the subscription.
-type LessonDeletedScope func(ctx context.Context, r *http.Request, claims tenancy.Claims, p LessonShapeParams, w *electric.Where) error
+type TodoDeletedScope func(ctx context.Context, r *http.Request, claims tenancy.Claims, p TodoShapeParams, w *electric.Where) error
 
-// handleLessonDeletedShape serves GET /electric/lesson/_deleted.
-func handleLessonDeletedShape(s Server, scope LessonDeletedScope) http.HandlerFunc {
+// handleTodoDeletedShape serves GET /electric/todo/_deleted.
+func handleTodoDeletedShape(s Server, scope TodoDeletedScope) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		claims, where, ok := prepare(s, w, r, false)
 		if !ok {
@@ -136,7 +114,7 @@ func handleLessonDeletedShape(s Server, scope LessonDeletedScope) http.HandlerFu
 		// not the history of what was deleted.
 		where.Eq("version_type", "Original")
 
-		params, err := parseLessonShapeParams(r)
+		params, err := parseTodoShapeParams(r)
 		if err != nil {
 			fail(s, w, r, err)
 			return
@@ -150,18 +128,18 @@ func handleLessonDeletedShape(s Server, scope LessonDeletedScope) http.HandlerFu
 		}
 
 		s.Proxy.Serve(w, r, electric.Shape{
-			Table:  "lesson",
+			Table:  "todo",
 			Where:  where.SQL(),
 			Params: where.Params(),
 			// The readable columns, named rather than left to default. A shape carries
 			// every column it names to every subscriber, and a column that is not in the
 			// API has no business in a live stream either.
-			Columns: LessonShapeColumns,
+			Columns: TodoShapeColumns,
 		})
 	}
 }
 
-// LessonVersionsScope narrows the history shape further.
+// TodoVersionsScope narrows the history shape further.
 //
 // The id is the row whose history this is, parsed before the filter was built
 // because the filter is made of it. A scope that wants to refuse some rows
@@ -175,10 +153,10 @@ func handleLessonDeletedShape(s Server, scope LessonDeletedScope) http.HandlerFu
 // injection point with a streaming response attached.
 //
 // Returning an error refuses the subscription.
-type LessonVersionsScope func(ctx context.Context, r *http.Request, claims tenancy.Claims, id uuid.UUID, p LessonShapeParams, w *electric.Where) error
+type TodoVersionsScope func(ctx context.Context, r *http.Request, claims tenancy.Claims, id uuid.UUID, p TodoShapeParams, w *electric.Where) error
 
-// handleLessonVersionsShape serves GET /electric/lesson/{id}/_versions.
-func handleLessonVersionsShape(s Server, scope LessonVersionsScope) http.HandlerFunc {
+// handleTodoVersionsShape serves GET /electric/todo/{id}/_versions.
+func handleTodoVersionsShape(s Server, scope TodoVersionsScope) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		claims, where, ok := prepare(s, w, r, false)
 		if !ok {
@@ -200,14 +178,14 @@ func handleLessonVersionsShape(s Server, scope LessonVersionsScope) http.Handler
 		// One row's history: the copies taken before each update, and never the row
 		// itself.
 		where.Eq("version_type", "Snapshot")
-		where.Eq("snapshot_from_lesson_id", id.String())
+		where.Eq("snapshot_from_todo_id", id.String())
 		// A snapshot is written with no deletion stamp and the table's check
 		// constraint keeps it that way — but the constraint is one the schema has to
 		// carry, and this filter does not depend on somebody else's migration having
 		// written it.
 		where.IsNull("deleted_at")
 
-		params, err := parseLessonShapeParams(r)
+		params, err := parseTodoShapeParams(r)
 		if err != nil {
 			fail(s, w, r, err)
 			return
@@ -221,38 +199,43 @@ func handleLessonVersionsShape(s Server, scope LessonVersionsScope) http.Handler
 		}
 
 		s.Proxy.Serve(w, r, electric.Shape{
-			Table:  "lesson",
+			Table:  "todo",
 			Where:  where.SQL(),
 			Params: where.Params(),
 			// The readable columns, named rather than left to default. A shape carries
 			// every column it names to every subscriber, and a column that is not in the
 			// API has no business in a live stream either.
-			Columns: LessonShapeColumns,
+			Columns: TodoShapeColumns,
 		})
 	}
 }
 
-// versionsFromLiveLesson is the live scope as a history scope.
+// versionsFromLiveTodo is the live scope as a history scope.
 //
 // Nil stays nil rather than becoming a function that calls one: a scope nobody
 // wrote is not a refusal.
-func versionsFromLiveLesson(live LessonScope) LessonVersionsScope {
+func versionsFromLiveTodo(live TodoScope) TodoVersionsScope {
 	if live == nil {
 		return nil
 	}
-	return func(ctx context.Context, r *http.Request, claims tenancy.Claims, _ uuid.UUID, p LessonShapeParams, w *electric.Where) error {
+	return func(ctx context.Context, r *http.Request, claims tenancy.Claims, _ uuid.UUID, p TodoShapeParams, w *electric.Where) error {
 		return live(ctx, r, claims, p, w)
 	}
 }
 
-// LessonShapeColumns are the columns this shape carries.
+// TodoShapeColumns are the columns this shape carries.
 //
 // They are the resource's readable fields — the same set a GET returns —
 // so a column excluded from the API is excluded here without anybody having to
 // remember.
-var LessonShapeColumns = []string{
+var TodoShapeColumns = []string{
 	"id",
 	"tenant_id",
+	"title",
+	"notes",
+	"is_done",
+	"priority",
+	"due_at",
 	"created_at",
 	"created_by_account_id",
 	"updated_at",
@@ -260,15 +243,7 @@ var LessonShapeColumns = []string{
 	"deleted_at",
 	"deleted_by_account_id",
 	"version_type",
-	"snapshot_from_lesson_id",
-	"snapshot_from_lesson_at",
-	"title",
-	"notes",
-	"status",
-	"manager_email",
-	"starts_at",
-	"capacity",
-	"price",
-	"tags",
-	"search_vector",
+	"snapshot_from_todo_id",
+	"snapshot_from_todo_at",
+	"cover_file_id",
 }

@@ -47,10 +47,24 @@ const DefaultElectricURL = "http://electric:3000"
 //
 // A nil scope is not an error: it means the shape is filtered by tenant and
 // lifecycle and nothing else, which is exactly right for most tables.
+//
+// A soft-deletable table has a trash shape here as well as a live one, and a
+// table that keeps its previous versions has a history shape. Neither is
+// configured: the columns are what decide, the same way they decide whether
+// the API has a GET /_deleted.
+//
+// Those two inherit the live shape's scope while their own field is nil. They
+// carry the same table's rows, so a narrowing that mattered for the live shape
+// almost always matters for the trash and the history too — and a narrowing
+// the application has to remember to repeat on a route rig added is one that
+// eventually does not get repeated. Set the field to scope them differently;
+// setting it replaces the inherited scope rather than adding to it.
 type Handlers struct {
 	Server Server
 
-	Lesson LessonScope
+	Lesson         LessonScope
+	LessonDeleted  LessonDeletedScope
+	LessonVersions LessonVersionsScope
 }
 
 // Register mounts every shape endpoint.
@@ -68,7 +82,18 @@ func Register(mux *http.ServeMux, h Handlers) {
 		panic("electric: Server.GetClaims is required")
 	}
 
+	// A derived shape falls back to the live shape's scope. Nil stays nil: a table
+	// nobody scoped is scoped by tenant and lifecycle on all three of its routes.
+	if h.LessonDeleted == nil {
+		h.LessonDeleted = LessonDeletedScope(h.Lesson)
+	}
+	if h.LessonVersions == nil {
+		h.LessonVersions = versionsFromLiveLesson(h.Lesson)
+	}
+
 	mux.HandleFunc("GET /electric/lesson", handleLessonShape(h.Server, h.Lesson))
+	mux.HandleFunc("GET /electric/lesson/_deleted", handleLessonDeletedShape(h.Server, h.LessonDeleted))
+	mux.HandleFunc("GET /electric/lesson/{id}/_versions", handleLessonVersionsShape(h.Server, h.LessonVersions))
 }
 
 // prepare authenticates a subscription and starts its filter.
