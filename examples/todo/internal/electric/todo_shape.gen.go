@@ -41,7 +41,7 @@ func parseTodoShapeParams(r *http.Request) (TodoShapeParams, error) {
 // Returning an error refuses the subscription.
 type TodoScope func(ctx context.Context, r *http.Request, claims tenancy.Claims, p TodoShapeParams, w *electric.Where) error
 
-// handleTodoShape serves GET /electric/todo.
+// handleTodoShape serves GET /api/v1/todo/_stream.
 func handleTodoShape(s Server, scope TodoScope) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		claims, where, ok := prepare(s, w, r, false)
@@ -95,7 +95,7 @@ func handleTodoShape(s Server, scope TodoScope) http.HandlerFunc {
 // Returning an error refuses the subscription.
 type TodoDeletedScope func(ctx context.Context, r *http.Request, claims tenancy.Claims, p TodoShapeParams, w *electric.Where) error
 
-// handleTodoDeletedShape serves GET /electric/todo/_deleted.
+// handleTodoDeletedShape serves GET /api/v1/todo/_deleted/_stream.
 func handleTodoDeletedShape(s Server, scope TodoDeletedScope) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		claims, where, ok := prepare(s, w, r, false)
@@ -155,7 +155,7 @@ func handleTodoDeletedShape(s Server, scope TodoDeletedScope) http.HandlerFunc {
 // Returning an error refuses the subscription.
 type TodoVersionsScope func(ctx context.Context, r *http.Request, claims tenancy.Claims, id uuid.UUID, p TodoShapeParams, w *electric.Where) error
 
-// handleTodoVersionsShape serves GET /electric/todo/{id}/_versions.
+// handleTodoVersionsShape serves GET /api/v1/todo/{id}/_versions/_stream.
 func handleTodoVersionsShape(s Server, scope TodoVersionsScope) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		claims, where, ok := prepare(s, w, r, false)

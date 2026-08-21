@@ -146,7 +146,10 @@ func resolveTypes(doc *ir.Document) diag.List {
 }
 
 // computeRoutes fills in the full route and operation identifier for every
-// endpoint, once.
+// endpoint, and the full route for every live-sync shape, once.
+//
+// Both are expanded against the same base path, because both are served by the
+// same mux, and both land in one namespace that is checked for collisions.
 func computeRoutes(doc *ir.Document) diag.List {
 	var diags diag.List
 
@@ -199,6 +202,31 @@ func computeRoutes(doc *ir.Document) diag.List {
 				seen[pattern] = r.Name + "." + e.Name
 			}
 		}
+	}
+
+	// A live-sync shape's route is expanded the same way and against the same
+	// base, because it is served by the same mux: the electric generator adds to
+	// the one api.Register makes. The second pass is what lets it be checked
+	// against every REST route rather than only the ones ahead of it.
+	//
+	// The check is the live shape's route alone. The trash and the history sit
+	// on longer paths under the same stem and are composed by the generator that
+	// mounts them; the shape's own route is the one an endpoint can land on by
+	// accident, and it is the one that would take the mux down at startup.
+	for i := range doc.API.Resources {
+		r := &doc.API.Resources[i]
+		if r.Electric == nil {
+			continue
+		}
+		r.Electric.Path = base + r.Electric.Path
+
+		pattern := "GET " + r.Electric.Path
+		if prev, dup := seen[pattern]; dup {
+			diags.Add(diag.CodeInvalidEndpoint, diag.At(r.Name+".electric"),
+				"%s streams on %q, which is already served by %s", r.Name, pattern, prev)
+			continue
+		}
+		seen[pattern] = r.Name + ".electric"
 	}
 
 	return diags

@@ -31,7 +31,7 @@ type shape struct {
 	kind shapeKind
 	// name is the Go stem for this shape's scope type and handler.
 	name string
-	// path is the route, for example "/electric/lesson/_deleted".
+	// path is the route, for example "/api/v1/lesson/_deleted/_stream".
 	path string
 }
 
@@ -56,14 +56,14 @@ func (e *emitter) shapesFor(res *ir.Resource) []shape {
 		shapes = append(shapes, shape{
 			kind: shapeDeleted,
 			name: res.Name + "Deleted",
-			path: res.Electric.Path + "/_deleted",
+			path: res.Electric.DeletedPath(),
 		})
 	}
 	if res.Storage.IsSnapshotable() {
 		shapes = append(shapes, shape{
 			kind: shapeVersions,
 			name: res.Name + "Versions",
-			path: res.Electric.Path + "/{id}/_versions",
+			path: res.Electric.VersionsPath(),
 		})
 	}
 	return shapes

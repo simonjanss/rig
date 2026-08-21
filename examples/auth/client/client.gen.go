@@ -27,7 +27,7 @@ const BasePath = "/api/v1"
 // to answer before removing anything: how old is the oldest client still
 // calling. Regenerating against an unchanged API leaves it alone — it is not
 // a build stamp.
-const Revision = "2026-08-20"
+const Revision = "2026-08-21"
 
 // RevisionHeader is where [Revision] is sent: the same header the server
 // generated from this document reads.

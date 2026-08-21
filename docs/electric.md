@@ -46,9 +46,17 @@ two answers to disagree.
 
 | Route | Carries | Needs |
 |---|---|---|
-| `GET /electric/todo` | Live rows. Not deleted, not a snapshot. | — |
-| `GET /electric/todo/_deleted` | Retired rows — the trash. | `deleted_at` |
-| `GET /electric/todo/{id}/_versions` | One row's previous versions. | the snapshot columns |
+| `GET /api/v1/todo/_stream` | Live rows. Not deleted, not a snapshot. | — |
+| `GET /api/v1/todo/_deleted/_stream` | Retired rows — the trash. | `deleted_at` |
+| `GET /api/v1/todo/{id}/_versions/_stream` | One row's previous versions. | the snapshot columns |
+
+`_stream` is always the last segment, so a shape's route is the read surface it
+streams plus one marker, and nothing ahead of the marker changes meaning because
+it is there. What comes first is the **table** name — not the resource's plural
+path segment, which is what keeps a shape from colliding with the endpoints
+beside it (`/api/v1/todos/...`). The `/api/v1` is your `api.base_path`: shapes
+are served by the same mux as the rest of your API and sit under the same
+prefix.
 
 The columns are the whole rule, and `operations:` is not part of it. The API
 needs `List` before it offers a `GET /_deleted` and `Get` before it offers a

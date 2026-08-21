@@ -839,7 +839,7 @@ func applyNotificationTable(res *ir.Resource, t *ir.Table, opt ConfigOptions) {
 	if res.Electric == nil {
 		res.Electric = &ir.ElectricEndpoint{
 			Auth: ir.ElectricAuthTenant,
-			Path: "/electric/" + res.Storage.Table,
+			Path: "/" + res.Storage.Table + ir.ElectricStreamSuffix,
 		}
 	}
 }
@@ -925,7 +925,7 @@ func applyElectricConfig(loaded *tableconf.Loaded, res *ir.Resource, cfg tableco
 
 	e := &ir.ElectricEndpoint{
 		Auth: auth,
-		Path: "/electric/" + res.Storage.Table,
+		Path: "/" + res.Storage.Table + ir.ElectricStreamSuffix,
 	}
 
 	names := make([]string, 0, len(cfg.Electric.Params))

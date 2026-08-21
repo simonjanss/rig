@@ -1607,7 +1607,7 @@
         },
         "electric": {
           "auth": "tenant",
-          "path": "/electric/memo"
+          "path": "/api/v1/memo/_stream"
         }
       }
     ],

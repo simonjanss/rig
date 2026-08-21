@@ -44,7 +44,7 @@ func parseRigNotificationRecipientShapeParams(r *http.Request) (RigNotificationR
 type RigNotificationRecipientScope func(ctx context.Context, r *http.Request, claims tenancy.Claims, p RigNotificationRecipientShapeParams, w *electric.Where) error
 
 // handleRigNotificationRecipientShape serves GET
-// /electric/rig_notification_recipient.
+// /api/v1/rig_notification_recipient/_stream.
 func handleRigNotificationRecipientShape(s Server, scope RigNotificationRecipientScope) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		claims, where, ok := prepare(s, w, r, false)
@@ -111,7 +111,7 @@ func handleRigNotificationRecipientShape(s Server, scope RigNotificationRecipien
 type RigNotificationRecipientDeletedScope func(ctx context.Context, r *http.Request, claims tenancy.Claims, p RigNotificationRecipientShapeParams, w *electric.Where) error
 
 // handleRigNotificationRecipientDeletedShape serves GET
-// /electric/rig_notification_recipient/_deleted.
+// /api/v1/rig_notification_recipient/_deleted/_stream.
 func handleRigNotificationRecipientDeletedShape(s Server, scope RigNotificationRecipientDeletedScope) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		claims, where, ok := prepare(s, w, r, false)

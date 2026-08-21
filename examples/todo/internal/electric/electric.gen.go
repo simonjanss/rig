@@ -96,11 +96,11 @@ func Register(mux *http.ServeMux, h Handlers) {
 		h.TodoVersions = versionsFromLiveTodo(h.Todo)
 	}
 
-	mux.HandleFunc("GET /electric/rig_notification_recipient", handleRigNotificationRecipientShape(h.Server, h.RigNotificationRecipient))
-	mux.HandleFunc("GET /electric/rig_notification_recipient/_deleted", handleRigNotificationRecipientDeletedShape(h.Server, h.RigNotificationRecipientDeleted))
-	mux.HandleFunc("GET /electric/todo", handleTodoShape(h.Server, h.Todo))
-	mux.HandleFunc("GET /electric/todo/_deleted", handleTodoDeletedShape(h.Server, h.TodoDeleted))
-	mux.HandleFunc("GET /electric/todo/{id}/_versions", handleTodoVersionsShape(h.Server, h.TodoVersions))
+	mux.HandleFunc("GET /api/v1/rig_notification_recipient/_stream", handleRigNotificationRecipientShape(h.Server, h.RigNotificationRecipient))
+	mux.HandleFunc("GET /api/v1/rig_notification_recipient/_deleted/_stream", handleRigNotificationRecipientDeletedShape(h.Server, h.RigNotificationRecipientDeleted))
+	mux.HandleFunc("GET /api/v1/todo/_stream", handleTodoShape(h.Server, h.Todo))
+	mux.HandleFunc("GET /api/v1/todo/_deleted/_stream", handleTodoDeletedShape(h.Server, h.TodoDeleted))
+	mux.HandleFunc("GET /api/v1/todo/{id}/_versions/_stream", handleTodoVersionsShape(h.Server, h.TodoVersions))
 }
 
 // prepare authenticates a subscription and starts its filter.
