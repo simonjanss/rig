@@ -58,11 +58,23 @@ func (e *emitter) handler(b *gobuf.Buf, res *ir.Resource, ep *ir.Endpoint) {
 
 	b.L("func handle%s(s Server, svc %sService) %s.HandlerFunc {", ep.Impl.HandlerName, res.Name, httpPkg)
 	b.L("return func(w %s.ResponseWriter, r *%s.Request) {", httpPkg, httpPkg)
+
+	// Before prepare, because prepare is one of the things that answers: a
+	// refused caller and a client too old to serve both write a response and
+	// return, and a line that missed those would be a line that only ever
+	// described the requests that worked.
+	b.L("rec := %s.Wrap(w)", b.Import(runtimeModule+"/reqlog"))
+	b.L("w = rec")
+	b.NL()
+
 	prepare := "prepare"
 	if ep.Public {
 		prepare = "preparePublic"
 	}
 	b.L("ctx, claims, rc, ok := %s(s, w, r)", prepare)
+	// After prepare, so rc is the populated one: a deferred call evaluates its
+	// arguments where it is written, and rc a line earlier is still empty.
+	b.L("defer logRequest(s, r, rec, rc)")
 	b.L("if !ok { return }")
 	b.NL()
 

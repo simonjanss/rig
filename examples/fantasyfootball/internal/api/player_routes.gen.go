@@ -8,6 +8,7 @@ import (
 	"net/http"
 
 	"github.com/simonjanss/rig/examples/fantasyfootball/internal/model"
+	"github.com/simonjanss/rig/runtime/reqlog"
 )
 
 // registerPlayer mounts Player's routes.
@@ -28,7 +29,11 @@ func registerPlayer(mux *http.ServeMux, s Server, svc PlayerService) {
 // List Players.
 func handleListPlayers(s Server, svc PlayerService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		rec := reqlog.Wrap(w)
+		w = rec
+
 		ctx, claims, rc, ok := prepare(s, w, r)
+		defer logRequest(s, r, rec, rc)
 		if !ok {
 			return
 		}
@@ -63,7 +68,11 @@ func handleListPlayers(s Server, svc PlayerService) http.HandlerFunc {
 // Create a Player.
 func handleCreatePlayer(s Server, svc PlayerService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		rec := reqlog.Wrap(w)
+		w = rec
+
 		ctx, claims, rc, ok := prepare(s, w, r)
+		defer logRequest(s, r, rec, rc)
 		if !ok {
 			return
 		}
@@ -90,7 +99,11 @@ func handleCreatePlayer(s Server, svc PlayerService) http.HandlerFunc {
 // Search Players with filters.
 func handleSearchPlayers(s Server, svc PlayerService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		rec := reqlog.Wrap(w)
+		w = rec
+
 		ctx, claims, rc, ok := prepare(s, w, r)
+		defer logRequest(s, r, rec, rc)
 		if !ok {
 			return
 		}
@@ -136,7 +149,11 @@ func handleSearchPlayers(s Server, svc PlayerService) http.HandlerFunc {
 // not in the trash either.
 func handleListDeletedPlayers(s Server, svc PlayerService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		rec := reqlog.Wrap(w)
+		w = rec
+
 		ctx, claims, rc, ok := prepare(s, w, r)
+		defer logRequest(s, r, rec, rc)
 		if !ok {
 			return
 		}
@@ -174,7 +191,11 @@ func handleListDeletedPlayers(s Server, svc PlayerService) http.HandlerFunc {
 // but can be restored within the retention window.
 func handleDeletePlayer(s Server, svc PlayerService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		rec := reqlog.Wrap(w)
+		w = rec
+
 		ctx, claims, rc, ok := prepare(s, w, r)
+		defer logRequest(s, r, rec, rc)
 		if !ok {
 			return
 		}
@@ -202,7 +223,11 @@ func handleDeletePlayer(s Server, svc PlayerService) http.HandlerFunc {
 // Fetch one Player by identifier.
 func handleGetPlayer(s Server, svc PlayerService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		rec := reqlog.Wrap(w)
+		w = rec
+
 		ctx, claims, rc, ok := prepare(s, w, r)
+		defer logRequest(s, r, rec, rc)
 		if !ok {
 			return
 		}
@@ -234,7 +259,11 @@ func handleGetPlayer(s Server, svc PlayerService) http.HandlerFunc {
 // cleared; a field left out is left alone.
 func handleUpdatePlayer(s Server, svc PlayerService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		rec := reqlog.Wrap(w)
+		w = rec
+
 		ctx, claims, rc, ok := prepare(s, w, r)
+		defer logRequest(s, r, rec, rc)
 		if !ok {
 			return
 		}
@@ -286,7 +315,11 @@ func handleUpdatePlayer(s Server, svc PlayerService) http.HandlerFunc {
 // checked against the world it is returning to.
 func handleRestorePlayer(s Server, svc PlayerService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		rec := reqlog.Wrap(w)
+		w = rec
+
 		ctx, claims, rc, ok := prepare(s, w, r)
+		defer logRequest(s, r, rec, rc)
 		if !ok {
 			return
 		}

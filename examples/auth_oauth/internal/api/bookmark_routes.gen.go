@@ -8,6 +8,7 @@ import (
 	"net/http"
 
 	"github.com/simonjanss/rig/examples/auth_oauth/internal/model"
+	"github.com/simonjanss/rig/runtime/reqlog"
 )
 
 // registerBookmark mounts Bookmark's routes.
@@ -26,7 +27,11 @@ func registerBookmark(mux *http.ServeMux, s Server, svc BookmarkService) {
 // List Bookmarks.
 func handleListBookmarks(s Server, svc BookmarkService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		rec := reqlog.Wrap(w)
+		w = rec
+
 		ctx, claims, rc, ok := prepare(s, w, r)
+		defer logRequest(s, r, rec, rc)
 		if !ok {
 			return
 		}
@@ -61,7 +66,11 @@ func handleListBookmarks(s Server, svc BookmarkService) http.HandlerFunc {
 // Create a Bookmark.
 func handleCreateBookmark(s Server, svc BookmarkService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		rec := reqlog.Wrap(w)
+		w = rec
+
 		ctx, claims, rc, ok := prepare(s, w, r)
+		defer logRequest(s, r, rec, rc)
 		if !ok {
 			return
 		}
@@ -88,7 +97,11 @@ func handleCreateBookmark(s Server, svc BookmarkService) http.HandlerFunc {
 // Search Bookmarks with filters.
 func handleSearchBookmarks(s Server, svc BookmarkService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		rec := reqlog.Wrap(w)
+		w = rec
+
 		ctx, claims, rc, ok := prepare(s, w, r)
+		defer logRequest(s, r, rec, rc)
 		if !ok {
 			return
 		}
@@ -129,7 +142,11 @@ func handleSearchBookmarks(s Server, svc BookmarkService) http.HandlerFunc {
 // Delete a Bookmark.
 func handleDeleteBookmark(s Server, svc BookmarkService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		rec := reqlog.Wrap(w)
+		w = rec
+
 		ctx, claims, rc, ok := prepare(s, w, r)
+		defer logRequest(s, r, rec, rc)
 		if !ok {
 			return
 		}
@@ -157,7 +174,11 @@ func handleDeleteBookmark(s Server, svc BookmarkService) http.HandlerFunc {
 // Fetch one Bookmark by identifier.
 func handleGetBookmark(s Server, svc BookmarkService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		rec := reqlog.Wrap(w)
+		w = rec
+
 		ctx, claims, rc, ok := prepare(s, w, r)
+		defer logRequest(s, r, rec, rc)
 		if !ok {
 			return
 		}
@@ -189,7 +210,11 @@ func handleGetBookmark(s Server, svc BookmarkService) http.HandlerFunc {
 // cleared; a field left out is left alone.
 func handleUpdateBookmark(s Server, svc BookmarkService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		rec := reqlog.Wrap(w)
+		w = rec
+
 		ctx, claims, rc, ok := prepare(s, w, r)
+		defer logRequest(s, r, rec, rc)
 		if !ok {
 			return
 		}

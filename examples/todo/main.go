@@ -163,12 +163,18 @@ func main() {
 				// app.Logger rather than the package default, so a request
 				// line, a shutdown step and anything a dependency says all
 				// land wherever the server was told to write.
-				PreHooks: []func(http.ResponseWriter, *http.Request) bool{
-					func(_ http.ResponseWriter, r *http.Request) bool {
-						app.Logger.Info("request", "method", r.Method, "path", r.URL.Path)
-						return true // false answers the request here and stops
-					},
-				},
+				//
+				// This used to be a PreHook logging the method and the path.
+				// The generated server writes the line itself now, and writes a
+				// better one: after the handler rather than before it, so it
+				// carries the status and the size, and labelled by the route
+				// that matched rather than by a path with an identifier in it.
+				//
+				// That line is debug, so this example does not print it: the
+				// level belongs to whoever built the logger, and nothing here
+				// builds one. The line that says why a 500 happened is an error
+				// and comes out regardless, which is the one worth having.
+				Logger: app.Logger,
 			},
 			Todo:           svc,
 			TodoAttachment: attachments,

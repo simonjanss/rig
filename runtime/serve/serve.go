@@ -215,14 +215,14 @@ func Main(cfg Config, mount Mount) {
 
 	name, err := taskName(os.Args[1:], cfg.Tasks)
 	if err != nil {
-		logger(cfg).Error("cannot run that", "error", err)
+		logger(cfg).ErrorContext(ctx, "cannot run that", "error", err)
 		stop()
 		os.Exit(2)
 	}
 
 	if name != "" {
 		if err := Once(ctx, cfg, cfg.Tasks[name]); err != nil {
-			logger(cfg).Error(name+" failed", "error", err)
+			logger(cfg).ErrorContext(ctx, name+" failed", "error", err)
 			stop()
 			os.Exit(1)
 		}
@@ -235,11 +235,11 @@ func Main(cfg Config, mount Mount) {
 		// nothing to repeat here — and nothing worth telling the orchestrator
 		// that the process crashed.
 		if Unclean(err) {
-			logger(cfg).Error("stopped, but not cleanly")
+			logger(cfg).ErrorContext(ctx, "stopped, but not cleanly")
 			return
 		}
 
-		logger(cfg).Error("server stopped", "error", err)
+		logger(cfg).ErrorContext(ctx, "server stopped", "error", err)
 		stop()
 		os.Exit(1)
 	}
@@ -328,7 +328,7 @@ func Run(ctx context.Context, cfg Config, mount Mount) (err error) {
 	defer pool.Close()
 
 	if cfg.Migrate != nil {
-		cfg.Logger.Info("migrating")
+		cfg.Logger.InfoContext(starting, "migrating")
 		if err := bounded(starting, "migrate", func(c context.Context) error {
 			return cfg.Migrate(c, pool)
 		}); err != nil {
@@ -366,7 +366,7 @@ func Run(ctx context.Context, cfg Config, mount Mount) (err error) {
 	// The shutdown is checked now, while the answer can still change anything:
 	// a step that cannot fit in the budget is a truncated flush during an
 	// actual shutdown, which is the worst time to learn about it.
-	if err := app.checkShutdown(cfg.MaxShutdown, cfg.DrainDelay); err != nil {
+	if err := app.checkShutdown(ctx, cfg.MaxShutdown, cfg.DrainDelay); err != nil {
 		return err
 	}
 
@@ -396,7 +396,7 @@ func Run(ctx context.Context, cfg Config, mount Mount) (err error) {
 	done()
 
 	ready.Store(true)
-	cfg.Logger.Info("listening", "addr", ln.Addr().String(), "started in", time.Since(began))
+	cfg.Logger.InfoContext(ctx, "listening", "addr", ln.Addr().String(), "started in", time.Since(began))
 
 	select {
 	case err := <-served:
@@ -417,7 +417,7 @@ func Run(ctx context.Context, cfg Config, mount Mount) (err error) {
 	// Announced before anything stops, so that whatever is routing traffic has
 	// a chance to look away first.
 	ready.Store(false)
-	cfg.Logger.Info("draining", "delay", cfg.DrainDelay, "timeout", cfg.MaxShutdown)
+	cfg.Logger.InfoContext(stopping, "draining", "delay", cfg.DrainDelay, "timeout", cfg.MaxShutdown)
 
 	// Then the things that fetch their own work, which should stop fetching
 	// while the server is still finishing what it has.
@@ -532,10 +532,10 @@ func ping(ctx context.Context, cfg Config, pool *pgxpool.Pool, addr string) erro
 
 	// The address, never the url: a connection string carries a password.
 	if cfg.Hint != "" {
-		cfg.Logger.Warn("cannot reach the database yet", "addr", addr,
+		cfg.Logger.WarnContext(ctx, "cannot reach the database yet", "addr", addr,
 			"waiting", cfg.ConnectTimeout, "hint", cfg.Hint)
 	} else {
-		cfg.Logger.Warn("cannot reach the database yet", "addr", addr,
+		cfg.Logger.WarnContext(ctx, "cannot reach the database yet", "addr", addr,
 			"waiting", cfg.ConnectTimeout)
 	}
 

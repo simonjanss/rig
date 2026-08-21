@@ -779,13 +779,23 @@ front, err := api.New(pool, api.Hooks{
     // How a provider sign-in ends, for a browser that wants a cookie and a
     // redirect rather than JSON. Nil issues the same session a password login does.
     OAuth: api.OAuthHooks{OnSignIn: nil},
+
+    // Where the cause of a failed auth request is recorded. Nil uses
+    // slog.Default(). Pass the same logger you give Server.Logger below: these
+    // routes answer on the same mux and in the same shape, and a 500 from
+    // signing in should not be the one line that lands somewhere else.
+    Logger: app.Logger,
 })
 
 mux := api.Register(api.Handlers{
-    Server: api.Server{Auth: front},   // GetClaims and /auth/* in one field
+    Server: api.Server{Auth: front, Logger: app.Logger}, // GetClaims and /auth/* in one field
     Note:   note.New(repos.Notes),
 })
 ```
+
+They are two fields rather than one because of the order: the configuration is
+built first, and what it produces is what `Server.Auth` is then set to. See
+[observability.md](observability.md).
 
 `OnCreated` runs **inside** the transaction that made the tenant — reach it with
 `dbx.Tx(ctx)`, the same way a generated repository does. That is what makes seeding

@@ -139,14 +139,18 @@ func TestTheConfiguredValuesReachTheOutput(t *testing.T) {
 // TestTheErrorMapperIsThisPackages is the reason the wiring is generated into
 // the API package rather than beside it: the mapper is reached by name, with no
 // import and no option naming the package it lives in.
+//
+// Through fail rather than the mapper directly, which is the other half: fail
+// is where the cause of a 500 is recorded, and an auth route is the one route a
+// project cannot wrap to record it itself.
 func TestTheErrorMapperIsThisPackages(t *testing.T) {
 	t.Parallel()
 
 	doc := gentest.LoadDocument(t, filepath.Join("testdata", authFixture))
 	got := find(t, gentest.Run(t, servergo.New(), doc, authOpts()), "auth.gen.go")
 
-	if !strings.Contains(got, "DefaultErrorMapper(w, r, RequestContext{") {
-		t.Error("the wiring should call this package's own error mapper unqualified")
+	if !strings.Contains(got, "fail(srv, w, r, RequestContext{") {
+		t.Error("the wiring should fail through this package's own path, unqualified")
 	}
 	if !strings.Contains(got, `r.Header.Get("X-Request-Id")`) {
 		t.Error("the failure should carry the same request identifier as every other one")

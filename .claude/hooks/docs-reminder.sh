@@ -50,6 +50,7 @@ internal/gen/*) pages="docs/generators.md README.md" ;;
 internal/cli/*) pages="docs/cli.md" ;;
 internal/diag/*) pages="docs/diagnostics.md" ;;
 runtime/electric/*) pages="docs/electric.md" ;;
+runtime/reqlog/*) pages="docs/observability.md" ;;
 runtime/serve/* | runtime/dbhook/*) pages="docs/services.md" ;;
 auth/*) pages="docs/auth.md" ;;
 rigclient/*) pages="docs/clients.md" ;;
