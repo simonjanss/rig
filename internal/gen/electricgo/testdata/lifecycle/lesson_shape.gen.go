@@ -63,7 +63,7 @@ func parseLessonShapeParams(r *http.Request) (LessonShapeParams, error) {
 // Returning an error refuses the subscription.
 type LessonScope func(ctx context.Context, r *http.Request, claims tenancy.Claims, p LessonShapeParams, w *electric.Where) error
 
-// handleLessonShape serves GET /electric/lesson.
+// handleLessonShape serves GET /api/v1/lesson/_stream.
 func handleLessonShape(s Server, scope LessonScope) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		claims, where, ok := prepare(s, w, r, false)
@@ -117,7 +117,7 @@ func handleLessonShape(s Server, scope LessonScope) http.HandlerFunc {
 // Returning an error refuses the subscription.
 type LessonDeletedScope func(ctx context.Context, r *http.Request, claims tenancy.Claims, p LessonShapeParams, w *electric.Where) error
 
-// handleLessonDeletedShape serves GET /electric/lesson/_deleted.
+// handleLessonDeletedShape serves GET /api/v1/lesson/_deleted/_stream.
 func handleLessonDeletedShape(s Server, scope LessonDeletedScope) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		claims, where, ok := prepare(s, w, r, false)
@@ -177,7 +177,7 @@ func handleLessonDeletedShape(s Server, scope LessonDeletedScope) http.HandlerFu
 // Returning an error refuses the subscription.
 type LessonVersionsScope func(ctx context.Context, r *http.Request, claims tenancy.Claims, id uuid.UUID, p LessonShapeParams, w *electric.Where) error
 
-// handleLessonVersionsShape serves GET /electric/lesson/{id}/_versions.
+// handleLessonVersionsShape serves GET /api/v1/lesson/{id}/_versions/_stream.
 func handleLessonVersionsShape(s Server, scope LessonVersionsScope) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		claims, where, ok := prepare(s, w, r, false)

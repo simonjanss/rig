@@ -91,9 +91,9 @@ func Register(mux *http.ServeMux, h Handlers) {
 		h.LessonVersions = versionsFromLiveLesson(h.Lesson)
 	}
 
-	mux.HandleFunc("GET /electric/lesson", handleLessonShape(h.Server, h.Lesson))
-	mux.HandleFunc("GET /electric/lesson/_deleted", handleLessonDeletedShape(h.Server, h.LessonDeleted))
-	mux.HandleFunc("GET /electric/lesson/{id}/_versions", handleLessonVersionsShape(h.Server, h.LessonVersions))
+	mux.HandleFunc("GET /api/v1/lesson/_stream", handleLessonShape(h.Server, h.Lesson))
+	mux.HandleFunc("GET /api/v1/lesson/_deleted/_stream", handleLessonDeletedShape(h.Server, h.LessonDeleted))
+	mux.HandleFunc("GET /api/v1/lesson/{id}/_versions/_stream", handleLessonVersionsShape(h.Server, h.LessonVersions))
 }
 
 // prepare authenticates a subscription and starts its filter.

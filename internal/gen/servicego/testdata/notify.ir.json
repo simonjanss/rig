@@ -4190,7 +4190,7 @@
         },
         "electric": {
           "auth": "tenant",
-          "path": "/electric/rig_notification_recipient"
+          "path": "/api/v1/rig_notification_recipient/_stream"
         }
       }
     ],

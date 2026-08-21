@@ -393,10 +393,10 @@ func TestTheExtraShapesComeFromTheColumns(t *testing.T) {
 	doc := gentest.LoadDocument(t, filepath.Join("testdata", "ownerscope.ir.json"))
 	base := routes(t, find(t, gentest.Run(t, electricgo.New(), doc, opts()), "electric.gen.go"))
 
-	if !strings.Contains(base, `"GET /electric/memo"`) {
+	if !strings.Contains(base, `"GET /api/v1/memo/_stream"`) {
 		t.Error("the live shape should be mounted")
 	}
-	if !strings.Contains(base, `"GET /electric/memo/_deleted"`) {
+	if !strings.Contains(base, `"GET /api/v1/memo/_deleted/_stream"`) {
 		t.Errorf("a soft-deletable table should have a trash shape:\n%s", base)
 	}
 	if strings.Contains(base, "_versions") {
@@ -408,7 +408,7 @@ func TestTheExtraShapesComeFromTheColumns(t *testing.T) {
 	plain.Resource("Memo").Storage.SoftDelete = nil
 	only := routes(t, find(t, gentest.Run(t, electricgo.New(), plain, opts()), "electric.gen.go"))
 
-	if !strings.Contains(only, `"GET /electric/memo"`) {
+	if !strings.Contains(only, `"GET /api/v1/memo/_stream"`) {
 		t.Error("the live shape should still be mounted")
 	}
 	if strings.Contains(only, "_deleted") || strings.Contains(only, "_versions") {
@@ -462,8 +462,8 @@ func TestTheExtraShapesIgnoreTheOperations(t *testing.T) {
 	body := routes(t, find(t, gentest.Run(t, electricgo.New(), doc, opts()), "electric.gen.go"))
 
 	for _, want := range []string{
-		`"GET /electric/rig_notification_recipient"`,
-		`"GET /electric/rig_notification_recipient/_deleted"`,
+		`"GET /api/v1/rig_notification_recipient/_stream"`,
+		`"GET /api/v1/rig_notification_recipient/_deleted/_stream"`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("missing %s:\n%s", want, body)
@@ -583,9 +583,9 @@ func TestTheGeneratedRoutesMountOnARealMux(t *testing.T) {
 	// And each one answers for itself: registering without a panic proves only
 	// that the patterns can coexist, not that they mean different things.
 	for path, want := range map[string]string{
-		"/electric/lesson":                                    "GET /electric/lesson",
-		"/electric/lesson/_deleted":                           "GET /electric/lesson/_deleted",
-		"/electric/lesson/" + uuid.NewString() + "/_versions": "GET /electric/lesson/{id}/_versions",
+		"/api/v1/lesson/_stream":                                    "GET /api/v1/lesson/_stream",
+		"/api/v1/lesson/_deleted/_stream":                           "GET /api/v1/lesson/_deleted/_stream",
+		"/api/v1/lesson/" + uuid.NewString() + "/_versions/_stream": "GET /api/v1/lesson/{id}/_versions/_stream",
 	} {
 		rec := httptest.NewRecorder()
 		mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))

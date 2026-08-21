@@ -87,8 +87,8 @@ func Register(mux *http.ServeMux, h Handlers) {
 		h.RigNotificationRecipientDeleted = RigNotificationRecipientDeletedScope(h.RigNotificationRecipient)
 	}
 
-	mux.HandleFunc("GET /electric/rig_notification_recipient", handleRigNotificationRecipientShape(h.Server, h.RigNotificationRecipient))
-	mux.HandleFunc("GET /electric/rig_notification_recipient/_deleted", handleRigNotificationRecipientDeletedShape(h.Server, h.RigNotificationRecipientDeleted))
+	mux.HandleFunc("GET /api/v1/rig_notification_recipient/_stream", handleRigNotificationRecipientShape(h.Server, h.RigNotificationRecipient))
+	mux.HandleFunc("GET /api/v1/rig_notification_recipient/_deleted/_stream", handleRigNotificationRecipientDeletedShape(h.Server, h.RigNotificationRecipientDeleted))
 }
 
 // prepare authenticates a subscription and starts its filter.

@@ -721,14 +721,45 @@ const (
 	ElectricAuthAdmin ElectricAuth = "admin"
 )
 
+// ElectricStreamSuffix marks a route as a live-sync stream.
+//
+// It is the last segment of every shape's route, so it reads as something done
+// to whatever precedes it — subscribe to this — and a shape's route is the read
+// surface it streams plus one marker. That is why the trash and history shapes
+// are composed by inserting before it rather than appending after it.
+const ElectricStreamSuffix = "/_stream"
+
 // ElectricEndpoint describes a live-sync shape endpoint for a resource. The
 // tenant and lifecycle predicates are built by rig; the declared params are
 // passed to the application's own scoping function.
 type ElectricEndpoint struct {
 	Auth ElectricAuth `json:"auth"`
-	// Path is the route, for example "/electric/lesson".
+	// Path is the live shape's route, for example "/api/v1/lesson/_stream".
+	// It is written relative to the API's base path and expanded to the full
+	// route when the document is frozen, the same way an endpoint's is.
 	Path   string          `json:"path"`
 	Params []ElectricParam `json:"params,omitempty"`
+}
+
+// DeletedPath is the route of the trash shape, and VersionsPath the route of the
+// history one.
+//
+// Both are the live shape's route with a segment spliced in ahead of the stream
+// marker. They live here rather than in the generator that mounts them so that
+// there is one answer to where the marker goes: a second place composing these
+// by hand is a second place that could put it somewhere else.
+func (e ElectricEndpoint) DeletedPath() string {
+	return e.stem() + "/_deleted" + ElectricStreamSuffix
+}
+
+// VersionsPath is the route of the history shape. See DeletedPath.
+func (e ElectricEndpoint) VersionsPath() string {
+	return e.stem() + "/{id}/_versions" + ElectricStreamSuffix
+}
+
+// stem is the route without its stream marker: what the shapes are shapes of.
+func (e ElectricEndpoint) stem() string {
+	return strings.TrimSuffix(e.Path, ElectricStreamSuffix)
 }
 
 // ElectricParam is one query parameter a live-sync endpoint accepts.

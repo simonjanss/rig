@@ -2856,7 +2856,7 @@
         },
         "electric": {
           "auth": "tenant",
-          "path": "/electric/lesson",
+          "path": "/api/v1/lesson/_stream",
           "params": [
             {
               "name": "matchday",

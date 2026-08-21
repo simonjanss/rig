@@ -285,6 +285,51 @@ func TestFreezeCatchesColumnDrift(t *testing.T) {
 	}
 }
 
+// A live-sync shape is served by the same mux as the API, so its route is
+// expanded against the same base path — and shares a namespace with the REST
+// surface, which is why an endpoint that lands on it is now reported rather than
+// left to panic when the two are mounted.
+func TestAShapeRouteSitsUnderTheBasePathAndIsCheckedAgainstIt(t *testing.T) {
+	t.Parallel()
+
+	api, _ := compile.Expand(simpleAPI(), compile.ExpandOptions{})
+	api.Resources[0].Electric = &ir.ElectricEndpoint{
+		Auth: ir.ElectricAuthTenant, Path: "/lesson" + ir.ElectricStreamSuffix,
+	}
+
+	doc, _ := compile.Freeze(api, ir.Schema{Name: "public"}, compile.Meta{Tool: "test"})
+	e := doc.Resource("Lesson").Electric
+
+	// The stream marker stays last on all three, so each route is the read
+	// surface it streams plus one segment.
+	for _, tc := range []struct{ got, want string }{
+		{e.Path, "/api/v1/lesson/_stream"},
+		{e.DeletedPath(), "/api/v1/lesson/_deleted/_stream"},
+		{e.VersionsPath(), "/api/v1/lesson/{id}/_versions/_stream"},
+	} {
+		if tc.got != tc.want {
+			t.Errorf("shape route = %q, want %q", tc.got, tc.want)
+		}
+	}
+
+	// And an endpoint that already serves the shape's route is a project that
+	// would not start.
+	clash := simpleAPI()
+	clash.Resources[0].Operations = nil
+	clash.Resources[0].Endpoints = []ir.Endpoint{
+		{Name: "Stream", Method: "GET", Path: ir.ElectricStreamSuffix,
+			Impl: ir.EndpointImpl{HandlerName: "Stream"}},
+	}
+	clash.Resources[0].Electric = &ir.ElectricEndpoint{
+		Auth: ir.ElectricAuthTenant, Path: "/lessons" + ir.ElectricStreamSuffix,
+	}
+
+	_, diags := compile.Freeze(clash, ir.Schema{Name: "public"}, compile.Meta{Tool: "test"})
+	if !strings.Contains(diags.String(), "already served by") {
+		t.Errorf("a shape route an endpoint already serves should be reported:\n%s", diags.String())
+	}
+}
+
 func TestFreezeRejectsDuplicateRoutes(t *testing.T) {
 	t.Parallel()
 
