@@ -16,10 +16,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/simonjanss/rig/examples/fantasyfootball/internal/model"
 	"github.com/simonjanss/rig/observe"
 	"github.com/simonjanss/rig/runtime/apirev"
-	"github.com/simonjanss/rig/runtime/dbhook"
 	"github.com/simonjanss/rig/runtime/dbx"
 	"github.com/simonjanss/rig/runtime/idempotency"
 	"github.com/simonjanss/rig/runtime/reqlog"
@@ -159,9 +157,7 @@ type Server struct {
 type Handlers struct {
 	Server Server
 
-	Fixture FixtureService
-	Player  PlayerService
-	Team    TeamService
+	Lesson LessonService
 }
 
 // Register mounts every route and returns the mux.
@@ -204,14 +200,8 @@ func Register(h Handlers) *http.ServeMux {
 
 	mux := http.NewServeMux()
 
-	if h.Fixture != nil {
-		registerFixture(mux, h.Server, h.Fixture)
-	}
-	if h.Player != nil {
-		registerPlayer(mux, h.Server, h.Player)
-	}
-	if h.Team != nil {
-		registerTeam(mux, h.Server, h.Team)
+	if h.Lesson != nil {
+		registerLesson(mux, h.Server, h.Lesson)
 	}
 
 	// After the resources, so a pattern collision between the two is a panic
@@ -266,27 +256,9 @@ func IdempotencyPruner(retention time.Duration) serve.Task {
 // appended to. A resource whose field is nil is skipped, and a parent whose
 // children are all nil adopts an empty list, which is what it had before.
 func Link(h Handlers) {
-	if h.Team != nil {
-		var cs TeamChildDeletes
-		if h.Fixture != nil {
-			p := h.Fixture.ParentHooks()
-			cs = append(cs, dbhook.ChildDelete[model.TeamDeleteInput, model.Team]{
-				Child:    "fixture",
-				Deleting: p.HomeTeamDeleting,
-				Deleted:  p.HomeTeamDeleted,
-			})
-		}
-		if h.Fixture != nil {
-			p := h.Fixture.ParentHooks()
-			cs = append(cs, dbhook.ChildDelete[model.TeamDeleteInput, model.Team]{
-				Child:    "fixture",
-				Deleting: p.AwayTeamDeleting,
-				Deleted:  p.AwayTeamDeleted,
-			})
-		}
-		h.Team.AdoptChildren(cs)
-	}
-
+	// No table here references another one rig writes a service for, so there is
+	// nothing to propagate.
+	_ = h
 }
 
 // maxBodyBytes bounds a request body. Without a limit, one client can exhaust

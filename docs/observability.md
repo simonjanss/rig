@@ -3,13 +3,14 @@
 What your server says about the requests it served, and how to find the one that
 went wrong.
 
-Three things, at three prices:
+Four things, at four prices:
 
 | | Costs | Turned on by |
 |---|---|---|
 | **The log** | nothing | nothing — it is always on |
 | **Spans** | an OpenTelemetry dependency | `tracing: {enabled: true}` in rig.yaml |
 | **Exporting them** | a collector, or a file | an environment variable, at run time |
+| **The monitoring page** | a route, and a password to guard it | `monitoring: {enabled: true}`, over a span file |
 
 They are separate because they are separately worth it. The line that says why a
 500 happened is worth having in every project, including the one you started
@@ -197,7 +198,133 @@ logged.
 
 **Not traced yet:** the `auth:` block's routes and the hand-written inbox routes
 under `/notifications`. They log, and their failures carry a request id, but
-they are mounted rather than generated and no span is opened for them.
+they are mounted rather than generated and no span is opened for them — so they
+do not appear on the monitoring page either.
+
+## The monitoring page
+
+The last few hundred requests, and what each of them spent its time on, on a
+page this server already serves. It is for the deployment too small to be worth
+a collector and a Grafana in front of it, which is most deployments for most of
+their life.
+
+```yaml
+tracing:
+  enabled: true
+
+monitoring:
+  enabled: true
+```
+
+It reads the span file above and stores nothing of its own — no table, no
+retention policy, nothing to run beside the server — which is why it cannot be
+turned on without `tracing:`. rig refuses the combination when it reads
+rig.yaml rather than leaving you with a page that is empty forever.
+
+Three lines in your `main`, next to the ones that set tracing up:
+
+```go
+page, err := tracing.Page(api.Monitoring())
+if err != nil {
+    return nil, err
+}
+if why := page.Unarmed(); why != "" {
+    app.Logger.Info("monitoring page not mounted", "reason", why)
+}
+```
+
+and then `Monitor: page` on the `api.Server` you already build. The page hangs
+off the provider because it reads the file that provider is writing: naming the
+path twice is one place too many to get it wrong.
+
+### The password
+
+```
+RIG_MONITOR_PASSWORD=…      # twelve characters or more
+```
+
+**With nothing in it the page is not mounted at all** — no route, not even one
+that answers 401 — and `Unarmed()` says so in the line above. That is the
+default on a laptop and in CI, and it is the right one: the page lists paths,
+request ids, user agents and the cause of every 500, which together are a
+record of what every caller did.
+
+It is HTTP Basic, so a browser asks and nothing has to store a session. The user
+name is not checked; there is one credential here. There is **no lockout and no
+rate limit** behind it — that would mean `rig/observe` depending on
+`rig/runtime` for the throttle. The length minimum, the allowlist below, and
+whatever TLS the rest of your API is behind are what stand in for one.
+
+### Restricting it to an address
+
+```yaml
+monitoring:
+  enabled: true
+  allow:
+    - 10.0.0.0/8
+    - 127.0.0.1
+```
+
+CIDR ranges or single addresses. An address that is not on the list gets **404**
+— the same answer as a page that was never mounted — and its password is never
+compared, so a scan learns nothing and a leaked password is not enough on its
+own.
+
+It **narrows the password; it does not replace it**, and there is no way to have
+one without the other. The reason is the next paragraph.
+
+**It reads the connection's own address and never a forwarded header** — no
+`X-Forwarded-For`, no `X-Real-IP` — for the reason
+[`auth.trusted_proxies`](rig-yaml.md#auth) exists: an address read from a header
+a client controls is an address a client chooses. Which means that **behind a
+load balancer this list is not a boundary**: every request arrives from the
+balancer, so the list matches everything or nothing. There, restrict at the
+proxy and let the password be the check here.
+
+### The rest of the block
+
+```yaml
+monitoring:
+  enabled: true
+  password_env: MY_APP_MONITOR_PASSWORD
+  password: ""          # a secret in a checked-in file; rig warns (RIG3006)
+  base_path: /_rig/monitor
+  max_traces: 200
+```
+
+### What it shows
+
+Requests newest first, each expanding to the spans underneath it: the
+repository call, the stage of the write that was slow, the statement that ran.
+A failed request is marked, and the cause is on the span that failed. There is a
+search box over routes, error text, span attributes and trace ids — paste the
+`requestId` from somebody's screenshot and you have their request — and a
+filter for the failures.
+
+`/_rig/monitor/traces.json` is the same data, and `observe.ReadTraces` reads the
+span file straight from a script if you would rather not have a page in the
+loop.
+
+Three empty states, and they say which they are: no span file configured
+(`$RIG_TRACE_FILE`), nothing served yet, or a search and a filter that no
+request here matches.
+
+**Looking at the page does not appear on the page.** rig opens its spans and
+writes its request lines inside each generated handler, so anything on the mux
+that is not one — the page, the probes — is invisible to both.
+
+### What it is not
+
+- **It is not a tracing backend.** One process, one file, a few hundred
+  requests, no index and no query language. A second replica shows its own
+  spans, because a file is per process. When that stops being enough, point
+  `$OTEL_EXPORTER_OTLP_ENDPOINT` at a collector: everything is already
+  instrumented.
+- **It does not survive the file's ceiling.** `FileMaxBytes` with one rotation
+  is what bounds it, so the oldest requests go. A request whose beginning has
+  rotated away is still listed, by trace id, with the spans it still has.
+- **It is not a dashboard.** No counters, no percentiles, no graph over time —
+  see *What rig does not do here* below.
 
 ## Correlating a log line with a trace
 
@@ -292,8 +419,9 @@ out at the wrong moment.
 
 - **No metrics.** Counters, histograms and a `/metrics` endpoint are a separate
   decision with a separate cost, and rig makes none of it for you. The spans
-  carry durations, which is where most of the questions a histogram answers can
-  be asked instead.
+  carry durations — the monitoring page reads them off the last few hundred
+  requests — which is where most of the questions a histogram answers can be
+  asked instead, one request at a time.
 - **No middleware of somebody else's.** rig opens the request span itself rather
   than wrapping the mux in `otelhttp`, because the route is only known once the
   mux has dispatched — outside it, every span would be named by path. If you

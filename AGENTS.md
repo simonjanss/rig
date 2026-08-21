@@ -124,6 +124,7 @@ the same commit.** The pages are short and the mapping is mechanical:
 | `runtime/serve`, `runtime/dbhook` | `docs/services.md` |
 | `runtime/reqlog`, `observe/`, or what a generator emits about logging or spans | `docs/observability.md` |
 | `internal/project/tracing.go` — the `tracing:` block | `docs/observability.md`, `docs/rig-yaml.md` |
+| `internal/project/monitoring.go` — the `monitoring:` block | `docs/observability.md`, `docs/rig-yaml.md` |
 | `rigclient/`, `internal/gen/goclient` | `docs/clients.md` |
 
 Two rules that are easier to break than the table above:

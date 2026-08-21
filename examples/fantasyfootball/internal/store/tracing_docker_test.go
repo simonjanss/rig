@@ -36,6 +36,9 @@ type traced struct {
 	ctx   context.Context
 	path  string
 	stop  func(t *testing.T)
+	// provider is kept so that the monitoring page can be built over the same
+	// file this is writing, which is how it is built in main.go.
+	provider *observe.Provider
 }
 
 func newTraced(t *testing.T) *traced {
@@ -76,9 +79,10 @@ func newTraced(t *testing.T) *traced {
 
 	claims := tenancy.Claims{TenantID: uuid.New(), AccountID: uuid.New()}
 	return &traced{
-		repos: store.New(pool, store.Config{Tracer: observe.Tracer()}),
-		ctx:   tenancy.NewContext(ctx, claims),
-		path:  path,
+		repos:    store.New(pool, store.Config{Tracer: observe.Tracer()}),
+		ctx:      tenancy.NewContext(ctx, claims),
+		path:     path,
+		provider: provider,
 		stop: func(t *testing.T) {
 			t.Helper()
 			// Export is batched; shutting down is what empties the batch.

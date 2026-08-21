@@ -46,6 +46,8 @@ func (e *emitter) serverType(b *gobuf.Buf) {
 	b.L("}")
 	b.NL()
 
+	e.monitorInterface(b)
+
 	b.Comment("Server is the behavior every handler shares.")
 	b.L("type Server struct {")
 	b.Comment("Auth wires the whole authentication foundation in one field.\n\n" +
@@ -119,6 +121,8 @@ func (e *emitter) serverType(b *gobuf.Buf) {
 		"takes the path it always took, with no transaction and no extra round " +
 		"trip. See [github.com/simonjanss/rig/runtime/idempotency].")
 	b.L("DB %s.Beginner", b.Import(runtimeModule+"/dbx"))
+	b.NL()
+	e.monitorField(b)
 	b.L("}")
 	b.NL()
 }
@@ -242,6 +246,9 @@ func (e *emitter) registerFunc(b *gobuf.Buf) {
 	b.L("if h.Server.Auth != nil {")
 	b.L("h.Server.Auth.Mount(mux)")
 	b.L("}")
+
+	e.mountMonitor(b)
+
 	b.NL()
 	b.L("return mux")
 	b.L("}")

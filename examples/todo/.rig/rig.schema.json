@@ -504,6 +504,39 @@
       "additionalProperties": false,
       "type": "object"
     },
+    "Monitoring": {
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Whether this project serves rig's monitoring page. It requires tracing.enabled, because the spans are what the page reads."
+        },
+        "base_path": {
+          "type": "string",
+          "description": "Where the page is mounted. Defaults to /_rig/monitor, and cannot sit under api.base_path or auth.base_path."
+        },
+        "max_traces": {
+          "type": "integer",
+          "description": "How many requests the page lists, newest first. Defaults to 200."
+        },
+        "password_env": {
+          "type": "string",
+          "description": "Variable the page reads its password from. Defaults to RIG_MONITOR_PASSWORD. Empty at run time means the page is not mounted."
+        },
+        "password": {
+          "type": "string",
+          "description": "The page's password, written here rather than read from the environment. It warns: rig.yaml is checked in."
+        },
+        "allow": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "description": "Addresses that may reach the page, as CIDR ranges or single addresses, for example 10.0.0.0/8 or 127.0.0.1. Empty allows any. It narrows the password check rather than replacing it, and is matched against the connection's own address, never a forwarded header."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
+    },
     "Naming": {
       "properties": {
         "json_case": {
@@ -761,6 +794,10 @@
     "tracing": {
       "$ref": "#/$defs/Tracing",
       "description": "Whether the generated code emits OpenTelemetry spans."
+    },
+    "monitoring": {
+      "$ref": "#/$defs/Monitoring",
+      "description": "rig's own page over the spans this server wrote. It needs tracing."
     },
     "naming": {
       "$ref": "#/$defs/Naming",

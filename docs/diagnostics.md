@@ -24,7 +24,7 @@ services/todo/todo.yaml
 |---|---|
 | `RIG1xxx` | Types: a Postgres type with no Go mapping, an empty enum, a relation rig cannot project |
 | `RIG2xxx` | Naming: two things projecting to the same API name, a plural that cannot be derived, a collision with a name or table prefix rig reserves |
-| `RIG3xxx` | Configuration: invalid YAML, a key that does not match the schema, a column or enum the configuration names that no longer exists |
+| `RIG3xxx` | Configuration: invalid YAML, a key that does not match the schema, a block that cannot work without another one, a column or enum the configuration names that no longer exists |
 | `RIG4xxx` | Notes: a hand-written endpoint replacing a generated one |
 | `RIG5xxx` | Structure: no primary key, a partial snapshot triple, a missing `restore_window_days`, an enum nullable in one place and not another, an `on_delete.order` rig cannot resolve |
 | `RIG6xxx` | Conventions: missing comments, unindexed foreign keys, naming rules, `ON DELETE CASCADE`, migration filenames |

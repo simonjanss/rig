@@ -80,6 +80,18 @@ func main() {
 		// must not spend the whole shutdown budget.
 		app.CloseWithin("traces", 5*time.Second, tracing.Shutdown)
 
+		// rig's own page over those spans, at /_rig/monitor. It reads the file
+		// the provider above is writing, which is why it hangs off it. With no
+		// $RIG_MONITOR_PASSWORD it mounts nothing and says so once, rather than
+		// serving every path, request id and error cause to anybody who asks.
+		page, err := tracing.Page(api.Monitoring())
+		if err != nil {
+			return nil, err
+		}
+		if why := page.Unarmed(); why != "" {
+			app.Logger.Info("monitoring page not mounted", "reason", why)
+		}
+
 		repos := store.New(app.Pool, store.Config{Tracer: observe.Tracer()})
 
 		// One field per resource is the whole registration surface: adding a
@@ -100,6 +112,11 @@ func main() {
 				// So the cause of a 500 lands wherever the server writes, and
 				// carries the identifier the client was handed.
 				Logger: app.Logger,
+				// Mounted with the resource routes and after them, and not
+				// itself traced or logged: rig opens its spans inside each
+				// generated handler, so looking at the page does not appear on
+				// the page.
+				Monitor: page,
 			},
 			Team:    team.New(repos.Teams),
 			Player:  player.New(repos.Players),

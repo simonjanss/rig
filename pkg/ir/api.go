@@ -70,6 +70,10 @@ type API struct {
 	// — optional, in rig, means absent.
 	Tracing *Tracing `json:"tracing,omitempty"`
 
+	// Monitoring is rig's own page over the spans, or nil for a project that
+	// asked for none. Never set without Tracing.
+	Monitoring *Monitoring `json:"monitoring,omitempty"`
+
 	// EmbeddedFoundation says rig's own migrations are carried by the modules
 	// that own them rather than vendored into this project's migrations
 	// directory.
@@ -187,6 +191,43 @@ type Tracing struct {
 	// ServiceName is what this application is called in a collector, taken from
 	// the project's own name.
 	ServiceName string `json:"service_name"`
+}
+
+// Monitoring is the resolved `monitoring:` block: rig's own page over the spans
+// this server wrote.
+//
+// A document carries it only when the project asked for the page, and only ever
+// alongside [Tracing] — the page is a reader over the span file and has nothing
+// to read without it, which the compiler refuses rather than leaves to be
+// discovered as a page that never fills up.
+//
+// The password is here and the span file is not, which looks inconsistent and
+// is not. Where the spans go is a property of the deployment: the same binary
+// runs on a laptop with no collector and in production with one. Which password
+// guards the page is a property of the deployment too — which is why
+// PasswordEnv is the ordinary way to say it — and Password is the project that
+// decided otherwise, warned about once when rig.yaml is read.
+type Monitoring struct {
+	// Enabled says the generated server mounts the page. A document carrying
+	// this block always has it set, since a block that is off resolves to no
+	// block at all.
+	Enabled bool `json:"enabled"`
+	// ServiceName is what the page calls this application, taken from the
+	// project's own name.
+	ServiceName string `json:"service_name"`
+	// BasePath is where the page is mounted, resolved and absolute.
+	BasePath string `json:"base_path"`
+	// MaxTraces is how many requests the page lists, newest first.
+	MaxTraces int `json:"max_traces"`
+	// PasswordEnv names the variable the page reads its password from.
+	PasswordEnv string `json:"password_env"`
+	// Password is the literal from rig.yaml, and empty in every project that
+	// took the warning.
+	Password string `json:"password,omitempty"`
+	// Allow is the addresses that may reach the page, as CIDR ranges or single
+	// addresses. Empty allows any, and it narrows the password rather than
+	// standing in for it.
+	Allow []string `json:"allow,omitempty"`
 }
 
 // Origin records why an object exists, so a generator can treat hand-declared
