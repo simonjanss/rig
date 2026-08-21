@@ -51,6 +51,16 @@ Next:
   spent rather than outliving it, and the missing-sender guard `ErrNoSender` was
   written for and never wired to. See *M13.1* below; the breaker itself is a
   stated non-goal in M13's list.
+- ~~**M9.0** — the logger.~~ Shipped, split off the front of M9 because it needed
+  no otel, no module and no configuration: an error line carrying the cause of
+  every 500 — which nothing anywhere recorded, the request identifier in the body
+  pointing at a log that had never been written — a debug request line with the
+  status and the size, and `runtime/reqlog` for the response writer none of it
+  could be measured without. The request travels as one grouped attribute and
+  there is no logger on the context — both `publicapis`'s shape rather than the
+  first draft's. It also settled M9's correlation question for free: point
+  `Server.RequestID` at the trace id and the log, the error body and the
+  collector all say the same string.
 - ~~**M14** — the foundation gets a version.~~ Shipped: rig's own DDL moved out of
   a Go const and into append-only `.sql` sets the owning modules carry, each with
   its own bookkeeping table, and `migrations.foundation: vendored | embedded` for
@@ -2526,11 +2536,192 @@ consumer — a better use of the time?
 
 ---
 
-## M9 — tracing and logging
+## M9.0 — the logger (shipped)
 
-**Goal.** A request traceable from the handler through the hooks to the SQL, and
-a server that can say why it returned a 500, without every generated application
-taking a dependency it did not ask for.
+The half of M9 that costs nothing, split off and landed first. `log/slog` is the
+standard library and `serve` already depended on it, so there is no new module
+here, no `rig.yaml` key, and nothing to switch on. M9 below is what is left, and
+it is the half that takes an otel dependency.
+
+### The bug this actually fixed
+
+`DefaultErrorMapper` read the code, rewrote an internal message to "something
+went wrong", and dropped the wrapped cause on the floor. Nothing anywhere
+recorded why a 500 happened. A generated server answered with a request
+identifier and then kept no line that identifier could be found in — so the one
+piece of machinery rig had for connecting a complaint to a cause connected it to
+nothing.
+
+That is not a missing feature. It is a shipped one that did not work, which is
+why this went first and why it is an error line rather than something a project
+opts into.
+
+### Three lines, and they are three different prices
+
+- **The error line**, at `ERROR`, carrying the whole wrapped error. Written in
+  `fail`, which is the single funnel every error response in the generated server
+  passes through.
+- **The refusal line**, the same call at `DEBUG`. A 404, a 422, a refused
+  permission — the server worked. Logging those at error is how a log becomes a
+  thing nobody reads.
+- **The request line**, at `DEBUG`, deferred from the handler with the status and
+  the byte count.
+
+### Before the mapper, not inside it
+
+`fail` consults `Server.OnError` and falls back to `DefaultErrorMapper`. The log
+call goes above that branch, so a project that replaced the mapper still gets the
+line: setting `OnError` says how a failure is *answered*, and reads nothing like
+asking to stop being told what the failure was.
+
+The auth wiring was the other half of the same point, and it was worse. It called
+`DefaultErrorMapper` directly, so `/auth/*` — the routes a project cannot wrap,
+and the ones where an interesting 500 lives — bypassed the funnel entirely. It
+goes through `fail` now, which is why `Hooks` grew a `Logger`: the auth config is
+built before the `Server` it ends up attached to, so there is no `Server` in
+scope to take one from. Two fields that should hold the same value, and nothing
+enforces it. Named in `docs/auth.md` rather than solved.
+
+The inbox routes were the third of the same kind. They went through `fail`
+already, but with a blank `RequestContext{}` — harmless while nothing read it,
+and once `fail` logs, an inbox 500 whose line names no method, no path and no
+request identifier, because `slog` drops an empty group outright. Collecting the
+context is a function now, `requestContext(s, r)`, which `resolve` and the inbox
+mount both call: a route that does not go through `resolve` still has one way to
+get the same fields rather than a literal of its own to leave empty.
+
+### `runtime/reqlog`, and the two interfaces it must not swallow
+
+The request line needs the status and the size, which means wrapping the
+`ResponseWriter` — something that existed nowhere in the repository. The wrapper
+is four methods and two careful ones:
+
+- It does **not** implement `http.Flusher` or `http.Hijacker`. It implements
+  `Unwrap`, and `http.ResponseController` follows that to the writer that can.
+  Forwarding them means claiming them, and a wrapper that answers to `Hijacker`
+  over a connection that cannot be hijacked is worse than one that does not
+  answer at all.
+- It **does** implement `ReadFrom`, because `io.Copy` prefers an `io.ReaderFrom`
+  over a plain `Write` and the writer net/http hands a handler has one. Without
+  it every file download would lose its sendfile path to a userspace buffer.
+
+`runtime/electric/proxy.go` was doing exactly the thing the first point forbids —
+`if f, ok := w.(http.Flusher)` — which a wrapper in front of it turns into an ok
+that is false and a long poll that sits in a buffer. It uses a
+`ResponseController` now. The electric routes do not go through a generated
+handler today, so this was a latent break rather than a live one; it is fixed
+because the next wrapper will not be so lucky.
+
+### The rule that makes M9's correlation free
+
+Every log call takes the context: `ErrorContext`, `DebugContext`,
+`LogAttrs(ctx, …)`, never a bare `Info`.
+
+`slog.Handler.Handle` is *given* the context, which is how a handler attaches the
+trace and span a line belongs to — the thing you asked for when you said logging
+should get the trace id from the spans. A bare `logger.Info` passes
+`context.Background()`, the handler finds no span, and the line is orphaned:
+silently, and only where there are spans to be orphaned from, which is
+production.
+
+So it is a linter and not a paragraph in this file. `sloglint` with
+`context: all` is in `.golangci.yml`; it found ten in `runtime/serve` and they
+are fixed. Honest limit: `exclusions.generated: lax` means it does not read the
+generated code, and the generators hold their log calls as strings anyway, where
+no linter would see them. The goldens pin the emitted text and the behaviour
+tests below run it, which is the substitute.
+
+### There is no logger on the context
+
+The first cut put one there, with a `Logger(ctx)` for a service to reach. That
+came out again, and the argument against it is `publicapis`, which has been
+running this shape in production for a while:
+
+- The logger is **passed explicitly**. `RegisterAPI(..., logger, ...)` hands it
+  to closures — `errorHook(logger)`, `preHookLogger(logger)` — and the `Server`
+  holds those. Nothing is smuggled through a context.
+- **Resource implementations never log at all.** They return errors; the error
+  hook logs them. A resource that wanted to would be handed a logger by its
+  constructor, which is where rig already was: `examples/todo` calls
+  `todo.New(repos.Todos, fileSvc, notifier, inbox, app.Pool, app.Logger)`. The
+  context version was a second way to reach a logger that every service already
+  had.
+
+So `resolve` puts the `RequestContext` on the context and nothing else, and a
+service that wants the request on its own lines does
+`api.RequestContextFrom(ctx)` — which existed before this milestone.
+
+### The request is one attribute, and that is `publicapis` too
+
+Every line there is `slog.Any("requestContext", requestContext)` rather than
+five loose keys. Same here: `slog.Any("request", rc)`, with everything about the
+answer — status, code, error — beside it rather than in it.
+
+`RequestContext` implements `slog.LogValuer` to do it. `publicapis` gets the
+same result from JSON struct tags, which rig's cannot use: that type is never
+serialized and a `TextHandler` would print Go syntax for it. `LogValue` also
+keeps the property the loose version had, which is that an empty field is absent
+rather than empty — a project that set no `RequestID` gets no `request_id` key
+rather than one with nothing in it.
+
+### Where it is tested
+
+`examples/todo/log_test.go`, and the interesting part is that it needs no
+database and no build tag. A generated handler takes its service as an interface,
+so a service that only fails drives the whole path a real 500 takes. Eight tests:
+that the cause is logged and withheld from the body, that a custom `OnError` does
+not lose the line, that a 404 is debug and silent at the default level, that the
+`requestId` in the body and the `request_id` in the log are the same string, that
+an absent one is absent rather than empty, that the request is one grouped
+attribute, and that a service can put it on its own lines with
+`api.RequestContextFrom(ctx)`.
+
+`examples/todo/main.go` lost something to this: a `PreHook` that logged the
+method and the path. The generated line replaces it and is strictly better —
+after the handler rather than before it, so it has the status and the size, and
+labelled by the route that matched rather than by a path with an identifier in
+it.
+
+### What came out differently
+
+- **`Hooks.Logger` was not planned.** The auth mapper bypassing `fail` was found
+  while wiring the rest, and fixing it needed a logger where no `Server` exists.
+- **`runtime/electric`'s flusher.** Also not planned, also found by asking what a
+  wrapper breaks.
+- **The plan said the request line would need no new package.** It needed
+  `runtime/reqlog`, because the wrapper has to live somewhere a generator can
+  import.
+- **The logger went on the context and then came off again.** `publicapis` was
+  the argument: an explicit logger and a service that is handed one by its own
+  constructor. See above — the reversal deleted `WithLogger`, `Logger(ctx)` and
+  the `loggerKey`, and nothing was lost, because `RequestContextFrom` already
+  did the half that mattered.
+- **The trace correlation stopped being M9's problem.** `RequestID` returning a
+  trace id is `publicapis`'s answer and it needs nothing rig does not have.
+
+### Honest gaps
+
+- Two `Logger` fields on a project with authentication, which should hold the
+  same value and are not checked. A `rig check` rule could compare them; nothing
+  does.
+- The wrapper allocates per request even where debug is off. One small struct,
+  and the status has to come from somewhere, but it is a cost paid by every
+  server for a line most of them never print.
+- Nothing logs at the repository layer. "The validator was slow" and "the SQL was
+  slow" are M9's spans, not this.
+
+---
+
+## M9 — tracing
+
+**Goal.** A request traceable from the handler through the hooks to the SQL,
+without every generated application taking a dependency it did not ask for.
+
+The logging half shipped as M9.0 above, including the constraint this half
+depends on: every log call already carries its context, so a `slog.Handler` that
+reads the span off one correlates every existing line with no call site
+changing. That is the shape the answer to "logging should also get trace id from
+the spans" takes — `observe.LogHandler`, below, rather than a field anywhere.
 
 **Shape.**
 
@@ -2570,12 +2761,23 @@ taking a dependency it did not ask for.
   `make examples` builds and runs generated servers on every check, and the
   Docker suites run more, so the default has to be the one that costs nothing
   and needs nothing running.
-- The logger is not optional, because it costs nothing to have. `log/slog` is
-  the standard library, `serve` already depends on it, and a server that cannot
-  say what it did is not a lighter server, only a quieter one. So there are
-  three settings and they are separate because they are separate prices: logging
-  always, spans when the project asks, an exporter when the environment has
-  somewhere to put them.
+- Three settings at three prices, and M9.0 shipped the first: logging always,
+  spans when the project asks, an exporter when the environment has somewhere to
+  put them. What is left here is the second and the third.
+- **The correlation is already done, and it is `RequestID`.** This was going to be
+  an `observe.LogHandler` wrapping a `slog.Handler` to add `trace_id` and
+  `span_id` from the span on the context. `publicapis` does something much
+  simpler and better: `GetRequestIDFunc: otel.GetTraceID`, so the request
+  identifier *is* the trace id. rig's `Server.RequestID` is the same seam and
+  already takes a function, so a project that runs otel writes four lines in its
+  own main and gets the trace id in the error body, in every log line, and in the
+  collector, with no otel anywhere in rig. Documented in
+  `docs/observability.md` as of M9.0; nothing here has to build it.
+- A `LogHandler` is still the only way to get the *span* id onto a line, and to
+  correlate lines written inside a nested span rather than at the request's root.
+  That is a real difference and a much smaller one. Build it if the span-level
+  question comes up; do not build it as the correlation story, because that is
+  settled.
 - Spans on the handler, and on each stage of a generated write. The stages are
   already discrete named calls in the emitted code: the validator, `Before`, the
   SQL, `After`, `AfterCommit`, around the `dbx.InTx` and `dbx.InTxIf` blocks
@@ -2597,26 +2799,14 @@ taking a dependency it did not ask for.
   three unrelated requests. `Op` carries the method and the path template but
   not the operation id — the generated method knows it and today only says so in
   a doc comment — so that has to go onto `Op`.
-- rig gets a logger. This reverses "rig has no logger", written above for the
-  API revision and right about that much: the revision header is telemetry, and
-  what to do with telemetry is the application's decision. It is not right about
-  everything. `serve.App` already holds a `*slog.Logger` and hands it to
-  constructors at mount time; what is new is a `Logger` on the generated
-  `api.Server`, put on the context in `resolve` beside the `RequestContext`, so
-  a service method or a hook logs with the request id and the route already
-  attached instead of threading a logger through its own constructor to get
-  there.
-- What it says, at `slog.LevelDebug`: the request in and the response out, from
-  the fields `RequestContext` already carries. The status and the byte count
-  need a `ResponseWriter` wrapper, which exists nowhere in the repository yet.
-  One wrapper, not a line per handler — `server-go` emits every handler body
-  from one function, and a log statement in each is a log statement to keep
-  correct in each.
-- One line is not debug, and it is the strongest reason for the milestone.
-  `DefaultErrorMapper` reads the code, rewrites an internal message to
-  "something went wrong", and drops the wrapped cause on the floor. Nothing
-  anywhere records why a 500 happened. That is an error line, and it should
-  exist whether or not anybody ever turns on tracing.
+- ~~rig gets a logger.~~ Shipped in M9.0: `Server.Logger`, the base logger put on
+  the context in `resolve`, and `Logger(ctx)` deriving the request fields when a
+  service asks. The reversal of "rig has no logger" stands and is now in the
+  code.
+- ~~What it says, at `slog.LevelDebug`.~~ Shipped, with `runtime/reqlog` for the
+  status and the byte count.
+- ~~One line is not debug.~~ Shipped, and it turned out to be the reason to split
+  the milestone rather than the strongest argument inside it.
 - The probes stay outside all of it. `withProbes` answers liveness and readiness
   before the application's handler sees them, and the reason is already written
   down: a check every second is not a traced request, a line in the log, or a
@@ -2630,13 +2820,22 @@ for a write refused before it began. Honest gap: that an exporter reaches a
 collector is not something this repository can test without becoming a
 deployment.
 
-**Open question for you.** Given that the tracing is gated, is it one
-`observability:` block that M10's page also reads, or two? One block is a
-smaller surface and the page cannot be switched on without the spans it exists
-to display, which is a dependency worth encoding. Two says the honest thing,
-which is that exporting to a collector somebody else runs and serving a page
-this server runs are different decisions, and most projects that want the first
-do not want the second. I lean one block with the page as a key inside it.
+**The open question, answered. Two blocks.** The question was whether tracing and
+M10's page share one `observability:` block. They do not: exporting to a
+collector somebody else runs and serving a page this server runs are different
+decisions, and most projects that want the first do not want the second. So
+`tracing:` here, and M10 names its own when it is planned.
+
+I had leaned one block, on the argument that the page cannot be shown without the
+spans it displays and that the dependency was worth encoding. That argument
+survives as a validation rule rather than as a schema — the page's block can
+refuse to be set without `tracing:` — which gets the same guarantee without
+making two decisions look like one setting.
+
+Note what this costs: logging is in neither block. It is always on and has no
+configuration at all, which came out of M9.0 and is the right shape, but it does
+mean "observability" is spread across two keys and a thing that is not a key.
+`docs/observability.md` is the one place that says so.
 
 ---
 

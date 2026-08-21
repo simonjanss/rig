@@ -29,6 +29,7 @@ import (
 	"embed"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"os"
@@ -116,7 +117,7 @@ func main() {
 		},
 		Migrate: migrate.RequireAll(migrationSources(), migrate.Options{}),
 	}, func(ctx context.Context, app *serve.App) (http.Handler, error) {
-		return newAPI(ctx, app.Pool, baseURL())
+		return newAPI(ctx, app.Pool, baseURL(), app.Logger)
 	})
 }
 
@@ -125,7 +126,7 @@ func main() {
 // base is the origin a provider redirects back to. It is a parameter rather than
 // read from the environment in here because a test serves on an ephemeral port and
 // has to be able to say so.
-func newAPI(ctx context.Context, pool *pgxpool.Pool, base string) (http.Handler, error) {
+func newAPI(ctx context.Context, pool *pgxpool.Pool, base string, log *slog.Logger) (http.Handler, error) {
 	repos := store.New(pool, store.Config{})
 
 	// The origin this run answers at. It reaches the generated wiring through the
@@ -175,6 +176,11 @@ func newAPI(ctx context.Context, pool *pgxpool.Pool, base string) (http.Handler,
 	// the host lookup, the per-host callback origin, provisioning, the state
 	// cookie. What is left is the one decision rig will not make for a browser.
 	front, err = api.New(pool, api.Hooks{
+		// The same logger the Server below gets: an auth route answers on the
+		// same mux and in the same shape, so the cause of a 500 from signing in
+		// should not be the one line that goes somewhere else.
+		Logger: log,
+
 		OAuth: api.OAuthHooks{
 			// The stand-in, when it is in use. A real deployment passes none of
 			// these: the provider is somebody else's server.
@@ -219,6 +225,7 @@ func newAPI(ctx context.Context, pool *pgxpool.Pool, base string) (http.Handler,
 		Server: api.Server{
 			Auth:      front,
 			RequestID: func(r *http.Request) string { return r.Header.Get("X-Request-Id") },
+			Logger:    log,
 			// Where a write that carried an Idempotency-Key is recorded, so a
 			// client that had to send one twice gets one row and one answer.
 			DB: pool,

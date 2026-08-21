@@ -68,6 +68,23 @@ func (e *emitter) serverType(b *gobuf.Buf) {
 	b.L("RequestID func(*%s.Request) string", httpPkg)
 	b.NL()
 
+	b.Comment("Logger is where this server says what it did and why a request " +
+		"failed. Nil uses [log/slog.Default].\n\n" +
+		"Nil means the default logger and not silence, which is the whole point: " +
+		"the one line worth having is the cause of a 500, and a server that drops " +
+		"it because nobody configured logging is a server whose error bodies say " +
+		"\"something went wrong\" and mean it literally. Set this to route the " +
+		"lines somewhere, not to turn them on.\n\n" +
+		"What comes out: an error line per failed request carrying the whole " +
+		"error, and, at [log/slog.LevelDebug], a line per request with its status " +
+		"and size.\n\n" +
+		"There is no logger on the context and no way to reach this one from a " +
+		"service. A service is constructed by the application, so it is handed a " +
+		"logger there — the same one this field gets — and puts the request on " +
+		"its own lines with [RequestContextFrom].")
+	b.L("Logger *%s.Logger", b.Import("log/slog"))
+	b.NL()
+
 	b.Comment("MinRevision refuses a caller built against an API revision older " +
 		"than this one. The zero value, the default, refuses nothing.\n\n" +
 		"\tMinRevision: apirev.MustParse(\"2026-04-30\"),\n\n" +
@@ -209,8 +226,10 @@ func (e *emitter) registerFunc(b *gobuf.Buf) {
 		b.L("Claims: h.Server.GetClaims,")
 		b.L("Fail: func(w %s.ResponseWriter, r *%s.Request, err error) {", httpPkg, httpPkg)
 		b.Comment("The project's own error shape, so an inbox route's 404 looks " +
-			"like every other route's.")
-		b.L("fail(h.Server, w, r, RequestContext{}, err)")
+			"like every other route's — and its own metadata, so the line an inbox " +
+			"500 writes says which request it was rather than nothing at all. These " +
+			"routes do not go through resolve, so the context is built here.")
+		b.L("fail(h.Server, w, r, requestContext(h.Server, r), err)")
 		b.L("},")
 		b.L("}).Mount(mux)")
 		b.L("}")
@@ -241,6 +260,7 @@ func (e *emitter) helpers(b *gobuf.Buf) {
 		uuidPkg = b.Import("github.com/google/uuid")
 		errPkg  = b.Import(runtimeModule + "/rigerr")
 		tenPkg  = b.Import(runtimeModule + "/tenancy")
+		slogPkg = b.Import("log/slog")
 	)
 
 	b.Comment("maxBodyBytes bounds a request body. Without a limit, one client can " +
@@ -271,10 +291,13 @@ func (e *emitter) helpers(b *gobuf.Buf) {
 		b.NL()
 	}
 
-	b.Comment("resolve is the body of both, differing only in whether a caller " +
-		"who cannot be identified is refused.")
-	b.L("func resolve(s Server, w %s.ResponseWriter, r *%s.Request, required bool) (%s.Context, %s.Claims, RequestContext, bool) {",
-		httpPkg, httpPkg, ctxPkg, tenPkg)
+	b.Comment("requestContext is what one request looks like to an error body and " +
+		"to a log line.\n\n" +
+		"A function rather than a literal per call site, because a route that " +
+		"builds a blank one still answers correctly and still logs a failure — it " +
+		"just logs one that names no method, no path and no request identifier, " +
+		"which is the one thing the line exists for.")
+	b.L("func requestContext(s Server, r *%s.Request) RequestContext {", httpPkg)
 	b.L("rc := RequestContext{")
 	b.L("Method:     r.Method,")
 	b.L("Path:       r.URL.Path,")
@@ -284,6 +307,15 @@ func (e *emitter) helpers(b *gobuf.Buf) {
 	b.L("ClientRevision: r.Header.Get(RevisionHeader),")
 	b.L("}")
 	b.L("if s.RequestID != nil { rc.RequestID = s.RequestID(r) }")
+	b.L("return rc")
+	b.L("}")
+	b.NL()
+
+	b.Comment("resolve is the body of both, differing only in whether a caller " +
+		"who cannot be identified is refused.")
+	b.L("func resolve(s Server, w %s.ResponseWriter, r *%s.Request, required bool) (%s.Context, %s.Claims, RequestContext, bool) {",
+		httpPkg, httpPkg, ctxPkg, tenPkg)
+	b.L("rc := requestContext(s, r)")
 	b.NL()
 	b.Comment("Announced on the way out of every response, including the failed " +
 		"ones: a client that is behind should not have to make a successful " +
@@ -342,11 +374,76 @@ func (e *emitter) helpers(b *gobuf.Buf) {
 
 	b.Comment("fail writes an error response.")
 	b.L("func fail(s Server, w %s.ResponseWriter, r *%s.Request, rc RequestContext, err error) {", httpPkg, httpPkg)
+	b.Comment("Before the mapper and not inside it. A project that set OnError " +
+		"replaced how a failure is *answered*; it did not ask to stop being told " +
+		"what the failure was.")
+	b.L("logFailure(s, r, rc, err)")
+	b.NL()
 	b.L("if s.OnError != nil {")
 	b.L("s.OnError(w, r, rc, err)")
 	b.L("return")
 	b.L("}")
 	b.L("DefaultErrorMapper(w, r, rc, err)")
+	b.L("}")
+	b.NL()
+
+	b.Comment("logFailure records why this request is about to fail.\n\n" +
+		"It is the only place that ever sees the whole error. DefaultErrorMapper " +
+		"rewrites an internal message to \"something went wrong\" before it " +
+		"reaches the client — deliberately, because the original is exactly the " +
+		"kind of thing that leaks a table name or a connection string — so " +
+		"without this line the cause of a 500 exists nowhere. The request " +
+		"identifier goes out in the body and comes out here, and that pair is the " +
+		"whole mechanism for answering \"what happened to my request\".\n\n" +
+		"Two levels, because they are two different events. An internal failure " +
+		"is the server's fault and is an error. A 404, a 422, a refused " +
+		"permission — the server worked, and logging those at anything but debug " +
+		"is how a log becomes a thing nobody reads.")
+	b.L("func logFailure(s Server, r *%s.Request, rc RequestContext, err error) {", httpPkg)
+	b.L("code := %s.CodeOf(err)", errPkg)
+	b.L("attrs := []any{")
+	b.L("%s.Any(\"request\", rc),", slogPkg)
+	b.L("%s.Int(\"status\", code.HTTPStatus()),", slogPkg)
+	b.L("%s.Any(\"code\", code),", slogPkg)
+	b.L("%s.Any(\"error\", err),", slogPkg)
+	b.L("}")
+	b.NL()
+	b.L("if code == %s.CodeInternal {", errPkg)
+	b.L("s.logger().ErrorContext(r.Context(), \"request failed\", attrs...)")
+	b.L("return")
+	b.L("}")
+	b.L("s.logger().DebugContext(r.Context(), \"request refused\", attrs...)")
+	b.L("}")
+	b.NL()
+
+	b.Comment("logRequest writes the request line, once every handler has finished.\n\n" +
+		"Deferred from the handler rather than wrapped around the mux, because " +
+		"the route is only known inside: net/http sets the matched pattern on the " +
+		"request the mux dispatches, and a middleware in front of it has an " +
+		"earlier request that has matched nothing. A line labelled by path " +
+		"instead would be one line per identifier that ever appeared in a URL.")
+	b.L("func logRequest(s Server, r *%s.Request, rec *%s.Writer, rc RequestContext) {",
+		httpPkg, b.Import(runtimeModule+"/reqlog"))
+	b.L("l := s.logger()")
+	b.Comment("Asked before the attributes are built. This runs on every request, " +
+		"including the ones nobody is watching.")
+	b.L("if !l.Enabled(r.Context(), %s.LevelDebug) { return }", slogPkg)
+	b.NL()
+	b.L("l.DebugContext(r.Context(), \"request served\",")
+	b.L("%s.Any(\"request\", rc),", slogPkg)
+	b.L("%s.Int(\"status\", rec.Status()),", slogPkg)
+	b.L("%s.Int64(\"bytes\", rec.Bytes()),", slogPkg)
+	b.L(")")
+	b.L("}")
+	b.NL()
+
+	b.Comment("logger is the server's, or the default one.\n\n" +
+		"Nil is a server nobody configured logging for, not a server that asked " +
+		"for silence, and the difference matters on the one line that says why a " +
+		"500 happened.")
+	b.L("func (s Server) logger() *%s.Logger {", b.Import("log/slog"))
+	b.L("if s.Logger != nil { return s.Logger }")
+	b.L("return %s.Default()", b.Import("log/slog"))
 	b.L("}")
 	b.NL()
 

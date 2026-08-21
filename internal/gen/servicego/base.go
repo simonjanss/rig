@@ -132,12 +132,52 @@ func (e *emitter) requestEnvelope(b *gobuf.Buf) {
 	b.L("}")
 	b.NL()
 
+	e.requestContextLogValue(b)
 	e.revisionMethods(b)
 
 	b.Comment("NewRequest builds a request. The server calls it; it is exported so a " +
 		"test can call a service method directly without going through HTTP.")
 	b.L("func NewRequest[Path, Query, Body any](claims %s.Claims, path Path, query Query, body Body, rc RequestContext) Request[Path, Query, Body] {", tenPkg)
 	b.L("return Request[Path, Query, Body]{Claims: claims, Path: path, Query: query, Body: body, ctx: rc}")
+	b.L("}")
+	b.NL()
+}
+
+// requestContextLogValue emits how a request appears in a log line.
+//
+// One attribute rather than five loose ones, because these fields travel
+// together: every line about a request wants all of them, and a caller spelling
+// them out is a caller who will eventually spell one differently.
+//
+// It is a [log/slog.LogValuer] rather than struct tags because a log line is not
+// JSON — a text handler would print Go syntax for a tagged struct, and the same
+// server writes both depending on where it is running. This is also what lets an
+// empty field be absent rather than empty.
+func (e *emitter) requestContextLogValue(b *gobuf.Buf) {
+	slogPkg := b.Import("log/slog")
+
+	b.Comment("LogValue is how a request appears in a log line.\n\n" +
+		"A group, so one attribute carries the lot:\n\n" +
+		"\tlogger.ErrorContext(ctx, \"that failed\", slog.Any(\"request\", rc))\n\n" +
+		"Only the fields that have something in them. An empty attribute on every " +
+		"line is the same width in a terminal and a key in a structured backend, " +
+		"and it says a field was collected when it was not — a project that set no " +
+		"RequestID gets lines with no request_id rather than lines with an empty " +
+		"one.")
+	b.L("func (rc RequestContext) LogValue() %s.Value {", slogPkg)
+	b.L("attrs := make([]%s.Attr, 0, 6)", slogPkg)
+	for _, f := range []struct{ key, field string }{
+		{"request_id", "RequestID"},
+		{"method", "Method"},
+		{"route", "Route"},
+		{"path", "Path"},
+		{"remote_addr", "RemoteAddr"},
+		{"user_agent", "UserAgent"},
+	} {
+		b.L("if rc.%s != \"\" { attrs = append(attrs, %s.String(%s, rc.%s)) }",
+			f.field, slogPkg, gobuf.Quote(f.key), f.field)
+	}
+	b.L("return %s.GroupValue(attrs...)", slogPkg)
 	b.L("}")
 	b.NL()
 }

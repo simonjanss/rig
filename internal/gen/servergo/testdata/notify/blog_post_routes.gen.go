@@ -10,6 +10,7 @@ import (
 	"rigtest/model"
 
 	"github.com/simonjanss/rig/runtime/idempotency"
+	"github.com/simonjanss/rig/runtime/reqlog"
 	"github.com/simonjanss/rig/runtime/tenancy"
 )
 
@@ -31,7 +32,11 @@ func registerBlogPost(mux *http.ServeMux, s Server, svc BlogPostService) {
 // List BlogPosts.
 func handleListBlogPosts(s Server, svc BlogPostService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		rec := reqlog.Wrap(w)
+		w = rec
+
 		ctx, claims, rc, ok := prepare(s, w, r)
+		defer logRequest(s, r, rec, rc)
 		if !ok {
 			return
 		}
@@ -71,7 +76,11 @@ func handleListBlogPosts(s Server, svc BlogPostService) http.HandlerFunc {
 // Create a BlogPost.
 func handleCreateBlogPost(s Server, svc BlogPostService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		rec := reqlog.Wrap(w)
+		w = rec
+
 		ctx, claims, rc, ok := prepare(s, w, r)
+		defer logRequest(s, r, rec, rc)
 		if !ok {
 			return
 		}
@@ -115,7 +124,11 @@ func handleCreateBlogPost(s Server, svc BlogPostService) http.HandlerFunc {
 // Search BlogPosts with filters.
 func handleSearchBlogPosts(s Server, svc BlogPostService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		rec := reqlog.Wrap(w)
+		w = rec
+
 		ctx, claims, rc, ok := prepare(s, w, r)
+		defer logRequest(s, r, rec, rc)
 		if !ok {
 			return
 		}
@@ -166,7 +179,11 @@ func handleSearchBlogPosts(s Server, svc BlogPostService) http.HandlerFunc {
 // not in the trash either.
 func handleListDeletedBlogPosts(s Server, svc BlogPostService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		rec := reqlog.Wrap(w)
+		w = rec
+
 		ctx, claims, rc, ok := prepare(s, w, r)
+		defer logRequest(s, r, rec, rc)
 		if !ok {
 			return
 		}
@@ -209,7 +226,11 @@ func handleListDeletedBlogPosts(s Server, svc BlogPostService) http.HandlerFunc 
 // but can be restored within the retention window.
 func handleDeleteBlogPost(s Server, svc BlogPostService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		rec := reqlog.Wrap(w)
+		w = rec
+
 		ctx, claims, rc, ok := prepare(s, w, r)
+		defer logRequest(s, r, rec, rc)
 		if !ok {
 			return
 		}
@@ -242,7 +263,11 @@ func handleDeleteBlogPost(s Server, svc BlogPostService) http.HandlerFunc {
 // Fetch one BlogPost by identifier.
 func handleGetBlogPost(s Server, svc BlogPostService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		rec := reqlog.Wrap(w)
+		w = rec
+
 		ctx, claims, rc, ok := prepare(s, w, r)
+		defer logRequest(s, r, rec, rc)
 		if !ok {
 			return
 		}
@@ -279,7 +304,11 @@ func handleGetBlogPost(s Server, svc BlogPostService) http.HandlerFunc {
 // cleared; a field left out is left alone.
 func handleUpdateBlogPost(s Server, svc BlogPostService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		rec := reqlog.Wrap(w)
+		w = rec
+
 		ctx, claims, rc, ok := prepare(s, w, r)
+		defer logRequest(s, r, rec, rc)
 		if !ok {
 			return
 		}
@@ -348,7 +377,11 @@ func handleUpdateBlogPost(s Server, svc BlogPostService) http.HandlerFunc {
 // checked against the world it is returning to.
 func handleRestoreBlogPost(s Server, svc BlogPostService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		rec := reqlog.Wrap(w)
+		w = rec
+
 		ctx, claims, rc, ok := prepare(s, w, r)
+		defer logRequest(s, r, rec, rc)
 		if !ok {
 			return
 		}

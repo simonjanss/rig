@@ -5,6 +5,7 @@ package main
 import (
 	"context"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/http/cookiejar"
@@ -344,7 +345,7 @@ func newBrowserAt(t *testing.T, primary string) *browser {
 		t.Fatal(err)
 	}
 
-	handler, err := newAPI(ctx, pool, "http://"+primary+":"+port)
+	handler, err := newAPI(ctx, pool, "http://"+primary+":"+port, slog.Default())
 	if err != nil {
 		t.Fatal(err)
 	}

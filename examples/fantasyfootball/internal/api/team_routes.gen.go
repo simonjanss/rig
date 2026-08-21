@@ -10,6 +10,7 @@ import (
 
 	"github.com/simonjanss/rig/examples/fantasyfootball/internal/model"
 	"github.com/simonjanss/rig/runtime/idempotency"
+	"github.com/simonjanss/rig/runtime/reqlog"
 )
 
 // registerTeam mounts Team's routes.
@@ -30,7 +31,11 @@ func registerTeam(mux *http.ServeMux, s Server, svc TeamService) {
 // List Teams.
 func handleListTeams(s Server, svc TeamService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		rec := reqlog.Wrap(w)
+		w = rec
+
 		ctx, claims, rc, ok := prepare(s, w, r)
+		defer logRequest(s, r, rec, rc)
 		if !ok {
 			return
 		}
@@ -65,7 +70,11 @@ func handleListTeams(s Server, svc TeamService) http.HandlerFunc {
 // Create a Team.
 func handleCreateTeam(s Server, svc TeamService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		rec := reqlog.Wrap(w)
+		w = rec
+
 		ctx, claims, rc, ok := prepare(s, w, r)
+		defer logRequest(s, r, rec, rc)
 		if !ok {
 			return
 		}
@@ -104,7 +113,11 @@ func handleCreateTeam(s Server, svc TeamService) http.HandlerFunc {
 // Search Teams with filters.
 func handleSearchTeams(s Server, svc TeamService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		rec := reqlog.Wrap(w)
+		w = rec
+
 		ctx, claims, rc, ok := prepare(s, w, r)
+		defer logRequest(s, r, rec, rc)
 		if !ok {
 			return
 		}
@@ -150,7 +163,11 @@ func handleSearchTeams(s Server, svc TeamService) http.HandlerFunc {
 // not in the trash either.
 func handleListDeletedTeams(s Server, svc TeamService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		rec := reqlog.Wrap(w)
+		w = rec
+
 		ctx, claims, rc, ok := prepare(s, w, r)
+		defer logRequest(s, r, rec, rc)
 		if !ok {
 			return
 		}
@@ -188,7 +205,11 @@ func handleListDeletedTeams(s Server, svc TeamService) http.HandlerFunc {
 // but can be restored within the retention window.
 func handleDeleteTeam(s Server, svc TeamService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		rec := reqlog.Wrap(w)
+		w = rec
+
 		ctx, claims, rc, ok := prepare(s, w, r)
+		defer logRequest(s, r, rec, rc)
 		if !ok {
 			return
 		}
@@ -216,7 +237,11 @@ func handleDeleteTeam(s Server, svc TeamService) http.HandlerFunc {
 // Fetch one Team by identifier.
 func handleGetTeam(s Server, svc TeamService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		rec := reqlog.Wrap(w)
+		w = rec
+
 		ctx, claims, rc, ok := prepare(s, w, r)
+		defer logRequest(s, r, rec, rc)
 		if !ok {
 			return
 		}
@@ -248,7 +273,11 @@ func handleGetTeam(s Server, svc TeamService) http.HandlerFunc {
 // cleared; a field left out is left alone.
 func handleUpdateTeam(s Server, svc TeamService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		rec := reqlog.Wrap(w)
+		w = rec
+
 		ctx, claims, rc, ok := prepare(s, w, r)
+		defer logRequest(s, r, rec, rc)
 		if !ok {
 			return
 		}
@@ -312,7 +341,11 @@ func handleUpdateTeam(s Server, svc TeamService) http.HandlerFunc {
 // checked against the world it is returning to.
 func handleRestoreTeam(s Server, svc TeamService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		rec := reqlog.Wrap(w)
+		w = rec
+
 		ctx, claims, rc, ok := prepare(s, w, r)
+		defer logRequest(s, r, rec, rc)
 		if !ok {
 			return
 		}

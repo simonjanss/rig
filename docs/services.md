@@ -95,7 +95,7 @@ serve.Main(serve.Config{
 }, func(ctx context.Context, app *serve.App) (http.Handler, error) {
     repos := store.New(app.Pool, store.Config{})
     return api.Register(api.Handlers{
-        Server: api.Server{GetClaims: yourClaimsFunc, DB: app.Pool},
+        Server: api.Server{GetClaims: yourClaimsFunc, DB: app.Pool, Logger: app.Logger},
         Todo:   todo.New(repos.Todos),
     }), nil
 })
@@ -105,8 +105,13 @@ Migrations live in `rig/migrate` and are embedded in your binary, so the schema 
 build expects ships with that build. `migrate.Require` refuses to start when the
 database is behind; `migrate.Apply` migrates on the way up instead.
 
+`Logger` is where the server records why a request failed. It is optional and
+nil means `slog.Default()` rather than silence — see
+[observability.md](observability.md).
+
 ## See also
 
 - [tutorial.md](tutorial.md#7-wire-it-up) — the smallest working `main.go`
 - [tables.md](tables.md#endpoints) — declaring an endpoint
+- [observability.md](observability.md) — what gets logged, and reading a 500
 - [concepts.md](concepts.md) — why this layer is yours

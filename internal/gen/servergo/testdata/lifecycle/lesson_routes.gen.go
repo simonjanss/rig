@@ -10,6 +10,7 @@ import (
 	"rigtest/model"
 
 	"github.com/simonjanss/rig/runtime/idempotency"
+	"github.com/simonjanss/rig/runtime/reqlog"
 	"github.com/simonjanss/rig/runtime/tenancy"
 )
 
@@ -34,7 +35,11 @@ func registerLesson(mux *http.ServeMux, s Server, svc LessonService) {
 // List Lessons.
 func handleListLessons(s Server, svc LessonService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		rec := reqlog.Wrap(w)
+		w = rec
+
 		ctx, claims, rc, ok := prepare(s, w, r)
+		defer logRequest(s, r, rec, rc)
 		if !ok {
 			return
 		}
@@ -74,7 +79,11 @@ func handleListLessons(s Server, svc LessonService) http.HandlerFunc {
 // Create a Lesson.
 func handleCreateLesson(s Server, svc LessonService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		rec := reqlog.Wrap(w)
+		w = rec
+
 		ctx, claims, rc, ok := prepare(s, w, r)
+		defer logRequest(s, r, rec, rc)
 		if !ok {
 			return
 		}
@@ -118,7 +127,11 @@ func handleCreateLesson(s Server, svc LessonService) http.HandlerFunc {
 // Search Lessons with filters.
 func handleSearchLessons(s Server, svc LessonService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		rec := reqlog.Wrap(w)
+		w = rec
+
 		ctx, claims, rc, ok := prepare(s, w, r)
+		defer logRequest(s, r, rec, rc)
 		if !ok {
 			return
 		}
@@ -169,7 +182,11 @@ func handleSearchLessons(s Server, svc LessonService) http.HandlerFunc {
 // not in the trash either.
 func handleListDeletedLessons(s Server, svc LessonService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		rec := reqlog.Wrap(w)
+		w = rec
+
 		ctx, claims, rc, ok := prepare(s, w, r)
+		defer logRequest(s, r, rec, rc)
 		if !ok {
 			return
 		}
@@ -212,7 +229,11 @@ func handleListDeletedLessons(s Server, svc LessonService) http.HandlerFunc {
 // but can be restored within the retention window.
 func handleDeleteLesson(s Server, svc LessonService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		rec := reqlog.Wrap(w)
+		w = rec
+
 		ctx, claims, rc, ok := prepare(s, w, r)
+		defer logRequest(s, r, rec, rc)
 		if !ok {
 			return
 		}
@@ -245,7 +266,11 @@ func handleDeleteLesson(s Server, svc LessonService) http.HandlerFunc {
 // Fetch one Lesson by identifier.
 func handleGetLesson(s Server, svc LessonService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		rec := reqlog.Wrap(w)
+		w = rec
+
 		ctx, claims, rc, ok := prepare(s, w, r)
+		defer logRequest(s, r, rec, rc)
 		if !ok {
 			return
 		}
@@ -282,7 +307,11 @@ func handleGetLesson(s Server, svc LessonService) http.HandlerFunc {
 // cleared; a field left out is left alone.
 func handleUpdateLesson(s Server, svc LessonService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		rec := reqlog.Wrap(w)
+		w = rec
+
 		ctx, claims, rc, ok := prepare(s, w, r)
+		defer logRequest(s, r, rec, rc)
 		if !ok {
 			return
 		}
@@ -334,7 +363,11 @@ func handleUpdateLesson(s Server, svc LessonService) http.HandlerFunc {
 // Publish the lesson to its participants.
 func handlePublishLesson(s Server, svc LessonService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		rec := reqlog.Wrap(w)
+		w = rec
+
 		ctx, claims, rc, ok := prepare(s, w, r)
+		defer logRequest(s, r, rec, rc)
 		if !ok {
 			return
 		}
@@ -403,7 +436,11 @@ func handlePublishLesson(s Server, svc LessonService) http.HandlerFunc {
 // checked against the world it is returning to.
 func handleRestoreLesson(s Server, svc LessonService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		rec := reqlog.Wrap(w)
+		w = rec
+
 		ctx, claims, rc, ok := prepare(s, w, r)
+		defer logRequest(s, r, rec, rc)
 		if !ok {
 			return
 		}
@@ -454,7 +491,11 @@ func handleRestoreLesson(s Server, svc LessonService) http.HandlerFunc {
 // that would be refused now is still refused.
 func handleRevertLesson(s Server, svc LessonService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		rec := reqlog.Wrap(w)
+		w = rec
+
 		ctx, claims, rc, ok := prepare(s, w, r)
+		defer logRequest(s, r, rec, rc)
 		if !ok {
 			return
 		}
@@ -513,7 +554,11 @@ func handleRevertLesson(s Server, svc LessonService) http.HandlerFunc {
 // turn up in a listing.
 func handleVersionsOfLesson(s Server, svc LessonService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		rec := reqlog.Wrap(w)
+		w = rec
+
 		ctx, claims, rc, ok := prepare(s, w, r)
+		defer logRequest(s, r, rec, rc)
 		if !ok {
 			return
 		}

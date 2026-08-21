@@ -72,6 +72,9 @@ func main() {
 				// so a client that had to send one twice gets one row.
 				DB:        app.Pool,
 				RequestID: func(r *http.Request) string { return r.Header.Get("X-Request-Id") },
+				// So the cause of a 500 lands wherever the server writes, and
+				// carries the identifier the client was handed.
+				Logger: app.Logger,
 			},
 			Team:    team.New(repos.Teams),
 			Player:  player.New(repos.Players),

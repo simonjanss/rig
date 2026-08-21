@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/http"
 	"os"
@@ -97,6 +98,18 @@ type Hooks struct {
 	// OnError renders a failure. Nil uses this package's own error mapper, so an
 	// authentication failure is shaped like every other failure this API returns.
 	OnError func(w http.ResponseWriter, r *http.Request, err error)
+
+	// Logger records why an authentication request failed. Nil uses
+	// [log/slog.Default].
+	//
+	// Give it the same logger as [Server.Logger]. These routes are mounted on the
+	// same mux and answer in the same shape, and the cause of a 500 from signing
+	// in should not be the one line that goes somewhere else.
+	//
+	// It is a second field rather than read from the Server because the order
+	// forbids it: this configuration is built first, and what it produces is what
+	// Server.Auth is then set to.
+	Logger *slog.Logger
 
 	// OAuth is what a provider sign-in needs beyond the configuration.
 	OAuth OAuthHooks
@@ -210,14 +223,18 @@ func Config(pool *pgxpool.Pool, h Hooks) (auth.Config, error) {
 	}
 
 	// So an authentication failure looks like every other failure this API
-	// returns. The mapper is this package's own, which is the point of the wiring
-	// being generated here rather than beside it.
+	// returns, and is recorded the same way. Through fail rather than straight to
+	// the mapper, because the line that says why a 500 happened is written there
+	// — an auth route is the one place a project cannot reach to add it, and it
+	// is also where the interesting 500s are.
 	if cfg.OnError == nil {
+		srv := Server{Logger: h.Logger}
 		cfg.OnError = func(w http.ResponseWriter, r *http.Request, err error) {
-			DefaultErrorMapper(w, r, RequestContext{
+			fail(srv, w, r, RequestContext{
 				RequestID: r.Header.Get("X-Request-Id"),
 				Method:    r.Method,
 				Path:      r.URL.Path,
+				Route:     r.Pattern,
 			}, err)
 		}
 	}

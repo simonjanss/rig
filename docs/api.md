@@ -63,6 +63,11 @@ Every failure carries a machine-readable code from a closed set of eight:
 | `UpgradeRequired` | 426 | Built against an API revision this server no longer serves |
 | `Internal` | 500 | Something went wrong on the server |
 
+An `Internal` body never says what happened: the message is always "something
+went wrong", because the real one names your tables. The cause is written to the
+server's log with the same `requestId` that went out in the body — see
+[observability.md](observability.md#why-a-500-happened).
+
 ```json
 {
   "code": "UnprocessableEntity",

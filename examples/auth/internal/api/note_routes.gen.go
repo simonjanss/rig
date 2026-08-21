@@ -10,6 +10,7 @@ import (
 
 	"github.com/simonjanss/rig/examples/auth/internal/model"
 	"github.com/simonjanss/rig/runtime/idempotency"
+	"github.com/simonjanss/rig/runtime/reqlog"
 	"github.com/simonjanss/rig/runtime/tenancy"
 )
 
@@ -31,7 +32,11 @@ func registerNote(mux *http.ServeMux, s Server, svc NoteService) {
 // List Notes.
 func handleListNotes(s Server, svc NoteService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		rec := reqlog.Wrap(w)
+		w = rec
+
 		ctx, claims, rc, ok := prepare(s, w, r)
+		defer logRequest(s, r, rec, rc)
 		if !ok {
 			return
 		}
@@ -81,7 +86,11 @@ func handleListNotes(s Server, svc NoteService) http.HandlerFunc {
 // Create a Note.
 func handleCreateNote(s Server, svc NoteService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		rec := reqlog.Wrap(w)
+		w = rec
+
 		ctx, claims, rc, ok := prepare(s, w, r)
+		defer logRequest(s, r, rec, rc)
 		if !ok {
 			return
 		}
@@ -125,7 +134,11 @@ func handleCreateNote(s Server, svc NoteService) http.HandlerFunc {
 // Search Notes with filters.
 func handleSearchNotes(s Server, svc NoteService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		rec := reqlog.Wrap(w)
+		w = rec
+
 		ctx, claims, rc, ok := prepare(s, w, r)
+		defer logRequest(s, r, rec, rc)
 		if !ok {
 			return
 		}
@@ -186,7 +199,11 @@ func handleSearchNotes(s Server, svc NoteService) http.HandlerFunc {
 // not in the trash either.
 func handleListDeletedNotes(s Server, svc NoteService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		rec := reqlog.Wrap(w)
+		w = rec
+
 		ctx, claims, rc, ok := prepare(s, w, r)
+		defer logRequest(s, r, rec, rc)
 		if !ok {
 			return
 		}
@@ -239,7 +256,11 @@ func handleListDeletedNotes(s Server, svc NoteService) http.HandlerFunc {
 // but can be restored within the retention window.
 func handleDeleteNote(s Server, svc NoteService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		rec := reqlog.Wrap(w)
+		w = rec
+
 		ctx, claims, rc, ok := prepare(s, w, r)
+		defer logRequest(s, r, rec, rc)
 		if !ok {
 			return
 		}
@@ -272,7 +293,11 @@ func handleDeleteNote(s Server, svc NoteService) http.HandlerFunc {
 // Fetch one Note by identifier.
 func handleGetNote(s Server, svc NoteService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		rec := reqlog.Wrap(w)
+		w = rec
+
 		ctx, claims, rc, ok := prepare(s, w, r)
+		defer logRequest(s, r, rec, rc)
 		if !ok {
 			return
 		}
@@ -321,7 +346,11 @@ func handleGetNote(s Server, svc NoteService) http.HandlerFunc {
 // cleared; a field left out is left alone.
 func handleUpdateNote(s Server, svc NoteService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		rec := reqlog.Wrap(w)
+		w = rec
+
 		ctx, claims, rc, ok := prepare(s, w, r)
+		defer logRequest(s, r, rec, rc)
 		if !ok {
 			return
 		}
@@ -390,7 +419,11 @@ func handleUpdateNote(s Server, svc NoteService) http.HandlerFunc {
 // checked against the world it is returning to.
 func handleRestoreNote(s Server, svc NoteService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		rec := reqlog.Wrap(w)
+		w = rec
+
 		ctx, claims, rc, ok := prepare(s, w, r)
+		defer logRequest(s, r, rec, rc)
 		if !ok {
 			return
 		}

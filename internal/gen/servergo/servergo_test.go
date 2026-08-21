@@ -342,17 +342,22 @@ func TestRevisionIsReadAndAnnounced(t *testing.T) {
 	doc.SetRevision("2026-08-01")
 	src := find(t, gentest.Run(t, servergo.New(), doc, opts()), "server.gen.go")
 
+	// Read where every request's metadata is collected, which is the function
+	// resolve and the inbox routes both go through.
+	build, ok := between(src, "func requestContext(", "\n}\n")
+	if !ok {
+		t.Fatal("no requestContext function")
+	}
+	if want := "ClientRevision: r.Header.Get(RevisionHeader)"; !strings.Contains(collapse(build), collapse(want)) {
+		t.Errorf("requestContext is missing %s:\n%s", want, build)
+	}
+
 	resolve, ok := between(src, "func resolve(", "\n}\n")
 	if !ok {
 		t.Fatal("no resolve function")
 	}
-	for _, want := range []string{
-		"ClientRevision: r.Header.Get(RevisionHeader)",
-		`if Revision != "" { w.Header().Set(RevisionHeader, Revision) }`,
-	} {
-		if !strings.Contains(collapse(resolve), collapse(want)) {
-			t.Errorf("resolve is missing %s:\n%s", want, resolve)
-		}
+	if want := `if Revision != "" { w.Header().Set(RevisionHeader, Revision) }`; !strings.Contains(collapse(resolve), collapse(want)) {
+		t.Errorf("resolve is missing %s:\n%s", want, resolve)
 	}
 }
 
@@ -706,6 +711,12 @@ func TestTheInboxIsWiredOnlyWhereItExists(t *testing.T) {
 		// The propagation rides the delete mechanism rather than being a second
 		// one beside it.
 		"cs = append(cs, notifyBlogPostDeletes(h.Notifications))",
+		// With the request it is failing, not a blank one. These routes do not
+		// go through resolve, and a blank context logs an inbox 500 that names
+		// no method, no path and no request identifier — slog drops an empty
+		// group outright, so the line would say nothing about which request it
+		// was.
+		"fail(h.Server, w, r, requestContext(h.Server, r), err)",
 	} {
 		if !strings.Contains(collapse(server), collapse(want)) {
 			t.Errorf("a project with an inbox should carry %s", want)

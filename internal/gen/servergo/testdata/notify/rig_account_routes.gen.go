@@ -10,6 +10,7 @@ import (
 	"rigtest/model"
 
 	"github.com/simonjanss/rig/runtime/idempotency"
+	"github.com/simonjanss/rig/runtime/reqlog"
 	"github.com/simonjanss/rig/runtime/tenancy"
 )
 
@@ -29,7 +30,11 @@ func registerRigAccount(mux *http.ServeMux, s Server, svc RigAccountService) {
 // List RigAccounts.
 func handleListRigAccounts(s Server, svc RigAccountService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		rec := reqlog.Wrap(w)
+		w = rec
+
 		ctx, claims, rc, ok := prepare(s, w, r)
+		defer logRequest(s, r, rec, rc)
 		if !ok {
 			return
 		}
@@ -69,7 +74,11 @@ func handleListRigAccounts(s Server, svc RigAccountService) http.HandlerFunc {
 // Create a RigAccount.
 func handleCreateRigAccount(s Server, svc RigAccountService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		rec := reqlog.Wrap(w)
+		w = rec
+
 		ctx, claims, rc, ok := prepare(s, w, r)
+		defer logRequest(s, r, rec, rc)
 		if !ok {
 			return
 		}
@@ -113,7 +122,11 @@ func handleCreateRigAccount(s Server, svc RigAccountService) http.HandlerFunc {
 // Search RigAccounts with filters.
 func handleSearchRigAccounts(s Server, svc RigAccountService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		rec := reqlog.Wrap(w)
+		w = rec
+
 		ctx, claims, rc, ok := prepare(s, w, r)
+		defer logRequest(s, r, rec, rc)
 		if !ok {
 			return
 		}
@@ -159,7 +172,11 @@ func handleSearchRigAccounts(s Server, svc RigAccountService) http.HandlerFunc {
 // Delete a RigAccount.
 func handleDeleteRigAccount(s Server, svc RigAccountService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		rec := reqlog.Wrap(w)
+		w = rec
+
 		ctx, claims, rc, ok := prepare(s, w, r)
+		defer logRequest(s, r, rec, rc)
 		if !ok {
 			return
 		}
@@ -192,7 +209,11 @@ func handleDeleteRigAccount(s Server, svc RigAccountService) http.HandlerFunc {
 // Fetch one RigAccount by identifier.
 func handleGetRigAccount(s Server, svc RigAccountService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		rec := reqlog.Wrap(w)
+		w = rec
+
 		ctx, claims, rc, ok := prepare(s, w, r)
+		defer logRequest(s, r, rec, rc)
 		if !ok {
 			return
 		}
@@ -229,7 +250,11 @@ func handleGetRigAccount(s Server, svc RigAccountService) http.HandlerFunc {
 // cleared; a field left out is left alone.
 func handleUpdateRigAccount(s Server, svc RigAccountService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		rec := reqlog.Wrap(w)
+		w = rec
+
 		ctx, claims, rc, ok := prepare(s, w, r)
+		defer logRequest(s, r, rec, rc)
 		if !ok {
 			return
 		}

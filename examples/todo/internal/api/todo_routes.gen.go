@@ -14,6 +14,7 @@ import (
 	"github.com/simonjanss/rig/files"
 	"github.com/simonjanss/rig/files/filehttp"
 	"github.com/simonjanss/rig/runtime/idempotency"
+	"github.com/simonjanss/rig/runtime/reqlog"
 )
 
 // registerTodo mounts Todo's routes.
@@ -40,7 +41,11 @@ func registerTodo(mux *http.ServeMux, s Server, svc TodoService) {
 // List Todos.
 func handleListTodos(s Server, svc TodoService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		rec := reqlog.Wrap(w)
+		w = rec
+
 		ctx, claims, rc, ok := prepare(s, w, r)
+		defer logRequest(s, r, rec, rc)
 		if !ok {
 			return
 		}
@@ -75,7 +80,11 @@ func handleListTodos(s Server, svc TodoService) http.HandlerFunc {
 // Create a Todo.
 func handleCreateTodo(s Server, svc TodoService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		rec := reqlog.Wrap(w)
+		w = rec
+
 		ctx, claims, rc, ok := prepare(s, w, r)
+		defer logRequest(s, r, rec, rc)
 		if !ok {
 			return
 		}
@@ -161,7 +170,11 @@ func handleCreateTodo(s Server, svc TodoService) http.HandlerFunc {
 // Search Todos with filters.
 func handleSearchTodos(s Server, svc TodoService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		rec := reqlog.Wrap(w)
+		w = rec
+
 		ctx, claims, rc, ok := prepare(s, w, r)
+		defer logRequest(s, r, rec, rc)
 		if !ok {
 			return
 		}
@@ -207,7 +220,11 @@ func handleSearchTodos(s Server, svc TodoService) http.HandlerFunc {
 // not in the trash either.
 func handleListDeletedTodos(s Server, svc TodoService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		rec := reqlog.Wrap(w)
+		w = rec
+
 		ctx, claims, rc, ok := prepare(s, w, r)
+		defer logRequest(s, r, rec, rc)
 		if !ok {
 			return
 		}
@@ -245,7 +262,11 @@ func handleListDeletedTodos(s Server, svc TodoService) http.HandlerFunc {
 // but can be restored within the retention window.
 func handleDeleteTodo(s Server, svc TodoService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		rec := reqlog.Wrap(w)
+		w = rec
+
 		ctx, claims, rc, ok := prepare(s, w, r)
+		defer logRequest(s, r, rec, rc)
 		if !ok {
 			return
 		}
@@ -273,7 +294,11 @@ func handleDeleteTodo(s Server, svc TodoService) http.HandlerFunc {
 // Fetch one Todo by identifier.
 func handleGetTodo(s Server, svc TodoService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		rec := reqlog.Wrap(w)
+		w = rec
+
 		ctx, claims, rc, ok := prepare(s, w, r)
+		defer logRequest(s, r, rec, rc)
 		if !ok {
 			return
 		}
@@ -305,7 +330,11 @@ func handleGetTodo(s Server, svc TodoService) http.HandlerFunc {
 // cleared; a field left out is left alone.
 func handleUpdateTodo(s Server, svc TodoService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		rec := reqlog.Wrap(w)
+		w = rec
+
 		ctx, claims, rc, ok := prepare(s, w, r)
+		defer logRequest(s, r, rec, rc)
 		if !ok {
 			return
 		}
@@ -356,7 +385,11 @@ func handleUpdateTodo(s Server, svc TodoService) http.HandlerFunc {
 // who finished it.
 func handleCompleteTodo(s Server, svc TodoService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		rec := reqlog.Wrap(w)
+		w = rec
+
 		ctx, claims, rc, ok := prepare(s, w, r)
+		defer logRequest(s, r, rec, rc)
 		if !ok {
 			return
 		}
@@ -420,7 +453,11 @@ func handleCompleteTodo(s Server, svc TodoService) http.HandlerFunc {
 // checked against the world it is returning to.
 func handleRestoreTodo(s Server, svc TodoService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		rec := reqlog.Wrap(w)
+		w = rec
+
 		ctx, claims, rc, ok := prepare(s, w, r)
+		defer logRequest(s, r, rec, rc)
 		if !ok {
 			return
 		}
@@ -466,7 +503,11 @@ func handleRestoreTodo(s Server, svc TodoService) http.HandlerFunc {
 // that would be refused now is still refused.
 func handleRevertTodo(s Server, svc TodoService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		rec := reqlog.Wrap(w)
+		w = rec
+
 		ctx, claims, rc, ok := prepare(s, w, r)
+		defer logRequest(s, r, rec, rc)
 		if !ok {
 			return
 		}
@@ -520,7 +561,11 @@ func handleRevertTodo(s Server, svc TodoService) http.HandlerFunc {
 // turn up in a listing.
 func handleVersionsOfTodo(s Server, svc TodoService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		rec := reqlog.Wrap(w)
+		w = rec
+
 		ctx, claims, rc, ok := prepare(s, w, r)
+		defer logRequest(s, r, rec, rc)
 		if !ok {
 			return
 		}
@@ -553,7 +598,11 @@ func handleVersionsOfTodo(s Server, svc TodoService) http.HandlerFunc {
 // has to hand back a row pointing at something.
 func handleDeleteTodoCoverFile(s Server, svc TodoService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		rec := reqlog.Wrap(w)
+		w = rec
+
 		ctx, claims, rc, ok := prepare(s, w, r)
+		defer logRequest(s, r, rec, rc)
 		if !ok {
 			return
 		}
@@ -589,7 +638,11 @@ func handleDeleteTodoCoverFile(s Server, svc TodoService) http.HandlerFunc {
 // them.
 func handleUploadTodoCoverFile(s Server, svc TodoService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		rec := reqlog.Wrap(w)
+		w = rec
+
 		ctx, claims, rc, ok := prepare(s, w, r)
+		defer logRequest(s, r, rec, rc)
 		if !ok {
 			return
 		}
@@ -628,7 +681,11 @@ func handleUploadTodoCoverFile(s Server, svc TodoService) http.HandlerFunc {
 // over and a media element can seek.
 func handleDownloadTodoCoverFile(s Server, svc TodoService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		rec := reqlog.Wrap(w)
+		w = rec
+
 		ctx, claims, rc, ok := prepare(s, w, r)
+		defer logRequest(s, r, rec, rc)
 		if !ok {
 			return
 		}

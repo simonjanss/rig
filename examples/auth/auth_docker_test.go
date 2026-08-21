@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -311,7 +312,7 @@ func newServer(t *testing.T) *server {
 	// The same function main uses, so what the test drives is what runs.
 	srv := httptest.NewUnstartedServer(nil)
 
-	handler, _, err := newAPI(context.Background(), pool)
+	handler, _, err := newAPI(context.Background(), pool, slog.Default())
 	if err != nil {
 		t.Fatal(err)
 	}

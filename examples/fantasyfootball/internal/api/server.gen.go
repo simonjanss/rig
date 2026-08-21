@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"time"
@@ -20,6 +21,7 @@ import (
 	"github.com/simonjanss/rig/runtime/dbhook"
 	"github.com/simonjanss/rig/runtime/dbx"
 	"github.com/simonjanss/rig/runtime/idempotency"
+	"github.com/simonjanss/rig/runtime/reqlog"
 	"github.com/simonjanss/rig/runtime/rigerr"
 	"github.com/simonjanss/rig/runtime/serve"
 	"github.com/simonjanss/rig/runtime/tenancy"
@@ -67,6 +69,24 @@ type Server struct {
 	// RequestID labels a request for the logs. Nil generates nothing, and the
 	// field is simply absent from error bodies.
 	RequestID func(*http.Request) string
+
+	// Logger is where this server says what it did and why a request failed. Nil
+	// uses [log/slog.Default].
+	//
+	// Nil means the default logger and not silence, which is the whole point: the
+	// one line worth having is the cause of a 500, and a server that drops it
+	// because nobody configured logging is a server whose error bodies say
+	// "something went wrong" and mean it literally. Set this to route the lines
+	// somewhere, not to turn them on.
+	//
+	// What comes out: an error line per failed request carrying the whole error,
+	// and, at [log/slog.LevelDebug], a line per request with its status and size.
+	//
+	// There is no logger on the context and no way to reach this one from a
+	// service. A service is constructed by the application, so it is handed a
+	// logger there — the same one this field gets — and puts the request on
+	// its own lines with [RequestContextFrom].
+	Logger *slog.Logger
 
 	// MinRevision refuses a caller built against an API revision older than this
 	// one. The zero value, the default, refuses nothing.
@@ -251,9 +271,14 @@ func prepare(s Server, w http.ResponseWriter, r *http.Request) (context.Context,
 	return resolve(s, w, r, true)
 }
 
-// resolve is the body of both, differing only in whether a caller who cannot
-// be identified is refused.
-func resolve(s Server, w http.ResponseWriter, r *http.Request, required bool) (context.Context, tenancy.Claims, RequestContext, bool) {
+// requestContext is what one request looks like to an error body and to a log
+// line.
+//
+// A function rather than a literal per call site, because a route that builds
+// a blank one still answers correctly and still logs a failure — it just
+// logs one that names no method, no path and no request identifier, which is
+// the one thing the line exists for.
+func requestContext(s Server, r *http.Request) RequestContext {
 	rc := RequestContext{
 		Method:         r.Method,
 		Path:           r.URL.Path,
@@ -265,6 +290,13 @@ func resolve(s Server, w http.ResponseWriter, r *http.Request, required bool) (c
 	if s.RequestID != nil {
 		rc.RequestID = s.RequestID(r)
 	}
+	return rc
+}
+
+// resolve is the body of both, differing only in whether a caller who cannot
+// be identified is refused.
+func resolve(s Server, w http.ResponseWriter, r *http.Request, required bool) (context.Context, tenancy.Claims, RequestContext, bool) {
+	rc := requestContext(s, r)
 
 	// Announced on the way out of every response, including the failed ones: a
 	// client that is behind should not have to make a successful request to find
@@ -329,11 +361,80 @@ func serveRevision(s Server, w http.ResponseWriter, r *http.Request, rc RequestC
 
 // fail writes an error response.
 func fail(s Server, w http.ResponseWriter, r *http.Request, rc RequestContext, err error) {
+	// Before the mapper and not inside it. A project that set OnError replaced how
+	// a failure is *answered*; it did not ask to stop being told what the failure
+	// was.
+	logFailure(s, r, rc, err)
+
 	if s.OnError != nil {
 		s.OnError(w, r, rc, err)
 		return
 	}
 	DefaultErrorMapper(w, r, rc, err)
+}
+
+// logFailure records why this request is about to fail.
+//
+// It is the only place that ever sees the whole error. DefaultErrorMapper
+// rewrites an internal message to "something went wrong" before it reaches the
+// client — deliberately, because the original is exactly the kind of thing
+// that leaks a table name or a connection string — so without this line the
+// cause of a 500 exists nowhere. The request identifier goes out in the body
+// and comes out here, and that pair is the whole mechanism for answering "what
+// happened to my request".
+//
+// Two levels, because they are two different events. An internal failure is
+// the server's fault and is an error. A 404, a 422, a refused permission —
+// the server worked, and logging those at anything but debug is how a log
+// becomes a thing nobody reads.
+func logFailure(s Server, r *http.Request, rc RequestContext, err error) {
+	code := rigerr.CodeOf(err)
+	attrs := []any{
+		slog.Any("request", rc),
+		slog.Int("status", code.HTTPStatus()),
+		slog.Any("code", code),
+		slog.Any("error", err),
+	}
+
+	if code == rigerr.CodeInternal {
+		s.logger().ErrorContext(r.Context(), "request failed", attrs...)
+		return
+	}
+	s.logger().DebugContext(r.Context(), "request refused", attrs...)
+}
+
+// logRequest writes the request line, once every handler has finished.
+//
+// Deferred from the handler rather than wrapped around the mux, because the
+// route is only known inside: net/http sets the matched pattern on the request
+// the mux dispatches, and a middleware in front of it has an earlier request
+// that has matched nothing. A line labelled by path instead would be one line
+// per identifier that ever appeared in a URL.
+func logRequest(s Server, r *http.Request, rec *reqlog.Writer, rc RequestContext) {
+	l := s.logger()
+	// Asked before the attributes are built. This runs on every request, including
+	// the ones nobody is watching.
+	if !l.Enabled(r.Context(), slog.LevelDebug) {
+		return
+	}
+
+	l.DebugContext(r.Context(), "request served",
+		slog.Any("request", rc),
+		slog.Int("status", rec.Status()),
+		slog.Int64("bytes", rec.Bytes()),
+	)
+}
+
+// logger is the server's, or the default one.
+//
+// Nil is a server nobody configured logging for, not a server that asked for
+// silence, and the difference matters on the one line that says why a 500
+// happened.
+func (s Server) logger() *slog.Logger {
+	if s.Logger != nil {
+		return s.Logger
+	}
+	return slog.Default()
 }
 
 // DefaultErrorMapper turns an error into a response.

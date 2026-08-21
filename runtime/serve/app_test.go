@@ -225,7 +225,7 @@ func TestTheShutdownPartsMustFitTheMaximum(t *testing.T) {
 	app.DrainWithin("consumer", 2*time.Second, noop)
 	app.CloseWithin("exporter", 20*time.Second, noop)
 
-	err := app.checkShutdown(20*time.Second, 5*time.Second)
+	err := app.checkShutdown(t.Context(), 20*time.Second, 5*time.Second)
 	if err == nil {
 		t.Fatal("27s of steps inside a 20s maximum should not start")
 	}
@@ -244,7 +244,7 @@ func TestAShutdownThatFitsIsAccepted(t *testing.T) {
 	app.CloseWithin("exporter", 5*time.Second, noop)
 	app.Close("cache", noop) // no limit of its own: takes what is left
 
-	if err := app.checkShutdown(20*time.Second, 2*time.Second); err != nil {
+	if err := app.checkShutdown(t.Context(), 20*time.Second, 2*time.Second); err != nil {
 		t.Errorf("7s of declared steps inside 20s should be fine: %v", err)
 	}
 }
@@ -257,7 +257,7 @@ func TestUndeclaredStepsDoNotCountAgainstTheMaximum(t *testing.T) {
 		app.Close("whatever", noop)
 	}
 
-	if err := app.checkShutdown(time.Second, 0); err != nil {
+	if err := app.checkShutdown(t.Context(), time.Second, 0); err != nil {
 		t.Errorf("steps without their own limits should not need budgeting: %v", err)
 	}
 }
