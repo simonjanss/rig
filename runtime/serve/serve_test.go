@@ -3,7 +3,6 @@ package serve
 import (
 	"context"
 	"errors"
-	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -348,7 +347,7 @@ func TestNoHintNoInvention(t *testing.T) {
 		DatabaseURL:    "postgres://rig:secret@127.0.0.1:1/rig?sslmode=disable",
 		ConnectTimeout: 300 * time.Millisecond,
 		MaxStartup:     time.Second,
-		Logger:         slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Logger:         slog.New(slog.DiscardHandler),
 	}.withDefaults()
 
 	_, err := open(context.Background(), cfg)

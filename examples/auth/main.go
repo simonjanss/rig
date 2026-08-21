@@ -32,6 +32,7 @@ import (
 	"embed"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"os"
 	"strings"
@@ -105,7 +106,7 @@ func main() {
 		},
 		Migrate: migrate.Require(migrations, migrate.Options{}),
 	}, func(ctx context.Context, app *serve.App) (http.Handler, error) {
-		mux, engine, err := newAPI(ctx, app.Pool)
+		mux, engine, err := newAPI(ctx, app.Pool, app.Logger)
 		if err != nil {
 			return nil, err
 		}
@@ -131,7 +132,7 @@ func main() {
 // file has a constructor both callers share instead of building services inside
 // the mount closure.
 func dispatchNotifications(ctx context.Context, pool *pgxpool.Pool) error {
-	_, engine, err := newAPI(ctx, pool)
+	_, engine, err := newAPI(ctx, pool, slog.Default())
 	if err != nil {
 		return err
 	}
@@ -147,7 +148,7 @@ func dispatchNotifications(ctx context.Context, pool *pgxpool.Pool) error {
 // the wiring — that the generated handlers and the auth endpoints agree about
 // who the caller is — and a test that assembled its own would be testing
 // something else.
-func newAPI(ctx context.Context, pool *pgxpool.Pool) (http.Handler, *notify.Engine, error) {
+func newAPI(ctx context.Context, pool *pgxpool.Pool, log *slog.Logger) (http.Handler, *notify.Engine, error) {
 	repos := store.New(pool, store.Config{})
 
 	// The inbox, and the two halves of it that have to be built in this order.
@@ -189,6 +190,11 @@ func newAPI(ctx context.Context, pool *pgxpool.Pool) (http.Handler, *notify.Engi
 	// the rate limits, and that registration and tenant creation are both open.
 	// What is left here is the part that is code.
 	front, err := api.New(pool, api.Hooks{
+		// The same logger the Server below gets: an auth route answers on the
+		// same mux and in the same shape, so the cause of a 500 from signing in
+		// should not be the one line that goes somewhere else.
+		Logger: log,
+
 		Notifier: mail,
 
 		// The one thing rig asks an application to decide. It derives the
@@ -249,6 +255,7 @@ func newAPI(ctx context.Context, pool *pgxpool.Pool) (http.Handler, *notify.Engi
 			// to serve a list of chores.
 			Auth:      front,
 			RequestID: func(r *http.Request) string { return r.Header.Get("X-Request-Id") },
+			Logger:    log,
 		},
 
 		Note:          notes,

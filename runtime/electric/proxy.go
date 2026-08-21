@@ -146,10 +146,13 @@ func (p *Proxy) Serve(w http.ResponseWriter, r *http.Request, s Shape) {
 	// Flush after the copy rather than during it: a long poll answers all at
 	// once, and the flush is what stops a buffering intermediary from sitting
 	// on the response until the next one arrives.
+	//
+	// Through a ResponseController rather than a type assertion for w: a
+	// middleware that wraps the writer — the request log's does — is not an
+	// http.Flusher itself, and an assertion would quietly find nothing and skip
+	// the flush. The controller follows Unwrap to the writer that can.
 	_, _ = io.Copy(w, res.Body)
-	if f, ok := w.(http.Flusher); ok {
-		f.Flush()
-	}
+	_ = http.NewResponseController(w).Flush()
 }
 
 // request builds the upstream call.

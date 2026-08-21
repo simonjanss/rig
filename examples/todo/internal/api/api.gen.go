@@ -10,6 +10,7 @@ package api
 
 import (
 	"context"
+	"log/slog"
 	"time"
 
 	"github.com/google/uuid"
@@ -101,6 +102,39 @@ type RequestContext struct {
 	// for a caller to be. Compare with [RequestContext.BuiltBefore] rather
 	// than with this.
 	ClientRevision string
+}
+
+// LogValue is how a request appears in a log line.
+//
+// A group, so one attribute carries the lot:
+//
+//	logger.ErrorContext(ctx, "that failed", slog.Any("request", rc))
+//
+// Only the fields that have something in them. An empty attribute on every
+// line is the same width in a terminal and a key in a structured backend, and
+// it says a field was collected when it was not — a project that set no
+// RequestID gets lines with no request_id rather than lines with an empty one.
+func (rc RequestContext) LogValue() slog.Value {
+	attrs := make([]slog.Attr, 0, 6)
+	if rc.RequestID != "" {
+		attrs = append(attrs, slog.String("request_id", rc.RequestID))
+	}
+	if rc.Method != "" {
+		attrs = append(attrs, slog.String("method", rc.Method))
+	}
+	if rc.Route != "" {
+		attrs = append(attrs, slog.String("route", rc.Route))
+	}
+	if rc.Path != "" {
+		attrs = append(attrs, slog.String("path", rc.Path))
+	}
+	if rc.RemoteAddr != "" {
+		attrs = append(attrs, slog.String("remote_addr", rc.RemoteAddr))
+	}
+	if rc.UserAgent != "" {
+		attrs = append(attrs, slog.String("user_agent", rc.UserAgent))
+	}
+	return slog.GroupValue(attrs...)
 }
 
 // Client is what the caller was built against.

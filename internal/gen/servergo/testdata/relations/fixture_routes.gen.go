@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"rigtest/model"
 
+	"github.com/simonjanss/rig/runtime/reqlog"
 	"github.com/simonjanss/rig/runtime/tenancy"
 )
 
@@ -27,7 +28,11 @@ func registerFixture(mux *http.ServeMux, s Server, svc FixtureService) {
 // List Fixtures.
 func handleListFixtures(s Server, svc FixtureService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		rec := reqlog.Wrap(w)
+		w = rec
+
 		ctx, claims, rc, ok := prepare(s, w, r)
+		defer logRequest(s, r, rec, rc)
 		if !ok {
 			return
 		}
@@ -67,7 +72,11 @@ func handleListFixtures(s Server, svc FixtureService) http.HandlerFunc {
 // Create a Fixture.
 func handleCreateFixture(s Server, svc FixtureService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		rec := reqlog.Wrap(w)
+		w = rec
+
 		ctx, claims, rc, ok := prepare(s, w, r)
+		defer logRequest(s, r, rec, rc)
 		if !ok {
 			return
 		}
@@ -99,7 +108,11 @@ func handleCreateFixture(s Server, svc FixtureService) http.HandlerFunc {
 // Search Fixtures with filters.
 func handleSearchFixtures(s Server, svc FixtureService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		rec := reqlog.Wrap(w)
+		w = rec
+
 		ctx, claims, rc, ok := prepare(s, w, r)
+		defer logRequest(s, r, rec, rc)
 		if !ok {
 			return
 		}
@@ -145,7 +158,11 @@ func handleSearchFixtures(s Server, svc FixtureService) http.HandlerFunc {
 // Delete a Fixture.
 func handleDeleteFixture(s Server, svc FixtureService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		rec := reqlog.Wrap(w)
+		w = rec
+
 		ctx, claims, rc, ok := prepare(s, w, r)
+		defer logRequest(s, r, rec, rc)
 		if !ok {
 			return
 		}
@@ -178,7 +195,11 @@ func handleDeleteFixture(s Server, svc FixtureService) http.HandlerFunc {
 // Fetch one Fixture by identifier.
 func handleGetFixture(s Server, svc FixtureService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		rec := reqlog.Wrap(w)
+		w = rec
+
 		ctx, claims, rc, ok := prepare(s, w, r)
+		defer logRequest(s, r, rec, rc)
 		if !ok {
 			return
 		}
@@ -215,7 +236,11 @@ func handleGetFixture(s Server, svc FixtureService) http.HandlerFunc {
 // cleared; a field left out is left alone.
 func handleUpdateFixture(s Server, svc FixtureService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		rec := reqlog.Wrap(w)
+		w = rec
+
 		ctx, claims, rc, ok := prepare(s, w, r)
+		defer logRequest(s, r, rec, rc)
 		if !ok {
 			return
 		}

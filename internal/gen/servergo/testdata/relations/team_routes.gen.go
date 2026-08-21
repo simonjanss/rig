@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"rigtest/model"
 
+	"github.com/simonjanss/rig/runtime/reqlog"
 	"github.com/simonjanss/rig/runtime/tenancy"
 )
 
@@ -27,7 +28,11 @@ func registerTeam(mux *http.ServeMux, s Server, svc TeamService) {
 // List Teams.
 func handleListTeams(s Server, svc TeamService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		rec := reqlog.Wrap(w)
+		w = rec
+
 		ctx, claims, rc, ok := prepare(s, w, r)
+		defer logRequest(s, r, rec, rc)
 		if !ok {
 			return
 		}
@@ -67,7 +72,11 @@ func handleListTeams(s Server, svc TeamService) http.HandlerFunc {
 // Create a Team.
 func handleCreateTeam(s Server, svc TeamService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		rec := reqlog.Wrap(w)
+		w = rec
+
 		ctx, claims, rc, ok := prepare(s, w, r)
+		defer logRequest(s, r, rec, rc)
 		if !ok {
 			return
 		}
@@ -99,7 +108,11 @@ func handleCreateTeam(s Server, svc TeamService) http.HandlerFunc {
 // Search Teams with filters.
 func handleSearchTeams(s Server, svc TeamService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		rec := reqlog.Wrap(w)
+		w = rec
+
 		ctx, claims, rc, ok := prepare(s, w, r)
+		defer logRequest(s, r, rec, rc)
 		if !ok {
 			return
 		}
@@ -145,7 +158,11 @@ func handleSearchTeams(s Server, svc TeamService) http.HandlerFunc {
 // Delete a Team.
 func handleDeleteTeam(s Server, svc TeamService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		rec := reqlog.Wrap(w)
+		w = rec
+
 		ctx, claims, rc, ok := prepare(s, w, r)
+		defer logRequest(s, r, rec, rc)
 		if !ok {
 			return
 		}
@@ -178,7 +195,11 @@ func handleDeleteTeam(s Server, svc TeamService) http.HandlerFunc {
 // Fetch one Team by identifier.
 func handleGetTeam(s Server, svc TeamService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		rec := reqlog.Wrap(w)
+		w = rec
+
 		ctx, claims, rc, ok := prepare(s, w, r)
+		defer logRequest(s, r, rec, rc)
 		if !ok {
 			return
 		}
@@ -215,7 +236,11 @@ func handleGetTeam(s Server, svc TeamService) http.HandlerFunc {
 // cleared; a field left out is left alone.
 func handleUpdateTeam(s Server, svc TeamService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		rec := reqlog.Wrap(w)
+		w = rec
+
 		ctx, claims, rc, ok := prepare(s, w, r)
+		defer logRequest(s, r, rec, rc)
 		if !ok {
 			return
 		}

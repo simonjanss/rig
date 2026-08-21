@@ -12,6 +12,7 @@ import (
 	"github.com/simonjanss/rig/examples/todo/internal/model"
 	"github.com/simonjanss/rig/files"
 	"github.com/simonjanss/rig/files/filehttp"
+	"github.com/simonjanss/rig/runtime/reqlog"
 )
 
 // registerTodoAttachment mounts TodoAttachment's routes.
@@ -34,7 +35,11 @@ func registerTodoAttachment(mux *http.ServeMux, s Server, svc TodoAttachmentServ
 // List TodoAttachments.
 func handleListTodoAttachments(s Server, svc TodoAttachmentService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		rec := reqlog.Wrap(w)
+		w = rec
+
 		ctx, claims, rc, ok := prepare(s, w, r)
+		defer logRequest(s, r, rec, rc)
 		if !ok {
 			return
 		}
@@ -69,7 +74,11 @@ func handleListTodoAttachments(s Server, svc TodoAttachmentService) http.Handler
 // Create a TodoAttachment.
 func handleCreateTodoAttachment(s Server, svc TodoAttachmentService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		rec := reqlog.Wrap(w)
+		w = rec
+
 		ctx, claims, rc, ok := prepare(s, w, r)
+		defer logRequest(s, r, rec, rc)
 		if !ok {
 			return
 		}
@@ -147,7 +156,11 @@ func handleCreateTodoAttachment(s Server, svc TodoAttachmentService) http.Handle
 // Search TodoAttachments with filters.
 func handleSearchTodoAttachments(s Server, svc TodoAttachmentService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		rec := reqlog.Wrap(w)
+		w = rec
+
 		ctx, claims, rc, ok := prepare(s, w, r)
+		defer logRequest(s, r, rec, rc)
 		if !ok {
 			return
 		}
@@ -194,7 +207,11 @@ func handleSearchTodoAttachments(s Server, svc TodoAttachmentService) http.Handl
 // not in the trash either.
 func handleListDeletedTodoAttachments(s Server, svc TodoAttachmentService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		rec := reqlog.Wrap(w)
+		w = rec
+
 		ctx, claims, rc, ok := prepare(s, w, r)
+		defer logRequest(s, r, rec, rc)
 		if !ok {
 			return
 		}
@@ -232,7 +249,11 @@ func handleListDeletedTodoAttachments(s Server, svc TodoAttachmentService) http.
 // but can be restored within the retention window.
 func handleDeleteTodoAttachment(s Server, svc TodoAttachmentService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		rec := reqlog.Wrap(w)
+		w = rec
+
 		ctx, claims, rc, ok := prepare(s, w, r)
+		defer logRequest(s, r, rec, rc)
 		if !ok {
 			return
 		}
@@ -260,7 +281,11 @@ func handleDeleteTodoAttachment(s Server, svc TodoAttachmentService) http.Handle
 // Fetch one TodoAttachment by identifier.
 func handleGetTodoAttachment(s Server, svc TodoAttachmentService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		rec := reqlog.Wrap(w)
+		w = rec
+
 		ctx, claims, rc, ok := prepare(s, w, r)
+		defer logRequest(s, r, rec, rc)
 		if !ok {
 			return
 		}
@@ -292,7 +317,11 @@ func handleGetTodoAttachment(s Server, svc TodoAttachmentService) http.HandlerFu
 // cleared; a field left out is left alone.
 func handleUpdateTodoAttachment(s Server, svc TodoAttachmentService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		rec := reqlog.Wrap(w)
+		w = rec
+
 		ctx, claims, rc, ok := prepare(s, w, r)
+		defer logRequest(s, r, rec, rc)
 		if !ok {
 			return
 		}
@@ -345,7 +374,11 @@ func handleUpdateTodoAttachment(s Server, svc TodoAttachmentService) http.Handle
 // checked against the world it is returning to.
 func handleRestoreTodoAttachment(s Server, svc TodoAttachmentService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		rec := reqlog.Wrap(w)
+		w = rec
+
 		ctx, claims, rc, ok := prepare(s, w, r)
+		defer logRequest(s, r, rec, rc)
 		if !ok {
 			return
 		}
@@ -384,7 +417,11 @@ func handleRestoreTodoAttachment(s Server, svc TodoAttachmentService) http.Handl
 // them.
 func handleUploadTodoAttachmentAttachmentFile(s Server, svc TodoAttachmentService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		rec := reqlog.Wrap(w)
+		w = rec
+
 		ctx, claims, rc, ok := prepare(s, w, r)
+		defer logRequest(s, r, rec, rc)
 		if !ok {
 			return
 		}
@@ -423,7 +460,11 @@ func handleUploadTodoAttachmentAttachmentFile(s Server, svc TodoAttachmentServic
 // over and a media element can seek.
 func handleDownloadTodoAttachmentAttachmentFile(s Server, svc TodoAttachmentService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		rec := reqlog.Wrap(w)
+		w = rec
+
 		ctx, claims, rc, ok := prepare(s, w, r)
+		defer logRequest(s, r, rec, rc)
 		if !ok {
 			return
 		}

@@ -254,6 +254,17 @@ func (e *authEmitter) hooks(b *gobuf.Buf) {
 	b.L("OnError func(w %s.ResponseWriter, r *%s.Request, err error)", httpPkg, httpPkg)
 	b.NL()
 
+	b.Comment("Logger records why an authentication request failed. Nil uses " +
+		"[log/slog.Default].\n\n" +
+		"Give it the same logger as [Server.Logger]. These routes are mounted on " +
+		"the same mux and answer in the same shape, and the cause of a 500 from " +
+		"signing in should not be the one line that goes somewhere else.\n\n" +
+		"It is a second field rather than read from the Server because the order " +
+		"forbids it: this configuration is built first, and what it produces is " +
+		"what Server.Auth is then set to.")
+	b.L("Logger *%s.Logger", b.Import("log/slog"))
+	b.NL()
+
 	if e.oauth() != nil {
 		b.Comment("OAuth is what a provider sign-in needs beyond the configuration.")
 		b.L("OAuth OAuthHooks")
@@ -472,14 +483,18 @@ func (e *authEmitter) configFunc(b *gobuf.Buf) {
 	}
 
 	b.Comment("So an authentication failure looks like every other failure this API " +
-		"returns. The mapper is this package's own, which is the point of the " +
-		"wiring being generated here rather than beside it.")
+		"returns, and is recorded the same way. Through fail rather than straight " +
+		"to the mapper, because the line that says why a 500 happened is written " +
+		"there — an auth route is the one place a project cannot reach to add it, " +
+		"and it is also where the interesting 500s are.")
 	b.L("if cfg.OnError == nil {")
+	b.L("srv := Server{Logger: h.Logger}")
 	b.L("cfg.OnError = func(w %s.ResponseWriter, r *%s.Request, err error) {", httpPkg, httpPkg)
-	b.L("DefaultErrorMapper(w, r, RequestContext{")
+	b.L("fail(srv, w, r, RequestContext{")
 	b.L("RequestID: r.Header.Get(%s),", gobuf.Quote(e.cfg.RequestIDHeader))
 	b.L("Method: r.Method,")
 	b.L("Path: r.URL.Path,")
+	b.L("Route: r.Pattern,")
 	b.L("}, err)")
 	b.L("}")
 	b.L("}")

@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"rigtest/model"
 
+	"github.com/simonjanss/rig/runtime/reqlog"
 	"github.com/simonjanss/rig/runtime/tenancy"
 )
 
@@ -27,7 +28,11 @@ func registerPlayer(mux *http.ServeMux, s Server, svc PlayerService) {
 // List Players.
 func handleListPlayers(s Server, svc PlayerService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		rec := reqlog.Wrap(w)
+		w = rec
+
 		ctx, claims, rc, ok := prepare(s, w, r)
+		defer logRequest(s, r, rec, rc)
 		if !ok {
 			return
 		}
@@ -67,7 +72,11 @@ func handleListPlayers(s Server, svc PlayerService) http.HandlerFunc {
 // Create a Player.
 func handleCreatePlayer(s Server, svc PlayerService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		rec := reqlog.Wrap(w)
+		w = rec
+
 		ctx, claims, rc, ok := prepare(s, w, r)
+		defer logRequest(s, r, rec, rc)
 		if !ok {
 			return
 		}
@@ -99,7 +108,11 @@ func handleCreatePlayer(s Server, svc PlayerService) http.HandlerFunc {
 // Search Players with filters.
 func handleSearchPlayers(s Server, svc PlayerService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		rec := reqlog.Wrap(w)
+		w = rec
+
 		ctx, claims, rc, ok := prepare(s, w, r)
+		defer logRequest(s, r, rec, rc)
 		if !ok {
 			return
 		}
@@ -145,7 +158,11 @@ func handleSearchPlayers(s Server, svc PlayerService) http.HandlerFunc {
 // Delete a Player.
 func handleDeletePlayer(s Server, svc PlayerService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		rec := reqlog.Wrap(w)
+		w = rec
+
 		ctx, claims, rc, ok := prepare(s, w, r)
+		defer logRequest(s, r, rec, rc)
 		if !ok {
 			return
 		}
@@ -178,7 +195,11 @@ func handleDeletePlayer(s Server, svc PlayerService) http.HandlerFunc {
 // Fetch one Player by identifier.
 func handleGetPlayer(s Server, svc PlayerService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		rec := reqlog.Wrap(w)
+		w = rec
+
 		ctx, claims, rc, ok := prepare(s, w, r)
+		defer logRequest(s, r, rec, rc)
 		if !ok {
 			return
 		}
@@ -215,7 +236,11 @@ func handleGetPlayer(s Server, svc PlayerService) http.HandlerFunc {
 // cleared; a field left out is left alone.
 func handleUpdatePlayer(s Server, svc PlayerService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		rec := reqlog.Wrap(w)
+		w = rec
+
 		ctx, claims, rc, ok := prepare(s, w, r)
+		defer logRequest(s, r, rec, rc)
 		if !ok {
 			return
 		}

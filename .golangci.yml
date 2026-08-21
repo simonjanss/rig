@@ -23,8 +23,18 @@ linters:
     - rowserrcheck   # rows.Err() after a range over rows
     - sqlclosecheck  # rows and statements closed on every path
     - nolintlint     # a //nolint has to say which linter, and why
+    - sloglint       # a log call that drops the context drops the span with it
 
   settings:
+    sloglint:
+      # Every slog call takes the context. It reads like a style rule and it is
+      # not: slog.Handler.Handle is given the context, which is how a handler
+      # attaches the trace and span a line belongs to. A bare logger.Info passes
+      # context.Background(), the handler finds no span, and the line is orphaned
+      # — silently, and only where there are spans to be orphaned from, which is
+      # production. The alternative to this check is noticing that by reading.
+      context: all
+
     nolintlint:
       # A silenced check has to name what it silenced and say why. Without
       # both, the comment outlives the reason and nobody dares remove it.

@@ -122,6 +122,7 @@ the same commit.** The pages are short and the mapping is mechanical:
 | `runtime/electric`, `internal/gen/electricgo` | `docs/electric.md` |
 | `notify/`, `internal/project/notifications.go` | `docs/notifications.md` |
 | `runtime/serve`, `runtime/dbhook` | `docs/services.md` |
+| `runtime/reqlog`, or what a generator emits about logging | `docs/observability.md` |
 | `rigclient/`, `internal/gen/goclient` | `docs/clients.md` |
 
 Two rules that are easier to break than the table above:

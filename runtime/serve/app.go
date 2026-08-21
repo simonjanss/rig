@@ -113,7 +113,7 @@ func (a *App) runDrain(ctx context.Context) error {
 	var failed error
 	for _, s := range a.drain {
 		if err := a.run(ctx, s); err != nil {
-			a.Logger.Error("draining failed", "step", s.name, "error", err)
+			a.Logger.ErrorContext(ctx, "draining failed", "step", s.name, "error", err)
 			failed = errors.Join(failed, fmt.Errorf("drain %s: %w", s.name, err))
 		}
 	}
@@ -146,7 +146,7 @@ func (a *App) runClose(ctx context.Context, timeout time.Duration) error {
 	for i := len(a.stop) - 1; i >= 0; i-- {
 		s := a.stop[i]
 		if err := a.run(closing, s); err != nil {
-			a.Logger.Error("shutdown failed", "step", s.name, "error", err)
+			a.Logger.ErrorContext(closing, "shutdown failed", "step", s.name, "error", err)
 			failed = errors.Join(failed, fmt.Errorf("close %s: %w", s.name, err))
 		}
 	}
@@ -215,7 +215,7 @@ func (a *App) declared(drainDelay time.Duration) (time.Duration, []string) {
 // step that can never finish, and finding that out during an actual shutdown
 // means finding out from a truncated flush in a process that is already going
 // away.
-func (a *App) checkShutdown(max, drainDelay time.Duration) error {
+func (a *App) checkShutdown(ctx context.Context, max, drainDelay time.Duration) error {
 	total, parts := a.declared(drainDelay)
 
 	if total > max {
@@ -228,7 +228,7 @@ func (a *App) checkShutdown(max, drainDelay time.Duration) error {
 	// Whatever is left over is what requests in flight get. None is legal and
 	// almost never meant.
 	if total == max && total > 0 {
-		a.Logger.Warn("the shutdown budget is fully spoken for, leaving nothing for requests in flight",
+		a.Logger.WarnContext(ctx, "the shutdown budget is fully spoken for, leaving nothing for requests in flight",
 			"max", max, "declared", total)
 	}
 	return nil
