@@ -40,7 +40,13 @@ type Error struct {
 	// and has them decoded already. [FieldsAs] is for a call made by hand.
 	Fields json.RawMessage
 	// RetryAfter is how long the server asked the caller to wait, from the
-	// header of the same name. Zero when it said nothing.
+	// header of the same name, in either form it takes: the seconds rig's own
+	// server sends, and the date something in front of it might. Zero when it
+	// said nothing, or asked for a moment already past.
+	//
+	// The SDK honours it for a call it may repeat — see [Retry] — so this is
+	// mostly for the refusal that came back anyway, where the interval was
+	// longer than the call had left to spend.
 	RetryAfter time.Duration
 	// Body is the start of the raw response, kept for a failure that decoded
 	// into nothing useful — a proxy's HTML error page, say. It is bounded even
@@ -269,7 +275,14 @@ type errorBody struct {
 // Anything that does not decode is still an error with a status: a 502 from a
 // load balancer is not JSON and is not the server's fault, and a client that
 // panicked on it would be reporting the wrong bug.
-func readError(res *http.Response) error {
+//
+// It answers with the concrete type rather than the interface because the retry
+// loop reads [Error.RetryAfter] off the value it is about to hand back, and a
+// second type assertion to reach a field this function just filled in would be
+// ceremony.
+//
+// now is the client's clock, for the date form of Retry-After.
+func readError(res *http.Response, now time.Time) *Error {
 	limit := int64(maxErrorBody)
 	if isJSON(res.Header.Get("Content-Type")) {
 		limit = maxJSONErrorBody
@@ -277,11 +290,7 @@ func readError(res *http.Response) error {
 	raw, _ := io.ReadAll(io.LimitReader(res.Body, limit))
 
 	e := &Error{Status: res.StatusCode, Body: excerpt(raw)}
-	if after := res.Header.Get("Retry-After"); after != "" {
-		if seconds, err := strconv.Atoi(after); err == nil {
-			e.RetryAfter = time.Duration(seconds) * time.Second
-		}
-	}
+	e.RetryAfter = retryAfter(res.Header.Get("Retry-After"), now)
 
 	var decoded errorBody
 	if err := json.Unmarshal(raw, &decoded); err == nil {
@@ -292,4 +301,29 @@ func readError(res *http.Response) error {
 		e.RequestID = res.Header.Get(DefaultRequestIDHeader)
 	}
 	return e
+}
+
+// retryAfter reads the header of the same name, in either of the two forms RFC
+// 9110 allows.
+//
+// The integer form is what rig's own server sends — see runtime/throttle. The
+// date form is what a CDN, a WAF, or an appliance in front of it sends, and a
+// client that only understood its own server's dialect would stop honouring the
+// interval the day somebody put a proxy in front of it, which is the day it
+// matters most.
+//
+// A date already in the past is zero rather than negative: a server whose clock
+// disagrees with this one is asking for no wait at all, not for a wait
+// backwards.
+func retryAfter(value string, now time.Time) time.Duration {
+	if value == "" {
+		return 0
+	}
+	if seconds, err := strconv.Atoi(value); err == nil {
+		return max(time.Duration(seconds)*time.Second, 0)
+	}
+	if at, err := http.ParseTime(value); err == nil {
+		return max(at.Sub(now), 0)
+	}
+	return 0
 }

@@ -9,6 +9,7 @@ import (
 	filesfnd "github.com/simonjanss/rig/files/foundation"
 	notifyfnd "github.com/simonjanss/rig/notify/foundation"
 	"github.com/simonjanss/rig/runtime/dbschema"
+	runtimefnd "github.com/simonjanss/rig/runtime/foundation"
 )
 
 // Foundation parts. Each is one migration and its table configuration, so
@@ -26,11 +27,12 @@ const (
 	PartOAuth         = "oauth"
 	PartFiles         = "files"
 	PartNotifications = "notifications"
+	PartIdempotency   = "idempotency"
 )
 
 // Sets are the foundation's migration sets, in the order they apply.
 //
-// Three of them, because the schema belongs to the three modules that write SQL
+// Four of them, because the schema belongs to the four modules that write SQL
 // against it, and each records how far it has been applied in a table of its own.
 // The private table is what lets those modules be tagged separately: a shared one
 // would mean a shared numbering sequence, and two modules adding a migration in
@@ -39,10 +41,15 @@ const (
 // The order is the dependency order, and each set says why in its own package
 // documentation. auth first because everything references its tenancy migration;
 // files next because rig_file references nothing at all, deliberately, so that
-// uploads work in a project with no authentication; notify last because an inbox
-// line names an account, which auth creates.
+// uploads work in a project with no authentication; notify after that because an
+// inbox line names an account, which auth creates.
+//
+// runtime is last and could have gone anywhere: rig_idempotency references
+// nothing either. Last because it is the newest, and a project that vendored
+// the foundation before it existed then finds it as a migration to add rather
+// than as a renumbering of the ones it already applied.
 func Sets() []dbschema.Set {
-	return []dbschema.Set{authfnd.Set(), filesfnd.Set(), notifyfnd.Set()}
+	return []dbschema.Set{authfnd.Set(), filesfnd.Set(), notifyfnd.Set(), runtimefnd.Set()}
 }
 
 // Parts in the order they must be applied.
@@ -144,6 +151,10 @@ type Wanted struct {
 	Files bool
 	// Notifications is `notifications.enabled`.
 	Notifications bool
+
+	// There is no Idempotency field. Every project brings that part — see
+	// [Wanted.Parts] — so a bool here could only ever be true, and a knob with
+	// one setting is a question somebody has to answer for no reason.
 }
 
 // Parts names the parts these features bring, in apply order, with [Requires]
@@ -196,6 +207,14 @@ func (w Wanted) Parts() []string {
 	if w.Notifications {
 		add(PartNotifications)
 	}
+
+	// Unconditionally, and it is the only part that is. Every generated project
+	// has write endpoints, and what rig_idempotency does for them is engaged by
+	// a request header rather than by a configuration — so a project that had to
+	// turn it on is a project whose clients cannot rely on it being on, which is
+	// most of the value gone. It costs one table nobody reads until a caller
+	// sends a key.
+	add(PartIdempotency)
 
 	// To a fixed point rather than once, because a part that arrives with its set
 	// may require one whose set is not here yet — which is exactly the shape of
@@ -511,6 +530,8 @@ func foundationPart(name string) part {
 		p.configs = fileConfigs()
 	case PartNotifications:
 		p.configs = notificationConfigs()
+	case PartIdempotency:
+		p.configs = idempotencyConfigs()
 	}
 	return p
 }

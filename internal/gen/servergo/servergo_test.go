@@ -282,11 +282,16 @@ func TestResponseStatusComesFromTheDocument(t *testing.T) {
 	doc := gentest.LoadDocument(t, filepath.Join("testdata", fixture))
 	src := collapse(find(t, gentest.Run(t, servergo.New(), doc, opts()), "lesson_routes.gen.go"))
 
-	if !strings.Contains(src, "writeJSON(w, http.StatusCreated, out)") {
+	// A create is a write, so its status is what it hands back from inside the
+	// idempotency record rather than what it writes directly. Same number, same
+	// source; one indirection more.
+	if !strings.Contains(src, "return http.StatusCreated, out, err") {
 		t.Error("Create answers 201")
 	}
 	// Delete returns nothing, so it writes a status and no body rather than a
-	// null the client has to ignore.
+	// null the client has to ignore. It is also not a write worth recording —
+	// a delete sent twice leaves the same nothing behind — so it still writes
+	// its own status.
 	if !strings.Contains(src, "w.WriteHeader(http.StatusNoContent)") {
 		t.Error("Delete answers 204 with no body")
 	}
@@ -615,6 +620,43 @@ func TestFileHandlersCompile(t *testing.T) {
 		},
 		gentest.Package{Dir: "api", Artifacts: api},
 	)
+}
+
+// An upload route is not wrapped in an idempotency record, and a create that
+// carries a file is.
+//
+// The difference is where the bytes are when the guarded call starts. OnePart
+// hands the service the form part itself, so guarding an upload would hold a
+// pooled connection open for the length of the transfer — thirty minutes at
+// filehttp.DefaultDeadline, and a few slow clients would be the whole pool. The
+// multipart create stores its parts through Prepare first, so by the time the
+// record opens there is nothing left on the wire.
+func TestAnUploadIsNotGuardedAndACreateCarryingAFileIs(t *testing.T) {
+	t.Parallel()
+
+	doc := gentest.LoadDocument(t, filepath.Join("testdata", "files.ir.json"))
+	src := collapse(find(t, gentest.Run(t, servergo.New(), doc, opts()), "profile_routes.gen.go"))
+
+	upload, ok := between(src, "func handleUploadProfileBannerFile", "func handle")
+	if !ok {
+		t.Fatal("the upload handler is not where this test thinks it is")
+	}
+	if !strings.Contains(upload, "svc.UploadBannerFile") {
+		t.Fatal("the upload handler does not call the service method it should")
+	}
+	if strings.Contains(upload, "idempotency.Run") {
+		t.Error("the upload holds a transaction open for the transfer")
+	}
+
+	// The create carries a file too — Prepare stores it before the record opens —
+	// so the two are the same shape apart from where the bytes are.
+	create, ok := between(src, "func handleCreateProfile", "func handle")
+	if !ok {
+		t.Fatal("no create handler")
+	}
+	if !strings.Contains(create, "idempotency.Run") {
+		t.Error("a create is recorded whether or not it carried a file")
+	}
 }
 
 // The inbox, end to end through the generators.

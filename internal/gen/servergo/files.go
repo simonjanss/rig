@@ -26,6 +26,21 @@ const (
 // The deadline is set on this request rather than on the server, because
 // ReadTimeout is set once on the one http.Server and raising it for a
 // two-hundred-megabyte upload weakens every other route in the application.
+//
+// This is the one write that is not wrapped in an idempotency record, and the
+// reason is the body. OnePart hands back the form part itself, so the bytes are
+// still on the wire when the service is called — putting that call inside a
+// transaction would hold a pooled connection open for the whole transfer, up to
+// filehttp.DefaultDeadline. A handful of slow uploads would then be the whole
+// pool, and every other route would be waiting on them.
+//
+// files.Service already draws this line: Attach stores the bytes and only then
+// opens its transaction, and the multipart create takes the same order — Prepare
+// runs before the guarded call, not inside it. A dedicated upload route has no
+// equivalent seam, because the service method takes the reader.
+//
+// What follows from it is that the SDK does not repeat a form body either — see
+// rigclient.Op.writes.
 func (e *emitter) uploadHandler(b *gobuf.Buf, res *ir.Resource, ep *ir.Endpoint) {
 	var (
 		httpPkg  = b.Import("net/http")
@@ -40,7 +55,7 @@ func (e *emitter) uploadHandler(b *gobuf.Buf, res *ir.Resource, ep *ir.Endpoint)
 	b.L("req := NewRequest(claims, path, struct{}{}, body, rc)")
 	b.L("out, err := svc.%s(ctx, req)", ep.Impl.ServiceMethod)
 	b.L("if err != nil { fail(s, w, r, rc, err); return }")
-	b.L("writeJSON(w, %s.StatusCreated, out)", httpPkg)
+	b.L("writeJSON(w, %s, out)", statusExpr(httpPkg, successStatus(ep)))
 }
 
 // downloadHandler emits the streaming read.

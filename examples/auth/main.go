@@ -97,6 +97,10 @@ func main() {
 			// exists because that key is set — a project that keeps everything
 			// gets no subcommand rather than one that silently does nothing.
 			"prune-auth-log": pruneAuthLog,
+			// The same shape for the other thing kept only until nobody will ask
+			// for it again: the records of writes that carried an
+			// Idempotency-Key. Zero takes the default retention, a day.
+			"prune-idempotency": api.IdempotencyPruner(0),
 			// `auth seed` makes a tenant, an account to sign in as, and the role
 			// that lets it write. There is no registration endpoint in this
 			// example: who may create an account is a product decision, and the
@@ -249,6 +253,9 @@ func newAPI(ctx context.Context, pool *pgxpool.Pool) (http.Handler, *notify.Engi
 			// to serve a list of chores.
 			Auth:      front,
 			RequestID: func(r *http.Request) string { return r.Header.Get("X-Request-Id") },
+			// Where a write that carried an Idempotency-Key is recorded, so a
+			// client that had to send one twice gets one row and one answer.
+			DB: pool,
 		},
 
 		Note:          notes,

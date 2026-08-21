@@ -110,6 +110,9 @@ func main() {
 			// sign-ins are reachable: a stranger joining, and an existing account
 			// being linked.
 			"seed": seed,
+			// Records of writes nobody is going to send again. A cron entry, not
+			// a goroutine: one thing running rather than one per replica.
+			"prune-idempotency": api.IdempotencyPruner(0),
 		},
 		Migrate: migrate.RequireAll(migrationSources(), migrate.Options{}),
 	}, func(ctx context.Context, app *serve.App) (http.Handler, error) {
@@ -216,6 +219,9 @@ func newAPI(ctx context.Context, pool *pgxpool.Pool, base string) (http.Handler,
 		Server: api.Server{
 			Auth:      front,
 			RequestID: func(r *http.Request) string { return r.Header.Get("X-Request-Id") },
+			// Where a write that carried an Idempotency-Key is recorded, so a
+			// client that had to send one twice gets one row and one answer.
+			DB: pool,
 		},
 		Bookmark: bookmark.New(repos.Bookmarks),
 	})

@@ -438,7 +438,7 @@ func (e *emitter) getMethod(b *gobuf.Buf, res *ir.Resource, typeName string) {
 
 	b.L("sql := %s.Sprintf(\"SELECT %%s FROM %s WHERE %%s\", %sSelect, where)",
 		fmtPkg, res.Storage.Table, typeName)
-	b.L("m, err := scan%s(%s.db.conn().QueryRow(ctx, sql, args...))", res.Name, repo)
+	b.L("m, err := scan%s(%s.db.connFor(ctx).QueryRow(ctx, sql, args...))", res.Name, repo)
 	b.L("if %s.IsNoRows(err) {", dbxPkg)
 	b.L("return nil, %s.NotFound(\"no %s with id %%s\", id)", errPkg, res.Name)
 	b.L("}")
@@ -531,7 +531,7 @@ func (e *emitter) listLike(b *gobuf.Buf, res *ir.Resource, typeName, method, doc
 	b.L("if countWhere != \"\" { countWhere = \" WHERE \" + countWhere }")
 	b.L("countSQL := %s.Sprintf(\"SELECT count(*) FROM %s%%s\", countWhere)", fmtPkg, res.Storage.Table)
 	b.L("var total int64")
-	b.L("if err := %s.db.conn().QueryRow(ctx, countSQL, countArgs.Values()...).Scan(&total); err != nil {", repo)
+	b.L("if err := %s.db.connFor(ctx).QueryRow(ctx, countSQL, countArgs.Values()...).Scan(&total); err != nil {", repo)
 	b.L("return nil, 0, %s.Internal(err, \"count %s\")", errPkg, res.Storage.Table)
 	b.L("}")
 	b.NL()
@@ -553,7 +553,7 @@ func (e *emitter) listLike(b *gobuf.Buf, res *ir.Resource, typeName, method, doc
 
 	b.L("listSQL := %s.Sprintf(\"SELECT %%s FROM %s%%s%%s%%s%%s\", %sSelect, joinSQL, where, %s.OrderSQL(order), window.SQL(args))",
 		fmtPkg, res.Storage.Table, typeName, queryPk)
-	b.L("rows, err := %s.db.conn().Query(ctx, listSQL, args.Values()...)", repo)
+	b.L("rows, err := %s.db.connFor(ctx).Query(ctx, listSQL, args.Values()...)", repo)
 	b.L("if err != nil {")
 	b.L("return nil, 0, %s.Internal(err, \"list %s\")", errPkg, res.Storage.Table)
 	b.L("}")
@@ -775,7 +775,7 @@ func (e *emitter) createMethod(b *gobuf.Buf, res *ir.Resource, typeName string) 
 	}
 	b.NL()
 	b.L("var m *%s", entity)
-	b.L("err = %s.InTxIf(ctx, %s.db.pool, %s.db.conn(), needsTx, func(ctx %s.Context, tx %s.Conn) error {",
+	b.L("err = %s.InTxIf(ctx, %s.db.pool, %s.db.connFor(ctx), needsTx, func(ctx %s.Context, tx %s.Conn) error {",
 		dbxPkg, repo, repo, ctxPkg, dbxPkg)
 	b.L("if in.Hooks.Before != nil {")
 	b.L("if err := in.Hooks.Before(ctx, claims, &in.Input); err != nil { return err }")
@@ -1523,7 +1523,7 @@ func (e *emitter) listSnapshotsMethod(b *gobuf.Buf, res *ir.Resource, typeName s
 
 	b.L("sql := %s.Sprintf(\"SELECT %%s FROM %s WHERE %s ORDER BY %s DESC\", %sSelect)",
 		fmtPkg, s.Table, where, s.Snapshot.FromAt.Name, typeName)
-	b.L("rows, err := %s.db.conn().Query(ctx, sql, %s)", repo, args)
+	b.L("rows, err := %s.db.connFor(ctx).Query(ctx, sql, %s)", repo, args)
 	b.L("if err != nil { return nil, %s.Internal(err, \"list snapshots of %s\") }", errPkg, s.Table)
 	b.L("defer rows.Close()")
 	b.NL()

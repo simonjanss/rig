@@ -91,6 +91,10 @@ func main() {
 			// needs the same one the server does: the audience is a method on a
 			// service, which is the honest cost of computing it late.
 			"dispatch-notifications": dispatchNotifications,
+			// Records of writes nobody is going to send again. Zero takes the
+			// default retention, a day; without this the table keeps every key
+			// ever used and a stale one replays instead of writing.
+			"prune-idempotency": api.IdempotencyPruner(0),
 		},
 
 		// The server does not apply them. It refuses to start without them,
@@ -159,6 +163,9 @@ func main() {
 		mux := api.Register(api.Handlers{
 			Server: api.Server{
 				GetClaims: headerClaims,
+				// Where a write that carried an Idempotency-Key is recorded,
+				// so a client that had to send one twice gets one row.
+				DB:        app.Pool,
 				RequestID: func(r *http.Request) string { return r.Header.Get("X-Request-Id") },
 				// app.Logger rather than the package default, so a request
 				// line, a shutdown step and anything a dependency says all

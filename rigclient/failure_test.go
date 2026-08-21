@@ -202,7 +202,7 @@ func TestSomethingThatIsNotJSONIsStillReadNarrowly(t *testing.T) {
 		w.Header().Set("Content-Type", "text/html")
 		w.WriteHeader(http.StatusBadGateway)
 		io.WriteString(w, page)
-	}), rigclient.Config{})
+	}), rigclient.Config{Retry: rigclient.Retry{Attempts: 1}}) // about the read, not the retry
 
 	_, err := rigclient.Do[todo](t.Context(), rt, rigclient.Op{
 		Method: http.MethodGet, Path: "/todos",

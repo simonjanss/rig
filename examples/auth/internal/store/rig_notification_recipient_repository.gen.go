@@ -468,7 +468,7 @@ func (r *rigNotificationRecipientRepo) Get(ctx context.Context, id uuid.UUID, op
 	}
 
 	sql := fmt.Sprintf("SELECT %s FROM rig_notification_recipient WHERE %s", rigNotificationRecipientRepoSelect, where)
-	m, err := scanRigNotificationRecipient(r.db.conn().QueryRow(ctx, sql, args...))
+	m, err := scanRigNotificationRecipient(r.db.connFor(ctx).QueryRow(ctx, sql, args...))
 	if dbx.IsNoRows(err) {
 		return nil, rigerr.NotFound("no RigNotificationRecipient with id %s", id)
 	}
@@ -542,7 +542,7 @@ func (r *rigNotificationRecipientRepo) list(ctx context.Context, f model.RigNoti
 	}
 	countSQL := fmt.Sprintf("SELECT count(*) FROM rig_notification_recipient%s", countWhere)
 	var total int64
-	if err := r.db.conn().QueryRow(ctx, countSQL, countArgs.Values()...).Scan(&total); err != nil {
+	if err := r.db.connFor(ctx).QueryRow(ctx, countSQL, countArgs.Values()...).Scan(&total); err != nil {
 		return nil, 0, rigerr.Internal(err, "count rig_notification_recipient")
 	}
 
@@ -565,7 +565,7 @@ func (r *rigNotificationRecipientRepo) list(ctx context.Context, f model.RigNoti
 	}
 
 	listSQL := fmt.Sprintf("SELECT %s FROM rig_notification_recipient%s%s%s%s", rigNotificationRecipientRepoSelect, joinSQL, where, query.OrderSQL(order), window.SQL(args))
-	rows, err := r.db.conn().Query(ctx, listSQL, args.Values()...)
+	rows, err := r.db.connFor(ctx).Query(ctx, listSQL, args.Values()...)
 	if err != nil {
 		return nil, 0, rigerr.Internal(err, "list rig_notification_recipient")
 	}
@@ -643,7 +643,7 @@ func (r *rigNotificationRecipientRepo) Create(ctx context.Context, in dbhook.Cre
 	needsTx := in.Hooks.Before != nil || in.Hooks.After != nil
 
 	var m *model.RigNotificationRecipient
-	err = dbx.InTxIf(ctx, r.db.pool, r.db.conn(), needsTx, func(ctx context.Context, tx dbx.Conn) error {
+	err = dbx.InTxIf(ctx, r.db.pool, r.db.connFor(ctx), needsTx, func(ctx context.Context, tx dbx.Conn) error {
 		if in.Hooks.Before != nil {
 			if err := in.Hooks.Before(ctx, claims, &in.Input); err != nil {
 				return err

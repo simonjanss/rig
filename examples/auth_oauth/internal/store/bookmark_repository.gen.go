@@ -331,7 +331,7 @@ func (r *bookmarkRepo) Get(ctx context.Context, id uuid.UUID, opts ...readopt.Op
 	}
 
 	sql := fmt.Sprintf("SELECT %s FROM bookmark WHERE %s", bookmarkRepoSelect, where)
-	m, err := scanBookmark(r.db.conn().QueryRow(ctx, sql, args...))
+	m, err := scanBookmark(r.db.connFor(ctx).QueryRow(ctx, sql, args...))
 	if dbx.IsNoRows(err) {
 		return nil, rigerr.NotFound("no Bookmark with id %s", id)
 	}
@@ -385,7 +385,7 @@ func (r *bookmarkRepo) list(ctx context.Context, f model.BookmarkFilter, page mo
 	}
 	countSQL := fmt.Sprintf("SELECT count(*) FROM bookmark%s", countWhere)
 	var total int64
-	if err := r.db.conn().QueryRow(ctx, countSQL, countArgs.Values()...).Scan(&total); err != nil {
+	if err := r.db.connFor(ctx).QueryRow(ctx, countSQL, countArgs.Values()...).Scan(&total); err != nil {
 		return nil, 0, rigerr.Internal(err, "count bookmark")
 	}
 
@@ -408,7 +408,7 @@ func (r *bookmarkRepo) list(ctx context.Context, f model.BookmarkFilter, page mo
 	}
 
 	listSQL := fmt.Sprintf("SELECT %s FROM bookmark%s%s%s%s", bookmarkRepoSelect, joinSQL, where, query.OrderSQL(order), window.SQL(args))
-	rows, err := r.db.conn().Query(ctx, listSQL, args.Values()...)
+	rows, err := r.db.connFor(ctx).Query(ctx, listSQL, args.Values()...)
 	if err != nil {
 		return nil, 0, rigerr.Internal(err, "list bookmark")
 	}
@@ -485,7 +485,7 @@ func (r *bookmarkRepo) Create(ctx context.Context, in dbhook.Create[model.Bookma
 	needsTx := in.Hooks.Before != nil || in.Hooks.After != nil
 
 	var m *model.Bookmark
-	err = dbx.InTxIf(ctx, r.db.pool, r.db.conn(), needsTx, func(ctx context.Context, tx dbx.Conn) error {
+	err = dbx.InTxIf(ctx, r.db.pool, r.db.connFor(ctx), needsTx, func(ctx context.Context, tx dbx.Conn) error {
 		if in.Hooks.Before != nil {
 			if err := in.Hooks.Before(ctx, claims, &in.Input); err != nil {
 				return err

@@ -142,6 +142,7 @@ func TestTheRequestContextTravelsOnTheContext(t *testing.T) {
 	handler := api.Register(api.Handlers{
 		Server: api.Server{
 			GetClaims: headerClaims,
+			DB:        pool,
 			Context: func(ctx context.Context, _ *http.Request) context.Context {
 				// The server puts it on before this hook runs, which is the
 				// only ordering that lets a hook build on it.
@@ -241,7 +242,7 @@ func TestMinRevisionClosesTheDoor(t *testing.T) {
 // thing about it that is not the default.
 func handlerWithMinRevision(pool *pgxpool.Pool, min apirev.Revision) http.Handler {
 	return api.Register(api.Handlers{
-		Server: api.Server{GetClaims: headerClaims, MinRevision: min},
+		Server: api.Server{GetClaims: headerClaims, MinRevision: min, DB: pool},
 		Todo:   todo.New(store.New(pool, store.Config{}).Todos, api.NewFiles(pool), nil, nil, pool, nil),
 	})
 }

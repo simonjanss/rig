@@ -95,7 +95,7 @@ serve.Main(serve.Config{
 }, func(ctx context.Context, app *serve.App) (http.Handler, error) {
     repos := store.New(app.Pool, store.Config{})
     return api.Register(api.Handlers{
-        Server: api.Server{GetClaims: yourClaimsFunc},
+        Server: api.Server{GetClaims: yourClaimsFunc, DB: app.Pool},
         Todo:   todo.New(repos.Todos),
     }), nil
 })

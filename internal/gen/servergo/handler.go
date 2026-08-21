@@ -291,6 +291,14 @@ func (e *emitter) call(b *gobuf.Buf, res *ir.Resource, ep *ir.Endpoint) {
 		extra = ", pending"
 	}
 
+	// A write is recorded against the Idempotency-Key it carried, if it carried
+	// one. A read goes straight to the service, because there is nothing about a
+	// read that a second one could duplicate.
+	if idempotentWrite(ep) {
+		e.guardedCall(b, res, ep, extra)
+		return
+	}
+
 	if successBodyObject(ep) == "" {
 		b.L("if err := svc.%s(ctx, req%s); err != nil { fail(s, w, r, rc, err); return }",
 			ep.Impl.ServiceMethod, extra)
