@@ -690,7 +690,7 @@ func (r *todoRepo) Get(ctx context.Context, id uuid.UUID, opts ...readopt.Option
 	}
 
 	sql := fmt.Sprintf("SELECT %s FROM todo WHERE %s", todoRepoSelect, where)
-	m, err := scanTodo(r.db.conn().QueryRow(ctx, sql, args...))
+	m, err := scanTodo(r.db.connFor(ctx).QueryRow(ctx, sql, args...))
 	if dbx.IsNoRows(err) {
 		return nil, rigerr.NotFound("no Todo with id %s", id)
 	}
@@ -756,7 +756,7 @@ func (r *todoRepo) list(ctx context.Context, f model.TodoFilter, page model.Todo
 	}
 	countSQL := fmt.Sprintf("SELECT count(*) FROM todo%s", countWhere)
 	var total int64
-	if err := r.db.conn().QueryRow(ctx, countSQL, countArgs.Values()...).Scan(&total); err != nil {
+	if err := r.db.connFor(ctx).QueryRow(ctx, countSQL, countArgs.Values()...).Scan(&total); err != nil {
 		return nil, 0, rigerr.Internal(err, "count todo")
 	}
 
@@ -779,7 +779,7 @@ func (r *todoRepo) list(ctx context.Context, f model.TodoFilter, page model.Todo
 	}
 
 	listSQL := fmt.Sprintf("SELECT %s FROM todo%s%s%s%s", todoRepoSelect, joinSQL, where, query.OrderSQL(order), window.SQL(args))
-	rows, err := r.db.conn().Query(ctx, listSQL, args.Values()...)
+	rows, err := r.db.connFor(ctx).Query(ctx, listSQL, args.Values()...)
 	if err != nil {
 		return nil, 0, rigerr.Internal(err, "list todo")
 	}
@@ -857,7 +857,7 @@ func (r *todoRepo) Create(ctx context.Context, in dbhook.Create[model.TodoCreate
 	needsTx := in.Hooks.Before != nil || in.Hooks.After != nil
 
 	var m *model.Todo
-	err = dbx.InTxIf(ctx, r.db.pool, r.db.conn(), needsTx, func(ctx context.Context, tx dbx.Conn) error {
+	err = dbx.InTxIf(ctx, r.db.pool, r.db.connFor(ctx), needsTx, func(ctx context.Context, tx dbx.Conn) error {
 		if in.Hooks.Before != nil {
 			if err := in.Hooks.Before(ctx, claims, &in.Input); err != nil {
 				return err
@@ -1302,7 +1302,7 @@ func (r *todoRepo) ListSnapshots(ctx context.Context, id uuid.UUID) ([]*model.To
 	}
 
 	sql := fmt.Sprintf("SELECT %s FROM todo WHERE snapshot_from_todo_id = $1 AND tenant_id = $2 ORDER BY snapshot_from_todo_at DESC", todoRepoSelect)
-	rows, err := r.db.conn().Query(ctx, sql, id, claims.TenantID)
+	rows, err := r.db.connFor(ctx).Query(ctx, sql, id, claims.TenantID)
 	if err != nil {
 		return nil, rigerr.Internal(err, "list snapshots of todo")
 	}

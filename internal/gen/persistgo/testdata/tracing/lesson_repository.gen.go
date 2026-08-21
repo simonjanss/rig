@@ -707,7 +707,7 @@ func (r *lessonRepo) Get(ctx context.Context, id uuid.UUID, opts ...readopt.Opti
 	}
 
 	sql := fmt.Sprintf("SELECT %s FROM lesson WHERE %s", lessonRepoSelect, where)
-	m, err := scanLesson(r.db.conn().QueryRow(ctx, sql, args...))
+	m, err := scanLesson(r.db.connFor(ctx).QueryRow(ctx, sql, args...))
 	if dbx.IsNoRows(err) {
 		return nil, rigerr.NotFound("no Lesson with id %s", id)
 	}
@@ -776,7 +776,7 @@ func (r *lessonRepo) list(ctx context.Context, f model.LessonFilter, page model.
 	}
 	countSQL := fmt.Sprintf("SELECT count(*) FROM lesson%s", countWhere)
 	var total int64
-	if err := r.db.conn().QueryRow(ctx, countSQL, countArgs.Values()...).Scan(&total); err != nil {
+	if err := r.db.connFor(ctx).QueryRow(ctx, countSQL, countArgs.Values()...).Scan(&total); err != nil {
 		return nil, 0, rigerr.Internal(err, "count lesson")
 	}
 
@@ -799,7 +799,7 @@ func (r *lessonRepo) list(ctx context.Context, f model.LessonFilter, page model.
 	}
 
 	listSQL := fmt.Sprintf("SELECT %s FROM lesson%s%s%s%s", lessonRepoSelect, joinSQL, where, query.OrderSQL(order), window.SQL(args))
-	rows, err := r.db.conn().Query(ctx, listSQL, args.Values()...)
+	rows, err := r.db.connFor(ctx).Query(ctx, listSQL, args.Values()...)
 	if err != nil {
 		return nil, 0, rigerr.Internal(err, "list lesson")
 	}
@@ -882,7 +882,7 @@ func (r *lessonRepo) Create(ctx context.Context, in dbhook.Create[model.LessonCr
 	needsTx := in.Hooks.Before != nil || in.Hooks.After != nil
 
 	var m *model.Lesson
-	err = dbx.InTxIf(ctx, r.db.pool, r.db.conn(), needsTx, func(ctx context.Context, tx dbx.Conn) error {
+	err = dbx.InTxIf(ctx, r.db.pool, r.db.connFor(ctx), needsTx, func(ctx context.Context, tx dbx.Conn) error {
 		if in.Hooks.Before != nil {
 			if err := r.trace(ctx, "repository.Lesson.Create.Before", func(ctx context.Context) error {
 				return in.Hooks.Before(ctx, claims, &in.Input)
@@ -1357,7 +1357,7 @@ func (r *lessonRepo) ListSnapshots(ctx context.Context, id uuid.UUID) ([]*model.
 	}
 
 	sql := fmt.Sprintf("SELECT %s FROM lesson WHERE snapshot_from_lesson_id = $1 AND tenant_id = $2 ORDER BY snapshot_from_lesson_at DESC", lessonRepoSelect)
-	rows, err := r.db.conn().Query(ctx, sql, id, claims.TenantID)
+	rows, err := r.db.connFor(ctx).Query(ctx, sql, id, claims.TenantID)
 	if err != nil {
 		return nil, rigerr.Internal(err, "list snapshots of lesson")
 	}

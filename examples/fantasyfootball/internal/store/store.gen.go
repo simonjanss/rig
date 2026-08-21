@@ -181,13 +181,15 @@ func New(pool *pgxpool.Pool, cfg Config) *Store {
 	return s
 }
 
-// conn returns the transaction on the context when there is one, and the pool
-// otherwise.
+// connFor returns the transaction on the context when there is one, and the
+// pool otherwise.
 //
 // This is what lets a repository method work the same whether it was called
-// directly or inside a transaction someone else opened.
-func (s *Store) conn() dbx.Conn { return s.connFor(context.Background()) }
-
+// directly or inside a transaction someone else opened — InTx, a hook, or
+// the record an idempotent write is being kept in. The context is the whole of
+// it: an argless version reading context.Background() can only ever answer
+// with the pool, and a write that answered with the pool would commit whatever
+// the surrounding transaction went on to do.
 func (s *Store) connFor(ctx context.Context) dbx.Conn {
 	if tx, ok := dbx.Tx(ctx); ok {
 		return tx

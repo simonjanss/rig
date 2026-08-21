@@ -472,32 +472,35 @@ func TestRequirementsComeFirst(t *testing.T) {
 func TestWantedExpandsToPartsInOrder(t *testing.T) {
 	t.Parallel()
 
-	everything := []string{"tenancy", "apikeys", "sessions", "oauth", "notifications"}
+	everything := []string{"tenancy", "apikeys", "sessions", "oauth", "notifications", "idempotency"}
 
 	cases := []struct {
 		name  string
 		want  scaffold.Wanted
 		parts []string
 	}{
-		{"nothing", scaffold.Wanted{}, nil},
+		// idempotency is on every row below, including this one. It is the part
+		// no feature asks for and every project brings, because what it does is
+		// engaged by a request header rather than by a configuration.
+		{"nothing", scaffold.Wanted{}, []string{"idempotency"}},
 		{
 			// files' set is one migration, so this is the one case where what a
 			// project asks for and what it gets are the same list.
 			"files alone",
 			scaffold.Wanted{Files: true},
-			[]string{"files"},
+			[]string{"files", "idempotency"},
 		},
 		{
 			// oauth is not a question a project in this mode gets to answer: it is
 			// a migration in auth's set, and goose reads a directory.
 			"auth without oauth brings oauth anyway",
 			scaffold.Wanted{Auth: true},
-			[]string{"tenancy", "apikeys", "sessions", "oauth"},
+			[]string{"tenancy", "apikeys", "sessions", "oauth", "idempotency"},
 		},
 		{
 			"auth with oauth is the same list",
 			scaffold.Wanted{Auth: true, OAuth: true},
-			[]string{"tenancy", "apikeys", "sessions", "oauth"},
+			[]string{"tenancy", "apikeys", "sessions", "oauth", "idempotency"},
 		},
 		{
 			// The cross-module edge: an inbox line names an account, so auth's set

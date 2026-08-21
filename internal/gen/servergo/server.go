@@ -14,6 +14,7 @@ func (e *emitter) serverFile() (gen.Artifact, error) {
 	e.serverType(b)
 	e.handlersStruct(b)
 	e.registerFunc(b)
+	e.idempotencyPrunerFunc(b)
 	e.linkFunc(b)
 	e.helpers(b)
 
@@ -106,6 +107,18 @@ func (e *emitter) serverType(b *gobuf.Buf) {
 	b.NL()
 	b.Comment("Context lets a hook attach values a service will read.")
 	b.L("Context func(ctx %s.Context, r *%s.Request) %s.Context", ctxPkg, httpPkg, ctxPkg)
+	b.NL()
+	b.Comment("DB is what a write carrying an Idempotency-Key is recorded in, so " +
+		"that a client which had to send the same write twice gets one row and " +
+		"the same answer both times. Pass the pool: `DB: app.Pool`.\n\n" +
+		"Required, and Register panics without it. A nil one would mean the " +
+		"header was quietly ignored, and a client that thinks its retry is safe " +
+		"when it is not is worse off than one that knows it is not — this is the " +
+		"one failure mode worth a startup panic rather than a runtime surprise.\n\n" +
+		"It costs nothing until a caller sends the header: a write without one " +
+		"takes the path it always took, with no transaction and no extra round " +
+		"trip. See [github.com/simonjanss/rig/runtime/idempotency].")
+	b.L("DB %s.Beginner", b.Import(runtimeModule+"/dbx"))
 	b.L("}")
 	b.NL()
 }
@@ -177,6 +190,16 @@ func (e *emitter) registerFunc(b *gobuf.Buf) {
 		"every generated query depends on it.")
 	b.L("panic(\"api.Register: set Server.Auth, or Server.GetClaims if this " +
 		"project authenticates its own way\")")
+	b.L("}")
+	b.NL()
+	b.L("if h.Server.DB == nil {")
+	b.Comment("Here rather than at the first write that carries the header. A " +
+		"nil pool would make every Idempotency-Key a header nobody read, and a " +
+		"client retrying a create in the belief that it is safe to would be " +
+		"writing a second row every time — a failure nobody sees until they go " +
+		"looking for duplicates.")
+	b.L("panic(\"api.Register: set Server.DB to the database pool, for example " +
+		"DB: app.Pool\")")
 	b.L("}")
 	b.NL()
 	b.L("Link(h)")
@@ -484,6 +507,8 @@ func (e *emitter) helpers(b *gobuf.Buf) {
 	b.L("_ = %s.NewEncoder(w).Encode(body)", jsonPkg)
 	b.L("}")
 	b.NL()
+
+	e.writeResultFunc(b)
 
 	b.Comment("decodeBody reads a JSON request body.\n\n" +
 		"Unknown fields are rejected. A client that misspells a field name is " +

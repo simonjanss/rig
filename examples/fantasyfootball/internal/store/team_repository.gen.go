@@ -679,7 +679,7 @@ func (r *teamRepo) Get(ctx context.Context, id uuid.UUID, opts ...readopt.Option
 	}
 
 	sql := fmt.Sprintf("SELECT %s FROM team WHERE %s", teamRepoSelect, where)
-	m, err := scanTeam(r.db.conn().QueryRow(ctx, sql, args...))
+	m, err := scanTeam(r.db.connFor(ctx).QueryRow(ctx, sql, args...))
 	if dbx.IsNoRows(err) {
 		return nil, rigerr.NotFound("no Team with id %s", id)
 	}
@@ -745,7 +745,7 @@ func (r *teamRepo) list(ctx context.Context, f model.TeamFilter, page model.Team
 	}
 	countSQL := fmt.Sprintf("SELECT count(*) FROM team%s", countWhere)
 	var total int64
-	if err := r.db.conn().QueryRow(ctx, countSQL, countArgs.Values()...).Scan(&total); err != nil {
+	if err := r.db.connFor(ctx).QueryRow(ctx, countSQL, countArgs.Values()...).Scan(&total); err != nil {
 		return nil, 0, rigerr.Internal(err, "count team")
 	}
 
@@ -768,7 +768,7 @@ func (r *teamRepo) list(ctx context.Context, f model.TeamFilter, page model.Team
 	}
 
 	listSQL := fmt.Sprintf("SELECT %s FROM team%s%s%s%s", teamRepoSelect, joinSQL, where, query.OrderSQL(order), window.SQL(args))
-	rows, err := r.db.conn().Query(ctx, listSQL, args.Values()...)
+	rows, err := r.db.connFor(ctx).Query(ctx, listSQL, args.Values()...)
 	if err != nil {
 		return nil, 0, rigerr.Internal(err, "list team")
 	}
@@ -850,7 +850,7 @@ func (r *teamRepo) Create(ctx context.Context, in dbhook.Create[model.TeamCreate
 	needsTx := in.Hooks.Before != nil || in.Hooks.After != nil
 
 	var m *model.Team
-	err = dbx.InTxIf(ctx, r.db.pool, r.db.conn(), needsTx, func(ctx context.Context, tx dbx.Conn) error {
+	err = dbx.InTxIf(ctx, r.db.pool, r.db.connFor(ctx), needsTx, func(ctx context.Context, tx dbx.Conn) error {
 		if in.Hooks.Before != nil {
 			if err := r.trace(ctx, "repository.Team.Create.Before", func(ctx context.Context) error {
 				return in.Hooks.Before(ctx, claims, &in.Input)

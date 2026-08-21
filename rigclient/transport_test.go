@@ -208,10 +208,12 @@ func TestAFailureDecodesIntoATypedError(t *testing.T) {
 // A gateway's error page is not JSON and is not the server's. It still has to
 // arrive as an error with a status rather than as a decoding failure.
 func TestSomethingThatIsNotARigServerStillFails(t *testing.T) {
+	// One attempt: this is about what the error carries, not about how many
+	// times a 502 is worth asking for. See retry_test.go for the latter.
 	rt := newClient(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusBadGateway)
 		w.Write([]byte("<html>502 Bad Gateway</html>"))
-	}), rigclient.Config{})
+	}), rigclient.Config{Retry: rigclient.Retry{Attempts: 1}})
 
 	_, err := rigclient.Do[todo](t.Context(), rt, rigclient.Op{
 		Method: http.MethodGet, Path: "/todos",
@@ -230,11 +232,14 @@ func TestSomethingThatIsNotARigServerStillFails(t *testing.T) {
 }
 
 func TestRetryAfterIsRead(t *testing.T) {
+	// One attempt, because this is about what the refusal carries. Left to
+	// itself the SDK would honour the twelve seconds twice over before giving
+	// the same error back.
 	rt := newClient(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Retry-After", "12")
 		w.WriteHeader(http.StatusTooManyRequests)
 		w.Write([]byte(`{"code":"RateLimited","message":"slow down"}`))
-	}), rigclient.Config{})
+	}), rigclient.Config{Retry: rigclient.Retry{Attempts: 1}})
 
 	_, err := rigclient.Do[todo](t.Context(), rt, rigclient.Op{
 		Method: http.MethodGet, Path: "/todos",

@@ -20,6 +20,7 @@ package rigclient
 import (
 	"context"
 	"errors"
+	"math/rand/v2"
 	"net/http"
 	"net/url"
 	"strings"
@@ -94,14 +95,21 @@ type Config struct {
 	// this shape works; rig/observe supplies one.
 	//
 	// Two spans per call, and the nesting is the point. The outer one is the
-	// operation, named by [Op.Name]; the inner ones are the attempts, and there
-	// can be three — the QUERY a proxy refused, the POST to the alias, and the
-	// retry after a credential refreshed. Tracing the attempts alone would show
-	// one call as three unrelated requests.
+	// operation, named by [Op.Name]; the inner ones are the attempts, and one
+	// call can be several — the QUERY a proxy refused, the POST to the alias,
+	// the send after a credential refreshed, and every [Retry]. Tracing the
+	// attempts alone would show one call as a handful of unrelated requests.
 	//
 	// Nil traces nothing, which is what a client that was never told about
 	// tracing does.
 	Trace func(ctx context.Context, name string, f func(context.Context) error) error
+
+	// Retry is how a call the server could not answer is sent again. The zero
+	// value sends a call up to four times with a jittered backoff — a read and a
+	// delete because they are repeatable by nature, a write because the SDK names
+	// it with an Idempotency-Key first. A form body is the exception and is never
+	// repeated. See [Retry].
+	Retry Retry
 }
 
 // API is what the generated client knows about the server and this package does
@@ -137,6 +145,10 @@ type Runtime struct {
 	revisionHeader  string
 	now             func() time.Time
 	trace           func(ctx context.Context, name string, f func(context.Context) error) error
+	retry           Retry
+	// jitter is the randomness in a backoff, held here so a test can make one
+	// deterministic. It answers in [0, n).
+	jitter func(int64) int64
 
 	mu sync.Mutex
 	// cred is under the mutex because signing in replaces it while requests may
@@ -204,6 +216,12 @@ func New(cfg Config, api API) (*Runtime, error) {
 		now:       cfg.Now,
 		trace:     cfg.Trace,
 		cred:      cfg.Credential,
+		retry:     cfg.Retry,
+		// math/rand/v2 rather than math/rand: its source is per-P and lock-free
+		// where the older one is a global mutex, and a client called from a
+		// hundred goroutines that are all backing off at once is exactly the
+		// moment that contention would show up.
+		jitter: rand.Int64N,
 	}
 	if rt.http == nil {
 		rt.http = &http.Client{Timeout: DefaultTimeout}

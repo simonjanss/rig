@@ -546,7 +546,7 @@ func (r *noteRepo) Get(ctx context.Context, id uuid.UUID, opts ...readopt.Option
 	}
 
 	sql := fmt.Sprintf("SELECT %s FROM note WHERE %s", noteRepoSelect, where)
-	m, err := scanNote(r.db.conn().QueryRow(ctx, sql, args...))
+	m, err := scanNote(r.db.connFor(ctx).QueryRow(ctx, sql, args...))
 	if dbx.IsNoRows(err) {
 		return nil, rigerr.NotFound("no Note with id %s", id)
 	}
@@ -620,7 +620,7 @@ func (r *noteRepo) list(ctx context.Context, f model.NoteFilter, page model.Note
 	}
 	countSQL := fmt.Sprintf("SELECT count(*) FROM note%s", countWhere)
 	var total int64
-	if err := r.db.conn().QueryRow(ctx, countSQL, countArgs.Values()...).Scan(&total); err != nil {
+	if err := r.db.connFor(ctx).QueryRow(ctx, countSQL, countArgs.Values()...).Scan(&total); err != nil {
 		return nil, 0, rigerr.Internal(err, "count note")
 	}
 
@@ -643,7 +643,7 @@ func (r *noteRepo) list(ctx context.Context, f model.NoteFilter, page model.Note
 	}
 
 	listSQL := fmt.Sprintf("SELECT %s FROM note%s%s%s%s", noteRepoSelect, joinSQL, where, query.OrderSQL(order), window.SQL(args))
-	rows, err := r.db.conn().Query(ctx, listSQL, args.Values()...)
+	rows, err := r.db.connFor(ctx).Query(ctx, listSQL, args.Values()...)
 	if err != nil {
 		return nil, 0, rigerr.Internal(err, "list note")
 	}
@@ -720,7 +720,7 @@ func (r *noteRepo) Create(ctx context.Context, in dbhook.Create[model.NoteCreate
 	needsTx := in.Hooks.Before != nil || in.Hooks.After != nil
 
 	var m *model.Note
-	err = dbx.InTxIf(ctx, r.db.pool, r.db.conn(), needsTx, func(ctx context.Context, tx dbx.Conn) error {
+	err = dbx.InTxIf(ctx, r.db.pool, r.db.connFor(ctx), needsTx, func(ctx context.Context, tx dbx.Conn) error {
 		if in.Hooks.Before != nil {
 			if err := in.Hooks.Before(ctx, claims, &in.Input); err != nil {
 				return err

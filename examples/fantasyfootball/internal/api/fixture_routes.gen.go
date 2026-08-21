@@ -5,10 +5,12 @@
 package api
 
 import (
+	"context"
 	"net/http"
 
 	"github.com/simonjanss/rig/examples/fantasyfootball/internal/model"
 	"github.com/simonjanss/rig/observe"
+	"github.com/simonjanss/rig/runtime/idempotency"
 	"github.com/simonjanss/rig/runtime/reqlog"
 )
 
@@ -90,12 +92,24 @@ func handleCreateFixture(s Server, svc FixtureService) http.HandlerFunc {
 
 		req := NewRequest(claims, struct{}{}, struct{}{}, body, rc)
 
-		out, err := svc.Create(ctx, req)
+		result, err := idempotency.Run(ctx, s.DB, idempotency.Request{
+			TenantID: claims.TenantID,
+			Key:      r.Header.Get("Idempotency-Key"),
+			// The route pattern rather than the path, so the same key against the same
+			// endpoint is one record however many rows it names. What the path said is in
+			// the fingerprint.
+			Endpoint:    rc.Route,
+			Fingerprint: idempotency.Fingerprint([]any{struct{}{}, struct{}{}, body}),
+			RequestID:   rc.RequestID,
+		}, func(ctx context.Context) (int, any, error) {
+			out, err := svc.Create(ctx, req)
+			return http.StatusCreated, out, err
+		})
 		if err != nil {
 			fail(s, w, r, rc, err)
 			return
 		}
-		writeJSON(w, http.StatusCreated, out)
+		writeResult(w, result)
 	}
 }
 
@@ -254,11 +268,23 @@ func handleUpdateFixture(s Server, svc FixtureService) http.HandlerFunc {
 
 		req := NewRequest(claims, path, struct{}{}, body, rc)
 
-		out, err := svc.Update(ctx, req)
+		result, err := idempotency.Run(ctx, s.DB, idempotency.Request{
+			TenantID: claims.TenantID,
+			Key:      r.Header.Get("Idempotency-Key"),
+			// The route pattern rather than the path, so the same key against the same
+			// endpoint is one record however many rows it names. What the path said is in
+			// the fingerprint.
+			Endpoint:    rc.Route,
+			Fingerprint: idempotency.Fingerprint([]any{path, struct{}{}, body}),
+			RequestID:   rc.RequestID,
+		}, func(ctx context.Context) (int, any, error) {
+			out, err := svc.Update(ctx, req)
+			return http.StatusOK, out, err
+		})
 		if err != nil {
 			fail(s, w, r, rc, err)
 			return
 		}
-		writeJSON(w, http.StatusOK, out)
+		writeResult(w, result)
 	}
 }

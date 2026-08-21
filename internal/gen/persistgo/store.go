@@ -228,12 +228,14 @@ func (e *emitter) storeType(b *gobuf.Buf) {
 	b.L("}")
 	b.NL()
 
-	b.Comment("conn returns the transaction on the context when there is one, and " +
-		"the pool otherwise.\n\n" +
+	b.Comment("connFor returns the transaction on the context when there is one, " +
+		"and the pool otherwise.\n\n" +
 		"This is what lets a repository method work the same whether it was " +
-		"called directly or inside a transaction someone else opened.")
-	b.L("func (s *Store) conn() %s.Conn { return s.connFor(%s.Background()) }", dbxPkg, ctxPkg)
-	b.NL()
+		"called directly or inside a transaction someone else opened — InTx, a " +
+		"hook, or the record an idempotent write is being kept in. The context is " +
+		"the whole of it: an argless version reading context.Background() can only " +
+		"ever answer with the pool, and a write that answered with the pool would " +
+		"commit whatever the surrounding transaction went on to do.")
 	b.L("func (s *Store) connFor(ctx %s.Context) %s.Conn {", ctxPkg, dbxPkg)
 	b.L("if tx, ok := %s.Tx(ctx); ok { return tx }", dbxPkg)
 	b.L("return s.pool")

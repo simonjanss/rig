@@ -4665,6 +4665,114 @@ in the hash by default.
 
 ---
 
+## Done: retries in the SDK, and the idempotency that lets writes have them
+
+`docs/clients.md` said the `rigclient` module carried "the transport,
+credentials, retries, pagination, error decoding". It carried everything on that
+list but retries. The first real consumer had noticed —
+`examples/sdk/import_demo.go` hand-rolled `worthRetrying` and `backoff`, with
+linear waits and no jitter — and the reason nobody had moved it into the library
+was that half the calls worth retrying are writes, and rig had no way to tell one
+write sent twice from two writes.
+
+So both halves. `rigclient` retries 429, 500, 502, 503, 504 and a request that
+never got an answer, over four attempts: immediate, then a second, then two, each
+wait half fixed and half random. The whole thing happens inside the timeout the
+call already had, so turning it on cannot make an existing call slower — a call
+that spends its budget on the first attempt simply gets no second one.
+`Retry-After` wins, in both the seconds form rig's own server sends and the date
+form something in front of it might; an interval longer than the call has left,
+or longer than thirty seconds, is handed back on the error rather than slept
+through, because whether a program has a minute is a question about the program.
+
+Writes are retried because they go out named. Every write the SDK might repeat
+carries an `Idempotency-Key`, generated per call and identical across attempts,
+and `rig_idempotency` — a new set under `runtime/foundation`, the first thing
+runtime has ever carried SQL for — records what the write answered **in the write's
+own transaction**. That single property is what the rest follows from: a claim
+stored apart from the effect it claims can outlive a rolled-back write, and then
+a key that wrote nothing replays a success forever. A second request holding the
+same key blocks on the unique index and then either replays what committed or,
+if it rolled back, does the work itself. No lease, no in-flight status, no TTL:
+Postgres was already keeping that bookkeeping.
+
+Making that true cost one line three directories away. A generated repository
+read its connection through `Store.conn()`, which resolved
+`context.Background()` — so it could only ever answer with the pool, and a
+create with no hooks committed its row outside whatever transaction was around
+it. The record and the effect were two facts, in exactly the case that matters
+most. `connFor(ctx)` everywhere, and the argless version is gone rather than
+left as a trap. It also means `Store.InTx` finally does what its own comment
+has always said it does.
+
+Two things the tests found rather than the design. The response column was
+`jsonb` first, and jsonb normalises — the replayed body came back with its keys
+reordered and its whitespace redone, so "replayed verbatim" was false and a
+client that signed what it received would have seen two answers to one request;
+it is `text` now. And `MaxRetryAfter` clamped an hour to thirty seconds instead
+of declining it, which meant going back before the server said to and sleeping
+ninety seconds to be refused three times.
+
+The generated server has no middleware and no `ResponseWriter` wrapper, and
+wanted neither: the handler already holds the typed response value with its
+status as a compile-time constant, so the emit captures the value rather than
+buffering bytes — which also keeps it away from `filehttp.Serve`, which streams
+and can answer 206. `Server.DB` is new and `Register` panics without it; a nil
+pool would make every key a header nobody read, and a client retrying a create in
+the belief that it is safe would write a row every time.
+
+**The upload route is the one write with no record.** Streaming turned out to cut
+both ways: a download is not the only thing on the file path that is still moving
+bytes when the handler is deep inside it. `OnePart` hands the service the form
+part itself, so guarding an upload would hold a pooled connection open for the
+length of a transfer — thirty minutes, at `filehttp.DefaultDeadline` — and a few
+slow clients would be the whole pool. `files.Service` had already drawn this line
+for itself and said so out loud: "a create is one transaction and an upload cannot
+be in it." The multipart create takes the same order, storing its parts before the
+guarded write begins, and is recorded. So the SDK does not name or repeat a form
+body at all — it cannot tell the two routes apart, and guessing wrong in the other
+direction stores the file twice.
+
+### What rig does not do here
+
+- **No configuration.** The lock timeout is five seconds and the retention is a
+  day, both constants. Neither is a number a project has an opinion about until
+  it has an incident, and a block with two knobs nobody turns is scope for its
+  own sake. If one of them ever needs to move, it moves for a reason somebody
+  can write down. The lock timeout is also `SET LOCAL` for the claim and then
+  put back: leaving it would have quietly put five seconds on every lock the
+  write went on to take, which is a 500 where there used to be a slow 201.
+- **Nothing schedules the retention.** `api.IdempotencyPruner` is generated for
+  every project and, like `FileSweeper`, it is a `serve.Task` waiting for a cron
+  entry. A goroutine per replica racing to delete the same rows is not the shape
+  this repository uses, and picking a schedule on a deployment's behalf is not
+  something a generator knows how to do.
+- **No retry budget across calls.** A hundred goroutines each retrying three
+  times is three hundred extra requests at a server that just said it was
+  overloaded. A shared token bucket — retries may be at most a tenth of traffic —
+  is the known answer; it needs state on the `Runtime` and a fraction nobody can
+  pick on a caller's behalf.
+- **No circuit breaker**, for the reason M13's list already gives.
+- **Deletes are not keyed.** A delete is idempotent in what it leaves behind, so
+  the only thing a record would buy is a 204 where there is now a truthful 404,
+  and it would cost a transaction on every delete to buy it.
+- **The multipart fingerprint does not cover the bytes.** For the create that
+  carries a file — the one multipart write that is recorded — two runs under one
+  key are the same write as far as the server can tell. Hashing the upload means
+  buffering a file that may be larger than memory, which is the one thing the
+  whole file path exists to avoid.
+- **A create carrying a file loses its retry.** The server would record it; the
+  SDK will not send it, because from `Op` a form body on a POST is a form body
+  on a POST. An `Op` field the client generator fills in would fix it, and it is
+  a field to add when somebody has an upload worth retrying rather than in
+  advance of one.
+- **rig's own drain 503 still carries no `Retry-After`.** `runtime/serve` sends
+  none, so a client mid-rollout guesses. One line, and it belongs in `serve`.
+- **`notify`'s delivery backoff still has no jitter.** Now that the client has
+  the rule written down, the engine three directories over is the one that still
+  retries a hundred rows in lockstep. Same fix, different module; it is on the
+  list below.
+
 ## Things I would fix if nobody asked for anything else
 
 - `internal/gen/servicego/servicego.go` still has an `elemType` helper that is

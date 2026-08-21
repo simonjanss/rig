@@ -367,7 +367,7 @@ func newHandler(pool *pgxpool.Pool, notifier todo.Notifier) http.Handler {
 	files := api.NewFiles(pool)
 
 	return api.Register(api.Handlers{
-		Server:         api.Server{GetClaims: headerClaims},
+		Server:         api.Server{GetClaims: headerClaims, DB: pool},
 		Todo:           todo.New(repos.Todos, files, notifier, nil, pool, nil),
 		TodoAttachment: todo_attachment.New(repos.TodoAttachments, files),
 	})
@@ -1099,7 +1099,7 @@ func newScopedHandler(
 	)
 
 	return api.Register(api.Handlers{
-		Server: api.Server{GetClaims: headerClaims},
+		Server: api.Server{GetClaims: headerClaims, DB: pool},
 		Todo:   svc,
 	})
 }

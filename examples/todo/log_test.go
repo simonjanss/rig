@@ -18,6 +18,7 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/simonjanss/rig/examples/todo/internal/api"
 	"github.com/simonjanss/rig/runtime/rigerr"
@@ -242,6 +243,10 @@ func drive(t *testing.T, srv api.Server, todos api.TodoService) *httptest.Respon
 	srv.GetClaims = func(*http.Request) (tenancy.Claims, error) {
 		return tenancy.Claims{TenantID: uuid.New(), AccountID: uuid.New()}, nil
 	}
+	// Register requires one, and nothing here reaches it: every request below is
+	// a read, and a write only opens a transaction when it carries an
+	// Idempotency-Key. A Beginner that refuses says so rather than pretending.
+	srv.DB = noDB{}
 
 	mux := api.Register(api.Handlers{Server: srv, Todo: todos})
 	res := httptest.NewRecorder()
@@ -292,3 +297,14 @@ func (s *stubTodos) List(ctx context.Context, _ api.Request[struct{}, api.TodoLi
 // AdoptChildren is called by Register, on every service, before any route is
 // mounted — so it is the one method a stub has to answer whatever it is testing.
 func (*stubTodos) AdoptChildren(api.TodoChildDeletes) {}
+
+// noDB satisfies Server.DB for a suite with no database.
+//
+// Register refuses a nil one, deliberately: a nil pool would make every
+// Idempotency-Key a header nobody read. Nothing in this file sends one, so this
+// is never called, and it fails loudly rather than quietly if that changes.
+type noDB struct{}
+
+func (noDB) Begin(context.Context) (pgx.Tx, error) {
+	return nil, errors.New("log_test: no database in this suite")
+}

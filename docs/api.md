@@ -88,6 +88,49 @@ already decoded, with one function per call; see
 Note that a row belonging to another tenant is a **404**, not a 403. A 403 would
 confirm the row exists.
 
+## Sending a write twice
+
+A write may carry an `Idempotency-Key`. A server that has seen the key before
+answers with what it answered the first time — same status, same bytes — and
+adds `Idempotency-Replayed: true`, rather than doing the work again.
+
+The record and the write commit together, so there is no moment where one exists
+without the other: a write that failed leaves no record, and its key is free for
+the corrected request that follows.
+
+- **The same key with a different body is a 422**, not a replay. A key names one
+  request; answering a different one with a stored response would hand a client a
+  success describing something it never asked for. For a multipart write the body
+  compared is the fields and the path, not the file bytes.
+- **The same key against a request still in flight waits, then a 409.** The
+  second request blocks until the first commits or rolls back — usually it then
+  replays — and gives up after five seconds rather than holding a connection for
+  as long as the first one takes.
+- **A key is remembered until it is pruned**, which is a day by default and
+  nothing at all until you schedule it. `api.IdempotencyPruner(0)` is a
+  `serve.Task`, and it wants a cron entry the way `FileSweeper` does:
+
+  ```go
+  Tasks: map[string]serve.Task{"prune-idempotency": api.IdempotencyPruner(0)},
+  ```
+
+  Without it `rig_idempotency` keeps every record ever written, and a key reused
+  a month later replays instead of writing — which is not what a key is for, since
+  a request arriving a day later is not a retry.
+
+- **An upload route is not recorded.** `POST /todos/{id}/cover-file` and its kind
+  take the key and ignore it: the body is still arriving when the handler runs,
+  and a record would mean holding a transaction open for the whole transfer. A
+  create that *carries* a file is recorded — its parts are stored before the
+  write begins.
+
+Keys are scoped to the tenant and to the route, so two tenants choosing the same
+string is not a collision and one identifier reused across two endpoints is two
+records rather than a replay of the wrong one.
+
+A generated Go client does all of this for you — it names every write it might
+have to send again; see [clients.md](clients.md#when-the-server-says-not-now).
+
 ## See also
 
 - [tables.md](tables.md) — choosing which operations exist, and adding your own

@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 )
 
 // Op is one call, as the generated method describes it.
@@ -110,10 +111,9 @@ func DoNoContent(ctx context.Context, rt *Runtime, op Op, opts ...CallOption) er
 // do performs one call, inside a span when the caller asked for one.
 //
 // The span is around the whole call rather than around each attempt, and that
-// is the difference between a trace saying "listTodos took 400ms, and here is
-// the QUERY that was refused inside it" and one showing three unrelated
-// requests. The attempts are spans of their own, underneath. See
-// [Config.Trace].
+// is the difference between a trace saying "listTodos took 400ms, and here are
+// the two attempts it took inside it" and one showing three unrelated requests.
+// The attempts are spans of their own, underneath. See [Config.Trace].
 func (rt *Runtime) do(ctx context.Context, op Op, opts []CallOption) (*http.Response, error) {
 	if rt.trace == nil {
 		return rt.call(ctx, op, opts)
@@ -141,12 +141,40 @@ func (op Op) spanName() string {
 	return op.Name
 }
 
-// call sends the request, handling the two things every call shares: a
-// credential that may need refreshing, and a QUERY an intermediary may refuse.
+// call sends the request, handling the three things every call shares: a
+// credential that may need refreshing, a QUERY an intermediary may refuse, and a
+// failure the server has asked to be given another go at.
 //
 // It returns a response whose body is still open and whose status is a success.
+//
+// The three re-sends are counted separately, deliberately. The fallback happens
+// at most once and is the same request addressed differently; the
+// reauthorization happens at most once and is the same request with a different
+// credential; only the retry is the same request in the same words, and only it
+// spends the attempt budget. Counting them together would leave a search behind
+// a refusing proxy with one retry fewer than the read beside it, for a reason
+// nobody looking at either could see.
 func (rt *Runtime) call(ctx context.Context, op Op, opts []CallOption) (*http.Response, error) {
 	call := newCall(opts)
+
+	// Asked of the operation the generated method built, before the fallback
+	// rewrites the method below: a search that has to go out as a POST is still
+	// a read. See [Op.idempotent].
+	repeatable := op.idempotent()
+	retry := rt.retry
+	if call.attempts > 0 {
+		retry.Attempts = call.attempts
+	}
+	budget := rt.budgetFor(call)
+
+	// A write becomes repeatable by being named, so that the server can tell a
+	// second send of one write from two writes. The name is generated here when
+	// the caller did not supply one — see [call.idempotencyKey] — and only when
+	// there is a retry to name it for: a client configured not to retry should
+	// not be making the server keep a record against the possibility.
+	if !repeatable && op.writes() && retry.attempts() > 1 {
+		repeatable = call.idempotencyKey() != ""
+	}
 
 	if op.Method == MethodQuery && op.Fallback != "" && rt.searchesByPost() {
 		op = op.asPost()
@@ -156,90 +184,164 @@ func (rt *Runtime) call(ctx context.Context, op Op, opts []CallOption) (*http.Re
 	// [Multipart.mark].
 	marks := op.Multipart.mark()
 
-	res, err := rt.send(ctx, op, call)
-	if err != nil {
-		return nil, err
-	}
+	// An explicit counter rather than a for-post statement: `continue` would run
+	// one, and two of the three paths below must not spend an attempt. Written
+	// this way, which re-send costs what is visible instead of subtle.
+	attempt := 1
+	// fellBack records that the alias has been tried, so a server answering 405
+	// to everything is a refusal rather than a loop.
+	fellBack := false
+	// leash is what remains of the whole call's budget. Zero on the first
+	// attempt, which is what makes the common path identical to what it was
+	// before any of this existed.
+	var leash time.Duration
 
-	// A method nobody in the chain recognizes is answered 405 by a proxy or 501
-	// by a server that has never heard of it. Both mean the same thing to a
-	// client: use the alias, and stop asking.
-	if op.Method == MethodQuery && op.Fallback != "" &&
-		(res.StatusCode == http.StatusMethodNotAllowed || res.StatusCode == http.StatusNotImplemented) {
-		drain(res)
-		rt.rememberSearchByPost()
-
-		res, err = rt.send(ctx, op.asPost(), call)
+	for {
+		res, sent, err := rt.send(ctx, op, call, leash)
 		if err != nil {
-			return nil, err
-		}
-	}
-
-	// One retry, and only for a credential that can do something about it. A
-	// blind retry on 401 is a way to lock an account out with a wrong password.
-	if res.StatusCode == http.StatusUnauthorized {
-		if re, ok := rt.Credential().(Reauthorizer); ok && !call.retried {
-			// Before the refresh, not after: an upload the client cannot send
-			// again is a call that has to come back to the caller, and doing it
-			// here means it comes back before a token was spent on it. The 401
-			// travels with it, so the failure still answers IsUnauthorized.
-			if err := op.Multipart.rewind(marks); err != nil {
-				defer res.Body.Close()
-				return nil, errors.Join(readError(res), err)
-			}
-
-			drain(res)
-			done, err := re.Reauthorize(ctx)
-			if err != nil {
+			if !sent || !repeatable || attempt >= retry.attempts() || ctx.Err() != nil {
 				return nil, err
 			}
-			if done {
-				call.retried = true
-				res, err = rt.send(ctx, op, call)
+			wait := retry.delay(attempt, 0, rt.jitter)
+			if !budget.allows(wait) {
+				return nil, err
+			}
+			if rewound := op.Multipart.rewind(marks); rewound != nil {
+				return nil, errors.Join(err, rewound)
+			}
+			if stopped := waitFor(ctx, wait, err); stopped != nil {
+				return nil, stopped
+			}
+			attempt, leash = attempt+1, budget.leash()
+			continue
+		}
+
+		// A method nobody in the chain recognizes is answered 405 by a proxy or
+		// 501 by a server that has never heard of it. Both mean the same thing
+		// to a client: use the alias, and stop asking.
+		if !fellBack && op.Method == MethodQuery && op.Fallback != "" &&
+			(res.StatusCode == http.StatusMethodNotAllowed || res.StatusCode == http.StatusNotImplemented) {
+			refusal := readError(res, rt.Now())
+			drain(res)
+			if rewound := op.Multipart.rewind(marks); rewound != nil {
+				return nil, errors.Join(refusal, rewound)
+			}
+			rt.rememberSearchByPost()
+			fellBack, op = true, op.asPost()
+			continue
+		}
+
+		// One reauthorization, and only for a credential that can do something
+		// about it. A blind retry on 401 is a way to lock an account out with a
+		// wrong password.
+		if res.StatusCode == http.StatusUnauthorized && !call.reauthorized {
+			if re, ok := rt.Credential().(Reauthorizer); ok {
+				// Before the refresh, not after: an upload the client cannot
+				// send again is a call that has to come back to the caller, and
+				// doing it here means it comes back before a token was spent on
+				// it. The 401 travels with it, so the failure still answers
+				// IsUnauthorized.
+				if rewound := op.Multipart.rewind(marks); rewound != nil {
+					refusal := readError(res, rt.Now())
+					res.Body.Close()
+					return nil, errors.Join(refusal, rewound)
+				}
+
+				// Read before the drain, because a Reauthorizer that answers
+				// false leaves this 401 as the answer — and a body already
+				// discarded is a refusal with no code on it, which would make
+				// IsUnauthorized say no about a 401.
+				refusal := readError(res, rt.Now())
+				drain(res)
+
+				done, err := re.Reauthorize(ctx)
 				if err != nil {
 					return nil, err
 				}
+				if !done {
+					return nil, refusal
+				}
+				call.reauthorized = true
+				continue
 			}
 		}
-	}
 
-	// A 304 is the answer to a question only a conditional call asked, so it is
-	// a success for that caller and an unexplained failure for anybody else.
-	// Which is why it is gated on the option rather than on the status alone.
-	if res.StatusCode == http.StatusNotModified && call.conditional {
+		// A 304 is the answer to a question only a conditional call asked, so it
+		// is a success for that caller and an unexplained failure for anybody
+		// else. Which is why it is gated on the option rather than on the status
+		// alone.
+		if res.StatusCode == http.StatusNotModified && call.conditional {
+			return res, nil
+		}
+
+		if res.StatusCode < 200 || res.StatusCode > 299 {
+			refusal := readError(res, rt.Now())
+			if !repeatable || !retryable(res.StatusCode) || attempt >= retry.attempts() {
+				res.Body.Close()
+				return nil, refusal
+			}
+			wait := retry.delay(attempt, refusal.RetryAfter, rt.jitter)
+			if refusal.RetryAfter > MaxRetryAfter || !budget.allows(wait) {
+				// The server asked for longer than a library may agree to on
+				// somebody's behalf, or for longer than this call has left.
+				// Either way the caller gets the server's own refusal with
+				// RetryAfter still on it — the same information, handed to
+				// somebody who can decide — and not a deadline error blaming
+				// this clock for somebody else's outage.
+				res.Body.Close()
+				return nil, refusal
+			}
+			// Drained rather than closed: the next attempt would rather have the
+			// connection back than a fresh handshake.
+			drain(res)
+			if rewound := op.Multipart.rewind(marks); rewound != nil {
+				return nil, errors.Join(refusal, rewound)
+			}
+			if stopped := waitFor(ctx, wait, refusal); stopped != nil {
+				return nil, stopped
+			}
+			attempt, leash = attempt+1, budget.leash()
+			continue
+		}
 		return res, nil
 	}
-
-	if res.StatusCode < 200 || res.StatusCode > 299 {
-		defer res.Body.Close()
-		return nil, readError(res)
-	}
-	return res, nil
 }
 
 // send performs one attempt, inside a span of its own when the caller traces.
 //
 // Named by the method actually used, so the QUERY that was refused and the POST
 // that replaced it are two lines in a trace rather than one repeated.
-func (rt *Runtime) send(ctx context.Context, op Op, call *call) (*http.Response, error) {
+func (rt *Runtime) send(ctx context.Context, op Op, call *call, leash time.Duration) (*http.Response, bool, error) {
 	if rt.trace == nil {
-		return rt.attempt(ctx, op, call)
+		return rt.attempt(ctx, op, call, leash)
 	}
 
-	var res *http.Response
+	var (
+		res  *http.Response
+		sent bool
+	)
 	err := rt.trace(ctx, "send "+op.Method, func(ctx context.Context) error {
 		var err error
 		//nolint:bodyclose // the response is returned below; do decides what happens to it
-		res, err = rt.attempt(ctx, op, call)
+		res, sent, err = rt.attempt(ctx, op, call, leash)
 		return err
 	})
-	return res, err
+	return res, sent, err
 }
 
 // attempt builds and performs one HTTP request.
-func (rt *Runtime) attempt(ctx context.Context, op Op, call *call) (*http.Response, error) {
+//
+// The bool is whether it reached the transport at all. A body that would not
+// encode and a credential that would not refresh are this call's own failures,
+// and a loop that treated them as the network's would make a bug in a generated
+// method take four times as long to surface — and would spend three more token
+// exchanges on a refresh that is not going to start working.
+//
+// leash bounds this one attempt when the call's budget has less left than the
+// client's own timeout. Zero leaves the client alone. See [budget].
+func (rt *Runtime) attempt(ctx context.Context, op Op, call *call, leash time.Duration) (*http.Response, bool, error) {
 	if op.Body != nil && op.Multipart != nil {
-		return nil, fmt.Errorf("rigclient: %s %s carries both a JSON body and a form; "+
+		return nil, false, fmt.Errorf("rigclient: %s %s carries both a JSON body and a form; "+
 			"a generated method sends one or the other", op.Method, op.Path)
 	}
 
@@ -253,7 +355,7 @@ func (rt *Runtime) attempt(ctx context.Context, op Op, call *call) (*http.Respon
 	case op.Body != nil:
 		encoded, err := json.Marshal(op.Body)
 		if err != nil {
-			return nil, fmt.Errorf("rigclient: encoding the body of %s %s: %w",
+			return nil, false, fmt.Errorf("rigclient: encoding the body of %s %s: %w",
 				op.Method, op.Path, err)
 		}
 		body, contentType = bytes.NewReader(encoded), "application/json"
@@ -266,7 +368,7 @@ func (rt *Runtime) attempt(ctx context.Context, op Op, call *call) (*http.Respon
 		if c, ok := body.(io.Closer); ok {
 			c.Close()
 		}
-		return nil, err
+		return nil, false, err
 	}
 
 	accept := op.Accept
@@ -300,11 +402,12 @@ func (rt *Runtime) attempt(ctx context.Context, op Op, call *call) (*http.Respon
 
 	if cred := rt.Credential(); cred != nil && !call.anonymous {
 		if err := cred.Apply(ctx, req); err != nil {
-			return nil, err
+			return nil, false, err
 		}
 	}
 
-	return call.client(rt.http).Do(req)
+	res, err := call.client(rt.http, leash).Do(req)
+	return res, true, err
 }
 
 // url builds the absolute URL for an operation.
