@@ -23,6 +23,13 @@ import what it writes. `electric` emits nothing until a table opts in with
 `electric: {enabled: true}`, so leaving it configured costs nothing. `go-client`
 is opt-in, because not every project wants a Go SDK of its own.
 
+Two blocks in `rig.yaml` change what these write without being generators of
+their own. `auth:` makes `server-go` write the authentication wiring, and
+`tracing:` makes `server-go` and `persist-go` open spans — a `tracing.gen.go`
+beside the routes, a span per handler, and a span per repository call and per
+hook. Without each block, not one line about it is emitted, which is what keeps
+the corresponding module out of the application's `go.mod`.
+
 ## Options, briefly
 
 Every generator takes `out_dir` and an `options` block. The common ones:

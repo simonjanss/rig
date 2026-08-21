@@ -40,6 +40,7 @@ func (c *TodoAttachmentClient) List(ctx context.Context, q TodoAttachmentListQue
 	rigclient.SetInt(query, "offset", q.Offset)
 
 	op := rigclient.Op{
+		Name:   "listTodoAttachments",
 		Method: http.MethodGet,
 		Path:   "/todo-attachments",
 		Query:  query,
@@ -57,6 +58,7 @@ func (c *TodoAttachmentClient) List(ctx context.Context, q TodoAttachmentListQue
 // what was wrong with each member of the body.
 func (c *TodoAttachmentClient) Create(ctx context.Context, in TodoAttachmentCreateInput, opts ...rigclient.CallOption) (*TodoAttachment, error) {
 	op := rigclient.Op{
+		Name:   "createTodoAttachment",
 		Method: http.MethodPost,
 		Path:   "/todo-attachments",
 		Body:   in,
@@ -77,6 +79,7 @@ func (c *TodoAttachmentClient) Search(ctx context.Context, filter TodoAttachment
 	rigclient.SetInt(query, "offset", q.Offset)
 
 	op := rigclient.Op{
+		Name:     "searchTodoAttachments",
 		Method:   rigclient.MethodQuery,
 		Path:     "/todo-attachments",
 		Query:    query,
@@ -102,6 +105,7 @@ func (c *TodoAttachmentClient) ListDeleted(ctx context.Context, q TodoAttachment
 	rigclient.SetInt(query, "offset", q.Offset)
 
 	op := rigclient.Op{
+		Name:   "listDeletedTodoAttachments",
 		Method: http.MethodGet,
 		Path:   "/todo-attachments/_deleted",
 		Query:  query,
@@ -119,6 +123,7 @@ func (c *TodoAttachmentClient) ListDeleted(ctx context.Context, q TodoAttachment
 // Operation deleteTodoAttachment.
 func (c *TodoAttachmentClient) Delete(ctx context.Context, id uuid.UUID, opts ...rigclient.CallOption) error {
 	op := rigclient.Op{
+		Name:   "deleteTodoAttachment",
 		Method: http.MethodDelete,
 		Path:   strings.Replace("/todo-attachments/{id}", "{id}", rigclient.PathValue(id.String()), 1),
 	}
@@ -132,6 +137,7 @@ func (c *TodoAttachmentClient) Delete(ctx context.Context, id uuid.UUID, opts ..
 // Operation getTodoAttachment.
 func (c *TodoAttachmentClient) Get(ctx context.Context, id uuid.UUID, opts ...rigclient.CallOption) (*TodoAttachment, error) {
 	op := rigclient.Op{
+		Name:   "getTodoAttachment",
 		Method: http.MethodGet,
 		Path:   strings.Replace("/todo-attachments/{id}", "{id}", rigclient.PathValue(id.String()), 1),
 	}
@@ -151,6 +157,7 @@ func (c *TodoAttachmentClient) Get(ctx context.Context, id uuid.UUID, opts ...ri
 // what was wrong with each member of the body.
 func (c *TodoAttachmentClient) Update(ctx context.Context, id uuid.UUID, in TodoAttachmentUpdateInput, opts ...rigclient.CallOption) (*TodoAttachment, error) {
 	op := rigclient.Op{
+		Name:   "updateTodoAttachment",
 		Method: http.MethodPatch,
 		Path:   strings.Replace("/todo-attachments/{id}", "{id}", rigclient.PathValue(id.String()), 1),
 		Body:   in,
@@ -182,6 +189,7 @@ func (c *TodoAttachmentClient) Update(ctx context.Context, id uuid.UUID, in Todo
 // Operation restoreTodoAttachment.
 func (c *TodoAttachmentClient) Restore(ctx context.Context, id uuid.UUID, opts ...rigclient.CallOption) (*TodoAttachment, error) {
 	op := rigclient.Op{
+		Name:   "restoreTodoAttachment",
 		Method: http.MethodPost,
 		Path:   strings.Replace("/todo-attachments/{id}/_restore", "{id}", rigclient.PathValue(id.String()), 1),
 	}
@@ -218,6 +226,7 @@ func (c *TodoAttachmentClient) Restore(ctx context.Context, id uuid.UUID, opts .
 // retry that almost never happens the SDK answers rigclient.ErrCannotRetry.
 func (c *TodoAttachmentClient) UploadAttachmentFile(ctx context.Context, id uuid.UUID, file rigclient.Upload, opts ...rigclient.CallOption) (*RigFile, error) {
 	op := rigclient.Op{
+		Name:      "uploadTodoAttachmentAttachmentFile",
 		Method:    http.MethodPost,
 		Path:      strings.Replace("/todo-attachments/{id}/attachment-file", "{id}", rigclient.PathValue(id.String()), 1),
 		Multipart: &rigclient.Multipart{Files: []rigclient.Upload{rigclient.Part("attachmentFile", file)}},
@@ -248,6 +257,7 @@ func (c *TodoAttachmentClient) UploadAttachmentFile(ctx context.Context, id uuid
 // the question, so the answer is a result.
 func (c *TodoAttachmentClient) DownloadAttachmentFile(ctx context.Context, id uuid.UUID, fileID uuid.UUID, filename string, opts ...rigclient.CallOption) (*rigclient.Content, error) {
 	op := rigclient.Op{
+		Name:   "downloadTodoAttachmentAttachmentFile",
 		Method: http.MethodGet,
 		Path:   strings.Replace(strings.Replace(strings.Replace("/todo-attachments/{id}/attachment-file/{fileId}/{filename}", "{id}", rigclient.PathValue(id.String()), 1), "{fileId}", rigclient.PathValue(fileID.String()), 1), "{filename}", rigclient.PathValue(string(filename)), 1),
 		// A download is whatever the file turned out to be, and the document cannot
@@ -269,6 +279,7 @@ func (c *TodoAttachmentClient) DownloadAttachmentFile(ctx context.Context, id uu
 // exchange, and this one carries files.
 func (c *TodoAttachmentClient) CreateWithFiles(ctx context.Context, in TodoAttachmentCreateInput, files TodoAttachmentCreateFiles, opts ...rigclient.CallOption) (*TodoAttachment, error) {
 	op := rigclient.Op{
+		Name:   "createTodoAttachment",
 		Method: http.MethodPost,
 		Path:   "/todo-attachments",
 		Multipart: &rigclient.Multipart{

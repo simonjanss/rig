@@ -86,6 +86,7 @@ func (a *Auth) Login(
 	// would have replaced it is how a client gets stuck refusing to sign in.
 	opts = append([]CallOption{Anonymous()}, opts...)
 	return Do[authwire.SignInResponse](ctx, a.rt, Op{
+		Name:   "authLogin",
 		Method: http.MethodPost, Root: true, Path: a.path("/login"), Body: in,
 	}, opts...)
 }
@@ -93,6 +94,7 @@ func (a *Auth) Login(
 // Logout ends the session the client is holding, and forgets it.
 func (a *Auth) Logout(ctx context.Context, opts ...CallOption) error {
 	if err := DoNoContent(ctx, a.rt, Op{
+		Name:   "authLogout",
 		Method: http.MethodPost, Root: true, Path: a.path("/logout"),
 	}, opts...); err != nil {
 		return err
@@ -111,6 +113,7 @@ func (a *Auth) Refresh(
 ) (*authwire.TokenPair, error) {
 	opts = append([]CallOption{Anonymous()}, opts...)
 	return Do[authwire.TokenPair](ctx, a.rt, Op{
+		Name:   "authRefresh",
 		Method: http.MethodPost, Root: true, Path: a.path("/refresh"),
 		Body: authwire.RefreshRequest{RefreshToken: refreshToken},
 	}, opts...)
@@ -128,6 +131,7 @@ func (a *Auth) Register(
 
 	opts = append([]CallOption{Anonymous()}, opts...)
 	res, err := Do[authwire.SignInResponse](ctx, a.rt, Op{
+		Name:   "authRegister",
 		Method: http.MethodPost, Root: true, Path: a.path("/register"), Body: in,
 	}, opts...)
 	if err != nil {
@@ -144,6 +148,7 @@ func (a *Auth) Provision(
 	ctx context.Context, in authwire.ProvisionRequest, opts ...CallOption,
 ) (*authwire.AccountView, error) {
 	return Do[authwire.AccountView](ctx, a.rt, Op{
+		Name:   "authProvision",
 		Method: http.MethodPost, Root: true, Path: a.path("/accounts"), Body: in,
 	}, opts...)
 }
@@ -157,6 +162,7 @@ func (a *Auth) RequestPasswordReset(
 ) error {
 	opts = append([]CallOption{Anonymous()}, opts...)
 	return DoNoContent(ctx, a.rt, Op{
+		Name:   "authRequestPasswordReset",
 		Method: http.MethodPost, Root: true, Path: a.path("/password/reset"),
 		Body: authwire.ResetRequest{EmailAddress: emailAddress},
 	}, opts...)
@@ -168,6 +174,7 @@ func (a *Auth) ConfirmPasswordReset(
 ) error {
 	opts = append([]CallOption{Anonymous()}, opts...)
 	return DoNoContent(ctx, a.rt, Op{
+		Name:   "authConfirmPasswordReset",
 		Method: http.MethodPost, Root: true, Path: a.path("/password/reset/confirm"),
 		Body: authwire.ConfirmResetRequest{Token: token, NewPassword: newPassword},
 	}, opts...)
@@ -179,6 +186,7 @@ func (a *Auth) ChangePassword(
 	ctx context.Context, in authwire.ChangePasswordRequest, opts ...CallOption,
 ) (*authwire.TokenPair, error) {
 	pair, err := Do[authwire.TokenPair](ctx, a.rt, Op{
+		Name:   "authChangePassword",
 		Method: http.MethodPost, Root: true, Path: a.path("/password/change"), Body: in,
 	}, opts...)
 	if err != nil {
@@ -192,6 +200,7 @@ func (a *Auth) ChangePassword(
 func (a *Auth) VerifyEmail(ctx context.Context, token string, opts ...CallOption) error {
 	opts = append([]CallOption{Anonymous()}, opts...)
 	return DoNoContent(ctx, a.rt, Op{
+		Name:   "authVerifyEmail",
 		Method: http.MethodPost, Root: true, Path: a.path("/email/verify"),
 		Body: authwire.VerifyEmailRequest{Token: token},
 	}, opts...)
@@ -200,6 +209,7 @@ func (a *Auth) VerifyEmail(ctx context.Context, token string, opts ...CallOption
 // ResendVerification sends the verification mail again.
 func (a *Auth) ResendVerification(ctx context.Context, opts ...CallOption) error {
 	return DoNoContent(ctx, a.rt, Op{
+		Name:   "authResendVerification",
 		Method: http.MethodPost, Root: true, Path: a.path("/email/verify/resend"),
 	}, opts...)
 }
@@ -215,6 +225,7 @@ func (a *Auth) SwitchTenant(
 	ctx context.Context, tenantID uuid.UUID, opts ...CallOption,
 ) (*authwire.TokenPair, error) {
 	pair, err := Do[authwire.TokenPair](ctx, a.rt, Op{
+		Name:   "authSwitchTenant",
 		Method: http.MethodPost, Root: true,
 		Path: a.path("/tenants/" + PathValue(tenantID.String()) + "/switch"),
 	}, opts...)
@@ -236,6 +247,7 @@ func (a *Auth) CreateTenant(
 
 	opts = append([]CallOption{withBearer(identityToken)}, opts...)
 	res, err := Do[authwire.SignInResponse](ctx, a.rt, Op{
+		Name:   "authCreateTenant",
 		Method: http.MethodPost, Root: true, Path: a.path("/tenants"), Body: in,
 	}, opts...)
 	if err != nil {
@@ -283,6 +295,7 @@ func (a *Auth) AcceptMyInvitation(
 
 	opts = append([]CallOption{withBearer(identityToken)}, opts...)
 	res, err := Do[authwire.SignInResponse](ctx, a.rt, Op{
+		Name:   "authAcceptMyInvitation",
 		Method: http.MethodPost, Root: true, Path: a.path("/me/invitations/accept"),
 		Body: authwire.AcceptAsMeRequest{InvitationID: invitationID, Client: client},
 	}, opts...)
@@ -304,6 +317,7 @@ func (a *Auth) EndIdentitySession(
 	}
 	opts = append([]CallOption{withBearer(identityToken)}, opts...)
 	return DoNoContent(ctx, a.rt, Op{
+		Name:   "authEndIdentitySession",
 		Method: http.MethodDelete, Root: true, Path: a.path("/me/session"),
 	}, opts...)
 }
@@ -317,6 +331,7 @@ func (a *Auth) AcceptInvitation(
 ) (*authwire.TokenPair, error) {
 	opts = append([]CallOption{Anonymous()}, opts...)
 	pair, err := Do[authwire.TokenPair](ctx, a.rt, Op{
+		Name:   "authAcceptInvitation",
 		Method: http.MethodPost, Root: true, Path: a.path("/invitations/accept"), Body: in,
 	}, opts...)
 	if err != nil {
@@ -340,6 +355,7 @@ func (a *Auth) RevokeInvitation(
 	ctx context.Context, invitationID uuid.UUID, opts ...CallOption,
 ) error {
 	return DoNoContent(ctx, a.rt, Op{
+		Name:   "authRevokeInvitation",
 		Method: http.MethodDelete, Root: true,
 		Path: a.path("/invitations/" + PathValue(invitationID.String())),
 	}, opts...)
@@ -364,6 +380,7 @@ func (a *Auth) Sessions(ctx context.Context, opts ...CallOption) ([]authwire.Ses
 // probed for existence.
 func (a *Auth) RevokeSession(ctx context.Context, id uuid.UUID, opts ...CallOption) error {
 	return DoNoContent(ctx, a.rt, Op{
+		Name:   "authRevokeSession",
 		Method: http.MethodDelete, Root: true, Path: a.path("/sessions/" + PathValue(id.String())),
 	}, opts...)
 }
@@ -410,6 +427,7 @@ func (a *Auth) AuditLog(
 	ctx context.Context, q AuditQuery, opts ...CallOption,
 ) (*authwire.Page[authwire.AuthLogEntryView], error) {
 	return Do[authwire.Page[authwire.AuthLogEntryView]](ctx, a.rt, Op{
+		Name:   "authAuditLog",
 		Method: http.MethodGet, Root: true, Path: a.path("/audit"), Query: q.Values(),
 	}, opts...)
 }
@@ -454,6 +472,7 @@ func (a *Auth) Impersonate(
 	ctx context.Context, accountID uuid.UUID, opts ...CallOption,
 ) (*authwire.TokenPair, error) {
 	pair, err := Do[authwire.TokenPair](ctx, a.rt, Op{
+		Name:   "authImpersonate",
 		Method: http.MethodPost, Root: true, Path: a.path("/impersonate"),
 		Body: authwire.ImpersonateRequest{AccountID: accountID},
 	}, opts...)
@@ -468,6 +487,7 @@ func (a *Auth) Impersonate(
 // session that was impersonating is gone, and it was the credential in hand.
 func (a *Auth) EndImpersonation(ctx context.Context, opts ...CallOption) error {
 	if err := DoNoContent(ctx, a.rt, Op{
+		Name:   "authEndImpersonation",
 		Method: http.MethodDelete, Root: true, Path: a.path("/impersonate"),
 	}, opts...); err != nil {
 		return err
@@ -496,6 +516,7 @@ func (a *Auth) CreateAPIKey(
 			"API keys are configured in main.go, by giving the handler an apikey manager")
 	}
 	return Do[authwire.CreateKeyResponse](ctx, a.rt, Op{
+		Name:   "authCreateAPIKey",
 		Method: http.MethodPost, Root: true, Path: a.path("/api-keys"), Body: in,
 	}, opts...)
 }
@@ -507,6 +528,7 @@ func (a *Auth) RevokeAPIKey(ctx context.Context, id uuid.UUID, opts ...CallOptio
 			"API keys are configured in main.go, by giving the handler an apikey manager")
 	}
 	return DoNoContent(ctx, a.rt, Op{
+		Name:   "authRevokeAPIKey",
 		Method: http.MethodDelete, Root: true, Path: a.path("/api-keys/" + PathValue(id.String())),
 	}, opts...)
 }

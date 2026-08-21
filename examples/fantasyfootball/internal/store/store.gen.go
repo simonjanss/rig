@@ -15,10 +15,12 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/simonjanss/rig/observe"
 	"github.com/simonjanss/rig/runtime/dbx"
 	"github.com/simonjanss/rig/runtime/query"
 	"github.com/simonjanss/rig/runtime/rigerr"
 	"github.com/simonjanss/rig/runtime/tenancy"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // Pagination limits. A read without a limit is a production incident waiting
@@ -144,14 +146,22 @@ func (s filterScope) orderJoin(farTable, alias, farColumn, localColumn string) (
 
 // Config is what a Store needs beyond a connection.
 //
-// It is empty today. It is still taken, and taken by value, so that giving a
-// store something to hold is a new field rather than a signature change every
-// caller has to follow.
-type Config struct{}
+// Taken by value, so that giving a store something else to hold is a new field
+// rather than a signature change every caller has to follow.
+type Config struct {
+
+	// Tracer is where this store's spans go. Nil takes the one rig installs, which
+	// is the global provider's — and that is a tracer whether or not anything is
+	// exporting, so this is safe to leave alone.
+	//
+	//	store.New(pool, store.Config{Tracer: observe.Tracer()})
+	Tracer trace.Tracer
+}
 
 // Store holds the connection pool and hands out repositories.
 type Store struct {
-	pool *pgxpool.Pool
+	pool   *pgxpool.Pool
+	tracer trace.Tracer
 
 	Fixtures FixtureRepository
 	Players  PlayerRepository
@@ -159,8 +169,12 @@ type Store struct {
 }
 
 // New builds a store over a connection pool.
-func New(pool *pgxpool.Pool, _ Config) *Store {
-	s := &Store{pool: pool}
+func New(pool *pgxpool.Pool, cfg Config) *Store {
+	if cfg.Tracer == nil {
+		cfg.Tracer = observe.Tracer()
+	}
+
+	s := &Store{pool: pool, tracer: cfg.Tracer}
 	s.Fixtures = &fixtureRepo{db: s}
 	s.Players = &playerRepo{db: s}
 	s.Teams = &teamRepo{db: s}

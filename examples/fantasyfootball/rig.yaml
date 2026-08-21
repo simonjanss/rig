@@ -12,6 +12,12 @@ api:
   # and it has no accounts to grant anything to. The default is `derived`.
   permissions: none
 
+# Spans, in the one example that turns them on. The generated handlers,
+# repositories and hooks open them; where they go is a runtime decision and is
+# in main.go, not here — see docs/observability.md.
+tracing:
+  enabled: true
+
 # A throwaway Postgres, created on demand. The port is explicit so this example
 # can run alongside the todo one without fighting over a port.
 database:

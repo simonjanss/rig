@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 	pgx "github.com/jackc/pgx/v5"
 	"github.com/simonjanss/rig/examples/fantasyfootball/internal/model"
+	"github.com/simonjanss/rig/observe"
 	"github.com/simonjanss/rig/runtime/dbhook"
 	"github.com/simonjanss/rig/runtime/dbx"
 	"github.com/simonjanss/rig/runtime/query"
@@ -632,6 +633,15 @@ type teamRepo struct {
 
 var _ TeamRepository = (*teamRepo)(nil)
 
+// trace runs one stage of a write inside a span of its own.
+//
+// The stage is a callback rather than something bracketed by two calls,
+// because that is what makes the span a function's: it is opened and ended in
+// one place, and nothing at the call site is holding one.
+func (r *teamRepo) trace(ctx context.Context, name string, f func(context.Context) error) error {
+	return observe.Trace(ctx, r.db.tracer, name, f)
+}
+
 const teamRepoSelect = "team.id, team.tenant_id, team.name, team.is_active, team.created_at, team.created_by_account_id, team.updated_at, team.updated_by_account_id, team.deleted_at, team.deleted_by_account_id"
 
 // scanTeam reads one row in the order teamRepoSelect lists.
@@ -648,6 +658,9 @@ func scanTeam(row pgx.Row) (*model.Team, error) {
 
 // Get implements TeamRepository.
 func (r *teamRepo) Get(ctx context.Context, id uuid.UUID, opts ...readopt.Option) (*model.Team, error) {
+	ctx, span := r.db.tracer.Start(ctx, "repository.Team.Get")
+	defer span.End()
+
 	cfg, err := readopt.Apply(opts)
 	if err != nil {
 		return nil, err
@@ -678,6 +691,9 @@ func (r *teamRepo) Get(ctx context.Context, id uuid.UUID, opts ...readopt.Option
 
 // List implements TeamRepository.
 func (r *teamRepo) List(ctx context.Context, f model.TeamFilter, page model.TeamPage, opts ...readopt.Option) ([]*model.Team, int64, error) {
+	ctx, span := r.db.tracer.Start(ctx, "repository.Team.List")
+	defer span.End()
+
 	return r.list(ctx, f, page, opts)
 }
 
@@ -780,6 +796,9 @@ var TeamDefaultOrder = []query.Order{{Table: "team", Column: "created_at", Desc:
 
 // Create implements TeamRepository.
 func (r *teamRepo) Create(ctx context.Context, in dbhook.Create[model.TeamCreateInput, model.Team]) (*model.Team, error) {
+	ctx, span := r.db.tracer.Start(ctx, "repository.Team.Create")
+	defer span.End()
+
 	// Who is asking, first of all. A write from a request carrying no identity is
 	// refused here — before a rule runs, before a column notices — which is
 	// what lets every hook below take the claims as a value rather than something
@@ -809,7 +828,9 @@ func (r *teamRepo) Create(ctx context.Context, in dbhook.Create[model.TeamCreate
 	// across a rule that may call out to another service would be a worse trade
 	// than the one it buys.
 	if in.Hooks.Validator != nil {
-		if err := in.Hooks.Validator.RunCreate(ctx, claims, &in.Input); err != nil {
+		if err := r.trace(ctx, "repository.Team.Create.Validator", func(ctx context.Context) error {
+			return in.Hooks.Validator.RunCreate(ctx, claims, &in.Input)
+		}); err != nil {
 			return nil, err
 		}
 	}
@@ -831,7 +852,9 @@ func (r *teamRepo) Create(ctx context.Context, in dbhook.Create[model.TeamCreate
 	var m *model.Team
 	err = dbx.InTxIf(ctx, r.db.pool, r.db.conn(), needsTx, func(ctx context.Context, tx dbx.Conn) error {
 		if in.Hooks.Before != nil {
-			if err := in.Hooks.Before(ctx, claims, &in.Input); err != nil {
+			if err := r.trace(ctx, "repository.Team.Create.Before", func(ctx context.Context) error {
+				return in.Hooks.Before(ctx, claims, &in.Input)
+			}); err != nil {
 				return err
 			}
 		}
@@ -848,7 +871,11 @@ func (r *teamRepo) Create(ctx context.Context, in dbhook.Create[model.TeamCreate
 		m = created
 
 		if in.Hooks.After != nil {
-			return in.Hooks.After(ctx, claims, m)
+			if err := r.trace(ctx, "repository.Team.Create.After", func(ctx context.Context) error {
+				return in.Hooks.After(ctx, claims, m)
+			}); err != nil {
+				return err
+			}
 		}
 		return nil
 	})
@@ -861,7 +888,12 @@ func (r *teamRepo) Create(ctx context.Context, in dbhook.Create[model.TeamCreate
 		// this runs, and reaching into a context for them then is reaching into one
 		// that has been cancelled.
 		done, who := in.Hooks.AfterCommit, claims
-		dbx.AfterCommit(ctx, func() { done(ctx, who, m) })
+		dbx.AfterCommit(ctx, func() {
+			ctx, span := r.db.tracer.Start(ctx, "repository.Team.Create.AfterCommit")
+			defer span.End()
+
+			done(ctx, who, m)
+		})
 	}
 
 	return m, nil
@@ -869,6 +901,9 @@ func (r *teamRepo) Create(ctx context.Context, in dbhook.Create[model.TeamCreate
 
 // Update implements TeamRepository.
 func (r *teamRepo) Update(ctx context.Context, id uuid.UUID, in dbhook.Update[model.TeamUpdateInput, model.Team]) (*model.Team, error) {
+	ctx, span := r.db.tracer.Start(ctx, "repository.Team.Update")
+	defer span.End()
+
 	in.Input.Normalize()
 
 	claims, err := tenancy.FromContext(ctx)
@@ -893,7 +928,9 @@ func (r *teamRepo) Update(ctx context.Context, id uuid.UUID, in dbhook.Update[mo
 		// reason: a hook that ran after validation could write a value nothing had
 		// checked.
 		if in.Hooks.Before != nil {
-			if err := in.Hooks.Before(ctx, claims, &in.Input, prev); err != nil {
+			if err := r.trace(ctx, "repository.Team.Update.Before", func(ctx context.Context) error {
+				return in.Hooks.Before(ctx, claims, &in.Input, prev)
+			}); err != nil {
 				return err
 			}
 		}
@@ -907,7 +944,9 @@ func (r *teamRepo) Update(ctx context.Context, id uuid.UUID, in dbhook.Update[mo
 		}
 
 		if in.Hooks.Validator != nil {
-			if err := in.Hooks.Validator.RunUpdate(ctx, claims, &in.Input, prev); err != nil {
+			if err := r.trace(ctx, "repository.Team.Update.Validator", func(ctx context.Context) error {
+				return in.Hooks.Validator.RunUpdate(ctx, claims, &in.Input, prev)
+			}); err != nil {
 				return err
 			}
 		}
@@ -946,7 +985,11 @@ func (r *teamRepo) Update(ctx context.Context, id uuid.UUID, in dbhook.Update[mo
 		}
 
 		if in.Hooks.After != nil {
-			return in.Hooks.After(ctx, claims, updated, prev)
+			if err := r.trace(ctx, "repository.Team.Update.After", func(ctx context.Context) error {
+				return in.Hooks.After(ctx, claims, updated, prev)
+			}); err != nil {
+				return err
+			}
 		}
 		return nil
 	})
@@ -959,7 +1002,12 @@ func (r *teamRepo) Update(ctx context.Context, id uuid.UUID, in dbhook.Update[mo
 		// this runs, and reaching into a context for them then is reaching into one
 		// that has been cancelled.
 		done, who := in.Hooks.AfterCommit, claims
-		dbx.AfterCommit(ctx, func() { done(ctx, who, updated, prev) })
+		dbx.AfterCommit(ctx, func() {
+			ctx, span := r.db.tracer.Start(ctx, "repository.Team.Update.AfterCommit")
+			defer span.End()
+
+			done(ctx, who, updated, prev)
+		})
 	}
 
 	return updated, nil
@@ -967,6 +1015,9 @@ func (r *teamRepo) Update(ctx context.Context, id uuid.UUID, in dbhook.Update[mo
 
 // Delete implements TeamRepository.
 func (r *teamRepo) Delete(ctx context.Context, in dbhook.Delete[model.TeamDeleteInput, model.Team]) error {
+	ctx, span := r.db.tracer.Start(ctx, "repository.Team.Delete")
+	defer span.End()
+
 	claims, err := tenancy.FromContext(ctx)
 	if err != nil {
 		return err
@@ -996,7 +1047,9 @@ func (r *teamRepo) Delete(ctx context.Context, in dbhook.Delete[model.TeamDelete
 		}
 
 		if in.Hooks.Before != nil {
-			if err := in.Hooks.Before(ctx, claims, &in.Input, prev); err != nil {
+			if err := r.trace(ctx, "repository.Team.Delete.Before", func(ctx context.Context) error {
+				return in.Hooks.Before(ctx, claims, &in.Input, prev)
+			}); err != nil {
 				return err
 			}
 		}
@@ -1020,7 +1073,9 @@ func (r *teamRepo) Delete(ctx context.Context, in dbhook.Delete[model.TeamDelete
 				return writeError(err, "team")
 			}
 			if in.Hooks.After != nil {
-				if err := in.Hooks.After(ctx, claims, prev); err != nil {
+				if err := r.trace(ctx, "repository.Team.Delete.After", func(ctx context.Context) error {
+					return in.Hooks.After(ctx, claims, prev)
+				}); err != nil {
 					return err
 				}
 			}
@@ -1048,7 +1103,9 @@ func (r *teamRepo) Delete(ctx context.Context, in dbhook.Delete[model.TeamDelete
 			return writeError(err, "team")
 		}
 		if in.Hooks.After != nil {
-			if err := in.Hooks.After(ctx, claims, prev); err != nil {
+			if err := r.trace(ctx, "repository.Team.Delete.After", func(ctx context.Context) error {
+				return in.Hooks.After(ctx, claims, prev)
+			}); err != nil {
 				return err
 			}
 		}
@@ -1071,7 +1128,12 @@ func (r *teamRepo) Delete(ctx context.Context, in dbhook.Delete[model.TeamDelete
 		// this runs, and reaching into a context for them then is reaching into one
 		// that has been cancelled.
 		done, who := in.Hooks.AfterCommit, claims
-		dbx.AfterCommit(ctx, func() { done(ctx, who, prev) })
+		dbx.AfterCommit(ctx, func() {
+			ctx, span := r.db.tracer.Start(ctx, "repository.Team.Delete.AfterCommit")
+			defer span.End()
+
+			done(ctx, who, prev)
+		})
 	}
 
 	return nil
@@ -1085,6 +1147,9 @@ func TeamRestoreCutoff() time.Time {
 
 // Restore implements TeamRepository.
 func (r *teamRepo) Restore(ctx context.Context, id uuid.UUID, in dbhook.Restore[model.TeamUpdateInput, model.Team]) (*model.Team, error) {
+	ctx, span := r.db.tracer.Start(ctx, "repository.Team.Restore")
+	defer span.End()
+
 	claims, err := tenancy.FromContext(ctx)
 	if err != nil {
 		return nil, err
@@ -1115,7 +1180,9 @@ func (r *teamRepo) Restore(ctx context.Context, id uuid.UUID, in dbhook.Restore[
 		// taken since gets changed on the way in. Returning an error refuses the
 		// restore instead.
 		if in.Hooks.Before != nil {
-			if err := in.Hooks.Before(ctx, claims, &in.Input, prev); err != nil {
+			if err := r.trace(ctx, "repository.Team.Restore.Before", func(ctx context.Context) error {
+				return in.Hooks.Before(ctx, claims, &in.Input, prev)
+			}); err != nil {
 				return err
 			}
 		}
@@ -1124,7 +1191,9 @@ func (r *teamRepo) Restore(ctx context.Context, id uuid.UUID, in dbhook.Restore[
 		// fields it touched: the row was not live, so nothing about it has been
 		// checked against the world it is returning to.
 		if in.Hooks.Validator != nil {
-			if err := in.Hooks.Validator.RunRestore(ctx, claims, &in.Input, prev); err != nil {
+			if err := r.trace(ctx, "repository.Team.Restore.Validator", func(ctx context.Context) error {
+				return in.Hooks.Validator.RunRestore(ctx, claims, &in.Input, prev)
+			}); err != nil {
 				return err
 			}
 		}
@@ -1161,7 +1230,11 @@ func (r *teamRepo) Restore(ctx context.Context, id uuid.UUID, in dbhook.Restore[
 		}
 
 		if in.Hooks.After != nil {
-			return in.Hooks.After(ctx, claims, restored, prev)
+			if err := r.trace(ctx, "repository.Team.Restore.After", func(ctx context.Context) error {
+				return in.Hooks.After(ctx, claims, restored, prev)
+			}); err != nil {
+				return err
+			}
 		}
 		return nil
 	})
@@ -1174,7 +1247,12 @@ func (r *teamRepo) Restore(ctx context.Context, id uuid.UUID, in dbhook.Restore[
 		// this runs, and reaching into a context for them then is reaching into one
 		// that has been cancelled.
 		done, who := in.Hooks.AfterCommit, claims
-		dbx.AfterCommit(ctx, func() { done(ctx, who, restored, prev) })
+		dbx.AfterCommit(ctx, func() {
+			ctx, span := r.db.tracer.Start(ctx, "repository.Team.Restore.AfterCommit")
+			defer span.End()
+
+			done(ctx, who, restored, prev)
+		})
 	}
 
 	return restored, nil
@@ -1182,6 +1260,9 @@ func (r *teamRepo) Restore(ctx context.Context, id uuid.UUID, in dbhook.Restore[
 
 // ListDeleted returns retired rows still inside the restore window.
 func (r *teamRepo) ListDeleted(ctx context.Context, f model.TeamFilter, page model.TeamPage, opts ...readopt.Option) ([]*model.Team, int64, error) {
+	ctx, span := r.db.tracer.Start(ctx, "repository.Team.ListDeleted")
+	defer span.End()
+
 	// The lifecycle option is forced and the caller's are kept: which rows the
 	// trash holds is not up for discussion, and how wide a view of it the caller
 	// gets still is.

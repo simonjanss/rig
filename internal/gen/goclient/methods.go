@@ -225,6 +225,7 @@ func setterFor(f ir.Field) string {
 // buildOp emits the operation the transport is handed.
 func (e *emitter) buildOp(b *gobuf.Buf, ep *ir.Endpoint, sig signature, rig string) {
 	b.L("op := %s.Op{", rig)
+	b.L("Name: %s,", gobuf.Quote(ep.OperationID))
 	b.L("Method: %s,", methodExpr(b, ep, rig))
 	b.L("Path: %s,", sig.path)
 	if sig.query != "" {

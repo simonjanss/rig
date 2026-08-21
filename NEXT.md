@@ -61,6 +61,16 @@ Next:
   first draft's. It also settled M9's correlation question for free: point
   `Server.RequestID` at the trace id and the log, the error body and the
   collector all say the same string.
+- ~~**M9** — tracing.~~ Shipped: an `observe/` module that is where
+  OpenTelemetry lives so that nothing else has to depend on it, a one-key
+  `tracing:` block, and spans in the generated code — one per request named by
+  its route, one per repository call, one per hook, one per statement from a pgx
+  tracer on the connection. Three things came out differently: the request span
+  is rig's own eighty lines rather than `otelhttp`, because outside the mux the
+  matched route does not exist yet; nothing configured installs a real provider
+  that samples nothing rather than a no-op, because the ids are worth having on
+  their own; and the file exporter arrived here instead of in M10, which is now
+  a reader over it. `rigclient` took a callback seam rather than an import.
 - ~~**M14** — the foundation gets a version.~~ Shipped: rig's own DDL moved out of
   a Go const and into append-only `.sql` sets the owning modules carry, each with
   its own bookkeeping table, and `migrations.foundation: vendored | embedded` for
@@ -77,6 +87,7 @@ runtime/        github.com/simonjanss/rig/runtime    imported by generated code
 auth/           github.com/simonjanss/rig/auth       sessions, oauth, api keys
 migrate/        github.com/simonjanss/rig/migrate    a binary migrates itself
 rigclient/      github.com/simonjanss/rig/rigclient  imported by a generated client
+observe/        github.com/simonjanss/rig/observe    otel, for a project with `tracing:`
 examples/todo/  a real project, built in CI
 examples/sdk/   a program that calls two of them, through their generated clients
 ```
@@ -2712,10 +2723,92 @@ it.
 
 ---
 
-## M9 — tracing
+## M9 — tracing (shipped)
 
 **Goal.** A request traceable from the handler through the hooks to the SQL,
 without every generated application taking a dependency it did not ask for.
+
+**What shipped.** `observe/`, a module of its own with otel v1 in it and nothing
+else importing it; a `tracing:` block with one key; spans in `server-go`,
+`persist-go` and `rigclient`; a JSONL span file; and
+`examples/fantasyfootball` turned on, with a Docker suite asserting the shape
+against a real database.
+
+The rule everything follows, and it came from `platform`'s documentation
+repository rather than from this plan: **a span is opened at the top of a
+function and ended by a defer, and a function opens at most one.** Where a
+method has several stages, each stage is a callback handed to a helper —
+`r.trace(ctx, name, func(ctx) error {…})` — so the stage *is* a function and its
+span is that function's. No call site holds a span it could fail to end, no
+early return can skip one, and the generator never had to rewrite an `if err :=
+…; err != nil` one-liner into three lines: it wraps the existing call in a
+closure and leaves the shape alone.
+
+### What came out differently
+
+- **The request span is rig's own, not `otelhttp`.** Four reasons, in the order
+  they mattered: `net/http` sets the matched pattern on the request the mux
+  dispatches, so a middleware in front of the mux has one that has matched
+  nothing and can only name a span by path — one span name per identifier
+  anybody ever fetched, which is the thing that makes a trace useless.
+  `runtime/reqlog` already wraps the `ResponseWriter` for the same status and
+  byte count, and M9.0 wrote a section on what a second wrapper costs.
+  `contrib/…/otelhttp` is v0, and would have been a v0 pin in a module every
+  traced application imports. And not importing it costs a user nothing —
+  `Register` returns a `*http.ServeMux` and `Config.HTTPClient` takes an
+  `*http.Client`, so anybody who wants it still has both seams. What rig does
+  take from otel core is `propagation` and `semconv`, so the spans carry
+  `http.route` and `http.response.status_code` and read like everybody else's.
+- **Nothing configured is not a no-op provider.** The plan said otel supplies
+  the no-op itself and that was the default to choose. It is not: a no-op
+  invents no identifiers, and the identifiers are the correlation story. So an
+  SDK provider is installed with `NeverSample`, which records nothing, exports
+  nothing, and still hands out a real trace id — which is what the request id in
+  the error body and on every log line becomes.
+- **The file exporter is here rather than in M10.** The question M10 asks — ring
+  buffer or `rig_trace` table — was answered "neither, a file". So `observe`
+  writes one JSON object per finished span, bounded by `FileMaxBytes` with one
+  rotation, and M10 is a reader over that rather than a store of its own.
+- **The correlation is automatic now, not a paragraph.** M9.0 settled that
+  `RequestID` *is* the trace id; with the block on, the generated
+  `requestContext` falls back to `observe.TraceID(r)` when a project set no
+  `RequestID` of its own. Four lines in a main became none.
+- **`store.Config` grew a `Tracer`.** It had been an empty struct taken by value
+  precisely so that giving a store something to hold would be a new field rather
+  than a signature change. That is what it was for.
+- **`Op` grew a `Name`.** The operation id existed only in a doc comment. A
+  client span cannot be named from `Op.Path` — by then the identifiers are
+  substituted in — so the generated methods now carry it, and the hand-written
+  auth calls in `rigclient` name themselves too.
+- **The SQL span needed no stage of its own.** A pgx tracer on the connection
+  sees every statement, including the ones a hook or a task runs and the ones no
+  generator wrote, and it lands under whichever stage's context issued it. Its
+  span name is the verb and the table — `INSERT team` — because a generated
+  INSERT names every column it writes and a trace listing that as a name is
+  unreadable.
+
+### Honest gaps
+
+- **The `auth:` routes and the inbox routes are not traced.** They are mounted
+  rather than generated, so no span is opened for them; they still log, and a
+  failure there still carries a request id. Fixing it means a wrapper that can
+  ask the mux which pattern matched — `mux.Handler(r)` can, since 1.22 — and
+  `Register` returns a `*http.ServeMux` by contract, so the wrapper would have
+  to go inside. Named, not built.
+- **A method's span is not marked failed.** The stage that refused is, and so is
+  the statement that failed, but the enclosing `repository.Team.Create` stays
+  green with a red child. Recording it would mean a named return and a closure
+  in every method, which is the shape this milestone deliberately avoided; most
+  trace UIs propagate a child's error upward anyway.
+- **`observe.LogHandler` was not built**, and the reasoning below still stands:
+  the correlation is `RequestID`, and a handler that also puts the *span* id on
+  a line is a smaller, separate thing.
+- **That an exporter reaches a collector is untested**, as predicted. The file
+  sink is what the Docker suite asserts against instead.
+
+---
+
+### The plan, as it stood
 
 The logging half shipped as M9.0 above, including the constraint this half
 depends on: every log call already carries its context, so a `slog.Handler` that
@@ -2868,13 +2961,21 @@ is blind.
   project that did not turn tracing on. A page that shows requests and no spans
   is a reasonable thing for such a project to see, and it has to say why rather
   than look broken.
-- The store is the whole question. A bounded ring in memory costs nothing, needs
-  no schema, and loses everything exactly when a restart is the thing you were
-  trying to explain. A `rig_trace` table survives, and rig already owns tables of
-  that shape in `rig_auth_log` and `rig_file` — but then every request writes
-  rows, and rig owns a retention policy, an index that is still useful at a
-  billion rows, and the vacuum behaviour of an append-only table. That is a
-  tracing backend, and I do not think rig wants to be one.
+- **The store question is answered, and the answer is the file M9 shipped.**
+  Neither of the two this section weighed: a bounded ring in memory costs
+  nothing and loses everything exactly when a restart is the thing you were
+  trying to explain, and a `rig_trace` table means rig owns a retention policy,
+  an index that is still useful at a billion rows and the vacuum behaviour of an
+  append-only table — a tracing backend, which rig does not want to be. What
+  `observe` writes instead is one JSON object per finished span, appended to a
+  file, bounded by `FileMaxBytes` with one rotation kept beside it. It survives
+  a restart, it costs no schema, and `SpanRecord` is exported so reading it back
+  is a `json.Unmarshal` rather than a format anybody has to agree on.
+- So M10 is a reader and a page, not a store. It opens the current file and the
+  rotated one, newest first, groups by `trace_id`, and shows the last few
+  hundred requests with their spans underneath. The interesting work left is the
+  page itself and the two questions below — the embed, and who is allowed to
+  look.
 - It would be the first `go:embed` in a module that is not an example.
   Everything generated today is Go source assembled through `internal/gen/gobuf`,
   and the only embedded assets in the repository are an example's templates and
@@ -2890,11 +2991,12 @@ is blind.
 block emits nothing, a project with it emits a page that compiles. The page
 itself wants an ordinary handler test against a store with a few requests in it.
 
-**Open question for you.** Is this worth building at all, or does M9 export OTLP
-and the page belong to somebody else? The version that earns its keep is small —
-the last few hundred requests and their spans, in memory, behind the project's
-auth — and the version anybody actually wants at three in the morning is the
-thing I just said rig should not become.
+**The open question, answered. Build it, over a file.** It was worth asking
+whether M9 should export OTLP and leave the page to somebody else. The answer
+was that a deployment too small for a collector is exactly the one that needs
+this — and that the store it needs is a file rather than memory or a table,
+which is what M9 built. What is left for M10 is the reader, the page, the embed
+`gentest` has to learn about, and the decision about who may look at it.
 
 ---
 

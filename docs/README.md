@@ -34,7 +34,7 @@ file per table.
 | [Clients](clients.md) | The generated Go client. |
 | [Live sync](electric.md) | Shape endpoints, for a client that subscribes instead of polling. |
 | [Notifications](notifications.md) | An inbox: who is told what happened, worked out when it is sent rather than when it was written. |
-| [Observability](observability.md) | What the server logs, and how to find out why a request returned 500. |
+| [Observability](observability.md) | What the server logs, the spans it opens with `tracing:` on, and how to find out why a request returned 500. |
 | [Diagnostics](diagnostics.md) | Every `RIG####` code, what it means, and how to change its severity. |
 
 ## Complete applications

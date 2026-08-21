@@ -18,6 +18,7 @@
 package rigclient
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"net/url"
@@ -80,6 +81,27 @@ type Config struct {
 	// Now is the clock, for a test that has to cross a token expiry without
 	// waiting ten minutes for one. Nil is [time.Now].
 	Now func() time.Time
+
+	// Trace runs one piece of work inside a span, and is how a caller that
+	// traces gets this client's calls into the same trace as everything else it
+	// does:
+	//
+	//	Trace: observe.Call,
+	//
+	// A function rather than a tracer, because this module is imported by every
+	// generated client and most of them do not want an OpenTelemetry dependency
+	// — the same argument that keeps otel out of rig/runtime. Anything with
+	// this shape works; rig/observe supplies one.
+	//
+	// Two spans per call, and the nesting is the point. The outer one is the
+	// operation, named by [Op.Name]; the inner ones are the attempts, and there
+	// can be three — the QUERY a proxy refused, the POST to the alias, and the
+	// retry after a credential refreshed. Tracing the attempts alone would show
+	// one call as three unrelated requests.
+	//
+	// Nil traces nothing, which is what a client that was never told about
+	// tracing does.
+	Trace func(ctx context.Context, name string, f func(context.Context) error) error
 }
 
 // API is what the generated client knows about the server and this package does
@@ -114,6 +136,7 @@ type Runtime struct {
 	revision        string
 	revisionHeader  string
 	now             func() time.Time
+	trace           func(ctx context.Context, name string, f func(context.Context) error) error
 
 	mu sync.Mutex
 	// cred is under the mutex because signing in replaces it while requests may
@@ -179,6 +202,7 @@ func New(cfg Config, api API) (*Runtime, error) {
 		requestID: cfg.RequestID,
 		revision:  cfg.Revision,
 		now:       cfg.Now,
+		trace:     cfg.Trace,
 		cred:      cfg.Credential,
 	}
 	if rt.http == nil {

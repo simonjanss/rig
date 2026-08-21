@@ -109,9 +109,13 @@ database is behind; `migrate.Apply` migrates on the way up instead.
 nil means `slog.Default()` rather than silence — see
 [observability.md](observability.md).
 
+A project with `tracing:` on has three more lines here — `observe.Setup`, a
+`CloseWithin` for the flush, and a `Tracer` in `store.Config` — and
+[observability.md](observability.md#wiring-it-up) has them in full.
+
 ## See also
 
 - [tutorial.md](tutorial.md#7-wire-it-up) — the smallest working `main.go`
 - [tables.md](tables.md#endpoints) — declaring an endpoint
-- [observability.md](observability.md) — what gets logged, and reading a 500
+- [observability.md](observability.md) — the log, the spans, and reading a 500
 - [concepts.md](concepts.md) — why this layer is yours

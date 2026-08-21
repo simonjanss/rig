@@ -8,6 +8,7 @@ import (
 	"net/http"
 
 	"github.com/simonjanss/rig/examples/fantasyfootball/internal/model"
+	"github.com/simonjanss/rig/observe"
 	"github.com/simonjanss/rig/runtime/reqlog"
 )
 
@@ -31,6 +32,9 @@ func handleListTeams(s Server, svc TeamService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		rec := reqlog.Wrap(w)
 		w = rec
+
+		r, span := observe.Server(r, "GET /api/v1/teams", rec.Status)
+		defer span.End()
 
 		ctx, claims, rc, ok := prepare(s, w, r)
 		defer logRequest(s, r, rec, rc)
@@ -71,6 +75,9 @@ func handleCreateTeam(s Server, svc TeamService) http.HandlerFunc {
 		rec := reqlog.Wrap(w)
 		w = rec
 
+		r, span := observe.Server(r, "POST /api/v1/teams", rec.Status)
+		defer span.End()
+
 		ctx, claims, rc, ok := prepare(s, w, r)
 		defer logRequest(s, r, rec, rc)
 		if !ok {
@@ -101,6 +108,9 @@ func handleSearchTeams(s Server, svc TeamService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		rec := reqlog.Wrap(w)
 		w = rec
+
+		r, span := observe.Server(r, "QUERY /api/v1/teams", rec.Status)
+		defer span.End()
 
 		ctx, claims, rc, ok := prepare(s, w, r)
 		defer logRequest(s, r, rec, rc)
@@ -152,6 +162,9 @@ func handleListDeletedTeams(s Server, svc TeamService) http.HandlerFunc {
 		rec := reqlog.Wrap(w)
 		w = rec
 
+		r, span := observe.Server(r, "GET /api/v1/teams/_deleted", rec.Status)
+		defer span.End()
+
 		ctx, claims, rc, ok := prepare(s, w, r)
 		defer logRequest(s, r, rec, rc)
 		if !ok {
@@ -194,6 +207,9 @@ func handleDeleteTeam(s Server, svc TeamService) http.HandlerFunc {
 		rec := reqlog.Wrap(w)
 		w = rec
 
+		r, span := observe.Server(r, "DELETE /api/v1/teams/{id}", rec.Status)
+		defer span.End()
+
 		ctx, claims, rc, ok := prepare(s, w, r)
 		defer logRequest(s, r, rec, rc)
 		if !ok {
@@ -225,6 +241,9 @@ func handleGetTeam(s Server, svc TeamService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		rec := reqlog.Wrap(w)
 		w = rec
+
+		r, span := observe.Server(r, "GET /api/v1/teams/{id}", rec.Status)
+		defer span.End()
 
 		ctx, claims, rc, ok := prepare(s, w, r)
 		defer logRequest(s, r, rec, rc)
@@ -261,6 +280,9 @@ func handleUpdateTeam(s Server, svc TeamService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		rec := reqlog.Wrap(w)
 		w = rec
+
+		r, span := observe.Server(r, "PATCH /api/v1/teams/{id}", rec.Status)
+		defer span.End()
 
 		ctx, claims, rc, ok := prepare(s, w, r)
 		defer logRequest(s, r, rec, rc)
@@ -317,6 +339,9 @@ func handleRestoreTeam(s Server, svc TeamService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		rec := reqlog.Wrap(w)
 		w = rec
+
+		r, span := observe.Server(r, "POST /api/v1/teams/{id}/_restore", rec.Status)
+		defer span.End()
 
 		ctx, claims, rc, ok := prepare(s, w, r)
 		defer logRequest(s, r, rec, rc)

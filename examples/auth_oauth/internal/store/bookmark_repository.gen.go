@@ -504,7 +504,9 @@ func (r *bookmarkRepo) Create(ctx context.Context, in dbhook.Create[model.Bookma
 		m = created
 
 		if in.Hooks.After != nil {
-			return in.Hooks.After(ctx, claims, m)
+			if err := in.Hooks.After(ctx, claims, m); err != nil {
+				return err
+			}
 		}
 		return nil
 	})
@@ -598,7 +600,9 @@ func (r *bookmarkRepo) Update(ctx context.Context, id uuid.UUID, in dbhook.Updat
 		}
 
 		if in.Hooks.After != nil {
-			return in.Hooks.After(ctx, claims, updated, prev)
+			if err := in.Hooks.After(ctx, claims, updated, prev); err != nil {
+				return err
+			}
 		}
 		return nil
 	})

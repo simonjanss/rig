@@ -59,6 +59,7 @@ func (e *emitter) uploadMethod(b *gobuf.Buf, res *ir.Resource, ep *ir.Endpoint, 
 	b.L("func (c *%sClient) %s(%s) %s {", res.Name, ep.Impl.ServiceMethod, params, sig.results)
 
 	b.L("op := %s.Op{", rig)
+	b.L("Name: %s,", gobuf.Quote(ep.OperationID))
 	b.L("Method: %s,", methodExpr(b, ep, rig))
 	b.L("Path: %s,", sig.path)
 	b.L("Multipart: &%s.Multipart{Files: []%s.Upload{%s.Part(%s, file)}},",
@@ -92,6 +93,7 @@ func (e *emitter) downloadMethod(b *gobuf.Buf, res *ir.Resource, ep *ir.Endpoint
 		res.Name, ep.Impl.ServiceMethod, sig.params, rig)
 
 	b.L("op := %s.Op{", rig)
+	b.L("Name: %s,", gobuf.Quote(ep.OperationID))
 	b.L("Method: %s,", methodExpr(b, ep, rig))
 	b.L("Path: %s,", sig.path)
 	b.Comment("A download is whatever the file turned out to be, and the " +
@@ -158,6 +160,7 @@ func (e *emitter) createWithFilesMethod(b *gobuf.Buf, res *ir.Resource, ep *ir.E
 	b.L("func (c *%sClient) CreateWithFiles(%s) %s {", res.Name, params, sig.results)
 
 	b.L("op := %s.Op{", rig)
+	b.L("Name: %s,", gobuf.Quote(ep.OperationID))
 	b.L("Method: %s,", methodExpr(b, ep, rig))
 	b.L("Path: %s,", sig.path)
 	b.L("Multipart: &%s.Multipart{", rig)

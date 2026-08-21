@@ -147,6 +147,17 @@ func (g *Generator) Generate(_ context.Context, doc *ir.Document, opts gen.Optio
 		artifacts = append(artifacts, files)
 	}
 
+	// The tracing configuration, for a project that asked for spans. Same rule
+	// again: without the block there is no file, no import of rig/observe, and
+	// no OpenTelemetry anywhere in the application's dependency graph.
+	if e.tracing() {
+		tracing, err := e.tracingFile()
+		if err != nil {
+			return nil, err
+		}
+		artifacts = append(artifacts, tracing)
+	}
+
 	// The inbox wiring, when there is an inbox. A project with no
 	// `notifications:` block gets no dispatcher and no routes.
 	if e.hasNotifications() {

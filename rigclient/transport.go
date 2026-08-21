@@ -19,6 +19,15 @@ import (
 // substituted: escaping an identifier into a route is the generated method's
 // job, because only it knows which argument goes where.
 type Op struct {
+	// Name is the operation this call is, as the document named it —
+	// "listTodos", "createTodo". The generated method fills it in.
+	//
+	// It is what a call's span is called, which is why it is a field rather
+	// than something derived from Method and Path: the path here already has
+	// its identifiers substituted, so a name built from it would be a new name
+	// for every row anybody ever fetched.
+	Name string
+
 	Method string
 	Path   string
 	Query  url.Values
@@ -98,11 +107,45 @@ func DoNoContent(ctx context.Context, rt *Runtime, op Op, opts ...CallOption) er
 	return nil
 }
 
-// do sends the request, handling the two things every call shares: a credential
-// that may need refreshing, and a QUERY an intermediary may refuse.
+// do performs one call, inside a span when the caller asked for one.
+//
+// The span is around the whole call rather than around each attempt, and that
+// is the difference between a trace saying "listTodos took 400ms, and here is
+// the QUERY that was refused inside it" and one showing three unrelated
+// requests. The attempts are spans of their own, underneath. See
+// [Config.Trace].
+func (rt *Runtime) do(ctx context.Context, op Op, opts []CallOption) (*http.Response, error) {
+	if rt.trace == nil {
+		return rt.call(ctx, op, opts)
+	}
+
+	var res *http.Response
+	err := rt.trace(ctx, op.spanName(), func(ctx context.Context) error {
+		var err error
+		//nolint:bodyclose // the response is returned below; Do and DoNoContent close it
+		res, err = rt.call(ctx, op, opts)
+		return err
+	})
+	return res, err
+}
+
+// spanName is what one call is called in a trace.
+//
+// An Op with no name — one somebody assembled by hand — falls back to its
+// method alone. Boring, and bounded: the path is not usable here, because by
+// this point it has an identifier in it.
+func (op Op) spanName() string {
+	if op.Name == "" {
+		return op.Method
+	}
+	return op.Name
+}
+
+// call sends the request, handling the two things every call shares: a
+// credential that may need refreshing, and a QUERY an intermediary may refuse.
 //
 // It returns a response whose body is still open and whose status is a success.
-func (rt *Runtime) do(ctx context.Context, op Op, opts []CallOption) (*http.Response, error) {
+func (rt *Runtime) call(ctx context.Context, op Op, opts []CallOption) (*http.Response, error) {
 	call := newCall(opts)
 
 	if op.Method == MethodQuery && op.Fallback != "" && rt.searchesByPost() {
@@ -174,8 +217,27 @@ func (rt *Runtime) do(ctx context.Context, op Op, opts []CallOption) (*http.Resp
 	return res, nil
 }
 
-// send builds and performs one HTTP request.
+// send performs one attempt, inside a span of its own when the caller traces.
+//
+// Named by the method actually used, so the QUERY that was refused and the POST
+// that replaced it are two lines in a trace rather than one repeated.
 func (rt *Runtime) send(ctx context.Context, op Op, call *call) (*http.Response, error) {
+	if rt.trace == nil {
+		return rt.attempt(ctx, op, call)
+	}
+
+	var res *http.Response
+	err := rt.trace(ctx, "send "+op.Method, func(ctx context.Context) error {
+		var err error
+		//nolint:bodyclose // the response is returned below; do decides what happens to it
+		res, err = rt.attempt(ctx, op, call)
+		return err
+	})
+	return res, err
+}
+
+// attempt builds and performs one HTTP request.
+func (rt *Runtime) attempt(ctx context.Context, op Op, call *call) (*http.Response, error) {
 	if op.Body != nil && op.Multipart != nil {
 		return nil, fmt.Errorf("rigclient: %s %s carries both a JSON body and a form; "+
 			"a generated method sends one or the other", op.Method, op.Path)

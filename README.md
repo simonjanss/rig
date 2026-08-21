@@ -52,7 +52,7 @@ rig generate   # 4. compile to one IR, fan out to generators
 | [rig.yaml](docs/rig-yaml.md) · [Tables](docs/tables.md) | The two files you write |
 | [Authentication](docs/auth.md) | Sessions, API keys, OAuth, RBAC |
 | [Notifications](docs/notifications.md) | An inbox, with the audience worked out when it is sent |
-| [Observability](docs/observability.md) | What the server logs, and how to read a 500 |
+| [Observability](docs/observability.md) | The log, the spans, and how to read a 500 |
 
 [examples/](examples/) holds complete applications, built and tested in CI.
 
@@ -75,6 +75,7 @@ pre-push hook that runs the checks. [AGENTS.md](AGENTS.md) has the rest.
 | `auth/` | a separate module: sessions, OAuth, API keys, RBAC |
 | `files/` | a separate module: uploads, the blob seam, the sweeper |
 | `notify/` | a separate module: the notification engine and the inbox routes |
+| `observe/` | a separate module: OpenTelemetry, for the projects that ask for it |
 | `migrate/` | a separate module: apply the project's migrations from its own binary |
 | `rigclient/` | a separate module: the half of a generated Go client that is not generated |
 

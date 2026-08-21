@@ -11,6 +11,7 @@ use (
 	./files
 	./migrate
 	./notify
+	./observe
 	./rigclient
 	./runtime
 )

@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 	pgx "github.com/jackc/pgx/v5"
 	"github.com/simonjanss/rig/examples/fantasyfootball/internal/model"
+	"github.com/simonjanss/rig/observe"
 	"github.com/simonjanss/rig/runtime/dbhook"
 	"github.com/simonjanss/rig/runtime/dbx"
 	"github.com/simonjanss/rig/runtime/query"
@@ -552,6 +553,15 @@ type fixtureRepo struct {
 
 var _ FixtureRepository = (*fixtureRepo)(nil)
 
+// trace runs one stage of a write inside a span of its own.
+//
+// The stage is a callback rather than something bracketed by two calls,
+// because that is what makes the span a function's: it is opened and ended in
+// one place, and nothing at the call site is holding one.
+func (r *fixtureRepo) trace(ctx context.Context, name string, f func(context.Context) error) error {
+	return observe.Trace(ctx, r.db.tracer, name, f)
+}
+
 const fixtureRepoSelect = "fixture.id, fixture.tenant_id, fixture.home_team_id, fixture.away_team_id, fixture.kickoff_at, fixture.created_at, fixture.created_by_account_id, fixture.updated_at, fixture.updated_by_account_id"
 
 // scanFixture reads one row in the order fixtureRepoSelect lists.
@@ -568,6 +578,9 @@ func scanFixture(row pgx.Row) (*model.Fixture, error) {
 
 // Get implements FixtureRepository.
 func (r *fixtureRepo) Get(ctx context.Context, id uuid.UUID, opts ...readopt.Option) (*model.Fixture, error) {
+	ctx, span := r.db.tracer.Start(ctx, "repository.Fixture.Get")
+	defer span.End()
+
 	cfg, err := readopt.Apply(opts)
 	if err != nil {
 		return nil, err
@@ -598,6 +611,9 @@ func (r *fixtureRepo) Get(ctx context.Context, id uuid.UUID, opts ...readopt.Opt
 
 // List implements FixtureRepository.
 func (r *fixtureRepo) List(ctx context.Context, f model.FixtureFilter, page model.FixturePage, opts ...readopt.Option) ([]*model.Fixture, int64, error) {
+	ctx, span := r.db.tracer.Start(ctx, "repository.Fixture.List")
+	defer span.End()
+
 	return r.list(ctx, f, page, opts)
 }
 
@@ -691,6 +707,9 @@ var FixtureDefaultOrder = []query.Order{{Table: "fixture", Column: "created_at",
 
 // Create implements FixtureRepository.
 func (r *fixtureRepo) Create(ctx context.Context, in dbhook.Create[model.FixtureCreateInput, model.Fixture]) (*model.Fixture, error) {
+	ctx, span := r.db.tracer.Start(ctx, "repository.Fixture.Create")
+	defer span.End()
+
 	// Who is asking, first of all. A write from a request carrying no identity is
 	// refused here — before a rule runs, before a column notices — which is
 	// what lets every hook below take the claims as a value rather than something
@@ -720,7 +739,9 @@ func (r *fixtureRepo) Create(ctx context.Context, in dbhook.Create[model.Fixture
 	// across a rule that may call out to another service would be a worse trade
 	// than the one it buys.
 	if in.Hooks.Validator != nil {
-		if err := in.Hooks.Validator.RunCreate(ctx, claims, &in.Input); err != nil {
+		if err := r.trace(ctx, "repository.Fixture.Create.Validator", func(ctx context.Context) error {
+			return in.Hooks.Validator.RunCreate(ctx, claims, &in.Input)
+		}); err != nil {
 			return nil, err
 		}
 	}
@@ -744,7 +765,9 @@ func (r *fixtureRepo) Create(ctx context.Context, in dbhook.Create[model.Fixture
 	var m *model.Fixture
 	err = dbx.InTxIf(ctx, r.db.pool, r.db.conn(), needsTx, func(ctx context.Context, tx dbx.Conn) error {
 		if in.Hooks.Before != nil {
-			if err := in.Hooks.Before(ctx, claims, &in.Input); err != nil {
+			if err := r.trace(ctx, "repository.Fixture.Create.Before", func(ctx context.Context) error {
+				return in.Hooks.Before(ctx, claims, &in.Input)
+			}); err != nil {
 				return err
 			}
 		}
@@ -784,7 +807,11 @@ func (r *fixtureRepo) Create(ctx context.Context, in dbhook.Create[model.Fixture
 		m = created
 
 		if in.Hooks.After != nil {
-			return in.Hooks.After(ctx, claims, m)
+			if err := r.trace(ctx, "repository.Fixture.Create.After", func(ctx context.Context) error {
+				return in.Hooks.After(ctx, claims, m)
+			}); err != nil {
+				return err
+			}
 		}
 		return nil
 	})
@@ -797,7 +824,12 @@ func (r *fixtureRepo) Create(ctx context.Context, in dbhook.Create[model.Fixture
 		// this runs, and reaching into a context for them then is reaching into one
 		// that has been cancelled.
 		done, who := in.Hooks.AfterCommit, claims
-		dbx.AfterCommit(ctx, func() { done(ctx, who, m) })
+		dbx.AfterCommit(ctx, func() {
+			ctx, span := r.db.tracer.Start(ctx, "repository.Fixture.Create.AfterCommit")
+			defer span.End()
+
+			done(ctx, who, m)
+		})
 	}
 
 	return m, nil
@@ -805,6 +837,9 @@ func (r *fixtureRepo) Create(ctx context.Context, in dbhook.Create[model.Fixture
 
 // Update implements FixtureRepository.
 func (r *fixtureRepo) Update(ctx context.Context, id uuid.UUID, in dbhook.Update[model.FixtureUpdateInput, model.Fixture]) (*model.Fixture, error) {
+	ctx, span := r.db.tracer.Start(ctx, "repository.Fixture.Update")
+	defer span.End()
+
 	in.Input.Normalize()
 
 	claims, err := tenancy.FromContext(ctx)
@@ -825,7 +860,9 @@ func (r *fixtureRepo) Update(ctx context.Context, id uuid.UUID, in dbhook.Update
 		// reason: a hook that ran after validation could write a value nothing had
 		// checked.
 		if in.Hooks.Before != nil {
-			if err := in.Hooks.Before(ctx, claims, &in.Input, prev); err != nil {
+			if err := r.trace(ctx, "repository.Fixture.Update.Before", func(ctx context.Context) error {
+				return in.Hooks.Before(ctx, claims, &in.Input, prev)
+			}); err != nil {
 				return err
 			}
 		}
@@ -839,7 +876,9 @@ func (r *fixtureRepo) Update(ctx context.Context, id uuid.UUID, in dbhook.Update
 		}
 
 		if in.Hooks.Validator != nil {
-			if err := in.Hooks.Validator.RunUpdate(ctx, claims, &in.Input, prev); err != nil {
+			if err := r.trace(ctx, "repository.Fixture.Update.Validator", func(ctx context.Context) error {
+				return in.Hooks.Validator.RunUpdate(ctx, claims, &in.Input, prev)
+			}); err != nil {
 				return err
 			}
 		}
@@ -904,7 +943,11 @@ func (r *fixtureRepo) Update(ctx context.Context, id uuid.UUID, in dbhook.Update
 		}
 
 		if in.Hooks.After != nil {
-			return in.Hooks.After(ctx, claims, updated, prev)
+			if err := r.trace(ctx, "repository.Fixture.Update.After", func(ctx context.Context) error {
+				return in.Hooks.After(ctx, claims, updated, prev)
+			}); err != nil {
+				return err
+			}
 		}
 		return nil
 	})
@@ -917,7 +960,12 @@ func (r *fixtureRepo) Update(ctx context.Context, id uuid.UUID, in dbhook.Update
 		// this runs, and reaching into a context for them then is reaching into one
 		// that has been cancelled.
 		done, who := in.Hooks.AfterCommit, claims
-		dbx.AfterCommit(ctx, func() { done(ctx, who, updated, prev) })
+		dbx.AfterCommit(ctx, func() {
+			ctx, span := r.db.tracer.Start(ctx, "repository.Fixture.Update.AfterCommit")
+			defer span.End()
+
+			done(ctx, who, updated, prev)
+		})
 	}
 
 	return updated, nil
@@ -925,6 +973,9 @@ func (r *fixtureRepo) Update(ctx context.Context, id uuid.UUID, in dbhook.Update
 
 // Delete implements FixtureRepository.
 func (r *fixtureRepo) Delete(ctx context.Context, in dbhook.Delete[model.FixtureDeleteInput, model.Fixture]) error {
+	ctx, span := r.db.tracer.Start(ctx, "repository.Fixture.Delete")
+	defer span.End()
+
 	claims, err := tenancy.FromContext(ctx)
 	if err != nil {
 		return err
@@ -939,7 +990,9 @@ func (r *fixtureRepo) Delete(ctx context.Context, in dbhook.Delete[model.Fixture
 		}
 
 		if in.Hooks.Before != nil {
-			if err := in.Hooks.Before(ctx, claims, &in.Input, prev); err != nil {
+			if err := r.trace(ctx, "repository.Fixture.Delete.Before", func(ctx context.Context) error {
+				return in.Hooks.Before(ctx, claims, &in.Input, prev)
+			}); err != nil {
 				return err
 			}
 		}
@@ -948,7 +1001,9 @@ func (r *fixtureRepo) Delete(ctx context.Context, in dbhook.Delete[model.Fixture
 			return writeError(err, "fixture")
 		}
 		if in.Hooks.After != nil {
-			if err := in.Hooks.After(ctx, claims, prev); err != nil {
+			if err := r.trace(ctx, "repository.Fixture.Delete.After", func(ctx context.Context) error {
+				return in.Hooks.After(ctx, claims, prev)
+			}); err != nil {
 				return err
 			}
 		}
@@ -963,7 +1018,12 @@ func (r *fixtureRepo) Delete(ctx context.Context, in dbhook.Delete[model.Fixture
 		// this runs, and reaching into a context for them then is reaching into one
 		// that has been cancelled.
 		done, who := in.Hooks.AfterCommit, claims
-		dbx.AfterCommit(ctx, func() { done(ctx, who, prev) })
+		dbx.AfterCommit(ctx, func() {
+			ctx, span := r.db.tracer.Start(ctx, "repository.Fixture.Delete.AfterCommit")
+			defer span.End()
+
+			done(ctx, who, prev)
+		})
 	}
 
 	return nil

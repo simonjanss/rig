@@ -16,6 +16,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/simonjanss/rig/examples/fantasyfootball/internal/model"
+	"github.com/simonjanss/rig/observe"
 	"github.com/simonjanss/rig/runtime/apirev"
 	"github.com/simonjanss/rig/runtime/dbhook"
 	"github.com/simonjanss/rig/runtime/reqlog"
@@ -240,6 +241,12 @@ func requestContext(s Server, r *http.Request) RequestContext {
 	}
 	if s.RequestID != nil {
 		rc.RequestID = s.RequestID(r)
+	} else {
+		// This project traces, so this request already has an identifier, and
+		// inventing a second one would be inventing a second answer to the same
+		// question. The requestId in the error body, the request_id on every log line
+		// and the trace in a collector are one string, and nobody had to wire it up.
+		rc.RequestID = observe.TraceID(r)
 	}
 	return rc
 }
@@ -340,6 +347,12 @@ func fail(s Server, w http.ResponseWriter, r *http.Request, rc RequestContext, e
 // becomes a thing nobody reads.
 func logFailure(s Server, r *http.Request, rc RequestContext, err error) {
 	code := rigerr.CodeOf(err)
+	// On the span the handler opened, which this does not end: the span belongs to
+	// the handler and is closed by its defer. Only an internal failure makes the
+	// span itself red — the same distinction the two log levels below draw, and
+	// for the same reason.
+	observe.Fail(r.Context(), code.HTTPStatus(), err)
+
 	attrs := []any{
 		slog.Any("request", rc),
 		slog.Int("status", code.HTTPStatus()),

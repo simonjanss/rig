@@ -610,6 +610,16 @@
         "module"
       ]
     },
+    "Tracing": {
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Whether the generated server, repositories and client open OpenTelemetry spans. Off means the generated code names no tracing library at all."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
+    },
     "Validate": {
       "properties": {
         "unmentioned_column": {
@@ -747,6 +757,10 @@
     "notifications": {
       "$ref": "#/$defs/Notifications",
       "description": "The inbox, and how notifications are delivered."
+    },
+    "tracing": {
+      "$ref": "#/$defs/Tracing",
+      "description": "Whether the generated code emits OpenTelemetry spans."
     },
     "naming": {
       "$ref": "#/$defs/Naming",
