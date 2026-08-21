@@ -129,9 +129,11 @@ func TestFailBlamesTheServerOnlyForItsOwnFailures(t *testing.T) {
 			path := spanFile(t)
 			p := setup(t, observe.Config{ServiceName: "todo", File: path})
 
+			status := 0
 			r := httptest.NewRequest(http.MethodGet, "/api/v1/todos/7", nil)
-			r, span := observe.Server(r, "GET /api/v1/todos/{id}", nil)
+			r, span := observe.Server(r, "GET /api/v1/todos/{id}", answered(&status))
 			observe.Fail(r.Context(), tc.status, errors.New("listing todos: connection refused"))
+			status = tc.status
 			span.End()
 
 			flush(t, p)
@@ -144,6 +146,61 @@ func TestFailBlamesTheServerOnlyForItsOwnFailures(t *testing.T) {
 				t.Errorf("status is %q, want %q", spans[0].Status, tc.want)
 			}
 		})
+	}
+}
+
+// The cause survives the status. Fail knows why the request failed and End
+// knows only that it was a 500, and End runs last — so an End that set the
+// status again would replace the one thing on the span worth reading with the
+// word for the status code.
+func TestEndKeepsTheReasonFailRecorded(t *testing.T) {
+	path := spanFile(t)
+	p := setup(t, observe.Config{ServiceName: "todo", File: path})
+
+	const cause = "listing todos: connection refused"
+
+	status := 0
+	r := httptest.NewRequest(http.MethodGet, "/api/v1/todos", nil)
+	r, span := observe.Server(r, "GET /api/v1/todos", answered(&status))
+	observe.Fail(r.Context(), http.StatusInternalServerError, errors.New(cause))
+	status = http.StatusInternalServerError
+	span.End()
+
+	flush(t, p)
+
+	spans := readSpans(t, path)
+	if len(spans) != 1 {
+		t.Fatalf("want one span, got %d", len(spans))
+	}
+	if spans[0].Error != cause {
+		t.Errorf("the span says %q, want the cause %q", spans[0].Error, cause)
+	}
+}
+
+// A 500 that reached the client without going through Fail is still a failed
+// span. Nothing recorded a reason, so the status code is the only thing there
+// is to say, and saying nothing would leave a red request with a green span.
+func TestEndBlamesAFailureNobodyExplained(t *testing.T) {
+	path := spanFile(t)
+	p := setup(t, observe.Config{ServiceName: "todo", File: path})
+
+	status := 0
+	r := httptest.NewRequest(http.MethodGet, "/api/v1/todos", nil)
+	_, span := observe.Server(r, "GET /api/v1/todos", answered(&status))
+	status = http.StatusBadGateway
+	span.End()
+
+	flush(t, p)
+
+	spans := readSpans(t, path)
+	if len(spans) != 1 {
+		t.Fatalf("want one span, got %d", len(spans))
+	}
+	if spans[0].Status != "error" {
+		t.Errorf("a %d left the span at %q", http.StatusBadGateway, spans[0].Status)
+	}
+	if spans[0].Error != http.StatusText(http.StatusBadGateway) {
+		t.Errorf("the span says %q, want the status text", spans[0].Error)
 	}
 }
 

@@ -1,6 +1,7 @@
 package observe
 
 import (
+	"context"
 	"net/http"
 
 	"go.opentelemetry.io/otel"
@@ -18,6 +19,26 @@ import (
 type Span struct {
 	span   trace.Span
 	status func() int
+	// failed is whether [Fail] already said why this request is being refused.
+	//
+	// It exists because the SDK's SetStatus overwrites the description of a
+	// status it is not lowering, so an End that set one unconditionally would
+	// replace the cause with the word for the status code. Written and read on
+	// the handler's own goroutine: Fail runs inside it, End runs from its
+	// defer.
+	failed bool
+}
+
+// spanKey is how [Fail] finds the request's Span on a context. Unexported, and
+// of a type nothing outside this package can name, so the only thing that puts
+// one there is [Server].
+type spanKey struct{}
+
+// requestSpan is the Span [Server] put on this context, if it was this package
+// that opened the span the context is in.
+func requestSpan(ctx context.Context) *Span {
+	s, _ := ctx.Value(spanKey{}).(*Span)
+	return s
 }
 
 // Server starts the span for one request, under whatever trace the caller
@@ -50,7 +71,11 @@ func Server(r *http.Request, route string, status func() int) (*http.Request, *S
 		),
 	)
 
-	return r.WithContext(ctx), &Span{span: span, status: status}
+	// On the context as well as returned, so that Fail — which is handed a
+	// context and not this — can tell that it has already given the span its
+	// reason.
+	s := &Span{span: span, status: status}
+	return r.WithContext(context.WithValue(ctx, spanKey{}, s)), s
 }
 
 // End records what was answered and closes the span.
@@ -70,10 +95,14 @@ func (s *Span) End() {
 		}
 		s.span.SetAttributes(semconv.HTTPResponseStatusCode(code))
 
-		// Only the server's own failures. The error itself was recorded by
-		// Fail, which is where the reason is; this is the case where a status
-		// was written by something that never called it.
-		if code >= 500 && s.span.IsRecording() {
+		// Only the server's own failures, and only the ones Fail did not
+		// already explain. Setting the status again would overwrite the cause
+		// with the word for the status code — SetStatus replaces the
+		// description of a status it is not lowering — and the cause is the
+		// only thing on the span worth reading. What is left is the 500 written
+		// by something that never called Fail, which would otherwise be a red
+		// request with a green span.
+		if code >= 500 && !s.failed && s.span.IsRecording() {
 			s.span.SetStatus(codes.Error, http.StatusText(code))
 		}
 	}

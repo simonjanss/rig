@@ -3,6 +3,7 @@ package rigclient_test
 import (
 	"context"
 	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/simonjanss/rig/rigclient"
@@ -123,5 +124,46 @@ func TestWithoutTheSeamNothingIsTraced(t *testing.T) {
 	}
 	if len(rec.spans) != 0 {
 		t.Errorf("spans = %v on a client with no Trace", rec.spans)
+	}
+}
+
+// The collection endpoints share one helper, and each of them is still its own
+// span. Six methods behind one line is exactly the shape that ends up filed
+// under "GET" if the name is left to the fallback.
+func TestTheAuthCollectionsAreNamedSeparately(t *testing.T) {
+	var rec recorder
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Write([]byte(`{"data":[]}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	rt, err := rigclient.New(rigclient.Config{
+		BaseURL: srv.URL,
+		Trace:   rec.trace,
+	}, rigclient.API{BasePath: "/api/v1", Auth: &profile})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	auth := rt.Auth()
+	for _, call := range []struct {
+		want string
+		run  func() error
+	}{
+		{"authTenants", func() error { _, err := auth.Tenants(t.Context()); return err }},
+		{"authMyTenants", func() error { _, err := auth.MyTenants(t.Context(), "identity"); return err }},
+		{"authMyInvitations", func() error { _, err := auth.MyInvitations(t.Context(), "identity"); return err }},
+		{"authInvitations", func() error { _, err := auth.Invitations(t.Context()); return err }},
+		{"authSessions", func() error { _, err := auth.Sessions(t.Context()); return err }},
+		{"authAPIKeys", func() error { _, err := auth.APIKeys(t.Context()); return err }},
+	} {
+		rec.spans = nil
+		if err := call.run(); err != nil {
+			t.Fatalf("%s: %v", call.want, err)
+		}
+		if len(rec.spans) == 0 || rec.spans[0] != call.want {
+			t.Errorf("spans = %v, want the call named %q", rec.spans, call.want)
+		}
 	}
 }

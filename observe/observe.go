@@ -42,6 +42,7 @@ import (
 	"os"
 
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
 	"go.opentelemetry.io/otel/propagation"
@@ -147,11 +148,7 @@ func Setup(ctx context.Context, cfg Config) (*Provider, error) {
 	cfg.SampleRatio = cmp.Or(cfg.SampleRatio, 1)
 
 	opts := []sdktrace.TracerProviderOption{
-		sdktrace.WithResource(resource.NewWithAttributes(
-			semconv.SchemaURL,
-			semconv.ServiceName(cfg.ServiceName),
-			semconv.ServiceVersion(cfg.ServiceVersion),
-		)),
+		sdktrace.WithResource(serviceResource(cfg)),
 		sdktrace.WithSampler(sampler(cfg)),
 	}
 
@@ -181,6 +178,21 @@ func Setup(ctx context.Context, cfg Config) (*Provider, error) {
 	))
 
 	return &Provider{tp: tp}, nil
+}
+
+// serviceResource is who this process says it is, on every span it exports.
+//
+// The version is appended rather than always set. An attribute holding the
+// empty string is still an attribute, and the generated Tracing() leaves the
+// version for the application to fill in — so setting it unconditionally would
+// put an empty service.version on every span most projects ever export, and a
+// collector grouping by it would file them under a version nobody stamped in.
+func serviceResource(cfg Config) *resource.Resource {
+	attrs := []attribute.KeyValue{semconv.ServiceName(cfg.ServiceName)}
+	if cfg.ServiceVersion != "" {
+		attrs = append(attrs, semconv.ServiceVersion(cfg.ServiceVersion))
+	}
+	return resource.NewWithAttributes(semconv.SchemaURL, attrs...)
 }
 
 // sampler records nothing when there is nowhere to put it.
@@ -269,6 +281,12 @@ func Fail(ctx context.Context, status int, err error) {
 	span.RecordError(err)
 	if status >= 500 {
 		span.SetStatus(codes.Error, err.Error())
+		// So [Span.End] leaves the reason alone. It runs after this and knows
+		// only the status code, and a second SetStatus would replace "listing
+		// todos: connection refused" with "Internal Server Error".
+		if s := requestSpan(ctx); s != nil {
+			s.failed = true
+		}
 	}
 }
 

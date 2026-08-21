@@ -216,7 +216,7 @@ func (a *Auth) ResendVerification(ctx context.Context, opts ...CallOption) error
 
 // Tenants lists every tenant the caller belongs to, reached with a session.
 func (a *Auth) Tenants(ctx context.Context, opts ...CallOption) ([]authwire.TenantView, error) {
-	return list[authwire.TenantView](ctx, a.rt, a.path("/tenants"), opts)
+	return list[authwire.TenantView](ctx, a.rt, "authTenants", a.path("/tenants"), opts)
 }
 
 // SwitchTenant issues a session for another tenant the caller belongs to, and
@@ -268,7 +268,7 @@ func (a *Auth) MyTenants(
 		return nil, err
 	}
 	opts = append([]CallOption{withBearer(identityToken)}, opts...)
-	return list[authwire.TenantView](ctx, a.rt, a.path("/me/tenants"), opts)
+	return list[authwire.TenantView](ctx, a.rt, "authMyTenants", a.path("/me/tenants"), opts)
 }
 
 // MyInvitations lists the invitations waiting for the holder of an identity
@@ -280,7 +280,7 @@ func (a *Auth) MyInvitations(
 		return nil, err
 	}
 	opts = append([]CallOption{withBearer(identityToken)}, opts...)
-	return list[authwire.InvitationToMeView](ctx, a.rt, a.path("/me/invitations"), opts)
+	return list[authwire.InvitationToMeView](ctx, a.rt, "authMyInvitations", a.path("/me/invitations"), opts)
 }
 
 // AcceptMyInvitation joins the tenant an invitation names, and installs the
@@ -347,7 +347,7 @@ func (a *Auth) AcceptInvitation(
 func (a *Auth) Invitations(
 	ctx context.Context, opts ...CallOption,
 ) ([]authwire.InvitationView, error) {
-	return list[authwire.InvitationView](ctx, a.rt, a.path("/invitations"), opts)
+	return list[authwire.InvitationView](ctx, a.rt, "authInvitations", a.path("/invitations"), opts)
 }
 
 // RevokeInvitation withdraws one.
@@ -369,7 +369,7 @@ func (a *Auth) RevokeInvitation(
 // parameter exists at all: two endpoints would let a client written against the
 // narrow one keep working, silently, when its credential was widened.
 func (a *Auth) Sessions(ctx context.Context, opts ...CallOption) ([]authwire.SessionView, error) {
-	return list[authwire.SessionView](ctx, a.rt, a.path("/sessions"), opts)
+	return list[authwire.SessionView](ctx, a.rt, "authSessions", a.path("/sessions"), opts)
 }
 
 // RevokeSession ends one of them.
@@ -503,7 +503,7 @@ func (a *Auth) APIKeys(ctx context.Context, opts ...CallOption) ([]authwire.APIK
 		return nil, notMounted("GET "+a.path("/api-keys"),
 			"API keys are configured in main.go, by giving the handler an apikey manager")
 	}
-	return list[authwire.APIKeyView](ctx, a.rt, a.path("/api-keys"), opts)
+	return list[authwire.APIKeyView](ctx, a.rt, "authAPIKeys", a.path("/api-keys"), opts)
 }
 
 // CreateAPIKey mints one. The secret in the answer is shown exactly once:
@@ -560,10 +560,16 @@ func (a *Auth) needsIdentity() error {
 
 // list reads one of the collection endpoints, which all answer with the same
 // one-member envelope.
+//
+// The name is passed in rather than derived, for the reason [Op.Name] exists:
+// six methods share this one line, and a span named after the method alone
+// would file all six under "GET".
 func list[T any](
-	ctx context.Context, rt *Runtime, path string, opts []CallOption,
+	ctx context.Context, rt *Runtime, name, path string, opts []CallOption,
 ) ([]T, error) {
-	res, err := Do[authwire.List[T]](ctx, rt, Op{Method: http.MethodGet, Root: true, Path: path}, opts...)
+	res, err := Do[authwire.List[T]](ctx, rt, Op{
+		Name: name, Method: http.MethodGet, Root: true, Path: path,
+	}, opts...)
 	if err != nil {
 		return nil, err
 	}
