@@ -20,11 +20,18 @@ import (
 // their values, and a shape filter built by concatenation is an injection
 // point with a streaming response attached.
 //
+// Wiring this into Handlers takes the place of the live shape's scope, which
+// is what this route uses while the field is nil. Whatever that one adds, add
+// here too unless the reason it added it stops applying to these rows —
+// otherwise this shape shows more than the live one does.
+//
 // Unlike the .gen.go files, this one is yours: rig writes it once and never
 // touches it again.
 func VersionsShape(ctx context.Context, r *http.Request, claims tenancy.Claims, id uuid.UUID, p internalelectric.TodoShapeParams, w *electric.Where) error {
 	// Nothing to add. The shape is already one row's history, and id is that
 	// row — refuse here to keep somebody out of a history they may not read.
+	//
+	// Delete this function and leave the field nil to keep the live scope.
 	return nil
 }
 

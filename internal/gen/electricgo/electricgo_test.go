@@ -445,6 +445,67 @@ func TestEveryShapeCarriesTheTenantAndOwnerConditions(t *testing.T) {
 	}
 }
 
+// The columns decide, and the resource's operations deliberately do not — the
+// API needs List for a GET /_deleted and Get for a GET /{id}/_versions, but a
+// shape is its own read surface. rig_notification_recipient is the case that
+// settles it: an unexposed table with no operations at all, subscribed to
+// through a shape because there is no endpoint to read it with. Reading the
+// operations here would give it a live shape and no trash.
+func TestTheExtraShapesIgnoreTheOperations(t *testing.T) {
+	t.Parallel()
+
+	doc := gentest.LoadDocument(t, filepath.Join("testdata", "notify.ir.json"))
+	if ops := doc.Resource("RigNotificationRecipient").Operations; len(ops) != 0 {
+		t.Fatalf("this test needs a resource that exposes no endpoints, got %v", ops)
+	}
+
+	body := routes(t, find(t, gentest.Run(t, electricgo.New(), doc, opts()), "electric.gen.go"))
+
+	for _, want := range []string{
+		`"GET /electric/rig_notification_recipient"`,
+		`"GET /electric/rig_notification_recipient/_deleted"`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("missing %s:\n%s", want, body)
+		}
+	}
+}
+
+// A project that regenerates gains these routes without a line of its own code
+// changing, and a new field on a struct it fills in by name is not a compile
+// error. Defaulting them to no scope would mean whatever narrowing its live
+// shape had — the membership check rig cannot express as a column — stops
+// applying, silently, on two routes that carry the same table's rows.
+func TestADerivedShapeInheritsTheLiveScope(t *testing.T) {
+	t.Parallel()
+
+	doc := gentest.LoadDocument(t, filepath.Join("testdata", fixture))
+	artifacts := gentest.Run(t, electricgo.New(), doc, opts())
+	body := collapse(routes(t, find(t, artifacts, "electric.gen.go")))
+
+	for _, want := range []string{
+		"if h.LessonDeleted == nil { h.LessonDeleted = LessonDeletedScope(h.Lesson) }",
+		"if h.LessonVersions == nil { h.LessonVersions = versionsFromLiveLesson(h.Lesson) }",
+	} {
+		if !strings.Contains(body, collapse(want)) {
+			t.Errorf("missing %s:\n%s", want, body)
+		}
+	}
+
+	// Before the routes are mounted, because a handler closes over the scope it
+	// was given and cannot be told about one later.
+	if fallback, mount := strings.Index(body, "h.LessonDeleted ="), strings.Index(body, "mux.HandleFunc"); fallback > mount {
+		t.Error("the fallback should be wired before the routes are mounted")
+	}
+
+	// And a scope nobody wrote stays nil rather than becoming a closure that
+	// calls one, which would panic on the first subscription.
+	shape := collapse(find(t, artifacts, "lesson_shape.gen.go"))
+	if !strings.Contains(shape, collapse("if live == nil { return nil }")) {
+		t.Errorf("versionsFromLiveLesson should pass nil through:\n%s", shape)
+	}
+}
+
 // A stub is written once and then belongs to the developer, so a shape that
 // shared one with another would have no way to be scoped separately — and a
 // project that regenerates after these shapes existed would find its own file

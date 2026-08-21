@@ -19,10 +19,16 @@ import (
 // their values, and a shape filter built by concatenation is an injection
 // point with a streaming response attached.
 //
+// Wiring this into Handlers takes the place of the live shape's scope, which
+// is what this route uses while the field is nil. Whatever that one adds, add
+// here too unless the reason it added it stops applying to these rows —
+// otherwise this shape shows more than the live one does.
+//
 // Unlike the .gen.go files, this one is yours: rig writes it once and never
 // touches it again.
 func DeletedShape(ctx context.Context, r *http.Request, claims tenancy.Claims, p internalelectric.TodoShapeParams, w *electric.Where) error {
-	// Nothing to add. Delete this function and pass nil if it stays that way.
+	// Nothing to add. Delete this function and leave the field nil to keep the
+	// live shape's scope on this route.
 	return nil
 }
 

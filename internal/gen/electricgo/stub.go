@@ -65,15 +65,23 @@ func (e *emitter) stubFile(res *ir.Resource, sh shape) (gen.Artifact, error) {
 
 	suffix, fn := stubName(sh)
 
-	b.Comment(fn + " narrows " + res.Name + stubSubject(sh) + ".\n\n" +
+	doc := fn + " narrows " + res.Name + stubSubject(sh) + ".\n\n" +
 		"The filter it receives already carries the tenant and the lifecycle " +
 		"conditions, and every condition is joined with AND — so this can only " +
 		"ever show a subscriber less, never more.\n\n" +
 		"Add conditions through the Where methods rather than as text: they bind " +
 		"their values, and a shape filter built by concatenation is an injection " +
-		"point with a streaming response attached.\n\n" +
-		"Unlike the .gen.go files, this one is yours: rig writes it once and never " +
-		"touches it again.")
+		"point with a streaming response attached.\n\n"
+
+	if sh.kind != shapeLive {
+		doc += "Wiring this into Handlers takes the place of the live shape's scope, " +
+			"which is what this route uses while the field is nil. Whatever that one " +
+			"adds, add here too unless the reason it added it stops applying to " +
+			"these rows — otherwise this shape shows more than the live one does.\n\n"
+	}
+
+	b.Comment(doc + "Unlike the .gen.go files, this one is yours: rig writes it once " +
+		"and never touches it again.")
 
 	if sh.kind == shapeVersions {
 		uuidPkg := b.Import("github.com/google/uuid")
@@ -100,6 +108,11 @@ func (e *emitter) stubFile(res *ir.Resource, sh shape) (gen.Artifact, error) {
 	case sh.kind == shapeVersions:
 		b.L("// Nothing to add. The shape is already one row's history, and id is that")
 		b.L("// row — refuse here to keep somebody out of a history they may not read.")
+		b.L("//")
+		b.L("// Delete this function and leave the field nil to keep the live scope.")
+	case sh.kind == shapeDeleted:
+		b.L("// Nothing to add. Delete this function and leave the field nil to keep the")
+		b.L("// live shape's scope on this route.")
 	default:
 		b.L("// Nothing to add. Delete this function and pass nil if it stays that way.")
 	}

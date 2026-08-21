@@ -210,6 +210,19 @@ func handleTodoVersionsShape(s Server, scope TodoVersionsScope) http.HandlerFunc
 	}
 }
 
+// versionsFromLiveTodo is the live scope as a history scope.
+//
+// Nil stays nil rather than becoming a function that calls one: a scope nobody
+// wrote is not a refusal.
+func versionsFromLiveTodo(live TodoScope) TodoVersionsScope {
+	if live == nil {
+		return nil
+	}
+	return func(ctx context.Context, r *http.Request, claims tenancy.Claims, _ uuid.UUID, p TodoShapeParams, w *electric.Where) error {
+		return live(ctx, r, claims, p, w)
+	}
+}
+
 // TodoShapeColumns are the columns this shape carries.
 //
 // They are the resource's readable fields — the same set a GET returns —

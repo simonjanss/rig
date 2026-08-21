@@ -44,15 +44,39 @@ columns are what say it has a history, the same way they decide whether the API
 has a `GET /_deleted`. Asking you a second time would only create a way for the
 two answers to disagree.
 
-| Route | Carries |
-|---|---|
-| `GET /electric/todo` | Live rows. Not deleted, not a snapshot. |
-| `GET /electric/todo/_deleted` | Retired rows — the trash. Needs `deleted_at`. |
-| `GET /electric/todo/{id}/_versions` | One row's previous versions. Needs the snapshot columns. |
+| Route | Carries | Needs |
+|---|---|---|
+| `GET /electric/todo` | Live rows. Not deleted, not a snapshot. | — |
+| `GET /electric/todo/_deleted` | Retired rows — the trash. | `deleted_at` |
+| `GET /electric/todo/{id}/_versions` | One row's previous versions. | the snapshot columns |
+
+The columns are the whole rule, and `operations:` is not part of it. The API
+needs `List` before it offers a `GET /_deleted` and `Get` before it offers a
+`GET /{id}/_versions`, but live sync is its own read surface — a table with no
+`operations` at all still gets shapes, which is how rig's own unexposed tables
+are subscribed to. Reading `operations` here would leave such a table with a
+live shape and no trash.
 
 Every one of them is filtered to the caller's tenant, and to the caller's own
-rows on an owner-scoped table, exactly like the live shape. Each gets its own
-scoping stub, so you can narrow a trash stream without touching a live one.
+rows on an owner-scoped table, exactly like the live shape.
+
+### Scoping them
+
+Each gets its own field on `Handlers` and its own stub, so you can narrow a
+trash stream without touching a live one. **While the field is nil, the route
+uses the live shape's scope.** The trash and the history carry the same table's
+rows, so a check the live shape needed — team membership, a share table, whatever
+rig cannot read off a column — is almost always a check these need too, and
+inheriting can only ever show a subscriber less. Setting the field replaces the
+inherited scope rather than adding to it, so a stub you wire up should repeat
+whatever the live one adds unless the reason for it stops applying.
+
+That matters most on an upgrade: these routes appear the first time you
+regenerate, and a new field on a struct you fill in by name is not a compile
+error. If your live scope is load-bearing for who may see a row, it keeps
+working on all three routes without you doing anything — but wiring the
+generated no-op stubs in without reading them would switch it off for two of
+them.
 
 They are the live-sync counterparts of [`GET /_deleted` and
 `GET /{id}/_versions`](api.md), and the split into routes is the point: a

@@ -40,9 +40,16 @@ type shape struct {
 // Nothing configures this. A table that retires its rows has a trash to stream,
 // and a table that keeps its previous versions has a history — the schema
 // already answers both questions, and answering them again in a configuration
-// key would only create a way for the two answers to disagree. It is the rule
-// the API surface follows for GET /_deleted and GET /{id}/_versions, applied
-// here.
+// key would only create a way for the two answers to disagree.
+//
+// It is the columns alone, and deliberately not the resource's operations. The
+// API asks for both — listDeleted needs List and versions needs Get — but live
+// sync is its own read surface and has never been gated on the CRUD set: a table
+// with no operations at all still gets a live shape, which is how an unexposed
+// table like rig_notification_recipient is subscribed to. Reading the operations
+// here and not there would mean a table whose only read surface is a shape could
+// never have a trash, so what the two rules have in common is the columns and
+// that is what is asked.
 func (e *emitter) shapesFor(res *ir.Resource) []shape {
 	shapes := []shape{{kind: shapeLive, name: res.Name, path: res.Electric.Path}}
 	if res.Storage.IsSoftDeletable() {
@@ -72,10 +79,41 @@ func (e *emitter) shapeFile(res *ir.Resource) (gen.Artifact, error) {
 	for _, sh := range e.shapesFor(res) {
 		e.scopeType(b, res, sh)
 		e.handler(b, res, sh)
+		if sh.kind == shapeVersions {
+			e.versionsAdapter(b, res)
+		}
 	}
 	e.columns(b, res)
 
 	return artifact(naming.Snake(res.Name)+"_shape.gen.go", b, gen.Overwrite)
+}
+
+// versionsAdapter lets the history shape inherit the live shape's scope.
+//
+// The two signatures differ by the row id, and a live scope has no argument for
+// one because it does not need one: the history shape bound the row before the
+// scope ran, so the id is already in the filter this receives. Dropping it is
+// the whole adaptation.
+func (e *emitter) versionsAdapter(b *gobuf.Buf, res *ir.Resource) {
+	var (
+		ctxPkg  = b.Import("context")
+		httpPkg = b.Import("net/http")
+		elecPkg = b.Import(runtimeModule + "/electric")
+		tenPkg  = b.Import(runtimeModule + "/tenancy")
+		uuidPkg = b.Import("github.com/google/uuid")
+	)
+
+	b.Comment("versionsFromLive" + res.Name + " is the live scope as a history scope.\n\n" +
+		"Nil stays nil rather than becoming a function that calls one: a scope " +
+		"nobody wrote is not a refusal.")
+	b.L("func versionsFromLive%s(live %sScope) %sVersionsScope {", res.Name, res.Name, res.Name)
+	b.L("if live == nil { return nil }")
+	b.L("return func(ctx %s.Context, r *%s.Request, claims %s.Claims, _ %s.UUID, p %sShapeParams, w *%s.Where) error {",
+		ctxPkg, httpPkg, tenPkg, uuidPkg, res.Name, elecPkg)
+	b.L("return live(ctx, r, claims, p, w)")
+	b.L("}")
+	b.L("}")
+	b.NL()
 }
 
 // paramsType emits the declared query parameters, typed.

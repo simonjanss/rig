@@ -232,6 +232,19 @@ func handleLessonVersionsShape(s Server, scope LessonVersionsScope) http.Handler
 	}
 }
 
+// versionsFromLiveLesson is the live scope as a history scope.
+//
+// Nil stays nil rather than becoming a function that calls one: a scope nobody
+// wrote is not a refusal.
+func versionsFromLiveLesson(live LessonScope) LessonVersionsScope {
+	if live == nil {
+		return nil
+	}
+	return func(ctx context.Context, r *http.Request, claims tenancy.Claims, _ uuid.UUID, p LessonShapeParams, w *electric.Where) error {
+		return live(ctx, r, claims, p, w)
+	}
+}
+
 // LessonShapeColumns are the columns this shape carries.
 //
 // They are the resource's readable fields — the same set a GET returns —

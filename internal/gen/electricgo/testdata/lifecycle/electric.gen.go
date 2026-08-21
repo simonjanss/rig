@@ -52,6 +52,13 @@ const DefaultElectricURL = "http://electric:3000"
 // table that keeps its previous versions has a history shape. Neither is
 // configured: the columns are what decide, the same way they decide whether
 // the API has a GET /_deleted.
+//
+// Those two inherit the live shape's scope while their own field is nil. They
+// carry the same table's rows, so a narrowing that mattered for the live shape
+// almost always matters for the trash and the history too — and a narrowing
+// the application has to remember to repeat on a route rig added is one that
+// eventually does not get repeated. Set the field to scope them differently;
+// setting it replaces the inherited scope rather than adding to it.
 type Handlers struct {
 	Server Server
 
@@ -73,6 +80,15 @@ func Register(mux *http.ServeMux, h Handlers) {
 		// subscriber has no filter to build, and a shape with no tenant filter streams
 		// the whole table to whoever asked.
 		panic("electric: Server.GetClaims is required")
+	}
+
+	// A derived shape falls back to the live shape's scope. Nil stays nil: a table
+	// nobody scoped is scoped by tenant and lifecycle on all three of its routes.
+	if h.LessonDeleted == nil {
+		h.LessonDeleted = LessonDeletedScope(h.Lesson)
+	}
+	if h.LessonVersions == nil {
+		h.LessonVersions = versionsFromLiveLesson(h.Lesson)
 	}
 
 	mux.HandleFunc("GET /electric/lesson", handleLessonShape(h.Server, h.Lesson))

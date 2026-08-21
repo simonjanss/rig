@@ -59,8 +59,8 @@ Every generator takes `out_dir` and an `options` block. The common ones:
 ## `.gen.` versus stubs
 
 A file with `.gen.` in its name is rewritten on every run. Anything else a
-generator produces — the service stub, the electric scoping stub — is written
-once and then belongs to you.
+generator produces — the service stub, the electric scoping stubs, one per
+shape — is written once and then belongs to you.
 
 `rig generate --force` overwrites generated files that were edited by hand.
 `rig generate --prune` deletes files no generator produces any more.
