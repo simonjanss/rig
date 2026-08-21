@@ -306,7 +306,20 @@ func (e *emitter) helpers(b *gobuf.Buf) {
 	b.L("UserAgent:  r.UserAgent(),")
 	b.L("ClientRevision: r.Header.Get(RevisionHeader),")
 	b.L("}")
-	b.L("if s.RequestID != nil { rc.RequestID = s.RequestID(r) }")
+	if e.tracing() {
+		b.L("if s.RequestID != nil {")
+		b.L("rc.RequestID = s.RequestID(r)")
+		b.L("} else {")
+		b.Comment("This project traces, so this request already has an identifier, " +
+			"and inventing a second one would be inventing a second answer to the " +
+			"same question. The requestId in the error body, the request_id on " +
+			"every log line and the trace in a collector are one string, and " +
+			"nobody had to wire it up.")
+		b.L("rc.RequestID = %s.TraceID(r)", b.Import(observeModule))
+		b.L("}")
+	} else {
+		b.L("if s.RequestID != nil { rc.RequestID = s.RequestID(r) }")
+	}
 	b.L("return rc")
 	b.L("}")
 	b.NL()
@@ -401,6 +414,14 @@ func (e *emitter) helpers(b *gobuf.Buf) {
 		"is how a log becomes a thing nobody reads.")
 	b.L("func logFailure(s Server, r *%s.Request, rc RequestContext, err error) {", httpPkg)
 	b.L("code := %s.CodeOf(err)", errPkg)
+	if e.tracing() {
+		b.Comment("On the span the handler opened, which this does not end: the " +
+			"span belongs to the handler and is closed by its defer. Only an " +
+			"internal failure makes the span itself red — the same distinction the " +
+			"two log levels below draw, and for the same reason.")
+		b.L("%s.Fail(r.Context(), code.HTTPStatus(), err)", b.Import(observeModule))
+		b.NL()
+	}
 	b.L("attrs := []any{")
 	b.L("%s.Any(\"request\", rc),", slogPkg)
 	b.L("%s.Int(\"status\", code.HTTPStatus()),", slogPkg)

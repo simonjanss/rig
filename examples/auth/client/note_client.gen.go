@@ -31,6 +31,7 @@ func (c *NoteClient) List(ctx context.Context, q NoteListQuery, opts ...rigclien
 	rigclient.SetString(query, "scope", q.Scope)
 
 	op := rigclient.Op{
+		Name:   "listNotes",
 		Method: http.MethodGet,
 		Path:   "/notes",
 		Query:  query,
@@ -48,6 +49,7 @@ func (c *NoteClient) List(ctx context.Context, q NoteListQuery, opts ...rigclien
 // wrong with each member of the body.
 func (c *NoteClient) Create(ctx context.Context, in NoteCreateInput, opts ...rigclient.CallOption) (*Note, error) {
 	op := rigclient.Op{
+		Name:   "createNote",
 		Method: http.MethodPost,
 		Path:   "/notes",
 		Body:   in,
@@ -69,6 +71,7 @@ func (c *NoteClient) Search(ctx context.Context, filter NoteFilter, q NoteSearch
 	rigclient.SetString(query, "scope", q.Scope)
 
 	op := rigclient.Op{
+		Name:     "searchNotes",
 		Method:   rigclient.MethodQuery,
 		Path:     "/notes",
 		Query:    query,
@@ -95,6 +98,7 @@ func (c *NoteClient) ListDeleted(ctx context.Context, q NoteListDeletedQuery, op
 	rigclient.SetString(query, "scope", q.Scope)
 
 	op := rigclient.Op{
+		Name:   "listDeletedNotes",
 		Method: http.MethodGet,
 		Path:   "/notes/_deleted",
 		Query:  query,
@@ -112,6 +116,7 @@ func (c *NoteClient) ListDeleted(ctx context.Context, q NoteListDeletedQuery, op
 // Operation deleteNote.
 func (c *NoteClient) Delete(ctx context.Context, id uuid.UUID, opts ...rigclient.CallOption) error {
 	op := rigclient.Op{
+		Name:   "deleteNote",
 		Method: http.MethodDelete,
 		Path:   strings.Replace("/notes/{id}", "{id}", rigclient.PathValue(id.String()), 1),
 	}
@@ -128,6 +133,7 @@ func (c *NoteClient) Get(ctx context.Context, id uuid.UUID, q NoteGetQuery, opts
 	rigclient.SetString(query, "scope", q.Scope)
 
 	op := rigclient.Op{
+		Name:   "getNote",
 		Method: http.MethodGet,
 		Path:   strings.Replace("/notes/{id}", "{id}", rigclient.PathValue(id.String()), 1),
 		Query:  query,
@@ -148,6 +154,7 @@ func (c *NoteClient) Get(ctx context.Context, id uuid.UUID, q NoteGetQuery, opts
 // wrong with each member of the body.
 func (c *NoteClient) Update(ctx context.Context, id uuid.UUID, in NoteUpdateInput, opts ...rigclient.CallOption) (*Note, error) {
 	op := rigclient.Op{
+		Name:   "updateNote",
 		Method: http.MethodPatch,
 		Path:   strings.Replace("/notes/{id}", "{id}", rigclient.PathValue(id.String()), 1),
 		Body:   in,
@@ -179,6 +186,7 @@ func (c *NoteClient) Update(ctx context.Context, id uuid.UUID, in NoteUpdateInpu
 // Operation restoreNote.
 func (c *NoteClient) Restore(ctx context.Context, id uuid.UUID, opts ...rigclient.CallOption) (*Note, error) {
 	op := rigclient.Op{
+		Name:   "restoreNote",
 		Method: http.MethodPost,
 		Path:   strings.Replace("/notes/{id}/_restore", "{id}", rigclient.PathValue(id.String()), 1),
 	}

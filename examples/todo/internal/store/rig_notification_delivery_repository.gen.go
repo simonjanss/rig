@@ -684,7 +684,9 @@ func (r *rigNotificationDeliveryRepo) Create(ctx context.Context, in dbhook.Crea
 		m = created
 
 		if in.Hooks.After != nil {
-			return in.Hooks.After(ctx, claims, m)
+			if err := in.Hooks.After(ctx, claims, m); err != nil {
+				return err
+			}
 		}
 		return nil
 	})
@@ -816,7 +818,9 @@ func (r *rigNotificationDeliveryRepo) Update(ctx context.Context, id uuid.UUID, 
 		}
 
 		if in.Hooks.After != nil {
-			return in.Hooks.After(ctx, claims, updated, prev)
+			if err := in.Hooks.After(ctx, claims, updated, prev); err != nil {
+				return err
+			}
 		}
 		return nil
 	})

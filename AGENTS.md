@@ -45,8 +45,8 @@ make test-docker   # the suite behind the `docker` build tag
 make examples      # regenerate all four examples and run them for real
 ```
 
-`make test-docker` covers `.`, `runtime`, `auth`, `files`, `notify`, `migrate`
-and `rigclient`.
+`make test-docker` covers `.`, `runtime`, `auth`, `files`, `notify`, `observe`,
+`migrate` and `rigclient`.
 Most of it starts its own Postgres on a port of its own and cleans up after
 itself. The `migrate` module is the exception: it expects a database at
 `localhost:55440`, or wherever `DATABASE_URL` points, and **skips itself
@@ -122,7 +122,8 @@ the same commit.** The pages are short and the mapping is mechanical:
 | `runtime/electric`, `internal/gen/electricgo` | `docs/electric.md` |
 | `notify/`, `internal/project/notifications.go` | `docs/notifications.md` |
 | `runtime/serve`, `runtime/dbhook` | `docs/services.md` |
-| `runtime/reqlog`, or what a generator emits about logging | `docs/observability.md` |
+| `runtime/reqlog`, `observe/`, or what a generator emits about logging or spans | `docs/observability.md` |
+| `internal/project/tracing.go` — the `tracing:` block | `docs/observability.md`, `docs/rig-yaml.md` |
 | `rigclient/`, `internal/gen/goclient` | `docs/clients.md` |
 
 Two rules that are easier to break than the table above:
@@ -145,8 +146,8 @@ of the files above is edited. It reminds; it does not gate.
 
 ## Godoc
 
-`runtime/`, `auth/`, `files/`, `notify/`, `migrate/` and `rigclient/` are separate
-modules
+`runtime/`, `auth/`, `files/`, `notify/`, `observe/`, `migrate/` and
+`rigclient/` are separate modules
 that a generated application imports. Their godoc is the only documentation
 their Go surface has: `docs/` covers what somebody writes — `rig.yaml`, a
 migration, a service — and never what they call. So a doc comment there is
@@ -180,7 +181,7 @@ and reads fine where it is. Nothing catches this, so after a rename:
 
 ```bash
 grep -rn '^\s*//.*\[[A-Z][A-Za-z0-9_]*\.[a-z][A-Za-z0-9_]*\]' --include='*.go' \
-  runtime auth files migrate rigclient
+  runtime auth files notify observe migrate rigclient
 ```
 
 **A doc on a `const (` block covers every name in it**, so the block is where a

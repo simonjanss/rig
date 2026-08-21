@@ -482,7 +482,9 @@ func (r *roleRepo) Create(ctx context.Context, in dbhook.Create[model.RoleCreate
 		m = created
 
 		if in.Hooks.After != nil {
-			return in.Hooks.After(ctx, claims, m)
+			if err := in.Hooks.After(ctx, claims, m); err != nil {
+				return err
+			}
 		}
 		return nil
 	})
@@ -582,7 +584,9 @@ func (r *roleRepo) Update(ctx context.Context, id uuid.UUID, in dbhook.Update[mo
 		}
 
 		if in.Hooks.After != nil {
-			return in.Hooks.After(ctx, claims, updated, prev)
+			if err := in.Hooks.After(ctx, claims, updated, prev); err != nil {
+				return err
+			}
 		}
 		return nil
 	})

@@ -30,6 +30,7 @@ func (c *LessonClient) List(ctx context.Context, q LessonListQuery, opts ...rigc
 	rigclient.SetInt(query, "offset", q.Offset)
 
 	op := rigclient.Op{
+		Name:   "listLessons",
 		Method: http.MethodGet,
 		Path:   "/lessons",
 		Query:  query,
@@ -47,6 +48,7 @@ func (c *LessonClient) List(ctx context.Context, q LessonListQuery, opts ...rigc
 // wrong with each member of the body.
 func (c *LessonClient) Create(ctx context.Context, in LessonCreateInput, opts ...rigclient.CallOption) (*Lesson, error) {
 	op := rigclient.Op{
+		Name:   "createLesson",
 		Method: http.MethodPost,
 		Path:   "/lessons",
 		Body:   in,
@@ -67,6 +69,7 @@ func (c *LessonClient) Search(ctx context.Context, filter LessonFilter, q Lesson
 	rigclient.SetInt(query, "offset", q.Offset)
 
 	op := rigclient.Op{
+		Name:     "searchLessons",
 		Method:   rigclient.MethodQuery,
 		Path:     "/lessons",
 		Query:    query,
@@ -92,6 +95,7 @@ func (c *LessonClient) ListDeleted(ctx context.Context, q LessonListDeletedQuery
 	rigclient.SetInt(query, "offset", q.Offset)
 
 	op := rigclient.Op{
+		Name:   "listDeletedLessons",
 		Method: http.MethodGet,
 		Path:   "/lessons/_deleted",
 		Query:  query,
@@ -109,6 +113,7 @@ func (c *LessonClient) ListDeleted(ctx context.Context, q LessonListDeletedQuery
 // Operation deleteLesson.
 func (c *LessonClient) Delete(ctx context.Context, id uuid.UUID, opts ...rigclient.CallOption) error {
 	op := rigclient.Op{
+		Name:   "deleteLesson",
 		Method: http.MethodDelete,
 		Path:   strings.Replace("/lessons/{id}", "{id}", rigclient.PathValue(id.String()), 1),
 	}
@@ -122,6 +127,7 @@ func (c *LessonClient) Delete(ctx context.Context, id uuid.UUID, opts ...rigclie
 // Operation getLesson.
 func (c *LessonClient) Get(ctx context.Context, id uuid.UUID, opts ...rigclient.CallOption) (*Lesson, error) {
 	op := rigclient.Op{
+		Name:   "getLesson",
 		Method: http.MethodGet,
 		Path:   strings.Replace("/lessons/{id}", "{id}", rigclient.PathValue(id.String()), 1),
 	}
@@ -141,6 +147,7 @@ func (c *LessonClient) Get(ctx context.Context, id uuid.UUID, opts ...rigclient.
 // wrong with each member of the body.
 func (c *LessonClient) Update(ctx context.Context, id uuid.UUID, in LessonUpdateInput, opts ...rigclient.CallOption) (*Lesson, error) {
 	op := rigclient.Op{
+		Name:   "updateLesson",
 		Method: http.MethodPatch,
 		Path:   strings.Replace("/lessons/{id}", "{id}", rigclient.PathValue(id.String()), 1),
 		Body:   in,
@@ -158,6 +165,7 @@ func (c *LessonClient) Update(ctx context.Context, id uuid.UUID, in LessonUpdate
 // wrong with each member of the body.
 func (c *LessonClient) Publish(ctx context.Context, id uuid.UUID, in LessonPublishBody, opts ...rigclient.CallOption) (*Lesson, error) {
 	op := rigclient.Op{
+		Name:   "publishLesson",
 		Method: http.MethodPost,
 		Path:   strings.Replace("/lessons/{id}/_publish", "{id}", rigclient.PathValue(id.String()), 1),
 		Body:   in,
@@ -189,6 +197,7 @@ func (c *LessonClient) Publish(ctx context.Context, id uuid.UUID, in LessonPubli
 // Operation restoreLesson.
 func (c *LessonClient) Restore(ctx context.Context, id uuid.UUID, opts ...rigclient.CallOption) (*Lesson, error) {
 	op := rigclient.Op{
+		Name:   "restoreLesson",
 		Method: http.MethodPost,
 		Path:   strings.Replace("/lessons/{id}/_restore", "{id}", rigclient.PathValue(id.String()), 1),
 	}
@@ -207,6 +216,7 @@ func (c *LessonClient) Restore(ctx context.Context, id uuid.UUID, opts ...rigcli
 // Operation revertLesson.
 func (c *LessonClient) Revert(ctx context.Context, id uuid.UUID, in LessonRevertBody, opts ...rigclient.CallOption) (*Lesson, error) {
 	op := rigclient.Op{
+		Name:   "revertLesson",
 		Method: http.MethodPost,
 		Path:   strings.Replace("/lessons/{id}/_revert", "{id}", rigclient.PathValue(id.String()), 1),
 		Body:   in,
@@ -228,6 +238,7 @@ func (c *LessonClient) Revert(ctx context.Context, id uuid.UUID, in LessonRevert
 // Operation versionsOfLesson.
 func (c *LessonClient) Versions(ctx context.Context, id uuid.UUID, opts ...rigclient.CallOption) (*LessonListResponse, error) {
 	op := rigclient.Op{
+		Name:   "versionsOfLesson",
 		Method: http.MethodGet,
 		Path:   strings.Replace("/lessons/{id}/_versions", "{id}", rigclient.PathValue(id.String()), 1),
 	}

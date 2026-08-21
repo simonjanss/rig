@@ -876,7 +876,9 @@ func (r *todoRepo) Create(ctx context.Context, in dbhook.Create[model.TodoCreate
 		m = created
 
 		if in.Hooks.After != nil {
-			return in.Hooks.After(ctx, claims, m)
+			if err := in.Hooks.After(ctx, claims, m); err != nil {
+				return err
+			}
 		}
 		return nil
 	})
@@ -1000,7 +1002,9 @@ func (r *todoRepo) Update(ctx context.Context, id uuid.UUID, in dbhook.Update[mo
 		}
 
 		if in.Hooks.After != nil {
-			return in.Hooks.After(ctx, claims, updated, prev)
+			if err := in.Hooks.After(ctx, claims, updated, prev); err != nil {
+				return err
+			}
 		}
 		return nil
 	})
@@ -1261,7 +1265,9 @@ func (r *todoRepo) Restore(ctx context.Context, id uuid.UUID, in dbhook.Restore[
 		}
 
 		if in.Hooks.After != nil {
-			return in.Hooks.After(ctx, claims, restored, prev)
+			if err := in.Hooks.After(ctx, claims, restored, prev); err != nil {
+				return err
+			}
 		}
 		return nil
 	})

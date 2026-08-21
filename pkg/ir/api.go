@@ -61,6 +61,15 @@ type API struct {
 	// none. Here for the reason [API.Auth] and [API.Files] are.
 	Notifications *Notifications `json:"notifications,omitempty"`
 
+	// Tracing is the spans this API's generated code opens, or nil for a
+	// project that asked for none.
+	//
+	// Nil is the question every generator asks, and asking it is the whole
+	// mechanism: a nil here means no import of rig/observe, no span, and no
+	// OpenTelemetry in the application's go.mod. Not a span that calls a no-op
+	// — optional, in rig, means absent.
+	Tracing *Tracing `json:"tracing,omitempty"`
+
 	// EmbeddedFoundation says rig's own migrations are carried by the modules
 	// that own them rather than vendored into this project's migrations
 	// directory.
@@ -160,6 +169,24 @@ type Notifications struct {
 	BackoffBaseSeconds int64 `json:"backoff_base_seconds"`
 	// RetentionSeconds is how long a read and deleted inbox line is kept.
 	RetentionSeconds int64 `json:"retention_seconds"`
+}
+
+// Tracing is the resolved `tracing:` block: whether the generated code opens
+// spans, and what this service is called when it does.
+//
+// The service name is here rather than left to the application because the
+// application already said it once, in `project.name`. Nothing about where the
+// spans go is here at all: that is a property of the deployment, not of the
+// generated code, and the same binary runs where there is a collector and where
+// there is not.
+type Tracing struct {
+	// Enabled says the generated server, repositories and client open spans.
+	// A document carrying this block always has it set, since a block that is
+	// off resolves to no block at all.
+	Enabled bool `json:"enabled"`
+	// ServiceName is what this application is called in a collector, taken from
+	// the project's own name.
+	ServiceName string `json:"service_name"`
 }
 
 // Origin records why an object exists, so a generator can treat hand-declared

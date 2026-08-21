@@ -85,6 +85,7 @@ func ApplyConfig(api ir.API, schema ir.Schema, set *tableconf.Set, opt ConfigOpt
 		Auth:               api.Auth,
 		Files:              api.Files,
 		Notifications:      api.Notifications,
+		Tracing:            api.Tracing,
 		EmbeddedFoundation: api.EmbeddedFoundation,
 	}
 

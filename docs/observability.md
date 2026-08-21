@@ -3,8 +3,19 @@
 What your server says about the requests it served, and how to find the one that
 went wrong.
 
-Today that means logging, and this page is all of it. Tracing is not built —
-[what rig does not do here](#what-rig-does-not-do-here) says where that stands.
+Three things, at three prices:
+
+| | Costs | Turned on by |
+|---|---|---|
+| **The log** | nothing | nothing — it is always on |
+| **Spans** | an OpenTelemetry dependency | `tracing: {enabled: true}` in rig.yaml |
+| **Exporting them** | a collector, or a file | an environment variable, at run time |
+
+They are separate because they are separately worth it. The line that says why a
+500 happened is worth having in every project, including the one you started
+this morning. Spans are worth having in a project big enough that "which part
+was slow" is a question — and that project may still spend most of its life on a
+laptop with nothing to export to.
 
 ## The short version
 
@@ -85,22 +96,148 @@ Logger: slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
 The liveness and readiness probes are not logged at any level. A check every
 second is not a request anybody wants a line about.
 
-## Correlating with a trace
+## Spans
 
-`RequestID` is a function you supply, so it can return whatever identifies a
-request in the rest of your system. If you already run OpenTelemetry, return the
-trace id:
+One line in `rig.yaml`:
+
+```yaml
+tracing:
+  enabled: true
+```
+
+and the generated code starts opening spans: one per request, one per repository
+call, one per hook, and one per statement. Off — the default — the generated
+code names no tracing library at all, and OpenTelemetry is not in your go.mod.
+Optional here means absent, not a switch that is false.
+
+There is nothing else in the block. The service name is your `project.name`,
+because you already said it once. Where the spans **go** is not generated at
+all: the same binary runs on a laptop, in CI and in production, and only the
+last of those has a collector.
+
+### Wiring it up
+
+Four lines in your `main`, and the generated `api.Tracing()` supplies the name:
+
+```go
+serve.Main(serve.Config{
+    // A span per statement, from the connection: it sees every query,
+    // including the ones your hooks and tasks run.
+    Pool: observe.Pool,
+    ...
+}, func(ctx context.Context, app *serve.App) (http.Handler, error) {
+    tracing, err := observe.Setup(ctx, api.Tracing())
+    if err != nil {
+        return nil, err
+    }
+    // Its own limit: a flush to a collector that is not answering must not
+    // spend the whole shutdown budget.
+    app.CloseWithin("traces", 5*time.Second, tracing.Shutdown)
+
+    repos := store.New(app.Pool, store.Config{Tracer: observe.Tracer()})
+    ...
+```
+
+`examples/fantasyfootball` is the one that turns it on, and is worth reading
+next to this.
+
+### Where the spans go
+
+Nowhere, until you say. Set one of:
+
+```
+OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318   # a collector
+RIG_TRACE_FILE=/var/log/myapp/spans.jsonl           # a file
+```
+
+or the `Endpoint` and `File` fields of `observe.Config` if a variable is the
+wrong place for it.
+
+**With neither, nothing is recorded and nothing is exported** — and the trace
+and span ids still exist. That is deliberate: it is what makes the request id in
+your logs a real trace id even on a machine that has never heard of a collector,
+and it is why `go test` and `go run .` cost nothing. An exporter pointed at a
+host that is not there retries, and the retry comes due during shutdown.
+
+### The file
+
+The file is one JSON object per line — a finished span each — which is grep, and
+which is what a deployment too small for a collector can still read:
+
+```json
+{"time":"2026-08-21T09:14:02.113Z","trace_id":"4bf92f...","span_id":"00f067...",
+ "parent_id":"a3ce92...","name":"repository.Team.Create.Validator","kind":"internal",
+ "duration_ms":38.4,"status":"error","error":"Invalid: a team needs a name",
+ "service":"fantasyfootball"}
+```
+
+It is bounded: `observe.Config.FileMaxBytes` (8 MiB by default) with one
+generation kept beside it as `<name>.1`, so the disk cost is twice the cap
+rather than "however long the process ran". A span that succeeded has no
+`status`, which makes `grep '"status":"error"'` the first thing to try.
+
+### What you get
+
+- **One span per request**, named by the route — `GET /api/v1/teams/{id}` — and
+  not by the path, so it groups. A caller that arrives with a `traceparent`
+  stays in its trace.
+- **One span per repository call**: `repository.Team.Create`.
+- **One per stage of a write**: `.Validator`, `.Before`, `.After`,
+  `.AfterCommit`. This is the point of the whole thing. "The create was slow" is
+  not worth collecting; "the validator was slow" is.
+- **One per statement**, `INSERT team`, with the SQL on it as `db.query.text`.
+  It comes from the connection rather than from generated code, so a query your
+  own hook runs is on the trace too.
+- A failure is recorded on the stage that failed. A 500 makes the request span
+  red; a 404 or a 422 does not, for the same reason those are debug lines and
+  not error lines.
+
+The liveness and readiness probes are not traced, the same as they are not
+logged.
+
+**Not traced yet:** the `auth:` block's routes and the hand-written inbox routes
+under `/notifications`. They log, and their failures carry a request id, but
+they are mounted rather than generated and no span is opened for them.
+
+## Correlating a log line with a trace
+
+With `tracing:` on and no `RequestID` of your own, rig sets one: the trace id.
+The `requestId` in the error body, the `request_id` on every log line and the
+trace in your collector are then the same string, and you wrote nothing.
+
+To keep a caller's own identifier when it sends one, and fall back to the trace:
 
 ```go
 RequestID: func(r *http.Request) string {
-    return trace.SpanContextFromContext(r.Context()).TraceID().String()
+    return cmp.Or(r.Header.Get("X-Request-Id"), observe.TraceID(r))
 },
 ```
 
-Now the `requestId` in the error body, the `request_id` in every log line, and
-the trace in your collector are all the same string. rig has no otel dependency
-and does not need one for this — the import is yours, and the only thing rig has
-to do is not invent an identifier of its own.
+Without the block, `RequestID` is a function you supply and can return whatever
+identifies a request in the rest of your system — including a trace id from an
+OpenTelemetry setup that is entirely your own. rig needs no dependency for that;
+the only thing it has to do is not invent an identifier of its own.
+
+## Tracing a client
+
+A generated Go client traces through a seam rather than a dependency, because
+`rigclient` is imported by every client and most of them do not want otel:
+
+```go
+client, err := todoclient.New(rigclient.Config{
+    BaseURL: "https://api.example.com",
+    Trace:   observe.Call,
+})
+```
+
+Two spans per call, and the nesting is the point: the outer one is the operation
+(`listTodos`), the inner ones are the attempts. One call can be three attempts —
+the QUERY a proxy refused, the POST to the alias, and the retry after the
+credential refreshed — and tracing only the attempts would show that as three
+unrelated requests.
+
+For the transport's own view — DNS, connect, TLS — wrap `Config.HTTPClient` in
+`otelhttp.NewTransport`. That import is yours; rig does not take it.
 
 ## Logging from a service
 
@@ -153,14 +290,14 @@ out at the wrong moment.
 
 ## What rig does not do here
 
-- **No metrics, and rig emits no spans.** Spans are a separate decision with a
-  separate cost — an OpenTelemetry dependency in a project that may not want one
-  — and rig does not generate them yet. Tracing your own server works today, and
-  the seams say so in their own doc comments: `serve.Config.Pool` takes a
-  `*pgxpool.Config` and is where a tracer goes, `Mount` returns an `http.Handler`
-  you can wrap in `otelhttp`, and `rigclient.Config.HTTPClient` takes an
-  `*http.Client` and so a `RoundTripper`. Point `RequestID` at the trace id, as
-  above, and the logs join up with all of it.
+- **No metrics.** Counters, histograms and a `/metrics` endpoint are a separate
+  decision with a separate cost, and rig makes none of it for you. The spans
+  carry durations, which is where most of the questions a histogram answers can
+  be asked instead.
+- **No middleware of somebody else's.** rig opens the request span itself rather
+  than wrapping the mux in `otelhttp`, because the route is only known once the
+  mux has dispatched — outside it, every span would be named by path. If you
+  want otelhttp anyway, `Register` returns an `*http.ServeMux` you can wrap.
 - **No log shipping.** `slog` writes where you point it. A collector, a file, a
   rotation policy and a retention period are the deployment's, not rig's.
 - **No sampling and no rate limit on the lines.** A server under a flood of 500s

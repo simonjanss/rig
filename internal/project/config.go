@@ -22,6 +22,8 @@ type Config struct {
 
 	Notifications Notifications `yaml:"notifications,omitempty" json:"notifications,omitempty" jsonschema_description:"The inbox, and how notifications are delivered."`
 
+	Tracing Tracing `yaml:"tracing,omitempty" json:"tracing,omitempty" jsonschema_description:"Whether the generated code emits OpenTelemetry spans."`
+
 	Naming   Naming   `yaml:"naming,omitempty" json:"naming,omitempty" jsonschema_description:"How database names become Go and JSON names."`
 	Validate Validate `yaml:"validate,omitempty" json:"validate,omitempty" jsonschema_description:"Severity of each configurable convention rule."`
 
@@ -597,6 +599,31 @@ type FilesS3 struct {
 
 	AccessKeyEnv string `yaml:"access_key_env,omitempty" json:"access_key_env,omitempty" jsonschema_description:"Environment variable holding the access key id. Defaults to AWS_ACCESS_KEY_ID."`
 	SecretKeyEnv string `yaml:"secret_key_env,omitempty" json:"secret_key_env,omitempty" jsonschema_description:"Environment variable holding the secret access key. Defaults to AWS_SECRET_ACCESS_KEY."`
+}
+
+// Tracing says whether this project's generated code emits spans.
+//
+// One key, and the two things somebody expects to find beside it are
+// deliberately elsewhere.
+//
+// The service name is the API's name. A project has already said what it is
+// called, and a second name here could disagree with the first — which is the
+// kind of thing nobody notices until two deployments show up in a collector
+// under names neither of them recognises.
+//
+// Where the spans go is not generated at all. The same binary runs on a laptop,
+// in CI and in production, and only the last of those has a collector; a
+// project that had to regenerate to stop exporting would be a project that
+// exports from its test suite. That is an environment variable, or a field on
+// observe.Config in the main function — see docs/observability.md.
+//
+// What is left is the one thing that genuinely belongs in a file the generators
+// read: whether the emitted code opens spans at all. Off means absent — no
+// import of rig/observe, no otel in the go.mod, and not one span that calls a
+// no-op.
+type Tracing struct {
+	// Enabled says this project emits spans.
+	Enabled bool `yaml:"enabled,omitempty" json:"enabled,omitempty" jsonschema_description:"Whether the generated server, repositories and client open OpenTelemetry spans. Off means the generated code names no tracing library at all."`
 }
 
 // Naming tunes the conversion from database names to code and wire names.

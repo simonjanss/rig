@@ -67,6 +67,7 @@ func Compile(raw ir.Schema, set *tableconf.Set, opt Options) (*ir.Document, diag
 		Auth:           cfg.Auth.IR(),
 		Files:          cfg.Files.IR(),
 		Notifications:  cfg.Notifications.IR(),
+		Tracing:        cfg.Tracing.IR(cfg.Project.Name),
 
 		EmbeddedFoundation: !cfg.Migrations.Vendored(),
 	})

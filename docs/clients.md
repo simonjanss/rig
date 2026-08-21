@@ -388,7 +388,28 @@ It is a second method rather than a wider `Create` because `Create` is the
 most-called method rig generates: adding a parameter to it would break every
 existing caller the day somebody adds a file column to a table they already had.
 
+## Tracing a call
+
+If the program calling the API runs OpenTelemetry, hand the client the seam:
+
+```go
+client, err := todoclient.New(rigclient.Config{
+    BaseURL: "https://api.example.com",
+    Trace:   observe.Call,
+})
+```
+
+`Trace` is a function rather than a tracer, so this module depends on no tracing
+library and neither does a client that never sets it. Two spans come out per
+call: the operation — `listTodos` — and one per attempt underneath it. The
+distinction matters because one call can be three attempts: the QUERY a proxy
+refused, the POST to the alias, and the retry after the credential refreshed.
+
+For DNS, connect and TLS as well, wrap `Config.HTTPClient` in
+`otelhttp.NewTransport`. That import is yours.
+
 ## See also
 
+- [observability.md](observability.md) — the server end of the same trace
 - [generators.md](generators.md) — `go-client` options
 - [examples/sdk](../examples/sdk) — a program built on two generated clients

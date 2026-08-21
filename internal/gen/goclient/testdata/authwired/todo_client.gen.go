@@ -30,6 +30,7 @@ func (c *TodoClient) List(ctx context.Context, q TodoListQuery, opts ...rigclien
 	rigclient.SetInt(query, "offset", q.Offset)
 
 	op := rigclient.Op{
+		Name:   "listTodos",
 		Method: http.MethodGet,
 		Path:   "/todos",
 		Query:  query,
@@ -47,6 +48,7 @@ func (c *TodoClient) List(ctx context.Context, q TodoListQuery, opts ...rigclien
 // wrong with each member of the body.
 func (c *TodoClient) Create(ctx context.Context, in TodoCreateInput, opts ...rigclient.CallOption) (*Todo, error) {
 	op := rigclient.Op{
+		Name:   "createTodo",
 		Method: http.MethodPost,
 		Path:   "/todos",
 		Body:   in,
@@ -67,6 +69,7 @@ func (c *TodoClient) Search(ctx context.Context, filter TodoFilter, q TodoSearch
 	rigclient.SetInt(query, "offset", q.Offset)
 
 	op := rigclient.Op{
+		Name:     "searchTodos",
 		Method:   rigclient.MethodQuery,
 		Path:     "/todos",
 		Query:    query,
@@ -83,6 +86,7 @@ func (c *TodoClient) Search(ctx context.Context, filter TodoFilter, q TodoSearch
 // Operation deleteTodo.
 func (c *TodoClient) Delete(ctx context.Context, id uuid.UUID, opts ...rigclient.CallOption) error {
 	op := rigclient.Op{
+		Name:   "deleteTodo",
 		Method: http.MethodDelete,
 		Path:   strings.Replace("/todos/{id}", "{id}", rigclient.PathValue(id.String()), 1),
 	}
@@ -96,6 +100,7 @@ func (c *TodoClient) Delete(ctx context.Context, id uuid.UUID, opts ...rigclient
 // Operation getTodo.
 func (c *TodoClient) Get(ctx context.Context, id uuid.UUID, opts ...rigclient.CallOption) (*Todo, error) {
 	op := rigclient.Op{
+		Name:   "getTodo",
 		Method: http.MethodGet,
 		Path:   strings.Replace("/todos/{id}", "{id}", rigclient.PathValue(id.String()), 1),
 	}
@@ -115,6 +120,7 @@ func (c *TodoClient) Get(ctx context.Context, id uuid.UUID, opts ...rigclient.Ca
 // wrong with each member of the body.
 func (c *TodoClient) Update(ctx context.Context, id uuid.UUID, in TodoUpdateInput, opts ...rigclient.CallOption) (*Todo, error) {
 	op := rigclient.Op{
+		Name:   "updateTodo",
 		Method: http.MethodPatch,
 		Path:   strings.Replace("/todos/{id}", "{id}", rigclient.PathValue(id.String()), 1),
 		Body:   in,

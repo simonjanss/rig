@@ -21,6 +21,7 @@ import (
 	"github.com/simonjanss/rig/examples/fantasyfootball/services/player"
 	"github.com/simonjanss/rig/examples/fantasyfootball/services/team"
 	"github.com/simonjanss/rig/migrate"
+	"github.com/simonjanss/rig/observe"
 	"github.com/simonjanss/rig/runtime/rigerr"
 	"github.com/simonjanss/rig/runtime/serve"
 	"github.com/simonjanss/rig/runtime/tenancy"
@@ -60,8 +61,26 @@ func main() {
 			"prune-idempotency": api.IdempotencyPruner(0),
 		},
 		Migrate: migrate.Require(migrations, migrate.Options{}),
-	}, func(_ context.Context, app *serve.App) (http.Handler, error) {
-		repos := store.New(app.Pool, store.Config{})
+
+		// A span per statement, from the connection rather than from the
+		// generated code: a tracer here sees every query, including the ones a
+		// hook or a task runs and the ones no generator wrote.
+		Pool: observe.Pool,
+	}, func(ctx context.Context, app *serve.App) (http.Handler, error) {
+		// This example is the one that turns `tracing:` on, so it is where the
+		// wiring is shown. Nothing is exported unless the environment says
+		// where to: $OTEL_EXPORTER_OTLP_ENDPOINT for a collector,
+		// $RIG_TRACE_FILE for a file. With neither, the spans cost nothing and
+		// the trace ids are still real, which is what the request id below is.
+		tracing, err := observe.Setup(ctx, api.Tracing())
+		if err != nil {
+			return nil, err
+		}
+		// Its own limit, because a flush to a collector that is not answering
+		// must not spend the whole shutdown budget.
+		app.CloseWithin("traces", 5*time.Second, tracing.Shutdown)
+
+		repos := store.New(app.Pool, store.Config{Tracer: observe.Tracer()})
 
 		// One field per resource is the whole registration surface: adding a
 		// table and forgetting to wire it up does not compile.
@@ -70,8 +89,14 @@ func main() {
 				GetClaims: headerClaims,
 				// Where a write that carried an Idempotency-Key is recorded,
 				// so a client that had to send one twice gets one row.
-				DB:        app.Pool,
-				RequestID: func(r *http.Request) string { return r.Header.Get("X-Request-Id") },
+				DB: app.Pool,
+				// The trace this request belongs to, so the identifier in an
+				// error body, the request_id on every log line and the span in
+				// a collector are one string. A caller that sent its own
+				// X-Request-Id is honoured first.
+				RequestID: func(r *http.Request) string {
+					return cmp.Or(r.Header.Get("X-Request-Id"), observe.TraceID(r))
+				},
 				// So the cause of a 500 lands wherever the server writes, and
 				// carries the identifier the client was handed.
 				Logger: app.Logger,

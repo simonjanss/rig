@@ -67,6 +67,8 @@ func (e *emitter) handler(b *gobuf.Buf, res *ir.Resource, ep *ir.Endpoint) {
 	b.L("w = rec")
 	b.NL()
 
+	e.span(b, ep)
+
 	prepare := "prepare"
 	if ep.Public {
 		prepare = "preparePublic"

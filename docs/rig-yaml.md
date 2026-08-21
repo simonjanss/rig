@@ -572,3 +572,34 @@ empty" rather than as a configuration error.
 rig ships **no transport**. Channels are an interface an application implements,
 for the reason the mail notifier already gives — see
 [notifications.md](notifications.md#delivery).
+
+## `tracing`
+
+Spans. Off by default, and what makes every generator emit them at all — a
+project without this block imports no tracing library and carries no
+OpenTelemetry in its `go.mod`.
+
+```yaml
+tracing:
+  enabled: true
+```
+
+That is the whole block, and the two things you might expect beside it are
+deliberately elsewhere.
+
+The **service name** is `project.name`. You have already said what this
+application is called, and a second name here could disagree with the first —
+which is the kind of thing nobody notices until two deployments turn up in a
+collector under names neither of them recognises.
+
+**Where the spans go** is not generated. A collector endpoint or a file path is
+a property of the deployment, not of the build: the same binary runs on your
+laptop, in CI and in production, and only the last of those has anywhere to send
+spans. It is `$OTEL_EXPORTER_OTLP_ENDPOINT`, `$RIG_TRACE_FILE`, or a field on
+`observe.Config` in your `main`. With none of them set, nothing is recorded and
+nothing is exported — see [observability.md](observability.md#where-the-spans-go)
+for why that is the useful default rather than a broken one.
+
+Turning it on changes generated code, so `rig generate` has to run: the handlers
+open a span each, the repositories open one per call and one per hook, and
+`store.Config` grows a `Tracer` field for your `main` to fill in.

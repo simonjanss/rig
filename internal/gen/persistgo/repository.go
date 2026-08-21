@@ -256,6 +256,7 @@ func (e *emitter) repositoryImpl(b *gobuf.Buf, res *ir.Resource) {
 	b.L("var _ %sRepository = (*%s)(nil)", res.Name, typeName)
 	b.NL()
 
+	e.traceHelper(b, typeName)
 	e.scanHelpers(b, res, typeName)
 	e.getMethod(b, res, typeName)
 	e.listMethod(b, res, typeName)
@@ -401,6 +402,7 @@ func (e *emitter) getMethod(b *gobuf.Buf, res *ir.Resource, typeName string) {
 	b.Comment("Get implements " + res.Name + "Repository.")
 	b.L("func (%s *%s) Get(ctx %s.Context, id %s.UUID, opts ...%s.Option) (*%s, error) {",
 		repo, typeName, ctxPkg, uuidPkg, optPkg, e.entity(b, res))
+	e.methodSpan(b, res, "Get")
 	e.readPreamble(b, res, optPkg, tenPkg, "nil, err", e.usesClaims(res), e.usesClaims(res))
 
 	b.L("args := []any{id}")
@@ -481,6 +483,7 @@ func (e *emitter) listLike(b *gobuf.Buf, res *ir.Resource, typeName, method, doc
 	if onlyDeleted {
 		b.L("func (%s *%s) %s(ctx %s.Context, f %sFilter, page %sPage, opts ...%s.Option) ([]*%s, int64, error) {",
 			repo, typeName, method, ctxPkg, entity, entity, optPkg, entity)
+		e.methodSpan(b, res, method)
 		b.Comment("The lifecycle option is forced and the caller's are kept: which " +
 			"rows the trash holds is not up for discussion, and how wide a view of " +
 			"it the caller gets still is.")
@@ -493,6 +496,7 @@ func (e *emitter) listLike(b *gobuf.Buf, res *ir.Resource, typeName, method, doc
 
 	b.L("func (%s *%s) %s(ctx %s.Context, f %sFilter, page %sPage, opts ...%s.Option) ([]*%s, int64, error) {",
 		repo, typeName, method, ctxPkg, entity, entity, optPkg, entity)
+	e.methodSpan(b, res, method)
 	b.L("return %s.list(ctx, f, page, opts)", repo)
 	b.L("}")
 	b.NL()
@@ -719,6 +723,7 @@ func (e *emitter) createMethod(b *gobuf.Buf, res *ir.Resource, typeName string) 
 	b.Comment("Create implements " + res.Name + "Repository.")
 	b.L("func (%s *%s) Create(ctx %s.Context, in %s.Create[%sCreateInput, %s]) (*%s, error) {",
 		repo, typeName, ctxPkg, hookPkg, entity, entity, entity)
+	e.methodSpan(b, res, "Create")
 	b.Comment("Who is asking, first of all. A write from a request carrying no " +
 		"identity is refused here — before a rule runs, before a column notices " +
 		"— which is what lets every hook below take the claims as a value rather " +
@@ -745,7 +750,7 @@ func (e *emitter) createMethod(b *gobuf.Buf, res *ir.Resource, typeName string) 
 		"and opening one to hold across a rule that may call out to another " +
 		"service would be a worse trade than the one it buys.")
 	b.L("if in.Hooks.Validator != nil {")
-	b.L("if err := in.Hooks.Validator.RunCreate(ctx, claims, &in.Input); err != nil { return nil, err }")
+	e.hookCall(b, res, "in.Hooks.Validator.RunCreate(ctx, claims, &in.Input)", "nil, ", "Create", "Validator")
 	b.L("}")
 	b.NL()
 
@@ -778,7 +783,7 @@ func (e *emitter) createMethod(b *gobuf.Buf, res *ir.Resource, typeName string) 
 	b.L("err = %s.InTxIf(ctx, %s.db.pool, %s.db.connFor(ctx), needsTx, func(ctx %s.Context, tx %s.Conn) error {",
 		dbxPkg, repo, repo, ctxPkg, dbxPkg)
 	b.L("if in.Hooks.Before != nil {")
-	b.L("if err := in.Hooks.Before(ctx, claims, &in.Input); err != nil { return err }")
+	e.hookCall(b, res, "in.Hooks.Before(ctx, claims, &in.Input)", "", "Create", "Before")
 	b.L("}")
 	b.NL()
 
@@ -817,13 +822,15 @@ func (e *emitter) createMethod(b *gobuf.Buf, res *ir.Resource, typeName string) 
 	b.L("}")
 	b.L("m = created")
 	b.NL()
-	b.L("if in.Hooks.After != nil { return in.Hooks.After(ctx, claims, m) }")
+	b.L("if in.Hooks.After != nil {")
+	e.hookCall(b, res, "in.Hooks.After(ctx, claims, m)", "", "Create", "After")
+	b.L("}")
 	b.L("return nil")
 	b.L("})")
 	b.L("if err != nil { return nil, err }")
 	b.NL()
 
-	e.afterCommit(b, "m", "")
+	e.afterCommit(b, res, "Create", "m", "")
 	b.L("return m, nil")
 	b.L("}")
 	b.NL()
@@ -836,7 +843,7 @@ func (e *emitter) createMethod(b *gobuf.Buf, res *ir.Resource, typeName string) 
 // inside somebody else's transaction, the commit that matters is theirs, and
 // announcing the change before it happens is exactly the bug the hook exists to
 // avoid.
-func (e *emitter) afterCommit(b *gobuf.Buf, args ...string) {
+func (e *emitter) afterCommit(b *gobuf.Buf, res *ir.Resource, op string, args ...string) {
 	dbxPkg := b.Import(runtimeModule + "/dbx")
 
 	var passed []string
@@ -851,7 +858,23 @@ func (e *emitter) afterCommit(b *gobuf.Buf, args ...string) {
 		"by the time this runs, and reaching into a context for them then is " +
 		"reaching into one that has been cancelled.")
 	b.L("done, who := in.Hooks.AfterCommit, claims")
-	b.L("%s.AfterCommit(ctx, func() { done(ctx, who, %s) })", dbxPkg, strings.Join(passed, ", "))
+
+	if !e.tracing() {
+		b.L("%s.AfterCommit(ctx, func() { done(ctx, who, %s) })", dbxPkg, strings.Join(passed, ", "))
+		b.L("}")
+		b.NL()
+		return
+	}
+
+	// The span is opened inside the callback rather than around the
+	// registration, because by the time this runs the method that registered it
+	// has returned and its own span is closed. What it hangs from is the
+	// transaction's context, which is what the callback was handed, so the work
+	// still lands under the request that caused it.
+	b.L("%s.AfterCommit(ctx, func() {", dbxPkg)
+	e.afterCommitSpan(b, res, op, "AfterCommit")
+	b.L("done(ctx, who, %s)", strings.Join(passed, ", "))
+	b.L("})")
 	b.L("}")
 	b.NL()
 }
@@ -874,6 +897,7 @@ func (e *emitter) updateMethod(b *gobuf.Buf, res *ir.Resource, typeName string) 
 	b.Comment("Update implements " + res.Name + "Repository.")
 	b.L("func (%s *%s) Update(ctx %s.Context, id %s.UUID, in %s.Update[%sUpdateInput, %s]) (*%s, error) {",
 		repo, typeName, ctxPkg, uuidPkg, hookPkg, entity, entity, entity)
+	e.methodSpan(b, res, "Update")
 	b.L("in.Input.Normalize()")
 	b.NL()
 	b.L("claims, err := %s.FromContext(ctx)", tenPkg)
@@ -910,7 +934,7 @@ func (e *emitter) updateMethod(b *gobuf.Buf, res *ir.Resource, typeName string) 
 		"exactly that reason: a hook that ran after validation could write a " +
 		"value nothing had checked.")
 	b.L("if in.Hooks.Before != nil {")
-	b.L("if err := in.Hooks.Before(ctx, claims, &in.Input, prev); err != nil { return err }")
+	e.hookCall(b, res, "in.Hooks.Before(ctx, claims, &in.Input, prev)", "", "Update", "Before")
 	b.L("}")
 	b.NL()
 
@@ -921,7 +945,7 @@ func (e *emitter) updateMethod(b *gobuf.Buf, res *ir.Resource, typeName string) 
 	b.L("if err := in.Input.Validate(prev); err != nil { return err }")
 	b.NL()
 	b.L("if in.Hooks.Validator != nil {")
-	b.L("if err := in.Hooks.Validator.RunUpdate(ctx, claims, &in.Input, prev); err != nil { return err }")
+	e.hookCall(b, res, "in.Hooks.Validator.RunUpdate(ctx, claims, &in.Input, prev)", "", "Update", "Validator")
 	b.L("}")
 	b.NL()
 
@@ -994,13 +1018,15 @@ func (e *emitter) updateMethod(b *gobuf.Buf, res *ir.Resource, typeName string) 
 	b.L("updated, err = scan%s(tx.QueryRow(ctx, sql, values...))", res.Name)
 	b.L("if err != nil { return writeError(err, %s) }", gobuf.Quote(res.Storage.Table))
 	b.NL()
-	b.L("if in.Hooks.After != nil { return in.Hooks.After(ctx, claims, updated, prev) }")
+	b.L("if in.Hooks.After != nil {")
+	e.hookCall(b, res, "in.Hooks.After(ctx, claims, updated, prev)", "", "Update", "After")
+	b.L("}")
 	b.L("return nil")
 	b.L("})")
 	b.L("if err != nil { return nil, err }")
 	b.NL()
 
-	e.afterCommit(b, "updated", "prev")
+	e.afterCommit(b, res, "Update", "updated", "prev")
 	b.L("return updated, nil")
 	b.L("}")
 	b.NL()
@@ -1059,6 +1085,7 @@ func (e *emitter) snapshotWriter(b *gobuf.Buf, res *ir.Resource, typeName string
 		"a reader of the history is asking about.")
 	b.L("func (%s *%s) writeSnapshot(ctx %s.Context, tx %s.Conn, prev *%s) error {",
 		repo, typeName, ctxPkg, dbxPkg, e.entity(b, res))
+	e.methodSpan(b, res, "writeSnapshot")
 	b.L("snapshotID, err := %s.NewV7()", uuidPkg)
 	b.L("if err != nil { return %s.Internal(err, \"generate an identifier\") }", errPkg)
 	b.NL()
@@ -1176,6 +1203,7 @@ func (e *emitter) deleteMethod(b *gobuf.Buf, res *ir.Resource, typeName string) 
 	b.Comment("Delete implements " + res.Name + "Repository.")
 	b.L("func (%s *%s) Delete(ctx %s.Context, in %s.Delete[%sDeleteInput, %s]) error {",
 		repo, typeName, ctxPkg, hookPkg, e.entity(b, res), e.entity(b, res))
+	e.methodSpan(b, res, "Delete")
 	b.L("claims, err := %s.FromContext(ctx)", tenPkg)
 	b.L("if err != nil { return err }")
 	b.L("_ = claims")
@@ -1191,18 +1219,18 @@ func (e *emitter) deleteMethod(b *gobuf.Buf, res *ir.Resource, typeName string) 
 	e.enterDelete(b, res)
 
 	if !s.IsSoftDeletable() {
-		e.beforeDelete(b)
+		e.beforeDelete(b, res)
 		e.childrenDeleting(b, res)
 		b.L("if _, err := tx.Exec(ctx, \"DELETE FROM %s WHERE id = $1\", in.Input.ID); err != nil {", s.Table)
 		b.L("return writeError(err, %s)", gobuf.Quote(s.Table))
 		b.L("}")
-		e.afterDelete(b)
+		e.afterDelete(b, res)
 		e.childrenDeleted(b, res)
 		b.L("return nil")
 		b.L("})")
 		b.L("if err != nil { return err }")
 		b.NL()
-		e.afterCommit(b, "prev")
+		e.afterCommit(b, res, "Delete", "prev")
 		b.L("return nil")
 		b.L("}")
 		b.NL()
@@ -1221,7 +1249,7 @@ func (e *emitter) deleteMethod(b *gobuf.Buf, res *ir.Resource, typeName string) 
 	b.L("if prev.%s != nil && !in.Input.Hard { return nil }", deletedField)
 	b.NL()
 
-	e.beforeDelete(b)
+	e.beforeDelete(b, res)
 	e.childrenDeleting(b, res)
 
 	b.L("if in.Input.Hard {")
@@ -1235,7 +1263,7 @@ func (e *emitter) deleteMethod(b *gobuf.Buf, res *ir.Resource, typeName string) 
 	b.L("if _, err := tx.Exec(ctx, \"DELETE FROM %s WHERE id = $1\", in.Input.ID); err != nil {", s.Table)
 	b.L("return writeError(err, %s)", gobuf.Quote(s.Table))
 	b.L("}")
-	e.afterDelete(b)
+	e.afterDelete(b, res)
 	e.childrenDeleted(b, res)
 	b.L("return nil")
 	b.L("}")
@@ -1262,23 +1290,23 @@ func (e *emitter) deleteMethod(b *gobuf.Buf, res *ir.Resource, typeName string) 
 	b.L("if _, err := tx.Exec(ctx, sql, values...); err != nil {")
 	b.L("return writeError(err, %s)", gobuf.Quote(s.Table))
 	b.L("}")
-	e.afterDelete(b)
+	e.afterDelete(b, res)
 	e.childrenDeleted(b, res)
 	b.L("return nil")
 	b.L("})")
 	b.L("if err != nil { return err }")
 	b.NL()
 
-	e.afterCommit(b, "prev")
+	e.afterCommit(b, res, "Delete", "prev")
 	b.L("return nil")
 	b.L("}")
 	b.NL()
 }
 
 // beforeDelete and afterDelete emit the two hooks that bracket a deletion.
-func (e *emitter) beforeDelete(b *gobuf.Buf) {
+func (e *emitter) beforeDelete(b *gobuf.Buf, res *ir.Resource) {
 	b.L("if in.Hooks.Before != nil {")
-	b.L("if err := in.Hooks.Before(ctx, claims, &in.Input, prev); err != nil { return err }")
+	e.hookCall(b, res, "in.Hooks.Before(ctx, claims, &in.Input, prev)", "", "Delete", "Before")
 	b.L("}")
 	b.NL()
 }
@@ -1355,9 +1383,9 @@ func (e *emitter) enterDelete(b *gobuf.Buf, res *ir.Resource) {
 	b.NL()
 }
 
-func (e *emitter) afterDelete(b *gobuf.Buf) {
+func (e *emitter) afterDelete(b *gobuf.Buf, res *ir.Resource) {
 	b.L("if in.Hooks.After != nil {")
-	b.L("if err := in.Hooks.After(ctx, claims, prev); err != nil { return err }")
+	e.hookCall(b, res, "in.Hooks.After(ctx, claims, prev)", "", "Delete", "After")
 	b.L("}")
 }
 
@@ -1386,6 +1414,7 @@ func (e *emitter) restoreMethod(b *gobuf.Buf, res *ir.Resource, typeName string)
 	b.Comment("Restore implements " + res.Name + "Repository.")
 	b.L("func (%s *%s) Restore(ctx %s.Context, id %s.UUID, in %s.Restore[%sUpdateInput, %s]) (*%s, error) {",
 		repo, typeName, ctxPkg, uuidPkg, hookPkg, e.entity(b, res), e.entity(b, res), e.entity(b, res))
+	e.methodSpan(b, res, "Restore")
 	b.L("claims, err := %s.FromContext(ctx)", tenPkg)
 	b.L("if err != nil { return nil, err }")
 	b.L("_ = claims")
@@ -1419,7 +1448,7 @@ func (e *emitter) restoreMethod(b *gobuf.Buf, res *ir.Resource, typeName string)
 		"how a value the world has taken since gets changed on the way in. " +
 		"Returning an error refuses the restore instead.")
 	b.L("if in.Hooks.Before != nil {")
-	b.L("if err := in.Hooks.Before(ctx, claims, &in.Input, prev); err != nil { return err }")
+	e.hookCall(b, res, "in.Hooks.Before(ctx, claims, &in.Input, prev)", "", "Restore", "Before")
 	b.L("}")
 	b.NL()
 
@@ -1427,7 +1456,7 @@ func (e *emitter) restoreMethod(b *gobuf.Buf, res *ir.Resource, typeName string)
 		"the ones for fields it touched: the row was not live, so nothing about " +
 		"it has been checked against the world it is returning to.")
 	b.L("if in.Hooks.Validator != nil {")
-	b.L("if err := in.Hooks.Validator.RunRestore(ctx, claims, &in.Input, prev); err != nil { return err }")
+	e.hookCall(b, res, "in.Hooks.Validator.RunRestore(ctx, claims, &in.Input, prev)", "", "Restore", "Validator")
 	b.L("}")
 	b.NL()
 
@@ -1484,13 +1513,15 @@ func (e *emitter) restoreMethod(b *gobuf.Buf, res *ir.Resource, typeName string)
 	b.L("restored, err = scan%s(tx.QueryRow(ctx, sql, values...))", res.Name)
 	b.L("if err != nil { return writeError(err, %s) }", gobuf.Quote(s.Table))
 	b.NL()
-	b.L("if in.Hooks.After != nil { return in.Hooks.After(ctx, claims, restored, prev) }")
+	b.L("if in.Hooks.After != nil {")
+	e.hookCall(b, res, "in.Hooks.After(ctx, claims, restored, prev)", "", "Restore", "After")
+	b.L("}")
 	b.L("return nil")
 	b.L("})")
 	b.L("if err != nil { return nil, err }")
 	b.NL()
 
-	e.afterCommit(b, "restored", "prev")
+	e.afterCommit(b, res, "Restore", "restored", "prev")
 	b.L("return restored, nil")
 	b.L("}")
 	b.NL()
@@ -1509,6 +1540,7 @@ func (e *emitter) listSnapshotsMethod(b *gobuf.Buf, res *ir.Resource, typeName s
 	b.Comment("ListSnapshots implements " + res.Name + "Repository.")
 	b.L("func (%s *%s) ListSnapshots(ctx %s.Context, id %s.UUID) ([]*%s, error) {",
 		repo, typeName, ctxPkg, uuidPkg, e.entity(b, res))
+	e.methodSpan(b, res, "ListSnapshots")
 	b.L("claims, err := %s.FromContext(ctx)", tenPkg)
 	b.L("if err != nil { return nil, err }")
 	b.NL()
@@ -1563,6 +1595,7 @@ func (e *emitter) revertMethod(b *gobuf.Buf, res *ir.Resource, typeName string) 
 	b.Comment("Revert implements " + res.Name + "Repository.")
 	b.L("func (%s *%s) Revert(ctx %s.Context, id, versionID %s.UUID, hooks %s.UpdateHooks[%sUpdateInput, %s]) (*%s, error) {",
 		repo, typeName, ctxPkg, uuidPkg, hookPkg, entity, entity, entity)
+	e.methodSpan(b, res, "Revert")
 
 	b.L("var reverted *%s", entity)
 	b.L("err := %s.InTx(ctx, %s.db.pool, func(ctx %s.Context, tx %s.Conn) error {",

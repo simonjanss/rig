@@ -41,6 +41,7 @@ esac
 case "$rel" in
 internal/project/config.go) pages="docs/rig-yaml.md" ;;
 internal/project/auth.go) pages="docs/auth.md" ;;
+internal/project/tracing.go) pages="docs/observability.md docs/rig-yaml.md" ;;
 internal/tableconf/config.go) pages="docs/tables.md" ;;
 internal/compile/convention.go) pages="docs/schema.md" ;;
 internal/compile/builtin.go) pages="docs/api.md" ;;
@@ -50,7 +51,7 @@ internal/gen/*) pages="docs/generators.md README.md" ;;
 internal/cli/*) pages="docs/cli.md" ;;
 internal/diag/*) pages="docs/diagnostics.md" ;;
 runtime/electric/*) pages="docs/electric.md" ;;
-runtime/reqlog/*) pages="docs/observability.md" ;;
+runtime/reqlog/* | observe/*) pages="docs/observability.md" ;;
 runtime/serve/* | runtime/dbhook/*) pages="docs/services.md" ;;
 auth/*) pages="docs/auth.md" ;;
 rigclient/*) pages="docs/clients.md" ;;
