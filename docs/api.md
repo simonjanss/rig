@@ -27,6 +27,13 @@ GET     /api/v1/todos/_deleted           the trash
 POST    /api/v1/todos/{id}/_restore      restore
 ```
 
+Tables that keep their previous versions also get:
+
+```
+GET     /api/v1/todos/{id}/_versions     the row's history
+POST    /api/v1/todos/{id}/_revert       put a previous version back
+```
+
 ## Pagination
 
 Every list and search response carries the page's position in the full result

@@ -47,6 +47,12 @@ enums:
         name: Snapshot
         description: An immutable copy of the task as it was before an update.
 
+# Live sync. Turning it on is the whole configuration: which shapes exist is
+# decided by the columns, so this table gets the live one, a trash one because
+# it has deleted_at, and a per-row history one because it keeps snapshots.
+electric:
+  enabled: true
+
 # Endpoints beyond the generated CRUD set. rig has no default for one — that is
 # the point of declaring it — so the service layer implements it, and the build
 # fails until it does.

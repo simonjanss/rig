@@ -137,7 +137,8 @@ CREATE TABLE IF NOT EXISTS lesson (
     title        text NOT NULL,
     secret_note  text,
     deleted_at   timestamptz,
-    version_type text NOT NULL DEFAULT 'Original'
+    version_type text NOT NULL DEFAULT 'Original',
+    snapshot_from_lesson_id uuid
 );
 `
 
@@ -175,20 +176,14 @@ type row struct {
 	Value map[string]any `json:"value"`
 }
 
-// front serves the shape the way the generated handler does: the tenant and
-// lifecycle conditions first, then whatever the application adds.
-func front(t *testing.T, proxy *electric.Proxy, tenant uuid.UUID, narrow func(*electric.Where)) *httptest.Server {
+// serve stands a shape up behind the real proxy, with the filter built the way
+// a generated handler builds it: the conditions first, then the request.
+func serve(t *testing.T, proxy *electric.Proxy, build func(*electric.Where)) *httptest.Server {
 	t.Helper()
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var where electric.Where
-		where.Eq("tenant_id", tenant.String()).
-			IsNull("deleted_at").
-			Eq("version_type", "Original")
-
-		if narrow != nil {
-			narrow(&where)
-		}
+		build(&where)
 
 		proxy.Serve(w, r, electric.Shape{
 			Table:   "lesson",
@@ -199,6 +194,45 @@ func front(t *testing.T, proxy *electric.Proxy, tenant uuid.UUID, narrow func(*e
 	}))
 	t.Cleanup(srv.Close)
 	return srv
+}
+
+// front serves the live shape the way the generated handler does: the tenant and
+// lifecycle conditions first, then whatever the application adds.
+func front(t *testing.T, proxy *electric.Proxy, tenant uuid.UUID, narrow func(*electric.Where)) *httptest.Server {
+	t.Helper()
+
+	return serve(t, proxy, func(where *electric.Where) {
+		where.Eq("tenant_id", tenant.String()).
+			IsNull("deleted_at").
+			Eq("version_type", "Original")
+
+		if narrow != nil {
+			narrow(where)
+		}
+	})
+}
+
+// frontDeleted serves the trash shape: the live one inverted.
+func frontDeleted(t *testing.T, proxy *electric.Proxy, tenant uuid.UUID) *httptest.Server {
+	t.Helper()
+
+	return serve(t, proxy, func(where *electric.Where) {
+		where.Eq("tenant_id", tenant.String()).
+			NotNull("deleted_at").
+			Eq("version_type", "Original")
+	})
+}
+
+// frontVersions serves one row's history shape.
+func frontVersions(t *testing.T, proxy *electric.Proxy, tenant, of uuid.UUID) *httptest.Server {
+	t.Helper()
+
+	return serve(t, proxy, func(where *electric.Where) {
+		where.Eq("tenant_id", tenant.String()).
+			Eq("version_type", "Snapshot").
+			Eq("snapshot_from_lesson_id", of.String()).
+			IsNull("deleted_at")
+	})
 }
 
 // fetch reads one shape response.
@@ -253,6 +287,29 @@ func insert(t *testing.T, p *pgxpool.Pool, tenant uuid.UUID, title string, delet
 	return id
 }
 
+// titles names what came back, for a failure that has to say which rows.
+func titles(rows []row) []string {
+	out := make([]string, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, fmt.Sprint(r.Value["title"]))
+	}
+	return out
+}
+
+// snapshot writes a prior version of one row.
+func snapshot(t *testing.T, p *pgxpool.Pool, tenant uuid.UUID, title string, of uuid.UUID) uuid.UUID {
+	t.Helper()
+
+	id := uuid.New()
+	if _, err := p.Exec(context.Background(), `
+		INSERT INTO lesson (id, tenant_id, title, secret_note, version_type, snapshot_from_lesson_id)
+		VALUES ($1, $2, $3, $4, 'Snapshot', $5)`,
+		id, tenant, title, "not for the wire", of); err != nil {
+		t.Fatal(err)
+	}
+	return id
+}
+
 // The claim the whole package rests on.
 func TestAShapeStreamsOnlyTheCallersLiveRows(t *testing.T) {
 	p, url := environment(t)
@@ -272,11 +329,7 @@ func TestAShapeStreamsOnlyTheCallersLiveRows(t *testing.T) {
 	rows := fetch(t, front(t, proxy, mine, nil), "")
 
 	if len(rows) != 1 {
-		var titles []string
-		for _, r := range rows {
-			titles = append(titles, fmt.Sprint(r.Value["title"]))
-		}
-		t.Fatalf("got %d rows %v, want only the live one", len(rows), titles)
+		t.Fatalf("got %d rows %v, want only the live one", len(rows), titles(rows))
 	}
 	if got := fmt.Sprint(rows[0].Value["id"]); got != wanted.String() {
 		t.Errorf("id = %s, want %s", got, wanted)
@@ -285,6 +338,88 @@ func TestAShapeStreamsOnlyTheCallersLiveRows(t *testing.T) {
 	// A shape carries every column it names to every subscriber, forever.
 	if _, leaked := rows[0].Value["secret_note"]; leaked {
 		t.Error("a column outside the projection reached the stream")
+	}
+}
+
+// The trash shape carries exactly what the live one refuses, against the thing
+// that decides it rather than against a string of SQL.
+func TestATrashShapeStreamsOnlyRetiredRows(t *testing.T) {
+	p, url := environment(t)
+
+	proxy, err := electric.New(electric.Config{URL: url})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	mine, theirs := uuid.New(), uuid.New()
+
+	insert(t, p, mine, "mine, live", false, "")
+	wanted := insert(t, p, mine, "mine, deleted", true, "")
+	insert(t, p, theirs, "theirs, deleted", true, "")
+
+	rows := fetch(t, frontDeleted(t, proxy, mine), "")
+
+	if len(rows) != 1 {
+		t.Fatalf("got %d rows %v, want only the retired one", len(rows), titles(rows))
+	}
+	if got := fmt.Sprint(rows[0].Value["id"]); got != wanted.String() {
+		t.Errorf("id = %s, want %s", got, wanted)
+	}
+}
+
+// History is per row. A shape that carried every version of every row would be
+// a different and much larger thing than the GET /{id}/_versions it mirrors.
+func TestAHistoryShapeStreamsOneRowsVersions(t *testing.T) {
+	p, url := environment(t)
+
+	proxy, err := electric.New(electric.Config{URL: url})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	mine := uuid.New()
+
+	live := insert(t, p, mine, "the row", false, "")
+	other := insert(t, p, mine, "another row", false, "")
+
+	wanted := snapshot(t, p, mine, "the row, as it was", live)
+	snapshot(t, p, mine, "another row, as it was", other)
+
+	rows := fetch(t, frontVersions(t, proxy, mine, live), "")
+
+	if len(rows) != 1 {
+		t.Fatalf("got %d rows %v, want only this row's history", len(rows), titles(rows))
+	}
+	if got := fmt.Sprint(rows[0].Value["id"]); got != wanted.String() {
+		t.Errorf("id = %s, want %s", got, wanted)
+	}
+
+	// And never the live row itself, which is what the live shape is for.
+	for _, r := range rows {
+		if fmt.Sprint(r.Value["id"]) == live.String() {
+			t.Error("the live row reached its own history")
+		}
+	}
+}
+
+// The handler cannot look the row up — the electric server has no database
+// handle — so an id from another tenant is answered by the tenant condition
+// rather than by a 404. What matters is that it is answered.
+func TestAHistoryShapeRefusesAnotherTenantsRow(t *testing.T) {
+	p, url := environment(t)
+
+	proxy, err := electric.New(electric.Config{URL: url})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	mine, theirs := uuid.New(), uuid.New()
+
+	hers := insert(t, p, theirs, "hers", false, "")
+	snapshot(t, p, theirs, "hers, as it was", hers)
+
+	if rows := fetch(t, frontVersions(t, proxy, mine, hers), ""); len(rows) != 0 {
+		t.Fatalf("got %d rows %v, want none", len(rows), titles(rows))
 	}
 }
 
@@ -298,8 +433,14 @@ func TestAClientCannotWidenTheShape(t *testing.T) {
 	}
 
 	mine, theirs := uuid.New(), uuid.New()
-	insert(t, p, mine, "mine", false, "")
+	kept := insert(t, p, mine, "mine", false, "")
 	insert(t, p, theirs, "theirs", false, "")
+
+	// The caller's own retired row and its own history, so that a widening
+	// attempt aimed at the lifecycle conditions has something to find if it
+	// works. These belong to the trash and history shapes, which are routes.
+	insert(t, p, mine, "mine, deleted", true, "")
+	snapshot(t, p, mine, "mine, as it was", kept)
 
 	srv := front(t, proxy, mine, nil)
 
@@ -308,11 +449,13 @@ func TestAClientCannotWidenTheShape(t *testing.T) {
 		"table=lesson&where=1%3D1",
 		"columns=id,tenant_id,title,secret_note",
 		"params[1]=" + theirs.String(),
+		"deleted=true",
+		"version_type=Snapshot",
 	} {
 		t.Run(attempt, func(t *testing.T) {
 			rows := fetch(t, srv, attempt)
 			if len(rows) != 1 {
-				t.Fatalf("got %d rows, want only this tenant's one", len(rows))
+				t.Fatalf("got %d rows %v, want only this tenant's live one", len(rows), titles(rows))
 			}
 			if got := fmt.Sprint(rows[0].Value["title"]); got != "mine" {
 				t.Errorf("title = %q", got)

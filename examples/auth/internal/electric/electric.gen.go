@@ -47,10 +47,16 @@ const DefaultElectricURL = "http://localhost:3000"
 //
 // A nil scope is not an error: it means the shape is filtered by tenant and
 // lifecycle and nothing else, which is exactly right for most tables.
+//
+// A soft-deletable table has a trash shape here as well as a live one, and a
+// table that keeps its previous versions has a history shape. Neither is
+// configured: the columns are what decide, the same way they decide whether
+// the API has a GET /_deleted.
 type Handlers struct {
 	Server Server
 
-	RigNotificationRecipient RigNotificationRecipientScope
+	RigNotificationRecipient        RigNotificationRecipientScope
+	RigNotificationRecipientDeleted RigNotificationRecipientDeletedScope
 }
 
 // Register mounts every shape endpoint.
@@ -69,6 +75,7 @@ func Register(mux *http.ServeMux, h Handlers) {
 	}
 
 	mux.HandleFunc("GET /electric/rig_notification_recipient", handleRigNotificationRecipientShape(h.Server, h.RigNotificationRecipient))
+	mux.HandleFunc("GET /electric/rig_notification_recipient/_deleted", handleRigNotificationRecipientDeletedShape(h.Server, h.RigNotificationRecipientDeleted))
 }
 
 // prepare authenticates a subscription and starts its filter.

@@ -332,9 +332,13 @@ a rule: it keeps action sub-paths from ever colliding with a future field name.
 
 ## `electric`
 
-A live-sync shape endpoint for this table. rig builds the tenant and lifecycle
+Live-sync shape endpoints for this table. rig builds the tenant and lifecycle
 predicates; declared params are handed to your own scoping function, which can
-only narrow the shape further.
+only narrow a shape further.
+
+`enabled: true` is the whole configuration. Which shapes exist is decided by
+your columns, not by a key here: a soft-deletable table also gets a trash shape,
+and one that keeps its previous versions also gets a per-row history shape.
 
 ```yaml
 electric:

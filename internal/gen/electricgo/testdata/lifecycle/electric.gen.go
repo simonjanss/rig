@@ -47,10 +47,17 @@ const DefaultElectricURL = "http://electric:3000"
 //
 // A nil scope is not an error: it means the shape is filtered by tenant and
 // lifecycle and nothing else, which is exactly right for most tables.
+//
+// A soft-deletable table has a trash shape here as well as a live one, and a
+// table that keeps its previous versions has a history shape. Neither is
+// configured: the columns are what decide, the same way they decide whether
+// the API has a GET /_deleted.
 type Handlers struct {
 	Server Server
 
-	Lesson LessonScope
+	Lesson         LessonScope
+	LessonDeleted  LessonDeletedScope
+	LessonVersions LessonVersionsScope
 }
 
 // Register mounts every shape endpoint.
@@ -69,6 +76,8 @@ func Register(mux *http.ServeMux, h Handlers) {
 	}
 
 	mux.HandleFunc("GET /electric/lesson", handleLessonShape(h.Server, h.Lesson))
+	mux.HandleFunc("GET /electric/lesson/_deleted", handleLessonDeletedShape(h.Server, h.LessonDeleted))
+	mux.HandleFunc("GET /electric/lesson/{id}/_versions", handleLessonVersionsShape(h.Server, h.LessonVersions))
 }
 
 // prepare authenticates a subscription and starts its filter.
