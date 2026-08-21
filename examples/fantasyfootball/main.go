@@ -55,6 +55,9 @@ func main() {
 
 		Tasks: map[string]serve.Task{
 			"migrate": migrate.Apply(migrations, migrate.Options{Log: os.Stdout}),
+			// Records of writes nobody is going to send again. A cron entry, not
+			// a goroutine: one thing running rather than one per replica.
+			"prune-idempotency": api.IdempotencyPruner(0),
 		},
 		Migrate: migrate.Require(migrations, migrate.Options{}),
 	}, func(_ context.Context, app *serve.App) (http.Handler, error) {
@@ -65,6 +68,9 @@ func main() {
 		return api.Register(api.Handlers{
 			Server: api.Server{
 				GetClaims: headerClaims,
+				// Where a write that carried an Idempotency-Key is recorded,
+				// so a client that had to send one twice gets one row.
+				DB:        app.Pool,
 				RequestID: func(r *http.Request) string { return r.Header.Get("X-Request-Id") },
 				// So the cause of a 500 lands wherever the server writes, and
 				// carries the identifier the client was handed.

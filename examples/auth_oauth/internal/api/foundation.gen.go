@@ -7,6 +7,7 @@ package api
 import (
 	"github.com/simonjanss/rig/auth/foundation"
 	"github.com/simonjanss/rig/migrate"
+	runtimefoundation "github.com/simonjanss/rig/runtime/foundation"
 )
 
 // MigrationSources is every migration set this project needs, in the order
@@ -43,6 +44,7 @@ import (
 func MigrationSources(project migrate.Source) []migrate.Source {
 	return []migrate.Source{
 		{Name: "rig/auth", FS: foundation.Set().FS, Dir: foundation.Set().Dir, Table: foundation.Table},
+		{Name: "rig/runtime", FS: runtimefoundation.Set().FS, Dir: runtimefoundation.Set().Dir, Table: runtimefoundation.Table},
 		project,
 	}
 }

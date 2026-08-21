@@ -89,6 +89,144 @@ member of `LessonPublishBody`, and returning it from the service is what makes
 Nothing generated fills it in — only your service knows what its own body means
 — which is why it comes with `Empty()` and no validator.
 
+## When the server says not now
+
+A 503 from an instance being taken out of a load balancer, a 429 from a rate
+limiter, a connection the server had already closed — none of these mean your
+request was wrong, and all of them are usually over by the time you could ask
+again. The SDK asks again for you.
+
+Four attempts. The first retry goes out immediately, then after about a second,
+then about two — so a call that was going to fail takes roughly five seconds to
+say so. The immediate one is there because the commonest failure worth retrying
+is a pooled connection the server closed while it was idle, and opening another
+one fixes that; waiting a second first would only be slower.
+
+The waits are randomised across half their interval. A hundred clients that all
+failed together would otherwise all come back together, which is the thing the
+interval was for.
+
+Retried: **429, 500, 502, 503, 504**, and a request that never got an answer.
+Not retried: every other 4xx, a 501, and a 505. A 501 is what something in the
+chain says when it has never heard of the `QUERY` method — the SDK falls back to
+the `_search` alias for that, and asking again a second later would not help.
+
+### Writes are retried too, because they go out named
+
+A `POST` whose answer went missing may already have written the row. Sending it
+again would ordinarily write a second one — so every write the SDK might have to
+repeat carries an `Idempotency-Key`, generated per call and kept the same across
+attempts. A rig server that sees a key it has seen before answers with what it
+answered the first time instead of doing the work again, and it records that
+answer in the same transaction as the write, so there is no window where one
+exists without the other.
+
+That is what makes the ambiguous failure stop being ambiguous. A connection that
+dies mid-`POST` may have been applied and may never have arrived; you cannot tell
+and neither can the SDK, but the server can, and that is the only place the
+question can be answered.
+
+You do not have to do anything for this. It is worth knowing about for three
+reasons:
+
+- **A key names one request, not a slot to put requests in.** Reusing one for a
+  different body is a **422**, not a replay. Replaying the wrong response would
+  hand you a success describing something you never asked for.
+- **A write that failed is not remembered.** A create that came back 422 wrote
+  nothing, so there is nothing to be idempotent about — fix the body, reuse the
+  key, and you get the write you wanted rather than a cached complaint about the
+  old one.
+- **`WithIdempotencyKey` is still worth reaching for**, when you want to choose
+  the name yourself. A key derived from your data — an import job naming a row by
+  the line it came from — deduplicates a re-run of the whole job, which a fresh
+  random name cannot.
+
+**A delete that had to be sent twice can come back `NotFound`.** Deletes are not
+keyed: a delete is already idempotent in what it leaves behind, and buying a
+smoother answer would cost a transaction on every one. If the first attempt
+worked and its answer was lost, the second is telling the truth — the row is
+gone. `rigclient.WithRetry(1)` is how you decline to pay that.
+
+**An upload is never sent twice.** It is the one write with no key on it, and
+the reason is the server's: an upload route's body is still arriving when the
+handler calls your service, so recording it would mean holding a database
+transaction open for the length of a transfer — a pooled connection per upload,
+for as long as the slowest client takes. A few of those are the whole pool. So
+an upload that fails comes back to you, and sending it again is your call to
+make.
+
+That costs a create carrying a file its retry too, even though the server does
+record one: the SDK cannot tell that route from an upload route, and guessing
+wrong in the other direction stores the file twice. `WithIdempotencyKey` still
+names such a create if you re-send it yourself.
+
+For a create that does carry a file, the fingerprint that catches a reused key
+covers the fields and the path, not the file bytes. Hashing those would mean
+buffering a file that may be larger than memory, which is the one thing the whole
+file path exists to avoid.
+
+### The interval the server asked for
+
+`Retry-After` wins over the SDK's own backoff, in both the forms it takes — the
+seconds rig's own server sends, and the date a CDN or WAF in front of it might.
+It is not jittered and it cancels the immediate first retry: a server that has
+just said when to come back has answered that question.
+
+An interval longer than your call has left is not waited for, and neither is one
+longer than thirty seconds. Whether your program has a minute is a question about
+your program, so the refusal comes back with the interval on it and you decide:
+
+```go
+if rigclient.IsRateLimited(err) {
+    var e *rigclient.Error
+    errors.As(err, &e)
+    log.Printf("rate limited; the server wants %s", e.RetryAfter)
+}
+```
+
+### The error is still the server's own
+
+Nothing about a refusal changed. When the attempts run out you get the last one
+whole — code, message, request ID, fields — not a wrapper saying how many times
+it was tried. `IsRateLimited`, `errors.As`, `CodeOf` and
+`client.TodoCreateError(err)` all read it exactly as they did before any of this
+existed. If the budget ran out you still get the server's refusal rather than a
+deadline error, because blaming your clock for somebody else's outage sends you
+to the wrong logs.
+
+### Retries do not lengthen your call
+
+**They happen inside the timeout you already had**, retries and backoff included.
+Turning them on cannot make a call slower than it was — which is the whole reason
+they are on by default. What it costs is the other side of that: a call that
+spends its entire budget on the first attempt has nothing left for a second, so a
+slow server gets one try where a fast-failing one gets four.
+
+Raising the attempt count without raising the timeout buys more tries inside the
+same wall clock, not more wall clock:
+
+```go
+rigclient.Config{Retry: rigclient.Retry{Attempts: 6}}         // every call
+client.Todos.List(ctx, q, rigclient.WithRetry(1))             // and off for this one
+```
+
+### What is not retried
+
+A body that fails while *you* are reading it. Once the headers are a success the
+call succeeded as far as the SDK is concerned, so a download that dies halfway
+through `io.Copy` is yours to make again — and `WithRange` is what resumes it
+rather than starting over.
+
+A request that never went out, either: a body that would not encode and a
+credential that would not refresh are your call's own failures, and repeating
+them would only make a bug take four times as long to surface.
+
+And any upload, for the reason above. A form body is still *re-sent* by the two
+things that are not retries — the `_search` fallback and a credential refresh on
+a 401 — and an upload whose body cannot be produced a second time comes back
+there as `rigclient.ErrCannotRetry` joined to whatever prompted it. See [a body
+that cannot seek](#sending-files).
+
 ## Bounding one call
 
 `rigclient.Config.HTTPClient` defaults to a client with a thirty-second timeout,
@@ -106,6 +244,10 @@ file, err := client.Todos.UploadCoverFile(ctx, todoID, upload,
 Raising the default instead would weaken every other route to suit the one that
 transfers files. `WithTimeout` takes a shallow copy of your client with a
 different deadline, so the transport and its connection pool are still shared.
+
+It bounds the call and not each attempt, so ten minutes means ten minutes however
+many times the SDK had to send it — see [When the server says not
+now](#when-the-server-says-not-now).
 
 ## Asking for the whole tenant
 

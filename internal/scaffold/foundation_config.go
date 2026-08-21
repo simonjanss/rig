@@ -302,6 +302,27 @@ columns:
 	}
 }
 
+// idempotencyConfigs is rig_idempotency's, and it is the shortest one here
+// because the table is the least like a resource of anything the foundation
+// creates.
+//
+// It exists to reserve the name. A project that exposed this table would be
+// serving other people's stored responses over HTTP, so there is no
+// configuration worth writing beyond saying no — but the resource name still has
+// to be taken, or somebody's own `idempotency` table would project to it and the
+// collision would surface as a generated method that overwrote another.
+func idempotencyConfigs() []tableConfig {
+	return []tableConfig{
+		config("rig_idempotency", "Idempotency",
+			`# Never exposed, and not the usual expose: false. The rows here are the
+# stored responses of writes that carried an Idempotency-Key — somebody
+# else's answers, kept only to be replayed to the caller that earned them.
+# An endpoint over this table would serve them to anybody who could list it.
+expose: false`,
+		),
+	}
+}
+
 // notificationConfigs are the two notification tables', and like rig_file's they
 // are written for a project that wants them read rather than for one that wants
 // CRUD.

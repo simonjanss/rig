@@ -46,7 +46,7 @@ func importDemo(ctx context.Context, args []string) error {
 	path := set.String("file", "testdata/todos.csv", "the CSV to import")
 	tenant := set.String("tenant", uuid.NewString(), "the tenant to import into")
 	workers := set.Int("workers", 4, "how many rows to import at once")
-	attempts := set.Int("attempts", 3, "how many times to try a row the server asked us to retry")
+	attempts := set.Int("attempts", 3, "how many times to send a row the server asked us to retry")
 	skipExisting := set.Bool("skip-existing", true, "leave a todo alone when its title is already there")
 	dryRun := set.Bool("dry-run", false, "read and check the file, and write nothing")
 	if err := set.Parse(args); err != nil {
@@ -99,8 +99,13 @@ func (e *importFailed) Error() string {
 
 // importJob is one run.
 type importJob struct {
-	client       *client.Client
-	workers      int
+	client  *client.Client
+	workers int
+	// attempts is handed to the SDK per call rather than spent in a loop here.
+	// Deciding which failures are worth repeating, how long to wait, and how to
+	// keep a crowd of workers from coming back in lockstep is the same decision
+	// in every program that calls an API, so it lives in rigclient — and what is
+	// left here is the number, and the key below that a random one could not be.
 	attempts     int
 	skipExisting bool
 	dryRun       bool
@@ -209,15 +214,14 @@ func (j *importJob) importRow(ctx context.Context, in row) outcome {
 		}
 	}
 
-	err := j.retrying(ctx, func() error {
-		_, err := j.client.Todos.Create(ctx, in.input,
-			// A create the client had to send twice is still one todo, on a
-			// server that honours the header. rig does not yet, so this is a
-			// statement of intent — and the check above is what stands in for it
-			// in the meantime.
-			rigclient.WithIdempotencyKey(idempotencyKey(in)))
-		return err
-	})
+	// The retry is the SDK's now, and so is the key it would otherwise be sent
+	// under. What is still worth choosing by hand is the name: this one is
+	// derived from the row, so re-running the whole import after fixing three
+	// lines writes those three and replays the rest, which a name generated per
+	// call cannot do.
+	_, err := j.client.Todos.Create(ctx, in.input,
+		rigclient.WithIdempotencyKey(idempotencyKey(in)),
+		rigclient.WithRetry(j.attempts))
 	if err != nil {
 		return outcome{line: in.line, title: in.input.Title, status: failed, detail: explainRow(err)}
 	}
@@ -232,69 +236,13 @@ func (j *importJob) importRow(ctx context.Context, in row) outcome {
 // and belongs in the migration rather than here. What this buys is the ordinary
 // case — somebody running the import a second time after fixing three rows.
 func (j *importJob) exists(ctx context.Context, title string) (bool, error) {
-	var found bool
-	err := j.retrying(ctx, func() error {
-		res, err := j.client.Todos.Search(ctx, client.TodoFilter{
-			Equals: &client.TodoFilterEquals{Title: &title},
-		}, client.TodoSearchQuery{Limit: rigclient.P(1)})
-		if err != nil {
-			return err
-		}
-		found = res != nil && len(res.Data) > 0
-		return nil
-	})
-	return found, err
-}
-
-// retrying runs a call, trying again only where trying again could help.
-//
-// The distinction is the whole of it. A 429 and a 5xx are the server asking for
-// a moment; a 422 is the row being wrong, and will be just as wrong in a second.
-// Retrying the second kind turns a report somebody could act on into a job that
-// takes three times as long to produce the same one.
-func (j *importJob) retrying(ctx context.Context, call func() error) error {
-	attempts := max(j.attempts, 1)
-
-	var err error
-	for attempt := 1; attempt <= attempts; attempt++ {
-		if err = call(); err == nil {
-			return nil
-		}
-		if !worthRetrying(err) || attempt == attempts {
-			return err
-		}
-
-		select {
-		case <-time.After(backoff(err, attempt)):
-		case <-ctx.Done():
-			return ctx.Err()
-		}
+	res, err := j.client.Todos.Search(ctx, client.TodoFilter{
+		Equals: &client.TodoFilterEquals{Title: &title},
+	}, client.TodoSearchQuery{Limit: rigclient.P(1)}, rigclient.WithRetry(j.attempts))
+	if err != nil {
+		return false, err
 	}
-	return err
-}
-
-// worthRetrying says which failures are the server's rather than the row's.
-func worthRetrying(err error) bool {
-	var e *rigclient.Error
-	if !errors.As(err, &e) {
-		// Not a refusal at all: a connection reset, a timeout, a server that was
-		// restarting. Those are the ones a second attempt is actually for.
-		return true
-	}
-	return e.Status >= 500 || rigclient.IsRateLimited(err)
-}
-
-// backoff is how long to wait before trying again.
-//
-// The server's own answer wins when it gave one: Retry-After is not a hint, it
-// is the interval after which the request will stop being refused, and guessing
-// a shorter one just spends the next attempt on another 429.
-func backoff(err error, attempt int) time.Duration {
-	var e *rigclient.Error
-	if errors.As(err, &e) && e.RetryAfter > 0 {
-		return e.RetryAfter
-	}
-	return time.Duration(attempt) * 200 * time.Millisecond
+	return res != nil && len(res.Data) > 0, nil
 }
 
 // idempotencyKey names this row's write, the same way on every attempt.

@@ -603,7 +603,7 @@ func (r *todoAttachmentRepo) Get(ctx context.Context, id uuid.UUID, opts ...read
 	}
 
 	sql := fmt.Sprintf("SELECT %s FROM todo_attachment WHERE %s", todoAttachmentRepoSelect, where)
-	m, err := scanTodoAttachment(r.db.conn().QueryRow(ctx, sql, args...))
+	m, err := scanTodoAttachment(r.db.connFor(ctx).QueryRow(ctx, sql, args...))
 	if dbx.IsNoRows(err) {
 		return nil, rigerr.NotFound("no TodoAttachment with id %s", id)
 	}
@@ -666,7 +666,7 @@ func (r *todoAttachmentRepo) list(ctx context.Context, f model.TodoAttachmentFil
 	}
 	countSQL := fmt.Sprintf("SELECT count(*) FROM todo_attachment%s", countWhere)
 	var total int64
-	if err := r.db.conn().QueryRow(ctx, countSQL, countArgs.Values()...).Scan(&total); err != nil {
+	if err := r.db.connFor(ctx).QueryRow(ctx, countSQL, countArgs.Values()...).Scan(&total); err != nil {
 		return nil, 0, rigerr.Internal(err, "count todo_attachment")
 	}
 
@@ -689,7 +689,7 @@ func (r *todoAttachmentRepo) list(ctx context.Context, f model.TodoAttachmentFil
 	}
 
 	listSQL := fmt.Sprintf("SELECT %s FROM todo_attachment%s%s%s%s", todoAttachmentRepoSelect, joinSQL, where, query.OrderSQL(order), window.SQL(args))
-	rows, err := r.db.conn().Query(ctx, listSQL, args.Values()...)
+	rows, err := r.db.connFor(ctx).Query(ctx, listSQL, args.Values()...)
 	if err != nil {
 		return nil, 0, rigerr.Internal(err, "list todo_attachment")
 	}
@@ -768,7 +768,7 @@ func (r *todoAttachmentRepo) Create(ctx context.Context, in dbhook.Create[model.
 	needsTx := true
 
 	var m *model.TodoAttachment
-	err = dbx.InTxIf(ctx, r.db.pool, r.db.conn(), needsTx, func(ctx context.Context, tx dbx.Conn) error {
+	err = dbx.InTxIf(ctx, r.db.pool, r.db.connFor(ctx), needsTx, func(ctx context.Context, tx dbx.Conn) error {
 		if in.Hooks.Before != nil {
 			if err := in.Hooks.Before(ctx, claims, &in.Input); err != nil {
 				return err

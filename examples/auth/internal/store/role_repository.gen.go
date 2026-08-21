@@ -309,7 +309,7 @@ func (r *roleRepo) Get(ctx context.Context, id uuid.UUID, opts ...readopt.Option
 	}
 
 	sql := fmt.Sprintf("SELECT %s FROM role WHERE %s", roleRepoSelect, where)
-	m, err := scanRole(r.db.conn().QueryRow(ctx, sql, args...))
+	m, err := scanRole(r.db.connFor(ctx).QueryRow(ctx, sql, args...))
 	if dbx.IsNoRows(err) {
 		return nil, rigerr.NotFound("no Role with id %s", id)
 	}
@@ -363,7 +363,7 @@ func (r *roleRepo) list(ctx context.Context, f model.RoleFilter, page model.Role
 	}
 	countSQL := fmt.Sprintf("SELECT count(*) FROM role%s", countWhere)
 	var total int64
-	if err := r.db.conn().QueryRow(ctx, countSQL, countArgs.Values()...).Scan(&total); err != nil {
+	if err := r.db.connFor(ctx).QueryRow(ctx, countSQL, countArgs.Values()...).Scan(&total); err != nil {
 		return nil, 0, rigerr.Internal(err, "count role")
 	}
 
@@ -386,7 +386,7 @@ func (r *roleRepo) list(ctx context.Context, f model.RoleFilter, page model.Role
 	}
 
 	listSQL := fmt.Sprintf("SELECT %s FROM role%s%s%s%s", roleRepoSelect, joinSQL, where, query.OrderSQL(order), window.SQL(args))
-	rows, err := r.db.conn().Query(ctx, listSQL, args.Values()...)
+	rows, err := r.db.connFor(ctx).Query(ctx, listSQL, args.Values()...)
 	if err != nil {
 		return nil, 0, rigerr.Internal(err, "list role")
 	}
@@ -463,7 +463,7 @@ func (r *roleRepo) Create(ctx context.Context, in dbhook.Create[model.RoleCreate
 	needsTx := in.Hooks.Before != nil || in.Hooks.After != nil
 
 	var m *model.Role
-	err = dbx.InTxIf(ctx, r.db.pool, r.db.conn(), needsTx, func(ctx context.Context, tx dbx.Conn) error {
+	err = dbx.InTxIf(ctx, r.db.pool, r.db.connFor(ctx), needsTx, func(ctx context.Context, tx dbx.Conn) error {
 		if in.Hooks.Before != nil {
 			if err := in.Hooks.Before(ctx, claims, &in.Input); err != nil {
 				return err

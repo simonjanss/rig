@@ -399,7 +399,7 @@ func (r *rigNotificationDeviceRepo) Get(ctx context.Context, id uuid.UUID, opts 
 	}
 
 	sql := fmt.Sprintf("SELECT %s FROM rig_notification_device WHERE %s", rigNotificationDeviceRepoSelect, where)
-	m, err := scanRigNotificationDevice(r.db.conn().QueryRow(ctx, sql, args...))
+	m, err := scanRigNotificationDevice(r.db.connFor(ctx).QueryRow(ctx, sql, args...))
 	if dbx.IsNoRows(err) {
 		return nil, rigerr.NotFound("no RigNotificationDevice with id %s", id)
 	}
@@ -453,7 +453,7 @@ func (r *rigNotificationDeviceRepo) list(ctx context.Context, f model.RigNotific
 	}
 	countSQL := fmt.Sprintf("SELECT count(*) FROM rig_notification_device%s", countWhere)
 	var total int64
-	if err := r.db.conn().QueryRow(ctx, countSQL, countArgs.Values()...).Scan(&total); err != nil {
+	if err := r.db.connFor(ctx).QueryRow(ctx, countSQL, countArgs.Values()...).Scan(&total); err != nil {
 		return nil, 0, rigerr.Internal(err, "count rig_notification_device")
 	}
 
@@ -476,7 +476,7 @@ func (r *rigNotificationDeviceRepo) list(ctx context.Context, f model.RigNotific
 	}
 
 	listSQL := fmt.Sprintf("SELECT %s FROM rig_notification_device%s%s%s%s", rigNotificationDeviceRepoSelect, joinSQL, where, query.OrderSQL(order), window.SQL(args))
-	rows, err := r.db.conn().Query(ctx, listSQL, args.Values()...)
+	rows, err := r.db.connFor(ctx).Query(ctx, listSQL, args.Values()...)
 	if err != nil {
 		return nil, 0, rigerr.Internal(err, "list rig_notification_device")
 	}
@@ -554,7 +554,7 @@ func (r *rigNotificationDeviceRepo) Create(ctx context.Context, in dbhook.Create
 	needsTx := in.Hooks.Before != nil || in.Hooks.After != nil
 
 	var m *model.RigNotificationDevice
-	err = dbx.InTxIf(ctx, r.db.pool, r.db.conn(), needsTx, func(ctx context.Context, tx dbx.Conn) error {
+	err = dbx.InTxIf(ctx, r.db.pool, r.db.connFor(ctx), needsTx, func(ctx context.Context, tx dbx.Conn) error {
 		if in.Hooks.Before != nil {
 			if err := in.Hooks.Before(ctx, claims, &in.Input); err != nil {
 				return err

@@ -19,6 +19,7 @@ package rigclient
 
 import (
 	"errors"
+	"math/rand/v2"
 	"net/http"
 	"net/url"
 	"strings"
@@ -80,6 +81,13 @@ type Config struct {
 	// Now is the clock, for a test that has to cross a token expiry without
 	// waiting ten minutes for one. Nil is [time.Now].
 	Now func() time.Time
+
+	// Retry is how a call the server could not answer is sent again. The zero
+	// value sends a call up to four times with a jittered backoff — a read and a
+	// delete because they are repeatable by nature, a write because the SDK names
+	// it with an Idempotency-Key first. A form body is the exception and is never
+	// repeated. See [Retry].
+	Retry Retry
 }
 
 // API is what the generated client knows about the server and this package does
@@ -114,6 +122,10 @@ type Runtime struct {
 	revision        string
 	revisionHeader  string
 	now             func() time.Time
+	retry           Retry
+	// jitter is the randomness in a backoff, held here so a test can make one
+	// deterministic. It answers in [0, n).
+	jitter func(int64) int64
 
 	mu sync.Mutex
 	// cred is under the mutex because signing in replaces it while requests may
@@ -180,6 +192,12 @@ func New(cfg Config, api API) (*Runtime, error) {
 		revision:  cfg.Revision,
 		now:       cfg.Now,
 		cred:      cfg.Credential,
+		retry:     cfg.Retry,
+		// math/rand/v2 rather than math/rand: its source is per-P and lock-free
+		// where the older one is a global mutex, and a client called from a
+		// hundred goroutines that are all backing off at once is exactly the
+		// moment that contention would show up.
+		jitter: rand.Int64N,
 	}
 	if rt.http == nil {
 		rt.http = &http.Client{Timeout: DefaultTimeout}

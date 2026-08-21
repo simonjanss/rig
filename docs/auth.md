@@ -788,8 +788,12 @@ front, err := api.New(pool, api.Hooks{
 })
 
 mux := api.Register(api.Handlers{
-    Server: api.Server{Auth: front, Logger: app.Logger}, // GetClaims and /auth/* in one field
-    Note:   note.New(repos.Notes),
+    Server: api.Server{
+        Auth:   front,      // GetClaims and /auth/* in one field
+        DB:     pool,       // where a write carrying an Idempotency-Key is recorded
+        Logger: app.Logger, // where the cause of a 500 goes
+    },
+    Note: note.New(repos.Notes),
 })
 ```
 

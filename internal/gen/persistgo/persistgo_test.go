@@ -375,6 +375,31 @@ func TestRepositoryEnforcesTheInvariants(t *testing.T) {
 	}
 }
 
+// Every statement goes out on the connection the context names, which is what
+// makes "a repository works the same inside somebody else's transaction" true
+// rather than aspirational.
+//
+// The failure this catches is silent and specific: an argless conn() resolving
+// context.Background() can only answer with the pool, so a create with no hooks
+// takes InTxIf's no-transaction branch and commits on its own — outside the
+// caller's InTx, and outside the record an idempotent write is being kept in.
+// Two facts where the whole design wants one, and nothing about the generated
+// source looks wrong.
+func TestEveryStatementUsesTheContextsConnection(t *testing.T) {
+	t.Parallel()
+
+	doc := gentest.LoadDocument(t, filepath.Join("testdata", "lifecycle.ir.json"))
+	artifacts := gentest.Run(t, persistgo.New(), doc, opts())
+
+	for _, name := range []string{"lesson_repository.gen.go", "store.gen.go"} {
+		src := find(t, artifacts, name)
+		if strings.Contains(src, "conn()") {
+			t.Errorf("%s reaches for a connection without the context; "+
+				"connFor(ctx) is the only one that can answer with a transaction", name)
+		}
+	}
+}
+
 func TestPackageOption(t *testing.T) {
 	t.Parallel()
 

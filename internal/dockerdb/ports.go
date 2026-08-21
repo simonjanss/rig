@@ -36,6 +36,11 @@ const (
 	// PortFiles is internal/filestest: uploads, the tenancy around them, and the
 	// sweeper.
 	PortFiles = 55494
+	// PortIdempotency is internal/idemtest, where two transactions contend for
+	// one key. Its own container because the contention is the test: a suite
+	// sharing a database with one that holds locks of its own would fail as a
+	// timeout nobody could place.
+	PortIdempotency = 55495
 
 	// PortElectricSync is the ElectricSQL container in internal/electrictest,
 	// which is an HTTP port rather than a database one. It is in the same list
@@ -67,6 +72,7 @@ var ports = map[string]int{
 	"examples/auth":                PortExampleAuth,
 	"examples/auth_oauth":          PortExampleAuthOAuth,
 	"internal/filestest":           PortFiles,
+	"internal/idemtest":            PortIdempotency,
 	"internal/electrictest (sync)": PortElectricSync,
 	"internal/introspect":          PortIntrospect,
 	"internal/electrictest (db)":   PortElectricDB,

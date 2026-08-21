@@ -15,11 +15,15 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/simonjanss/rig/notify"
 	"github.com/simonjanss/rig/notify/notifyhttp"
 	"github.com/simonjanss/rig/runtime/apirev"
+	"github.com/simonjanss/rig/runtime/dbx"
+	"github.com/simonjanss/rig/runtime/idempotency"
 	"github.com/simonjanss/rig/runtime/reqlog"
 	"github.com/simonjanss/rig/runtime/rigerr"
+	"github.com/simonjanss/rig/runtime/serve"
 	"github.com/simonjanss/rig/runtime/tenancy"
 	"github.com/simonjanss/rig/runtime/throttle"
 )
@@ -109,6 +113,20 @@ type Server struct {
 
 	// Context lets a hook attach values a service will read.
 	Context func(ctx context.Context, r *http.Request) context.Context
+
+	// DB is what a write carrying an Idempotency-Key is recorded in, so that a
+	// client which had to send the same write twice gets one row and the same
+	// answer both times. Pass the pool: `DB: app.Pool`.
+	//
+	// Required, and Register panics without it. A nil one would mean the header
+	// was quietly ignored, and a client that thinks its retry is safe when it is
+	// not is worse off than one that knows it is not — this is the one failure
+	// mode worth a startup panic rather than a runtime surprise.
+	//
+	// It costs nothing until a caller sends the header: a write without one takes
+	// the path it always took, with no transaction and no extra round trip. See
+	// [github.com/simonjanss/rig/runtime/idempotency].
+	DB dbx.Beginner
 }
 
 // Handlers is every resource's service, plus the shared behavior.
@@ -156,6 +174,14 @@ func Register(h Handlers) *http.ServeMux {
 		panic("api.Register: set Server.Auth, or Server.GetClaims if this project authenticates its own way")
 	}
 
+	if h.Server.DB == nil {
+		// Here rather than at the first write that carries the header. A nil pool
+		// would make every Idempotency-Key a header nobody read, and a client retrying
+		// a create in the belief that it is safe to would be writing a second row
+		// every time — a failure nobody sees until they go looking for duplicates.
+		panic("api.Register: set Server.DB to the database pool, for example DB: app.Pool")
+	}
+
 	Link(h)
 
 	mux := http.NewServeMux()
@@ -190,6 +216,29 @@ func Register(h Handlers) *http.ServeMux {
 	}
 
 	return mux
+}
+
+// IdempotencyPruner deletes the records of writes past their retention, and so
+// decides how long after a write its Idempotency-Key still replays.
+//
+// Zero takes idempotency.DefaultRetention, a day: long enough to cover any
+// retry, short enough that a key reused a week later is a new request rather
+// than a write that silently does nothing.
+//
+// A task rather than a goroutine, for the reason FileSweeper is one — a cron
+// job is one thing running, and a goroutine in every replica is as many as
+// there are replicas, all racing to delete the same rows. Register it in
+// serve.Config.Tasks and run `<binary> prune-idempotency`:
+//
+//	Tasks: map[string]serve.Task{"prune-idempotency": api.IdempotencyPruner(0)},
+//
+// Nothing schedules it for you. Without it rig_idempotency keeps every record
+// ever written, and the retention above is a sentence rather than a behaviour.
+func IdempotencyPruner(retention time.Duration) serve.Task {
+	return func(ctx context.Context, pool *pgxpool.Pool) error {
+		_, err := idempotency.Prune(ctx, pool, retention)
+		return err
+	}
 }
 
 // Link hands every resource the hooks of the tables that reference it, so a
@@ -438,6 +487,29 @@ func writeJSON(w http.ResponseWriter, status int, body any) {
 		return
 	}
 	_ = json.NewEncoder(w).Encode(body)
+}
+
+// writeResult answers with what a write produced, or with what it produced the
+// first time somebody sent it.
+//
+// The bytes are written rather than re-encoded, because a replay that
+// round-tripped through a decoder would come back with its keys in whatever
+// order that decoder chose — and a client that hashes or signs what it
+// received would see two different answers to one request.
+func writeResult(w http.ResponseWriter, res idempotency.Result) {
+	if res.Replayed {
+		// Nothing a client must act on, and worth saying: it is the difference between
+		// a write that happened just now and one that happened the first time this key
+		// was seen.
+		w.Header().Set("Idempotency-Replayed", "true")
+	}
+	if len(res.Body) == 0 {
+		w.WriteHeader(res.Status)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(res.Status)
+	_, _ = w.Write(res.Body)
 }
 
 // decodeBody reads a JSON request body.
