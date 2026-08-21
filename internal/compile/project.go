@@ -30,6 +30,10 @@ type ProjectOptions struct {
 	Files *ir.Files
 	// Notifications is the resolved inbox, or nil for a project with none.
 	Notifications *ir.Notifications
+	// Monitoring is the resolved monitoring block, or nil for a project with no
+	// page. Never set without Tracing; the config check is what guarantees it.
+	Monitoring *ir.Monitoring
+
 	// Tracing is the resolved tracing block, or nil for a project that emits no
 	// spans.
 	Tracing *ir.Tracing
@@ -60,6 +64,7 @@ func Project(schema ir.Schema, opt ProjectOptions) (ir.API, diag.List) {
 		Files:          opt.Files,
 		Notifications:  opt.Notifications,
 		Tracing:        opt.Tracing,
+		Monitoring:     opt.Monitoring,
 
 		// Who keeps rig's own migrations. Carried from here to the generators
 		// untouched: it is a fact about the project, not about the schema.

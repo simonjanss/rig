@@ -603,3 +603,48 @@ for why that is the useful default rather than a broken one.
 Turning it on changes generated code, so `rig generate` has to run: the handlers
 open a span each, the repositories open one per call and one per hook, and
 `store.Config` grows a `Tracer` field for your `main` to fill in.
+
+## `monitoring`
+
+rig's own page over those spans: the last few hundred requests and what each of
+them spent its time on, at `/_rig/monitor`. Off by default, and off means the
+route does not exist.
+
+```yaml
+monitoring:
+  enabled: true
+```
+
+It is a reader over the span file `tracing:` writes and stores nothing of its
+own, so **it cannot be turned on without `tracing:`** — rig refuses that
+combination (RIG3005) rather than leaving you with a page that is empty forever.
+
+| Key | Default | |
+|---|---|---|
+| `enabled` | `false` | Mounts the page. Requires `tracing.enabled`. |
+| `base_path` | `/_rig/monitor` | Where it is mounted. It cannot sit under `api.base_path` or `auth.base_path`, where it would take a route this project owns. |
+| `max_traces` | `200` | How many requests the page lists, newest first. |
+| `password_env` | `RIG_MONITOR_PASSWORD` | The variable the password is read from. |
+| `password` | — | The password itself. It warns (RIG3006): rig.yaml is checked in. |
+| `allow` | — | Addresses that may reach the page, as CIDR ranges or single addresses. Empty allows any. |
+
+`allow` **narrows the password rather than replacing it.** An address that is
+not on the list is answered 404, before the password is compared — but there is
+no way to have the list without the password, because it reads the connection's
+own address and never a forwarded header, and behind a load balancer that means
+it matches everything or nothing. See
+[observability.md](observability.md#restricting-it-to-an-address).
+
+**The password is not here by default**, and for the reason the collector
+endpoint is not: it is a property of the deployment. With nothing in the
+variable at run time the page is not mounted at all, which is what you want on a
+laptop and in CI. Writing one into this file is accepted — a throwaway staging
+box and a production deployment are not the same decision — and warned about
+once, because the page it guards lists every path, request id and error cause
+this server has seen.
+
+Turning it on changes generated code, so `rig generate` has to run: `api.Server`
+grows a `Monitor` field and the API package gains a `Monitoring()` that supplies
+everything above. See
+[observability.md](observability.md#the-monitoring-page) for the three lines of
+`main` that go with it.

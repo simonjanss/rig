@@ -58,10 +58,18 @@ func Unmarshal(b []byte) (*Document, error) {
 // against. Moving a project's DDL from its own directory into the modules that
 // own it changes nothing anybody could observe over HTTP, so it must not spend a
 // revision saying otherwise.
+//
+// [API.Monitoring] is cleared for that same reason. rig's own page is mounted
+// beside the API rather than in it: it appears in no specification, no
+// generated client calls it, and a caller cannot tell whether it is there. A
+// project that turned the page on and spent a revision on it would be telling
+// every client it was built against something older than the server, over a
+// change none of them can see.
 func (d *Document) Hash() (string, error) {
 	unstamped := *d
 	unstamped.API.Revision = ""
 	unstamped.API.EmbeddedFoundation = false
+	unstamped.API.Monitoring = nil
 
 	b, err := Marshal(&unstamped)
 	if err != nil {

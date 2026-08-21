@@ -71,6 +71,18 @@ Next:
   that samples nothing rather than a no-op, because the ids are worth having on
   their own; and the file exporter arrived here instead of in M10, which is now
   a reader over it. `rigclient` took a callback seam rather than an import.
+- ~~**M10** — the built-in monitoring page.~~ Shipped: a `monitoring:` block that
+  the compiler refuses without `tracing:`, a reader over the span file M9 wrote,
+  and a page at `/_rig/monitor` listing the last few hundred requests with their
+  spans underneath. Three things came out differently: it mounts on the API's own
+  mux rather than beside the probes, because spans and request lines are opened
+  inside each generated handler and so a route that is not one is already
+  invisible to both; the embed lives in `observe/` rather than in generated
+  output, which is why `gentest` never had to learn about a file that is not Go;
+  and who may look is a password from `$RIG_MONITOR_PASSWORD` — with nothing in
+  it meaning no route at all rather than a 401 anybody can probe — optionally
+  narrowed by a `monitoring.allow` list of addresses that answers 404 to
+  everything else.
 - ~~**M14** — the foundation gets a version.~~ Shipped: rig's own DDL moved out of
   a Go const and into append-only `.sql` sets the owning modules carry, each with
   its own bookkeeping table, and `migrations.foundation: vendored | embedded` for
@@ -2932,11 +2944,100 @@ mean "observability" is spread across two keys and a thing that is not a key.
 
 ---
 
-## M10 — the built-in monitoring page
+## M10 — the built-in monitoring page (shipped)
 
 **Goal.** See the last requests and their spans on a page the server already
 serves, so a deployment too small to be worth a Grafana is not a deployment that
 is blind.
+
+**What shipped.** A `monitoring:` block that cannot be set without `tracing:`;
+`observe.ReadSpans` / `GroupTraces` / `ReadTraces` over the span file M9 wrote,
+exported because reading it from a script is a thing to do; `observe.Page`, an
+embedded HTML file and a JSON endpoint beside it, behind a password; a
+`monitoring.gen.go` and a `Server.Monitor` field that mount it; and
+`examples/fantasyfootball` turned on, which is already the example that traces.
+
+### What came out differently
+
+- **The page is on the API's mux, not next to the probes.** The plan argued it
+  had to be outside the application's handler so that looking at the page does
+  not appear on the page. That property was already free, and the reason is
+  M9's: rig opens its spans and writes its request lines *inside each generated
+  handler* — `reqlog.Wrap` and `observe.Server` are emitted per handler, not as
+  a middleware around the mux — so anything on the mux that is not a generated
+  endpoint is invisible to both. Mounting next to the probes would have meant
+  the page's asset living in `runtime/`, which every generated application
+  imports, and that is the one thing the block exists to avoid. There is a test
+  asserting the page writes no span, because a future change that moved
+  span-opening into a wrapper would silently make the page watch itself.
+- **The `go:embed` problem dissolved.** The plan expected `gentest` to have to
+  learn about a file that is not Go. The HTML is hand-written in `observe/`,
+  beside the Go that serves it, and nothing is generated but wiring — so there
+  was nothing for `gentest` to learn. (It would have coped: it writes artifacts
+  by base name with `os.WriteFile`.)
+- **Who may look is a password and, optionally, an address list.** Not localhost
+  and not the project's `auth:` block, which were the two the plan named. HTTP
+  Basic against `$RIG_MONITOR_PASSWORD`, constant-time, twelve characters
+  minimum. Empty is not a misconfiguration but the ordinary case on a laptop and
+  in CI, and it mounts *nothing* — not a route that answers 401, which would
+  tell anybody scanning that there is a page here. `Page.Unarmed()` returns the
+  reason so a main logs one line instead of guessing.
+- **`monitoring.allow` narrows it, and cannot replace it.** CIDR ranges or
+  single addresses; anything else is answered 404 before the password is
+  compared, so a scan learns nothing and a leaked password is not enough on its
+  own. It reads `RemoteAddr` and never a forwarded header, which is
+  `auth.trusted_proxies`'s argument — and which is exactly why it is not allowed
+  to stand alone: behind a load balancer every request arrives from the
+  balancer, so the list matches everything or nothing, and that failure is
+  silent and total. Refusing the combination is cheaper than documenting it.
+  rig.yaml's entries are parsed twice, here and in `observe`, because sharing
+  the eight lines would mean the rig binary importing OpenTelemetry.
+- **A password in rig.yaml is accepted and warns.** `internal/project/config.go`
+  already says the two things that stay out of the file are "a function, and a
+  secret", and this is a secret. But a throwaway staging box and a production
+  deployment are not the same decision, so RIG3006 says it once and leaves the
+  call where it belongs.
+- **The block does not spend an API revision.** `Document.Hash` clears
+  `API.Monitoring`, on exactly the argument already written there for
+  `EmbeddedFoundation`: no client can tell whether the page is mounted, and a
+  project that turned it on should not be telling every caller it was built
+  against something older than the server.
+- **`Provider.Page`, not a free function.** The page reads the span file that
+  provider resolved, environment variables included. Two places naming a path is
+  one too many, and the failure would have been a page that is permanently empty
+  for no visible reason.
+- **The reader is the reusable half.** `TraceRecord` and the three functions are
+  exported, so a script gets the same grouping the page has rather than
+  re-deriving it from `SpanRecord`. `ReadSpans` keeps the last N *raw lines* and
+  decodes only those — the whole file is scanned either way, and decoding a
+  hundred thousand records to throw all but three hundred away is the one part
+  of this that would have cost something.
+
+### Honest gaps
+
+- **No lockout and no rate limit on the password.** One secret, compared in
+  constant time. A limiter would mean `observe` depending on
+  `runtime/throttle`, which is a dependency this module is not going to take —
+  so what stands in for it is the length minimum, `monitoring.allow`, and
+  whatever TLS the deployment has.
+- **The page is trace-only.** A project with `tracing:` off has no page at all.
+  The plan imagined a log half that worked without tracing; the file-store
+  answer removed it, because nothing writes the log somewhere rig can read.
+- **One process, one file.** A second replica shows its own spans. That is what
+  a file is, and it is the point at which a collector is the answer instead.
+- **A rotation mid-trace loses the root**, so `TraceRecord.Root` can be nil. The
+  trace is still listed, by id, with the spans it still has.
+- **`tracing:` still spends a revision when it is turned on**, and it changes
+  nothing a client can see either. Only `monitoring:` was cleared, because
+  clearing tracing would move the hash of every project that already traces — a
+  one-time spurious bump to fix a spurious bump. Named, not fixed.
+- **Nothing renders the page in a browser.** The handler is tested, and the
+  render path was run over real data against a stub DOM, but no test opens it.
+  A generated page that compiles and answers 200 can still lay out wrong.
+
+---
+
+### The plan, as it stood
 
 **Shape.**
 

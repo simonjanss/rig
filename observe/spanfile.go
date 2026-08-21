@@ -141,7 +141,7 @@ func (e *fileExporter) rotateIfFull(next int64) error {
 	if err := e.f.Close(); err != nil {
 		return err
 	}
-	if err := os.Rename(e.path, e.path+".1"); err != nil {
+	if err := os.Rename(e.path, e.path+rotatedSuffix); err != nil {
 		return err
 	}
 

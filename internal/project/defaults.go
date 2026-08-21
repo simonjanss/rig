@@ -227,6 +227,7 @@ func (p *Project) applyDefaults() {
 	p.applyAuthDefaults()
 	p.applyFilesDefaults()
 	p.applyNotificationsDefaults()
+	p.applyMonitoringDefaults()
 }
 
 // applyNotificationsDefaults resolves every value the notifications block leaves
@@ -431,6 +432,7 @@ func (p *Project) check() diag.List {
 	diags.Append(p.checkAuth())
 	diags.Append(p.checkFiles())
 	diags.Append(p.checkNotifications())
+	diags.Append(p.checkMonitoring())
 
 	return diags
 }

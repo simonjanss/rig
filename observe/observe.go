@@ -132,6 +132,11 @@ type Config struct {
 // and a limit there is the difference between a slow deploy and a stuck one.
 type Provider struct {
 	tp *sdktrace.TracerProvider
+	// cfg is what [Setup] resolved, environment variables included. It is kept
+	// so that [Provider.Page] reads the file this process actually writes: the
+	// page and the exporter agreeing on a path is not something a main should
+	// have to arrange twice.
+	cfg Config
 }
 
 // Setup installs a tracer provider and the W3C propagator, and returns what to
@@ -177,7 +182,7 @@ func Setup(ctx context.Context, cfg Config) (*Provider, error) {
 		propagation.TraceContext{}, propagation.Baggage{},
 	))
 
-	return &Provider{tp: tp}, nil
+	return &Provider{tp: tp, cfg: cfg}, nil
 }
 
 // serviceResource is who this process says it is, on every span it exports.

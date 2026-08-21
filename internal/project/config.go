@@ -24,6 +24,8 @@ type Config struct {
 
 	Tracing Tracing `yaml:"tracing,omitempty" json:"tracing,omitempty" jsonschema_description:"Whether the generated code emits OpenTelemetry spans."`
 
+	Monitoring Monitoring `yaml:"monitoring,omitempty" json:"monitoring,omitempty" jsonschema_description:"rig's own page over the spans this server wrote. It needs tracing."`
+
 	Naming   Naming   `yaml:"naming,omitempty" json:"naming,omitempty" jsonschema_description:"How database names become Go and JSON names."`
 	Validate Validate `yaml:"validate,omitempty" json:"validate,omitempty" jsonschema_description:"Severity of each configurable convention rule."`
 

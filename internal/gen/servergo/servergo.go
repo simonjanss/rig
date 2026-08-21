@@ -158,6 +158,17 @@ func (g *Generator) Generate(_ context.Context, doc *ir.Document, opts gen.Optio
 		artifacts = append(artifacts, tracing)
 	}
 
+	// The monitoring page's configuration, for a project that asked for the
+	// page. It cannot be reached without the block above, which is what the
+	// compiler refuses: the page reads the span file tracing writes.
+	if e.monitoring() {
+		monitoring, err := e.monitoringFile()
+		if err != nil {
+			return nil, err
+		}
+		artifacts = append(artifacts, monitoring)
+	}
+
 	// The inbox wiring, when there is an inbox. A project with no
 	// `notifications:` block gets no dispatcher and no routes.
 	if e.hasNotifications() {

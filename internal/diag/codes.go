@@ -120,6 +120,21 @@ var (
 			"other way: a project maintaining rig's tables itself cannot also leave "+
 			"them to the modules.")
 
+	CodeMonitoringWithoutTracing = newCode("RIG3005", SeverityError,
+		"`monitoring:` is enabled and `tracing:` is not.",
+		"The monitoring page is a reader over the span file that `tracing:` writes; "+
+			"it stores nothing of its own. Without spans it would be empty forever, "+
+			"which is a page that looks broken rather than one that is off. Set "+
+			"`tracing: {enabled: true}`, or remove the `monitoring:` block.")
+
+	CodeMonitoringPasswordInFile = newCode("RIG3006", SeverityWarning,
+		"`monitoring.password` puts a secret in rig.yaml.",
+		"rig.yaml is checked in, and the page it guards lists every path, request id "+
+			"and error cause this server has seen. Leave the key out and the page "+
+			"reads `monitoring.password_env` — $RIG_MONITOR_PASSWORD by default — "+
+			"instead. Whether the trade is worth making is the project's call, so "+
+			"this is a warning and not a refusal.")
+
 	CodeUnmentionedColumn = newCode("RIG3100", SeverityWarning,
 		"A column exists in the database but is not mentioned in the table configuration.",
 		"Run `rig sync` to add it, then replace the placeholder comment.")
