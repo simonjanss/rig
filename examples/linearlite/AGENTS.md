@@ -106,6 +106,15 @@ rig infers behavior from column names, so the schema is the source of truth:
 
 Add them in a migration; do not try to configure them.
 
+## Running it
+
+`make demo` in this directory is the whole setup — containers, migrations,
+seed, front end, server — and every step of it is also its own target. One
+caveat for working inside the rig repository: under `RIG_DB_ISOLATE` the sync
+service publishes on a kernel-chosen port rather than 55445, so export
+`ELECTRIC_URL` from the address `rig db up` printed before `go run .`, or the
+generated proxy points at the default and the streams answer 502.
+
 ## This example's extras
 
 Beyond the todo example's layout, three directories:

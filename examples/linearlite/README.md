@@ -12,6 +12,18 @@ board through the generated Go client.
 ## Run it
 
 ```bash
+make demo
+```
+
+That is the whole setup: it builds rig, starts Postgres *and* the sync
+service, applies the migrations, seeds the demo tenant, builds the front end
+(skipped with a note if pnpm is not installed), and runs the server. Run it
+again tomorrow and it reuses all of it. `make down` stops the containers.
+
+The steps it is made of, for when you want one of them alone or want to see
+where each piece comes from:
+
+```bash
 rig db up          # Postgres AND the sync service — see database.electric in rig.yaml
 go run . seed      # the demo tenant, two people, the roles, a board
 go run .           # the API at :8084
