@@ -1,6 +1,7 @@
 package servicego
 
 import (
+	"github.com/simonjanss/rig/internal/gen/genutil"
 	"github.com/simonjanss/rig/internal/gen/gobuf"
 	"github.com/simonjanss/rig/pkg/gen"
 	"github.com/simonjanss/rig/pkg/ir"
@@ -49,7 +50,7 @@ func (e *emitter) revision(b *gobuf.Buf) {
 	b.Comment("RevisionHeader carries the revision in both directions: what the " +
 		"caller was built against on the way in, what this server was generated " +
 		"from on the way out.")
-	b.L("const RevisionHeader = %s", gobuf.Quote(e.revisionHeader()))
+	b.L("const RevisionHeader = %s", gobuf.Quote(genutil.RevisionHeader(e.doc)))
 	b.NL()
 
 	b.Comment("serverRevision is [Revision] as a value, parsed once. Unknown for a " +
@@ -57,15 +58,6 @@ func (e *emitter) revision(b *gobuf.Buf) {
 		"as \"nobody is behind this server\" rather than as an error.")
 	b.L("var serverRevision, _ = %s.Parse(Revision)", revPkg)
 	b.NL()
-}
-
-// revisionHeader is the configured header name, or the default for a document
-// compiled before the setting existed.
-func (e *emitter) revisionHeader() string {
-	if h := e.doc.API.RevisionHeader; h != "" {
-		return h
-	}
-	return defaultRevisionHeader
 }
 
 func (e *emitter) requestEnvelope(b *gobuf.Buf) {

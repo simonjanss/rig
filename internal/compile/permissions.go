@@ -27,11 +27,14 @@ const (
 //
 // The parameter's own vocabulary lives in [tenancy.Scope], where the handler and
 // the client both read it. These are here because the compiler has to name them
-// in a diagnostic before any of that exists.
+// in a diagnostic before any of that exists — and the two the parameter accepts
+// are exported, because a specification has to list them as an enumeration and
+// deriving that list a second time is how a document ends up offering a value
+// the handler refuses.
 const (
 	accessScopeTenant = "tenant"
-	accessScopeOwn    = "own"
-	accessScopeAll    = "all"
+	AccessScopeOwn    = "own"
+	AccessScopeAll    = "all"
 )
 
 // wideReadPermission is what a caller must hold to ask an owner-scoped resource
@@ -42,7 +45,7 @@ const (
 // reading notes, and the suffix says how far. A screen that groups by prefix gets
 // the grouping for free.
 func wideReadPermission(table string) string {
-	return table + "." + actionRead + "." + accessScopeAll
+	return table + "." + actionRead + "." + AccessScopeAll
 }
 
 // computePermissions fills in every endpoint's permission and collects the
@@ -125,9 +128,9 @@ func computePermissions(doc *ir.Document, mode project.PermissionMode) diag.List
 							res.Storage.Table + "." + actionRead + " rather than instead of it: " +
 							"the endpoint's own check runs first, so this one widens a read " +
 							"somebody may already do and grants nothing on its own. Without it, " +
-							"?" + ir.ScopeParam + "=" + accessScopeAll + " is refused.",
+							"?" + ir.ScopeParam + "=" + AccessScopeAll + " is refused.",
 						Resource: res.Name,
-						Action:   actionRead + "." + accessScopeAll,
+						Action:   actionRead + "." + AccessScopeAll,
 					}
 				}
 			}

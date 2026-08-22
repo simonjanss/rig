@@ -378,10 +378,10 @@ func scopeParam(res *ir.Resource, wide string) ir.Field {
 	return ir.Field{
 		Name: "Scope", Wire: ir.ScopeParam,
 		Type: ir.TypeString, TypeKind: ir.TypeKindPrimitive, GoType: "tenancy.Scope",
-		Default: accessScopeOwn,
-		Description: "How wide to read: " + accessScopeOwn + " for the " +
+		Default: AccessScopeOwn,
+		Description: "How wide to read: " + AccessScopeOwn + " for the " +
 			strings.ToLower(res.Plural) + " the caller created, which is the default, or " +
-			accessScopeAll + " for every one in the tenant. Asking for " + accessScopeAll +
+			AccessScopeAll + " for every one in the tenant. Asking for " + AccessScopeAll +
 			" requires the " + wide + " permission and is refused without it, rather than " +
 			"quietly answering with fewer rows.",
 	}

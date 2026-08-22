@@ -225,6 +225,58 @@ func TestArtifactNamesTheFileItCouldNotWrite(t *testing.T) {
 	}
 }
 
+// A create or an update is named from the operation and not from the field
+// list. The model declares LessonCreateInput whether or not the table left any
+// column for a caller to fill in, so answering "nothing to name" for the empty
+// one would have the client emit a parameter with no type.
+func TestAModelInputIsNamedEvenWithNoFields(t *testing.T) {
+	t.Parallel()
+
+	res := &ir.Resource{Name: "Lesson"}
+	generated := ir.EndpointImpl{Kind: ir.EndpointGenerated}
+
+	for _, tc := range []struct {
+		name string
+		ep   *ir.Endpoint
+		want string
+	}{
+		{"empty create", &ir.Endpoint{Name: ir.OpCreate, Impl: generated}, "LessonCreateInput"},
+		{"empty update", &ir.Endpoint{Name: ir.OpUpdate, Impl: generated}, "LessonUpdateInput"},
+		{
+			"create with fields",
+			&ir.Endpoint{Name: ir.OpCreate, Impl: generated, Request: ir.EndpointRequest{
+				BodyParams: []ir.Field{{Name: "Title"}},
+			}},
+			"LessonCreateInput",
+		},
+		{
+			"a custom body is named from the endpoint",
+			&ir.Endpoint{Name: "Publish", Impl: generated, Request: ir.EndpointRequest{
+				BodyParams: []ir.Field{{Name: "NotifyGuardians"}},
+			}},
+			"LessonPublishBody",
+		},
+		// Nothing to name: no body at all, or one the document already named.
+		{"no body", &ir.Endpoint{Name: "Publish", Impl: generated}, ""},
+		{
+			"an object the document named",
+			&ir.Endpoint{Name: "Publish", Impl: generated, Request: ir.EndpointRequest{
+				BodyObject: "PublishRequest",
+				BodyParams: []ir.Field{{Name: "NotifyGuardians"}},
+			}},
+			"",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			if got := genutil.BodyShapeName(res, tc.ep); got != tc.want {
+				t.Errorf("BodyShapeName = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 func names(fields []ir.ResourceField) []string {
 	out := make([]string, 0, len(fields))
 	for _, f := range fields {

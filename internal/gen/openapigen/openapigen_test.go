@@ -1,0 +1,905 @@
+package openapigen_test
+
+import (
+	"encoding/json"
+	"flag"
+	"net/http"
+	"path/filepath"
+	"regexp"
+	"slices"
+	"strings"
+	"testing"
+
+	"github.com/pb33f/libopenapi"
+	validator "github.com/pb33f/libopenapi-validator/schema_validation"
+	"github.com/pb33f/libopenapi/datamodel/high/base"
+	v3 "github.com/pb33f/libopenapi/datamodel/high/v3"
+
+	"github.com/simonjanss/rig/internal/gen/gentest"
+	"github.com/simonjanss/rig/internal/gen/openapigen"
+	"github.com/simonjanss/rig/pkg/gen"
+	"github.com/simonjanss/rig/pkg/ir"
+)
+
+var update = flag.Bool("update", false, "rewrite the golden files")
+
+// fixtures are the compiled documents this generator is held to. Each is a copy
+// of the compiler's own golden, and gentest's fixture test enforces that.
+var fixtures = []string{"lifecycle", "files", "authwired", "ownerscope", "notify"}
+
+// primary is the fixture the golden files and most assertions are written
+// against: it has a QUERY search with its alias, soft delete, snapshots, a
+// custom endpoint, enums, a formatted field, an immutable field and live sync —
+// and no auth block, which makes it the no-security case as well.
+const primary = "lifecycle"
+
+func opts() gen.Options {
+	return gen.Options{OutDir: ".", Raw: map[string]any{
+		"servers": []any{map[string]any{"url": "https://api.example.test"}},
+	}}
+}
+
+func load(t *testing.T, fixture string) *ir.Document {
+	t.Helper()
+	return gentest.LoadDocument(t, filepath.Join("testdata", fixture+".ir.json"))
+}
+
+func run(t *testing.T, fixture string) []gen.Artifact {
+	t.Helper()
+	return gentest.Run(t, openapigen.New(), load(t, fixture), opts())
+}
+
+// yamlOf is the rendered YAML, which is what most assertions read: it is the
+// same model as the JSON and it is the one a person would open.
+func yamlOf(t *testing.T, artifacts []gen.Artifact) string {
+	t.Helper()
+	for _, a := range artifacts {
+		if a.Path == "openapi.gen.yaml" {
+			return string(a.Content)
+		}
+	}
+	t.Fatal("no openapi.gen.yaml among the artifacts")
+	return ""
+}
+
+// model parses an emitted document back into a high-level model, which is the
+// only honest way to assert about what was produced: reading the bytes with a
+// regexp tests the renderer, not the document.
+func model(t *testing.T, artifacts []gen.Artifact) *v3.Document {
+	t.Helper()
+	doc, err := libopenapi.NewDocument([]byte(yamlOf(t, artifacts)))
+	if err != nil {
+		t.Fatalf("the emitted document does not parse: %v", err)
+	}
+	built, err := doc.BuildV3Model()
+	if err != nil {
+		t.Fatalf("the emitted document is not a v3 model: %v", err)
+	}
+	return &built.Model
+}
+
+func TestGolden(t *testing.T) {
+	t.Parallel()
+
+	for _, fixture := range fixtures {
+		t.Run(fixture, func(t *testing.T) {
+			t.Parallel()
+			gentest.Golden(t, filepath.Join("testdata", fixture), run(t, fixture), *update)
+		})
+	}
+}
+
+func TestDeterministic(t *testing.T) {
+	t.Parallel()
+
+	for _, fixture := range fixtures {
+		t.Run(fixture, func(t *testing.T) {
+			t.Parallel()
+			gentest.Deterministic(t, openapigen.New(), load(t, fixture), opts())
+		})
+	}
+}
+
+// TestTheDocumentIsValid is the in-process half of the verification: the
+// emitted bytes are parsed back and checked against the OpenAPI meta-schema.
+// The external linter in `make openapi-lint` is the other half, and catches
+// what a valid-but-poor document gets wrong.
+func TestTheDocumentIsValid(t *testing.T) {
+	t.Parallel()
+
+	for _, fixture := range fixtures {
+		t.Run(fixture, func(t *testing.T) {
+			t.Parallel()
+
+			artifacts := run(t, fixture)
+			doc, err := libopenapi.NewDocument([]byte(yamlOf(t, artifacts)))
+			if err != nil {
+				t.Fatalf("does not parse: %v", err)
+			}
+			if _, err := doc.BuildV3Model(); err != nil {
+				t.Fatalf("does not build: %v", err)
+			}
+
+			ok, errs := validator.ValidateOpenAPIDocument(doc)
+			if !ok {
+				for _, e := range errs {
+					t.Errorf("%s: %s", e.Message, e.Reason)
+					for _, se := range e.SchemaValidationErrors {
+						t.Errorf("  %s at %s", se.Reason, se.FieldPath)
+					}
+				}
+			}
+		})
+	}
+}
+
+// TestDescriptionsReachTheOutput holds the generator to the document's own
+// words. ir.Field.Description is the single copy of them, and an output with
+// somewhere to put one has to put that one there.
+//
+// It reads the YAML and not the JSON, and the reason is not cosmetic.
+// gentest's matcher collapses whitespace, but a paragraph break inside a JSON
+// string is the two characters backslash-n, which is not whitespace and does
+// not collapse — so every multi-paragraph description in the fixture would fail
+// against the JSON. YAML renders the same string as a block scalar with real
+// newlines. Both artifacts come from one model, so checking one checks both.
+func TestDescriptionsReachTheOutput(t *testing.T) {
+	t.Parallel()
+
+	doc := load(t, primary)
+	artifacts := run(t, primary)
+
+	var yamlOnly []gen.Artifact
+	for _, a := range artifacts {
+		if a.Path == "openapi.gen.yaml" {
+			yamlOnly = append(yamlOnly, a)
+		}
+	}
+
+	gentest.DescriptionsSurvive(t, doc, yamlOnly, func(name string) string {
+		// A component key. The colon is what keeps Lesson from matching
+		// LessonFilter, and a $ref value has none.
+		return name + ":"
+	})
+}
+
+// TestAMultiParagraphDescriptionIsABlockScalar is why the check above reads the
+// YAML. If this ever stops holding, that test is silently weaker than it looks.
+func TestAMultiParagraphDescriptionIsABlockScalar(t *testing.T) {
+	t.Parallel()
+
+	if got := yamlOf(t, run(t, primary)); !strings.Contains(got, "description: |-") {
+		t.Error("no block scalar in the document; TestDescriptionsReachTheOutput " +
+			"is relying on one")
+	}
+}
+
+// TestEveryEndpointReachesTheDocument is the invariant the whole generator is
+// for. A golden file cannot catch a missing endpoint family: one that was never
+// emitted still matches a golden that never had it.
+func TestEveryEndpointReachesTheDocument(t *testing.T) {
+	t.Parallel()
+
+	for _, fixture := range fixtures {
+		t.Run(fixture, func(t *testing.T) {
+			t.Parallel()
+
+			doc := load(t, fixture)
+			ids := operationIDs(model(t, run(t, fixture)))
+
+			for _, res := range doc.API.Resources {
+				if res.Unexposed {
+					continue
+				}
+				for i := range res.Endpoints {
+					ep := &res.Endpoints[i]
+					// A QUERY with no POST alias has no route 3.1 can describe.
+					// Its absence is deliberate and the tag says so.
+					if ep.Method == "QUERY" && len(ep.AliasPatterns) == 0 {
+						continue
+					}
+					if !slices.Contains(ids, ep.OperationID) {
+						t.Errorf("%s.%s (%s) reached no operation",
+							res.Name, ep.Name, ep.Pattern)
+					}
+				}
+			}
+		})
+	}
+}
+
+func operationIDs(m *v3.Document) []string {
+	var out []string
+	for pair := m.Paths.PathItems.First(); pair != nil; pair = pair.Next() {
+		for _, op := range pair.Value().GetOperations().FromOldest() {
+			out = append(out, op.OperationId)
+		}
+	}
+	return out
+}
+
+func TestOperationIdsAreUnique(t *testing.T) {
+	t.Parallel()
+
+	for _, fixture := range fixtures {
+		t.Run(fixture, func(t *testing.T) {
+			t.Parallel()
+
+			seen := map[string]bool{}
+			for _, id := range operationIDs(model(t, run(t, fixture))) {
+				if seen[id] {
+					t.Errorf("operationId %q is used more than once", id)
+				}
+				seen[id] = true
+			}
+		})
+	}
+}
+
+var pathParam = regexp.MustCompile(`\{([^}]*)\}`)
+
+// TestEveryPathParameterIsDeclared compares both directions: a template naming
+// something no operation declares, and an operation declaring a path parameter
+// the template does not contain. Either one is a document that fails its own
+// validation, and the live-sync history route — whose {id} the IR does not
+// declare — is the case that makes this worth having.
+func TestEveryPathParameterIsDeclared(t *testing.T) {
+	t.Parallel()
+
+	for _, fixture := range fixtures {
+		t.Run(fixture, func(t *testing.T) {
+			t.Parallel()
+
+			m := model(t, run(t, fixture))
+			for pair := m.Paths.PathItems.First(); pair != nil; pair = pair.Next() {
+				path := pair.Key()
+
+				var inTemplate []string
+				for _, match := range pathParam.FindAllStringSubmatch(path, -1) {
+					inTemplate = append(inTemplate, match[1])
+				}
+				slices.Sort(inTemplate)
+
+				for method, op := range pair.Value().GetOperations().FromOldest() {
+					var declared []string
+					for _, p := range op.Parameters {
+						if p.In == "path" {
+							declared = append(declared, p.Name)
+						}
+					}
+					slices.Sort(declared)
+
+					if !slices.Equal(inTemplate, declared) {
+						t.Errorf("%s %s: template has %v, operation declares %v",
+							strings.ToUpper(method), path, inTemplate, declared)
+					}
+				}
+			}
+		})
+	}
+}
+
+// TestSearchIsDocumentedAsItsPostAlias holds the one decision 3.1 forced.
+func TestSearchIsDocumentedAsItsPostAlias(t *testing.T) {
+	t.Parallel()
+
+	artifacts := run(t, primary)
+	m := model(t, artifacts)
+
+	alias, ok := m.Paths.PathItems.Get("/api/v1/lessons/_search")
+	if !ok {
+		t.Fatal("no POST alias path for the search")
+	}
+	if alias.Post == nil || alias.Post.OperationId != "searchLessons" {
+		t.Error("the alias does not carry the search's own operationId")
+	}
+	if !strings.Contains(alias.Post.Description, "QUERY /api/v1/lessons") {
+		t.Error("the alias does not say what the primary form is")
+	}
+
+	collection, ok := m.Paths.PathItems.Get("/api/v1/lessons")
+	if !ok {
+		t.Fatal("no collection path")
+	}
+	if collection.Query != nil {
+		t.Error("a query operation was emitted; the 3.1 meta-schema rejects one")
+	}
+	// The model would drop a key it could not parse, so the bytes are checked
+	// too: libopenapi has a Query field that renders happily.
+	if regexp.MustCompile(`(?m)^\s{8}query:`).MatchString(yamlOf(t, artifacts)) {
+		t.Error("a query: path-item key reached the rendered document")
+	}
+}
+
+// TestUnexposedShapesStayOut proves the reachability walk is doing work.
+//
+// AuthLogEntry is the sharpest case: the compiler injects it for a consumer
+// that does not exist yet, nothing references it, and it must not appear.
+func TestUnexposedShapesStayOut(t *testing.T) {
+	t.Parallel()
+
+	for _, fixture := range []string{"authwired", "notify"} {
+		t.Run(fixture, func(t *testing.T) {
+			t.Parallel()
+
+			m := model(t, run(t, fixture))
+			for _, unwanted := range []string{
+				"AuthLogEntry", "RigAccountToken", "RigSession",
+				"RigNotification", "RigNotificationFilter",
+			} {
+				if _, found := m.Components.Schemas.Get(unwanted); found {
+					t.Errorf("%s is in components/schemas and no operation carries it",
+						unwanted)
+				}
+			}
+		})
+	}
+}
+
+// TestNoSQLDefaultLeaksIntoTheDocument guards the trap in ir.Field.Default: on a
+// query parameter it is a wire literal, on a column-backed field it is the
+// Postgres default expression. Nothing else in the repository catches this.
+func TestNoSQLDefaultLeaksIntoTheDocument(t *testing.T) {
+	t.Parallel()
+
+	for _, fixture := range fixtures {
+		t.Run(fixture, func(t *testing.T) {
+			t.Parallel()
+
+			got := yamlOf(t, run(t, fixture))
+			for _, expr := range []string{"default: now()", "gen_random_uuid()", "default: '''"} {
+				if strings.Contains(got, expr) {
+					t.Errorf("a SQL default expression reached the document: %s", expr)
+				}
+			}
+		})
+	}
+
+	m := model(t, run(t, primary))
+	lesson, ok := m.Components.Schemas.Get("Lesson")
+	if !ok {
+		t.Fatal("no Lesson schema")
+	}
+	createdAt, ok := lesson.Schema().Properties.Get("createdAt")
+	if !ok {
+		t.Fatal("no createdAt on Lesson")
+	}
+	if createdAt.Schema().Default != nil {
+		t.Error("createdAt carries a default; a response field is always sent")
+	}
+
+	list := findOperation(t, m, "listLessons")
+	for _, p := range list.Parameters {
+		if p.Name != "limit" {
+			continue
+		}
+		if p.Schema.Schema().Default == nil {
+			t.Error("limit lost its default, which is the kind that should be documented")
+		}
+	}
+}
+
+// TestNullableIsAUnionNotAKeyword: 3.1 is JSON Schema 2020-12, where null is a
+// type. The nullable keyword is 3.0's and means nothing here.
+func TestNullableIsAUnionNotAKeyword(t *testing.T) {
+	t.Parallel()
+
+	artifacts := run(t, primary)
+	if strings.Contains(yamlOf(t, artifacts), "nullable:") {
+		t.Error("the 3.0 nullable keyword reached a 3.1 document")
+	}
+
+	lesson := schemaOf(t, model(t, artifacts), "Lesson")
+
+	notes := propertyOf(t, lesson, "notes")
+	if !slices.Equal(notes.Type, []string{"string", "null"}) {
+		t.Errorf("notes type = %v, want [string null]", notes.Type)
+	}
+
+	tags := propertyOf(t, lesson, "tags")
+	if !slices.Equal(tags.Type, []string{"array", "null"}) {
+		t.Errorf("tags type = %v, want [array null] — the array is nullable, not its "+
+			"elements", tags.Type)
+	}
+	if items := tags.Items; items == nil || !items.IsA() {
+		t.Fatal("tags has no items schema")
+	} else if got := items.A.Schema().Type; !slices.Equal(got, []string{"string"}) {
+		t.Errorf("tags items type = %v, want [string]", got)
+	}
+}
+
+// TestImmutableIsExpressedByShape: OpenAPI has no keyword for it, and writeOnly
+// means the opposite. The paths say it — present on create, absent on update.
+func TestImmutableIsExpressedByShape(t *testing.T) {
+	t.Parallel()
+
+	m := model(t, run(t, primary))
+
+	if strings.Contains(yamlOf(t, run(t, primary)), "writeOnly:") {
+		t.Error("writeOnly was emitted; it means request-only, not immutable")
+	}
+
+	create := schemaOf(t, m, "LessonCreateInput")
+	if _, ok := create.Properties.Get("startsAt"); !ok {
+		t.Error("the immutable field is missing from the create body")
+	}
+	update := schemaOf(t, m, "LessonUpdateInput")
+	if _, ok := update.Properties.Get("startsAt"); ok {
+		t.Error("the immutable field is in the update body, which cannot change it")
+	}
+	if len(update.Required) != 0 {
+		t.Errorf("the update body requires %v; a PATCH leaves an absent field alone",
+			update.Required)
+	}
+
+	entity := schemaOf(t, m, "Lesson")
+	id := propertyOf(t, entity, "id")
+	if id.ReadOnly == nil || !*id.ReadOnly {
+		t.Error("a read-only field is not marked readOnly on the entity")
+	}
+}
+
+// TestErrorResponsesNameTheirCode: ir.Endpoint.Errors is bare statuses, and the
+// pairing with the code a client switches on has to survive into the document.
+func TestErrorResponsesNameTheirCode(t *testing.T) {
+	t.Parallel()
+
+	for _, fixture := range fixtures {
+		t.Run(fixture, func(t *testing.T) {
+			t.Parallel()
+
+			doc := load(t, fixture)
+			m := model(t, run(t, fixture))
+
+			for _, res := range doc.API.Resources {
+				for i := range res.Endpoints {
+					for _, status := range res.Endpoints[i].Errors {
+						if _, ok := m.Components.Responses.Get(
+							responseName(status)); !ok {
+							t.Errorf("status %d has no shared response", status)
+						}
+					}
+				}
+			}
+
+			for pair := m.Components.Responses.First(); pair != nil; pair = pair.Next() {
+				if pair.Value().Description == "" {
+					t.Errorf("%s has an empty description", pair.Key())
+				}
+			}
+		})
+	}
+}
+
+// responseName mirrors the generator's own naming, from the compiler's table.
+func responseName(status int) string {
+	for _, c := range errorCodeTable {
+		if c.status == status {
+			return c.name
+		}
+	}
+	return ""
+}
+
+var errorCodeTable = []struct {
+	name   string
+	status int
+}{
+	{"BadRequest", 400}, {"Unauthorized", 401}, {"Forbidden", 403}, {"NotFound", 404},
+	{"TooLarge", 413}, {"UnsupportedMediaType", 415}, {"Conflict", 409},
+	{"UnprocessableEntity", 422}, {"UpgradeRequired", 426}, {"RateLimited", 429},
+	{"Internal", 500},
+}
+
+// TestTheScopeParameterIsAnEnumeration: the scope parameter's Go type is
+// tenancy.Scope rather than an IR enum, so without a special case the document
+// would say `string` and leave the two values to prose.
+func TestTheScopeParameterIsAnEnumeration(t *testing.T) {
+	t.Parallel()
+
+	m := model(t, run(t, "ownerscope"))
+
+	var checked int
+	for pair := m.Paths.PathItems.First(); pair != nil; pair = pair.Next() {
+		for _, op := range pair.Value().GetOperations().FromOldest() {
+			for _, p := range op.Parameters {
+				if p.Name != ir.ScopeParam {
+					continue
+				}
+				checked++
+				s := p.Schema.Schema()
+				if len(s.Enum) != 2 {
+					t.Errorf("%s: scope has %d enum values, want own and all",
+						op.OperationId, len(s.Enum))
+				}
+				if s.Default == nil || s.Default.Value != "own" {
+					t.Errorf("%s: scope does not default to own", op.OperationId)
+				}
+			}
+		}
+	}
+	if checked == 0 {
+		t.Fatal("no scope parameter found; this test is watching nothing")
+	}
+}
+
+// TestMultipartCarriesItsParts: a create on a table with file columns takes the
+// row and its bytes together, because a not-null file column is otherwise
+// unreachable.
+func TestMultipartCarriesItsParts(t *testing.T) {
+	t.Parallel()
+
+	m := model(t, run(t, "files"))
+
+	var found bool
+	for pair := m.Paths.PathItems.First(); pair != nil; pair = pair.Next() {
+		op := pair.Value().Post
+		if op == nil || op.RequestBody == nil {
+			continue
+		}
+		form, ok := op.RequestBody.Content.Get(ir.MediaMultipart)
+		if !ok {
+			continue
+		}
+		found = true
+
+		if form.Encoding == nil {
+			t.Errorf("%s: a multipart body with no encoding block", op.OperationId)
+			continue
+		}
+		for enc := form.Encoding.First(); enc != nil; enc = enc.Next() {
+			if enc.Value().ContentType == "" {
+				t.Errorf("%s: part %q has no content type", op.OperationId, enc.Key())
+			}
+		}
+	}
+	if !found {
+		t.Fatal("no multipart request body found; this test is watching nothing")
+	}
+}
+
+// TestSecurityComesFromTheAuthBlock, and its absence from its absence.
+func TestSecurityComesFromTheAuthBlock(t *testing.T) {
+	t.Parallel()
+
+	m := model(t, run(t, "authwired"))
+	if m.Components.SecuritySchemes == nil {
+		t.Fatal("a document with an auth block declares no security scheme")
+	}
+	scheme, ok := m.Components.SecuritySchemes.Get("bearerAuth")
+	if !ok {
+		t.Fatal("no bearerAuth scheme")
+	}
+	if scheme.Type != "http" || scheme.Scheme != "bearer" {
+		t.Errorf("scheme = %s/%s, want http/bearer", scheme.Type, scheme.Scheme)
+	}
+	if m.Components.SecuritySchemes.Len() != 1 {
+		t.Error("more than one scheme; both credentials arrive the same way and " +
+			"are told apart by a prefix, which OpenAPI cannot express")
+	}
+	if len(m.Security) == 0 {
+		t.Error("no document-level security requirement")
+	}
+
+	plain := model(t, run(t, primary))
+	if plain.Components.SecuritySchemes != nil && plain.Components.SecuritySchemes.Len() > 0 {
+		t.Error("a project with no auth block got a security scheme")
+	}
+	if len(plain.Security) != 0 {
+		t.Error("a project with no auth block got a security requirement")
+	}
+}
+
+// TestPublicEndpointsAllowButDoNotIgnoreACredential.
+//
+// ir.Endpoint.Public means the claims lookup need not succeed, not that a
+// credential is ignored — a caller who presents one is still identified by it
+// and may be shown more than a stranger. An empty security list would say the
+// opposite, so the encoding is an empty requirement object beside the real one.
+//
+// No compiler fixture has a public endpoint, so this one is made rather than
+// found. Skipping instead would be a test that reads as covering the branch and
+// never executes it.
+func TestPublicEndpointsAllowButDoNotIgnoreACredential(t *testing.T) {
+	t.Parallel()
+
+	doc := load(t, "authwired")
+
+	var opened string
+	for i := range doc.API.Resources {
+		res := &doc.API.Resources[i]
+		if res.Unexposed || len(res.Endpoints) == 0 {
+			continue
+		}
+		for j := range res.Endpoints {
+			ep := &res.Endpoints[j]
+			if len(routesFor(ep)) == 0 {
+				continue
+			}
+			ep.Public = true
+			opened = ep.OperationID
+			break
+		}
+		break
+	}
+	if opened == "" {
+		t.Fatal("no endpoint to open; this test is watching nothing")
+	}
+
+	m := model(t, gentest.Run(t, openapigen.New(), doc, opts()))
+	op := findOperation(t, m, opened)
+	if op == nil {
+		t.Fatalf("%s is not in the document", opened)
+	}
+
+	if len(op.Security) != 2 {
+		t.Fatalf("security has %d entries, want an empty requirement beside the real one",
+			len(op.Security))
+	}
+	if !op.Security[0].ContainsEmptyRequirement {
+		t.Error("the first requirement is not the empty one, so a caller presenting " +
+			"nothing is not described as served")
+	}
+	if _, ok := op.Security[1].Requirements.Get("bearerAuth"); !ok {
+		t.Error("the credential is not offered, so a caller presenting one is " +
+			"described as ignored")
+	}
+}
+
+// routesFor mirrors the generator's own rule for whether an endpoint can be
+// described in 3.1 at all.
+func routesFor(ep *ir.Endpoint) []string {
+	var out []string
+	if ep.Method != "QUERY" {
+		out = append(out, ep.Pattern)
+	}
+	return append(out, ep.AliasPatterns...)
+}
+
+// TestAnUnexposedResourceStillStreams: a shape is its own read surface. The
+// notification recipient table has no endpoints and is not exposed, and the mux
+// still serves its shape route — electricgo gates only on the resource having
+// an Electric block — so a document that left it out would be describing fewer
+// routes than the server answers on.
+func TestAnUnexposedResourceStillStreams(t *testing.T) {
+	t.Parallel()
+
+	doc := load(t, "notify")
+	m := model(t, run(t, "notify"))
+
+	var checked int
+	for i := range doc.API.Resources {
+		res := &doc.API.Resources[i]
+		if !res.Unexposed || res.Electric == nil {
+			continue
+		}
+		checked++
+		if _, ok := m.Paths.PathItems.Get(res.Electric.Path); !ok {
+			t.Errorf("%s streams on %s and the document does not say so",
+				res.Name, res.Electric.Path)
+		}
+		// The row itself stays out: the compiler emits no wire object for an
+		// unexposed table, and a shape route answers with the sync protocol's
+		// own body rather than the row.
+		if _, found := m.Components.Schemas.Get(res.Name); found {
+			t.Errorf("%s is in components/schemas and no operation carries it", res.Name)
+		}
+	}
+	if checked == 0 {
+		t.Fatal("no unexposed streaming resource in the fixture; this test is watching nothing")
+	}
+}
+
+// TestNoComponentIsDeclaredUnused. vacuum reports one as a warning and
+// `make openapi-lint` fails on warnings, so this is the in-process half of a
+// check the pipeline makes anyway — and it runs on the shapes a fixture does
+// not have, which is where the pipeline has nothing to say.
+func TestNoComponentIsDeclaredUnused(t *testing.T) {
+	t.Parallel()
+
+	for _, fixture := range fixtures {
+		t.Run(fixture, func(t *testing.T) {
+			t.Parallel()
+			assertNoUnusedComponents(t, run(t, fixture))
+		})
+	}
+
+	// An API of nothing but reads: no Idempotency-Key to send, and no
+	// Idempotency-Replayed to come back.
+	t.Run("reads only", func(t *testing.T) {
+		t.Parallel()
+
+		doc := load(t, primary)
+		for i := range doc.API.Resources {
+			res := &doc.API.Resources[i]
+			var reads []ir.Endpoint
+			for _, ep := range res.Endpoints {
+				if ep.Method == http.MethodGet {
+					reads = append(reads, ep)
+				}
+			}
+			res.Endpoints = reads
+		}
+
+		artifacts := gentest.Run(t, openapigen.New(), doc, opts())
+		assertNoUnusedComponents(t, artifacts)
+		if strings.Contains(yamlOf(t, artifacts), "Idempotency") {
+			t.Error("an idempotency component survived into a document with no writes")
+		}
+	})
+}
+
+// assertNoUnusedComponents fails for any component nothing refers to.
+//
+// It reads the rendered JSON rather than the model, because a $ref is the one
+// thing the model resolves away: two schemas that point at a third are
+// indistinguishable from two that inline it once it is built.
+func assertNoUnusedComponents(t *testing.T, artifacts []gen.Artifact) {
+	t.Helper()
+
+	var rendered string
+	for _, a := range artifacts {
+		if a.Path == "openapi.gen.json" {
+			rendered = string(a.Content)
+		}
+	}
+	if rendered == "" {
+		t.Fatal("no openapi.gen.json among the artifacts")
+	}
+
+	var doc struct {
+		Components map[string]map[string]json.RawMessage `json:"components"`
+	}
+	if err := json.Unmarshal([]byte(rendered), &doc); err != nil {
+		t.Fatalf("the emitted document is not JSON: %v", err)
+	}
+
+	for kind, items := range doc.Components {
+		// A security scheme is named by a security requirement rather than
+		// referred to, so it has no $ref to look for.
+		if kind == "securitySchemes" {
+			continue
+		}
+		for name := range items {
+			ref := "#/components/" + kind + "/" + name
+			if !strings.Contains(rendered, `"`+ref+`"`) {
+				t.Errorf("%s is declared and nothing refers to it", ref)
+			}
+		}
+	}
+}
+
+// TestSecurityIsOnlyClaimedAgainstADeclaredScheme. ir.Endpoint.Public does not
+// depend on the auth foundation being wired, so the combination is reachable —
+// and an operation naming a scheme the document does not declare is an error a
+// linter reports rather than a document a reader can use.
+func TestSecurityIsOnlyClaimedAgainstADeclaredScheme(t *testing.T) {
+	t.Parallel()
+
+	doc := load(t, primary)
+	if doc.API.Auth != nil {
+		t.Fatal("the fixture has an auth block; this test needs one without")
+	}
+
+	var opened string
+	for i := range doc.API.Resources {
+		res := &doc.API.Resources[i]
+		if res.Unexposed || len(res.Endpoints) == 0 {
+			continue
+		}
+		for j := range res.Endpoints {
+			ep := &res.Endpoints[j]
+			if len(routesFor(ep)) == 0 {
+				continue
+			}
+			ep.Public = true
+			opened = ep.OperationID
+			break
+		}
+		break
+	}
+	if opened == "" {
+		t.Fatal("no endpoint to open; this test is watching nothing")
+	}
+
+	artifacts := gentest.Run(t, openapigen.New(), doc, opts())
+	if strings.Contains(yamlOf(t, artifacts), securitySchemeName) {
+		t.Errorf("%s is claimed by an operation and declared nowhere", securitySchemeName)
+	}
+
+	m := model(t, artifacts)
+	if op := findOperation(t, m, opened); op != nil && len(op.Security) != 0 {
+		t.Error("a public endpoint in a project with no credential describes one")
+	}
+}
+
+// securitySchemeName is the key the generator declares its one scheme under.
+const securitySchemeName = "bearerAuth"
+
+func TestOptionsAreValidated(t *testing.T) {
+	t.Parallel()
+
+	doc := load(t, primary)
+
+	cases := []struct {
+		name string
+		raw  map[string]any
+		want string
+	}{
+		{"unknown key", map[string]any{"verson": "3.1"}, "verson"},
+		{"unsupported version", map[string]any{"version": "3.2"}, "3.2"},
+		{"unknown format", map[string]any{"formats": []any{"toml"}}, "toml"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			_, err := openapigen.New().Generate(t.Context(), doc,
+				gen.Options{OutDir: ".", Raw: tc.raw})
+			if err == nil {
+				t.Fatalf("no error for %v", tc.raw)
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("error does not name %q: %v", tc.want, err)
+			}
+		})
+	}
+}
+
+func TestElectricShapesAreDocumentedUnlessTurnedOff(t *testing.T) {
+	t.Parallel()
+
+	m := model(t, run(t, primary))
+	if _, ok := m.Paths.PathItems.Get("/api/v1/lesson/_stream"); !ok {
+		t.Error("the live shape route is missing")
+	}
+
+	off := gentest.Run(t, openapigen.New(), load(t, primary),
+		gen.Options{OutDir: ".", Raw: map[string]any{"electric": false}})
+	if strings.Contains(yamlOf(t, off), "_stream") {
+		t.Error("electric: false still emitted the shape routes")
+	}
+}
+
+func TestBothFormatsAreEmitted(t *testing.T) {
+	t.Parallel()
+
+	var paths []string
+	for _, a := range run(t, primary) {
+		paths = append(paths, a.Path)
+	}
+	slices.Sort(paths)
+	if !slices.Equal(paths, []string{"openapi.gen.json", "openapi.gen.yaml"}) {
+		t.Errorf("artifacts = %v", paths)
+	}
+}
+
+func schemaOf(t *testing.T, m *v3.Document, name string) *base.Schema {
+	t.Helper()
+	proxy, ok := m.Components.Schemas.Get(name)
+	if !ok {
+		t.Fatalf("no %s schema", name)
+	}
+	return proxy.Schema()
+}
+
+func propertyOf(t *testing.T, s *base.Schema, name string) *base.Schema {
+	t.Helper()
+	proxy, ok := s.Properties.Get(name)
+	if !ok {
+		t.Fatalf("no %s property", name)
+	}
+	return proxy.Schema()
+}
+
+func findOperation(t *testing.T, m *v3.Document, id string) *v3.Operation {
+	t.Helper()
+	for pair := m.Paths.PathItems.First(); pair != nil; pair = pair.Next() {
+		for _, op := range pair.Value().GetOperations().FromOldest() {
+			if op.OperationId == id {
+				return op
+			}
+		}
+	}
+	return nil
+}

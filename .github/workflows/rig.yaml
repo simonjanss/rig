@@ -152,3 +152,8 @@ jobs:
 
       - name: Examples
         run: make examples
+
+      # After the examples, because that is what rewrites the documents it
+      # reads. Same target the pre-push hook runs, in the same order.
+      - name: OpenAPI lint
+        run: make openapi-lint

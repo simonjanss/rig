@@ -1,0 +1,3145 @@
+openapi: 3.1.0
+info:
+    title: demo
+    description: The demo HTTP API.
+    version: v1
+servers:
+    - url: https://api.example.test
+paths:
+    /api/v1/profile-attachments:
+        get:
+            tags:
+                - ProfileAttachments
+            summary: List ProfileAttachments.
+            description: |-
+                List ProfileAttachments.
+
+                Requires the `profile_attachment.read` permission.
+            operationId: listProfileAttachments
+            parameters:
+                - name: limit
+                  in: query
+                  description: Maximum rows to return.
+                  required: false
+                  schema:
+                    type: integer
+                    format: int32
+                    default: 50
+                - name: offset
+                  in: query
+                  description: Rows to skip before the first returned row.
+                  required: false
+                  schema:
+                    type: integer
+                    format: int32
+                    default: 0
+                - $ref: '#/components/parameters/ApiRevision'
+            responses:
+                "200":
+                    description: A page of ProfileAttachments.
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ProfileAttachmentListResponse'
+                "400":
+                    $ref: '#/components/responses/BadRequest'
+                "401":
+                    $ref: '#/components/responses/Unauthorized'
+                "403":
+                    $ref: '#/components/responses/Forbidden'
+                "429":
+                    $ref: '#/components/responses/RateLimited'
+                "500":
+                    $ref: '#/components/responses/Internal'
+            x-rig-permission: profile_attachment.read
+        post:
+            tags:
+                - ProfileAttachments
+            summary: Create a ProfileAttachment.
+            description: |-
+                Create a ProfileAttachment.
+
+                Requires the `profile_attachment.write` permission.
+            operationId: createProfileAttachment
+            parameters:
+                - $ref: '#/components/parameters/ApiRevision'
+                - $ref: '#/components/parameters/IdempotencyKey'
+            requestBody:
+                description: The ProfileAttachment to create, as JSON — or as a multipart form when its files are being attached in the same request.
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/ProfileAttachmentCreateInput'
+                    multipart/form-data:
+                        schema:
+                            $ref: '#/components/schemas/ProfileAttachmentCreateMultipart'
+                        encoding:
+                            json:
+                                contentType: application/json
+                            documentFile:
+                                contentType: application/octet-stream
+                required: true
+            responses:
+                "201":
+                    description: The created ProfileAttachment.
+                    headers:
+                        Idempotency-Replayed:
+                            $ref: '#/components/headers/IdempotencyReplayed'
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ProfileAttachment'
+                "400":
+                    $ref: '#/components/responses/BadRequest'
+                "401":
+                    $ref: '#/components/responses/Unauthorized'
+                "403":
+                    $ref: '#/components/responses/Forbidden'
+                "409":
+                    $ref: '#/components/responses/Conflict'
+                "413":
+                    $ref: '#/components/responses/TooLarge'
+                "415":
+                    $ref: '#/components/responses/UnsupportedMediaType'
+                "422":
+                    $ref: '#/components/responses/UnprocessableEntity'
+                "429":
+                    $ref: '#/components/responses/RateLimited'
+                "500":
+                    $ref: '#/components/responses/Internal'
+            x-rig-permission: profile_attachment.write
+    /api/v1/profile-attachments/_search:
+        post:
+            tags:
+                - ProfileAttachments
+            summary: Search ProfileAttachments with filters.
+            description: |-
+                Search ProfileAttachments with filters.
+
+                The primary form of this operation is `QUERY /api/v1/profile-attachments` — a read that carries a body, and so safe and idempotent in a way POST is not. OpenAPI 3.1 cannot describe an operation on the QUERY method, so it is documented here as the POST alias that exists for intermediaries which reject unfamiliar methods. One handler serves both routes and they answer identically.
+
+                Requires the `profile_attachment.read` permission.
+            operationId: searchProfileAttachments
+            parameters:
+                - name: limit
+                  in: query
+                  description: Maximum rows to return.
+                  required: false
+                  schema:
+                    type: integer
+                    format: int32
+                    default: 50
+                - name: offset
+                  in: query
+                  description: Rows to skip before the first returned row.
+                  required: false
+                  schema:
+                    type: integer
+                    format: int32
+                    default: 0
+                - $ref: '#/components/parameters/ApiRevision'
+            requestBody:
+                description: The request body for ProfileAttachment.Search.
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/ProfileAttachmentSearchBody'
+                required: true
+            responses:
+                "200":
+                    description: A page of matching ProfileAttachments.
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ProfileAttachmentListResponse'
+                "400":
+                    $ref: '#/components/responses/BadRequest'
+                "401":
+                    $ref: '#/components/responses/Unauthorized'
+                "403":
+                    $ref: '#/components/responses/Forbidden'
+                "422":
+                    $ref: '#/components/responses/UnprocessableEntity'
+                "429":
+                    $ref: '#/components/responses/RateLimited'
+                "500":
+                    $ref: '#/components/responses/Internal'
+            x-rig-permission: profile_attachment.read
+    /api/v1/profile-attachments/{id}:
+        get:
+            tags:
+                - ProfileAttachments
+            summary: Fetch one ProfileAttachment by identifier.
+            description: |-
+                Fetch one ProfileAttachment by identifier.
+
+                Requires the `profile_attachment.read` permission.
+            operationId: getProfileAttachment
+            parameters:
+                - name: id
+                  in: path
+                  description: Identifier of the ProfileAttachment.
+                  required: true
+                  schema:
+                    type: string
+                    format: uuid
+                - $ref: '#/components/parameters/ApiRevision'
+            responses:
+                "200":
+                    description: The requested ProfileAttachment.
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ProfileAttachment'
+                "400":
+                    $ref: '#/components/responses/BadRequest'
+                "401":
+                    $ref: '#/components/responses/Unauthorized'
+                "403":
+                    $ref: '#/components/responses/Forbidden'
+                "404":
+                    $ref: '#/components/responses/NotFound'
+                "429":
+                    $ref: '#/components/responses/RateLimited'
+                "500":
+                    $ref: '#/components/responses/Internal'
+            x-rig-permission: profile_attachment.read
+        delete:
+            tags:
+                - ProfileAttachments
+            summary: Delete a ProfileAttachment.
+            description: |-
+                Delete a ProfileAttachment.
+
+                Requires the `profile_attachment.delete` permission.
+            operationId: deleteProfileAttachment
+            parameters:
+                - name: id
+                  in: path
+                  description: Identifier of the ProfileAttachment.
+                  required: true
+                  schema:
+                    type: string
+                    format: uuid
+                - $ref: '#/components/parameters/ApiRevision'
+            responses:
+                "204":
+                    description: The ProfileAttachment was deleted.
+                "400":
+                    $ref: '#/components/responses/BadRequest'
+                "401":
+                    $ref: '#/components/responses/Unauthorized'
+                "403":
+                    $ref: '#/components/responses/Forbidden'
+                "404":
+                    $ref: '#/components/responses/NotFound'
+                "409":
+                    $ref: '#/components/responses/Conflict'
+                "429":
+                    $ref: '#/components/responses/RateLimited'
+                "500":
+                    $ref: '#/components/responses/Internal'
+            x-rig-permission: profile_attachment.delete
+        patch:
+            tags:
+                - ProfileAttachments
+            summary: Update a ProfileAttachment.
+            description: |-
+                Only the fields present in the body are changed. A field set to null is cleared; a field left out is left alone.
+
+                Requires the `profile_attachment.write` permission.
+            operationId: updateProfileAttachment
+            parameters:
+                - name: id
+                  in: path
+                  description: Identifier of the ProfileAttachment.
+                  required: true
+                  schema:
+                    type: string
+                    format: uuid
+                - $ref: '#/components/parameters/ApiRevision'
+                - $ref: '#/components/parameters/IdempotencyKey'
+            requestBody:
+                description: 'The fields of a ProfileAttachment to change. Every member is optional: one left out is left alone, and an explicit null clears it.'
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/ProfileAttachmentUpdateInput'
+                required: true
+            responses:
+                "200":
+                    description: The updated ProfileAttachment.
+                    headers:
+                        Idempotency-Replayed:
+                            $ref: '#/components/headers/IdempotencyReplayed'
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ProfileAttachment'
+                "400":
+                    $ref: '#/components/responses/BadRequest'
+                "401":
+                    $ref: '#/components/responses/Unauthorized'
+                "403":
+                    $ref: '#/components/responses/Forbidden'
+                "404":
+                    $ref: '#/components/responses/NotFound'
+                "409":
+                    $ref: '#/components/responses/Conflict'
+                "422":
+                    $ref: '#/components/responses/UnprocessableEntity'
+                "429":
+                    $ref: '#/components/responses/RateLimited'
+                "500":
+                    $ref: '#/components/responses/Internal'
+            x-rig-permission: profile_attachment.write
+    /api/v1/profile-attachments/{id}/document-file:
+        post:
+            tags:
+                - ProfileAttachments
+            summary: Attach a file to a ProfileAttachment as its document.
+            description: |-
+                The form carries one part, named documentFile. Nothing else in it is accepted.
+
+                The type is sniffed from the bytes rather than taken from what the request claimed, and the sniffed type is what is stored and what a download announces. A file replacing an existing one does not delete it: a row that keeps its previous versions still points at the old file from every one of them.
+
+                Requires the `profile_attachment.document_file.write` permission.
+            operationId: uploadProfileAttachmentDocumentFile
+            parameters:
+                - name: id
+                  in: path
+                  description: Identifier of the ProfileAttachment.
+                  required: true
+                  schema:
+                    type: string
+                    format: uuid
+                - $ref: '#/components/parameters/ApiRevision'
+                - $ref: '#/components/parameters/IdempotencyKey'
+            requestBody:
+                description: The file to attach, as a multipart form.
+                content:
+                    multipart/form-data:
+                        schema:
+                            $ref: '#/components/schemas/ProfileAttachmentUploadDocumentFileMultipart'
+                        encoding:
+                            documentFile:
+                                contentType: application/octet-stream
+                required: true
+            responses:
+                "201":
+                    description: The stored file.
+                    headers:
+                        Idempotency-Replayed:
+                            $ref: '#/components/headers/IdempotencyReplayed'
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/RigFile'
+                "400":
+                    $ref: '#/components/responses/BadRequest'
+                "401":
+                    $ref: '#/components/responses/Unauthorized'
+                "403":
+                    $ref: '#/components/responses/Forbidden'
+                "404":
+                    $ref: '#/components/responses/NotFound'
+                "409":
+                    $ref: '#/components/responses/Conflict'
+                "413":
+                    $ref: '#/components/responses/TooLarge'
+                "415":
+                    $ref: '#/components/responses/UnsupportedMediaType'
+                "422":
+                    $ref: '#/components/responses/UnprocessableEntity'
+                "429":
+                    $ref: '#/components/responses/RateLimited'
+                "500":
+                    $ref: '#/components/responses/Internal'
+            x-rig-permission: profile_attachment.document_file.write
+    /api/v1/profile-attachments/{id}/document-file/{fileId}/{filename}:
+        get:
+            tags:
+                - ProfileAttachments
+            summary: Fetch a ProfileAttachment's document.
+            description: |-
+                Answers range and conditional requests, so a resumed download does not start over and a media element can seek.
+
+                Requires the `profile_attachment.document_file.read` permission.
+            operationId: downloadProfileAttachmentDocumentFile
+            parameters:
+                - name: id
+                  in: path
+                  description: Identifier of the ProfileAttachment.
+                  required: true
+                  schema:
+                    type: string
+                    format: uuid
+                - name: fileId
+                  in: path
+                  description: Identifier of the file, from the row's document field.
+                  required: true
+                  schema:
+                    type: string
+                    format: uuid
+                - name: filename
+                  in: path
+                  description: The file's own name. It has to match the stored one, and it is what the browser offers to save the download as.
+                  required: true
+                  schema:
+                    type: string
+                - $ref: '#/components/parameters/ApiRevision'
+            responses:
+                "200":
+                    description: The file's bytes, announced as whatever they were sniffed to be.
+                    content:
+                        application/octet-stream: {}
+                "206":
+                    description: The requested range of the file.
+                    content:
+                        application/octet-stream: {}
+                "304":
+                    description: The caller already has this version of the file.
+                "400":
+                    $ref: '#/components/responses/BadRequest'
+                "401":
+                    $ref: '#/components/responses/Unauthorized'
+                "403":
+                    $ref: '#/components/responses/Forbidden'
+                "404":
+                    $ref: '#/components/responses/NotFound'
+                "429":
+                    $ref: '#/components/responses/RateLimited'
+                "500":
+                    $ref: '#/components/responses/Internal'
+            x-rig-permission: profile_attachment.document_file.read
+    /api/v1/profiles:
+        get:
+            tags:
+                - Profiles
+            summary: List Profiles.
+            description: |-
+                List Profiles.
+
+                Requires the `profile.read` permission.
+            operationId: listProfiles
+            parameters:
+                - name: limit
+                  in: query
+                  description: Maximum rows to return.
+                  required: false
+                  schema:
+                    type: integer
+                    format: int32
+                    default: 50
+                - name: offset
+                  in: query
+                  description: Rows to skip before the first returned row.
+                  required: false
+                  schema:
+                    type: integer
+                    format: int32
+                    default: 0
+                - $ref: '#/components/parameters/ApiRevision'
+            responses:
+                "200":
+                    description: A page of Profiles.
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ProfileListResponse'
+                "400":
+                    $ref: '#/components/responses/BadRequest'
+                "401":
+                    $ref: '#/components/responses/Unauthorized'
+                "403":
+                    $ref: '#/components/responses/Forbidden'
+                "429":
+                    $ref: '#/components/responses/RateLimited'
+                "500":
+                    $ref: '#/components/responses/Internal'
+            x-rig-permission: profile.read
+        post:
+            tags:
+                - Profiles
+            summary: Create a Profile.
+            description: |-
+                Create a Profile.
+
+                Requires the `profile.write` permission.
+            operationId: createProfile
+            parameters:
+                - $ref: '#/components/parameters/ApiRevision'
+                - $ref: '#/components/parameters/IdempotencyKey'
+            requestBody:
+                description: The Profile to create, as JSON — or as a multipart form when its files are being attached in the same request.
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/ProfileCreateInput'
+                    multipart/form-data:
+                        schema:
+                            $ref: '#/components/schemas/ProfileCreateMultipart'
+                        encoding:
+                            json:
+                                contentType: application/json
+                            profileImageFile:
+                                contentType: application/octet-stream
+                            bannerFile:
+                                contentType: application/octet-stream
+                required: true
+            responses:
+                "201":
+                    description: The created Profile.
+                    headers:
+                        Idempotency-Replayed:
+                            $ref: '#/components/headers/IdempotencyReplayed'
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Profile'
+                "400":
+                    $ref: '#/components/responses/BadRequest'
+                "401":
+                    $ref: '#/components/responses/Unauthorized'
+                "403":
+                    $ref: '#/components/responses/Forbidden'
+                "409":
+                    $ref: '#/components/responses/Conflict'
+                "413":
+                    $ref: '#/components/responses/TooLarge'
+                "415":
+                    $ref: '#/components/responses/UnsupportedMediaType'
+                "422":
+                    $ref: '#/components/responses/UnprocessableEntity'
+                "429":
+                    $ref: '#/components/responses/RateLimited'
+                "500":
+                    $ref: '#/components/responses/Internal'
+            x-rig-permission: profile.write
+    /api/v1/profiles/_search:
+        post:
+            tags:
+                - Profiles
+            summary: Search Profiles with filters.
+            description: |-
+                Search Profiles with filters.
+
+                The primary form of this operation is `QUERY /api/v1/profiles` — a read that carries a body, and so safe and idempotent in a way POST is not. OpenAPI 3.1 cannot describe an operation on the QUERY method, so it is documented here as the POST alias that exists for intermediaries which reject unfamiliar methods. One handler serves both routes and they answer identically.
+
+                Requires the `profile.read` permission.
+            operationId: searchProfiles
+            parameters:
+                - name: limit
+                  in: query
+                  description: Maximum rows to return.
+                  required: false
+                  schema:
+                    type: integer
+                    format: int32
+                    default: 50
+                - name: offset
+                  in: query
+                  description: Rows to skip before the first returned row.
+                  required: false
+                  schema:
+                    type: integer
+                    format: int32
+                    default: 0
+                - $ref: '#/components/parameters/ApiRevision'
+            requestBody:
+                description: The request body for Profile.Search.
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/ProfileSearchBody'
+                required: true
+            responses:
+                "200":
+                    description: A page of matching Profiles.
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ProfileListResponse'
+                "400":
+                    $ref: '#/components/responses/BadRequest'
+                "401":
+                    $ref: '#/components/responses/Unauthorized'
+                "403":
+                    $ref: '#/components/responses/Forbidden'
+                "422":
+                    $ref: '#/components/responses/UnprocessableEntity'
+                "429":
+                    $ref: '#/components/responses/RateLimited'
+                "500":
+                    $ref: '#/components/responses/Internal'
+            x-rig-permission: profile.read
+    /api/v1/profiles/{id}:
+        get:
+            tags:
+                - Profiles
+            summary: Fetch one Profile by identifier.
+            description: |-
+                Fetch one Profile by identifier.
+
+                Requires the `profile.read` permission.
+            operationId: getProfile
+            parameters:
+                - name: id
+                  in: path
+                  description: Identifier of the Profile.
+                  required: true
+                  schema:
+                    type: string
+                    format: uuid
+                - $ref: '#/components/parameters/ApiRevision'
+            responses:
+                "200":
+                    description: The requested Profile.
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Profile'
+                "400":
+                    $ref: '#/components/responses/BadRequest'
+                "401":
+                    $ref: '#/components/responses/Unauthorized'
+                "403":
+                    $ref: '#/components/responses/Forbidden'
+                "404":
+                    $ref: '#/components/responses/NotFound'
+                "429":
+                    $ref: '#/components/responses/RateLimited'
+                "500":
+                    $ref: '#/components/responses/Internal'
+            x-rig-permission: profile.read
+        delete:
+            tags:
+                - Profiles
+            summary: Delete a Profile.
+            description: |-
+                Delete a Profile.
+
+                Requires the `profile.delete` permission.
+            operationId: deleteProfile
+            parameters:
+                - name: id
+                  in: path
+                  description: Identifier of the Profile.
+                  required: true
+                  schema:
+                    type: string
+                    format: uuid
+                - $ref: '#/components/parameters/ApiRevision'
+            responses:
+                "204":
+                    description: The Profile was deleted.
+                "400":
+                    $ref: '#/components/responses/BadRequest'
+                "401":
+                    $ref: '#/components/responses/Unauthorized'
+                "403":
+                    $ref: '#/components/responses/Forbidden'
+                "404":
+                    $ref: '#/components/responses/NotFound'
+                "409":
+                    $ref: '#/components/responses/Conflict'
+                "429":
+                    $ref: '#/components/responses/RateLimited'
+                "500":
+                    $ref: '#/components/responses/Internal'
+            x-rig-permission: profile.delete
+        patch:
+            tags:
+                - Profiles
+            summary: Update a Profile.
+            description: |-
+                Only the fields present in the body are changed. A field set to null is cleared; a field left out is left alone.
+
+                Requires the `profile.write` permission.
+            operationId: updateProfile
+            parameters:
+                - name: id
+                  in: path
+                  description: Identifier of the Profile.
+                  required: true
+                  schema:
+                    type: string
+                    format: uuid
+                - $ref: '#/components/parameters/ApiRevision'
+                - $ref: '#/components/parameters/IdempotencyKey'
+            requestBody:
+                description: 'The fields of a Profile to change. Every member is optional: one left out is left alone, and an explicit null clears it.'
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/ProfileUpdateInput'
+                required: true
+            responses:
+                "200":
+                    description: The updated Profile.
+                    headers:
+                        Idempotency-Replayed:
+                            $ref: '#/components/headers/IdempotencyReplayed'
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Profile'
+                "400":
+                    $ref: '#/components/responses/BadRequest'
+                "401":
+                    $ref: '#/components/responses/Unauthorized'
+                "403":
+                    $ref: '#/components/responses/Forbidden'
+                "404":
+                    $ref: '#/components/responses/NotFound'
+                "409":
+                    $ref: '#/components/responses/Conflict'
+                "422":
+                    $ref: '#/components/responses/UnprocessableEntity'
+                "429":
+                    $ref: '#/components/responses/RateLimited'
+                "500":
+                    $ref: '#/components/responses/Internal'
+            x-rig-permission: profile.write
+    /api/v1/profiles/{id}/banner-file:
+        post:
+            tags:
+                - Profiles
+            summary: Attach a file to a Profile as its banner.
+            description: |-
+                The form carries one part, named bannerFile. Nothing else in it is accepted.
+
+                The type is sniffed from the bytes rather than taken from what the request claimed, and the sniffed type is what is stored and what a download announces. A file replacing an existing one does not delete it: a row that keeps its previous versions still points at the old file from every one of them.
+
+                Requires the `profile.banner_file.write` permission.
+            operationId: uploadProfileBannerFile
+            parameters:
+                - name: id
+                  in: path
+                  description: Identifier of the Profile.
+                  required: true
+                  schema:
+                    type: string
+                    format: uuid
+                - $ref: '#/components/parameters/ApiRevision'
+                - $ref: '#/components/parameters/IdempotencyKey'
+            requestBody:
+                description: The file to attach, as a multipart form.
+                content:
+                    multipart/form-data:
+                        schema:
+                            $ref: '#/components/schemas/ProfileUploadBannerFileMultipart'
+                        encoding:
+                            bannerFile:
+                                contentType: application/octet-stream
+                required: true
+            responses:
+                "201":
+                    description: The stored file.
+                    headers:
+                        Idempotency-Replayed:
+                            $ref: '#/components/headers/IdempotencyReplayed'
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/RigFile'
+                "400":
+                    $ref: '#/components/responses/BadRequest'
+                "401":
+                    $ref: '#/components/responses/Unauthorized'
+                "403":
+                    $ref: '#/components/responses/Forbidden'
+                "404":
+                    $ref: '#/components/responses/NotFound'
+                "409":
+                    $ref: '#/components/responses/Conflict'
+                "413":
+                    $ref: '#/components/responses/TooLarge'
+                "415":
+                    $ref: '#/components/responses/UnsupportedMediaType'
+                "422":
+                    $ref: '#/components/responses/UnprocessableEntity'
+                "429":
+                    $ref: '#/components/responses/RateLimited'
+                "500":
+                    $ref: '#/components/responses/Internal'
+            x-rig-permission: profile.banner_file.write
+        delete:
+            tags:
+                - Profiles
+            summary: Remove a Profile's banner.
+            description: |-
+                The column is cleared and the file is retired. Its bytes outlive the delete for as long as the file restore window, because a restore inside that window has to hand back a row pointing at something.
+
+                Requires the `profile.banner_file.write` permission.
+            operationId: deleteProfileBannerFile
+            parameters:
+                - name: id
+                  in: path
+                  description: Identifier of the Profile.
+                  required: true
+                  schema:
+                    type: string
+                    format: uuid
+                - $ref: '#/components/parameters/ApiRevision'
+            responses:
+                "204":
+                    description: The file was removed.
+                "400":
+                    $ref: '#/components/responses/BadRequest'
+                "401":
+                    $ref: '#/components/responses/Unauthorized'
+                "403":
+                    $ref: '#/components/responses/Forbidden'
+                "404":
+                    $ref: '#/components/responses/NotFound'
+                "409":
+                    $ref: '#/components/responses/Conflict'
+                "429":
+                    $ref: '#/components/responses/RateLimited'
+                "500":
+                    $ref: '#/components/responses/Internal'
+            x-rig-permission: profile.banner_file.write
+    /api/v1/profiles/{id}/banner-file/{fileId}/{filename}:
+        get:
+            tags:
+                - Profiles
+            summary: Fetch a Profile's banner.
+            description: |-
+                Answers range and conditional requests, so a resumed download does not start over and a media element can seek.
+
+                Requires the `profile.banner_file.read` permission.
+            operationId: downloadProfileBannerFile
+            parameters:
+                - name: id
+                  in: path
+                  description: Identifier of the Profile.
+                  required: true
+                  schema:
+                    type: string
+                    format: uuid
+                - name: fileId
+                  in: path
+                  description: Identifier of the file, from the row's banner field.
+                  required: true
+                  schema:
+                    type: string
+                    format: uuid
+                - name: filename
+                  in: path
+                  description: The file's own name. It has to match the stored one, and it is what the browser offers to save the download as.
+                  required: true
+                  schema:
+                    type: string
+                - $ref: '#/components/parameters/ApiRevision'
+            responses:
+                "200":
+                    description: The file's bytes, announced as whatever they were sniffed to be.
+                    content:
+                        application/octet-stream: {}
+                "206":
+                    description: The requested range of the file.
+                    content:
+                        application/octet-stream: {}
+                "304":
+                    description: The caller already has this version of the file.
+                "400":
+                    $ref: '#/components/responses/BadRequest'
+                "401":
+                    $ref: '#/components/responses/Unauthorized'
+                "403":
+                    $ref: '#/components/responses/Forbidden'
+                "404":
+                    $ref: '#/components/responses/NotFound'
+                "429":
+                    $ref: '#/components/responses/RateLimited'
+                "500":
+                    $ref: '#/components/responses/Internal'
+            x-rig-permission: profile.banner_file.read
+    /api/v1/profiles/{id}/profile-image-file:
+        post:
+            tags:
+                - Profiles
+            summary: Attach a file to a Profile as its profile image.
+            description: |-
+                The form carries one part, named profileImageFile. Nothing else in it is accepted.
+
+                The type is sniffed from the bytes rather than taken from what the request claimed, and the sniffed type is what is stored and what a download announces. A file replacing an existing one does not delete it: a row that keeps its previous versions still points at the old file from every one of them.
+
+                Requires the `profile.profile_image_file.write` permission.
+            operationId: uploadProfileProfileImageFile
+            parameters:
+                - name: id
+                  in: path
+                  description: Identifier of the Profile.
+                  required: true
+                  schema:
+                    type: string
+                    format: uuid
+                - $ref: '#/components/parameters/ApiRevision'
+                - $ref: '#/components/parameters/IdempotencyKey'
+            requestBody:
+                description: The file to attach, as a multipart form.
+                content:
+                    multipart/form-data:
+                        schema:
+                            $ref: '#/components/schemas/ProfileUploadProfileImageFileMultipart'
+                        encoding:
+                            profileImageFile:
+                                contentType: application/octet-stream
+                required: true
+            responses:
+                "201":
+                    description: The stored file.
+                    headers:
+                        Idempotency-Replayed:
+                            $ref: '#/components/headers/IdempotencyReplayed'
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/RigFile'
+                "400":
+                    $ref: '#/components/responses/BadRequest'
+                "401":
+                    $ref: '#/components/responses/Unauthorized'
+                "403":
+                    $ref: '#/components/responses/Forbidden'
+                "404":
+                    $ref: '#/components/responses/NotFound'
+                "409":
+                    $ref: '#/components/responses/Conflict'
+                "413":
+                    $ref: '#/components/responses/TooLarge'
+                "415":
+                    $ref: '#/components/responses/UnsupportedMediaType'
+                "422":
+                    $ref: '#/components/responses/UnprocessableEntity'
+                "429":
+                    $ref: '#/components/responses/RateLimited'
+                "500":
+                    $ref: '#/components/responses/Internal'
+            x-rig-permission: profile.profile_image_file.write
+        delete:
+            tags:
+                - Profiles
+            summary: Remove a Profile's profile image.
+            description: |-
+                The column is cleared and the file is retired. Its bytes outlive the delete for as long as the file restore window, because a restore inside that window has to hand back a row pointing at something.
+
+                Requires the `profile.profile_image_file.write` permission.
+            operationId: deleteProfileProfileImageFile
+            parameters:
+                - name: id
+                  in: path
+                  description: Identifier of the Profile.
+                  required: true
+                  schema:
+                    type: string
+                    format: uuid
+                - $ref: '#/components/parameters/ApiRevision'
+            responses:
+                "204":
+                    description: The file was removed.
+                "400":
+                    $ref: '#/components/responses/BadRequest'
+                "401":
+                    $ref: '#/components/responses/Unauthorized'
+                "403":
+                    $ref: '#/components/responses/Forbidden'
+                "404":
+                    $ref: '#/components/responses/NotFound'
+                "409":
+                    $ref: '#/components/responses/Conflict'
+                "429":
+                    $ref: '#/components/responses/RateLimited'
+                "500":
+                    $ref: '#/components/responses/Internal'
+            x-rig-permission: profile.profile_image_file.write
+    /api/v1/profiles/{id}/profile-image-file/{fileId}/{filename}:
+        get:
+            tags:
+                - Profiles
+            summary: Fetch a Profile's profile image.
+            description: |-
+                Answers range and conditional requests, so a resumed download does not start over and a media element can seek.
+
+                Requires the `profile.profile_image_file.read` permission.
+            operationId: downloadProfileProfileImageFile
+            parameters:
+                - name: id
+                  in: path
+                  description: Identifier of the Profile.
+                  required: true
+                  schema:
+                    type: string
+                    format: uuid
+                - name: fileId
+                  in: path
+                  description: Identifier of the file, from the row's profileImage field.
+                  required: true
+                  schema:
+                    type: string
+                    format: uuid
+                - name: filename
+                  in: path
+                  description: The file's own name. It has to match the stored one, and it is what the browser offers to save the download as.
+                  required: true
+                  schema:
+                    type: string
+                - $ref: '#/components/parameters/ApiRevision'
+            responses:
+                "200":
+                    description: The file's bytes, announced as whatever they were sniffed to be.
+                    content:
+                        application/octet-stream: {}
+                "206":
+                    description: The requested range of the file.
+                    content:
+                        application/octet-stream: {}
+                "304":
+                    description: The caller already has this version of the file.
+                "400":
+                    $ref: '#/components/responses/BadRequest'
+                "401":
+                    $ref: '#/components/responses/Unauthorized'
+                "403":
+                    $ref: '#/components/responses/Forbidden'
+                "404":
+                    $ref: '#/components/responses/NotFound'
+                "429":
+                    $ref: '#/components/responses/RateLimited'
+                "500":
+                    $ref: '#/components/responses/Internal'
+            x-rig-permission: profile.profile_image_file.read
+    /api/v1/rig-files:
+        get:
+            tags:
+                - RigFiles
+            summary: List RigFiles.
+            description: |-
+                List RigFiles.
+
+                Requires the `rig_file.read` permission.
+            operationId: listRigFiles
+            parameters:
+                - name: limit
+                  in: query
+                  description: Maximum rows to return.
+                  required: false
+                  schema:
+                    type: integer
+                    format: int32
+                    default: 50
+                - name: offset
+                  in: query
+                  description: Rows to skip before the first returned row.
+                  required: false
+                  schema:
+                    type: integer
+                    format: int32
+                    default: 0
+                - $ref: '#/components/parameters/ApiRevision'
+            responses:
+                "200":
+                    description: A page of RigFiles.
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/RigFileListResponse'
+                "400":
+                    $ref: '#/components/responses/BadRequest'
+                "401":
+                    $ref: '#/components/responses/Unauthorized'
+                "403":
+                    $ref: '#/components/responses/Forbidden'
+                "429":
+                    $ref: '#/components/responses/RateLimited'
+                "500":
+                    $ref: '#/components/responses/Internal'
+            x-rig-permission: rig_file.read
+        post:
+            tags:
+                - RigFiles
+            summary: Create a RigFile.
+            description: |-
+                Create a RigFile.
+
+                Requires the `rig_file.write` permission.
+            operationId: createRigFile
+            parameters:
+                - $ref: '#/components/parameters/ApiRevision'
+                - $ref: '#/components/parameters/IdempotencyKey'
+            requestBody:
+                description: The fields a new RigFile is created with. A field the database cannot supply for itself is required.
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/RigFileCreateInput'
+                required: true
+            responses:
+                "201":
+                    description: The created RigFile.
+                    headers:
+                        Idempotency-Replayed:
+                            $ref: '#/components/headers/IdempotencyReplayed'
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/RigFile'
+                "400":
+                    $ref: '#/components/responses/BadRequest'
+                "401":
+                    $ref: '#/components/responses/Unauthorized'
+                "403":
+                    $ref: '#/components/responses/Forbidden'
+                "409":
+                    $ref: '#/components/responses/Conflict'
+                "422":
+                    $ref: '#/components/responses/UnprocessableEntity'
+                "429":
+                    $ref: '#/components/responses/RateLimited'
+                "500":
+                    $ref: '#/components/responses/Internal'
+            x-rig-permission: rig_file.write
+    /api/v1/rig-files/_deleted:
+        get:
+            tags:
+                - RigFiles
+            summary: List retired RigFiles.
+            description: |-
+                A deletion stamps the row rather than removing it, so this is what was deleted and can still be brought back. Only rows inside the 7-day restore window appear: past it a row is gone as far as anyone is concerned, so it is not in the trash either.
+
+                Requires the `rig_file.read` permission.
+            operationId: listDeletedRigFiles
+            parameters:
+                - name: limit
+                  in: query
+                  description: Maximum rows to return.
+                  required: false
+                  schema:
+                    type: integer
+                    format: int32
+                    default: 50
+                - name: offset
+                  in: query
+                  description: Rows to skip before the first returned row.
+                  required: false
+                  schema:
+                    type: integer
+                    format: int32
+                    default: 0
+                - $ref: '#/components/parameters/ApiRevision'
+            responses:
+                "200":
+                    description: A page of retired RigFiles.
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/RigFileListResponse'
+                "400":
+                    $ref: '#/components/responses/BadRequest'
+                "401":
+                    $ref: '#/components/responses/Unauthorized'
+                "403":
+                    $ref: '#/components/responses/Forbidden'
+                "429":
+                    $ref: '#/components/responses/RateLimited'
+                "500":
+                    $ref: '#/components/responses/Internal'
+            x-rig-permission: rig_file.read
+    /api/v1/rig-files/_search:
+        post:
+            tags:
+                - RigFiles
+            summary: Search RigFiles with filters.
+            description: |-
+                Search RigFiles with filters.
+
+                The primary form of this operation is `QUERY /api/v1/rig-files` — a read that carries a body, and so safe and idempotent in a way POST is not. OpenAPI 3.1 cannot describe an operation on the QUERY method, so it is documented here as the POST alias that exists for intermediaries which reject unfamiliar methods. One handler serves both routes and they answer identically.
+
+                Requires the `rig_file.read` permission.
+            operationId: searchRigFiles
+            parameters:
+                - name: limit
+                  in: query
+                  description: Maximum rows to return.
+                  required: false
+                  schema:
+                    type: integer
+                    format: int32
+                    default: 50
+                - name: offset
+                  in: query
+                  description: Rows to skip before the first returned row.
+                  required: false
+                  schema:
+                    type: integer
+                    format: int32
+                    default: 0
+                - $ref: '#/components/parameters/ApiRevision'
+            requestBody:
+                description: The request body for RigFile.Search.
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/RigFileSearchBody'
+                required: true
+            responses:
+                "200":
+                    description: A page of matching RigFiles.
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/RigFileListResponse'
+                "400":
+                    $ref: '#/components/responses/BadRequest'
+                "401":
+                    $ref: '#/components/responses/Unauthorized'
+                "403":
+                    $ref: '#/components/responses/Forbidden'
+                "422":
+                    $ref: '#/components/responses/UnprocessableEntity'
+                "429":
+                    $ref: '#/components/responses/RateLimited'
+                "500":
+                    $ref: '#/components/responses/Internal'
+            x-rig-permission: rig_file.read
+    /api/v1/rig-files/{id}:
+        get:
+            tags:
+                - RigFiles
+            summary: Fetch one RigFile by identifier.
+            description: |-
+                Fetch one RigFile by identifier.
+
+                Requires the `rig_file.read` permission.
+            operationId: getRigFile
+            parameters:
+                - name: id
+                  in: path
+                  description: Identifier of the RigFile.
+                  required: true
+                  schema:
+                    type: string
+                    format: uuid
+                - $ref: '#/components/parameters/ApiRevision'
+            responses:
+                "200":
+                    description: The requested RigFile.
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/RigFile'
+                "400":
+                    $ref: '#/components/responses/BadRequest'
+                "401":
+                    $ref: '#/components/responses/Unauthorized'
+                "403":
+                    $ref: '#/components/responses/Forbidden'
+                "404":
+                    $ref: '#/components/responses/NotFound'
+                "429":
+                    $ref: '#/components/responses/RateLimited'
+                "500":
+                    $ref: '#/components/responses/Internal'
+            x-rig-permission: rig_file.read
+        delete:
+            tags:
+                - RigFiles
+            summary: Delete a RigFile.
+            description: |-
+                The row is retired by stamping a deletion time; it stops appearing in reads but can be restored within the retention window.
+
+                Requires the `rig_file.delete` permission.
+            operationId: deleteRigFile
+            parameters:
+                - name: id
+                  in: path
+                  description: Identifier of the RigFile.
+                  required: true
+                  schema:
+                    type: string
+                    format: uuid
+                - $ref: '#/components/parameters/ApiRevision'
+            responses:
+                "204":
+                    description: The RigFile was deleted.
+                "400":
+                    $ref: '#/components/responses/BadRequest'
+                "401":
+                    $ref: '#/components/responses/Unauthorized'
+                "403":
+                    $ref: '#/components/responses/Forbidden'
+                "404":
+                    $ref: '#/components/responses/NotFound'
+                "409":
+                    $ref: '#/components/responses/Conflict'
+                "429":
+                    $ref: '#/components/responses/RateLimited'
+                "500":
+                    $ref: '#/components/responses/Internal'
+            x-rig-permission: rig_file.delete
+        patch:
+            tags:
+                - RigFiles
+            summary: Update a RigFile.
+            description: |-
+                Only the fields present in the body are changed. A field set to null is cleared; a field left out is left alone.
+
+                Requires the `rig_file.write` permission.
+            operationId: updateRigFile
+            parameters:
+                - name: id
+                  in: path
+                  description: Identifier of the RigFile.
+                  required: true
+                  schema:
+                    type: string
+                    format: uuid
+                - $ref: '#/components/parameters/ApiRevision'
+                - $ref: '#/components/parameters/IdempotencyKey'
+            requestBody:
+                description: 'The fields of a RigFile to change. Every member is optional: one left out is left alone, and an explicit null clears it.'
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/RigFileUpdateInput'
+                required: true
+            responses:
+                "200":
+                    description: The updated RigFile.
+                    headers:
+                        Idempotency-Replayed:
+                            $ref: '#/components/headers/IdempotencyReplayed'
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/RigFile'
+                "400":
+                    $ref: '#/components/responses/BadRequest'
+                "401":
+                    $ref: '#/components/responses/Unauthorized'
+                "403":
+                    $ref: '#/components/responses/Forbidden'
+                "404":
+                    $ref: '#/components/responses/NotFound'
+                "409":
+                    $ref: '#/components/responses/Conflict'
+                "422":
+                    $ref: '#/components/responses/UnprocessableEntity'
+                "429":
+                    $ref: '#/components/responses/RateLimited'
+                "500":
+                    $ref: '#/components/responses/Internal'
+            x-rig-permission: rig_file.write
+    /api/v1/rig-files/{id}/_restore:
+        post:
+            tags:
+                - RigFiles
+            summary: Bring a retired RigFile back.
+            description: |-
+                The deletion stamp is cleared and the row appears in reads again. It works for 7 days after the deletion; past that the row is no longer eligible and this answers 409.
+
+                Restoring a row that was never deleted is not an error. It is already in the state the caller asked for, and answering otherwise would make a retry of a request whose response went missing look like a failure.
+
+                The request carries no fields. What to do when the world has moved on while the row was retired — a unique value taken by something created since — is the application's decision, and it is made in the restore hook: refuse, or change the row so that it fits.
+
+                Every rule then runs against whatever the hook settled on, not only the ones for fields it touched. The row was not live, so nothing about it has been checked against the world it is returning to.
+
+                Requires the `rig_file.write` permission.
+            operationId: restoreRigFile
+            parameters:
+                - name: id
+                  in: path
+                  description: Identifier of the RigFile.
+                  required: true
+                  schema:
+                    type: string
+                    format: uuid
+                - $ref: '#/components/parameters/ApiRevision'
+                - $ref: '#/components/parameters/IdempotencyKey'
+            responses:
+                "200":
+                    description: The restored RigFile.
+                    headers:
+                        Idempotency-Replayed:
+                            $ref: '#/components/headers/IdempotencyReplayed'
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/RigFile'
+                "400":
+                    $ref: '#/components/responses/BadRequest'
+                "401":
+                    $ref: '#/components/responses/Unauthorized'
+                "403":
+                    $ref: '#/components/responses/Forbidden'
+                "404":
+                    $ref: '#/components/responses/NotFound'
+                "409":
+                    $ref: '#/components/responses/Conflict'
+                "422":
+                    $ref: '#/components/responses/UnprocessableEntity'
+                "429":
+                    $ref: '#/components/responses/RateLimited'
+                "500":
+                    $ref: '#/components/responses/Internal'
+            x-rig-permission: rig_file.write
+components:
+    schemas:
+        Error:
+            type: object
+            properties:
+                code:
+                    $ref: '#/components/schemas/ErrorCode'
+                    description: Machine-readable reason the request failed.
+                message:
+                    type: string
+                    description: Human-readable explanation. Not intended for clients to parse.
+                requestId:
+                    type:
+                        - string
+                        - "null"
+                    description: Identifier of this request, for correlating with server logs.
+                fields:
+                    description: Present when the failure was validation. It is shaped like the request body that failed — one member per field, holding the problem with that field — so a client can put each message beside the control it belongs to.
+            description: Returned whenever a request fails.
+        ErrorCode:
+            type: string
+            enum:
+                - BadRequest
+                - Unauthorized
+                - Forbidden
+                - NotFound
+                - Conflict
+                - UnprocessableEntity
+                - RateLimited
+                - TooLarge
+                - UnsupportedMediaType
+                - UpgradeRequired
+                - Internal
+            description: Machine-readable reason a request failed.
+            x-enum-varnames:
+                - BadRequest
+                - Unauthorized
+                - Forbidden
+                - NotFound
+                - Conflict
+                - UnprocessableEntity
+                - RateLimited
+                - TooLarge
+                - UnsupportedMediaType
+                - UpgradeRequired
+                - Internal
+        Pagination:
+            type: object
+            properties:
+                offset:
+                    type: integer
+                    format: int32
+                    description: Number of rows skipped before this page.
+                limit:
+                    type: integer
+                    format: int32
+                    description: Maximum number of rows in this page.
+                total:
+                    type: integer
+                    format: int64
+                    description: Total number of rows matching the query, ignoring pagination.
+            description: Where the returned page sits within the full result set.
+        Profile:
+            type: object
+            properties:
+                id:
+                    type: string
+                    format: uuid
+                    description: Unique identifier for this row.
+                    readOnly: true
+                tenantId:
+                    type: string
+                    format: uuid
+                    description: Tenant this row belongs to. Every query is scoped by it.
+                    readOnly: true
+                createdAt:
+                    type: string
+                    format: date-time
+                    description: When this row was created. Set automatically and never changes.
+                    readOnly: true
+                displayName:
+                    type: string
+                    description: What to call them.
+                profileImageFileId:
+                    type:
+                        - string
+                        - "null"
+                    format: uuid
+                    description: 'The picture. A <role>_file_id column is the declaration: the role names the endpoints and the permission keys, and rig_file is the only table it could point at, so the naming rule exempts it.'
+                bannerFileId:
+                    type:
+                        - string
+                        - "null"
+                    format: uuid
+                    description: A second one on the same table, which is the reason the role is in the name at all. The rule's own suggestion, rig_file_id, allows exactly one.
+            description: Somebody's public face, with pictures attached to it.
+        ProfileAttachment:
+            type: object
+            properties:
+                id:
+                    type: string
+                    format: uuid
+                    description: Unique identifier for this row.
+                    readOnly: true
+                tenantId:
+                    type: string
+                    format: uuid
+                    description: Tenant this row belongs to. Every query is scoped by it.
+                    readOnly: true
+                createdAt:
+                    type: string
+                    format: date-time
+                    description: When this row was created. Set automatically and never changes.
+                    readOnly: true
+                profileId:
+                    type: string
+                    format: uuid
+                    description: Reached through a composite key carrying the tenant, which is the shape rig recommends wherever the target is tenant-scoped. Its index leads with the tenant, and that is the index the generated queries want.
+                documentFileId:
+                    type: string
+                    format: uuid
+                    description: The same shape, deliberately left without an index so the rule has something to say. Before the tenant-carrying form was denormalized onto its column, it had nothing to say about either of these.
+                thumbnailFileId:
+                    type:
+                        - string
+                        - "null"
+                    format: uuid
+                    description: The control. Named like a file column and pointing at profile instead, so it is not one — and it still gets the ordinary naming advice.
+                caption:
+                    type:
+                        - string
+                        - "null"
+                    description: What the attachment is.
+            description: A gallery is a table. Many files against one row is a child table with one file column, not a second mechanism.
+        ProfileAttachmentCreateInput:
+            type: object
+            properties:
+                profileId:
+                    type: string
+                    format: uuid
+                    description: Reached through a composite key carrying the tenant, which is the shape rig recommends wherever the target is tenant-scoped. Its index leads with the tenant, and that is the index the generated queries want.
+                documentFileId:
+                    type: string
+                    format: uuid
+                    description: The same shape, deliberately left without an index so the rule has something to say. Before the tenant-carrying form was denormalized onto its column, it had nothing to say about either of these.
+                thumbnailFileId:
+                    type:
+                        - string
+                        - "null"
+                    format: uuid
+                    description: The control. Named like a file column and pointing at profile instead, so it is not one — and it still gets the ordinary naming advice.
+                caption:
+                    type:
+                        - string
+                        - "null"
+                    description: What the attachment is.
+            required:
+                - profileId
+                - documentFileId
+            description: The fields a new ProfileAttachment is created with. A field the database cannot supply for itself is required.
+        ProfileAttachmentCreateMultipart:
+            type: object
+            properties:
+                json:
+                    $ref: '#/components/schemas/ProfileAttachmentCreateInput'
+                    description: The ProfileAttachment itself, as JSON.
+                documentFile:
+                    type: string
+                    description: The document, as a file.
+                    contentMediaType: application/octet-stream
+            required:
+                - json
+                - documentFile
+            description: The same body Create takes, in a part named `json`, plus one part per file column. The row and its bytes are committed together, so a request that fails leaves neither.
+        ProfileAttachmentFilter:
+            type: object
+            properties:
+                equals:
+                    oneOf:
+                        - $ref: '#/components/schemas/ProfileAttachmentFilterEquals'
+                        - type: "null"
+                    description: Fields that must equal the given value.
+                notEquals:
+                    oneOf:
+                        - $ref: '#/components/schemas/ProfileAttachmentFilterEquals'
+                        - type: "null"
+                    description: Fields that must not equal the given value.
+                greaterThan:
+                    oneOf:
+                        - $ref: '#/components/schemas/ProfileAttachmentFilterRange'
+                        - type: "null"
+                    description: Fields that must be greater than the given value.
+                smallerThan:
+                    oneOf:
+                        - $ref: '#/components/schemas/ProfileAttachmentFilterRange'
+                        - type: "null"
+                    description: Fields that must be less than the given value.
+                greaterOrEqual:
+                    oneOf:
+                        - $ref: '#/components/schemas/ProfileAttachmentFilterRange'
+                        - type: "null"
+                    description: Fields that must be greater than or equal to the given value.
+                smallerOrEqual:
+                    oneOf:
+                        - $ref: '#/components/schemas/ProfileAttachmentFilterRange'
+                        - type: "null"
+                    description: Fields that must be less than or equal to the given value.
+                contains:
+                    oneOf:
+                        - $ref: '#/components/schemas/ProfileAttachmentFilterContains'
+                        - type: "null"
+                    description: Fields that must be one of the given values.
+                notContains:
+                    oneOf:
+                        - $ref: '#/components/schemas/ProfileAttachmentFilterContains'
+                        - type: "null"
+                    description: Fields that must not be one of the given values.
+                like:
+                    oneOf:
+                        - $ref: '#/components/schemas/ProfileAttachmentFilterLike'
+                        - type: "null"
+                    description: Text fields that must match the given pattern.
+                notLike:
+                    oneOf:
+                        - $ref: '#/components/schemas/ProfileAttachmentFilterLike'
+                        - type: "null"
+                    description: Text fields that must not match the given pattern.
+                "null":
+                    oneOf:
+                        - $ref: '#/components/schemas/ProfileAttachmentFilterNull'
+                        - type: "null"
+                    description: Fields that must be null.
+                notNull:
+                    oneOf:
+                        - $ref: '#/components/schemas/ProfileAttachmentFilterNull'
+                        - type: "null"
+                    description: Fields that must not be null.
+                orCondition:
+                    type: boolean
+                    description: Combine this filter's conditions with OR instead of AND.
+                nestedFilters:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/ProfileAttachmentFilter'
+                    description: Sub-filters combined with this one, so that AND and OR can be mixed to any depth.
+                without:
+                    oneOf:
+                        - $ref: '#/components/schemas/ProfileAttachmentFilterWithout'
+                        - type: "null"
+                    description: |-
+                        Relations with no row matching the given conditions. An empty one asks for no related row at all.
+
+                        This is where a negation belongs when what you mean is "not": it negates whether a matching related row exists, so a row with no related row at all satisfies it. The negative operators above negate the comparison instead and still require the related row to be there — "no related row called X" is here, "a related row not called X" is NotEquals.
+            description: Conditions a ProfileAttachment must satisfy to match a search.
+        ProfileAttachmentFilterContains:
+            type: object
+            properties:
+                id:
+                    type: array
+                    items:
+                        type: string
+                        format: uuid
+                    description: Unique identifier for this row.
+                createdAt:
+                    type: array
+                    items:
+                        type: string
+                        format: date-time
+                    description: When this row was created. Set automatically and never changes.
+                profileId:
+                    type: array
+                    items:
+                        type: string
+                        format: uuid
+                    description: Reached through a composite key carrying the tenant, which is the shape rig recommends wherever the target is tenant-scoped. Its index leads with the tenant, and that is the index the generated queries want.
+                documentFileId:
+                    type: array
+                    items:
+                        type: string
+                        format: uuid
+                    description: The same shape, deliberately left without an index so the rule has something to say. Before the tenant-carrying form was denormalized onto its column, it had nothing to say about either of these.
+                thumbnailFileId:
+                    type: array
+                    items:
+                        type: string
+                        format: uuid
+                    description: The control. Named like a file column and pointing at profile instead, so it is not one — and it still gets the ordinary naming advice.
+                caption:
+                    type: array
+                    items:
+                        type: string
+                    description: What the attachment is.
+                documentFile:
+                    oneOf:
+                        - $ref: '#/components/schemas/RigFileFilterContains'
+                        - type: "null"
+                    description: |-
+                        Conditions on this row's DocumentFile.
+
+                        A row with no DocumentFile never matches, and that holds for the negative operators too: under NotEquals this asks whether the DocumentFile is there and differs, so a row without one fails that as well. To ask the other question — no matching DocumentFile, which a row with none satisfies — use Without.DocumentFile.
+                profile:
+                    oneOf:
+                        - $ref: '#/components/schemas/ProfileFilterContains'
+                        - type: "null"
+                    description: |-
+                        Conditions on this row's Profile.
+
+                        A row with no Profile never matches, and that holds for the negative operators too: under NotEquals this asks whether the Profile is there and differs, so a row without one fails that as well. To ask the other question — no matching Profile, which a row with none satisfies — use Without.Profile.
+                thumbnailFile:
+                    oneOf:
+                        - $ref: '#/components/schemas/ProfileFilterContains'
+                        - type: "null"
+                    description: |-
+                        Conditions on this row's ThumbnailFile.
+
+                        A row with no ThumbnailFile never matches, and that holds for the negative operators too: under NotEquals this asks whether the ThumbnailFile is there and differs, so a row without one fails that as well. To ask the other question — no matching ThumbnailFile, which a row with none satisfies — use Without.ThumbnailFile.
+            description: Set-membership conditions on ProfileAttachment fields.
+        ProfileAttachmentFilterEquals:
+            type: object
+            properties:
+                id:
+                    type:
+                        - string
+                        - "null"
+                    format: uuid
+                    description: Unique identifier for this row.
+                createdAt:
+                    type:
+                        - string
+                        - "null"
+                    format: date-time
+                    description: When this row was created. Set automatically and never changes.
+                profileId:
+                    type:
+                        - string
+                        - "null"
+                    format: uuid
+                    description: Reached through a composite key carrying the tenant, which is the shape rig recommends wherever the target is tenant-scoped. Its index leads with the tenant, and that is the index the generated queries want.
+                documentFileId:
+                    type:
+                        - string
+                        - "null"
+                    format: uuid
+                    description: The same shape, deliberately left without an index so the rule has something to say. Before the tenant-carrying form was denormalized onto its column, it had nothing to say about either of these.
+                thumbnailFileId:
+                    type:
+                        - string
+                        - "null"
+                    format: uuid
+                    description: The control. Named like a file column and pointing at profile instead, so it is not one — and it still gets the ordinary naming advice.
+                caption:
+                    type:
+                        - string
+                        - "null"
+                    description: What the attachment is.
+                documentFile:
+                    oneOf:
+                        - $ref: '#/components/schemas/RigFileFilterEquals'
+                        - type: "null"
+                    description: |-
+                        Conditions on this row's DocumentFile.
+
+                        A row with no DocumentFile never matches, and that holds for the negative operators too: under NotEquals this asks whether the DocumentFile is there and differs, so a row without one fails that as well. To ask the other question — no matching DocumentFile, which a row with none satisfies — use Without.DocumentFile.
+                profile:
+                    oneOf:
+                        - $ref: '#/components/schemas/ProfileFilterEquals'
+                        - type: "null"
+                    description: |-
+                        Conditions on this row's Profile.
+
+                        A row with no Profile never matches, and that holds for the negative operators too: under NotEquals this asks whether the Profile is there and differs, so a row without one fails that as well. To ask the other question — no matching Profile, which a row with none satisfies — use Without.Profile.
+                thumbnailFile:
+                    oneOf:
+                        - $ref: '#/components/schemas/ProfileFilterEquals'
+                        - type: "null"
+                    description: |-
+                        Conditions on this row's ThumbnailFile.
+
+                        A row with no ThumbnailFile never matches, and that holds for the negative operators too: under NotEquals this asks whether the ThumbnailFile is there and differs, so a row without one fails that as well. To ask the other question — no matching ThumbnailFile, which a row with none satisfies — use Without.ThumbnailFile.
+            description: Exact-match conditions on ProfileAttachment fields.
+        ProfileAttachmentFilterLike:
+            type: object
+            properties:
+                caption:
+                    type:
+                        - string
+                        - "null"
+                    description: What the attachment is.
+                documentFile:
+                    oneOf:
+                        - $ref: '#/components/schemas/RigFileFilterLike'
+                        - type: "null"
+                    description: |-
+                        Conditions on this row's DocumentFile.
+
+                        A row with no DocumentFile never matches, and that holds for the negative operators too: under NotEquals this asks whether the DocumentFile is there and differs, so a row without one fails that as well. To ask the other question — no matching DocumentFile, which a row with none satisfies — use Without.DocumentFile.
+                profile:
+                    oneOf:
+                        - $ref: '#/components/schemas/ProfileFilterLike'
+                        - type: "null"
+                    description: |-
+                        Conditions on this row's Profile.
+
+                        A row with no Profile never matches, and that holds for the negative operators too: under NotEquals this asks whether the Profile is there and differs, so a row without one fails that as well. To ask the other question — no matching Profile, which a row with none satisfies — use Without.Profile.
+                thumbnailFile:
+                    oneOf:
+                        - $ref: '#/components/schemas/ProfileFilterLike'
+                        - type: "null"
+                    description: |-
+                        Conditions on this row's ThumbnailFile.
+
+                        A row with no ThumbnailFile never matches, and that holds for the negative operators too: under NotEquals this asks whether the ThumbnailFile is there and differs, so a row without one fails that as well. To ask the other question — no matching ThumbnailFile, which a row with none satisfies — use Without.ThumbnailFile.
+            description: Pattern conditions on ProfileAttachment text fields.
+        ProfileAttachmentFilterNull:
+            type: object
+            properties:
+                thumbnailFileId:
+                    type:
+                        - boolean
+                        - "null"
+                    description: The control. Named like a file column and pointing at profile instead, so it is not one — and it still gets the ordinary naming advice.
+                caption:
+                    type:
+                        - boolean
+                        - "null"
+                    description: What the attachment is.
+                documentFile:
+                    oneOf:
+                        - $ref: '#/components/schemas/RigFileFilterNull'
+                        - type: "null"
+                    description: |-
+                        Conditions on this row's DocumentFile.
+
+                        A row with no DocumentFile never matches, and that holds for the negative operators too: under NotEquals this asks whether the DocumentFile is there and differs, so a row without one fails that as well. To ask the other question — no matching DocumentFile, which a row with none satisfies — use Without.DocumentFile.
+                profile:
+                    oneOf:
+                        - $ref: '#/components/schemas/ProfileFilterNull'
+                        - type: "null"
+                    description: |-
+                        Conditions on this row's Profile.
+
+                        A row with no Profile never matches, and that holds for the negative operators too: under NotEquals this asks whether the Profile is there and differs, so a row without one fails that as well. To ask the other question — no matching Profile, which a row with none satisfies — use Without.Profile.
+                thumbnailFile:
+                    oneOf:
+                        - $ref: '#/components/schemas/ProfileFilterNull'
+                        - type: "null"
+                    description: |-
+                        Conditions on this row's ThumbnailFile.
+
+                        A row with no ThumbnailFile never matches, and that holds for the negative operators too: under NotEquals this asks whether the ThumbnailFile is there and differs, so a row without one fails that as well. To ask the other question — no matching ThumbnailFile, which a row with none satisfies — use Without.ThumbnailFile.
+            description: Presence conditions on nullable ProfileAttachment fields.
+        ProfileAttachmentFilterRange:
+            type: object
+            properties:
+                createdAt:
+                    type:
+                        - string
+                        - "null"
+                    format: date-time
+                    description: When this row was created. Set automatically and never changes.
+                documentFile:
+                    oneOf:
+                        - $ref: '#/components/schemas/RigFileFilterRange'
+                        - type: "null"
+                    description: |-
+                        Conditions on this row's DocumentFile.
+
+                        A row with no DocumentFile never matches, and that holds for the negative operators too: under NotEquals this asks whether the DocumentFile is there and differs, so a row without one fails that as well. To ask the other question — no matching DocumentFile, which a row with none satisfies — use Without.DocumentFile.
+                profile:
+                    oneOf:
+                        - $ref: '#/components/schemas/ProfileFilterRange'
+                        - type: "null"
+                    description: |-
+                        Conditions on this row's Profile.
+
+                        A row with no Profile never matches, and that holds for the negative operators too: under NotEquals this asks whether the Profile is there and differs, so a row without one fails that as well. To ask the other question — no matching Profile, which a row with none satisfies — use Without.Profile.
+                thumbnailFile:
+                    oneOf:
+                        - $ref: '#/components/schemas/ProfileFilterRange'
+                        - type: "null"
+                    description: |-
+                        Conditions on this row's ThumbnailFile.
+
+                        A row with no ThumbnailFile never matches, and that holds for the negative operators too: under NotEquals this asks whether the ThumbnailFile is there and differs, so a row without one fails that as well. To ask the other question — no matching ThumbnailFile, which a row with none satisfies — use Without.ThumbnailFile.
+            description: Ordering conditions on ProfileAttachment fields that can be compared.
+        ProfileAttachmentFilterWithout:
+            type: object
+            properties:
+                documentFile:
+                    oneOf:
+                        - $ref: '#/components/schemas/RigFileFilter'
+                        - type: "null"
+                    description: |-
+                        Match rows with no DocumentFile satisfying these conditions, including rows that have none at all.
+
+                        This negates the existence of the related row rather than the comparison, which is the whole difference from NotEquals.DocumentFile: that one needs the DocumentFile to be there and to differ, so a row without one fails it and satisfies this. An empty object asks for rows with no DocumentFile at all.
+                profile:
+                    oneOf:
+                        - $ref: '#/components/schemas/ProfileFilter'
+                        - type: "null"
+                    description: |-
+                        Match rows with no Profile satisfying these conditions, including rows that have none at all.
+
+                        This negates the existence of the related row rather than the comparison, which is the whole difference from NotEquals.Profile: that one needs the Profile to be there and to differ, so a row without one fails it and satisfies this. An empty object asks for rows with no Profile at all.
+                thumbnailFile:
+                    oneOf:
+                        - $ref: '#/components/schemas/ProfileFilter'
+                        - type: "null"
+                    description: |-
+                        Match rows with no ThumbnailFile satisfying these conditions, including rows that have none at all.
+
+                        This negates the existence of the related row rather than the comparison, which is the whole difference from NotEquals.ThumbnailFile: that one needs the ThumbnailFile to be there and to differ, so a row without one fails it and satisfies this. An empty object asks for rows with no ThumbnailFile at all.
+            description: Relations a ProfileAttachment must have no matching row for.
+        ProfileAttachmentListResponse:
+            type: object
+            properties:
+                data:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/ProfileAttachment'
+                    description: The rows in this page.
+                pagination:
+                    $ref: '#/components/schemas/Pagination'
+                    description: Where this page sits in the full result set.
+            description: A page of ProfileAttachments.
+        ProfileAttachmentSearchBody:
+            type: object
+            properties:
+                filter:
+                    $ref: '#/components/schemas/ProfileAttachmentFilter'
+                    description: Conditions rows must satisfy.
+            required:
+                - filter
+            description: The request body for ProfileAttachment.Search.
+        ProfileAttachmentUpdateInput:
+            type: object
+            properties:
+                profileId:
+                    type: string
+                    format: uuid
+                    description: Reached through a composite key carrying the tenant, which is the shape rig recommends wherever the target is tenant-scoped. Its index leads with the tenant, and that is the index the generated queries want.
+                documentFileId:
+                    type: string
+                    format: uuid
+                    description: The same shape, deliberately left without an index so the rule has something to say. Before the tenant-carrying form was denormalized onto its column, it had nothing to say about either of these.
+                thumbnailFileId:
+                    type:
+                        - string
+                        - "null"
+                    format: uuid
+                    description: The control. Named like a file column and pointing at profile instead, so it is not one — and it still gets the ordinary naming advice.
+                caption:
+                    type:
+                        - string
+                        - "null"
+                    description: What the attachment is.
+            description: 'The fields of a ProfileAttachment to change. Every member is optional: one left out is left alone, and an explicit null clears it.'
+        ProfileAttachmentUploadDocumentFileMultipart:
+            type: object
+            properties:
+                documentFile:
+                    type: string
+                    description: The document, as a file.
+                    contentMediaType: application/octet-stream
+            required:
+                - documentFile
+            description: The same body UploadDocumentFile takes, in a part named `json`, plus one part per file column. The row and its bytes are committed together, so a request that fails leaves neither.
+        ProfileCreateInput:
+            type: object
+            properties:
+                displayName:
+                    type: string
+                    description: What to call them.
+                profileImageFileId:
+                    type:
+                        - string
+                        - "null"
+                    format: uuid
+                    description: 'The picture. A <role>_file_id column is the declaration: the role names the endpoints and the permission keys, and rig_file is the only table it could point at, so the naming rule exempts it.'
+                bannerFileId:
+                    type:
+                        - string
+                        - "null"
+                    format: uuid
+                    description: A second one on the same table, which is the reason the role is in the name at all. The rule's own suggestion, rig_file_id, allows exactly one.
+            required:
+                - displayName
+            description: The fields a new Profile is created with. A field the database cannot supply for itself is required.
+        ProfileCreateMultipart:
+            type: object
+            properties:
+                json:
+                    $ref: '#/components/schemas/ProfileCreateInput'
+                    description: The Profile itself, as JSON.
+                profileImageFile:
+                    type: string
+                    description: The profileImage, as a file.
+                    contentMediaType: application/octet-stream
+                bannerFile:
+                    type: string
+                    description: The banner, as a file.
+                    contentMediaType: application/octet-stream
+            required:
+                - json
+            description: The same body Create takes, in a part named `json`, plus one part per file column. The row and its bytes are committed together, so a request that fails leaves neither.
+        ProfileFilter:
+            type: object
+            properties:
+                equals:
+                    oneOf:
+                        - $ref: '#/components/schemas/ProfileFilterEquals'
+                        - type: "null"
+                    description: Fields that must equal the given value.
+                notEquals:
+                    oneOf:
+                        - $ref: '#/components/schemas/ProfileFilterEquals'
+                        - type: "null"
+                    description: Fields that must not equal the given value.
+                greaterThan:
+                    oneOf:
+                        - $ref: '#/components/schemas/ProfileFilterRange'
+                        - type: "null"
+                    description: Fields that must be greater than the given value.
+                smallerThan:
+                    oneOf:
+                        - $ref: '#/components/schemas/ProfileFilterRange'
+                        - type: "null"
+                    description: Fields that must be less than the given value.
+                greaterOrEqual:
+                    oneOf:
+                        - $ref: '#/components/schemas/ProfileFilterRange'
+                        - type: "null"
+                    description: Fields that must be greater than or equal to the given value.
+                smallerOrEqual:
+                    oneOf:
+                        - $ref: '#/components/schemas/ProfileFilterRange'
+                        - type: "null"
+                    description: Fields that must be less than or equal to the given value.
+                contains:
+                    oneOf:
+                        - $ref: '#/components/schemas/ProfileFilterContains'
+                        - type: "null"
+                    description: Fields that must be one of the given values.
+                notContains:
+                    oneOf:
+                        - $ref: '#/components/schemas/ProfileFilterContains'
+                        - type: "null"
+                    description: Fields that must not be one of the given values.
+                like:
+                    oneOf:
+                        - $ref: '#/components/schemas/ProfileFilterLike'
+                        - type: "null"
+                    description: Text fields that must match the given pattern.
+                notLike:
+                    oneOf:
+                        - $ref: '#/components/schemas/ProfileFilterLike'
+                        - type: "null"
+                    description: Text fields that must not match the given pattern.
+                "null":
+                    oneOf:
+                        - $ref: '#/components/schemas/ProfileFilterNull'
+                        - type: "null"
+                    description: Fields that must be null.
+                notNull:
+                    oneOf:
+                        - $ref: '#/components/schemas/ProfileFilterNull'
+                        - type: "null"
+                    description: Fields that must not be null.
+                orCondition:
+                    type: boolean
+                    description: Combine this filter's conditions with OR instead of AND.
+                nestedFilters:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/ProfileFilter'
+                    description: Sub-filters combined with this one, so that AND and OR can be mixed to any depth.
+                without:
+                    oneOf:
+                        - $ref: '#/components/schemas/ProfileFilterWithout'
+                        - type: "null"
+                    description: |-
+                        Relations with no row matching the given conditions. An empty one asks for no related row at all.
+
+                        This is where a negation belongs when what you mean is "not": it negates whether a matching related row exists, so a row with no related row at all satisfies it. The negative operators above negate the comparison instead and still require the related row to be there — "no related row called X" is here, "a related row not called X" is NotEquals.
+            description: Conditions a Profile must satisfy to match a search.
+        ProfileFilterContains:
+            type: object
+            properties:
+                id:
+                    type: array
+                    items:
+                        type: string
+                        format: uuid
+                    description: Unique identifier for this row.
+                createdAt:
+                    type: array
+                    items:
+                        type: string
+                        format: date-time
+                    description: When this row was created. Set automatically and never changes.
+                displayName:
+                    type: array
+                    items:
+                        type: string
+                    description: What to call them.
+                profileImageFileId:
+                    type: array
+                    items:
+                        type: string
+                        format: uuid
+                    description: 'The picture. A <role>_file_id column is the declaration: the role names the endpoints and the permission keys, and rig_file is the only table it could point at, so the naming rule exempts it.'
+                bannerFileId:
+                    type: array
+                    items:
+                        type: string
+                        format: uuid
+                    description: A second one on the same table, which is the reason the role is in the name at all. The rule's own suggestion, rig_file_id, allows exactly one.
+                bannerFile:
+                    oneOf:
+                        - $ref: '#/components/schemas/RigFileFilterContains'
+                        - type: "null"
+                    description: |-
+                        Conditions on this row's BannerFile.
+
+                        A row with no BannerFile never matches, and that holds for the negative operators too: under NotEquals this asks whether the BannerFile is there and differs, so a row without one fails that as well. To ask the other question — no matching BannerFile, which a row with none satisfies — use Without.BannerFile.
+                profileAttachments:
+                    oneOf:
+                        - $ref: '#/components/schemas/ProfileAttachmentFilterContains'
+                        - type: "null"
+                    description: |-
+                        Conditions on one of this row's ProfileAttachments.
+
+                        Every condition has to hold of the same one, not of the set between them.
+
+                        Under the negative operators this asks whether one of them differs, which is not the same as none of them matching: a row can have one that matches and one that does not, satisfying the first and failing the second. Without.ProfileAttachments asks the second.
+                profileImageFile:
+                    oneOf:
+                        - $ref: '#/components/schemas/RigFileFilterContains'
+                        - type: "null"
+                    description: |-
+                        Conditions on this row's ProfileImageFile.
+
+                        A row with no ProfileImageFile never matches, and that holds for the negative operators too: under NotEquals this asks whether the ProfileImageFile is there and differs, so a row without one fails that as well. To ask the other question — no matching ProfileImageFile, which a row with none satisfies — use Without.ProfileImageFile.
+                thumbnailFileProfileAttachments:
+                    oneOf:
+                        - $ref: '#/components/schemas/ProfileAttachmentFilterContains'
+                        - type: "null"
+                    description: |-
+                        Conditions on one of this row's ThumbnailFileProfileAttachments.
+
+                        Every condition has to hold of the same one, not of the set between them.
+
+                        Under the negative operators this asks whether one of them differs, which is not the same as none of them matching: a row can have one that matches and one that does not, satisfying the first and failing the second. Without.ThumbnailFileProfileAttachments asks the second.
+            description: Set-membership conditions on Profile fields.
+        ProfileFilterEquals:
+            type: object
+            properties:
+                id:
+                    type:
+                        - string
+                        - "null"
+                    format: uuid
+                    description: Unique identifier for this row.
+                createdAt:
+                    type:
+                        - string
+                        - "null"
+                    format: date-time
+                    description: When this row was created. Set automatically and never changes.
+                displayName:
+                    type:
+                        - string
+                        - "null"
+                    description: What to call them.
+                profileImageFileId:
+                    type:
+                        - string
+                        - "null"
+                    format: uuid
+                    description: 'The picture. A <role>_file_id column is the declaration: the role names the endpoints and the permission keys, and rig_file is the only table it could point at, so the naming rule exempts it.'
+                bannerFileId:
+                    type:
+                        - string
+                        - "null"
+                    format: uuid
+                    description: A second one on the same table, which is the reason the role is in the name at all. The rule's own suggestion, rig_file_id, allows exactly one.
+                bannerFile:
+                    oneOf:
+                        - $ref: '#/components/schemas/RigFileFilterEquals'
+                        - type: "null"
+                    description: |-
+                        Conditions on this row's BannerFile.
+
+                        A row with no BannerFile never matches, and that holds for the negative operators too: under NotEquals this asks whether the BannerFile is there and differs, so a row without one fails that as well. To ask the other question — no matching BannerFile, which a row with none satisfies — use Without.BannerFile.
+                profileAttachments:
+                    oneOf:
+                        - $ref: '#/components/schemas/ProfileAttachmentFilterEquals'
+                        - type: "null"
+                    description: |-
+                        Conditions on one of this row's ProfileAttachments.
+
+                        Every condition has to hold of the same one, not of the set between them.
+
+                        Under the negative operators this asks whether one of them differs, which is not the same as none of them matching: a row can have one that matches and one that does not, satisfying the first and failing the second. Without.ProfileAttachments asks the second.
+                profileImageFile:
+                    oneOf:
+                        - $ref: '#/components/schemas/RigFileFilterEquals'
+                        - type: "null"
+                    description: |-
+                        Conditions on this row's ProfileImageFile.
+
+                        A row with no ProfileImageFile never matches, and that holds for the negative operators too: under NotEquals this asks whether the ProfileImageFile is there and differs, so a row without one fails that as well. To ask the other question — no matching ProfileImageFile, which a row with none satisfies — use Without.ProfileImageFile.
+                thumbnailFileProfileAttachments:
+                    oneOf:
+                        - $ref: '#/components/schemas/ProfileAttachmentFilterEquals'
+                        - type: "null"
+                    description: |-
+                        Conditions on one of this row's ThumbnailFileProfileAttachments.
+
+                        Every condition has to hold of the same one, not of the set between them.
+
+                        Under the negative operators this asks whether one of them differs, which is not the same as none of them matching: a row can have one that matches and one that does not, satisfying the first and failing the second. Without.ThumbnailFileProfileAttachments asks the second.
+            description: Exact-match conditions on Profile fields.
+        ProfileFilterLike:
+            type: object
+            properties:
+                displayName:
+                    type:
+                        - string
+                        - "null"
+                    description: What to call them.
+                bannerFile:
+                    oneOf:
+                        - $ref: '#/components/schemas/RigFileFilterLike'
+                        - type: "null"
+                    description: |-
+                        Conditions on this row's BannerFile.
+
+                        A row with no BannerFile never matches, and that holds for the negative operators too: under NotEquals this asks whether the BannerFile is there and differs, so a row without one fails that as well. To ask the other question — no matching BannerFile, which a row with none satisfies — use Without.BannerFile.
+                profileAttachments:
+                    oneOf:
+                        - $ref: '#/components/schemas/ProfileAttachmentFilterLike'
+                        - type: "null"
+                    description: |-
+                        Conditions on one of this row's ProfileAttachments.
+
+                        Every condition has to hold of the same one, not of the set between them.
+
+                        Under the negative operators this asks whether one of them differs, which is not the same as none of them matching: a row can have one that matches and one that does not, satisfying the first and failing the second. Without.ProfileAttachments asks the second.
+                profileImageFile:
+                    oneOf:
+                        - $ref: '#/components/schemas/RigFileFilterLike'
+                        - type: "null"
+                    description: |-
+                        Conditions on this row's ProfileImageFile.
+
+                        A row with no ProfileImageFile never matches, and that holds for the negative operators too: under NotEquals this asks whether the ProfileImageFile is there and differs, so a row without one fails that as well. To ask the other question — no matching ProfileImageFile, which a row with none satisfies — use Without.ProfileImageFile.
+                thumbnailFileProfileAttachments:
+                    oneOf:
+                        - $ref: '#/components/schemas/ProfileAttachmentFilterLike'
+                        - type: "null"
+                    description: |-
+                        Conditions on one of this row's ThumbnailFileProfileAttachments.
+
+                        Every condition has to hold of the same one, not of the set between them.
+
+                        Under the negative operators this asks whether one of them differs, which is not the same as none of them matching: a row can have one that matches and one that does not, satisfying the first and failing the second. Without.ThumbnailFileProfileAttachments asks the second.
+            description: Pattern conditions on Profile text fields.
+        ProfileFilterNull:
+            type: object
+            properties:
+                profileImageFileId:
+                    type:
+                        - boolean
+                        - "null"
+                    description: 'The picture. A <role>_file_id column is the declaration: the role names the endpoints and the permission keys, and rig_file is the only table it could point at, so the naming rule exempts it.'
+                bannerFileId:
+                    type:
+                        - boolean
+                        - "null"
+                    description: A second one on the same table, which is the reason the role is in the name at all. The rule's own suggestion, rig_file_id, allows exactly one.
+                bannerFile:
+                    oneOf:
+                        - $ref: '#/components/schemas/RigFileFilterNull'
+                        - type: "null"
+                    description: |-
+                        Conditions on this row's BannerFile.
+
+                        A row with no BannerFile never matches, and that holds for the negative operators too: under NotEquals this asks whether the BannerFile is there and differs, so a row without one fails that as well. To ask the other question — no matching BannerFile, which a row with none satisfies — use Without.BannerFile.
+                profileAttachments:
+                    oneOf:
+                        - $ref: '#/components/schemas/ProfileAttachmentFilterNull'
+                        - type: "null"
+                    description: |-
+                        Conditions on one of this row's ProfileAttachments.
+
+                        Every condition has to hold of the same one, not of the set between them.
+
+                        Under the negative operators this asks whether one of them differs, which is not the same as none of them matching: a row can have one that matches and one that does not, satisfying the first and failing the second. Without.ProfileAttachments asks the second.
+                profileImageFile:
+                    oneOf:
+                        - $ref: '#/components/schemas/RigFileFilterNull'
+                        - type: "null"
+                    description: |-
+                        Conditions on this row's ProfileImageFile.
+
+                        A row with no ProfileImageFile never matches, and that holds for the negative operators too: under NotEquals this asks whether the ProfileImageFile is there and differs, so a row without one fails that as well. To ask the other question — no matching ProfileImageFile, which a row with none satisfies — use Without.ProfileImageFile.
+                thumbnailFileProfileAttachments:
+                    oneOf:
+                        - $ref: '#/components/schemas/ProfileAttachmentFilterNull'
+                        - type: "null"
+                    description: |-
+                        Conditions on one of this row's ThumbnailFileProfileAttachments.
+
+                        Every condition has to hold of the same one, not of the set between them.
+
+                        Under the negative operators this asks whether one of them differs, which is not the same as none of them matching: a row can have one that matches and one that does not, satisfying the first and failing the second. Without.ThumbnailFileProfileAttachments asks the second.
+            description: Presence conditions on nullable Profile fields.
+        ProfileFilterRange:
+            type: object
+            properties:
+                createdAt:
+                    type:
+                        - string
+                        - "null"
+                    format: date-time
+                    description: When this row was created. Set automatically and never changes.
+                bannerFile:
+                    oneOf:
+                        - $ref: '#/components/schemas/RigFileFilterRange'
+                        - type: "null"
+                    description: |-
+                        Conditions on this row's BannerFile.
+
+                        A row with no BannerFile never matches, and that holds for the negative operators too: under NotEquals this asks whether the BannerFile is there and differs, so a row without one fails that as well. To ask the other question — no matching BannerFile, which a row with none satisfies — use Without.BannerFile.
+                profileAttachments:
+                    oneOf:
+                        - $ref: '#/components/schemas/ProfileAttachmentFilterRange'
+                        - type: "null"
+                    description: |-
+                        Conditions on one of this row's ProfileAttachments.
+
+                        Every condition has to hold of the same one, not of the set between them.
+
+                        Under the negative operators this asks whether one of them differs, which is not the same as none of them matching: a row can have one that matches and one that does not, satisfying the first and failing the second. Without.ProfileAttachments asks the second.
+                profileImageFile:
+                    oneOf:
+                        - $ref: '#/components/schemas/RigFileFilterRange'
+                        - type: "null"
+                    description: |-
+                        Conditions on this row's ProfileImageFile.
+
+                        A row with no ProfileImageFile never matches, and that holds for the negative operators too: under NotEquals this asks whether the ProfileImageFile is there and differs, so a row without one fails that as well. To ask the other question — no matching ProfileImageFile, which a row with none satisfies — use Without.ProfileImageFile.
+                thumbnailFileProfileAttachments:
+                    oneOf:
+                        - $ref: '#/components/schemas/ProfileAttachmentFilterRange'
+                        - type: "null"
+                    description: |-
+                        Conditions on one of this row's ThumbnailFileProfileAttachments.
+
+                        Every condition has to hold of the same one, not of the set between them.
+
+                        Under the negative operators this asks whether one of them differs, which is not the same as none of them matching: a row can have one that matches and one that does not, satisfying the first and failing the second. Without.ThumbnailFileProfileAttachments asks the second.
+            description: Ordering conditions on Profile fields that can be compared.
+        ProfileFilterWithout:
+            type: object
+            properties:
+                bannerFile:
+                    oneOf:
+                        - $ref: '#/components/schemas/RigFileFilter'
+                        - type: "null"
+                    description: |-
+                        Match rows with no BannerFile satisfying these conditions, including rows that have none at all.
+
+                        This negates the existence of the related row rather than the comparison, which is the whole difference from NotEquals.BannerFile: that one needs the BannerFile to be there and to differ, so a row without one fails it and satisfies this. An empty object asks for rows with no BannerFile at all.
+                profileAttachments:
+                    oneOf:
+                        - $ref: '#/components/schemas/ProfileAttachmentFilter'
+                        - type: "null"
+                    description: |-
+                        Match rows with no ProfileAttachments satisfying these conditions, including rows with none at all.
+
+                        This negates the existence of a matching row rather than the comparison, which is the whole difference from NotEquals.ProfileAttachments: that one is satisfied by one of them differing, and a row can have one that differs and one that matches at the same time. An empty object asks for rows with no ProfileAttachments at all.
+                profileImageFile:
+                    oneOf:
+                        - $ref: '#/components/schemas/RigFileFilter'
+                        - type: "null"
+                    description: |-
+                        Match rows with no ProfileImageFile satisfying these conditions, including rows that have none at all.
+
+                        This negates the existence of the related row rather than the comparison, which is the whole difference from NotEquals.ProfileImageFile: that one needs the ProfileImageFile to be there and to differ, so a row without one fails it and satisfies this. An empty object asks for rows with no ProfileImageFile at all.
+                thumbnailFileProfileAttachments:
+                    oneOf:
+                        - $ref: '#/components/schemas/ProfileAttachmentFilter'
+                        - type: "null"
+                    description: |-
+                        Match rows with no ThumbnailFileProfileAttachments satisfying these conditions, including rows with none at all.
+
+                        This negates the existence of a matching row rather than the comparison, which is the whole difference from NotEquals.ThumbnailFileProfileAttachments: that one is satisfied by one of them differing, and a row can have one that differs and one that matches at the same time. An empty object asks for rows with no ThumbnailFileProfileAttachments at all.
+            description: Relations a Profile must have no matching row for.
+        ProfileListResponse:
+            type: object
+            properties:
+                data:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/Profile'
+                    description: The rows in this page.
+                pagination:
+                    $ref: '#/components/schemas/Pagination'
+                    description: Where this page sits in the full result set.
+            description: A page of Profiles.
+        ProfileSearchBody:
+            type: object
+            properties:
+                filter:
+                    $ref: '#/components/schemas/ProfileFilter'
+                    description: Conditions rows must satisfy.
+            required:
+                - filter
+            description: The request body for Profile.Search.
+        ProfileUpdateInput:
+            type: object
+            properties:
+                displayName:
+                    type: string
+                    description: What to call them.
+                profileImageFileId:
+                    type:
+                        - string
+                        - "null"
+                    format: uuid
+                    description: 'The picture. A <role>_file_id column is the declaration: the role names the endpoints and the permission keys, and rig_file is the only table it could point at, so the naming rule exempts it.'
+                bannerFileId:
+                    type:
+                        - string
+                        - "null"
+                    format: uuid
+                    description: A second one on the same table, which is the reason the role is in the name at all. The rule's own suggestion, rig_file_id, allows exactly one.
+            description: 'The fields of a Profile to change. Every member is optional: one left out is left alone, and an explicit null clears it.'
+        ProfileUploadBannerFileMultipart:
+            type: object
+            properties:
+                bannerFile:
+                    type: string
+                    description: The banner, as a file.
+                    contentMediaType: application/octet-stream
+            description: The same body UploadBannerFile takes, in a part named `json`, plus one part per file column. The row and its bytes are committed together, so a request that fails leaves neither.
+        ProfileUploadProfileImageFileMultipart:
+            type: object
+            properties:
+                profileImageFile:
+                    type: string
+                    description: The profileImage, as a file.
+                    contentMediaType: application/octet-stream
+            description: The same body UploadProfileImageFile takes, in a part named `json`, plus one part per file column. The row and its bytes are committed together, so a request that fails leaves neither.
+        RigFile:
+            type: object
+            properties:
+                id:
+                    type: string
+                    format: uuid
+                    description: Unique identifier for this row.
+                    readOnly: true
+                tenantId:
+                    type: string
+                    format: uuid
+                    description: Tenant this row belongs to. Every query is scoped by it.
+                    readOnly: true
+                storageKey:
+                    type: string
+                    description: Where the bytes are, derived from the identifier and never from a name.
+                url:
+                    type: string
+                    description: Where the file is served from. It is a column so a synced row carries it and a client can render the file without asking anything first.
+                fileName:
+                    type: string
+                    description: What the file was called when it arrived.
+                contentType:
+                    type: string
+                    description: What the bytes were sniffed to be, which is not what the client claimed.
+                sizeBytes:
+                    type: integer
+                    format: int64
+                    description: How large the object is.
+                uploadedAt:
+                    type:
+                        - string
+                        - "null"
+                    format: date-time
+                    description: When the bytes landed. Null means the row was inserted and the upload has not finished, which is what makes an abandoned upload reapable.
+                createdAt:
+                    type: string
+                    format: date-time
+                    description: When this row was created. Set automatically and never changes.
+                    readOnly: true
+                deletedAt:
+                    type:
+                        - string
+                        - "null"
+                    format: date-time
+                    description: When this row was soft-deleted. Null while the row is live.
+                    readOnly: true
+            description: One uploaded file. Metadata only — the bytes live in the blob store, and the storage key never leaves the server.
+        RigFileCreateInput:
+            type: object
+            properties:
+                storageKey:
+                    type: string
+                    description: Where the bytes are, derived from the identifier and never from a name.
+                url:
+                    type: string
+                    description: Where the file is served from. It is a column so a synced row carries it and a client can render the file without asking anything first.
+                fileName:
+                    type: string
+                    description: What the file was called when it arrived.
+                contentType:
+                    type: string
+                    description: What the bytes were sniffed to be, which is not what the client claimed.
+                sizeBytes:
+                    type: integer
+                    format: int64
+                    description: How large the object is.
+                uploadedAt:
+                    type:
+                        - string
+                        - "null"
+                    format: date-time
+                    description: When the bytes landed. Null means the row was inserted and the upload has not finished, which is what makes an abandoned upload reapable.
+            required:
+                - storageKey
+                - url
+                - fileName
+                - contentType
+                - sizeBytes
+            description: The fields a new RigFile is created with. A field the database cannot supply for itself is required.
+        RigFileFilter:
+            type: object
+            properties:
+                equals:
+                    oneOf:
+                        - $ref: '#/components/schemas/RigFileFilterEquals'
+                        - type: "null"
+                    description: Fields that must equal the given value.
+                notEquals:
+                    oneOf:
+                        - $ref: '#/components/schemas/RigFileFilterEquals'
+                        - type: "null"
+                    description: Fields that must not equal the given value.
+                greaterThan:
+                    oneOf:
+                        - $ref: '#/components/schemas/RigFileFilterRange'
+                        - type: "null"
+                    description: Fields that must be greater than the given value.
+                smallerThan:
+                    oneOf:
+                        - $ref: '#/components/schemas/RigFileFilterRange'
+                        - type: "null"
+                    description: Fields that must be less than the given value.
+                greaterOrEqual:
+                    oneOf:
+                        - $ref: '#/components/schemas/RigFileFilterRange'
+                        - type: "null"
+                    description: Fields that must be greater than or equal to the given value.
+                smallerOrEqual:
+                    oneOf:
+                        - $ref: '#/components/schemas/RigFileFilterRange'
+                        - type: "null"
+                    description: Fields that must be less than or equal to the given value.
+                contains:
+                    oneOf:
+                        - $ref: '#/components/schemas/RigFileFilterContains'
+                        - type: "null"
+                    description: Fields that must be one of the given values.
+                notContains:
+                    oneOf:
+                        - $ref: '#/components/schemas/RigFileFilterContains'
+                        - type: "null"
+                    description: Fields that must not be one of the given values.
+                like:
+                    oneOf:
+                        - $ref: '#/components/schemas/RigFileFilterLike'
+                        - type: "null"
+                    description: Text fields that must match the given pattern.
+                notLike:
+                    oneOf:
+                        - $ref: '#/components/schemas/RigFileFilterLike'
+                        - type: "null"
+                    description: Text fields that must not match the given pattern.
+                "null":
+                    oneOf:
+                        - $ref: '#/components/schemas/RigFileFilterNull'
+                        - type: "null"
+                    description: Fields that must be null.
+                notNull:
+                    oneOf:
+                        - $ref: '#/components/schemas/RigFileFilterNull'
+                        - type: "null"
+                    description: Fields that must not be null.
+                orCondition:
+                    type: boolean
+                    description: Combine this filter's conditions with OR instead of AND.
+                nestedFilters:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/RigFileFilter'
+                    description: Sub-filters combined with this one, so that AND and OR can be mixed to any depth.
+                without:
+                    oneOf:
+                        - $ref: '#/components/schemas/RigFileFilterWithout'
+                        - type: "null"
+                    description: |-
+                        Relations with no row matching the given conditions. An empty one asks for no related row at all.
+
+                        This is where a negation belongs when what you mean is "not": it negates whether a matching related row exists, so a row with no related row at all satisfies it. The negative operators above negate the comparison instead and still require the related row to be there — "no related row called X" is here, "a related row not called X" is NotEquals.
+            description: Conditions a RigFile must satisfy to match a search.
+        RigFileFilterContains:
+            type: object
+            properties:
+                id:
+                    type: array
+                    items:
+                        type: string
+                        format: uuid
+                    description: Unique identifier for this row.
+                storageKey:
+                    type: array
+                    items:
+                        type: string
+                    description: Where the bytes are, derived from the identifier and never from a name.
+                url:
+                    type: array
+                    items:
+                        type: string
+                    description: Where the file is served from. It is a column so a synced row carries it and a client can render the file without asking anything first.
+                fileName:
+                    type: array
+                    items:
+                        type: string
+                    description: What the file was called when it arrived.
+                contentType:
+                    type: array
+                    items:
+                        type: string
+                    description: What the bytes were sniffed to be, which is not what the client claimed.
+                sizeBytes:
+                    type: array
+                    items:
+                        type: integer
+                        format: int64
+                    description: How large the object is.
+                uploadedAt:
+                    type: array
+                    items:
+                        type: string
+                        format: date-time
+                    description: When the bytes landed. Null means the row was inserted and the upload has not finished, which is what makes an abandoned upload reapable.
+                createdAt:
+                    type: array
+                    items:
+                        type: string
+                        format: date-time
+                    description: When this row was created. Set automatically and never changes.
+                deletedAt:
+                    type: array
+                    items:
+                        type: string
+                        format: date-time
+                    description: When this row was soft-deleted. Null while the row is live.
+                bannerFileProfiles:
+                    oneOf:
+                        - $ref: '#/components/schemas/ProfileFilterContains'
+                        - type: "null"
+                    description: |-
+                        Conditions on one of this row's BannerFileProfiles.
+
+                        Every condition has to hold of the same one, not of the set between them.
+
+                        Under the negative operators this asks whether one of them differs, which is not the same as none of them matching: a row can have one that matches and one that does not, satisfying the first and failing the second. Without.BannerFileProfiles asks the second.
+                documentFileProfileAttachments:
+                    oneOf:
+                        - $ref: '#/components/schemas/ProfileAttachmentFilterContains'
+                        - type: "null"
+                    description: |-
+                        Conditions on one of this row's DocumentFileProfileAttachments.
+
+                        Every condition has to hold of the same one, not of the set between them.
+
+                        Under the negative operators this asks whether one of them differs, which is not the same as none of them matching: a row can have one that matches and one that does not, satisfying the first and failing the second. Without.DocumentFileProfileAttachments asks the second.
+                profileImageFileProfiles:
+                    oneOf:
+                        - $ref: '#/components/schemas/ProfileFilterContains'
+                        - type: "null"
+                    description: |-
+                        Conditions on one of this row's ProfileImageFileProfiles.
+
+                        Every condition has to hold of the same one, not of the set between them.
+
+                        Under the negative operators this asks whether one of them differs, which is not the same as none of them matching: a row can have one that matches and one that does not, satisfying the first and failing the second. Without.ProfileImageFileProfiles asks the second.
+            description: Set-membership conditions on RigFile fields.
+        RigFileFilterEquals:
+            type: object
+            properties:
+                id:
+                    type:
+                        - string
+                        - "null"
+                    format: uuid
+                    description: Unique identifier for this row.
+                storageKey:
+                    type:
+                        - string
+                        - "null"
+                    description: Where the bytes are, derived from the identifier and never from a name.
+                url:
+                    type:
+                        - string
+                        - "null"
+                    description: Where the file is served from. It is a column so a synced row carries it and a client can render the file without asking anything first.
+                fileName:
+                    type:
+                        - string
+                        - "null"
+                    description: What the file was called when it arrived.
+                contentType:
+                    type:
+                        - string
+                        - "null"
+                    description: What the bytes were sniffed to be, which is not what the client claimed.
+                sizeBytes:
+                    type:
+                        - integer
+                        - "null"
+                    format: int64
+                    description: How large the object is.
+                uploadedAt:
+                    type:
+                        - string
+                        - "null"
+                    format: date-time
+                    description: When the bytes landed. Null means the row was inserted and the upload has not finished, which is what makes an abandoned upload reapable.
+                createdAt:
+                    type:
+                        - string
+                        - "null"
+                    format: date-time
+                    description: When this row was created. Set automatically and never changes.
+                deletedAt:
+                    type:
+                        - string
+                        - "null"
+                    format: date-time
+                    description: When this row was soft-deleted. Null while the row is live.
+                bannerFileProfiles:
+                    oneOf:
+                        - $ref: '#/components/schemas/ProfileFilterEquals'
+                        - type: "null"
+                    description: |-
+                        Conditions on one of this row's BannerFileProfiles.
+
+                        Every condition has to hold of the same one, not of the set between them.
+
+                        Under the negative operators this asks whether one of them differs, which is not the same as none of them matching: a row can have one that matches and one that does not, satisfying the first and failing the second. Without.BannerFileProfiles asks the second.
+                documentFileProfileAttachments:
+                    oneOf:
+                        - $ref: '#/components/schemas/ProfileAttachmentFilterEquals'
+                        - type: "null"
+                    description: |-
+                        Conditions on one of this row's DocumentFileProfileAttachments.
+
+                        Every condition has to hold of the same one, not of the set between them.
+
+                        Under the negative operators this asks whether one of them differs, which is not the same as none of them matching: a row can have one that matches and one that does not, satisfying the first and failing the second. Without.DocumentFileProfileAttachments asks the second.
+                profileImageFileProfiles:
+                    oneOf:
+                        - $ref: '#/components/schemas/ProfileFilterEquals'
+                        - type: "null"
+                    description: |-
+                        Conditions on one of this row's ProfileImageFileProfiles.
+
+                        Every condition has to hold of the same one, not of the set between them.
+
+                        Under the negative operators this asks whether one of them differs, which is not the same as none of them matching: a row can have one that matches and one that does not, satisfying the first and failing the second. Without.ProfileImageFileProfiles asks the second.
+            description: Exact-match conditions on RigFile fields.
+        RigFileFilterLike:
+            type: object
+            properties:
+                storageKey:
+                    type:
+                        - string
+                        - "null"
+                    description: Where the bytes are, derived from the identifier and never from a name.
+                url:
+                    type:
+                        - string
+                        - "null"
+                    description: Where the file is served from. It is a column so a synced row carries it and a client can render the file without asking anything first.
+                fileName:
+                    type:
+                        - string
+                        - "null"
+                    description: What the file was called when it arrived.
+                contentType:
+                    type:
+                        - string
+                        - "null"
+                    description: What the bytes were sniffed to be, which is not what the client claimed.
+                bannerFileProfiles:
+                    oneOf:
+                        - $ref: '#/components/schemas/ProfileFilterLike'
+                        - type: "null"
+                    description: |-
+                        Conditions on one of this row's BannerFileProfiles.
+
+                        Every condition has to hold of the same one, not of the set between them.
+
+                        Under the negative operators this asks whether one of them differs, which is not the same as none of them matching: a row can have one that matches and one that does not, satisfying the first and failing the second. Without.BannerFileProfiles asks the second.
+                documentFileProfileAttachments:
+                    oneOf:
+                        - $ref: '#/components/schemas/ProfileAttachmentFilterLike'
+                        - type: "null"
+                    description: |-
+                        Conditions on one of this row's DocumentFileProfileAttachments.
+
+                        Every condition has to hold of the same one, not of the set between them.
+
+                        Under the negative operators this asks whether one of them differs, which is not the same as none of them matching: a row can have one that matches and one that does not, satisfying the first and failing the second. Without.DocumentFileProfileAttachments asks the second.
+                profileImageFileProfiles:
+                    oneOf:
+                        - $ref: '#/components/schemas/ProfileFilterLike'
+                        - type: "null"
+                    description: |-
+                        Conditions on one of this row's ProfileImageFileProfiles.
+
+                        Every condition has to hold of the same one, not of the set between them.
+
+                        Under the negative operators this asks whether one of them differs, which is not the same as none of them matching: a row can have one that matches and one that does not, satisfying the first and failing the second. Without.ProfileImageFileProfiles asks the second.
+            description: Pattern conditions on RigFile text fields.
+        RigFileFilterNull:
+            type: object
+            properties:
+                uploadedAt:
+                    type:
+                        - boolean
+                        - "null"
+                    description: When the bytes landed. Null means the row was inserted and the upload has not finished, which is what makes an abandoned upload reapable.
+                deletedAt:
+                    type:
+                        - boolean
+                        - "null"
+                    description: When this row was soft-deleted. Null while the row is live.
+                bannerFileProfiles:
+                    oneOf:
+                        - $ref: '#/components/schemas/ProfileFilterNull'
+                        - type: "null"
+                    description: |-
+                        Conditions on one of this row's BannerFileProfiles.
+
+                        Every condition has to hold of the same one, not of the set between them.
+
+                        Under the negative operators this asks whether one of them differs, which is not the same as none of them matching: a row can have one that matches and one that does not, satisfying the first and failing the second. Without.BannerFileProfiles asks the second.
+                documentFileProfileAttachments:
+                    oneOf:
+                        - $ref: '#/components/schemas/ProfileAttachmentFilterNull'
+                        - type: "null"
+                    description: |-
+                        Conditions on one of this row's DocumentFileProfileAttachments.
+
+                        Every condition has to hold of the same one, not of the set between them.
+
+                        Under the negative operators this asks whether one of them differs, which is not the same as none of them matching: a row can have one that matches and one that does not, satisfying the first and failing the second. Without.DocumentFileProfileAttachments asks the second.
+                profileImageFileProfiles:
+                    oneOf:
+                        - $ref: '#/components/schemas/ProfileFilterNull'
+                        - type: "null"
+                    description: |-
+                        Conditions on one of this row's ProfileImageFileProfiles.
+
+                        Every condition has to hold of the same one, not of the set between them.
+
+                        Under the negative operators this asks whether one of them differs, which is not the same as none of them matching: a row can have one that matches and one that does not, satisfying the first and failing the second. Without.ProfileImageFileProfiles asks the second.
+            description: Presence conditions on nullable RigFile fields.
+        RigFileFilterRange:
+            type: object
+            properties:
+                sizeBytes:
+                    type:
+                        - integer
+                        - "null"
+                    format: int64
+                    description: How large the object is.
+                uploadedAt:
+                    type:
+                        - string
+                        - "null"
+                    format: date-time
+                    description: When the bytes landed. Null means the row was inserted and the upload has not finished, which is what makes an abandoned upload reapable.
+                createdAt:
+                    type:
+                        - string
+                        - "null"
+                    format: date-time
+                    description: When this row was created. Set automatically and never changes.
+                deletedAt:
+                    type:
+                        - string
+                        - "null"
+                    format: date-time
+                    description: When this row was soft-deleted. Null while the row is live.
+                bannerFileProfiles:
+                    oneOf:
+                        - $ref: '#/components/schemas/ProfileFilterRange'
+                        - type: "null"
+                    description: |-
+                        Conditions on one of this row's BannerFileProfiles.
+
+                        Every condition has to hold of the same one, not of the set between them.
+
+                        Under the negative operators this asks whether one of them differs, which is not the same as none of them matching: a row can have one that matches and one that does not, satisfying the first and failing the second. Without.BannerFileProfiles asks the second.
+                documentFileProfileAttachments:
+                    oneOf:
+                        - $ref: '#/components/schemas/ProfileAttachmentFilterRange'
+                        - type: "null"
+                    description: |-
+                        Conditions on one of this row's DocumentFileProfileAttachments.
+
+                        Every condition has to hold of the same one, not of the set between them.
+
+                        Under the negative operators this asks whether one of them differs, which is not the same as none of them matching: a row can have one that matches and one that does not, satisfying the first and failing the second. Without.DocumentFileProfileAttachments asks the second.
+                profileImageFileProfiles:
+                    oneOf:
+                        - $ref: '#/components/schemas/ProfileFilterRange'
+                        - type: "null"
+                    description: |-
+                        Conditions on one of this row's ProfileImageFileProfiles.
+
+                        Every condition has to hold of the same one, not of the set between them.
+
+                        Under the negative operators this asks whether one of them differs, which is not the same as none of them matching: a row can have one that matches and one that does not, satisfying the first and failing the second. Without.ProfileImageFileProfiles asks the second.
+            description: Ordering conditions on RigFile fields that can be compared.
+        RigFileFilterWithout:
+            type: object
+            properties:
+                bannerFileProfiles:
+                    oneOf:
+                        - $ref: '#/components/schemas/ProfileFilter'
+                        - type: "null"
+                    description: |-
+                        Match rows with no BannerFileProfiles satisfying these conditions, including rows with none at all.
+
+                        This negates the existence of a matching row rather than the comparison, which is the whole difference from NotEquals.BannerFileProfiles: that one is satisfied by one of them differing, and a row can have one that differs and one that matches at the same time. An empty object asks for rows with no BannerFileProfiles at all.
+                documentFileProfileAttachments:
+                    oneOf:
+                        - $ref: '#/components/schemas/ProfileAttachmentFilter'
+                        - type: "null"
+                    description: |-
+                        Match rows with no DocumentFileProfileAttachments satisfying these conditions, including rows with none at all.
+
+                        This negates the existence of a matching row rather than the comparison, which is the whole difference from NotEquals.DocumentFileProfileAttachments: that one is satisfied by one of them differing, and a row can have one that differs and one that matches at the same time. An empty object asks for rows with no DocumentFileProfileAttachments at all.
+                profileImageFileProfiles:
+                    oneOf:
+                        - $ref: '#/components/schemas/ProfileFilter'
+                        - type: "null"
+                    description: |-
+                        Match rows with no ProfileImageFileProfiles satisfying these conditions, including rows with none at all.
+
+                        This negates the existence of a matching row rather than the comparison, which is the whole difference from NotEquals.ProfileImageFileProfiles: that one is satisfied by one of them differing, and a row can have one that differs and one that matches at the same time. An empty object asks for rows with no ProfileImageFileProfiles at all.
+            description: Relations a RigFile must have no matching row for.
+        RigFileListResponse:
+            type: object
+            properties:
+                data:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/RigFile'
+                    description: The rows in this page.
+                pagination:
+                    $ref: '#/components/schemas/Pagination'
+                    description: Where this page sits in the full result set.
+            description: A page of RigFiles.
+        RigFileSearchBody:
+            type: object
+            properties:
+                filter:
+                    $ref: '#/components/schemas/RigFileFilter'
+                    description: Conditions rows must satisfy.
+            required:
+                - filter
+            description: The request body for RigFile.Search.
+        RigFileUpdateInput:
+            type: object
+            properties:
+                storageKey:
+                    type: string
+                    description: Where the bytes are, derived from the identifier and never from a name.
+                url:
+                    type: string
+                    description: Where the file is served from. It is a column so a synced row carries it and a client can render the file without asking anything first.
+                fileName:
+                    type: string
+                    description: What the file was called when it arrived.
+                contentType:
+                    type: string
+                    description: What the bytes were sniffed to be, which is not what the client claimed.
+                sizeBytes:
+                    type: integer
+                    format: int64
+                    description: How large the object is.
+                uploadedAt:
+                    type:
+                        - string
+                        - "null"
+                    format: date-time
+                    description: When the bytes landed. Null means the row was inserted and the upload has not finished, which is what makes an abandoned upload reapable.
+            description: 'The fields of a RigFile to change. Every member is optional: one left out is left alone, and an explicit null clears it.'
+    responses:
+        BadRequest:
+            description: |-
+                The request was malformed or a parameter could not be parsed.
+
+                The body's `code` is `BadRequest`.
+            content:
+                application/json:
+                    schema:
+                        $ref: '#/components/schemas/Error'
+        Unauthorized:
+            description: |-
+                No valid session or API key was presented.
+
+                The body's `code` is `Unauthorized`.
+            content:
+                application/json:
+                    schema:
+                        $ref: '#/components/schemas/Error'
+        Forbidden:
+            description: |-
+                The caller is known but not permitted to do this.
+
+                The body's `code` is `Forbidden`.
+            content:
+                application/json:
+                    schema:
+                        $ref: '#/components/schemas/Error'
+        NotFound:
+            description: |-
+                No such resource, or it belongs to another tenant.
+
+                The body's `code` is `NotFound`.
+            content:
+                application/json:
+                    schema:
+                        $ref: '#/components/schemas/Error'
+        Conflict:
+            description: |-
+                The request conflicts with the current state of the resource.
+
+                The body's `code` is `Conflict`.
+            content:
+                application/json:
+                    schema:
+                        $ref: '#/components/schemas/Error'
+        TooLarge:
+            description: |-
+                The request body is larger than this endpoint accepts.
+
+                The body's `code` is `TooLarge`.
+            content:
+                application/json:
+                    schema:
+                        $ref: '#/components/schemas/Error'
+        UnsupportedMediaType:
+            description: |-
+                The body's content type is not one this endpoint accepts.
+
+                The body's `code` is `UnsupportedMediaType`.
+            content:
+                application/json:
+                    schema:
+                        $ref: '#/components/schemas/Error'
+        UnprocessableEntity:
+            description: |-
+                The request was well-formed but failed validation.
+
+                The body's `code` is `UnprocessableEntity`.
+            content:
+                application/json:
+                    schema:
+                        $ref: '#/components/schemas/Error'
+        RateLimited:
+            description: |-
+                Too many requests. Retry after the interval in the Retry-After header.
+
+                The body's `code` is `RateLimited`.
+            headers:
+                Retry-After:
+                    $ref: '#/components/headers/RetryAfter'
+                RateLimit-Limit:
+                    $ref: '#/components/headers/RateLimitLimit'
+                RateLimit-Remaining:
+                    $ref: '#/components/headers/RateLimitRemaining'
+                RateLimit-Reset:
+                    $ref: '#/components/headers/RateLimitReset'
+            content:
+                application/json:
+                    schema:
+                        $ref: '#/components/schemas/Error'
+        Internal:
+            description: |-
+                Something went wrong on the server.
+
+                The body's `code` is `Internal`.
+            content:
+                application/json:
+                    schema:
+                        $ref: '#/components/schemas/Error'
+    parameters:
+        ApiRevision:
+            name: API-Revision
+            in: header
+            description: The API revision this client was built against. A server generated from an older document than the caller expects answers 426 rather than guessing.
+            required: false
+            schema:
+                type: string
+        IdempotencyKey:
+            name: Idempotency-Key
+            in: header
+            description: A key of the caller's choosing, so a retried write happens once. Sending the same key with the same body replays the first answer and sets Idempotency-Replayed; with a different body it is refused with 422, and while the first is still in flight, with 409.
+            required: false
+            schema:
+                type: string
+    headers:
+        IdempotencyReplayed:
+            description: Present and true when this answer is a replay of an earlier request carrying the same Idempotency-Key, rather than work done again.
+            schema:
+                type: boolean
+        RateLimitLimit:
+            description: Requests permitted in the current window.
+            schema:
+                type: integer
+        RateLimitRemaining:
+            description: Requests left in the current window.
+            schema:
+                type: integer
+        RateLimitReset:
+            description: Seconds until the current window resets.
+            schema:
+                type: integer
+        RetryAfter:
+            description: Seconds to wait before retrying.
+            schema:
+                type: integer
+tags:
+    - name: Profiles
+      description: Somebody's public face, with pictures attached to it.
+    - name: ProfileAttachments
+      description: A gallery is a table. Many files against one row is a child table with one file column, not a second mechanism.
+    - name: RigFiles
+      description: One uploaded file. Metadata only — the bytes live in the blob store, and the storage key never leaves the server.

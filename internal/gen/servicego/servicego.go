@@ -121,11 +121,6 @@ const (
 	objectError      = "Error"
 	objectPagination = "Pagination"
 	enumErrorCode    = "ErrorCode"
-
-	// defaultRevisionHeader is what rig.yaml's api.revision_header defaults to,
-	// for a document compiled before the setting existed. A project that has one
-	// gets its own, from the document.
-	defaultRevisionHeader = "API-Revision"
 )
 
 type emitter struct {
