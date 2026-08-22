@@ -1,10 +1,10 @@
 # Live sync
 
-> **Half written.** The shapes a table gets are below. Still to come: the
-> scoping function, running an ElectricSQL service alongside your application,
-> and what a client does with the stream.
+> **Half written.** The shapes a table gets are below, and what a client does
+> with them is in [clients.md](clients.md#live-sync). Still to come: the scoping
+> function, and running an ElectricSQL service alongside your application.
 >
-> Until it exists, the `electric:` block in [tables.md](tables.md#electric) is
+> Until they exist, the `electric:` block in [tables.md](tables.md#electric) is
 > the complete configuration reference, and the `electric` generator's options
 > are in [generators.md](generators.md).
 
@@ -109,7 +109,17 @@ subscriber's copy forever, filtered in appearance and not in fact. Nothing
 hard-deletes past-window rows either, so on a table that is deleted from heavily
 this stream grows without bound. Use `GET /_deleted` when you want the window.
 
+## Subscribing to one
+
+`ts-client` writes a factory per shape, and a subscriber chooses which rows it
+wants by choosing a factory. One thing to know before you write against them: a
+streamed row carries column names where the API sends its own keys, so the
+generated types are `TodoRow` and `Todo` rather than one type used twice.
+
+Both are in [clients.md](clients.md#live-sync).
+
 ## See also
 
+- [clients.md](clients.md#live-sync) — subscribing from a browser
 - [tables.md](tables.md#electric) — the configuration keys
 - [generators.md](generators.md) — `electric_url`, `shape_import`, `stub_dir`

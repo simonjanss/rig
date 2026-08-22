@@ -1,0 +1,17 @@
+{
+    "name": "rig-ts-typecheck-fixture",
+    "private": true,
+    "version": "0.0.0",
+    "type": "module",
+    "description": "Compiles the generator's golden output against the real packages",
+    "scripts": {
+        "typecheck": "tsc --noEmit"
+    },
+    "dependencies": {
+        "@rig/client": "workspace:*",
+        "@rig/electric": "workspace:*"
+    },
+    "devDependencies": {
+        "typescript": "5.9.3"
+    }
+}

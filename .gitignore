@@ -21,3 +21,10 @@ coverage.*
 
 # Workspace sum file is machine-specific noise; the per-module go.sum files are authoritative.
 go.work.sum
+
+# The TypeScript workspace: installed dependencies and built packages. The
+# lockfile is committed; everything it produces is not.
+/ts/node_modules/
+/ts/packages/*/node_modules/
+/ts/packages/*/dist/
+/ts/typecheck-fixture/node_modules/
