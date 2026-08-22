@@ -24,7 +24,7 @@ export RIG_DB_ISOLATE := $(CURDIR)
 # the examples are mostly generated output, and their Docker tests are already
 # run by `make examples`, which brings each example's own database up first.
 CORE_MODULES    := . ./runtime ./auth ./files ./notify ./observe ./migrate ./rigclient
-EXAMPLE_MODULES := ./examples/todo ./examples/fantasyfootball ./examples/auth ./examples/auth_oauth ./examples/sdk
+EXAMPLE_MODULES := ./examples/todo ./examples/fantasyfootball ./examples/auth ./examples/auth_oauth ./examples/linearlite ./examples/sdk
 
 # The core modules less the root: the ones a generated application imports, so
 # their godoc is the documentation for a Go surface somebody depends on rather
@@ -32,7 +32,7 @@ EXAMPLE_MODULES := ./examples/todo ./examples/fantasyfootball ./examples/auth ./
 # `internal/`, `pkg/ir` or `pkg/gen`, which are nobody else's dependency.
 PUBLIC_MODULES  := ./runtime ./auth ./files ./notify ./observe ./migrate ./rigclient
 MODULES         := $(CORE_MODULES) $(EXAMPLE_MODULES)
-EXAMPLES        := todo fantasyfootball auth auth_oauth
+EXAMPLES        := todo fantasyfootball auth auth_oauth linearlite
 
 # Versions of the external checkers, pinned so a run means the same thing on
 # every machine. The linter is installed into ./bin rather than GOPATH/bin so
@@ -120,7 +120,7 @@ update-schema:
 ##                this target no matter what.
 GOLDEN := ./internal/compile ./internal/gen/electricgo ./internal/gen/goclient \
           ./internal/gen/modelgo ./internal/gen/openapigen ./internal/gen/persistgo \
-          ./internal/gen/servergo ./internal/gen/servicego
+          ./internal/gen/servergo ./internal/gen/servicego ./internal/gen/tsclient
 update-golden:
 	$(GO) test $(GOLDEN) -update
 
@@ -220,6 +220,16 @@ ts-typecheck: ts-deps
 ## ts-test: the TypeScript unit suite
 ts-test: ts-deps
 	@cd $(TS_DIR) && $(PNPM) run test
+
+## linearlite-web: typecheck, lint and build the linearlite example's front end
+##                 Not part of `examples` on purpose: that target needs Go and
+##                 Docker and deliberately not pnpm, and the Go server tolerates
+##                 a missing web/dist. Self-contained: the app's tsconfig and
+##                 vite config pin every dependency of the aliased ts/ sources
+##                 to the app's own node_modules, so ts/ needs no install.
+linearlite-web:
+	@cd examples/linearlite/web && $(PNPM) install --frozen-lockfile && \
+		$(PNPM) run lint && $(PNPM) run build
 
 ## ts-fmt: rewrite the hand-written TypeScript with Prettier
 ##         Generated output is not in scope: it is laid out by the emitter,

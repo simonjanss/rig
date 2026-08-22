@@ -210,6 +210,13 @@ Step 1 creates a person and **nothing else** — no tenant, no session. That sta
 has to exist, because somebody with an invitation waiting has an account and
 belongs nowhere, and accepting an invitation requires being signed in.
 
+An application that wants every newcomer to land somewhere answers step 2
+itself: `OnRegistered` (under [What you decide](#what-you-decide)) runs inside
+the registration transaction, and its ordinary body is `accounts.Provision`
+with `Invite` set — so the picker the stranger lands in already lists an
+invitation to a starter tenant. The transaction is the point: a hook error
+rolls the whole sign-up back, so there is never an account that half-joined.
+
 Accepting sends the invitation's **identifier**, not the token that was emailed.
 Being signed in as the person invited is the *stronger* claim of the two: a token
 proves somebody reached the address, a session proves who they are. That is why a
@@ -774,6 +781,21 @@ front, err := api.New(pool, api.Hooks{
         Validate:  func(ctx, *account.TenantDraft) error { … },    // what a name may be
         Slug:      func(name string, id uuid.UUID) string { … },
         OnCreated: func(ctx, made account.NewTenant) error { … },  // what else it needs
+    },
+
+    // What happens to a stranger who just signed themselves up, inside the
+    // transaction that created them — an error rolls the sign-up back. The
+    // ordinary body is Provision with Invite set, so the picker they land in
+    // already has an invitation to a starter tenant waiting. Present only when
+    // allow_registration is set; nil registers the person and nothing else.
+    OnRegistered: func(ctx context.Context, accounts *account.Service, in account.Registered) error {
+        _, err := accounts.Provision(ctx, account.ProvisionInput{
+            TenantID:     starterTenant,
+            EmailAddress: in.EmailAddress,
+            DisplayName:  in.DisplayName,
+            Invite:       true,
+        })
+        return err
     },
 
     // How a provider sign-in ends, for a browser that wants a cookie and a

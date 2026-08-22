@@ -2477,11 +2477,26 @@ test against the M3 server exercising the QUERY→POST fallback.
 
 ## M8 — docs, the second example, and the remaining polish
 
-**`examples/fantasyfootball`.** The full demo: many tables, relations, enums,
-soft delete, snapshots, custom endpoints, RBAC, OAuth sign-in, API keys, live
-sync, and a small TypeScript consumer. Built end to end in CI the way
-`examples/todo` is. This is the strongest regression test in the repository and
-also the biggest single piece of work left.
+**The full demo shipped as `examples/linearlite`, not fantasyfootball.** A
+Linear-style board: the auth foundation end to end (registration with an
+OnRegistered auto-invite, tenant creation, personal API keys), soft delete,
+snapshots, files, notifications with the actor excluded, live sync wired all
+the way to a browser — the first caller of `electric.Register` and the first
+consumer of the generated TypeScript client (a React app in `web/`, served by
+the binary from `web/dist`) — plus a CSV import job over the generated Go
+client. Built and tested by `make examples` like the others; the front end has
+its own `linearlite-web` target because the example suite deliberately needs
+no pnpm. What it surfaced along the way: `OnRegistered` on the auth config,
+`database.settings`/`database.electric` so `rig db up` runs the sync service,
+`Where.EqText` because Electric cannot type a value against a Postgres enum,
+and an `Omit<>` on the multipart create so the documented TS call compiles.
+
+**`examples/fantasyfootball`** stays the relations-and-observability example;
+the "many tables, custom endpoints, OAuth" expansion below is still open:
+
+> The full demo: many tables, relations, enums, soft delete, snapshots, custom
+> endpoints, RBAC, OAuth sign-in, API keys, live sync, and a small TypeScript
+> consumer. Built end to end in CI the way `examples/todo` is.
 
 **`docs/`.**
 

@@ -1,10 +1,11 @@
 # Live sync
 
-> **Half written.** The shapes a table gets are below, and what a client does
-> with them is in [clients.md](clients.md#live-sync). Still to come: the scoping
-> function, and running an ElectricSQL service alongside your application.
+> **Partly written.** The shapes a table gets are below, running the sync
+> service is [its own section](#running-electric-alongside-your-application),
+> and what a client does with the shapes is in
+> [clients.md](clients.md#live-sync). Still to come: the scoping function.
 >
-> Until they exist, the `electric:` block in [tables.md](tables.md#electric) is
+> Until it exists, the `electric:` block in [tables.md](tables.md#electric) is
 > the complete configuration reference, and the `electric` generator's options
 > are in [generators.md](generators.md).
 
@@ -108,6 +109,49 @@ moving predicate, and the sync service evaluates a shape's filter when a row
 subscriber's copy forever, filtered in appearance and not in fact. Nothing
 hard-deletes past-window rows either, so on a table that is deleted from heavily
 this stream grows without bound. Use `GET /_deleted` when you want the window.
+
+## Running Electric alongside your application
+
+The shapes are served by ElectricSQL — a separate service that follows your
+database over logical replication — with rig's generated endpoints standing in
+front of it. Locally, `rig db up` runs it for you:
+
+```yaml
+database:
+  port: 55440
+  electric:
+    enabled: true      # image, container_name and port all have defaults
+```
+
+That brings up a second container beside the database, pointed at it and
+waiting until its replication stream reports active. `rig db down` stops both
+and `rig db reset` rebuilds both — the sync service holds a replication slot
+*in* the database, so a database thrown away takes the slot with it, and rig
+recreates the service rather than leaving it following nothing. Enabling the
+block also adds `wal_level=logical` to the database's settings, which logical
+replication requires and which cannot be turned on after Postgres has started.
+
+Three settings in three places have to agree, and each names a different thing:
+
+| Where | What it says |
+|---|---|
+| `database.electric.port` in rig.yaml | where the local sync service answers |
+| the `electric` generator's `electric_url` | where the generated proxy forwards |
+| `electric: {enabled: true}` in a table's yaml | that the table has shapes at all |
+
+So a project on port 55445 writes `electric_url: http://localhost:55445`, or
+overrides it at runtime the way the examples do, with an environment variable
+read in `main.go`.
+
+In a deployment, run Electric as a service of its own against your real
+database and point the proxy's URL at it. Nothing else changes: the proxy is
+the only thing a browser ever talks to, so the sync service itself stays
+unreachable from outside — which is the point of the proxy, and why
+`ELECTRIC_INSECURE=true` on the local container is not the setting it sounds
+like.
+
+`examples/linearlite` is the worked example: a table with shapes, the proxy
+wired in `main.go`, and a front end subscribed from a browser.
 
 ## Subscribing to one
 

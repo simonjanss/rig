@@ -228,7 +228,7 @@ export class ProfileAttachmentClient {
      * is not. **This call is never sent twice**, for the reason an upload is
      * not — a form is the one write no idempotency key names.
      */
-    createWithFiles(input: ProfileAttachmentCreateInput, files: ProfileAttachmentCreateFiles, options?: CallOptions): Promise<ProfileAttachment> {
+    createWithFiles(input: Omit<ProfileAttachmentCreateInput, "documentFileId">, files: ProfileAttachmentCreateFiles, options?: CallOptions): Promise<ProfileAttachment> {
         const form = multipart(input, [["documentFile", files.documentFile]]);
 
         return send<ProfileAttachment>(this.#rt, {

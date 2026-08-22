@@ -22,6 +22,22 @@ type RegisterInput struct {
 	UserAgent string
 }
 
+// Registered is somebody who just signed themselves up, as
+// [Config.OnRegistered] sees them.
+type Registered struct {
+	IdentityID uuid.UUID
+	// EmailAddress as typed, trimmed. Lowercase it yourself for comparisons —
+	// the address is one person's name for themselves, and the cased form is
+	// what they wrote.
+	EmailAddress string
+	// DisplayName as resolved: what was sent, or the address's local part when
+	// nothing was.
+	DisplayName string
+
+	IPAddress string
+	UserAgent string
+}
+
 // Register creates an identity with a password and no tenant at all.
 //
 // The counterpart to [Service.Provision], and the difference is who is asking.
@@ -94,13 +110,31 @@ func (s *Service) Register(ctx context.Context, in RegisterInput) (SignInResult,
 		DisplayName:  display,
 		IsActive:     true,
 	}
-	if err := s.cfg.Store.InsertIdentity(ctx, ident); err != nil {
-		return SignInResult{}, err
-	}
 
-	// Through the same path a reset uses, so the hash, the parameters and the
-	// policy are the ones every other password gets.
-	if err := s.SetPassword(ctx, ident.ID, in.Password); err != nil {
+	// One transaction around the person, their credential, and whatever the
+	// application's OnRegistered adds — an invitation into a starter tenant,
+	// most often. A hook error rolls the whole sign-up back, so a retry is a
+	// clean retry rather than a conflict with a half-made account. The
+	// credential goes through storePassword rather than SetPassword: the policy
+	// was checked above, and a brand-new identity has no sessions to revoke.
+	if err := s.cfg.Store.InTx(ctx, func(ctx context.Context) error {
+		if err := s.cfg.Store.InsertIdentity(ctx, ident); err != nil {
+			return err
+		}
+		if err := s.storePassword(ctx, ident, in.Password); err != nil {
+			return err
+		}
+		if s.cfg.OnRegistered == nil {
+			return nil
+		}
+		return s.cfg.OnRegistered(ctx, s, Registered{
+			IdentityID:   ident.ID,
+			EmailAddress: ident.EmailAddress,
+			DisplayName:  display,
+			IPAddress:    in.IPAddress,
+			UserAgent:    in.UserAgent,
+		})
+	}); err != nil {
 		return SignInResult{}, err
 	}
 

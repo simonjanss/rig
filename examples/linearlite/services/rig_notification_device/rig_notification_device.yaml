@@ -1,0 +1,32 @@
+# yaml-language-server: $schema=../../.rig/table.schema.json
+table: rig_notification_device
+comment: 'Where a push can reach somebody. Email is refused: the address is on the account already.'
+
+columns:
+  account_id:
+    comment: Whose device it is.
+  channel:
+    comment: Desktop or Mobile. Email is refused by the CHECK above.
+  token:
+    comment: What the provider was given to address this device. Opaque to rig.
+  label:
+    comment: What a person sees in a list of their devices, and the column that makes revoking one possible for somebody who has four.
+  last_seen_at:
+    comment: When this device last checked in, so a stale one can be told apart from a revoked one.
+  revoked_at:
+    comment: When it stopped being a place to send to. Kept rather than deleted, so a token that comes back can be recognised.
+
+enums:
+  rig_notification_channel:
+    name: RigNotificationChannel
+    description: 'TODO: what does this enumeration represent?'
+    values:
+      Desktop:
+        name: Desktop
+        description: 'TODO: describe this.'
+      Mobile:
+        name: Mobile
+        description: 'TODO: describe this.'
+      Email:
+        name: Email
+        description: 'TODO: describe this.'

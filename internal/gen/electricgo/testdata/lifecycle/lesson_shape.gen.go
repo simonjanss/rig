@@ -77,8 +77,10 @@ func handleLessonShape(s Server, scope LessonScope) http.HandlerFunc {
 		// A retired row stops appearing in reads, so it stops appearing in a live
 		// stream too.
 		where.IsNull("deleted_at")
-		// Snapshots are prior versions. A subscriber wants the live row.
-		where.Eq("version_type", "Original")
+		// Snapshots are prior versions. A subscriber wants the live row. Compared as
+		// text because the column is usually a Postgres enum, and the sync service
+		// refuses to type a value against one; on a text column the cast is a no-op.
+		where.EqText("version_type", "Original")
 
 		params, err := parseLessonShapeParams(r)
 		if err != nil {
@@ -134,7 +136,7 @@ func handleLessonDeletedShape(s Server, scope LessonDeletedScope) http.HandlerFu
 		where.NotNull("deleted_at")
 		// Still the live generation of the row, though. The trash is what was deleted,
 		// not the history of what was deleted.
-		where.Eq("version_type", "Original")
+		where.EqText("version_type", "Original")
 
 		params, err := parseLessonShapeParams(r)
 		if err != nil {
@@ -199,7 +201,7 @@ func handleLessonVersionsShape(s Server, scope LessonVersionsScope) http.Handler
 		where.Eq("tenant_id", claims.TenantID.String())
 		// One row's history: the copies taken before each update, and never the row
 		// itself.
-		where.Eq("version_type", "Snapshot")
+		where.EqText("version_type", "Snapshot")
 		where.Eq("snapshot_from_lesson_id", id.String())
 		// A snapshot is written with no deletion stamp and the table's check
 		// constraint keeps it that way — but the constraint is one the schema has to

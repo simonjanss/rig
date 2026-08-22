@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -96,7 +97,15 @@ type DB struct {
 	// port unless there was none to configure. Resolved before anything tries to
 	// connect, because under isolation it is the only way to.
 	port int
+	// fresh records that Start created the container rather than reusing one.
+	// The data is on a tmpfs, so fresh means empty — and it means anything that
+	// followed this database, a sync service's replication slot most of all, is
+	// now following nothing and has to be rebuilt too.
+	fresh bool
 }
+
+// Fresh reports whether Start created this container rather than reusing one.
+func (d *DB) Fresh() bool { return d.fresh }
 
 // Start brings the database up and waits until it accepts connections.
 //
@@ -121,6 +130,7 @@ func Start(ctx context.Context, cfg Config) (*DB, error) {
 		if err := db.create(ctx); err != nil {
 			return nil, err
 		}
+		db.fresh = true
 
 	case !state.matches(cfg):
 		db.logf("replacing container %s: %s\n", cfg.Name, state.mismatch(cfg))
@@ -130,6 +140,7 @@ func Start(ctx context.Context, cfg Config) (*DB, error) {
 		if err := db.create(ctx); err != nil {
 			return nil, err
 		}
+		db.fresh = true
 
 	case !state.Running:
 		db.logf("starting container %s\n", cfg.Name)
@@ -213,6 +224,16 @@ type containerState struct {
 	Running bool
 	Image   string
 	Port    int
+	// Cmd is what the container was started with, which for Postgres carries
+	// the -c server parameters. It is how a reuse can tell that a setting has
+	// since been asked for: wal_level cannot be turned on after the server has
+	// started, so a container without it has to be replaced, not adapted.
+	Cmd []string
+	// Env is the container's environment, which for the sync service carries
+	// the DATABASE_URL it follows. A reuse has to check it, because under
+	// isolation the database's port moves and a sync service pointed at the old
+	// one is following nothing.
+	Env []string
 }
 
 // matches reports whether an existing container is the one asked for.
@@ -226,6 +247,9 @@ func (s containerState) matches(cfg Config) bool {
 	if s.Image != cfg.Image {
 		return false
 	}
+	if len(s.missingSettings(cfg)) > 0 {
+		return false
+	}
 	return cfg.Port == 0 || s.Port == cfg.Port
 }
 
@@ -237,12 +261,35 @@ func (s containerState) mismatch(cfg Config) string {
 	if cfg.Port != 0 && s.Port != cfg.Port {
 		reasons = append(reasons, fmt.Sprintf("port is %d, want %d", s.Port, cfg.Port))
 	}
+	if missing := s.missingSettings(cfg); len(missing) > 0 {
+		reasons = append(reasons, fmt.Sprintf("started without %s", strings.Join(missing, ", ")))
+	}
 	return strings.Join(reasons, "; ")
+}
+
+// missingSettings are the requested server parameters this container was not
+// started with. Extra ones it does carry are left alone: a setting removed from
+// the configuration stops mattering, and replacing a warm database over it
+// would cost the caller everything for nothing.
+func (s containerState) missingSettings(cfg Config) []string {
+	var missing []string
+	for _, want := range cfg.Settings {
+		if !slices.Contains(s.Cmd, strings.TrimSpace(want)) {
+			missing = append(missing, want)
+		}
+	}
+	return missing
 }
 
 // inspect returns the container's state, or nil when it does not exist.
 func (d *DB) inspect(ctx context.Context) (*containerState, error) {
-	out, err := d.runtime.Run(ctx, "inspect", d.cfg.Name)
+	return inspectContainer(ctx, d.runtime, d.cfg.Name)
+}
+
+// inspectContainer is inspect for any container this package manages — the
+// database's, and the sync service's beside it.
+func inspectContainer(ctx context.Context, rt Runtime, name string) (*containerState, error) {
+	out, err := rt.Run(ctx, "inspect", name)
 	if err != nil {
 		// Every engine words "not found" differently, so the check is on the
 		// substring rather than on an exit code.
@@ -258,7 +305,9 @@ func (d *DB) inspect(ctx context.Context) (*containerState, error) {
 			Running bool `json:"Running"`
 		} `json:"State"`
 		Config struct {
-			Image string `json:"Image"`
+			Image string   `json:"Image"`
+			Cmd   []string `json:"Cmd"`
+			Env   []string `json:"Env"`
 		} `json:"Config"`
 		HostConfig struct {
 			PortBindings map[string][]portBinding `json:"PortBindings"`
@@ -275,7 +324,12 @@ func (d *DB) inspect(ctx context.Context) (*containerState, error) {
 	}
 
 	c := inspected[0]
-	state := &containerState{Running: c.State.Running, Image: c.Config.Image}
+	state := &containerState{
+		Running: c.State.Running,
+		Image:   c.Config.Image,
+		Cmd:     c.Config.Cmd,
+		Env:     c.Config.Env,
+	}
 
 	// The published port is read from the request, not the result. A container
 	// that exists but is stopped — or is still starting — has no live port

@@ -431,8 +431,32 @@ type Database struct {
 	Password      string `yaml:"password,omitempty" json:"password,omitempty" jsonschema_description:"Database password. This is a local throwaway database; do not put a real secret here."`
 	Schema        string `yaml:"schema,omitempty" json:"schema,omitempty" jsonschema_description:"Postgres schema to read. Defaults to public."`
 
+	// Settings are extra server parameters for the throwaway container, passed
+	// as -c flags. electric.enabled adds wal_level=logical when nothing lists
+	// one, because logical replication cannot be turned on after the server has
+	// started.
+	Settings []string `yaml:"settings,omitempty" json:"settings,omitempty" jsonschema_description:"Extra Postgres server parameters for the throwaway container, passed as -c name=value flags."`
+
+	// Electric is a sync-service container `rig db up` manages beside the
+	// database. Nested here rather than top-level because its lifecycle is the
+	// database container's: up starts it, down stops it, reset removes it.
+	Electric DatabaseElectric `yaml:"electric,omitempty" json:"electric,omitempty" jsonschema_description:"An ElectricSQL sync-service container managed beside the throwaway database."`
+
 	// URL, when set, is used as-is and no container is started.
 	URL string `yaml:"url,omitempty" json:"url,omitempty" jsonschema_description:"Connection URL of an existing database. Set this to skip the throwaway container entirely."`
+}
+
+// DatabaseElectric is the sync service `rig db up` runs beside the database.
+//
+// It is a different thing from the per-table `electric:` key, which says a
+// table has live-sync shapes, and from the electric generator's `electric_url`
+// option, which says where the generated proxy forwards to — that URL should
+// agree with the port here.
+type DatabaseElectric struct {
+	Enabled       bool   `yaml:"enabled,omitempty" json:"enabled,omitempty" jsonschema_description:"Start an ElectricSQL container beside the throwaway database."`
+	Image         string `yaml:"image,omitempty" json:"image,omitempty" jsonschema_description:"Container image for the sync service."`
+	ContainerName string `yaml:"container_name,omitempty" json:"container_name,omitempty" jsonschema_description:"Name of the sync-service container."`
+	Port          int    `yaml:"port,omitempty" json:"port,omitempty" jsonschema_description:"Host port the sync service listens on."`
 }
 
 // FoundationMode selects how rig's own tables reach the database.

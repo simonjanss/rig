@@ -131,13 +131,21 @@ func start() (*pgxpool.Pool, string, error) {
 }
 
 const schema = `
+DO $$ BEGIN
+    CREATE TYPE lesson_version_type AS ENUM ('Original', 'Snapshot');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
 CREATE TABLE IF NOT EXISTS lesson (
     id           uuid PRIMARY KEY,
     tenant_id    uuid NOT NULL,
     title        text NOT NULL,
     secret_note  text,
     deleted_at   timestamptz,
-    version_type text NOT NULL DEFAULT 'Original',
+    -- A real enum, the way rig's snapshot migrations write it. It used to be
+    -- text, and that is how a where clause the sync service cannot type an
+    -- enum value for stayed green here while failing against a real schema:
+    -- the generated filters compare version_type::text for exactly this.
+    version_type lesson_version_type NOT NULL DEFAULT 'Original',
     snapshot_from_lesson_id uuid
 );
 `
@@ -204,7 +212,7 @@ func front(t *testing.T, proxy *electric.Proxy, tenant uuid.UUID, narrow func(*e
 	return serve(t, proxy, func(where *electric.Where) {
 		where.Eq("tenant_id", tenant.String()).
 			IsNull("deleted_at").
-			Eq("version_type", "Original")
+			EqText("version_type", "Original")
 
 		if narrow != nil {
 			narrow(where)
@@ -219,7 +227,7 @@ func frontDeleted(t *testing.T, proxy *electric.Proxy, tenant uuid.UUID) *httpte
 	return serve(t, proxy, func(where *electric.Where) {
 		where.Eq("tenant_id", tenant.String()).
 			NotNull("deleted_at").
-			Eq("version_type", "Original")
+			EqText("version_type", "Original")
 	})
 }
 
@@ -229,7 +237,7 @@ func frontVersions(t *testing.T, proxy *electric.Proxy, tenant, of uuid.UUID) *h
 
 	return serve(t, proxy, func(where *electric.Where) {
 		where.Eq("tenant_id", tenant.String()).
-			Eq("version_type", "Snapshot").
+			EqText("version_type", "Snapshot").
 			Eq("snapshot_from_lesson_id", of.String()).
 			IsNull("deleted_at")
 	})

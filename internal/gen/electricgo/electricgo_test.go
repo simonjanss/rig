@@ -97,7 +97,7 @@ func TestTheFilterIsBuiltBeforeAnythingElseRuns(t *testing.T) {
 	for _, want := range []string{
 		`where.Eq("tenant_id", claims.TenantID.String())`,
 		`where.IsNull("deleted_at")`,
-		`where.Eq("version_type", "Original")`,
+		`where.EqText("version_type", "Original")`,
 	} {
 		if !strings.Contains(collapsed, collapse(want)) {
 			t.Errorf("missing %s:\n%s", want, body)
@@ -320,7 +320,7 @@ func TestTheTrashShapeWantsWhatTheLiveShapeExcludes(t *testing.T) {
 		`where.NotNull("deleted_at")`,
 		// Still the live generation of the row: the trash is what was deleted,
 		// not the history of what was deleted.
-		`where.Eq("version_type", "Original")`,
+		`where.EqText("version_type", "Original")`,
 	} {
 		if !strings.Contains(collapsed, collapse(want)) {
 			t.Errorf("missing %s:\n%s", want, body)
@@ -357,7 +357,7 @@ func TestAHistoryShapeIsScopedToOneRow(t *testing.T) {
 	for _, want := range []string{
 		`id, err := parseUUID("id", r.PathValue("id"))`,
 		`where.Eq("tenant_id", claims.TenantID.String())`,
-		`where.Eq("version_type", "Snapshot")`,
+		`where.EqText("version_type", "Snapshot")`,
 		`where.Eq("snapshot_from_lesson_id", id.String())`,
 	} {
 		if !strings.Contains(collapsed, collapse(want)) {
@@ -366,7 +366,7 @@ func TestAHistoryShapeIsScopedToOneRow(t *testing.T) {
 	}
 
 	// Never the live row. That one is what the live shape is for.
-	if strings.Contains(collapsed, collapse(`where.Eq("version_type", "Original")`)) {
+	if strings.Contains(collapsed, collapse(`where.EqText("version_type", "Original")`)) {
 		t.Errorf("the history shape should not carry the live row:\n%s", body)
 	}
 

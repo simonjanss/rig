@@ -71,6 +71,12 @@ type Hooks struct {
 	// tenant nobody can reach.
 	Tenants account.TenantOptions
 
+	// OnRegistered runs inside the transaction that creates a self-registered
+	// identity, and an error rolls the sign-up back. The ordinary body is
+	// accounts.Provision with Invite set, so a newcomer lands in the picker with
+	// an invitation already waiting. Nil registers the person and nothing else.
+	OnRegistered func(context.Context, *account.Service, account.Registered) error
+
 	// OnSessionRefresh replaces a session's payload every time it is refreshed.
 	// Nil carries the previous one forward unchanged.
 	//
@@ -145,6 +151,7 @@ func Config(pool *pgxpool.Pool, h Hooks) (auth.Config, error) {
 		AllowTenantCreation:  true,
 		RequireVerifiedEmail: false,
 		Tenants:              h.Tenants,
+		OnRegistered:         h.OnRegistered,
 
 		Grants:           h.Grants,
 		Notifier:         h.Notifier,

@@ -1,0 +1,21 @@
+# yaml-language-server: $schema=../../.rig/table.schema.json
+table: rig_notification_recipient
+comment: 'One inbox line: a notification, an account, and whether it has been read.'
+
+# No restore_window_days, although the table has deleted_at: how long a
+# dismissed line is kept is notifications.retention in rig.yaml, and RIG5031
+# refuses a second copy of that number here.
+
+columns:
+  notification_id:
+    comment: What happened. The line is separate from it so that one person clearing their inbox changes nothing anybody else sees.
+  account_id:
+    comment: 'Who this line is for. An account rather than an identity: an identity has no tenant, so a row addressed to one would fall outside every generated query.'
+  kind:
+    comment: Copied from the notification, so the inbox and its live-sync shape never touch a table holding rows for people who are not recipients.
+  group_key:
+    comment: What collapses several events into one line. Null opts out and every event is its own row.
+  event_count:
+    comment: How many events this line stands for. One unless a group key collapsed them.
+  read_at:
+    comment: When the person read it. Null is unread, which is what the badge counts.

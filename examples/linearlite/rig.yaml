@@ -1,0 +1,145 @@
+# yaml-language-server: $schema=.rig/rig.schema.json
+version: 1
+
+# The full-stack example: everything the others demonstrate one piece at a
+# time, together. Accounts and tenants (examples/auth), files and the inbox
+# (examples/todo), live sync wired all the way to a browser — a React front end
+# in web/ consuming the generated TypeScript client — and a Go import job in
+# import/ driving the generated Go client with a personal API key.
+project:
+  name: linearlite
+  module: github.com/simonjanss/rig/examples/linearlite
+
+api:
+  version: v1
+  base_path: /api/v1
+  # Permissions are left at the default, `derived`: every endpoint checks a key
+  # taken from its resource and operation, and services/authz decides who holds
+  # which. examples/todo turns this off and says why.
+
+# The authentication foundation. Registration and tenant creation are both on,
+# because this example's front door is a sign-up form: a stranger registers,
+# lands in the picker, and finds an invitation to the seeded tenant already
+# waiting — the OnRegistered hook in main.go is what put it there.
+auth:
+  enabled: true
+  allow_registration: true
+  allow_tenant_creation: true
+  # The people in a tenant, as an ordinary read-only resource. The board needs
+  # names to put on assignees, and this is the documented way to get them: the
+  # foundation table keeps its own authentication queries, and a generated
+  # model, repository and API appear beside them. Which operations exist is
+  # services/rig_account/rig_account.yaml.
+  expose: [rig_account]
+
+# Uploads, for a todo's attachments. Memory because this example is a
+# `go run .`: uploads do not survive a restart, which is exactly right here and
+# exactly wrong in production.
+files:
+  enabled: true
+  backend: memory
+  max_bytes: 5242880
+
+# The inbox. A todo announces a status change from its update hook, NotifyWho
+# names the stakeholders, and the browser hears about it over the
+# rig_notification_recipient live shape — no socket, no polling.
+notifications:
+  enabled: true
+
+# A throwaway Postgres with the sync service beside it: `rig db up` starts
+# both, waits for Electric's replication stream to report active, and
+# `rig db down` stops both. The ports are explicit so this example can run
+# alongside the others; both numbers are also listed in
+# internal/dockerdb/ports.go, where a test keeps the suites off them.
+database:
+  image: postgres:17-alpine
+  port: 55444
+  electric:
+    enabled: true
+    port: 55445
+
+# Every table gets a configuration file. `rig sync` creates and updates them.
+layout:
+  table_dir: services/{table}
+  config_file: "{table_dir}/{table}.yaml"
+
+# Convention rules. Each is off, warn, or error.
+validate:
+  unmentioned_column: warn
+  missing_comment: error
+  fk_needs_index: error
+  tenant_id_leading_index: error
+  boolean_prefix: warn
+
+generators:
+  # The entity, its enums, its query types, and its inputs. Both of the
+  # layers below import this one, so there is one definition of a row
+  # rather than a copy on each side and a conversion between them.
+  - name: model-go
+    out_dir: internal/model
+    options:
+      package: model
+
+  # The repository interface and its pgx implementation.
+  - name: persist-go
+    out_dir: internal/store
+    options:
+      package: store
+      model_import: github.com/simonjanss/rig/examples/linearlite/internal/model
+
+  # Wire types, the interface your service layer implements, and a
+  # working default implementation of every operation.
+  - name: service-go
+    out_dir: internal/api
+    options:
+      package: api
+      model_import: github.com/simonjanss/rig/examples/linearlite/internal/model
+      store_import: github.com/simonjanss/rig/examples/linearlite/internal/store
+      api_import: github.com/simonjanss/rig/examples/linearlite/internal/api
+      # Where your service layer goes. Written once, then yours.
+      stub_dir: services/{table}
+
+  # Routing and handlers — and, because the auth block above is enabled, the
+  # authentication wiring beside them.
+  - name: server-go
+    out_dir: internal/api
+    options:
+      package: api
+      model_import: github.com/simonjanss/rig/examples/linearlite/internal/model
+
+  # A typed Go client for this API. import/ is the consumer: a batch job
+  # that signs in with a personal API key and creates a todo per CSV row.
+  - name: go-client
+    out_dir: client
+    options:
+      package: client
+      # Where this example runs, so the import job can build a client
+      # without naming the server. A real project leaves it out.
+      default_base_url: http://localhost:8084
+
+  # The same client for a browser, from the same document — generated
+  # straight into the front end's source tree, which is the layout
+  # docs/clients.md recommends. web/ imports it like any of its own code.
+  - name: ts-client
+    out_dir: web/src/api
+    options:
+      default_base_url: http://localhost:8084
+
+  # The OpenAPI document, written from the same compiled document the routes
+  # above are, so it cannot describe an endpoint that does not exist.
+  - name: openapi
+    out_dir: docs
+    options:
+      formats: [json, yaml]
+
+  # Live-sync shape endpoints, proxying the Electric container `rig db up`
+  # runs. The URL agrees with database.electric.port above; main.go lets
+  # $ELECTRIC_URL override it for a deployment.
+  - name: electric
+    out_dir: internal/electric
+    options:
+      package: electric
+      electric_url: http://localhost:55445
+      shape_import: github.com/simonjanss/rig/examples/linearlite/internal/electric
+      # Where your extra scoping goes. Written once, then yours.
+      stub_dir: services/{table}
