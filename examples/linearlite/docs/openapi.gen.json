@@ -1,0 +1,4334 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "linearlite",
+    "description": "The linearlite HTTP API.\n\nThe authentication endpoints under `/auth` are served by a hand-written module and are not described here.\n\nThe notification inbox endpoints are served by a hand-written module and are not described here.",
+    "version": "2026-08-22"
+  },
+  "servers": [
+    {
+      "url": "/",
+      "description": "This server. Set openapi.servers to name the deployment instead."
+    }
+  ],
+  "paths": {
+    "/api/v1/accounts": {
+      "get": {
+        "tags": [
+          "Accounts"
+        ],
+        "summary": "List Accounts.",
+        "description": "List Accounts.\n\nRequires the `rig_account.read` permission.",
+        "operationId": "listAccounts",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Maximum rows to return.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "default": 50
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "description": "Rows to skip before the first returned row.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "default": 0
+            }
+          },
+          {
+            "$ref": "#/components/parameters/ApiRevision"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of Accounts.",
+            "headers": {
+              "API-Revision": {
+                "$ref": "#/components/headers/ApiRevision"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountListResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-rig-permission": "rig_account.read"
+      }
+    },
+    "/api/v1/accounts/_deleted": {
+      "get": {
+        "tags": [
+          "Accounts"
+        ],
+        "summary": "List retired Accounts.",
+        "description": "A deletion stamps the row rather than removing it, so this is what was deleted and can still be brought back. Only rows inside the 30-day restore window appear: past it a row is gone as far as anyone is concerned, so it is not in the trash either.\n\nRequires the `rig_account.read` permission.",
+        "operationId": "listDeletedAccounts",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Maximum rows to return.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "default": 50
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "description": "Rows to skip before the first returned row.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "default": 0
+            }
+          },
+          {
+            "$ref": "#/components/parameters/ApiRevision"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of retired Accounts.",
+            "headers": {
+              "API-Revision": {
+                "$ref": "#/components/headers/ApiRevision"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountListResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-rig-permission": "rig_account.read"
+      }
+    },
+    "/api/v1/accounts/{id}": {
+      "get": {
+        "tags": [
+          "Accounts"
+        ],
+        "summary": "Fetch one Account by identifier.",
+        "description": "Fetch one Account by identifier.\n\nRequires the `rig_account.read` permission.",
+        "operationId": "getAccount",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Identifier of the Account.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/ApiRevision"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The requested Account.",
+            "headers": {
+              "API-Revision": {
+                "$ref": "#/components/headers/ApiRevision"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Account"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-rig-permission": "rig_account.read"
+      }
+    },
+    "/api/v1/rig_notification_recipient/_deleted/_stream": {
+      "get": {
+        "tags": [
+          "RigNotificationRecipients"
+        ],
+        "summary": "Subscribe to retired RigNotificationRecipients.",
+        "description": "The rows a delete stamped rather than removed, kept up to date.\n\nA shape is a filtered view of one table that a client subscribes to. This route is a proxy in front of the sync service: which rows exist in the shape — the tenant, the lifecycle predicate, and the application's own scoping — is decided by the server and cannot be influenced from here. Where the client is in the stream is forwarded untouched.\n\nWith `live=true` the request is a long poll: it does not answer until something changes, so a client timeout set for an ordinary request will cut it short.\n\nThe response body is the sync protocol's own and is not described here. The `electric-*` response headers carry the cursor: send `handle` and `offset` back on the next request, or the subscription starts over.\n\nRequires a session scoped to a tenant, and the shape is filtered to it.",
+        "operationId": "streamDeletedRigNotificationRecipients",
+        "parameters": [
+          {
+            "name": "offset",
+            "in": "query",
+            "description": "Where in the stream to resume, from the previous response's electric-offset.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "handle",
+            "in": "query",
+            "description": "The shape handle from a previous response. Omit it to start a new subscription.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "live",
+            "in": "query",
+            "description": "Long-poll until something changes, rather than answering with what is there now.",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "The sync service's own cache-busting cursor, echoed back from the last response.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "replica",
+            "in": "query",
+            "description": "Whether updates carry the whole row or only the columns that changed.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/ApiRevision"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A chunk of the shape, in the sync protocol's own format.",
+            "headers": {
+              "electric-handle": {
+                "description": "The shape handle. Send it back to continue this subscription.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "electric-offset": {
+                "description": "Where this chunk ended. Send it back to resume from here.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "electric-schema": {
+                "description": "The shape's column types.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "electric-cursor": {
+                "description": "The cursor to echo on the next request.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "electric-up-to-date": {
+                "description": "Present when the client has caught up with the shape.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {}
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "502": {
+            "description": "The sync service could not be reached.",
+            "content": {
+              "text/plain": {}
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/rig_notification_recipient/_stream": {
+      "get": {
+        "tags": [
+          "RigNotificationRecipients"
+        ],
+        "summary": "Subscribe to the live RigNotificationRecipient shape.",
+        "description": "Every RigNotificationRecipient the caller may read, kept up to date.\n\nA shape is a filtered view of one table that a client subscribes to. This route is a proxy in front of the sync service: which rows exist in the shape — the tenant, the lifecycle predicate, and the application's own scoping — is decided by the server and cannot be influenced from here. Where the client is in the stream is forwarded untouched.\n\nWith `live=true` the request is a long poll: it does not answer until something changes, so a client timeout set for an ordinary request will cut it short.\n\nThe response body is the sync protocol's own and is not described here. The `electric-*` response headers carry the cursor: send `handle` and `offset` back on the next request, or the subscription starts over.\n\nRequires a session scoped to a tenant, and the shape is filtered to it.",
+        "operationId": "streamRigNotificationRecipients",
+        "parameters": [
+          {
+            "name": "offset",
+            "in": "query",
+            "description": "Where in the stream to resume, from the previous response's electric-offset.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "handle",
+            "in": "query",
+            "description": "The shape handle from a previous response. Omit it to start a new subscription.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "live",
+            "in": "query",
+            "description": "Long-poll until something changes, rather than answering with what is there now.",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "The sync service's own cache-busting cursor, echoed back from the last response.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "replica",
+            "in": "query",
+            "description": "Whether updates carry the whole row or only the columns that changed.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/ApiRevision"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A chunk of the shape, in the sync protocol's own format.",
+            "headers": {
+              "electric-handle": {
+                "description": "The shape handle. Send it back to continue this subscription.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "electric-offset": {
+                "description": "Where this chunk ended. Send it back to resume from here.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "electric-schema": {
+                "description": "The shape's column types.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "electric-cursor": {
+                "description": "The cursor to echo on the next request.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "electric-up-to-date": {
+                "description": "Present when the client has caught up with the shape.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {}
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "502": {
+            "description": "The sync service could not be reached.",
+            "content": {
+              "text/plain": {}
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/todo-attachments": {
+      "get": {
+        "tags": [
+          "TodoAttachments"
+        ],
+        "summary": "List TodoAttachments.",
+        "description": "List TodoAttachments.\n\nRequires the `todo_attachment.read` permission.",
+        "operationId": "listTodoAttachments",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Maximum rows to return.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "default": 50
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "description": "Rows to skip before the first returned row.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "default": 0
+            }
+          },
+          {
+            "$ref": "#/components/parameters/ApiRevision"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of TodoAttachments.",
+            "headers": {
+              "API-Revision": {
+                "$ref": "#/components/headers/ApiRevision"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TodoAttachmentListResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-rig-permission": "todo_attachment.read"
+      },
+      "post": {
+        "tags": [
+          "TodoAttachments"
+        ],
+        "summary": "Create a TodoAttachment.",
+        "description": "Create a TodoAttachment.\n\nRequires the `todo_attachment.write` permission.",
+        "operationId": "createTodoAttachment",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ApiRevision"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "description": "The TodoAttachment to create, as JSON — or as a multipart form when its files are being attached in the same request.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TodoAttachmentCreateInput"
+              }
+            },
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/TodoAttachmentCreateMultipart"
+              },
+              "encoding": {
+                "json": {
+                  "contentType": "application/json"
+                },
+                "attachmentFile": {
+                  "contentType": "application/octet-stream"
+                }
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "The created TodoAttachment.",
+            "headers": {
+              "API-Revision": {
+                "$ref": "#/components/headers/ApiRevision"
+              },
+              "Idempotency-Replayed": {
+                "$ref": "#/components/headers/IdempotencyReplayed"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TodoAttachment"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "413": {
+            "$ref": "#/components/responses/TooLarge"
+          },
+          "415": {
+            "$ref": "#/components/responses/UnsupportedMediaType"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnprocessableEntity"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-rig-permission": "todo_attachment.write"
+      }
+    },
+    "/api/v1/todo-attachments/_deleted": {
+      "get": {
+        "tags": [
+          "TodoAttachments"
+        ],
+        "summary": "List retired TodoAttachments.",
+        "description": "A deletion stamps the row rather than removing it, so this is what was deleted and can still be brought back. Only rows inside the 30-day restore window appear: past it a row is gone as far as anyone is concerned, so it is not in the trash either.\n\nRequires the `todo_attachment.read` permission.",
+        "operationId": "listDeletedTodoAttachments",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Maximum rows to return.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "default": 50
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "description": "Rows to skip before the first returned row.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "default": 0
+            }
+          },
+          {
+            "$ref": "#/components/parameters/ApiRevision"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of retired TodoAttachments.",
+            "headers": {
+              "API-Revision": {
+                "$ref": "#/components/headers/ApiRevision"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TodoAttachmentListResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-rig-permission": "todo_attachment.read"
+      }
+    },
+    "/api/v1/todo-attachments/_search": {
+      "post": {
+        "tags": [
+          "TodoAttachments"
+        ],
+        "summary": "Search TodoAttachments with filters.",
+        "description": "Search TodoAttachments with filters.\n\nThe primary form of this operation is `QUERY /api/v1/todo-attachments` — a read that carries a body, and so safe and idempotent in a way POST is not. OpenAPI 3.1 cannot describe an operation on the QUERY method, so it is documented here as the POST alias that exists for intermediaries which reject unfamiliar methods. One handler serves both routes and they answer identically.\n\nRequires the `todo_attachment.read` permission.",
+        "operationId": "searchTodoAttachments",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Maximum rows to return.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "default": 50
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "description": "Rows to skip before the first returned row.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "default": 0
+            }
+          },
+          {
+            "$ref": "#/components/parameters/ApiRevision"
+          }
+        ],
+        "requestBody": {
+          "description": "The request body for TodoAttachment.Search.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TodoAttachmentSearchBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "A page of matching TodoAttachments.",
+            "headers": {
+              "API-Revision": {
+                "$ref": "#/components/headers/ApiRevision"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TodoAttachmentListResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnprocessableEntity"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-rig-permission": "todo_attachment.read"
+      }
+    },
+    "/api/v1/todo-attachments/{id}": {
+      "get": {
+        "tags": [
+          "TodoAttachments"
+        ],
+        "summary": "Fetch one TodoAttachment by identifier.",
+        "description": "Fetch one TodoAttachment by identifier.\n\nRequires the `todo_attachment.read` permission.",
+        "operationId": "getTodoAttachment",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Identifier of the TodoAttachment.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/ApiRevision"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The requested TodoAttachment.",
+            "headers": {
+              "API-Revision": {
+                "$ref": "#/components/headers/ApiRevision"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TodoAttachment"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-rig-permission": "todo_attachment.read"
+      },
+      "delete": {
+        "tags": [
+          "TodoAttachments"
+        ],
+        "summary": "Delete a TodoAttachment.",
+        "description": "The row is retired by stamping a deletion time; it stops appearing in reads but can be restored within the retention window.\n\nRequires the `todo_attachment.delete` permission.",
+        "operationId": "deleteTodoAttachment",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Identifier of the TodoAttachment.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/ApiRevision"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "The TodoAttachment was deleted.",
+            "headers": {
+              "API-Revision": {
+                "$ref": "#/components/headers/ApiRevision"
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-rig-permission": "todo_attachment.delete"
+      },
+      "patch": {
+        "tags": [
+          "TodoAttachments"
+        ],
+        "summary": "Update a TodoAttachment.",
+        "description": "Only the fields present in the body are changed. A field set to null is cleared; a field left out is left alone.\n\nRequires the `todo_attachment.write` permission.",
+        "operationId": "updateTodoAttachment",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Identifier of the TodoAttachment.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/ApiRevision"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "description": "The fields of a TodoAttachment to change. Every member is optional: one left out is left alone, and an explicit null clears it.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TodoAttachmentUpdateInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The updated TodoAttachment.",
+            "headers": {
+              "API-Revision": {
+                "$ref": "#/components/headers/ApiRevision"
+              },
+              "Idempotency-Replayed": {
+                "$ref": "#/components/headers/IdempotencyReplayed"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TodoAttachment"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnprocessableEntity"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-rig-permission": "todo_attachment.write"
+      }
+    },
+    "/api/v1/todo-attachments/{id}/_restore": {
+      "post": {
+        "tags": [
+          "TodoAttachments"
+        ],
+        "summary": "Bring a retired TodoAttachment back.",
+        "description": "The deletion stamp is cleared and the row appears in reads again. It works for 30 days after the deletion; past that the row is no longer eligible and this answers 409.\n\nRestoring a row that was never deleted is not an error. It is already in the state the caller asked for, and answering otherwise would make a retry of a request whose response went missing look like a failure.\n\nThe request carries no fields. What to do when the world has moved on while the row was retired — a unique value taken by something created since — is the application's decision, and it is made in the restore hook: refuse, or change the row so that it fits.\n\nEvery rule then runs against whatever the hook settled on, not only the ones for fields it touched. The row was not live, so nothing about it has been checked against the world it is returning to.\n\nRequires the `todo_attachment.write` permission.",
+        "operationId": "restoreTodoAttachment",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Identifier of the TodoAttachment.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/ApiRevision"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The restored TodoAttachment.",
+            "headers": {
+              "API-Revision": {
+                "$ref": "#/components/headers/ApiRevision"
+              },
+              "Idempotency-Replayed": {
+                "$ref": "#/components/headers/IdempotencyReplayed"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TodoAttachment"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnprocessableEntity"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-rig-permission": "todo_attachment.write"
+      }
+    },
+    "/api/v1/todo-attachments/{id}/attachment-file": {
+      "post": {
+        "tags": [
+          "TodoAttachments"
+        ],
+        "summary": "Attach a file to a TodoAttachment as its attachment.",
+        "description": "The form carries one part, named attachmentFile. Nothing else in it is accepted.\n\nThe type is sniffed from the bytes rather than taken from what the request claimed, and the sniffed type is what is stored and what a download announces. A file replacing an existing one does not delete it: a row that keeps its previous versions still points at the old file from every one of them.\n\nRequires the `todo_attachment.attachment_file.write` permission.",
+        "operationId": "uploadTodoAttachmentAttachmentFile",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Identifier of the TodoAttachment.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/ApiRevision"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "description": "The file to attach, as a multipart form.",
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/TodoAttachmentUploadAttachmentFileMultipart"
+              },
+              "encoding": {
+                "attachmentFile": {
+                  "contentType": "application/octet-stream"
+                }
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "The stored file.",
+            "headers": {
+              "API-Revision": {
+                "$ref": "#/components/headers/ApiRevision"
+              },
+              "Idempotency-Replayed": {
+                "$ref": "#/components/headers/IdempotencyReplayed"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RigFile"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "413": {
+            "$ref": "#/components/responses/TooLarge"
+          },
+          "415": {
+            "$ref": "#/components/responses/UnsupportedMediaType"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnprocessableEntity"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-rig-permission": "todo_attachment.attachment_file.write"
+      }
+    },
+    "/api/v1/todo-attachments/{id}/attachment-file/{fileId}/{filename}": {
+      "get": {
+        "tags": [
+          "TodoAttachments"
+        ],
+        "summary": "Fetch a TodoAttachment's attachment.",
+        "description": "Answers range and conditional requests, so a resumed download does not start over and a media element can seek.\n\nRequires the `todo_attachment.attachment_file.read` permission.",
+        "operationId": "downloadTodoAttachmentAttachmentFile",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Identifier of the TodoAttachment.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "fileId",
+            "in": "path",
+            "description": "Identifier of the file, from the row's attachment field.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "filename",
+            "in": "path",
+            "description": "The file's own name. It has to match the stored one, and it is what the browser offers to save the download as.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/ApiRevision"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The file's bytes, announced as whatever they were sniffed to be.",
+            "headers": {
+              "API-Revision": {
+                "$ref": "#/components/headers/ApiRevision"
+              }
+            },
+            "content": {
+              "application/octet-stream": {}
+            }
+          },
+          "206": {
+            "description": "The requested range of the file.",
+            "headers": {
+              "API-Revision": {
+                "$ref": "#/components/headers/ApiRevision"
+              }
+            },
+            "content": {
+              "application/octet-stream": {}
+            }
+          },
+          "304": {
+            "description": "The caller already has this version of the file."
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-rig-permission": "todo_attachment.attachment_file.read"
+      }
+    },
+    "/api/v1/todo/_deleted/_stream": {
+      "get": {
+        "tags": [
+          "Todos"
+        ],
+        "summary": "Subscribe to retired Todos.",
+        "description": "The rows a delete stamped rather than removed, kept up to date.\n\nA shape is a filtered view of one table that a client subscribes to. This route is a proxy in front of the sync service: which rows exist in the shape — the tenant, the lifecycle predicate, and the application's own scoping — is decided by the server and cannot be influenced from here. Where the client is in the stream is forwarded untouched.\n\nWith `live=true` the request is a long poll: it does not answer until something changes, so a client timeout set for an ordinary request will cut it short.\n\nThe response body is the sync protocol's own and is not described here. The `electric-*` response headers carry the cursor: send `handle` and `offset` back on the next request, or the subscription starts over.\n\nRequires a session scoped to a tenant, and the shape is filtered to it.",
+        "operationId": "streamDeletedTodos",
+        "parameters": [
+          {
+            "name": "offset",
+            "in": "query",
+            "description": "Where in the stream to resume, from the previous response's electric-offset.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "handle",
+            "in": "query",
+            "description": "The shape handle from a previous response. Omit it to start a new subscription.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "live",
+            "in": "query",
+            "description": "Long-poll until something changes, rather than answering with what is there now.",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "The sync service's own cache-busting cursor, echoed back from the last response.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "replica",
+            "in": "query",
+            "description": "Whether updates carry the whole row or only the columns that changed.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/ApiRevision"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A chunk of the shape, in the sync protocol's own format.",
+            "headers": {
+              "electric-handle": {
+                "description": "The shape handle. Send it back to continue this subscription.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "electric-offset": {
+                "description": "Where this chunk ended. Send it back to resume from here.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "electric-schema": {
+                "description": "The shape's column types.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "electric-cursor": {
+                "description": "The cursor to echo on the next request.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "electric-up-to-date": {
+                "description": "Present when the client has caught up with the shape.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {}
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "502": {
+            "description": "The sync service could not be reached.",
+            "content": {
+              "text/plain": {}
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/todo/_stream": {
+      "get": {
+        "tags": [
+          "Todos"
+        ],
+        "summary": "Subscribe to the live Todo shape.",
+        "description": "Every Todo the caller may read, kept up to date.\n\nA shape is a filtered view of one table that a client subscribes to. This route is a proxy in front of the sync service: which rows exist in the shape — the tenant, the lifecycle predicate, and the application's own scoping — is decided by the server and cannot be influenced from here. Where the client is in the stream is forwarded untouched.\n\nWith `live=true` the request is a long poll: it does not answer until something changes, so a client timeout set for an ordinary request will cut it short.\n\nThe response body is the sync protocol's own and is not described here. The `electric-*` response headers carry the cursor: send `handle` and `offset` back on the next request, or the subscription starts over.\n\nRequires a session scoped to a tenant, and the shape is filtered to it.",
+        "operationId": "streamTodos",
+        "parameters": [
+          {
+            "name": "offset",
+            "in": "query",
+            "description": "Where in the stream to resume, from the previous response's electric-offset.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "handle",
+            "in": "query",
+            "description": "The shape handle from a previous response. Omit it to start a new subscription.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "live",
+            "in": "query",
+            "description": "Long-poll until something changes, rather than answering with what is there now.",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "The sync service's own cache-busting cursor, echoed back from the last response.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "replica",
+            "in": "query",
+            "description": "Whether updates carry the whole row or only the columns that changed.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/ApiRevision"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A chunk of the shape, in the sync protocol's own format.",
+            "headers": {
+              "electric-handle": {
+                "description": "The shape handle. Send it back to continue this subscription.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "electric-offset": {
+                "description": "Where this chunk ended. Send it back to resume from here.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "electric-schema": {
+                "description": "The shape's column types.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "electric-cursor": {
+                "description": "The cursor to echo on the next request.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "electric-up-to-date": {
+                "description": "Present when the client has caught up with the shape.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {}
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "502": {
+            "description": "The sync service could not be reached.",
+            "content": {
+              "text/plain": {}
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/todo/{id}/_versions/_stream": {
+      "get": {
+        "tags": [
+          "Todos"
+        ],
+        "summary": "Subscribe to one Todo's history.",
+        "description": "The previous versions of a single Todo, kept up to date.\n\nA shape is a filtered view of one table that a client subscribes to. This route is a proxy in front of the sync service: which rows exist in the shape — the tenant, the lifecycle predicate, and the application's own scoping — is decided by the server and cannot be influenced from here. Where the client is in the stream is forwarded untouched.\n\nWith `live=true` the request is a long poll: it does not answer until something changes, so a client timeout set for an ordinary request will cut it short.\n\nThe response body is the sync protocol's own and is not described here. The `electric-*` response headers carry the cursor: send `handle` and `offset` back on the next request, or the subscription starts over.\n\nRequires a session scoped to a tenant, and the shape is filtered to it.",
+        "operationId": "streamTodoVersions",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Identifier of the Todo whose history to stream.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "description": "Where in the stream to resume, from the previous response's electric-offset.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "handle",
+            "in": "query",
+            "description": "The shape handle from a previous response. Omit it to start a new subscription.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "live",
+            "in": "query",
+            "description": "Long-poll until something changes, rather than answering with what is there now.",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "The sync service's own cache-busting cursor, echoed back from the last response.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "replica",
+            "in": "query",
+            "description": "Whether updates carry the whole row or only the columns that changed.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/ApiRevision"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A chunk of the shape, in the sync protocol's own format.",
+            "headers": {
+              "electric-handle": {
+                "description": "The shape handle. Send it back to continue this subscription.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "electric-offset": {
+                "description": "Where this chunk ended. Send it back to resume from here.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "electric-schema": {
+                "description": "The shape's column types.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "electric-cursor": {
+                "description": "The cursor to echo on the next request.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "electric-up-to-date": {
+                "description": "Present when the client has caught up with the shape.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {}
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "502": {
+            "description": "The sync service could not be reached.",
+            "content": {
+              "text/plain": {}
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/todos": {
+      "get": {
+        "tags": [
+          "Todos"
+        ],
+        "summary": "List Todos.",
+        "description": "List Todos.\n\nRequires the `todo.read` permission.",
+        "operationId": "listTodos",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Maximum rows to return.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "default": 50
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "description": "Rows to skip before the first returned row.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "default": 0
+            }
+          },
+          {
+            "$ref": "#/components/parameters/ApiRevision"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of Todos.",
+            "headers": {
+              "API-Revision": {
+                "$ref": "#/components/headers/ApiRevision"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TodoListResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-rig-permission": "todo.read"
+      },
+      "post": {
+        "tags": [
+          "Todos"
+        ],
+        "summary": "Create a Todo.",
+        "description": "Create a Todo.\n\nRequires the `todo.write` permission.",
+        "operationId": "createTodo",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ApiRevision"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "description": "The fields a new Todo is created with. A field the database cannot supply for itself is required.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TodoCreateInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "The created Todo.",
+            "headers": {
+              "API-Revision": {
+                "$ref": "#/components/headers/ApiRevision"
+              },
+              "Idempotency-Replayed": {
+                "$ref": "#/components/headers/IdempotencyReplayed"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Todo"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnprocessableEntity"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-rig-permission": "todo.write"
+      }
+    },
+    "/api/v1/todos/_deleted": {
+      "get": {
+        "tags": [
+          "Todos"
+        ],
+        "summary": "List retired Todos.",
+        "description": "A deletion stamps the row rather than removing it, so this is what was deleted and can still be brought back. Only rows inside the 30-day restore window appear: past it a row is gone as far as anyone is concerned, so it is not in the trash either.\n\nRequires the `todo.read` permission.",
+        "operationId": "listDeletedTodos",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Maximum rows to return.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "default": 50
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "description": "Rows to skip before the first returned row.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "default": 0
+            }
+          },
+          {
+            "$ref": "#/components/parameters/ApiRevision"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of retired Todos.",
+            "headers": {
+              "API-Revision": {
+                "$ref": "#/components/headers/ApiRevision"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TodoListResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-rig-permission": "todo.read"
+      }
+    },
+    "/api/v1/todos/_search": {
+      "post": {
+        "tags": [
+          "Todos"
+        ],
+        "summary": "Search Todos with filters.",
+        "description": "Search Todos with filters.\n\nThe primary form of this operation is `QUERY /api/v1/todos` — a read that carries a body, and so safe and idempotent in a way POST is not. OpenAPI 3.1 cannot describe an operation on the QUERY method, so it is documented here as the POST alias that exists for intermediaries which reject unfamiliar methods. One handler serves both routes and they answer identically.\n\nRequires the `todo.read` permission.",
+        "operationId": "searchTodos",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Maximum rows to return.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "default": 50
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "description": "Rows to skip before the first returned row.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "default": 0
+            }
+          },
+          {
+            "$ref": "#/components/parameters/ApiRevision"
+          }
+        ],
+        "requestBody": {
+          "description": "The request body for Todo.Search.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TodoSearchBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "A page of matching Todos.",
+            "headers": {
+              "API-Revision": {
+                "$ref": "#/components/headers/ApiRevision"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TodoListResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnprocessableEntity"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-rig-permission": "todo.read"
+      }
+    },
+    "/api/v1/todos/{id}": {
+      "get": {
+        "tags": [
+          "Todos"
+        ],
+        "summary": "Fetch one Todo by identifier.",
+        "description": "Fetch one Todo by identifier.\n\nRequires the `todo.read` permission.",
+        "operationId": "getTodo",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Identifier of the Todo.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/ApiRevision"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The requested Todo.",
+            "headers": {
+              "API-Revision": {
+                "$ref": "#/components/headers/ApiRevision"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Todo"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-rig-permission": "todo.read"
+      },
+      "delete": {
+        "tags": [
+          "Todos"
+        ],
+        "summary": "Delete a Todo.",
+        "description": "The row is retired by stamping a deletion time; it stops appearing in reads but can be restored within the retention window.\n\nRequires the `todo.delete` permission.",
+        "operationId": "deleteTodo",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Identifier of the Todo.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/ApiRevision"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "The Todo was deleted.",
+            "headers": {
+              "API-Revision": {
+                "$ref": "#/components/headers/ApiRevision"
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-rig-permission": "todo.delete"
+      },
+      "patch": {
+        "tags": [
+          "Todos"
+        ],
+        "summary": "Update a Todo.",
+        "description": "Only the fields present in the body are changed. A field set to null is cleared; a field left out is left alone.\n\nRequires the `todo.write` permission.",
+        "operationId": "updateTodo",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Identifier of the Todo.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/ApiRevision"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "description": "The fields of a Todo to change. Every member is optional: one left out is left alone, and an explicit null clears it.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TodoUpdateInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The updated Todo.",
+            "headers": {
+              "API-Revision": {
+                "$ref": "#/components/headers/ApiRevision"
+              },
+              "Idempotency-Replayed": {
+                "$ref": "#/components/headers/IdempotencyReplayed"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Todo"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnprocessableEntity"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-rig-permission": "todo.write"
+      }
+    },
+    "/api/v1/todos/{id}/_restore": {
+      "post": {
+        "tags": [
+          "Todos"
+        ],
+        "summary": "Bring a retired Todo back.",
+        "description": "The deletion stamp is cleared and the row appears in reads again. It works for 30 days after the deletion; past that the row is no longer eligible and this answers 409.\n\nRestoring a row that was never deleted is not an error. It is already in the state the caller asked for, and answering otherwise would make a retry of a request whose response went missing look like a failure.\n\nThe request carries no fields. What to do when the world has moved on while the row was retired — a unique value taken by something created since — is the application's decision, and it is made in the restore hook: refuse, or change the row so that it fits.\n\nEvery rule then runs against whatever the hook settled on, not only the ones for fields it touched. The row was not live, so nothing about it has been checked against the world it is returning to.\n\nRequires the `todo.write` permission.",
+        "operationId": "restoreTodo",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Identifier of the Todo.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/ApiRevision"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The restored Todo.",
+            "headers": {
+              "API-Revision": {
+                "$ref": "#/components/headers/ApiRevision"
+              },
+              "Idempotency-Replayed": {
+                "$ref": "#/components/headers/IdempotencyReplayed"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Todo"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnprocessableEntity"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-rig-permission": "todo.write"
+      }
+    },
+    "/api/v1/todos/{id}/_revert": {
+      "post": {
+        "tags": [
+          "Todos"
+        ],
+        "summary": "Put a Todo back to one of its previous versions.",
+        "description": "The version is replayed through the ordinary update path rather than written over the row, so the state being replaced is itself snapshotted first and every rule an update runs still runs. Reverting is undoable, and a value that would be refused now is still refused.\n\nRequires the `todo.write` permission.",
+        "operationId": "revertTodo",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Identifier of the Todo.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/ApiRevision"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "description": "The request body for Todo.Revert.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TodoRevertBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The Todo, as of the version replayed.",
+            "headers": {
+              "API-Revision": {
+                "$ref": "#/components/headers/ApiRevision"
+              },
+              "Idempotency-Replayed": {
+                "$ref": "#/components/headers/IdempotencyReplayed"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Todo"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnprocessableEntity"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-rig-permission": "todo.write"
+      }
+    },
+    "/api/v1/todos/{id}/_versions": {
+      "get": {
+        "tags": [
+          "Todos"
+        ],
+        "summary": "List a Todo's previous versions.",
+        "description": "Every update copies the row as it was before writing the change, so this is the row's history: newest first, and never the live row itself.\n\nThese do not appear in ordinary reads. A version answers Get by its own identifier, but it is filtered out of List and Search, so history does not turn up in a listing.\n\nRequires the `todo.read` permission.",
+        "operationId": "versionsOfTodo",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Identifier of the Todo.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/ApiRevision"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The versions of the Todo, newest first.",
+            "headers": {
+              "API-Revision": {
+                "$ref": "#/components/headers/ApiRevision"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TodoListResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-rig-permission": "todo.read"
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Account": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Unique identifier for this row.",
+            "readOnly": true
+          },
+          "tenantId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Tenant this row belongs to. Every query is scoped by it.",
+            "readOnly": true
+          },
+          "identityId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The person this account belongs to, or null for a service account, which is nobody."
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When this row was created. Set automatically and never changes.",
+            "readOnly": true
+          },
+          "createdByAccountId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Account that created this row, taken from the request's claims.",
+            "readOnly": true
+          },
+          "updatedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When this row was last updated. Set automatically on every update.",
+            "readOnly": true
+          },
+          "updatedByAccountId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Account that last updated this row, taken from the request's claims.",
+            "readOnly": true
+          },
+          "deletedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When this row was soft-deleted. Null while the row is live.",
+            "readOnly": true
+          },
+          "deletedByAccountId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Account that soft-deleted this row, taken from the request's claims.",
+            "readOnly": true
+          },
+          "kind": {
+            "$ref": "#/components/schemas/RigAccountKind",
+            "description": "Whether this is a person or a service account an integration acts as."
+          },
+          "role": {
+            "$ref": "#/components/schemas/RigAccountRoleLevel",
+            "description": "The coarse level in this tenant: Owner, Admin, or Basic. Somebody can be an Owner here and Basic elsewhere."
+          },
+          "emailAddress": {
+            "type": "string",
+            "description": "A copy of the identity's address, kept here so listing accounts is one query. For a service account it is a label nobody signs in with."
+          },
+          "displayName": {
+            "type": "string",
+            "description": "What to call the person in this tenant."
+          },
+          "timeZone": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "IANA name, for example Europe/Stockholm. Null means UTC."
+          },
+          "isActive": {
+            "type": "boolean",
+            "description": "Whether the account may be used. A disabled account is refused with 403, not 401."
+          },
+          "createdByApiKeyId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "API key this row was created through, when it was an integration rather than a person.",
+            "readOnly": true
+          },
+          "updatedByApiKeyId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "API key this row was last updated through, when it was an integration rather than a person.",
+            "readOnly": true
+          },
+          "deletedByApiKeyId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "API key this row was soft-deleted through, when it was an integration rather than a person.",
+            "readOnly": true
+          }
+        },
+        "description": "One person inside one tenant. The person is the identity; this is who they are here."
+      },
+      "AccountListResponse": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Account"
+            },
+            "description": "The rows in this page."
+          },
+          "pagination": {
+            "$ref": "#/components/schemas/Pagination",
+            "description": "Where this page sits in the full result set."
+          }
+        },
+        "description": "A page of Accounts."
+      },
+      "Error": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "$ref": "#/components/schemas/ErrorCode",
+            "description": "Machine-readable reason the request failed."
+          },
+          "message": {
+            "type": "string",
+            "description": "Human-readable explanation. Not intended for clients to parse."
+          },
+          "requestId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Identifier of this request, for correlating with server logs."
+          },
+          "fields": {
+            "description": "Present when the failure was validation. It is shaped like the request body that failed — one member per field, holding the problem with that field — so a client can put each message beside the control it belongs to."
+          }
+        },
+        "description": "Returned whenever a request fails."
+      },
+      "ErrorCode": {
+        "type": "string",
+        "enum": [
+          "BadRequest",
+          "Unauthorized",
+          "Forbidden",
+          "NotFound",
+          "Conflict",
+          "UnprocessableEntity",
+          "RateLimited",
+          "TooLarge",
+          "UnsupportedMediaType",
+          "UpgradeRequired",
+          "Internal"
+        ],
+        "description": "Machine-readable reason a request failed.",
+        "x-enum-varnames": [
+          "BadRequest",
+          "Unauthorized",
+          "Forbidden",
+          "NotFound",
+          "Conflict",
+          "UnprocessableEntity",
+          "RateLimited",
+          "TooLarge",
+          "UnsupportedMediaType",
+          "UpgradeRequired",
+          "Internal"
+        ]
+      },
+      "Pagination": {
+        "type": "object",
+        "properties": {
+          "offset": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Number of rows skipped before this page."
+          },
+          "limit": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Maximum number of rows in this page."
+          },
+          "total": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Total number of rows matching the query, ignoring pagination."
+          }
+        },
+        "description": "Where the returned page sits within the full result set."
+      },
+      "RigAccountKind": {
+        "type": "string",
+        "enum": [
+          "Person",
+          "Service"
+        ],
+        "description": "Whether an account is a person or a machine.",
+        "x-enum-varnames": [
+          "Person",
+          "Service"
+        ]
+      },
+      "RigAccountRoleLevel": {
+        "type": "string",
+        "enum": [
+          "Owner",
+          "Admin",
+          "Basic"
+        ],
+        "description": "The coarse level an account holds in its tenant.",
+        "x-enum-varnames": [
+          "Owner",
+          "Admin",
+          "Basic"
+        ]
+      },
+      "RigFile": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Identifier of the file."
+          },
+          "url": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Where the file is served from. Stable and unsigned, so it is safe to keep and to sync and grants nothing on its own: the endpoint behind it still checks the caller. Null until the upload is finished."
+          },
+          "fileName": {
+            "type": "string",
+            "description": "What the file was called when it arrived. It is for the save dialog, and it is not a path: if you write the file somewhere, you decide where and you sanitize what."
+          },
+          "contentType": {
+            "type": "string",
+            "description": "What the bytes were sniffed to be, which is what a download announces. It is not necessarily what the client claimed on the way up."
+          },
+          "sizeBytes": {
+            "type": "integer",
+            "format": "int64",
+            "description": "How large the file is, in bytes."
+          }
+        },
+        "description": "One uploaded file. Metadata only; the bytes are fetched from Url."
+      },
+      "Todo": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Unique identifier for this row.",
+            "readOnly": true
+          },
+          "tenantId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Tenant this row belongs to. Every query is scoped by it.",
+            "readOnly": true
+          },
+          "title": {
+            "type": "string",
+            "description": "What needs doing, in a few words."
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The longer story, or null while the title says it all."
+          },
+          "status": {
+            "$ref": "#/components/schemas/TodoStatus",
+            "description": "Which column of the board the item is in."
+          },
+          "priority": {
+            "$ref": "#/components/schemas/TodoPriority",
+            "description": "How urgently the item wants attention."
+          },
+          "assigneeAccountId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Who has taken the item, or null while nobody has."
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When this row was created. Set automatically and never changes.",
+            "readOnly": true
+          },
+          "createdByAccountId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Account that created this row, taken from the request's claims.",
+            "readOnly": true
+          },
+          "updatedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When this row was last updated. Set automatically on every update.",
+            "readOnly": true
+          },
+          "updatedByAccountId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Account that last updated this row, taken from the request's claims.",
+            "readOnly": true
+          },
+          "deletedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When this row was soft-deleted. Null while the row is live.",
+            "readOnly": true
+          },
+          "deletedByAccountId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Account that soft-deleted this row, taken from the request's claims.",
+            "readOnly": true
+          },
+          "versionType": {
+            "$ref": "#/components/schemas/TodoVersionType",
+            "description": "Whether this row is the live version or an immutable snapshot of a previous one.",
+            "readOnly": true
+          },
+          "snapshotFromTodoId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The row this snapshot was copied from. Null on live rows.",
+            "readOnly": true
+          },
+          "snapshotFromTodoAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "The source row's last-updated time at the moment this snapshot was taken. This identifies the version captured, not when the copy was made.",
+            "readOnly": true
+          }
+        },
+        "description": "One item on the board."
+      },
+      "TodoAttachment": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Unique identifier for this row.",
+            "readOnly": true
+          },
+          "tenantId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Tenant this row belongs to. Every query is scoped by it.",
+            "readOnly": true
+          },
+          "todoId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The todo this is attached to."
+          },
+          "attachmentFileId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The file itself. Required: an attachment with no file is nothing."
+          },
+          "caption": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "What the attachment is, in a few words."
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When this row was created. Set automatically and never changes.",
+            "readOnly": true
+          },
+          "createdByAccountId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Account that created this row, taken from the request's claims.",
+            "readOnly": true
+          },
+          "updatedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When this row was last updated. Set automatically on every update.",
+            "readOnly": true
+          },
+          "updatedByAccountId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Account that last updated this row, taken from the request's claims.",
+            "readOnly": true
+          },
+          "deletedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When this row was soft-deleted. Null while the row is live.",
+            "readOnly": true
+          },
+          "deletedByAccountId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Account that soft-deleted this row, taken from the request's claims.",
+            "readOnly": true
+          }
+        },
+        "description": "A file attached to a todo."
+      },
+      "TodoAttachmentCreateInput": {
+        "type": "object",
+        "properties": {
+          "todoId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The todo this is attached to."
+          },
+          "attachmentFileId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The file itself. Required: an attachment with no file is nothing."
+          },
+          "caption": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "What the attachment is, in a few words."
+          }
+        },
+        "required": [
+          "todoId",
+          "attachmentFileId"
+        ],
+        "description": "The fields a new TodoAttachment is created with. A field the database cannot supply for itself is required."
+      },
+      "TodoAttachmentCreateMultipart": {
+        "type": "object",
+        "properties": {
+          "json": {
+            "$ref": "#/components/schemas/TodoAttachmentCreateInput",
+            "description": "The TodoAttachment itself, as JSON."
+          },
+          "attachmentFile": {
+            "type": "string",
+            "description": "The attachment, as a file.",
+            "contentMediaType": "application/octet-stream"
+          }
+        },
+        "required": [
+          "json",
+          "attachmentFile"
+        ],
+        "description": "The same body Create takes, in a part named `json`, plus one part per file column. The row and its bytes are committed together, so a request that fails leaves neither."
+      },
+      "TodoAttachmentFilter": {
+        "type": "object",
+        "properties": {
+          "equals": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/TodoAttachmentFilterEquals"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Fields that must equal the given value."
+          },
+          "notEquals": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/TodoAttachmentFilterEquals"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Fields that must not equal the given value."
+          },
+          "greaterThan": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/TodoAttachmentFilterRange"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Fields that must be greater than the given value."
+          },
+          "smallerThan": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/TodoAttachmentFilterRange"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Fields that must be less than the given value."
+          },
+          "greaterOrEqual": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/TodoAttachmentFilterRange"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Fields that must be greater than or equal to the given value."
+          },
+          "smallerOrEqual": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/TodoAttachmentFilterRange"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Fields that must be less than or equal to the given value."
+          },
+          "contains": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/TodoAttachmentFilterContains"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Fields that must be one of the given values."
+          },
+          "notContains": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/TodoAttachmentFilterContains"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Fields that must not be one of the given values."
+          },
+          "like": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/TodoAttachmentFilterLike"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Text fields that must match the given pattern."
+          },
+          "notLike": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/TodoAttachmentFilterLike"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Text fields that must not match the given pattern."
+          },
+          "null": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/TodoAttachmentFilterNull"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Fields that must be null."
+          },
+          "notNull": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/TodoAttachmentFilterNull"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Fields that must not be null."
+          },
+          "orCondition": {
+            "type": "boolean",
+            "description": "Combine this filter's conditions with OR instead of AND."
+          },
+          "nestedFilters": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TodoAttachmentFilter"
+            },
+            "description": "Sub-filters combined with this one, so that AND and OR can be mixed to any depth."
+          },
+          "without": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/TodoAttachmentFilterWithout"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Relations with no row matching the given conditions. An empty one asks for no related row at all.\n\nThis is where a negation belongs when what you mean is \"not\": it negates whether a matching related row exists, so a row with no related row at all satisfies it. The negative operators above negate the comparison instead and still require the related row to be there — \"no related row called X\" is here, \"a related row not called X\" is NotEquals."
+          }
+        },
+        "description": "Conditions a TodoAttachment must satisfy to match a search."
+      },
+      "TodoAttachmentFilterContains": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Unique identifier for this row."
+          },
+          "todoId": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "The todo this is attached to."
+          },
+          "attachmentFileId": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "The file itself. Required: an attachment with no file is nothing."
+          },
+          "caption": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "What the attachment is, in a few words."
+          },
+          "createdAt": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "description": "When this row was created. Set automatically and never changes."
+          },
+          "createdByAccountId": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Account that created this row, taken from the request's claims."
+          },
+          "updatedAt": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "description": "When this row was last updated. Set automatically on every update."
+          },
+          "updatedByAccountId": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Account that last updated this row, taken from the request's claims."
+          },
+          "deletedAt": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "description": "When this row was soft-deleted. Null while the row is live."
+          },
+          "deletedByAccountId": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Account that soft-deleted this row, taken from the request's claims."
+          },
+          "todo": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/TodoFilterContains"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Conditions on this row's Todo.\n\nA row with no Todo never matches, and that holds for the negative operators too: under NotEquals this asks whether the Todo is there and differs, so a row without one fails that as well. To ask the other question — no matching Todo, which a row with none satisfies — use Without.Todo."
+          }
+        },
+        "description": "Set-membership conditions on TodoAttachment fields."
+      },
+      "TodoAttachmentFilterEquals": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Unique identifier for this row."
+          },
+          "todoId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The todo this is attached to."
+          },
+          "attachmentFileId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The file itself. Required: an attachment with no file is nothing."
+          },
+          "caption": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "What the attachment is, in a few words."
+          },
+          "createdAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When this row was created. Set automatically and never changes."
+          },
+          "createdByAccountId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Account that created this row, taken from the request's claims."
+          },
+          "updatedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When this row was last updated. Set automatically on every update."
+          },
+          "updatedByAccountId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Account that last updated this row, taken from the request's claims."
+          },
+          "deletedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When this row was soft-deleted. Null while the row is live."
+          },
+          "deletedByAccountId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Account that soft-deleted this row, taken from the request's claims."
+          },
+          "todo": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/TodoFilterEquals"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Conditions on this row's Todo.\n\nA row with no Todo never matches, and that holds for the negative operators too: under NotEquals this asks whether the Todo is there and differs, so a row without one fails that as well. To ask the other question — no matching Todo, which a row with none satisfies — use Without.Todo."
+          }
+        },
+        "description": "Exact-match conditions on TodoAttachment fields."
+      },
+      "TodoAttachmentFilterLike": {
+        "type": "object",
+        "properties": {
+          "caption": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "What the attachment is, in a few words."
+          },
+          "todo": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/TodoFilterLike"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Conditions on this row's Todo.\n\nA row with no Todo never matches, and that holds for the negative operators too: under NotEquals this asks whether the Todo is there and differs, so a row without one fails that as well. To ask the other question — no matching Todo, which a row with none satisfies — use Without.Todo."
+          }
+        },
+        "description": "Pattern conditions on TodoAttachment text fields."
+      },
+      "TodoAttachmentFilterNull": {
+        "type": "object",
+        "properties": {
+          "caption": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "What the attachment is, in a few words."
+          },
+          "createdByAccountId": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Account that created this row, taken from the request's claims."
+          },
+          "updatedAt": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "When this row was last updated. Set automatically on every update."
+          },
+          "updatedByAccountId": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Account that last updated this row, taken from the request's claims."
+          },
+          "deletedAt": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "When this row was soft-deleted. Null while the row is live."
+          },
+          "deletedByAccountId": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Account that soft-deleted this row, taken from the request's claims."
+          },
+          "todo": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/TodoFilterNull"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Conditions on this row's Todo.\n\nA row with no Todo never matches, and that holds for the negative operators too: under NotEquals this asks whether the Todo is there and differs, so a row without one fails that as well. To ask the other question — no matching Todo, which a row with none satisfies — use Without.Todo."
+          }
+        },
+        "description": "Presence conditions on nullable TodoAttachment fields."
+      },
+      "TodoAttachmentFilterRange": {
+        "type": "object",
+        "properties": {
+          "createdAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When this row was created. Set automatically and never changes."
+          },
+          "updatedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When this row was last updated. Set automatically on every update."
+          },
+          "deletedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When this row was soft-deleted. Null while the row is live."
+          },
+          "todo": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/TodoFilterRange"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Conditions on this row's Todo.\n\nA row with no Todo never matches, and that holds for the negative operators too: under NotEquals this asks whether the Todo is there and differs, so a row without one fails that as well. To ask the other question — no matching Todo, which a row with none satisfies — use Without.Todo."
+          }
+        },
+        "description": "Ordering conditions on TodoAttachment fields that can be compared."
+      },
+      "TodoAttachmentFilterWithout": {
+        "type": "object",
+        "properties": {
+          "todo": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/TodoFilter"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Match rows with no Todo satisfying these conditions, including rows that have none at all.\n\nThis negates the existence of the related row rather than the comparison, which is the whole difference from NotEquals.Todo: that one needs the Todo to be there and to differ, so a row without one fails it and satisfies this. An empty object asks for rows with no Todo at all."
+          }
+        },
+        "description": "Relations a TodoAttachment must have no matching row for."
+      },
+      "TodoAttachmentListResponse": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TodoAttachment"
+            },
+            "description": "The rows in this page."
+          },
+          "pagination": {
+            "$ref": "#/components/schemas/Pagination",
+            "description": "Where this page sits in the full result set."
+          }
+        },
+        "description": "A page of TodoAttachments."
+      },
+      "TodoAttachmentSearchBody": {
+        "type": "object",
+        "properties": {
+          "filter": {
+            "$ref": "#/components/schemas/TodoAttachmentFilter",
+            "description": "Conditions rows must satisfy."
+          }
+        },
+        "required": [
+          "filter"
+        ],
+        "description": "The request body for TodoAttachment.Search."
+      },
+      "TodoAttachmentUpdateInput": {
+        "type": "object",
+        "properties": {
+          "todoId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The todo this is attached to."
+          },
+          "attachmentFileId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The file itself. Required: an attachment with no file is nothing."
+          },
+          "caption": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "What the attachment is, in a few words."
+          }
+        },
+        "description": "The fields of a TodoAttachment to change. Every member is optional: one left out is left alone, and an explicit null clears it."
+      },
+      "TodoAttachmentUploadAttachmentFileMultipart": {
+        "type": "object",
+        "properties": {
+          "attachmentFile": {
+            "type": "string",
+            "description": "The attachment, as a file.",
+            "contentMediaType": "application/octet-stream"
+          }
+        },
+        "required": [
+          "attachmentFile"
+        ],
+        "description": "The same body UploadAttachmentFile takes, in a part named `json`, plus one part per file column. The row and its bytes are committed together, so a request that fails leaves neither."
+      },
+      "TodoCreateInput": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string",
+            "description": "What needs doing, in a few words."
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The longer story, or null while the title says it all."
+          },
+          "status": {
+            "$ref": "#/components/schemas/TodoStatus",
+            "description": "Which column of the board the item is in."
+          },
+          "priority": {
+            "$ref": "#/components/schemas/TodoPriority",
+            "description": "How urgently the item wants attention."
+          },
+          "assigneeAccountId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Who has taken the item, or null while nobody has."
+          }
+        },
+        "required": [
+          "title"
+        ],
+        "description": "The fields a new Todo is created with. A field the database cannot supply for itself is required."
+      },
+      "TodoFilter": {
+        "type": "object",
+        "properties": {
+          "equals": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/TodoFilterEquals"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Fields that must equal the given value."
+          },
+          "notEquals": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/TodoFilterEquals"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Fields that must not equal the given value."
+          },
+          "greaterThan": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/TodoFilterRange"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Fields that must be greater than the given value."
+          },
+          "smallerThan": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/TodoFilterRange"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Fields that must be less than the given value."
+          },
+          "greaterOrEqual": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/TodoFilterRange"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Fields that must be greater than or equal to the given value."
+          },
+          "smallerOrEqual": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/TodoFilterRange"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Fields that must be less than or equal to the given value."
+          },
+          "contains": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/TodoFilterContains"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Fields that must be one of the given values."
+          },
+          "notContains": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/TodoFilterContains"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Fields that must not be one of the given values."
+          },
+          "like": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/TodoFilterLike"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Text fields that must match the given pattern."
+          },
+          "notLike": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/TodoFilterLike"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Text fields that must not match the given pattern."
+          },
+          "null": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/TodoFilterNull"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Fields that must be null."
+          },
+          "notNull": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/TodoFilterNull"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Fields that must not be null."
+          },
+          "orCondition": {
+            "type": "boolean",
+            "description": "Combine this filter's conditions with OR instead of AND."
+          },
+          "nestedFilters": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TodoFilter"
+            },
+            "description": "Sub-filters combined with this one, so that AND and OR can be mixed to any depth."
+          },
+          "without": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/TodoFilterWithout"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Relations with no row matching the given conditions. An empty one asks for no related row at all.\n\nThis is where a negation belongs when what you mean is \"not\": it negates whether a matching related row exists, so a row with no related row at all satisfies it. The negative operators above negate the comparison instead and still require the related row to be there — \"no related row called X\" is here, \"a related row not called X\" is NotEquals."
+          }
+        },
+        "description": "Conditions a Todo must satisfy to match a search."
+      },
+      "TodoFilterContains": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Unique identifier for this row."
+          },
+          "title": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "What needs doing, in a few words."
+          },
+          "description": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The longer story, or null while the title says it all."
+          },
+          "status": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TodoStatus"
+            },
+            "description": "Which column of the board the item is in."
+          },
+          "priority": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TodoPriority"
+            },
+            "description": "How urgently the item wants attention."
+          },
+          "assigneeAccountId": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Who has taken the item, or null while nobody has."
+          },
+          "createdAt": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "description": "When this row was created. Set automatically and never changes."
+          },
+          "createdByAccountId": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Account that created this row, taken from the request's claims."
+          },
+          "updatedAt": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "description": "When this row was last updated. Set automatically on every update."
+          },
+          "updatedByAccountId": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Account that last updated this row, taken from the request's claims."
+          },
+          "deletedAt": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "description": "When this row was soft-deleted. Null while the row is live."
+          },
+          "deletedByAccountId": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Account that soft-deleted this row, taken from the request's claims."
+          },
+          "versionType": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TodoVersionType"
+            },
+            "description": "Whether this row is the live version or an immutable snapshot of a previous one."
+          },
+          "snapshotFromTodoId": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "The row this snapshot was copied from. Null on live rows."
+          },
+          "snapshotFromTodoAt": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "description": "The source row's last-updated time at the moment this snapshot was taken. This identifies the version captured, not when the copy was made."
+          },
+          "todoAttachments": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/TodoAttachmentFilterContains"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Conditions on one of this row's TodoAttachments.\n\nEvery condition has to hold of the same one, not of the set between them.\n\nUnder the negative operators this asks whether one of them differs, which is not the same as none of them matching: a row can have one that matches and one that does not, satisfying the first and failing the second. Without.TodoAttachments asks the second."
+          }
+        },
+        "description": "Set-membership conditions on Todo fields."
+      },
+      "TodoFilterEquals": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Unique identifier for this row."
+          },
+          "title": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "What needs doing, in a few words."
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The longer story, or null while the title says it all."
+          },
+          "status": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/TodoStatus"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Which column of the board the item is in."
+          },
+          "priority": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/TodoPriority"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "How urgently the item wants attention."
+          },
+          "assigneeAccountId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Who has taken the item, or null while nobody has."
+          },
+          "createdAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When this row was created. Set automatically and never changes."
+          },
+          "createdByAccountId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Account that created this row, taken from the request's claims."
+          },
+          "updatedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When this row was last updated. Set automatically on every update."
+          },
+          "updatedByAccountId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Account that last updated this row, taken from the request's claims."
+          },
+          "deletedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When this row was soft-deleted. Null while the row is live."
+          },
+          "deletedByAccountId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Account that soft-deleted this row, taken from the request's claims."
+          },
+          "versionType": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/TodoVersionType"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Whether this row is the live version or an immutable snapshot of a previous one."
+          },
+          "snapshotFromTodoId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The row this snapshot was copied from. Null on live rows."
+          },
+          "snapshotFromTodoAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "The source row's last-updated time at the moment this snapshot was taken. This identifies the version captured, not when the copy was made."
+          },
+          "todoAttachments": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/TodoAttachmentFilterEquals"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Conditions on one of this row's TodoAttachments.\n\nEvery condition has to hold of the same one, not of the set between them.\n\nUnder the negative operators this asks whether one of them differs, which is not the same as none of them matching: a row can have one that matches and one that does not, satisfying the first and failing the second. Without.TodoAttachments asks the second."
+          }
+        },
+        "description": "Exact-match conditions on Todo fields."
+      },
+      "TodoFilterLike": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "What needs doing, in a few words."
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The longer story, or null while the title says it all."
+          },
+          "todoAttachments": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/TodoAttachmentFilterLike"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Conditions on one of this row's TodoAttachments.\n\nEvery condition has to hold of the same one, not of the set between them.\n\nUnder the negative operators this asks whether one of them differs, which is not the same as none of them matching: a row can have one that matches and one that does not, satisfying the first and failing the second. Without.TodoAttachments asks the second."
+          }
+        },
+        "description": "Pattern conditions on Todo text fields."
+      },
+      "TodoFilterNull": {
+        "type": "object",
+        "properties": {
+          "description": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "The longer story, or null while the title says it all."
+          },
+          "assigneeAccountId": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Who has taken the item, or null while nobody has."
+          },
+          "createdByAccountId": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Account that created this row, taken from the request's claims."
+          },
+          "updatedAt": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "When this row was last updated. Set automatically on every update."
+          },
+          "updatedByAccountId": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Account that last updated this row, taken from the request's claims."
+          },
+          "deletedAt": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "When this row was soft-deleted. Null while the row is live."
+          },
+          "deletedByAccountId": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Account that soft-deleted this row, taken from the request's claims."
+          },
+          "snapshotFromTodoId": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "The row this snapshot was copied from. Null on live rows."
+          },
+          "snapshotFromTodoAt": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "The source row's last-updated time at the moment this snapshot was taken. This identifies the version captured, not when the copy was made."
+          },
+          "todoAttachments": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/TodoAttachmentFilterNull"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Conditions on one of this row's TodoAttachments.\n\nEvery condition has to hold of the same one, not of the set between them.\n\nUnder the negative operators this asks whether one of them differs, which is not the same as none of them matching: a row can have one that matches and one that does not, satisfying the first and failing the second. Without.TodoAttachments asks the second."
+          }
+        },
+        "description": "Presence conditions on nullable Todo fields."
+      },
+      "TodoFilterRange": {
+        "type": "object",
+        "properties": {
+          "createdAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When this row was created. Set automatically and never changes."
+          },
+          "updatedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When this row was last updated. Set automatically on every update."
+          },
+          "deletedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When this row was soft-deleted. Null while the row is live."
+          },
+          "snapshotFromTodoAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "The source row's last-updated time at the moment this snapshot was taken. This identifies the version captured, not when the copy was made."
+          },
+          "todoAttachments": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/TodoAttachmentFilterRange"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Conditions on one of this row's TodoAttachments.\n\nEvery condition has to hold of the same one, not of the set between them.\n\nUnder the negative operators this asks whether one of them differs, which is not the same as none of them matching: a row can have one that matches and one that does not, satisfying the first and failing the second. Without.TodoAttachments asks the second."
+          }
+        },
+        "description": "Ordering conditions on Todo fields that can be compared."
+      },
+      "TodoFilterWithout": {
+        "type": "object",
+        "properties": {
+          "todoAttachments": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/TodoAttachmentFilter"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Match rows with no TodoAttachments satisfying these conditions, including rows with none at all.\n\nThis negates the existence of a matching row rather than the comparison, which is the whole difference from NotEquals.TodoAttachments: that one is satisfied by one of them differing, and a row can have one that differs and one that matches at the same time. An empty object asks for rows with no TodoAttachments at all."
+          }
+        },
+        "description": "Relations a Todo must have no matching row for."
+      },
+      "TodoListResponse": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Todo"
+            },
+            "description": "The rows in this page."
+          },
+          "pagination": {
+            "$ref": "#/components/schemas/Pagination",
+            "description": "Where this page sits in the full result set."
+          }
+        },
+        "description": "A page of Todos."
+      },
+      "TodoPriority": {
+        "type": "string",
+        "enum": [
+          "low",
+          "normal",
+          "high"
+        ],
+        "description": "How urgently an item wants attention.",
+        "x-enum-varnames": [
+          "Low",
+          "Normal",
+          "High"
+        ]
+      },
+      "TodoRevertBody": {
+        "type": "object",
+        "properties": {
+          "versionId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The version to put back, from the Todo's history."
+          }
+        },
+        "required": [
+          "versionId"
+        ],
+        "description": "The request body for Todo.Revert."
+      },
+      "TodoSearchBody": {
+        "type": "object",
+        "properties": {
+          "filter": {
+            "$ref": "#/components/schemas/TodoFilter",
+            "description": "Conditions rows must satisfy."
+          }
+        },
+        "required": [
+          "filter"
+        ],
+        "description": "The request body for Todo.Search."
+      },
+      "TodoStatus": {
+        "type": "string",
+        "enum": [
+          "backlog",
+          "todo",
+          "in_progress",
+          "done",
+          "canceled"
+        ],
+        "description": "Which column of the board an item is in.",
+        "x-enum-varnames": [
+          "Backlog",
+          "Todo",
+          "InProgress",
+          "Done",
+          "Canceled"
+        ]
+      },
+      "TodoUpdateInput": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string",
+            "description": "What needs doing, in a few words."
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The longer story, or null while the title says it all."
+          },
+          "status": {
+            "$ref": "#/components/schemas/TodoStatus",
+            "description": "Which column of the board the item is in."
+          },
+          "priority": {
+            "$ref": "#/components/schemas/TodoPriority",
+            "description": "How urgently the item wants attention."
+          },
+          "assigneeAccountId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Who has taken the item, or null while nobody has."
+          }
+        },
+        "description": "The fields of a Todo to change. Every member is optional: one left out is left alone, and an explicit null clears it."
+      },
+      "TodoVersionType": {
+        "type": "string",
+        "enum": [
+          "Original",
+          "Snapshot"
+        ],
+        "description": "Whether a row is the live item or a copy of a previous version of it.",
+        "x-enum-varnames": [
+          "Original",
+          "Snapshot"
+        ]
+      }
+    },
+    "responses": {
+      "BadRequest": {
+        "description": "The request was malformed or a parameter could not be parsed.\n\nThe body's `code` is `BadRequest`.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "Unauthorized": {
+        "description": "No valid session or API key was presented.\n\nThe body's `code` is `Unauthorized`.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "Forbidden": {
+        "description": "The caller is known but not permitted to do this.\n\nThe body's `code` is `Forbidden`.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "NotFound": {
+        "description": "No such resource, or it belongs to another tenant.\n\nThe body's `code` is `NotFound`.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "Conflict": {
+        "description": "The request conflicts with the current state of the resource.\n\nThe body's `code` is `Conflict`.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "TooLarge": {
+        "description": "The request body is larger than this endpoint accepts.\n\nThe body's `code` is `TooLarge`.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "UnsupportedMediaType": {
+        "description": "The body's content type is not one this endpoint accepts.\n\nThe body's `code` is `UnsupportedMediaType`.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "UnprocessableEntity": {
+        "description": "The request was well-formed but failed validation.\n\nThe body's `code` is `UnprocessableEntity`.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "RateLimited": {
+        "description": "Too many requests. Retry after the interval in the Retry-After header.\n\nThe body's `code` is `RateLimited`.",
+        "headers": {
+          "Retry-After": {
+            "$ref": "#/components/headers/RetryAfter"
+          },
+          "RateLimit-Limit": {
+            "$ref": "#/components/headers/RateLimitLimit"
+          },
+          "RateLimit-Remaining": {
+            "$ref": "#/components/headers/RateLimitRemaining"
+          },
+          "RateLimit-Reset": {
+            "$ref": "#/components/headers/RateLimitReset"
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "Internal": {
+        "description": "Something went wrong on the server.\n\nThe body's `code` is `Internal`.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      }
+    },
+    "parameters": {
+      "ApiRevision": {
+        "name": "API-Revision",
+        "in": "header",
+        "description": "The API revision this client was built against. A server generated from an older document than the caller expects answers 426 rather than guessing.",
+        "required": false,
+        "schema": {
+          "type": "string"
+        }
+      },
+      "IdempotencyKey": {
+        "name": "Idempotency-Key",
+        "in": "header",
+        "description": "A key of the caller's choosing, so a retried write happens once. Sending the same key with the same body replays the first answer and sets Idempotency-Replayed; with a different body it is refused with 422, and while the first is still in flight, with 409.",
+        "required": false,
+        "schema": {
+          "type": "string"
+        }
+      }
+    },
+    "headers": {
+      "ApiRevision": {
+        "description": "The revision this server was generated from.",
+        "schema": {
+          "type": "string"
+        }
+      },
+      "IdempotencyReplayed": {
+        "description": "Present and true when this answer is a replay of an earlier request carrying the same Idempotency-Key, rather than work done again.",
+        "schema": {
+          "type": "boolean"
+        }
+      },
+      "RateLimitLimit": {
+        "description": "Requests permitted in the current window.",
+        "schema": {
+          "type": "integer"
+        }
+      },
+      "RateLimitRemaining": {
+        "description": "Requests left in the current window.",
+        "schema": {
+          "type": "integer"
+        }
+      },
+      "RateLimitReset": {
+        "description": "Seconds until the current window resets.",
+        "schema": {
+          "type": "integer"
+        }
+      },
+      "RetryAfter": {
+        "description": "Seconds to wait before retrying.",
+        "schema": {
+          "type": "integer"
+        }
+      }
+    },
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "description": "A credential in `Authorization: Bearer \u003ctoken\u003e`.\n\nTwo kinds are accepted and are told apart by a prefix on the token itself. A session access token travels on every request and is good for 10m, renewed against the session endpoints before it expires. An API key does not expire: an integration key's scopes are its permissions outright, and a personal key carries what its owner carries and no more.\n\nThe endpoints that issue and renew these are mounted under `/auth` and are not described in this document.",
+        "scheme": "bearer",
+        "bearerFormat": "opaque"
+      }
+    }
+  },
+  "security": [
+    {
+      "bearerAuth": []
+    }
+  ],
+  "tags": [
+    {
+      "name": "Accounts",
+      "description": "One person inside one tenant. The person is the identity; this is who they are here."
+    },
+    {
+      "name": "RigNotificationRecipients",
+      "description": "One inbox line: a notification, an account, and whether it has been read."
+    },
+    {
+      "name": "Todos",
+      "description": "One item on the board."
+    },
+    {
+      "name": "TodoAttachments",
+      "description": "A file attached to a todo."
+    }
+  ]
+}

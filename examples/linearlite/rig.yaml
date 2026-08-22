@@ -125,6 +125,13 @@ generators:
     options:
       default_base_url: http://localhost:8084
 
+  # The OpenAPI document, written from the same compiled document the routes
+  # above are, so it cannot describe an endpoint that does not exist.
+  - name: openapi
+    out_dir: docs
+    options:
+      formats: [json, yaml]
+
   # Live-sync shape endpoints, proxying the Electric container `rig db up`
   # runs. The URL agrees with database.electric.port above; main.go lets
   # $ELECTRIC_URL override it for a deployment.

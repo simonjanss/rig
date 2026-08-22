@@ -1,0 +1,844 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rig.dev/schema/project.v1.json",
+  "$defs": {
+    "API": {
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Name of the API, used in documentation and generated type prefixes."
+        },
+        "version": {
+          "type": "string",
+          "description": "API version segment, for example v1."
+        },
+        "base_path": {
+          "type": "string",
+          "description": "Prefix every route sits under, for example /api/v1."
+        },
+        "description": {
+          "type": "string",
+          "description": "What this API is for."
+        },
+        "permissions": {
+          "type": "string",
+          "enum": [
+            "derived",
+            "none"
+          ],
+          "description": "Whether generated handlers check a permission derived from the resource and operation. Defaults to derived."
+        },
+        "search_method": {
+          "type": "string",
+          "enum": [
+            "query",
+            "post",
+            "both"
+          ],
+          "description": "How the Search operation is exposed. Defaults to both: QUERY with a POST alias."
+        },
+        "revision_header": {
+          "type": "string",
+          "description": "Header carrying the API revision, in both directions. Defaults to API-Revision."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
+    },
+    "Auth": {
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Whether this project authenticates its callers. The server-go generator writes the wiring only when it is set."
+        },
+        "base_path": {
+          "type": "string",
+          "description": "Prefix the authentication endpoints sit under. Defaults to /auth."
+        },
+        "tenant": {
+          "$ref": "#/$defs/AuthTenant",
+          "description": "How a request names the tenant it is for."
+        },
+        "session": {
+          "$ref": "#/$defs/AuthSession",
+          "description": "How long the credentials somebody holds stay valid."
+        },
+        "password": {
+          "$ref": "#/$defs/AuthPassword",
+          "description": "What a new password must satisfy."
+        },
+        "limits": {
+          "$ref": "#/$defs/AuthLimits",
+          "description": "Rate limits, counted in the database so replicas cannot disagree."
+        },
+        "allow_registration": {
+          "type": "boolean",
+          "description": "Mount the registration endpoint, where a stranger creates an account. Off means the route does not exist."
+        },
+        "allow_tenant_creation": {
+          "type": "boolean",
+          "description": "Mount the tenant-creation endpoint. Who may create one, and what else a new one needs, stay in Go."
+        },
+        "require_verified_email": {
+          "type": "boolean",
+          "description": "Refuse a sign-in until the address has been verified."
+        },
+        "trusted_proxies": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "description": "CIDR ranges whose X-Forwarded-For may be believed, for example 10.0.0.0/8. Empty trusts none of them."
+        },
+        "log_retention": {
+          "$ref": "#/$defs/Duration",
+          "description": "How long an entry in rig_auth_log is kept, for example 90d. Zero, the default, keeps everything. It cannot be shorter than the longest rate-limit window, because this table is what the limits count."
+        },
+        "oauth": {
+          "$ref": "#/$defs/AuthOAuth",
+          "description": "Provider sign-in. No providers means the provider routes are not mounted."
+        },
+        "expose": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "description": "Foundation tables to generate a model, repository, and API for anyway."
+        },
+        "own": {
+          "type": "boolean",
+          "description": "Generate for every foundation table, for a project that has forked the schema and no longer imports rig/auth."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
+    },
+    "AuthLimit": {
+      "properties": {
+        "max": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "How many are allowed in one window."
+        },
+        "window": {
+          "$ref": "#/$defs/Duration",
+          "description": "How long the window is."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
+    },
+    "AuthLimits": {
+      "properties": {
+        "login_by_email": {
+          "$ref": "#/$defs/AuthLimit",
+          "description": "Failed sign-ins per address before the account is locked out. Defaults to 5 per 15m."
+        },
+        "login_by_ip": {
+          "$ref": "#/$defs/AuthLimit",
+          "description": "Failed sign-ins per source address. Looser than the per-address limit so an office behind one NAT does not trip it. Defaults to 50 per 15m."
+        },
+        "password_reset": {
+          "$ref": "#/$defs/AuthLimit",
+          "description": "Password-reset requests per address. Defaults to 5 per 1h."
+        },
+        "verification_resend": {
+          "$ref": "#/$defs/AuthLimit",
+          "description": "Verification mails per address. Defaults to 5 per 1h."
+        },
+        "refresh": {
+          "$ref": "#/$defs/AuthLimit",
+          "description": "Token rotations per session. A client refreshing this often is looping, not working. Defaults to 60 per 1m."
+        },
+        "api_key_failures": {
+          "$ref": "#/$defs/AuthLimit",
+          "description": "Failed API-key authentications per key. Defaults to 20 per 1m."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
+    },
+    "AuthOAuth": {
+      "properties": {
+        "base_url": {
+          "type": "string",
+          "description": "This application's own origin, for example https://app.example.com. The callback URL is built from it and a provider compares that exactly."
+        },
+        "base_url_env": {
+          "type": "string",
+          "description": "Environment variable that overrides base_url, for an origin that differs per deployment. Not defaulted: one of base_url and base_url_env has to be set."
+        },
+        "origin_from_host": {
+          "type": "boolean",
+          "description": "Derive the callback origin from each request's Host, for an application serving a tenant per subdomain. Every origin must be registered with the provider."
+        },
+        "signing_key_env": {
+          "type": "string",
+          "description": "Environment variable holding the key that signs the state parameter, at least 32 bytes. Defaults to OAUTH_SIGNING_KEY. Unset generates one per process, which breaks across replicas."
+        },
+        "state_ttl": {
+          "$ref": "#/$defs/Duration",
+          "description": "How long a sign-in round trip may take. Generous for a redirect, short enough that a stolen state is useless. Defaults to 10m."
+        },
+        "allow_provisioning": {
+          "type": "boolean",
+          "description": "Create an account the first time somebody signs in with a provider. Off means a provider sign-in only works for an address that already has one."
+        },
+        "allowed_return_to": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "description": "Origins or paths a finished sign-in may return to. Anything else is refused, which is what stops an open redirect."
+        },
+        "insecure": {
+          "type": "boolean",
+          "description": "Allow the state cookie over plain HTTP, for local development only. Never set this in a deployment."
+        },
+        "providers": {
+          "items": {
+            "$ref": "#/$defs/AuthProvider"
+          },
+          "type": "array",
+          "description": "Identity providers to offer. Empty mounts no provider routes."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
+    },
+    "AuthPassword": {
+      "properties": {
+        "min_length": {
+          "type": "integer",
+          "minimum": 8,
+          "description": "Minimum password length in characters. Defaults to 12."
+        },
+        "max_length": {
+          "type": "integer",
+          "description": "Maximum password length in characters. This bounds hashing work, not strength. Defaults to 1024."
+        },
+        "breach_check": {
+          "type": "boolean",
+          "description": "Reject passwords that appear in Have I Been Pwned. Only a hash prefix is sent, and the check fails open."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
+    },
+    "AuthProvider": {
+      "properties": {
+        "name": {
+          "type": "string",
+          "enum": [
+            "google",
+            "microsoft",
+            "github"
+          ],
+          "description": "Which provider. It is also the route segment: google is reached at \u003cbase_path\u003e/oauth/google/start."
+        },
+        "client_id_env": {
+          "type": "string",
+          "description": "Environment variable holding the client id. Defaults to \u003cPROVIDER\u003e_CLIENT_ID."
+        },
+        "client_secret_env": {
+          "type": "string",
+          "description": "Environment variable holding the client secret. Defaults to \u003cPROVIDER\u003e_CLIENT_SECRET."
+        },
+        "tenant_env": {
+          "type": "string",
+          "description": "Microsoft only: environment variable naming its directory. common accepts any account, a directory id restricts sign-in to one organization. Defaults to MICROSOFT_TENANT."
+        },
+        "required": {
+          "type": "boolean",
+          "description": "Fail startup when the credentials are absent. The default skips the provider instead, so one configuration works with or without them."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "name"
+      ]
+    },
+    "AuthSession": {
+      "properties": {
+        "access_ttl": {
+          "$ref": "#/$defs/Duration",
+          "description": "Lifetime of the access token, which travels on every request. Shorter is safer and refreshes more often. Defaults to 10m."
+        },
+        "refresh_ttl": {
+          "$ref": "#/$defs/Duration",
+          "description": "How long an ordinary session lasts. Defaults to 12h."
+        },
+        "remember_ttl": {
+          "$ref": "#/$defs/Duration",
+          "description": "How long a session lasts when somebody asked to stay signed in. Defaults to 30d."
+        },
+        "rotation_leeway": {
+          "$ref": "#/$defs/Duration",
+          "description": "How long a refresh token stays usable after it was exchanged, so a dropped response is a retry rather than a logout. Longer forgives more retries and widens the replay window. Defaults to 30s."
+        },
+        "identity_ttl": {
+          "$ref": "#/$defs/Duration",
+          "description": "Lifetime of the tenant-less credential held between signing in and picking a tenant. Defaults to 30m."
+        },
+        "cache_ttl": {
+          "$ref": "#/$defs/Duration",
+          "description": "Keep verified access tokens in memory for this long. Zero, the default, reads the row every time, which makes revocation immediate. Anything above a few seconds is a revoked session that keeps working."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
+    },
+    "AuthTenant": {
+      "properties": {
+        "from": {
+          "items": {
+            "type": "string",
+            "enum": [
+              "header",
+              "host",
+              "query",
+              "hook"
+            ]
+          },
+          "type": "array",
+          "description": "Sources to try in order; the first that names a tenant wins. Defaults to [header]."
+        },
+        "header": {
+          "type": "string",
+          "description": "Header the header source reads. Defaults to X-Tenant-Id."
+        },
+        "query": {
+          "type": "string",
+          "description": "Query parameter the query source reads. Defaults to tenant."
+        },
+        "default_slug_env": {
+          "type": "string",
+          "description": "Environment variable holding a tenant slug to fall back to when the host names none."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
+    },
+    "Database": {
+      "properties": {
+        "image": {
+          "type": "string",
+          "description": "Container image for the throwaway database."
+        },
+        "container_name": {
+          "type": "string",
+          "description": "Name of the throwaway container."
+        },
+        "port": {
+          "type": "integer",
+          "description": "Host port the throwaway database listens on."
+        },
+        "name": {
+          "type": "string",
+          "description": "Database name."
+        },
+        "user": {
+          "type": "string",
+          "description": "Database user."
+        },
+        "password": {
+          "type": "string",
+          "description": "Database password. This is a local throwaway database; do not put a real secret here."
+        },
+        "schema": {
+          "type": "string",
+          "description": "Postgres schema to read. Defaults to public."
+        },
+        "settings": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "description": "Extra Postgres server parameters for the throwaway container, passed as -c name=value flags."
+        },
+        "electric": {
+          "$ref": "#/$defs/DatabaseElectric",
+          "description": "An ElectricSQL sync-service container managed beside the throwaway database."
+        },
+        "url": {
+          "type": "string",
+          "description": "Connection URL of an existing database. Set this to skip the throwaway container entirely."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
+    },
+    "DatabaseElectric": {
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Start an ElectricSQL container beside the throwaway database."
+        },
+        "image": {
+          "type": "string",
+          "description": "Container image for the sync service."
+        },
+        "container_name": {
+          "type": "string",
+          "description": "Name of the sync-service container."
+        },
+        "port": {
+          "type": "integer",
+          "description": "Host port the sync service listens on."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
+    },
+    "Duration": {
+      "type": "string",
+      "pattern": "^(0|(\\d+(\\.\\d+)?(ns|us|µs|ms|s|m|h|d))+)$",
+      "description": "A length of time: 250ms, 30s, 15m, 12h, 30d. Go's duration syntax, with d for days.",
+      "examples": [
+        "10m",
+        "12h",
+        "30d"
+      ]
+    },
+    "Files": {
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Whether this project accepts uploads. The server-go generator writes the wiring only when it is set."
+        },
+        "expose": {
+          "type": "boolean",
+          "description": "Project rig_file as a read-only resource, so its url column can be read and synced. There is no generated write path either way."
+        },
+        "backend": {
+          "type": "string",
+          "enum": [
+            "memory",
+            "s3"
+          ],
+          "description": "Where the bytes are kept. memory is for tests and go run and is not durable. Defaults to memory."
+        },
+        "s3": {
+          "$ref": "#/$defs/FilesS3",
+          "description": "Bucket settings, read only when backend is s3."
+        },
+        "max_bytes": {
+          "type": "integer",
+          "description": "Largest single upload, in bytes. A hard per-file cap, not a storage quota. Defaults to 26214400 (25 MiB)."
+        },
+        "inline_types": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "description": "Sniffed content types served inline rather than as an attachment. Kept short: a file served inline from the API origin runs there. Defaults to common image types."
+        },
+        "abandoned_after": {
+          "$ref": "#/$defs/Duration",
+          "description": "How long a file row with no bytes behind it is left alone before the sweeper reaps it. Defaults to 24h."
+        },
+        "restore_window": {
+          "$ref": "#/$defs/Duration",
+          "description": "How long a deleted file stays restorable, and how long its bytes outlive the delete. A bucket lifecycle rule has to outlive it. Defaults to 720h (30 days)."
+        },
+        "cookie_downloads": {
+          "type": "boolean",
+          "description": "Accept the session cookie on file download routes, so a stored URL works in an img or a download link. GET only, deliberately: widening it past GET reintroduces the CSRF problem bearer tokens avoid."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
+    },
+    "FilesS3": {
+      "properties": {
+        "bucket": {
+          "type": "string",
+          "description": "Bucket name. One of bucket and bucket_env has to be set."
+        },
+        "bucket_env": {
+          "type": "string",
+          "description": "Environment variable holding the bucket name, for a bucket that differs per deployment."
+        },
+        "region": {
+          "type": "string",
+          "description": "Bucket region."
+        },
+        "endpoint": {
+          "type": "string",
+          "description": "Endpoint URL, for an S3-compatible service that is not AWS."
+        },
+        "access_key_env": {
+          "type": "string",
+          "description": "Environment variable holding the access key id. Defaults to AWS_ACCESS_KEY_ID."
+        },
+        "secret_key_env": {
+          "type": "string",
+          "description": "Environment variable holding the secret access key. Defaults to AWS_SECRET_ACCESS_KEY."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
+    },
+    "Generator": {
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Registered generator name, for example persist-go."
+        },
+        "out_dir": {
+          "type": "string",
+          "description": "Output directory, relative to the project root."
+        },
+        "options": {
+          "type": "object",
+          "description": "Generator-specific options. Each generator publishes its own schema for this block."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "name"
+      ]
+    },
+    "Layout": {
+      "properties": {
+        "table_dir": {
+          "type": "string",
+          "description": "Directory for a table's configuration and service code. Templates: {table} {Table} {tables}."
+        },
+        "config_file": {
+          "type": "string",
+          "description": "Path to a table's configuration file. May reference {table_dir}."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
+    },
+    "Migrations": {
+      "properties": {
+        "dir": {
+          "type": "string",
+          "description": "Directory holding goose migration files."
+        },
+        "table": {
+          "type": "string",
+          "description": "Name of the migration bookkeeping table."
+        },
+        "foundation": {
+          "type": "string",
+          "enum": [
+            "vendored",
+            "embedded"
+          ],
+          "description": "Who keeps rig's own migrations. vendored copies them into this project's migrations directory; embedded leaves each module to apply its own. Defaults to vendored, and cannot be changed once the database exists."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
+    },
+    "Monitoring": {
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Whether this project serves rig's monitoring page. It requires tracing.enabled, because the spans are what the page reads."
+        },
+        "base_path": {
+          "type": "string",
+          "description": "Where the page is mounted. Defaults to /_rig/monitor, and cannot sit under api.base_path or auth.base_path."
+        },
+        "max_traces": {
+          "type": "integer",
+          "description": "How many requests the page lists, newest first. Defaults to 200."
+        },
+        "max_logs": {
+          "type": "integer",
+          "description": "How many log lines the page reads, newest first. Defaults to 500."
+        },
+        "password_env": {
+          "type": "string",
+          "description": "Variable the page reads its password from. Defaults to RIG_MONITOR_PASSWORD. Empty at run time means the page is not mounted."
+        },
+        "password": {
+          "type": "string",
+          "description": "The page's password, written here rather than read from the environment. It warns: rig.yaml is checked in."
+        },
+        "allow": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "description": "Addresses that may reach the page, as CIDR ranges or single addresses, for example 10.0.0.0/8 or 127.0.0.1. Empty allows any. It narrows the password check rather than replacing it, and is matched against the connection's own address, never a forwarded header."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
+    },
+    "Naming": {
+      "properties": {
+        "json_case": {
+          "type": "string",
+          "enum": [
+            "camel",
+            "pascal",
+            "snake"
+          ],
+          "description": "Shape of generated JSON keys. Defaults to camel."
+        },
+        "initialisms": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "description": "Extra acronyms that stay uppercase in Go identifiers, for example SCB."
+        },
+        "plurals": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object",
+          "description": "Plural overrides keyed by table name, for the words English inflection gets wrong."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
+    },
+    "Notifications": {
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Whether this project has an inbox. The server-go generator writes the wiring only when it is set."
+        },
+        "expose": {
+          "type": "boolean",
+          "description": "Project the inbox as a generated resource as well, for the filter grammar and a typed client. The hand-written routes exist either way."
+        },
+        "default_digest": {
+          "type": "string",
+          "enum": [
+            "Immediate",
+            "Hourly",
+            "Daily",
+            "Weekly",
+            "Off"
+          ],
+          "description": "What an account gets on a channel it has no setting for. Defaults to Immediate."
+        },
+        "claim_ttl": {
+          "$ref": "#/$defs/Duration",
+          "description": "How long a dispatcher's claim on a delivery is honoured before another may take it. Set it longer than your slowest channel's timeout. Defaults to 5m, and under 1m is refused."
+        },
+        "send_timeout": {
+          "$ref": "#/$defs/Duration",
+          "description": "How long one call into a channel may take before it is treated as failed. Has to be shorter than claim_ttl. Defaults to 30s, and under 1s is refused."
+        },
+        "max_attempts": {
+          "type": "integer",
+          "description": "How many times a delivery is tried before it is marked failed. Defaults to 5."
+        },
+        "backoff_base": {
+          "$ref": "#/$defs/Duration",
+          "description": "Delay before the first retry. Each attempt doubles it. Defaults to 1m."
+        },
+        "retention": {
+          "$ref": "#/$defs/Duration",
+          "description": "How long a read and deleted inbox line is kept before it is pruned. Has to outlive the longest digest window. Defaults to 2160h (90 days)."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
+    },
+    "ProjectInfo": {
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Short name of the application."
+        },
+        "module": {
+          "type": "string",
+          "description": "Go module path of the application, used to build generated import paths."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "name",
+        "module"
+      ]
+    },
+    "Tracing": {
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Whether the generated server, repositories and client open OpenTelemetry spans. Off means the generated code names no tracing library at all."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
+    },
+    "Validate": {
+      "properties": {
+        "unmentioned_column": {
+          "type": "string",
+          "enum": [
+            "off",
+            "warn",
+            "error"
+          ],
+          "description": "A column exists in the database but is not mentioned in its table configuration."
+        },
+        "missing_comment": {
+          "type": "string",
+          "enum": [
+            "off",
+            "warn",
+            "error"
+          ],
+          "description": "A table or column has no comment."
+        },
+        "fk_needs_index": {
+          "type": "string",
+          "enum": [
+            "off",
+            "warn",
+            "error"
+          ],
+          "description": "A foreign-key column is not covered by an index."
+        },
+        "tenant_id_leading_index": {
+          "type": "string",
+          "enum": [
+            "off",
+            "warn",
+            "error"
+          ],
+          "description": "No index leads with the tenant column."
+        },
+        "boolean_prefix": {
+          "type": "string",
+          "enum": [
+            "off",
+            "warn",
+            "error"
+          ],
+          "description": "A boolean column does not read as a predicate."
+        },
+        "timestamp_suffix": {
+          "type": "string",
+          "enum": [
+            "off",
+            "warn",
+            "error"
+          ],
+          "description": "A timestamp column is not named _at, or an _at column is not a timestamptz. A name ending in _at claims the column records when something happened, and only timestamptz can: a bare timestamp is a clock reading with nothing to anchor it."
+        },
+        "date_suffix": {
+          "type": "string",
+          "enum": [
+            "off",
+            "warn",
+            "error"
+          ],
+          "description": "A date column is not named _date, or a _date column is not a date."
+        },
+        "fk_naming": {
+          "type": "string",
+          "enum": [
+            "off",
+            "warn",
+            "error"
+          ],
+          "description": "A foreign-key column is not named after the table it references."
+        },
+        "cascade_delete": {
+          "type": "string",
+          "enum": [
+            "off",
+            "warn",
+            "error"
+          ],
+          "description": "A foreign key declares ON DELETE CASCADE."
+        },
+        "migration_filename": {
+          "type": "string",
+          "enum": [
+            "off",
+            "warn",
+            "error"
+          ],
+          "description": "A migration file is not named NNNNN_snake_case.sql."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
+    }
+  },
+  "properties": {
+    "version": {
+      "type": "integer",
+      "description": "Configuration format version."
+    },
+    "project": {
+      "$ref": "#/$defs/ProjectInfo",
+      "description": "Identity of the application being generated."
+    },
+    "layout": {
+      "$ref": "#/$defs/Layout",
+      "description": "Where table configuration and generated code live."
+    },
+    "api": {
+      "$ref": "#/$defs/API",
+      "description": "Shape of the generated HTTP API."
+    },
+    "database": {
+      "$ref": "#/$defs/Database",
+      "description": "Where to run migrations and read the schema from."
+    },
+    "migrations": {
+      "$ref": "#/$defs/Migrations",
+      "description": "Migration file location."
+    },
+    "auth": {
+      "$ref": "#/$defs/Auth",
+      "description": "How the authentication foundation's tables are treated."
+    },
+    "files": {
+      "$ref": "#/$defs/Files",
+      "description": "Where uploaded files are kept, and what an upload may be."
+    },
+    "notifications": {
+      "$ref": "#/$defs/Notifications",
+      "description": "The inbox, and how notifications are delivered."
+    },
+    "tracing": {
+      "$ref": "#/$defs/Tracing",
+      "description": "Whether the generated code emits OpenTelemetry spans."
+    },
+    "monitoring": {
+      "$ref": "#/$defs/Monitoring",
+      "description": "rig's own page over the spans this server wrote. It needs tracing."
+    },
+    "naming": {
+      "$ref": "#/$defs/Naming",
+      "description": "How database names become Go and JSON names."
+    },
+    "validate": {
+      "$ref": "#/$defs/Validate",
+      "description": "Severity of each configurable convention rule."
+    },
+    "generators": {
+      "items": {
+        "$ref": "#/$defs/Generator"
+      },
+      "type": "array",
+      "description": "Generators to run, in order."
+    }
+  },
+  "additionalProperties": false,
+  "type": "object",
+  "required": [
+    "project"
+  ],
+  "title": "rig project configuration",
+  "description": "Project-wide configuration: layout, database, naming, convention severities, and the generators to run."
+}
