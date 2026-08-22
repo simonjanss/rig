@@ -150,6 +150,8 @@ database:
 | `user` | `rig` | |
 | `password` | `rig` | This is a local throwaway database. Do not put a real secret here. |
 | `schema` | `public` | Postgres schema to read. |
+| `settings` | — | Extra server parameters, passed as `-c name=value` flags. |
+| `electric` | — | A sync-service container managed beside the database. See below. |
 | `url` | — | Connection URL of a database you manage. Set it and no container is started. |
 
 Set `url` to point at a database you manage instead — which is what CI does,
@@ -159,6 +161,40 @@ wasteful.
 A `url` you wrote is used exactly as written. rig does not append parameters to
 it, because quietly editing a connection string is a good way to break one that
 already carries its own.
+
+### `database.electric`
+
+A project doing [live sync](electric.md) needs an ElectricSQL service following
+its database. This block makes that `rig db up`'s job:
+
+```yaml
+database:
+  port: 55440
+  electric:
+    enabled: true
+```
+
+| Key | Default | |
+|---|---|---|
+| `enabled` | `false` | Start the sync service beside the database. |
+| `image` | `electricsql/electric:1.6.9` | Pinned, because live sync is exactly where a version skew looks like an application bug. |
+| `container_name` | `{project.name}-electric` | |
+| `port` | `55433` | Host port the sync service answers shapes on. The `electric` generator's `electric_url` option should agree with it. |
+
+Enabling it also adds `wal_level=logical` to `settings` when nothing lists one —
+logical replication is how the sync service follows changes, and it cannot be
+turned on after the server has started. A container started without it is
+replaced on the next `rig db up`, not adapted.
+
+It is nested under `database` because its lifecycle is the database container's:
+`up` starts it, `down` stops it, `reset` removes and rebuilds it. It needs the
+managed container — with `url` set, rig runs no sync service, because it cannot
+promise anything about a database it does not manage. This block is also a
+different thing from the per-table `electric:` key ([tables.md](tables.md)),
+which says a table has shapes, and from the generator's `electric_url` option
+([generators.md](generators.md)), which says where the proxy forwards.
+[electric.md](electric.md#running-electric-alongside-your-application) puts the
+three together.
 
 ---
 

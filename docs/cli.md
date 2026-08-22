@@ -13,7 +13,7 @@ The commands, in the order you meet them:
 |---|---|
 | `rig init [dir]` | Start a new project |
 | `rig migration new <name>` | Write a new migration file |
-| `rig db up` / `down` / `reset` / `url` / `psql` | Manage the throwaway local database |
+| `rig db up` / `down` / `reset` / `url` / `psql` | Manage the throwaway local database — and, with `database.electric.enabled`, the sync service beside it |
 | `rig sync` | Bring table configuration in step with the database |
 | `rig validate` | Check the schema and its configuration |
 | `rig generate` | Write the code |

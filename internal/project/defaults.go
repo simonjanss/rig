@@ -43,6 +43,15 @@ const (
 	DefaultDBPass   = "rig"
 	DefaultDBSchema = "public"
 
+	// DefaultElectricImage pins the sync service, because "latest" is a
+	// different container on every machine and live sync is exactly the place a
+	// version skew looks like an application bug.
+	DefaultElectricImage = "electricsql/electric:1.6.9"
+	// DefaultElectricPort sits beside DefaultPort the way the containers sit
+	// beside each other. internal/dockerdb/ports.go lists the same number, and
+	// its uniqueness test is what keeps a suite from ever taking it.
+	DefaultElectricPort = 55433
+
 	DefaultMigrationsDir = "migrations"
 
 	// DefaultMigrationsTable is rig/migrate's, not a copy of it: `rig db up`
@@ -210,6 +219,28 @@ func (p *Project) applyDefaults() {
 	}
 	if c.Database.Port == 0 {
 		c.Database.Port = DefaultPort
+	}
+	if c.Database.Electric.Enabled {
+		setDefault(&c.Database.Electric.Image, DefaultElectricImage)
+		if c.Database.Electric.ContainerName == "" {
+			name := c.Project.Name
+			if name == "" {
+				name = "rig"
+			}
+			c.Database.Electric.ContainerName = name + "-electric"
+		}
+		if c.Database.Electric.Port == 0 {
+			c.Database.Electric.Port = DefaultElectricPort
+		}
+		// Logical replication is how the sync service follows changes, and it
+		// cannot be turned on after the server has started. Added rather than
+		// required, and only when nothing else names one: a project that pins
+		// its own wal_level wrote it down for a reason.
+		if !slices.ContainsFunc(c.Database.Settings, func(s string) bool {
+			return strings.HasPrefix(strings.TrimSpace(s), "wal_level=")
+		}) {
+			c.Database.Settings = append(c.Database.Settings, "wal_level=logical")
+		}
 	}
 
 	setDefault(&c.Migrations.Dir, DefaultMigrationsDir)

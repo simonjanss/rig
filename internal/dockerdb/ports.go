@@ -25,6 +25,10 @@ const (
 	// PortDefault is what `rig init` writes into a new project, so it is the one
 	// number here a real project sees. Not a suite's, and not to be taken by one.
 	PortDefault = 55432
+	// PortDefaultElectric is the sync service's default beside it, when
+	// `database.electric` is enabled. internal/project/defaults.go carries the
+	// same number; being listed here is what keeps a suite off it.
+	PortDefaultElectric = 55433
 
 	// The examples, whose databases `make examples` brings up. Declared here,
 	// defined in each example's own configuration.
@@ -32,6 +36,11 @@ const (
 	PortExampleFantasyFootball = 55441
 	PortExampleAuth            = 55442
 	PortExampleAuthOAuth       = 55443
+	PortExampleLinearlite      = 55444
+	// PortExampleLinearliteElectric is that example's sync service — an HTTP
+	// port rather than a database one, in the list because it is the same host
+	// and the same collision.
+	PortExampleLinearliteElectric = 55445
 
 	// PortFiles is internal/filestest: uploads, the tenancy around them, and the
 	// sweeper.
@@ -59,6 +68,10 @@ const (
 	PortCLISetupOwn = 55497
 	// PortAuth is internal/authtest.
 	PortAuth = 55498
+	// PortCLIElectricDB and PortCLIElectricSync are internal/cli's test of
+	// `rig db up` managing the sync service beside the database.
+	PortCLIElectricDB   = 55499
+	PortCLIElectricSync = 55489
 )
 
 // ports is every number above, with the name a failure should mention.
@@ -66,18 +79,23 @@ const (
 // It is written out rather than derived, because the point is to have one list
 // that a person reads and a test checks.
 var ports = map[string]int{
-	"default (rig init)":           PortDefault,
-	"examples/todo":                PortExampleTodo,
-	"examples/fantasyfootball":     PortExampleFantasyFootball,
-	"examples/auth":                PortExampleAuth,
-	"examples/auth_oauth":          PortExampleAuthOAuth,
-	"internal/filestest":           PortFiles,
-	"internal/idemtest":            PortIdempotency,
-	"internal/electrictest (sync)": PortElectricSync,
-	"internal/introspect":          PortIntrospect,
-	"internal/electrictest (db)":   PortElectricDB,
-	"internal/cli (e2e)":           PortCLIEndToEnd,
-	"internal/cli (setup)":         PortCLISetup,
-	"internal/cli (setup, own)":    PortCLISetupOwn,
-	"internal/authtest":            PortAuth,
+	"default (rig init)":             PortDefault,
+	"default electric (rig db up)":   PortDefaultElectric,
+	"examples/todo":                  PortExampleTodo,
+	"examples/fantasyfootball":       PortExampleFantasyFootball,
+	"examples/auth":                  PortExampleAuth,
+	"examples/auth_oauth":            PortExampleAuthOAuth,
+	"examples/linearlite":            PortExampleLinearlite,
+	"examples/linearlite (electric)": PortExampleLinearliteElectric,
+	"internal/filestest":             PortFiles,
+	"internal/idemtest":              PortIdempotency,
+	"internal/electrictest (sync)":   PortElectricSync,
+	"internal/introspect":            PortIntrospect,
+	"internal/electrictest (db)":     PortElectricDB,
+	"internal/cli (e2e)":             PortCLIEndToEnd,
+	"internal/cli (setup)":           PortCLISetup,
+	"internal/cli (setup, own)":      PortCLISetupOwn,
+	"internal/cli (electric db)":     PortCLIElectricDB,
+	"internal/cli (electric sync)":   PortCLIElectricSync,
+	"internal/authtest":              PortAuth,
 }

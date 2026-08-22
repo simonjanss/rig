@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"fmt"
+	"runtime"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -29,15 +30,22 @@ func (e *env) database(ctx context.Context, p *project.Project) (url string, err
 		return p.DatabaseURL(), nil
 	}
 
-	cfg := containerConfig(p)
-	cfg.Log = e.errOut
-	cfg.StartWait = 90 * time.Second
-
-	db, err := dockerdb.Start(ctx, cfg)
+	db, err := e.startDatabase(ctx, p)
 	if err != nil {
 		return "", err
 	}
 	return db.URL(), nil
+}
+
+// startDatabase brings the container up and hands back the handle, for the one
+// command that needs more than the URL: `rig db up` reads the published port
+// and whether the container is fresh, because the sync service beside it needs
+// the first and is invalidated by the second.
+func (e *env) startDatabase(ctx context.Context, p *project.Project) (*dockerdb.DB, error) {
+	cfg := containerConfig(p)
+	cfg.Log = e.errOut
+	cfg.StartWait = 90 * time.Second
+	return dockerdb.Start(ctx, cfg)
 }
 
 // containerConfig is the throwaway database this project asks for.
@@ -49,14 +57,48 @@ func (e *env) database(ctx context.Context, p *project.Project) (url string, err
 // name and port it wrote down.
 func containerConfig(p *project.Project) dockerdb.Config {
 	cfg := p.Config.Database
-	return dockerdb.Config{
+	out := dockerdb.Config{
 		Image:    cfg.Image,
 		Name:     dockerdb.Qualify(cfg.ContainerName),
 		Port:     dockerdb.HostPort(cfg.Port),
 		Database: cfg.Name,
 		User:     cfg.User,
 		Password: cfg.Password,
+		Settings: cfg.Settings,
 		Runtime:  containerRuntime,
+	}
+	if cfg.Electric.Enabled && runtime.GOOS == "linux" {
+		// The sync service is a sibling container, and on Linux it arrives over
+		// the bridge rather than through the host's loopback — a loopback-only
+		// publish refuses it. Docker Desktop routes host.docker.internal to the
+		// host either way, which is why macOS keeps the safer default.
+		out.Bind = "0.0.0.0"
+	}
+	return out
+}
+
+// electricConfig is the sync-service container the project asks for, pointed at
+// a database that is already up — its real published port, not the configured
+// one, because under isolation they differ.
+func electricConfig(p *project.Project, db *dockerdb.DB) dockerdb.ElectricConfig {
+	cfg := p.Config.Database
+	out := attachElectricConfig(p)
+	out.DBPort = db.Port()
+	out.DBName = cfg.Name
+	out.DBUser = cfg.User
+	out.DBPassword = cfg.Password
+	return out
+}
+
+// attachElectricConfig is enough to stop or remove the container: the identity
+// without the database, which a teardown does not need.
+func attachElectricConfig(p *project.Project) dockerdb.ElectricConfig {
+	cfg := p.Config.Database
+	return dockerdb.ElectricConfig{
+		Image:   cfg.Electric.Image,
+		Name:    dockerdb.Qualify(cfg.Electric.ContainerName),
+		Port:    dockerdb.HostPort(cfg.Electric.Port),
+		Runtime: containerRuntime,
 	}
 }
 
