@@ -93,7 +93,7 @@ func (e *emitter) updateInput(b *gobuf.Buf, res *ir.Resource, ep *ir.Endpoint) {
 // bodyStruct emits the body of an endpoint that has one of its own — a custom
 // endpoint, or one of the lifecycle operations.
 func (e *emitter) bodyStruct(b *gobuf.Buf, res *ir.Resource, ep *ir.Endpoint) {
-	name := bodyTypeName(res, ep)
+	name := genutil.BodyShapeName(res, ep)
 
 	b.Comment(name + " is the request body for " + res.Name + "." + ep.Name + ".")
 	b.L("type %s struct {", name)

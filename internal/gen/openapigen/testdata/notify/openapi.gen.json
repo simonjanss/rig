@@ -1,0 +1,2187 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "demo",
+    "description": "The demo HTTP API.\n\nThe authentication endpoints under `/auth` are served by a hand-written module and are not described here.\n\nThe notification inbox endpoints are served by a hand-written module and are not described here.",
+    "version": "v1"
+  },
+  "servers": [
+    {
+      "url": "https://api.example.test"
+    }
+  ],
+  "paths": {
+    "/api/v1/blog-posts": {
+      "get": {
+        "tags": [
+          "BlogPosts"
+        ],
+        "summary": "List BlogPosts.",
+        "description": "List BlogPosts.\n\nRequires the `blog_post.read` permission.",
+        "operationId": "listBlogPosts",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Maximum rows to return.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "default": 50
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "description": "Rows to skip before the first returned row.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "default": 0
+            }
+          },
+          {
+            "$ref": "#/components/parameters/ApiRevision"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of BlogPosts.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BlogPostListResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-rig-permission": "blog_post.read"
+      },
+      "post": {
+        "tags": [
+          "BlogPosts"
+        ],
+        "summary": "Create a BlogPost.",
+        "description": "Create a BlogPost.\n\nRequires the `blog_post.write` permission.",
+        "operationId": "createBlogPost",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ApiRevision"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "description": "The fields a new BlogPost is created with. A field the database cannot supply for itself is required.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BlogPostCreateInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "The created BlogPost.",
+            "headers": {
+              "Idempotency-Replayed": {
+                "$ref": "#/components/headers/IdempotencyReplayed"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BlogPost"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnprocessableEntity"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-rig-permission": "blog_post.write"
+      }
+    },
+    "/api/v1/blog-posts/_deleted": {
+      "get": {
+        "tags": [
+          "BlogPosts"
+        ],
+        "summary": "List retired BlogPosts.",
+        "description": "A deletion stamps the row rather than removing it, so this is what was deleted and can still be brought back. Only rows inside the 30-day restore window appear: past it a row is gone as far as anyone is concerned, so it is not in the trash either.\n\nRequires the `blog_post.read` permission.",
+        "operationId": "listDeletedBlogPosts",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Maximum rows to return.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "default": 50
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "description": "Rows to skip before the first returned row.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "default": 0
+            }
+          },
+          {
+            "$ref": "#/components/parameters/ApiRevision"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of retired BlogPosts.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BlogPostListResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-rig-permission": "blog_post.read"
+      }
+    },
+    "/api/v1/blog-posts/_search": {
+      "post": {
+        "tags": [
+          "BlogPosts"
+        ],
+        "summary": "Search BlogPosts with filters.",
+        "description": "Search BlogPosts with filters.\n\nThe primary form of this operation is `QUERY /api/v1/blog-posts` — a read that carries a body, and so safe and idempotent in a way POST is not. OpenAPI 3.1 cannot describe an operation on the QUERY method, so it is documented here as the POST alias that exists for intermediaries which reject unfamiliar methods. One handler serves both routes and they answer identically.\n\nRequires the `blog_post.read` permission.",
+        "operationId": "searchBlogPosts",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Maximum rows to return.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "default": 50
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "description": "Rows to skip before the first returned row.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "default": 0
+            }
+          },
+          {
+            "$ref": "#/components/parameters/ApiRevision"
+          }
+        ],
+        "requestBody": {
+          "description": "The request body for BlogPost.Search.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BlogPostSearchBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "A page of matching BlogPosts.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BlogPostListResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnprocessableEntity"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-rig-permission": "blog_post.read"
+      }
+    },
+    "/api/v1/blog-posts/{id}": {
+      "get": {
+        "tags": [
+          "BlogPosts"
+        ],
+        "summary": "Fetch one BlogPost by identifier.",
+        "description": "Fetch one BlogPost by identifier.\n\nRequires the `blog_post.read` permission.",
+        "operationId": "getBlogPost",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Identifier of the BlogPost.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/ApiRevision"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The requested BlogPost.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BlogPost"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-rig-permission": "blog_post.read"
+      },
+      "delete": {
+        "tags": [
+          "BlogPosts"
+        ],
+        "summary": "Delete a BlogPost.",
+        "description": "The row is retired by stamping a deletion time; it stops appearing in reads but can be restored within the retention window.\n\nRequires the `blog_post.delete` permission.",
+        "operationId": "deleteBlogPost",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Identifier of the BlogPost.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/ApiRevision"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "The BlogPost was deleted."
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-rig-permission": "blog_post.delete"
+      },
+      "patch": {
+        "tags": [
+          "BlogPosts"
+        ],
+        "summary": "Update a BlogPost.",
+        "description": "Only the fields present in the body are changed. A field set to null is cleared; a field left out is left alone.\n\nRequires the `blog_post.write` permission.",
+        "operationId": "updateBlogPost",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Identifier of the BlogPost.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/ApiRevision"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "description": "The fields of a BlogPost to change. Every member is optional: one left out is left alone, and an explicit null clears it.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BlogPostUpdateInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The updated BlogPost.",
+            "headers": {
+              "Idempotency-Replayed": {
+                "$ref": "#/components/headers/IdempotencyReplayed"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BlogPost"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnprocessableEntity"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-rig-permission": "blog_post.write"
+      }
+    },
+    "/api/v1/blog-posts/{id}/_restore": {
+      "post": {
+        "tags": [
+          "BlogPosts"
+        ],
+        "summary": "Bring a retired BlogPost back.",
+        "description": "The deletion stamp is cleared and the row appears in reads again. It works for 30 days after the deletion; past that the row is no longer eligible and this answers 409.\n\nRestoring a row that was never deleted is not an error. It is already in the state the caller asked for, and answering otherwise would make a retry of a request whose response went missing look like a failure.\n\nThe request carries no fields. What to do when the world has moved on while the row was retired — a unique value taken by something created since — is the application's decision, and it is made in the restore hook: refuse, or change the row so that it fits.\n\nEvery rule then runs against whatever the hook settled on, not only the ones for fields it touched. The row was not live, so nothing about it has been checked against the world it is returning to.\n\nRequires the `blog_post.write` permission.",
+        "operationId": "restoreBlogPost",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Identifier of the BlogPost.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/ApiRevision"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The restored BlogPost.",
+            "headers": {
+              "Idempotency-Replayed": {
+                "$ref": "#/components/headers/IdempotencyReplayed"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BlogPost"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnprocessableEntity"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-rig-permission": "blog_post.write"
+      }
+    },
+    "/api/v1/rig-accounts": {
+      "get": {
+        "tags": [
+          "RigAccounts"
+        ],
+        "summary": "List RigAccounts.",
+        "description": "List RigAccounts.\n\nRequires the `rig_account.read` permission.",
+        "operationId": "listRigAccounts",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Maximum rows to return.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "default": 50
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "description": "Rows to skip before the first returned row.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "default": 0
+            }
+          },
+          {
+            "$ref": "#/components/parameters/ApiRevision"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of RigAccounts.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RigAccountListResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-rig-permission": "rig_account.read"
+      },
+      "post": {
+        "tags": [
+          "RigAccounts"
+        ],
+        "summary": "Create a RigAccount.",
+        "description": "Create a RigAccount.\n\nRequires the `rig_account.write` permission.",
+        "operationId": "createRigAccount",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ApiRevision"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "description": "The fields a new RigAccount is created with. A field the database cannot supply for itself is required.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RigAccountCreateInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "The created RigAccount.",
+            "headers": {
+              "Idempotency-Replayed": {
+                "$ref": "#/components/headers/IdempotencyReplayed"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RigAccount"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnprocessableEntity"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-rig-permission": "rig_account.write"
+      }
+    },
+    "/api/v1/rig-accounts/_search": {
+      "post": {
+        "tags": [
+          "RigAccounts"
+        ],
+        "summary": "Search RigAccounts with filters.",
+        "description": "Search RigAccounts with filters.\n\nThe primary form of this operation is `QUERY /api/v1/rig-accounts` — a read that carries a body, and so safe and idempotent in a way POST is not. OpenAPI 3.1 cannot describe an operation on the QUERY method, so it is documented here as the POST alias that exists for intermediaries which reject unfamiliar methods. One handler serves both routes and they answer identically.\n\nRequires the `rig_account.read` permission.",
+        "operationId": "searchRigAccounts",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Maximum rows to return.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "default": 50
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "description": "Rows to skip before the first returned row.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "default": 0
+            }
+          },
+          {
+            "$ref": "#/components/parameters/ApiRevision"
+          }
+        ],
+        "requestBody": {
+          "description": "The request body for RigAccount.Search.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RigAccountSearchBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "A page of matching RigAccounts.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RigAccountListResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnprocessableEntity"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-rig-permission": "rig_account.read"
+      }
+    },
+    "/api/v1/rig-accounts/{id}": {
+      "get": {
+        "tags": [
+          "RigAccounts"
+        ],
+        "summary": "Fetch one RigAccount by identifier.",
+        "description": "Fetch one RigAccount by identifier.\n\nRequires the `rig_account.read` permission.",
+        "operationId": "getRigAccount",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Identifier of the RigAccount.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/ApiRevision"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The requested RigAccount.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RigAccount"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-rig-permission": "rig_account.read"
+      },
+      "delete": {
+        "tags": [
+          "RigAccounts"
+        ],
+        "summary": "Delete a RigAccount.",
+        "description": "Delete a RigAccount.\n\nRequires the `rig_account.delete` permission.",
+        "operationId": "deleteRigAccount",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Identifier of the RigAccount.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/ApiRevision"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "The RigAccount was deleted."
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-rig-permission": "rig_account.delete"
+      },
+      "patch": {
+        "tags": [
+          "RigAccounts"
+        ],
+        "summary": "Update a RigAccount.",
+        "description": "Only the fields present in the body are changed. A field set to null is cleared; a field left out is left alone.\n\nRequires the `rig_account.write` permission.",
+        "operationId": "updateRigAccount",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Identifier of the RigAccount.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/ApiRevision"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "description": "The fields of a RigAccount to change. Every member is optional: one left out is left alone, and an explicit null clears it.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RigAccountUpdateInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The updated RigAccount.",
+            "headers": {
+              "Idempotency-Replayed": {
+                "$ref": "#/components/headers/IdempotencyReplayed"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RigAccount"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnprocessableEntity"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-rig-permission": "rig_account.write"
+      }
+    },
+    "/api/v1/rig_notification_recipient/_deleted/_stream": {
+      "get": {
+        "tags": [
+          "RigNotificationRecipients"
+        ],
+        "summary": "Subscribe to retired RigNotificationRecipients.",
+        "description": "The rows a delete stamped rather than removed, kept up to date.\n\nA shape is a filtered view of one table that a client subscribes to. This route is a proxy in front of the sync service: which rows exist in the shape — the tenant, the lifecycle predicate, and the application's own scoping — is decided by the server and cannot be influenced from here. Where the client is in the stream is forwarded untouched.\n\nWith `live=true` the request is a long poll: it does not answer until something changes, so a client timeout set for an ordinary request will cut it short.\n\nThe response body is the sync protocol's own and is not described here. The `electric-*` response headers carry the cursor: send `handle` and `offset` back on the next request, or the subscription starts over.\n\nRequires a session scoped to a tenant, and the shape is filtered to it.",
+        "operationId": "streamDeletedRigNotificationRecipients",
+        "parameters": [
+          {
+            "name": "offset",
+            "in": "query",
+            "description": "Where in the stream to resume, from the previous response's electric-offset.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "handle",
+            "in": "query",
+            "description": "The shape handle from a previous response. Omit it to start a new subscription.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "live",
+            "in": "query",
+            "description": "Long-poll until something changes, rather than answering with what is there now.",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "The sync service's own cache-busting cursor, echoed back from the last response.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "replica",
+            "in": "query",
+            "description": "Whether updates carry the whole row or only the columns that changed.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/ApiRevision"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A chunk of the shape, in the sync protocol's own format.",
+            "headers": {
+              "electric-handle": {
+                "description": "The shape handle. Send it back to continue this subscription.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "electric-offset": {
+                "description": "Where this chunk ended. Send it back to resume from here.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "electric-schema": {
+                "description": "The shape's column types.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "electric-cursor": {
+                "description": "The cursor to echo on the next request.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "electric-up-to-date": {
+                "description": "Present when the client has caught up with the shape.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {}
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "502": {
+            "description": "The sync service could not be reached.",
+            "content": {
+              "text/plain": {}
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/rig_notification_recipient/_stream": {
+      "get": {
+        "tags": [
+          "RigNotificationRecipients"
+        ],
+        "summary": "Subscribe to the live RigNotificationRecipient shape.",
+        "description": "Every RigNotificationRecipient the caller may read, kept up to date.\n\nA shape is a filtered view of one table that a client subscribes to. This route is a proxy in front of the sync service: which rows exist in the shape — the tenant, the lifecycle predicate, and the application's own scoping — is decided by the server and cannot be influenced from here. Where the client is in the stream is forwarded untouched.\n\nWith `live=true` the request is a long poll: it does not answer until something changes, so a client timeout set for an ordinary request will cut it short.\n\nThe response body is the sync protocol's own and is not described here. The `electric-*` response headers carry the cursor: send `handle` and `offset` back on the next request, or the subscription starts over.\n\nRequires a session scoped to a tenant, and the shape is filtered to it.",
+        "operationId": "streamRigNotificationRecipients",
+        "parameters": [
+          {
+            "name": "offset",
+            "in": "query",
+            "description": "Where in the stream to resume, from the previous response's electric-offset.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "handle",
+            "in": "query",
+            "description": "The shape handle from a previous response. Omit it to start a new subscription.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "live",
+            "in": "query",
+            "description": "Long-poll until something changes, rather than answering with what is there now.",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "The sync service's own cache-busting cursor, echoed back from the last response.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "replica",
+            "in": "query",
+            "description": "Whether updates carry the whole row or only the columns that changed.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/ApiRevision"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A chunk of the shape, in the sync protocol's own format.",
+            "headers": {
+              "electric-handle": {
+                "description": "The shape handle. Send it back to continue this subscription.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "electric-offset": {
+                "description": "Where this chunk ended. Send it back to resume from here.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "electric-schema": {
+                "description": "The shape's column types.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "electric-cursor": {
+                "description": "The cursor to echo on the next request.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "electric-up-to-date": {
+                "description": "Present when the client has caught up with the shape.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {}
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "502": {
+            "description": "The sync service could not be reached.",
+            "content": {
+              "text/plain": {}
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "BlogPost": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Unique identifier for this row.",
+            "readOnly": true
+          },
+          "tenantId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Tenant this row belongs to. Every query is scoped by it.",
+            "readOnly": true
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When this row was created. Set automatically and never changes.",
+            "readOnly": true
+          },
+          "createdByAccountId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Account that created this row, taken from the request's claims.",
+            "readOnly": true
+          },
+          "updatedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When this row was last updated. Set automatically on every update.",
+            "readOnly": true
+          },
+          "deletedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When this row was soft-deleted. Null while the row is live.",
+            "readOnly": true
+          },
+          "title": {
+            "type": "string",
+            "description": "What the post is called."
+          },
+          "publishAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When the post goes live, or null while it is a draft."
+          }
+        },
+        "description": "A post, which people are told about when it goes live."
+      },
+      "BlogPostCreateInput": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string",
+            "description": "What the post is called."
+          },
+          "publishAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When the post goes live, or null while it is a draft."
+          }
+        },
+        "required": [
+          "title"
+        ],
+        "description": "The fields a new BlogPost is created with. A field the database cannot supply for itself is required."
+      },
+      "BlogPostFilter": {
+        "type": "object",
+        "properties": {
+          "equals": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/BlogPostFilterEquals"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Fields that must equal the given value."
+          },
+          "notEquals": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/BlogPostFilterEquals"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Fields that must not equal the given value."
+          },
+          "greaterThan": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/BlogPostFilterRange"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Fields that must be greater than the given value."
+          },
+          "smallerThan": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/BlogPostFilterRange"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Fields that must be less than the given value."
+          },
+          "greaterOrEqual": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/BlogPostFilterRange"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Fields that must be greater than or equal to the given value."
+          },
+          "smallerOrEqual": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/BlogPostFilterRange"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Fields that must be less than or equal to the given value."
+          },
+          "contains": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/BlogPostFilterContains"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Fields that must be one of the given values."
+          },
+          "notContains": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/BlogPostFilterContains"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Fields that must not be one of the given values."
+          },
+          "like": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/BlogPostFilterLike"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Text fields that must match the given pattern."
+          },
+          "notLike": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/BlogPostFilterLike"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Text fields that must not match the given pattern."
+          },
+          "null": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/BlogPostFilterNull"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Fields that must be null."
+          },
+          "notNull": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/BlogPostFilterNull"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Fields that must not be null."
+          },
+          "orCondition": {
+            "type": "boolean",
+            "description": "Combine this filter's conditions with OR instead of AND."
+          },
+          "nestedFilters": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BlogPostFilter"
+            },
+            "description": "Sub-filters combined with this one, so that AND and OR can be mixed to any depth."
+          }
+        },
+        "description": "Conditions a BlogPost must satisfy to match a search."
+      },
+      "BlogPostFilterContains": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Unique identifier for this row."
+          },
+          "createdAt": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "description": "When this row was created. Set automatically and never changes."
+          },
+          "createdByAccountId": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Account that created this row, taken from the request's claims."
+          },
+          "updatedAt": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "description": "When this row was last updated. Set automatically on every update."
+          },
+          "deletedAt": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "description": "When this row was soft-deleted. Null while the row is live."
+          },
+          "title": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "What the post is called."
+          },
+          "publishAt": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "description": "When the post goes live, or null while it is a draft."
+          }
+        },
+        "description": "Set-membership conditions on BlogPost fields."
+      },
+      "BlogPostFilterEquals": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Unique identifier for this row."
+          },
+          "createdAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When this row was created. Set automatically and never changes."
+          },
+          "createdByAccountId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Account that created this row, taken from the request's claims."
+          },
+          "updatedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When this row was last updated. Set automatically on every update."
+          },
+          "deletedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When this row was soft-deleted. Null while the row is live."
+          },
+          "title": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "What the post is called."
+          },
+          "publishAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When the post goes live, or null while it is a draft."
+          }
+        },
+        "description": "Exact-match conditions on BlogPost fields."
+      },
+      "BlogPostFilterLike": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "What the post is called."
+          }
+        },
+        "description": "Pattern conditions on BlogPost text fields."
+      },
+      "BlogPostFilterNull": {
+        "type": "object",
+        "properties": {
+          "createdByAccountId": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Account that created this row, taken from the request's claims."
+          },
+          "updatedAt": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "When this row was last updated. Set automatically on every update."
+          },
+          "deletedAt": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "When this row was soft-deleted. Null while the row is live."
+          },
+          "publishAt": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "When the post goes live, or null while it is a draft."
+          }
+        },
+        "description": "Presence conditions on nullable BlogPost fields."
+      },
+      "BlogPostFilterRange": {
+        "type": "object",
+        "properties": {
+          "createdAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When this row was created. Set automatically and never changes."
+          },
+          "updatedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When this row was last updated. Set automatically on every update."
+          },
+          "deletedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When this row was soft-deleted. Null while the row is live."
+          },
+          "publishAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When the post goes live, or null while it is a draft."
+          }
+        },
+        "description": "Ordering conditions on BlogPost fields that can be compared."
+      },
+      "BlogPostListResponse": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BlogPost"
+            },
+            "description": "The rows in this page."
+          },
+          "pagination": {
+            "$ref": "#/components/schemas/Pagination",
+            "description": "Where this page sits in the full result set."
+          }
+        },
+        "description": "A page of BlogPosts."
+      },
+      "BlogPostSearchBody": {
+        "type": "object",
+        "properties": {
+          "filter": {
+            "$ref": "#/components/schemas/BlogPostFilter",
+            "description": "Conditions rows must satisfy."
+          }
+        },
+        "required": [
+          "filter"
+        ],
+        "description": "The request body for BlogPost.Search."
+      },
+      "BlogPostUpdateInput": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string",
+            "description": "What the post is called."
+          },
+          "publishAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When the post goes live, or null while it is a draft."
+          }
+        },
+        "description": "The fields of a BlogPost to change. Every member is optional: one left out is left alone, and an explicit null clears it."
+      },
+      "Error": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "$ref": "#/components/schemas/ErrorCode",
+            "description": "Machine-readable reason the request failed."
+          },
+          "message": {
+            "type": "string",
+            "description": "Human-readable explanation. Not intended for clients to parse."
+          },
+          "requestId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Identifier of this request, for correlating with server logs."
+          },
+          "fields": {
+            "description": "Present when the failure was validation. It is shaped like the request body that failed — one member per field, holding the problem with that field — so a client can put each message beside the control it belongs to."
+          }
+        },
+        "description": "Returned whenever a request fails."
+      },
+      "ErrorCode": {
+        "type": "string",
+        "enum": [
+          "BadRequest",
+          "Unauthorized",
+          "Forbidden",
+          "NotFound",
+          "Conflict",
+          "UnprocessableEntity",
+          "RateLimited",
+          "TooLarge",
+          "UnsupportedMediaType",
+          "UpgradeRequired",
+          "Internal"
+        ],
+        "description": "Machine-readable reason a request failed.",
+        "x-enum-varnames": [
+          "BadRequest",
+          "Unauthorized",
+          "Forbidden",
+          "NotFound",
+          "Conflict",
+          "UnprocessableEntity",
+          "RateLimited",
+          "TooLarge",
+          "UnsupportedMediaType",
+          "UpgradeRequired",
+          "Internal"
+        ]
+      },
+      "Pagination": {
+        "type": "object",
+        "properties": {
+          "offset": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Number of rows skipped before this page."
+          },
+          "limit": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Maximum number of rows in this page."
+          },
+          "total": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Total number of rows matching the query, ignoring pagination."
+          }
+        },
+        "description": "Where the returned page sits within the full result set."
+      },
+      "RigAccount": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Unique identifier for this row.",
+            "readOnly": true
+          },
+          "tenantId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Tenant this row belongs to. Every query is scoped by it.",
+            "readOnly": true
+          },
+          "displayName": {
+            "type": "string"
+          }
+        },
+        "description": "One person's membership of one tenant."
+      },
+      "RigAccountCreateInput": {
+        "type": "object",
+        "properties": {
+          "displayName": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "displayName"
+        ],
+        "description": "The fields a new RigAccount is created with. A field the database cannot supply for itself is required."
+      },
+      "RigAccountFilter": {
+        "type": "object",
+        "properties": {
+          "equals": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/RigAccountFilterEquals"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Fields that must equal the given value."
+          },
+          "notEquals": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/RigAccountFilterEquals"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Fields that must not equal the given value."
+          },
+          "greaterThan": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/RigAccountFilterRange"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Fields that must be greater than the given value."
+          },
+          "smallerThan": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/RigAccountFilterRange"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Fields that must be less than the given value."
+          },
+          "greaterOrEqual": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/RigAccountFilterRange"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Fields that must be greater than or equal to the given value."
+          },
+          "smallerOrEqual": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/RigAccountFilterRange"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Fields that must be less than or equal to the given value."
+          },
+          "contains": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/RigAccountFilterContains"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Fields that must be one of the given values."
+          },
+          "notContains": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/RigAccountFilterContains"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Fields that must not be one of the given values."
+          },
+          "like": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/RigAccountFilterLike"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Text fields that must match the given pattern."
+          },
+          "notLike": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/RigAccountFilterLike"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Text fields that must not match the given pattern."
+          },
+          "null": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/RigAccountFilterNull"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Fields that must be null."
+          },
+          "notNull": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/RigAccountFilterNull"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Fields that must not be null."
+          },
+          "orCondition": {
+            "type": "boolean",
+            "description": "Combine this filter's conditions with OR instead of AND."
+          },
+          "nestedFilters": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RigAccountFilter"
+            },
+            "description": "Sub-filters combined with this one, so that AND and OR can be mixed to any depth."
+          }
+        },
+        "description": "Conditions a RigAccount must satisfy to match a search."
+      },
+      "RigAccountFilterContains": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Unique identifier for this row."
+          },
+          "displayName": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "description": "Set-membership conditions on RigAccount fields."
+      },
+      "RigAccountFilterEquals": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Unique identifier for this row."
+          },
+          "displayName": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "description": "Exact-match conditions on RigAccount fields."
+      },
+      "RigAccountFilterLike": {
+        "type": "object",
+        "properties": {
+          "displayName": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "description": "Pattern conditions on RigAccount text fields."
+      },
+      "RigAccountFilterNull": {
+        "type": "object",
+        "description": "Presence conditions on nullable RigAccount fields."
+      },
+      "RigAccountFilterRange": {
+        "type": "object",
+        "description": "Ordering conditions on RigAccount fields that can be compared."
+      },
+      "RigAccountListResponse": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RigAccount"
+            },
+            "description": "The rows in this page."
+          },
+          "pagination": {
+            "$ref": "#/components/schemas/Pagination",
+            "description": "Where this page sits in the full result set."
+          }
+        },
+        "description": "A page of RigAccounts."
+      },
+      "RigAccountSearchBody": {
+        "type": "object",
+        "properties": {
+          "filter": {
+            "$ref": "#/components/schemas/RigAccountFilter",
+            "description": "Conditions rows must satisfy."
+          }
+        },
+        "required": [
+          "filter"
+        ],
+        "description": "The request body for RigAccount.Search."
+      },
+      "RigAccountUpdateInput": {
+        "type": "object",
+        "properties": {
+          "displayName": {
+            "type": "string"
+          }
+        },
+        "description": "The fields of a RigAccount to change. Every member is optional: one left out is left alone, and an explicit null clears it."
+      }
+    },
+    "responses": {
+      "BadRequest": {
+        "description": "The request was malformed or a parameter could not be parsed.\n\nThe body's `code` is `BadRequest`.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "Unauthorized": {
+        "description": "No valid session or API key was presented.\n\nThe body's `code` is `Unauthorized`.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "Forbidden": {
+        "description": "The caller is known but not permitted to do this.\n\nThe body's `code` is `Forbidden`.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "NotFound": {
+        "description": "No such resource, or it belongs to another tenant.\n\nThe body's `code` is `NotFound`.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "Conflict": {
+        "description": "The request conflicts with the current state of the resource.\n\nThe body's `code` is `Conflict`.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "UnprocessableEntity": {
+        "description": "The request was well-formed but failed validation.\n\nThe body's `code` is `UnprocessableEntity`.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "RateLimited": {
+        "description": "Too many requests. Retry after the interval in the Retry-After header.\n\nThe body's `code` is `RateLimited`.",
+        "headers": {
+          "Retry-After": {
+            "$ref": "#/components/headers/RetryAfter"
+          },
+          "RateLimit-Limit": {
+            "$ref": "#/components/headers/RateLimitLimit"
+          },
+          "RateLimit-Remaining": {
+            "$ref": "#/components/headers/RateLimitRemaining"
+          },
+          "RateLimit-Reset": {
+            "$ref": "#/components/headers/RateLimitReset"
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "Internal": {
+        "description": "Something went wrong on the server.\n\nThe body's `code` is `Internal`.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      }
+    },
+    "parameters": {
+      "ApiRevision": {
+        "name": "API-Revision",
+        "in": "header",
+        "description": "The API revision this client was built against. A server generated from an older document than the caller expects answers 426 rather than guessing.",
+        "required": false,
+        "schema": {
+          "type": "string"
+        }
+      },
+      "IdempotencyKey": {
+        "name": "Idempotency-Key",
+        "in": "header",
+        "description": "A key of the caller's choosing, so a retried write happens once. Sending the same key with the same body replays the first answer and sets Idempotency-Replayed; with a different body it is refused with 422, and while the first is still in flight, with 409.",
+        "required": false,
+        "schema": {
+          "type": "string"
+        }
+      }
+    },
+    "headers": {
+      "IdempotencyReplayed": {
+        "description": "Present and true when this answer is a replay of an earlier request carrying the same Idempotency-Key, rather than work done again.",
+        "schema": {
+          "type": "boolean"
+        }
+      },
+      "RateLimitLimit": {
+        "description": "Requests permitted in the current window.",
+        "schema": {
+          "type": "integer"
+        }
+      },
+      "RateLimitRemaining": {
+        "description": "Requests left in the current window.",
+        "schema": {
+          "type": "integer"
+        }
+      },
+      "RateLimitReset": {
+        "description": "Seconds until the current window resets.",
+        "schema": {
+          "type": "integer"
+        }
+      },
+      "RetryAfter": {
+        "description": "Seconds to wait before retrying.",
+        "schema": {
+          "type": "integer"
+        }
+      }
+    },
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "description": "A credential in `Authorization: Bearer \u003ctoken\u003e`.\n\nTwo kinds are accepted and are told apart by a prefix on the token itself. A session access token travels on every request and is good for 10m, renewed against the session endpoints before it expires. An API key does not expire: an integration key's scopes are its permissions outright, and a personal key carries what its owner carries and no more.\n\nThe endpoints that issue and renew these are mounted under `/auth` and are not described in this document.",
+        "scheme": "bearer",
+        "bearerFormat": "opaque"
+      }
+    }
+  },
+  "security": [
+    {
+      "bearerAuth": []
+    }
+  ],
+  "tags": [
+    {
+      "name": "BlogPosts",
+      "description": "A post, which people are told about when it goes live."
+    },
+    {
+      "name": "RigAccounts",
+      "description": "One person's membership of one tenant."
+    },
+    {
+      "name": "RigNotificationRecipients",
+      "description": "One inbox line: a notification, an account, and whether it has been read."
+    }
+  ]
+}

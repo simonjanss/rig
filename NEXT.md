@@ -2428,45 +2428,6 @@ would rather have.
 
 ---
 
-## M6 — `openapi`
-
-**Goal.** An OpenAPI document from the same IR, so it cannot describe an API
-that does not exist.
-
-**Shape.**
-
-- `internal/gen/openapigen`, generator name `openapi`.
-- `pb33f/libopenapi` to build and render. Not text templates: a document
-  assembled from strings is a document that eventually stops parsing.
-- Options: `formats: [json, yaml]`, `version: "3.1" | "3.2"`, `out_dir: docs`.
-- One `components/schemas` entry per `ir.Object` and per `ir.Enum`. The filter
-  shapes are objects too, so `Search` documents itself.
-- `ir.API.Auth` is where the security scheme comes from: which endpoints exist
-  under the auth base path, and the lifetimes and rate limits to document. It is
-  resolved rather than optional, so the numbers in the specification are the ones
-  the server enforces — that is the reason the configuration lives in rig.yaml.
-- Every endpoint's `Errors []int` becomes a response referencing the shared
-  `Error` schema. That is why the IR stores bare codes.
-- `Endpoint.Pattern` is the path, unchanged. The router, this document, and the
-  TypeScript client read the same field.
-
-**The QUERY problem.** OpenAPI 3.1 has no `query` field on a path item.
-
-- Under `"3.1"`: document the `POST /_search` alias, and note in the operation's
-  description that `QUERY` on the collection path is the primary form.
-- Under `"3.2"`: emit the `query` operation directly.
-- Default `"3.1"` until 3.2 tooling is common. `openapi.version` in `rig.yaml`.
-
-**Open question for you.** Is the 3.1 fallback worth it, or should rig emit 3.2
-and let people who need 3.1 downgrade with a tool? The fallback is roughly
-forty lines and a permanent branch in the generator.
-
-**Verification.** Validate the emitted document in-process with libopenapi, and
-in CI with an external linter (`vacuum` or `spectral`). Golden files for the
-rendered JSON and YAML.
-
----
-
 ## M7 — `ts-client`
 
 **Goal.** A TypeScript client generated from the same document, so the types a

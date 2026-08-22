@@ -37,6 +37,7 @@ rig generate   # 4. compile to one IR, fan out to generators
 | `service-go` | API types, service interfaces, and a working default implementation |
 | `server-go` | net/http routing, request decoding, the handler registration struct, and the delete propagation |
 | `electric` | live-sync shape endpoints, with the tenant and lifecycle filters built in |
+| `openapi` | an OpenAPI 3.1 document: every endpoint, schema and status the API answers with |
 | `go-client` | a typed Go client: the wire types and one method per endpoint |
 
 ## Documentation

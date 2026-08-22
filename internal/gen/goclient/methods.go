@@ -97,16 +97,16 @@ func (e *emitter) signature(b *gobuf.Buf, res *ir.Resource, ep *ir.Endpoint, rig
 	case ep.Name == ir.OpSearch:
 		if filter, ok := searchFilterField(ep); ok {
 			params = append(params, "filter "+e.goType(b, filter))
-			sig.body = bodyTypeName(res, ep) + "{" + filter.Name + ": filter}"
+			sig.body = genutil.BodyShapeName(res, ep) + "{" + filter.Name + ": filter}"
 		}
-	case inputTypeName(res, ep) != "":
-		params = append(params, "in "+inputTypeName(res, ep))
+	case genutil.UsesModelInput(ep):
+		params = append(params, "in "+genutil.BodyShapeName(res, ep))
 		sig.body = "in"
 	case ep.Request.BodyObject != "":
 		params = append(params, "in "+ep.Request.BodyObject)
 		sig.body = "in"
 	case len(ep.Request.BodyParams) > 0:
-		params = append(params, "in "+bodyTypeName(res, ep))
+		params = append(params, "in "+genutil.BodyShapeName(res, ep))
 		sig.body = "in"
 	}
 

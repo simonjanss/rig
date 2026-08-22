@@ -106,6 +106,13 @@ generators:
       # naming the server. A real project leaves it out.
       default_base_url: http://localhost:8080
 
+  # The OpenAPI document, written from the same compiled document the routes
+  # above are, so it cannot describe an endpoint that does not exist.
+  - name: openapi
+    out_dir: docs
+    options:
+      formats: [json, yaml]
+
   # Live-sync shape endpoints. It writes nothing until a table asks
   # for one with `electric: {enabled: true}`, so leaving it here costs
   # nothing and turning it on is one line in a table's configuration.

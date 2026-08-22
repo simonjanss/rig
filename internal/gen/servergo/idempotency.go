@@ -1,36 +1,11 @@
 package servergo
 
 import (
-	"net/http"
-
 	"github.com/simonjanss/rig/internal/gen/gobuf"
 	"github.com/simonjanss/rig/pkg/ir"
 )
 
 const idempotencyModule = runtimeModule + "/idempotency"
-
-// idempotentWrite reports whether an endpoint's work is worth recording against
-// an Idempotency-Key.
-//
-// The methods that can produce a second row if a client sends the same request
-// twice, and only those. A GET has nothing to record. A DELETE is idempotent in
-// what it leaves behind — its second answer is a 404 about a row that is
-// genuinely gone — so buying a smoother answer for it would cost a transaction
-// per delete to change an error nobody was wrong to receive.
-//
-// A search is a QUERY here even where it is also mounted as a POST alias, so it
-// is excluded by the same switch that excludes reads. The alias is a second
-// route to one handler, and the handler is generated from the operation.
-//
-// A dedicated upload route never reaches this: it takes a branch of its own in
-// [emitter.handler], and [emitter.uploadHandler] says why it is not guarded.
-func idempotentWrite(ep *ir.Endpoint) bool {
-	switch ep.Method {
-	case http.MethodPost, http.MethodPatch, http.MethodPut:
-		return true
-	}
-	return false
-}
 
 // fingerprintOf renders the expression a write is identified by, beyond its key
 // and its route.

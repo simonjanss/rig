@@ -45,6 +45,7 @@ internal/project/tracing.go | internal/project/monitoring.go) pages="docs/observ
 internal/tableconf/config.go) pages="docs/tables.md" ;;
 internal/compile/convention.go) pages="docs/schema.md" ;;
 internal/compile/builtin.go) pages="docs/api.md" ;;
+internal/gen/openapigen/*) pages="docs/api.md docs/generators.md README.md" ;;
 internal/gen/electricgo/*) pages="docs/electric.md docs/generators.md" ;;
 internal/gen/goclient/*) pages="docs/clients.md docs/generators.md" ;;
 internal/gen/*) pages="docs/generators.md README.md" ;;

@@ -24,10 +24,14 @@ import (
 	"time"
 )
 
-// protocolParams are the sync protocol's own, forwarded as the client sent
-// them. They say where in the stream a request resumes; none of them can widen
-// what the stream contains.
-var protocolParams = []string{"offset", "handle", "live", "cursor", "replica"}
+// ProtocolParams are the sync protocol's own query parameters, forwarded as the
+// client sent them. They say where in the stream a request resumes; none of
+// them can widen what the stream contains.
+//
+// Exported because the proxy is not the only thing that has to name them: a
+// specification describing a shape route documents the same five, and a second
+// copy of the list is a second thing to forget when the protocol grows a sixth.
+var ProtocolParams = []string{"offset", "handle", "live", "cursor", "replica"}
 
 // Shape is what to subscribe to.
 type Shape struct {
@@ -186,7 +190,7 @@ func (p *Proxy) request(r *http.Request, s Shape) (*http.Request, error) {
 
 	// Theirs, forwarded. Anything else the client sent is dropped.
 	from := r.URL.Query()
-	for _, name := range protocolParams {
+	for _, name := range ProtocolParams {
 		if v := from.Get(name); v != "" {
 			q.Set(name, v)
 		}
