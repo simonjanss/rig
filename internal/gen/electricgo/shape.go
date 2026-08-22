@@ -393,8 +393,11 @@ func (e *emitter) lifecycle(b *gobuf.Buf, res *ir.Resource, sh shape) {
 			b.L("where.IsNull(%s)", gobuf.Quote(storage.SoftDelete.Column.Name))
 		}
 		if storage.IsSnapshotable() {
-			b.Comment("Snapshots are prior versions. A subscriber wants the live row.")
-			b.L("where.Eq(%s, %s)", gobuf.Quote(storage.Snapshot.VersionType.Name),
+			b.Comment("Snapshots are prior versions. A subscriber wants the live row. " +
+				"Compared as text because the column is usually a Postgres enum, and " +
+				"the sync service refuses to type a value against one; on a text " +
+				"column the cast is a no-op.")
+			b.L("where.EqText(%s, %s)", gobuf.Quote(storage.Snapshot.VersionType.Name),
 				gobuf.Quote(e.versionLabel(res, versionOriginal)))
 		}
 
@@ -406,14 +409,14 @@ func (e *emitter) lifecycle(b *gobuf.Buf, res *ir.Resource, sh shape) {
 		if storage.IsSnapshotable() {
 			b.Comment("Still the live generation of the row, though. The trash is " +
 				"what was deleted, not the history of what was deleted.")
-			b.L("where.Eq(%s, %s)", gobuf.Quote(storage.Snapshot.VersionType.Name),
+			b.L("where.EqText(%s, %s)", gobuf.Quote(storage.Snapshot.VersionType.Name),
 				gobuf.Quote(e.versionLabel(res, versionOriginal)))
 		}
 
 	case shapeVersions:
 		b.Comment("One row's history: the copies taken before each update, and never " +
 			"the row itself.")
-		b.L("where.Eq(%s, %s)", gobuf.Quote(storage.Snapshot.VersionType.Name),
+		b.L("where.EqText(%s, %s)", gobuf.Quote(storage.Snapshot.VersionType.Name),
 			gobuf.Quote(e.versionLabel(res, versionSnapshot)))
 		b.L("where.Eq(%s, id.String())", gobuf.Quote(storage.Snapshot.FromID.Name))
 		if storage.IsSoftDeletable() {

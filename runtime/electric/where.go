@@ -28,6 +28,19 @@ func (w *Where) NotEq(column string, value string) *Where {
 	return w.binary(column, "<>", value)
 }
 
+// EqText adds `column::text = $n`, for a column whose Postgres type is an
+// enum.
+//
+// The cast is not decoration. The sync service types a filter's parameters
+// from the column they compare against, and a user-defined enum is a type its
+// parser does not accept a value for — `version_type = 'Original'` is refused
+// whether the value is bound or literal. Comparing the text form is the same
+// filter, and text is a type every value has.
+func (w *Where) EqText(column string, value string) *Where {
+	w.parts = append(w.parts, quote(column)+"::text = "+w.bind(value))
+	return w
+}
+
 // Gt adds `column > $n`.
 func (w *Where) Gt(column, value string) *Where { return w.binary(column, ">", value) }
 
