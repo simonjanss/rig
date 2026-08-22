@@ -22,6 +22,7 @@ func monitored(t *testing.T) *ir.Document {
 		ServiceName: "lifecycle",
 		BasePath:    "/_rig/monitor",
 		MaxTraces:   200,
+		MaxLogs:     500,
 		PasswordEnv: "RIG_MONITOR_PASSWORD",
 	}
 	return doc
@@ -61,6 +62,7 @@ func TestTheGeneratedConfigurationCarriesTheBlock(t *testing.T) {
 		`ServiceName: "lifecycle"`,
 		`BasePath:    "/_rig/monitor"`,
 		`MaxTraces:   200`,
+		`MaxLogs:     500`,
 		`PasswordEnv: "RIG_MONITOR_PASSWORD"`,
 	} {
 		if !strings.Contains(src, want) {

@@ -13,4 +13,5 @@ import (
 	_ "github.com/simonjanss/rig/internal/gen/persistgo"
 	_ "github.com/simonjanss/rig/internal/gen/servergo"
 	_ "github.com/simonjanss/rig/internal/gen/servicego"
+	_ "github.com/simonjanss/rig/internal/gen/tsclient"
 )

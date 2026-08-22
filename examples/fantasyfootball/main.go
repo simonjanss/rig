@@ -9,6 +9,8 @@ import (
 	"cmp"
 	"context"
 	"embed"
+	"fmt"
+	"log/slog"
 	"net/http"
 	"os"
 	"time"
@@ -38,6 +40,19 @@ var migrations embed.FS
 const localDSN = "postgres://rig:rig@localhost:55441/rig?sslmode=disable"
 
 func main() {
+	// The log file rig's own monitoring page reads. It is opened before the
+	// server, because the logger is built out of it and the lines written while
+	// starting up are lines worth having on the page. Nothing is written unless
+	// $RIG_LOG_FILE says where — the ordinary case on a laptop — and then this
+	// costs one branch per log call and nothing else.
+	logs, err := observe.OpenLogs(observe.LogConfig{})
+	if err != nil {
+		// There is no logger yet: this is the thing that would have been half of
+		// one.
+		fmt.Fprintln(os.Stderr, "cannot open the log file:", err)
+		os.Exit(1)
+	}
+
 	serve.Main(serve.Config{
 		DatabaseURL: cmp.Or(os.Getenv("DATABASE_URL"), localDSN),
 		Addr:        cmp.Or(os.Getenv("ADDR"), "127.0.0.1:8081"),
@@ -53,6 +68,13 @@ func main() {
 
 		MaxStartup:  30 * time.Second,
 		MaxShutdown: 20 * time.Second,
+
+		// Stderr, and the file the monitoring page reads. The two keep their own
+		// levels: this one stays at whatever the default handler is set to, and
+		// the file keeps debug — which is where rig's request line is, so the
+		// page has requests to list without this process printing one per
+		// request to a terminal nobody is watching.
+		Logger: slog.New(observe.Tee(slog.Default().Handler(), logs.Handler())),
 
 		Tasks: map[string]serve.Task{
 			"migrate": migrate.Apply(migrations, migrate.Options{Log: os.Stdout}),
@@ -80,11 +102,15 @@ func main() {
 		// must not spend the whole shutdown budget.
 		app.CloseWithin("traces", 5*time.Second, tracing.Shutdown)
 
-		// rig's own page over those spans, at /_rig/monitor. It reads the file
-		// the provider above is writing, which is why it hangs off it. With no
+		// rig's own page over those spans and those log lines, at /_rig/monitor.
+		// It reads the span file the provider above is writing, which is why it
+		// hangs off it, and the log file the sink above holds, which is why that
+		// is set on the configuration rather than generated into it. With no
 		// $RIG_MONITOR_PASSWORD it mounts nothing and says so once, rather than
 		// serving every path, request id and error cause to anybody who asks.
-		page, err := tracing.Page(api.Monitoring())
+		monitoring := api.Monitoring()
+		monitoring.Logs = logs
+		page, err := tracing.Page(monitoring)
 		if err != nil {
 			return nil, err
 		}

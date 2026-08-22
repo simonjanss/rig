@@ -7,7 +7,7 @@
 > [examples/todo](../examples/todo/rig.yaml) is a working, commented
 > configuration for every built-in.
 
-Seven generators ship with rig. `rig init` scaffolds all but `go-client`.
+Eight generators ship with rig. `rig init` scaffolds all but the two clients.
 
 | Name | What it writes |
 |---|---|
@@ -18,11 +18,14 @@ Seven generators ship with rig. `rig init` scaffolds all but `go-client`.
 | `electric` | live-sync shape endpoints, with the tenant and lifecycle filters built in |
 | `openapi` | an OpenAPI 3.1 document: every endpoint, schema and status the API answers with |
 | `go-client` | a typed Go client: the wire types and one method per endpoint |
+| `ts-client` | a typed TypeScript client: the wire types, one method per endpoint, and the live-sync collections |
 
 `model-go` is listed first in a generated `rig.yaml` because the layers above
 import what it writes. `electric` emits nothing until a table opts in with
-`electric: {enabled: true}`, so leaving it configured costs nothing. `go-client`
-is opt-in, because not every project wants a Go SDK of its own.
+`electric: {enabled: true}`, so leaving it configured costs nothing — and
+`ts-client` makes the same promise about the streaming half of its output, so a
+project that streams nothing never installs the streaming package. The two
+clients are opt-in, because not every project wants an SDK of its own.
 
 Two blocks in `rig.yaml` change what these write without being generators of
 their own. `auth:` makes `server-go` write the authentication wiring, and
@@ -56,9 +59,24 @@ Every generator takes `out_dir` and an `options` block. The common ones:
 | `formats` | `openapi` | Which renderings to write: `json`, `yaml`, or both. Both by default |
 | `servers` | `openapi` | Origins the API answers on. Defaults to a single relative server |
 | `electric` | `openapi` | Whether the live-sync routes are described. On by default |
-| `client_import` | `go-client` | Import path of the SDK runtime. For a fork or a vendored copy |
-| `default_base_url` | `go-client` | Emitted as a constant. Leave it out for anything that runs in more than one place |
+| `client_import` | `go-client`, `ts-client` | Import path, or npm specifier, of the SDK runtime. For a fork or a vendored copy |
+| `electric_import` | `ts-client` | npm specifier of the streaming runtime. Same reasons |
+| `default_base_url` | `go-client`, `ts-client` | Emitted as a constant. Leave it out for anything that runs in more than one place |
 | `request_id_header` | `server-go` | Header the generated auth error mapper reads a request identifier from |
+
+## The two clients
+
+`go-client` and `ts-client` read the same document and answer the same shape:
+methods grouped per resource, a QUERY that falls back to the `_search` alias once
+and remembers, query parameters that are absent rather than zero, a per-input
+shape for the 422 body, and a multipart create beside the JSON one wherever a
+file column would otherwise be unreachable. Where they differ, the difference is the
+language's — a Go `patch.Optional[T]` is a TypeScript `?: T`, and a Go
+`client.TodoCreateError(err)` is a TypeScript `isTodoCreateError(err)`.
+
+The one place they differ about the API itself is live sync, and it is worth
+knowing before you write against it: **a streamed row is not the same shape as
+the row the API sends.** See [clients.md](clients.md#two-shapes-for-one-row).
 
 ## `.gen.` versus stubs
 

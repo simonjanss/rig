@@ -70,11 +70,34 @@ func TestMonitoringDefaults(t *testing.T) {
 	if got.MaxTraces != project.DefaultMonitorMaxTraces {
 		t.Errorf("max traces is %d, want %d", got.MaxTraces, project.DefaultMonitorMaxTraces)
 	}
+	if got.MaxLogs != project.DefaultMonitorMaxLogs {
+		t.Errorf("max logs is %d, want %d", got.MaxLogs, project.DefaultMonitorMaxLogs)
+	}
 	if got.PasswordEnv != project.DefaultMonitorPasswordEnv {
 		t.Errorf("password variable is %q, want %q", got.PasswordEnv, project.DefaultMonitorPasswordEnv)
 	}
 	if got.Password != "" {
 		t.Errorf("a project that wrote no password got %q", got.Password)
+	}
+}
+
+// Both list sizes are the same kind of number and are checked the same way. A
+// negative one is a page that lists nothing, which is not what anybody typing a
+// minus sign meant.
+func TestTheListSizesHaveToBePositive(t *testing.T) {
+	for _, key := range []string{"max_traces", "max_logs"} {
+		body := tracingOn + "monitoring:\n  enabled: true\n  " + key + ": -1\n"
+		if _, out := parseMonitoring(t, body); !strings.Contains(out, "RIG3002") {
+			t.Errorf("a negative %s was accepted:\n%s", key, out)
+		}
+	}
+}
+
+// max_logs is one of the keys that makes a block configured, so writing only it
+// and forgetting `enabled` is refused rather than ignored.
+func TestMaxLogsCountsAsConfiguring(t *testing.T) {
+	if _, out := parseMonitoring(t, tracingOn+"monitoring:\n  max_logs: 50\n"); !strings.Contains(out, "RIG3002") {
+		t.Errorf("a block holding only max_logs was ignored:\n%s", out)
 	}
 }
 

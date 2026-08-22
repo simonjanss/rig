@@ -20,6 +20,7 @@ make test        # the fast suite
 make deps        # go mod tidy, then fail if anything changed
 make lint        # golangci-lint, pinned, installed into ./bin
 make vulncheck   # govulncheck, likewise
+make ts          # the TypeScript workspace; needs pnpm
 make test-docker # needs Docker
 make examples    # needs Docker; a few minutes on its own
 ```
@@ -127,6 +128,7 @@ the same commit.** The pages are short and the mapping is mechanical:
 | `internal/project/tracing.go` — the `tracing:` block | `docs/observability.md`, `docs/rig-yaml.md` |
 | `internal/project/monitoring.go` — the `monitoring:` block | `docs/observability.md`, `docs/rig-yaml.md` |
 | `rigclient/`, `internal/gen/goclient` | `docs/clients.md` |
+| `ts/packages/*`, `internal/gen/tsclient` | `docs/clients.md` |
 
 Two rules that are easier to break than the table above:
 
@@ -145,6 +147,37 @@ a named example. Filling one in is deleting the blockquote, not adding a file.
 
 A checked-in `PostToolUse` hook in `.claude/` prints the matching page when one
 of the files above is edited. It reminds; it does not gate.
+
+## The TypeScript workspace
+
+`ts/` is a pnpm workspace holding the two packages a generated TypeScript client
+imports — `@rig/client` and `@rig/electric` — plus `typecheck-fixture`, which is
+not published and exists only to be compiled.
+
+`make ts` is the whole of it: install, Prettier, `tsc`, and the unit suite. It
+needs pnpm on the machine and nothing else.
+
+Three things about it are easy to get wrong.
+
+**The generated output is not Prettier's.** Nothing in the Go toolchain formats
+TypeScript, so `internal/gen/tsbuf` emits code already laid out — four spaces,
+Prettier's import wrapping, its quote style — and Prettier runs over the
+hand-written packages only. A change to the emitter's layout is checked by the
+golden files and by nothing else.
+
+**A golden test cannot notice that the output stopped compiling.** It proves the
+generator emits the bytes it emitted last time, which stays true after a runtime
+signature moves underneath it. `typecheck-fixture` is what closes that: its
+`tsconfig.json` includes the golden directories and `examples/todo/client-ts`
+directly — not copies — and maps `@rig/client` and `@rig/electric` to their
+`src`, so it checks what the packages say now rather than what the last build
+said. A new golden goes in that list, or the emitter can start writing something
+that does not compile and every check will stay green.
+
+**`allowBuilds` in `pnpm-workspace.yaml` is checked in on purpose.** pnpm blocks
+install scripts by default and fails the install rather than warning once a
+blocked one exists, so the answer belongs in the repository instead of being
+approved once per clone.
 
 ## Godoc
 

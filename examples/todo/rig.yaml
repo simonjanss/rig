@@ -106,6 +106,21 @@ generators:
       # naming the server. A real project leaves it out.
       default_base_url: http://localhost:8080
 
+  # The same client for a browser, from the same document. Two packages
+  # underneath it rather than one: @rig/client is the request, the
+  # credential and the failure and has no dependencies, and @rig/electric
+  # is the live-sync collections and brings TanStack DB with it. A project
+  # with no streamed table never gets the second file and never installs
+  # the second package.
+  #
+  # client-ts rather than web/src/api: this example's web/ is a Go
+  # server-rendered UI, and the generated client is for somebody else's
+  # front end the same way client/ is for somebody else's program.
+  - name: ts-client
+    out_dir: client-ts
+    options:
+      default_base_url: http://localhost:8080
+
   # The OpenAPI document, written from the same compiled document the routes
   # above are, so it cannot describe an endpoint that does not exist.
   - name: openapi

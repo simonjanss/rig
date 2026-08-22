@@ -1,0 +1,4 @@
+# Built output, and the dependencies.
+dist/
+node_modules/
+pnpm-lock.yaml

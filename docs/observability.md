@@ -10,6 +10,7 @@ Four things, at four prices:
 | **The log** | nothing | nothing — it is always on |
 | **Spans** | an OpenTelemetry dependency | `tracing: {enabled: true}` in rig.yaml |
 | **Exporting them** | a collector, or a file | an environment variable, at run time |
+| **Keeping the log lines** | a bounded file | a sink you tee into your logger, at run time |
 | **The monitoring page** | a route, and a password to guard it | `monitoring: {enabled: true}`, over a span file |
 
 They are separate because they are separately worth it. The line that says why a
@@ -203,10 +204,10 @@ do not appear on the monitoring page either.
 
 ## The monitoring page
 
-The last few hundred requests, and what each of them spent its time on, on a
-page this server already serves. It is for the deployment too small to be worth
-a collector and a Grafana in front of it, which is most deployments for most of
-their life.
+The last few hundred requests, what each of them spent its time on, and the log
+lines they wrote — on a page this server already serves. It is for the
+deployment too small to be worth a collector and a Grafana in front of it, which
+is most deployments for most of their life.
 
 ```yaml
 tracing:
@@ -290,24 +291,108 @@ monitoring:
   password: ""          # a secret in a checked-in file; rig warns (RIG3006)
   base_path: /_rig/monitor
   max_traces: 200
+  max_logs: 500
 ```
+
+### The logs
+
+The page's other half, and it needs one more thing than the spans do: something
+has to keep the log lines where the page can read them. `slog` writes to
+wherever you pointed it, which is usually a terminal or a collector's agent, and
+neither is a file rig can open.
+
+So `observe` has a sink. Open it, tee its handler beside the one you already
+have, and hand the same object to the page:
+
+```go
+logs, err := observe.OpenLogs(observe.LogConfig{})
+if err != nil {
+    return err
+}
+
+serve.Main(serve.Config{
+    // Stderr, and the file. Both.
+    Logger: slog.New(observe.Tee(slog.Default().Handler(), logs.Handler())),
+    // ...
+}, func(ctx context.Context, app *serve.App) (http.Handler, error) {
+    monitoring := api.Monitoring()
+    monitoring.Logs = logs
+    page, err := tracing.Page(monitoring)
+    // ...
+})
+```
+
+```
+RIG_LOG_FILE=/var/log/myapp/rig.jsonl
+```
+
+**With nothing in it nothing is written**, the same as `$RIG_TRACE_FILE`, and
+the page says so instead of showing an empty list. `logs.Unarmed()` is the
+reason, if you want a line about it at startup.
+
+It is the same store as the spans and makes the same promise: one JSON object
+per line, `observe.LogConfig.FileMaxBytes` (8 MiB) with one generation kept
+beside it as `<name>.1`. Writes are unbuffered, so there is nothing to flush and
+no shutdown step to add.
+
+```json
+{"time":"2026-08-21T09:14:02.113Z","level":"ERROR","msg":"request failed",
+ "trace_id":"4bf92f...","span_id":"00f067...",
+ "attrs":{"request":{"request_id":"4bf92f...","method":"POST","route":"POST /api/v1/teams"},
+          "status":500,"error":"creating team: connection refused"}}
+```
+
+Three things about that shape are deliberate:
+
+- **The trace id is on the line**, taken from the context the log call was
+  given. That is what makes a request and the lines it wrote one view rather
+  than two searches — and it is why every log call in rig passes the context.
+- **Everything else is under `attrs`.** A line is free to carry a field called
+  `level` or `msg`, and a flat record would let it overwrite one.
+- **The file keeps debug lines even when your terminal does not.** `observe.Tee`
+  asks each handler its own level, and the sink's default is `DEBUG`. This
+  matters more than it sounds: rig's request line and its refusal line are debug
+  lines, so a server running at info writes them nowhere — and the page would
+  have nothing to list. Set `LogConfig.Level` if you want the file narrower.
+
+`observe.ReadLogs` reads such a file from a script, and it will read a file your
+own `slog.JSONHandler` wrote too — `time`, `level` and `msg` are slog's own
+keys, and anything else lands in `attrs`.
+
+**The span file and the log file have to be different files.** Two writers on
+one path interleave their lines and rotate each other's data away; `Page` says
+so rather than leaving you with a file that reads as neither.
 
 ### What it shows
 
-Requests newest first, each expanding to the spans underneath it: the
-repository call, the stage of the write that was slow, the statement that ran.
-A failed request is marked, and the cause is on the span that failed. There is a
-search box over routes, error text, span attributes and trace ids — paste the
-`requestId` from somebody's screenshot and you have their request — and a
-filter for the failures.
+Two tabs over one search box.
 
-`/_rig/monitor/traces.json` is the same data, and `observe.ReadTraces` reads the
-span file straight from a script if you would rather not have a page in the
-loop.
+**Requests**, newest first: the verb, the route, the status, how long it took.
+Opening one gives the spans underneath it on a timeline — the repository call,
+the stage of the write that was slow, the statement that ran, each with its own
+time and its self time — the cause on the span that failed, and **the log lines
+that request wrote**, offset from when it started. Above the list are four
+numbers over the requests on the page: how many, how many failed, p50/p95/p99,
+and a sparkline of when they arrived.
 
-Three empty states, and they say which they are: no span file configured
-(`$RIG_TRACE_FILE`), nothing served yet, or a search and a filter that no
-request here matches.
+**Logs**, newest first: the level, the message, the route. A line expands to
+every attribute it carried, and to the way back to the request it belongs to.
+The level filter is a threshold — `WARN` means warn and worse.
+
+One search box for both halves, over routes, messages, error text, attributes
+and trace ids. Paste the `requestId` from somebody's screenshot and you have
+their request and everything it logged.
+
+The state is in the URL, so a view is a link: reload it, share it, or use the
+back button. `?` lists the keyboard shortcuts.
+
+`/_rig/monitor/traces.json` and `/_rig/monitor/logs.json` are the same data, and
+`observe.ReadTraces` and `observe.ReadLogs` read the files straight from a script
+if you would rather not have a page in the loop.
+
+The empty states say which empty they are: no span file configured
+(`$RIG_TRACE_FILE`), no log sink wired, no log file configured
+(`$RIG_LOG_FILE`), nothing served yet, or a filter that nothing here matches.
 
 **Looking at the page does not appear on the page.** rig opens its spans and
 writes its request lines inside each generated handler, so anything on the mux
@@ -323,14 +408,20 @@ that is not one — the page, the probes — is invisible to both.
 - **It does not survive the file's ceiling.** `FileMaxBytes` with one rotation
   is what bounds it, so the oldest requests go. A request whose beginning has
   rotated away is still listed, by trace id, with the spans it still has.
-- **It is not a dashboard.** No counters, no percentiles, no graph over time —
-  see *What rig does not do here* below.
+- **Its numbers describe the page, not the server.** The count, the error rate,
+  the percentiles and the sparkline are computed over the requests in the window
+  you are looking at — a few hundred of them, from one process. Nothing is
+  counted over time and nothing is retained, so these are a way of reading the
+  window rather than metrics. For metrics, see *What rig does not do here*.
 
 ## Correlating a log line with a trace
 
 With `tracing:` on and no `RequestID` of your own, rig sets one: the trace id.
 The `requestId` in the error body, the `request_id` on every log line and the
-trace in your collector are then the same string, and you wrote nothing.
+trace in your collector are then the same string, and you wrote nothing. In the
+log file the sink writes, the same identifier is also `trace_id` on the line
+itself, taken from the context rather than from the request — which is what the
+monitoring page joins the two halves on.
 
 To keep a caller's own identifier when it sends one, and fall back to the trace:
 
@@ -426,8 +517,11 @@ out at the wrong moment.
   than wrapping the mux in `otelhttp`, because the route is only known once the
   mux has dispatched — outside it, every span would be named by path. If you
   want otelhttp anyway, `Register` returns an `*http.ServeMux` you can wrap.
-- **No log shipping.** `slog` writes where you point it. A collector, a file, a
-  rotation policy and a retention period are the deployment's, not rig's.
+- **No log shipping.** `slog` writes where you point it. A collector, a
+  retention period and somewhere to search from are the deployment's, not rig's.
+  The sink above is not a counter-example: it is a bounded file with one
+  generation, written so that the monitoring page has something to read, and it
+  keeps nothing longer than the disk cost you agreed to.
 - **No sampling and no rate limit on the lines.** A server under a flood of 500s
   writes one line per failure. If that is a problem, it is a problem about the
   500s.
