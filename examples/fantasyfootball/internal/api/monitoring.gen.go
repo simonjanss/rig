@@ -19,6 +19,21 @@ import (
 //
 // Then set it as Server.Monitor, and it is mounted with the resource routes.
 //
+// For the log half, open a sink, tee its handler into the logger this
+// application already has, and set it on what this returns:
+//
+//	logs, err := observe.OpenLogs(observe.LogConfig{})
+//	// ... serve.Config{Logger: slog.New(observe.Tee(base, logs.Handler()))}
+//	cfg := api.Monitoring()
+//	cfg.Logs = logs
+//	page, err := tracing.Page(cfg)
+//
+// It is not a field a generator can fill in, because it is the sink itself
+// rather than a path: the page reading the file the handler is writing is what
+// makes a request and the lines it wrote one view, and two places naming that
+// path would be one too many. Without it the page serves its request half and
+// says why the other is empty.
+//
 // It hangs off the provider rather than standing alone because the page reads
 // the span file that provider is writing: two places naming a path is two
 // places to get it wrong, and the failure would be a page that is permanently
@@ -39,6 +54,7 @@ func Monitoring() observe.PageConfig {
 		ServiceName: "fantasyfootball",
 		BasePath:    "/_rig/monitor",
 		MaxTraces:   200,
+		MaxLogs:     500,
 		PasswordEnv: "RIG_MONITOR_PASSWORD",
 	}
 }

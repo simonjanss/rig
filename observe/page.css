@@ -1,0 +1,517 @@
+/* rig monitor.
+ *
+ * One stylesheet, no framework and no build step, for the reason the page has
+ * no templating: this is served by a module every generated application can
+ * import, and a toolchain here would be a toolchain in rig.
+ *
+ * Two rules run through all of it. Status is never colour alone — every badge
+ * ships its mark and its word, so the page reads the same to somebody who
+ * cannot tell the two greens apart. And dark mode is chosen rather than
+ * flipped: its own steps, each checked against its own surface, because a
+ * green that passes on paper-white is unreadable on near-black.
+ */
+
+:root {
+  color-scheme: light;
+  --plane: #f9f9f7;
+  --surface: #fcfcfb;
+  --raised: #f2f1ec;
+  --ink: #0b0b0b;
+  --ink-2: #52514e;
+  --muted: #898781;
+  --grid: #e1e0d9;
+  --border: rgba(11, 11, 11, .10);
+  --shadow: rgba(11, 11, 11, .06);
+
+  /* Every one of these is at least 4.5:1 on --surface, because each of them is
+   * used as text somewhere and not only as a mark. */
+  --accent: #1f6fd0;
+  --good: #0a7d29;
+  --warn: #8a5a00;
+  --critical: #c0342f;
+  --focus: #1f6fd0;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    --plane: #0d0d0d;
+    --surface: #1a1a19;
+    --raised: #232322;
+    --ink: #fff;
+    --ink-2: #c3c2b7;
+    --muted: #8f8d86;
+    --grid: #2c2c2a;
+    --border: rgba(255, 255, 255, .12);
+    --shadow: rgba(0, 0, 0, .4);
+
+    --accent: #3987e5;
+    --good: #4ec97a;
+    --warn: #e0a63a;
+    --critical: #e8564f;
+    --focus: #3987e5;
+  }
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--plane);
+  color: var(--ink);
+  font: 14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+.mono, .id, .num, td.num { font-variant-numeric: tabular-nums; }
+.mono, .id {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+}
+
+.sr-only {
+  position: absolute; width: 1px; height: 1px;
+  padding: 0; margin: -1px; overflow: hidden;
+  clip-path: inset(50%); white-space: nowrap; border: 0;
+}
+
+:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* ── header ─────────────────────────────────────────────────────────────── */
+
+header {
+  position: sticky; top: 0; z-index: 3;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+
+.bar {
+  display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center;
+  padding: 10px 20px 0;
+}
+
+h1 {
+  margin: 0; font-size: 15px; font-weight: 600;
+  letter-spacing: -.01em;
+}
+.service { color: var(--muted); font-weight: 400; }
+
+.live {
+  display: flex; align-items: center; gap: 6px;
+  color: var(--muted); font-size: 12px;
+}
+.pulse {
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--grid);
+  transition: background .2s ease;
+}
+.pulse.on { background: var(--good); }
+.pulse.bad { background: var(--critical); }
+
+/* ── tabs ───────────────────────────────────────────────────────────────── */
+
+.tabs {
+  display: flex; gap: 2px; margin-left: auto;
+  background: var(--raised);
+  border: 1px solid var(--border);
+  border-radius: 8px; padding: 2px;
+}
+.tabs button {
+  font: inherit; font-size: 13px; color: var(--ink-2);
+  background: none; border: 0; border-radius: 6px;
+  padding: 4px 12px; cursor: pointer;
+}
+.tabs button[aria-selected="true"] {
+  background: var(--surface); color: var(--ink); font-weight: 550;
+  box-shadow: 0 1px 2px var(--shadow);
+}
+
+/* ── filters ────────────────────────────────────────────────────────────── */
+
+.filters {
+  display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+  padding: 10px 20px;
+}
+
+.field {
+  display: flex; align-items: center; gap: 6px;
+  background: var(--plane);
+  border: 1px solid var(--border); border-radius: 7px;
+  padding: 0 8px;
+  flex: 1 1 26ch; max-width: 46ch;
+}
+.field:focus-within { border-color: var(--focus); }
+.field input {
+  font: inherit; color: inherit; background: none; border: 0;
+  padding: 6px 0; width: 100%; min-width: 0;
+}
+.field input:focus { outline: none; }
+.field input::-webkit-search-cancel-button { filter: grayscale(1); }
+kbd {
+  font: 11px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--muted); background: var(--raised);
+  border: 1px solid var(--border); border-radius: 4px;
+  padding: 3px 4px;
+}
+
+.seg {
+  display: flex; gap: 2px;
+  background: var(--raised);
+  border: 1px solid var(--border);
+  border-radius: 7px; padding: 2px;
+}
+.seg button {
+  font: inherit; font-size: 12px; color: var(--ink-2);
+  background: none; border: 0; border-radius: 5px;
+  padding: 3px 9px; cursor: pointer; white-space: nowrap;
+}
+.seg button[aria-pressed="true"] {
+  background: var(--surface); color: var(--ink); font-weight: 550;
+}
+.seg .count { color: var(--muted); font-variant-numeric: tabular-nums; }
+.seg button[aria-pressed="true"] .count { color: var(--ink-2); }
+
+.check {
+  display: flex; align-items: center; gap: 5px;
+  color: var(--ink-2); font-size: 13px;
+}
+button.ghost {
+  font: inherit; font-size: 13px; color: var(--ink-2);
+  background: var(--plane);
+  border: 1px solid var(--border); border-radius: 7px;
+  padding: 5px 10px; cursor: pointer;
+}
+button.ghost:hover { color: var(--ink); border-color: var(--muted); }
+
+/* The two filters that belong to one panel each. A level chip on the requests
+ * tab would be a control with nothing to do. */
+body[data-tab="logs"] #status-seg,
+body[data-tab="requests"] #level-seg { display: none; }
+
+/* ── main ───────────────────────────────────────────────────────────────── */
+
+main { padding: 14px 20px 72px; }
+
+.note {
+  margin: 0 0 12px; padding: 14px 16px;
+  color: var(--ink-2); max-width: 70ch;
+  background: var(--surface);
+  border: 1px solid var(--border); border-radius: 10px;
+}
+.note:empty { display: none; }
+.note code {
+  color: var(--ink); background: var(--raised);
+  border-radius: 4px; padding: 1px 5px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px;
+}
+
+/* ── tiles ──────────────────────────────────────────────────────────────── */
+
+.tiles {
+  display: grid; gap: 8px; margin-bottom: 12px;
+  /* Wide enough for three percentiles side by side, which is the tile that
+   * decides this number. */
+  grid-template-columns: repeat(auto-fit, minmax(172px, 1fr));
+}
+.tiles:empty { display: none; }
+.tile {
+  background: var(--surface);
+  border: 1px solid var(--border); border-radius: 10px;
+  padding: 10px 12px;
+}
+.tile.wide { grid-column: span 2; }
+.tile h2 {
+  margin: 0 0 4px; font-size: 11px; font-weight: 550;
+  text-transform: uppercase; letter-spacing: .06em; color: var(--muted);
+}
+.tile .big {
+  font-size: 22px; font-weight: 600; line-height: 1.15;
+  font-variant-numeric: tabular-nums; letter-spacing: -.02em;
+}
+.tile .big.bad { color: var(--critical); }
+.tile .sub { font-size: 12px; color: var(--muted); }
+.pct { display: flex; flex-wrap: wrap; gap: 4px 12px; }
+.pct div { display: flex; flex-direction: column; }
+.pct .k { font-size: 11px; color: var(--muted); }
+.pct .v { font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums; }
+
+.spark { display: block; width: 100%; height: 34px; }
+.legend {
+  display: flex; gap: 12px; margin-top: 2px;
+  font-size: 11px; color: var(--muted);
+}
+.legend span { display: flex; align-items: center; gap: 4px; }
+.legend i {
+  width: 8px; height: 8px; border-radius: 2px;
+  background: var(--accent);
+}
+.legend i.err { background: var(--critical); }
+
+/* ── the split ──────────────────────────────────────────────────────────── */
+
+.split {
+  display: grid; gap: 10px;
+  grid-template-columns: minmax(0, 1fr);
+}
+body.open .split { grid-template-columns: minmax(0, 1fr) minmax(0, 30rem); }
+
+@media (max-width: 1100px) {
+  body.open .split { grid-template-columns: minmax(0, 1fr); }
+  /* Above the list rather than beside it, so opening a request on a narrow
+   * screen does not put the thing you asked for below the fold. */
+  .detail { order: -1; }
+}
+
+/* ── rows ───────────────────────────────────────────────────────────────── */
+
+.pane {
+  background: var(--surface);
+  border: 1px solid var(--border); border-radius: 10px;
+  overflow: hidden;
+}
+
+table.rows {
+  width: 100%; border-collapse: collapse;
+  table-layout: fixed;
+}
+table.rows thead th {
+  position: sticky; top: 0; z-index: 1;
+  text-align: left; font-size: 11px; font-weight: 550;
+  text-transform: uppercase; letter-spacing: .06em; color: var(--muted);
+  padding: 7px 12px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+table.rows thead th.num { text-align: right; }
+table.rows tbody tr { border-top: 1px solid var(--grid); }
+table.rows tbody tr:first-child { border-top: 0; }
+table.rows tbody tr[tabindex] { cursor: pointer; }
+table.rows tbody tr[tabindex]:hover { background: var(--raised); }
+table.rows tbody tr.sel {
+  background: var(--raised);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+table.rows td {
+  padding: 7px 12px; vertical-align: top;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+td.num { text-align: right; }
+
+.c-when { width: 7ch; color: var(--muted); }
+.c-method { width: 6.5ch; }
+.c-status { width: 11ch; }
+.c-ms { width: 12ch; }
+/* Wide enough for eight hex characters and the copy button beside them, and
+ * for "✕ ERROR" — a badge that ships its word and then clips it is worse than
+ * one that ships neither. */
+.c-id { width: 15ch; }
+.c-level { width: 12ch; }
+.c-route { width: 26ch; color: var(--ink-2); }
+
+.route { font-weight: 500; }
+.msg { color: var(--ink); }
+
+/* The duration is a number and a bar in one cell: the number is what you read,
+ * the bar is what you scan for. */
+.dur { display: flex; align-items: center; gap: 6px; justify-content: flex-end; }
+.dur .n { font-variant-numeric: tabular-nums; }
+.dur .b {
+  width: 34px; height: 4px; border-radius: 2px;
+  background: var(--grid); overflow: hidden;
+}
+.dur .b i { display: block; height: 4px; background: var(--accent); border-radius: 2px; }
+.dur .b i.err { background: var(--critical); }
+
+/* ── badges ─────────────────────────────────────────────────────────────── */
+
+.badge {
+  display: inline-block;
+  font-size: 11px; font-weight: 600; white-space: nowrap;
+  letter-spacing: .01em;
+}
+.badge.ok { color: var(--good); }
+.badge.err { color: var(--critical); }
+.badge.warn { color: var(--warn); }
+.badge.info { color: var(--accent); }
+.badge.mute { color: var(--muted); }
+
+.method {
+  font: 600 11px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--ink-2);
+}
+.method.w { color: var(--accent); }
+.method.d { color: var(--critical); }
+
+.copy {
+  font: inherit; color: var(--muted); background: none;
+  border: 0; padding: 0 0 0 4px; cursor: pointer;
+}
+.copy:hover { color: var(--ink); }
+
+/* ── detail ─────────────────────────────────────────────────────────────── */
+
+.detail {
+  background: var(--surface);
+  border: 1px solid var(--border); border-radius: 10px;
+  padding: 12px 14px;
+  align-self: start;
+  position: sticky; top: 106px;
+  max-height: calc(100vh - 122px);
+  overflow: auto;
+}
+.detail[hidden] { display: none; }
+
+.dh { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.dh .route { font-size: 14px; overflow-wrap: anywhere; }
+.dh .close { margin-left: auto; }
+.dh-sub {
+  display: flex; gap: 10px; flex-wrap: wrap;
+  margin: 4px 0 12px; color: var(--muted); font-size: 12px;
+}
+
+.detail h3 {
+  margin: 16px 0 6px; font-size: 11px; font-weight: 550;
+  text-transform: uppercase; letter-spacing: .06em; color: var(--muted);
+}
+
+/* ── the waterfall ──────────────────────────────────────────────────────── */
+
+.axis {
+  position: relative; height: 14px;
+  margin-left: 0; border-bottom: 1px solid var(--grid);
+  font-size: 10px; color: var(--muted);
+}
+.axis .t {
+  position: absolute; top: 0;
+  font-variant-numeric: tabular-nums;
+  transform: translateX(-50%); white-space: nowrap;
+}
+/* By class and not by position: the log markers below are appended after the
+ * ticks, so :last-child stops being the tick at 100% and its label hangs off
+ * the right edge. */
+.axis .t.first { transform: none; }
+/* Anchored to the right edge rather than translated off the last tick, so the
+ * final label cannot spill past the panel by a subpixel. The JS sets `right`
+ * on this one and `left` on the others. */
+.axis .t.last { transform: none; }
+/* A warn-or-worse line, on the same time base as the bars below, so a slow span
+ * and the line that explains it line up without reading two timestamps. */
+.axis .mk {
+  position: absolute; bottom: -1px; width: 2px; height: 7px;
+  background: var(--warn); border-radius: 1px;
+}
+.axis .mk.err { background: var(--critical); }
+
+.wf { margin-top: 2px; }
+.wf-row {
+  display: grid; align-items: center; gap: 8px;
+  grid-template-columns: minmax(0, 1fr);
+  padding: 3px 0;
+}
+.wf-head { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
+.wf-name {
+  font-size: 12px; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.wf-ms {
+  margin-left: auto; font-size: 11px; color: var(--ink-2);
+  font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+.wf-self { color: var(--muted); }
+.track {
+  position: relative; height: 5px;
+  background: var(--grid); border-radius: 3px;
+}
+.fill {
+  position: absolute; top: 0; height: 5px;
+  background: var(--accent); border-radius: 3px;
+  min-width: 2px;
+  /* The 2px surface ring is what keeps two bars that touch from reading as one. */
+  box-shadow: 0 0 0 2px var(--surface);
+}
+.fill.err { background: var(--critical); }
+
+.err-text {
+  color: var(--critical); font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.attrs {
+  color: var(--muted); font-size: 11px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  overflow-wrap: anywhere;
+}
+pre.sql {
+  margin: 3px 0 0; padding: 6px 8px;
+  background: var(--raised); border-radius: 6px;
+  font-size: 11px; color: var(--ink-2);
+  white-space: pre-wrap; overflow-wrap: anywhere;
+}
+
+/* ── the detail's log lines ─────────────────────────────────────────────── */
+
+.dlogs { display: flex; flex-direction: column; gap: 4px; }
+.dlog {
+  display: grid; gap: 2px 8px;
+  grid-template-columns: 6ch 6.5ch minmax(0, 1fr);
+  align-items: baseline;
+  font-size: 12px;
+}
+.dlog .at { color: var(--muted); font-variant-numeric: tabular-nums; font-size: 11px; }
+.dlog .m { overflow-wrap: anywhere; }
+.dlog .a { grid-column: 3; }
+
+/* ── the logs tab ───────────────────────────────────────────────────────── */
+
+tr.logrow.open { background: var(--raised); }
+tr.logdetail > td { padding: 0 12px 10px; }
+dl.kv {
+  display: grid; gap: 2px 10px; margin: 0;
+  grid-template-columns: max-content minmax(0, 1fr);
+  font-size: 12px;
+}
+dl.kv dt { color: var(--muted); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; }
+dl.kv dd { margin: 0; overflow-wrap: anywhere; }
+.jump {
+  font: inherit; font-size: 12px; color: var(--accent);
+  background: none; border: 0; padding: 6px 0 0; cursor: pointer;
+}
+
+/* ── shortcuts ──────────────────────────────────────────────────────────── */
+
+dialog {
+  border: 1px solid var(--border); border-radius: 12px;
+  background: var(--surface); color: var(--ink);
+  padding: 16px 18px; max-width: 34rem;
+  box-shadow: 0 10px 40px var(--shadow);
+}
+dialog::backdrop { background: rgba(0, 0, 0, .35); }
+dialog h2 { margin: 0 0 10px; font-size: 14px; }
+dialog dl { display: grid; grid-template-columns: 5rem 1fr; gap: 4px 10px; margin: 0; font-size: 13px; }
+dialog dt { margin: 0; }
+dialog dd { margin: 0; color: var(--ink-2); }
+
+/* ── narrow ─────────────────────────────────────────────────────────────── */
+
+@media (max-width: 720px) {
+  .bar, .filters { padding-left: 12px; padding-right: 12px; }
+  main { padding: 12px 12px 64px; }
+  .tabs { margin-left: 0; }
+  .c-when, .c-id { display: none; }
+  .c-route { width: auto; }
+  .detail { position: static; max-height: none; }
+
+  /* The status badge keeps its word here rather than shrinking to its colour,
+   * so the bar goes instead: it is the one thing in the row that is a nicety.
+   * The number it sits beside says the same thing exactly. */
+  .c-status { width: 14ch; }
+  .c-ms { width: 9ch; }
+  .dur .b { display: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none !important; animation: none !important; }
+}

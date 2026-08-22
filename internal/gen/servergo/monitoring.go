@@ -92,6 +92,18 @@ func (e *emitter) monitoringFile() (gen.Artifact, error) {
 		"\t}\n\n" +
 		"Then set it as Server.Monitor, and it is mounted with the resource " +
 		"routes.\n\n" +
+		"For the log half, open a sink, tee its handler into the logger this " +
+		"application already has, and set it on what this returns:\n\n" +
+		"\tlogs, err := observe.OpenLogs(observe.LogConfig{})\n" +
+		"\t// ... serve.Config{Logger: slog.New(observe.Tee(base, logs.Handler()))}\n" +
+		"\tcfg := api.Monitoring()\n" +
+		"\tcfg.Logs = logs\n" +
+		"\tpage, err := tracing.Page(cfg)\n\n" +
+		"It is not a field a generator can fill in, because it is the sink " +
+		"itself rather than a path: the page reading the file the handler is " +
+		"writing is what makes a request and the lines it wrote one view, and " +
+		"two places naming that path would be one too many. Without it the page " +
+		"serves its request half and says why the other is empty.\n\n" +
 		"It hangs off the provider rather than standing alone because the page " +
 		"reads the span file that provider is writing: two places naming a path " +
 		"is two places to get it wrong, and the failure would be a page that is " +
@@ -111,6 +123,7 @@ func (e *emitter) monitoringFile() (gen.Artifact, error) {
 	b.L("ServiceName: %s,", gobuf.Quote(m.ServiceName))
 	b.L("BasePath: %s,", gobuf.Quote(m.BasePath))
 	b.L("MaxTraces: %s,", strconv.Itoa(m.MaxTraces))
+	b.L("MaxLogs: %s,", strconv.Itoa(m.MaxLogs))
 	b.L("PasswordEnv: %s,", gobuf.Quote(m.PasswordEnv))
 	if m.Password != "" {
 		b.L("Password: %s,", gobuf.Quote(m.Password))
