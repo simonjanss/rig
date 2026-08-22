@@ -24,7 +24,7 @@ export RIG_DB_ISOLATE := $(CURDIR)
 # the examples are mostly generated output, and their Docker tests are already
 # run by `make examples`, which brings each example's own database up first.
 CORE_MODULES    := . ./runtime ./auth ./files ./notify ./observe ./migrate ./rigclient
-EXAMPLE_MODULES := ./examples/todo ./examples/fantasyfootball ./examples/auth ./examples/auth_oauth ./examples/sdk
+EXAMPLE_MODULES := ./examples/todo ./examples/fantasyfootball ./examples/auth ./examples/auth_oauth ./examples/linearlite ./examples/sdk
 
 # The core modules less the root: the ones a generated application imports, so
 # their godoc is the documentation for a Go surface somebody depends on rather
@@ -32,7 +32,7 @@ EXAMPLE_MODULES := ./examples/todo ./examples/fantasyfootball ./examples/auth ./
 # `internal/`, `pkg/ir` or `pkg/gen`, which are nobody else's dependency.
 PUBLIC_MODULES  := ./runtime ./auth ./files ./notify ./observe ./migrate ./rigclient
 MODULES         := $(CORE_MODULES) $(EXAMPLE_MODULES)
-EXAMPLES        := todo fantasyfootball auth auth_oauth
+EXAMPLES        := todo fantasyfootball auth auth_oauth linearlite
 
 # Versions of the external checkers, pinned so a run means the same thing on
 # every machine. The linter is installed into ./bin rather than GOPATH/bin so

@@ -1,0 +1,16 @@
+title,description,status,priority
+Audit the onboarding flow,Where do new people actually get stuck?,backlog,normal
+Rewrite the empty states,Every blank screen should say what goes there,backlog,low
+Fix the flaky session test,It fails on CI roughly one run in ten,todo,high
+Upgrade Postgres to 17,Read the release notes first,todo,normal
+Add keyboard shortcuts to the board,J and K at minimum,todo,low
+Profile the board render,Something re-renders more than it should,in_progress,high
+Document the deploy runbook,The one in the wiki is two migrations old,in_progress,normal
+Interview notes template,One page everybody uses,todo,normal
+Retire the legacy webhook,Nobody has fired it since March,backlog,low
+Set up the status page,Before the next incident rather than during,todo,high
+Refresh the brand colors,The blue reads purple on cheap panels,backlog,low
+Batch the email digests,One mail a day is plenty,todo,normal
+Close out Q3 goals,Write the honest version,in_progress,normal
+Plan the offsite,Somewhere with reliable wifi,backlog,normal
+Rotate the API credentials,"Quarterly, and this is the quarter",todo,high

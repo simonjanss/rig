@@ -1,0 +1,55 @@
+# yaml-language-server: $schema=../../.rig/table.schema.json
+table: rig_notification_setting
+comment: 'What somebody wants on a channel, and when. Resolved in three steps: this kind, then this channel, then the project default.'
+
+columns:
+  account_id:
+    comment: Whose preference it is.
+  kind:
+    comment: Null is the default for the channel, which is the second step of the resolution.
+  channel:
+    comment: Which channel it answers for.
+  is_enabled:
+    comment: False writes no delivery row at all. Not the same as digest Off, which is about preferring to look rather than be told.
+  digest:
+    comment: Immediate sends each on its own; anything else waits for the window and goes out as one message.
+  active_from:
+    comment: 'When to start delivering, in the account time zone. Null means all day. A window that wraps midnight is ordinary: 22:00 to 06:00 is how somebody says "not overnight".'
+  active_until:
+    comment: 'When to stop. Outside the window a delivery is held, not dropped: the inbox line exists either way, and a discarded copy makes the badge and the mailbox disagree.'
+  active_days:
+    comment: 'ISO weekdays, 1 being Monday. Empty means every day. An array rather than a bitmask because [1,2,3,4,5] is legible in a settings payload and 62 is not.'
+
+enums:
+  rig_notification_channel:
+    name: RigNotificationChannel
+    description: 'TODO: what does this enumeration represent?'
+    values:
+      Desktop:
+        name: Desktop
+        description: 'TODO: describe this.'
+      Mobile:
+        name: Mobile
+        description: 'TODO: describe this.'
+      Email:
+        name: Email
+        description: 'TODO: describe this.'
+  rig_notification_digest:
+    name: RigNotificationDigest
+    description: 'TODO: what does this enumeration represent?'
+    values:
+      Immediate:
+        name: Immediate
+        description: 'TODO: describe this.'
+      Hourly:
+        name: Hourly
+        description: 'TODO: describe this.'
+      Daily:
+        name: Daily
+        description: 'TODO: describe this.'
+      Weekly:
+        name: Weekly
+        description: 'TODO: describe this.'
+      Off:
+        name: Off
+        description: 'TODO: describe this.'
