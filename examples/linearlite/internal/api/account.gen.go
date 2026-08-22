@@ -9,35 +9,35 @@ import (
 	"github.com/simonjanss/rig/examples/linearlite/internal/model"
 )
 
-// A page of RigAccounts.
-type RigAccountListResponse struct {
+// A page of Accounts.
+type AccountListResponse struct {
 	// The rows in this page.
 	//
 	// Pointers, because that is what the repository returns and copying every row
 	// to change that would be work nobody asked for.
-	Data []*model.RigAccount `json:"data"`
+	Data []*model.Account `json:"data"`
 	// Where this page sits in the full result set.
 	Pagination Pagination `json:"pagination"`
 }
 
-// Query parameters for RigAccount.List.
-type RigAccountListQuery struct {
+// Query parameters for Account.List.
+type AccountListQuery struct {
 	// Maximum rows to return.
 	Limit int `json:"limit"`
 	// Rows to skip before the first returned row.
 	Offset int `json:"offset"`
 }
 
-// Query parameters for RigAccount.ListDeleted.
-type RigAccountListDeletedQuery struct {
+// Query parameters for Account.ListDeleted.
+type AccountListDeletedQuery struct {
 	// Maximum rows to return.
 	Limit int `json:"limit"`
 	// Rows to skip before the first returned row.
 	Offset int `json:"offset"`
 }
 
-// Path parameters for RigAccount.Get.
-type RigAccountGetPath struct {
-	// Identifier of the RigAccount.
+// Path parameters for Account.Get.
+type AccountGetPath struct {
+	// Identifier of the Account.
 	ID uuid.UUID `json:"id"`
 }

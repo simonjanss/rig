@@ -146,7 +146,7 @@ type Handlers struct {
 	// rather than something reached for.
 	Notifications *notify.Service
 
-	RigAccount     RigAccountService
+	Account        AccountService
 	Todo           TodoService
 	TodoAttachment TodoAttachmentService
 }
@@ -191,8 +191,8 @@ func Register(h Handlers) *http.ServeMux {
 
 	mux := http.NewServeMux()
 
-	if h.RigAccount != nil {
-		registerRigAccount(mux, h.Server, h.RigAccount)
+	if h.Account != nil {
+		registerAccount(mux, h.Server, h.Account)
 	}
 	if h.Todo != nil {
 		registerTodo(mux, h.Server, h.Todo)

@@ -2,6 +2,11 @@
 table: rig_account
 comment: One person inside one tenant. The person is the identity; this is who they are here.
 
+# The name the foundation reserves for this table, which is also the name
+# `rig setup-project --expose rig_account` would have written: the resource is
+# Account at /api/v1/accounts, not RigAccount at a path with the prefix in it.
+resource: Account
+
 # The one foundation table this example exposes — `auth.expose` in rig.yaml is
 # what put it in the generated set. The board needs names to put on assignees,
 # and this is the documented way to get them: rig/auth keeps its own queries

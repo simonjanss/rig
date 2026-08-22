@@ -54,14 +54,6 @@ type RigNotificationDeliveryFilterEquals struct {
 	// hostname beside it in the log line, so a stuck lease traces to a pod rather
 	// than to a mystery.
 	ClaimedBy *uuid.UUID `json:"claimedBy,omitempty"`
-	// Conditions on this row's Account.
-	//
-	// A row with no Account never matches, and that holds for the negative
-	// operators too: under NotEquals this asks whether the Account is there and
-	// differs, so a row without one fails that as well. To ask the other question
-	// — no matching Account, which a row with none satisfies — use
-	// Without.Account.
-	Account *RigAccountFilterEquals `json:"account,omitempty"`
 }
 
 // Ordering conditions on RigNotificationDelivery fields that can be compared.
@@ -81,14 +73,6 @@ type RigNotificationDeliveryFilterRange struct {
 	// When a dispatcher took it. Past notifications.claim_ttl another one may,
 	// which is what makes a crashed process recoverable.
 	ClaimedAt *time.Time `json:"claimedAt,omitempty"`
-	// Conditions on this row's Account.
-	//
-	// A row with no Account never matches, and that holds for the negative
-	// operators too: under NotEquals this asks whether the Account is there and
-	// differs, so a row without one fails that as well. To ask the other question
-	// — no matching Account, which a row with none satisfies — use
-	// Without.Account.
-	Account *RigAccountFilterRange `json:"account,omitempty"`
 }
 
 // Set-membership conditions on RigNotificationDelivery fields.
@@ -135,14 +119,6 @@ type RigNotificationDeliveryFilterContains struct {
 	// hostname beside it in the log line, so a stuck lease traces to a pod rather
 	// than to a mystery.
 	ClaimedBy []uuid.UUID `json:"claimedBy,omitempty"`
-	// Conditions on this row's Account.
-	//
-	// A row with no Account never matches, and that holds for the negative
-	// operators too: under NotEquals this asks whether the Account is there and
-	// differs, so a row without one fails that as well. To ask the other question
-	// — no matching Account, which a row with none satisfies — use
-	// Without.Account.
-	Account *RigAccountFilterContains `json:"account,omitempty"`
 }
 
 // Pattern conditions on RigNotificationDelivery text fields.
@@ -153,14 +129,6 @@ type RigNotificationDeliveryFilterLike struct {
 	// What the channel said last time. Kept on a retry as well as on a failure, so
 	// a pattern is visible before the cap is reached.
 	FailedReason *string `json:"failedReason,omitempty"`
-	// Conditions on this row's Account.
-	//
-	// A row with no Account never matches, and that holds for the negative
-	// operators too: under NotEquals this asks whether the Account is there and
-	// differs, so a row without one fails that as well. To ask the other question
-	// — no matching Account, which a row with none satisfies — use
-	// Without.Account.
-	Account *RigAccountFilterLike `json:"account,omitempty"`
 }
 
 // Presence conditions on nullable RigNotificationDelivery fields.
@@ -179,26 +147,6 @@ type RigNotificationDeliveryFilterNull struct {
 	// hostname beside it in the log line, so a stuck lease traces to a pod rather
 	// than to a mystery.
 	ClaimedBy *bool `json:"claimedBy,omitempty"`
-	// Conditions on this row's Account.
-	//
-	// A row with no Account never matches, and that holds for the negative
-	// operators too: under NotEquals this asks whether the Account is there and
-	// differs, so a row without one fails that as well. To ask the other question
-	// — no matching Account, which a row with none satisfies — use
-	// Without.Account.
-	Account *RigAccountFilterNull `json:"account,omitempty"`
-}
-
-// Relations a RigNotificationDelivery must have no matching row for.
-type RigNotificationDeliveryFilterWithout struct {
-	// Match rows with no Account satisfying these conditions, including rows that
-	// have none at all.
-	//
-	// This negates the existence of the related row rather than the comparison,
-	// which is the whole difference from NotEquals.Account: that one needs the
-	// Account to be there and to differ, so a row without one fails it and
-	// satisfies this. An empty object asks for rows with no Account at all.
-	Account *RigAccountFilter `json:"account,omitempty"`
 }
 
 // Conditions a RigNotificationDelivery must satisfy to match a search.
@@ -232,15 +180,6 @@ type RigNotificationDeliveryFilter struct {
 	// Sub-filters combined with this one, so that AND and OR can be mixed to any
 	// depth.
 	NestedFilters []RigNotificationDeliveryFilter `json:"nestedFilters,omitempty"`
-	// Relations with no row matching the given conditions. An empty one asks for
-	// no related row at all.
-	//
-	// This is where a negation belongs when what you mean is "not": it negates
-	// whether a matching related row exists, so a row with no related row at all
-	// satisfies it. The negative operators above negate the comparison instead and
-	// still require the related row to be there — "no related row called X" is
-	// here, "a related row not called X" is NotEquals.
-	Without *RigNotificationDeliveryFilterWithout `json:"without,omitempty"`
 }
 
 // RigNotificationDeliveryPage says which slice of a result to return, and in
@@ -305,21 +244,6 @@ var (
 	RigNotificationDeliveryOrderClaimedByDesc    = RigNotificationDeliveryOrder{Column: "claimed_by", Desc: true}
 )
 
-// RigNotificationDeliveryOrderAccount orders a RigNotificationDelivery by a
-// column of its Account.
-//
-// Take the term from RigAccount's own orderings:
-//
-//	RigNotificationDeliveryOrderAccount(RigAccountOrderIDDesc)
-//
-// The repository reaches it with a left join, so a RigNotificationDelivery
-// with no Account sorts to one end rather than vanishing. Only RigAccount's
-// own columns can be used; an ordering that itself reaches across a relation
-// is refused, because one join is where this stops.
-func RigNotificationDeliveryOrderAccount(o RigAccountOrder) RigNotificationDeliveryOrder {
-	return RigNotificationDeliveryOrder{Relation: "Account", Column: o.Column, Desc: o.Desc}
-}
-
 // NewRigNotificationDeliveryFilterEquals builds an empty
 // RigNotificationDeliveryFilterEquals to fill in.
 func NewRigNotificationDeliveryFilterEquals() *RigNotificationDeliveryFilterEquals {
@@ -348,12 +272,6 @@ func NewRigNotificationDeliveryFilterLike() *RigNotificationDeliveryFilterLike {
 // RigNotificationDeliveryFilterNull to fill in.
 func NewRigNotificationDeliveryFilterNull() *RigNotificationDeliveryFilterNull {
 	return &RigNotificationDeliveryFilterNull{}
-}
-
-// NewRigNotificationDeliveryFilterWithout builds an empty
-// RigNotificationDeliveryFilterWithout to fill in.
-func NewRigNotificationDeliveryFilterWithout() *RigNotificationDeliveryFilterWithout {
-	return &RigNotificationDeliveryFilterWithout{}
 }
 
 // NewRigNotificationDeliveryFilter builds an empty filter, which matches every

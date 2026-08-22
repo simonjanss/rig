@@ -16,26 +16,10 @@ type AccountRoleFilterEquals struct {
 	AccountID *uuid.UUID `json:"accountId,omitempty"`
 	// The role it holds.
 	RoleID *uuid.UUID `json:"roleId,omitempty"`
-	// Conditions on this row's Account.
-	//
-	// A row with no Account never matches, and that holds for the negative
-	// operators too: under NotEquals this asks whether the Account is there and
-	// differs, so a row without one fails that as well. To ask the other question
-	// — no matching Account, which a row with none satisfies — use
-	// Without.Account.
-	Account *RigAccountFilterEquals `json:"account,omitempty"`
 }
 
 // Ordering conditions on AccountRole fields that can be compared.
 type AccountRoleFilterRange struct {
-	// Conditions on this row's Account.
-	//
-	// A row with no Account never matches, and that holds for the negative
-	// operators too: under NotEquals this asks whether the Account is there and
-	// differs, so a row without one fails that as well. To ask the other question
-	// — no matching Account, which a row with none satisfies — use
-	// Without.Account.
-	Account *RigAccountFilterRange `json:"account,omitempty"`
 }
 
 // Set-membership conditions on AccountRole fields.
@@ -46,50 +30,14 @@ type AccountRoleFilterContains struct {
 	AccountID []uuid.UUID `json:"accountId,omitempty"`
 	// The role it holds.
 	RoleID []uuid.UUID `json:"roleId,omitempty"`
-	// Conditions on this row's Account.
-	//
-	// A row with no Account never matches, and that holds for the negative
-	// operators too: under NotEquals this asks whether the Account is there and
-	// differs, so a row without one fails that as well. To ask the other question
-	// — no matching Account, which a row with none satisfies — use
-	// Without.Account.
-	Account *RigAccountFilterContains `json:"account,omitempty"`
 }
 
 // Pattern conditions on AccountRole text fields.
 type AccountRoleFilterLike struct {
-	// Conditions on this row's Account.
-	//
-	// A row with no Account never matches, and that holds for the negative
-	// operators too: under NotEquals this asks whether the Account is there and
-	// differs, so a row without one fails that as well. To ask the other question
-	// — no matching Account, which a row with none satisfies — use
-	// Without.Account.
-	Account *RigAccountFilterLike `json:"account,omitempty"`
 }
 
 // Presence conditions on nullable AccountRole fields.
 type AccountRoleFilterNull struct {
-	// Conditions on this row's Account.
-	//
-	// A row with no Account never matches, and that holds for the negative
-	// operators too: under NotEquals this asks whether the Account is there and
-	// differs, so a row without one fails that as well. To ask the other question
-	// — no matching Account, which a row with none satisfies — use
-	// Without.Account.
-	Account *RigAccountFilterNull `json:"account,omitempty"`
-}
-
-// Relations a AccountRole must have no matching row for.
-type AccountRoleFilterWithout struct {
-	// Match rows with no Account satisfying these conditions, including rows that
-	// have none at all.
-	//
-	// This negates the existence of the related row rather than the comparison,
-	// which is the whole difference from NotEquals.Account: that one needs the
-	// Account to be there and to differ, so a row without one fails it and
-	// satisfies this. An empty object asks for rows with no Account at all.
-	Account *RigAccountFilter `json:"account,omitempty"`
 }
 
 // Conditions a AccountRole must satisfy to match a search.
@@ -123,15 +71,6 @@ type AccountRoleFilter struct {
 	// Sub-filters combined with this one, so that AND and OR can be mixed to any
 	// depth.
 	NestedFilters []AccountRoleFilter `json:"nestedFilters,omitempty"`
-	// Relations with no row matching the given conditions. An empty one asks for
-	// no related row at all.
-	//
-	// This is where a negation belongs when what you mean is "not": it negates
-	// whether a matching related row exists, so a row with no related row at all
-	// satisfies it. The negative operators above negate the comparison instead and
-	// still require the related row to be there — "no related row called X" is
-	// here, "a related row not called X" is NotEquals.
-	Without *AccountRoleFilterWithout `json:"without,omitempty"`
 }
 
 // AccountRolePage says which slice of a result to return, and in what order.
@@ -169,20 +108,6 @@ var (
 	AccountRoleOrderRoleIDDesc    = AccountRoleOrder{Column: "role_id", Desc: true}
 )
 
-// AccountRoleOrderAccount orders a AccountRole by a column of its Account.
-//
-// Take the term from RigAccount's own orderings:
-//
-//	AccountRoleOrderAccount(RigAccountOrderIDDesc)
-//
-// The repository reaches it with a left join, so a AccountRole with no Account
-// sorts to one end rather than vanishing. Only RigAccount's own columns can be
-// used; an ordering that itself reaches across a relation is refused, because
-// one join is where this stops.
-func AccountRoleOrderAccount(o RigAccountOrder) AccountRoleOrder {
-	return AccountRoleOrder{Relation: "Account", Column: o.Column, Desc: o.Desc}
-}
-
 // NewAccountRoleFilterEquals builds an empty AccountRoleFilterEquals to fill
 // in.
 func NewAccountRoleFilterEquals() *AccountRoleFilterEquals { return &AccountRoleFilterEquals{} }
@@ -199,10 +124,6 @@ func NewAccountRoleFilterLike() *AccountRoleFilterLike { return &AccountRoleFilt
 
 // NewAccountRoleFilterNull builds an empty AccountRoleFilterNull to fill in.
 func NewAccountRoleFilterNull() *AccountRoleFilterNull { return &AccountRoleFilterNull{} }
-
-// NewAccountRoleFilterWithout builds an empty AccountRoleFilterWithout to fill
-// in.
-func NewAccountRoleFilterWithout() *AccountRoleFilterWithout { return &AccountRoleFilterWithout{} }
 
 // NewAccountRoleFilter builds an empty filter, which matches every row the
 // caller is allowed to see.

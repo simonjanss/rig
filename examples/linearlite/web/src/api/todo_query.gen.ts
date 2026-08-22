@@ -3,14 +3,6 @@
 // This file is rewritten on every run. Put changes in the code that calls it.
 
 import type {
-    RigAccountFilter,
-    RigAccountFilterContains,
-    RigAccountFilterEquals,
-    RigAccountFilterLike,
-    RigAccountFilterNull,
-    RigAccountFilterRange,
-} from "./rig_account_query.gen.js";
-import type {
     TodoAttachmentFilter,
     TodoAttachmentFilterContains,
     TodoAttachmentFilterEquals,
@@ -107,16 +99,6 @@ export type TodoFilterContains = {
      */
     snapshotFromTodoAt: string[];
     /**
-     * Conditions on this row's AssigneeAccount.
-     *
-     * A row with no AssigneeAccount never matches, and that holds for the
-     * negative operators too: under NotEquals this asks whether the
-     * AssigneeAccount is there and differs, so a row without one fails that as
-     * well. To ask the other question — no matching AssigneeAccount, which a
-     * row with none satisfies — use Without.AssigneeAccount.
-     */
-    assigneeAccount?: RigAccountFilterContains | null;
-    /**
      * Conditions on one of this row's TodoAttachments.
      *
      * Every condition has to hold of the same one, not of the set between them.
@@ -168,16 +150,6 @@ export type TodoFilterEquals = {
      */
     snapshotFromTodoAt?: string | null;
     /**
-     * Conditions on this row's AssigneeAccount.
-     *
-     * A row with no AssigneeAccount never matches, and that holds for the
-     * negative operators too: under NotEquals this asks whether the
-     * AssigneeAccount is there and differs, so a row without one fails that as
-     * well. To ask the other question — no matching AssigneeAccount, which a
-     * row with none satisfies — use Without.AssigneeAccount.
-     */
-    assigneeAccount?: RigAccountFilterEquals | null;
-    /**
      * Conditions on one of this row's TodoAttachments.
      *
      * Every condition has to hold of the same one, not of the set between them.
@@ -196,16 +168,6 @@ export type TodoFilterLike = {
     title?: string | null;
     /** The longer story, or null while the title says it all. */
     description?: string | null;
-    /**
-     * Conditions on this row's AssigneeAccount.
-     *
-     * A row with no AssigneeAccount never matches, and that holds for the
-     * negative operators too: under NotEquals this asks whether the
-     * AssigneeAccount is there and differs, so a row without one fails that as
-     * well. To ask the other question — no matching AssigneeAccount, which a
-     * row with none satisfies — use Without.AssigneeAccount.
-     */
-    assigneeAccount?: RigAccountFilterLike | null;
     /**
      * Conditions on one of this row's TodoAttachments.
      *
@@ -243,16 +205,6 @@ export type TodoFilterNull = {
      */
     snapshotFromTodoAt?: boolean | null;
     /**
-     * Conditions on this row's AssigneeAccount.
-     *
-     * A row with no AssigneeAccount never matches, and that holds for the
-     * negative operators too: under NotEquals this asks whether the
-     * AssigneeAccount is there and differs, so a row without one fails that as
-     * well. To ask the other question — no matching AssigneeAccount, which a
-     * row with none satisfies — use Without.AssigneeAccount.
-     */
-    assigneeAccount?: RigAccountFilterNull | null;
-    /**
      * Conditions on one of this row's TodoAttachments.
      *
      * Every condition has to hold of the same one, not of the set between them.
@@ -279,16 +231,6 @@ export type TodoFilterRange = {
      */
     snapshotFromTodoAt?: string | null;
     /**
-     * Conditions on this row's AssigneeAccount.
-     *
-     * A row with no AssigneeAccount never matches, and that holds for the
-     * negative operators too: under NotEquals this asks whether the
-     * AssigneeAccount is there and differs, so a row without one fails that as
-     * well. To ask the other question — no matching AssigneeAccount, which a
-     * row with none satisfies — use Without.AssigneeAccount.
-     */
-    assigneeAccount?: RigAccountFilterRange | null;
-    /**
      * Conditions on one of this row's TodoAttachments.
      *
      * Every condition has to hold of the same one, not of the set between them.
@@ -303,17 +245,6 @@ export type TodoFilterRange = {
 
 /** Relations a Todo must have no matching row for. */
 export type TodoFilterWithout = {
-    /**
-     * Match rows with no AssigneeAccount satisfying these conditions, including
-     * rows that have none at all.
-     *
-     * This negates the existence of the related row rather than the comparison,
-     * which is the whole difference from NotEquals.AssigneeAccount: that one
-     * needs the AssigneeAccount to be there and to differ, so a row without one
-     * fails it and satisfies this. An empty object asks for rows with no
-     * AssigneeAccount at all.
-     */
-    assigneeAccount?: RigAccountFilter | null;
     /**
      * Match rows with no TodoAttachments satisfying these conditions, including
      * rows with none at all.

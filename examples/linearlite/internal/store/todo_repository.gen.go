@@ -7,7 +7,6 @@ package store
 import (
 	"context"
 	"fmt"
-	"strconv"
 	"time"
 
 	"github.com/google/uuid"
@@ -76,66 +75,6 @@ type TodoRepository interface {
 	// Writing the old values straight over the row would skip both, and a revert
 	// that cannot itself be reverted is not much of a safety net.
 	Revert(ctx context.Context, id, versionID uuid.UUID, hooks dbhook.UpdateHooks[model.TodoUpdateInput, model.Todo]) (*model.Todo, error)
-}
-
-// todoAssigneeAccountFilter collects the conditions written on a Todo's
-// AssigneeAccount.
-//
-// The bool is whether there were any: a relation nobody mentioned is not a
-// condition that everything satisfies, it is no condition at all.
-func todoAssigneeAccountFilter(f model.TodoFilter) (model.RigAccountFilter, bool) {
-	var (
-		sub   model.RigAccountFilter
-		asked bool
-	)
-
-	if p := f.Equals; p != nil && p.AssigneeAccount != nil {
-		sub.Equals, asked = p.AssigneeAccount, true
-	}
-	if p := f.NotEquals; p != nil && p.AssigneeAccount != nil {
-		sub.NotEquals, asked = p.AssigneeAccount, true
-	}
-	if p := f.GreaterThan; p != nil && p.AssigneeAccount != nil {
-		sub.GreaterThan, asked = p.AssigneeAccount, true
-	}
-	if p := f.SmallerThan; p != nil && p.AssigneeAccount != nil {
-		sub.SmallerThan, asked = p.AssigneeAccount, true
-	}
-	if p := f.GreaterOrEqual; p != nil && p.AssigneeAccount != nil {
-		sub.GreaterOrEqual, asked = p.AssigneeAccount, true
-	}
-	if p := f.SmallerOrEqual; p != nil && p.AssigneeAccount != nil {
-		sub.SmallerOrEqual, asked = p.AssigneeAccount, true
-	}
-	if p := f.Contains; p != nil && p.AssigneeAccount != nil {
-		sub.Contains, asked = p.AssigneeAccount, true
-	}
-	if p := f.NotContains; p != nil && p.AssigneeAccount != nil {
-		sub.NotContains, asked = p.AssigneeAccount, true
-	}
-	if p := f.Like; p != nil && p.AssigneeAccount != nil {
-		sub.Like, asked = p.AssigneeAccount, true
-	}
-	if p := f.NotLike; p != nil && p.AssigneeAccount != nil {
-		sub.NotLike, asked = p.AssigneeAccount, true
-	}
-	if p := f.Null; p != nil && p.AssigneeAccount != nil {
-		sub.Null, asked = p.AssigneeAccount, true
-	}
-	if p := f.NotNull; p != nil && p.AssigneeAccount != nil {
-		sub.NotNull, asked = p.AssigneeAccount, true
-	}
-
-	if !asked {
-		return sub, false
-	}
-
-	// The connective comes down with them, and it has to: under OR the caller
-	// asked for a related row satisfying either condition, and one subquery whose
-	// inside is a disjunction is exactly that. Under AND it is the same row
-	// satisfying both, which is the part a subquery per operator could not say.
-	sub.OrCondition = f.OrCondition
-	return sub, true
 }
 
 // todoTodoAttachmentsFilter collects the conditions written on a Todo's
@@ -602,21 +541,6 @@ func todoGroup(f model.TodoFilter, sc filterScope) (query.Group, error) {
 		}
 	}
 
-	if sub, ok := todoAssigneeAccountFilter(f); ok {
-		inner, from, on := sc.belongsTo("rig_account", "id", "assignee_account_id")
-		where, err := rigAccountGroup(sub, inner)
-		if err != nil {
-			return query.Group{}, err
-		}
-
-		// The far side is scoped whatever the read asked for. A read option widens
-		// what this query returns, not what it may look through to decide.
-		where.Add(inner.tenant("tenant_id"))
-		where.Add(inner.live("deleted_at"))
-
-		g.Add(query.Related(query.Exists{From: from, On: on, Where: where}))
-	}
-
 	if sub, ok := todoTodoAttachmentsFilter(f); ok {
 		inner, from, on := sc.hasMany("todo_attachment", "todo_id", "id")
 		where, err := todoAttachmentGroup(sub, inner)
@@ -630,21 +554,6 @@ func todoGroup(f model.TodoFilter, sc filterScope) (query.Group, error) {
 		where.Add(inner.live("deleted_at"))
 
 		g.Add(query.Related(query.Exists{From: from, On: on, Where: where}))
-	}
-
-	if p := f.Without; p != nil && p.AssigneeAccount != nil {
-		inner, from, on := sc.belongsTo("rig_account", "id", "assignee_account_id")
-		where, err := rigAccountGroup(*p.AssigneeAccount, inner)
-		if err != nil {
-			return query.Group{}, err
-		}
-
-		// The far side is scoped whatever the read asked for. A read option widens
-		// what this query returns, not what it may look through to decide.
-		where.Add(inner.tenant("tenant_id"))
-		where.Add(inner.live("deleted_at"))
-
-		g.Add(query.Related(query.Exists{From: from, On: on, Where: where, Not: true}))
 	}
 
 	if p := f.Without; p != nil && p.TodoAttachments != nil {
@@ -681,40 +590,6 @@ func todoSortable(column string) bool {
 	return false
 }
 
-// todoOrderColumn reports whether an ordering names a column of a relation
-// that can be ordered by.
-func todoOrderColumn(relation, column string) error {
-	switch relation {
-	case "AssigneeAccount":
-		if !rigAccountSortable(column) {
-			return rigerr.Invalid("a Todo has no AssigneeAccount that can be ordered by %q", column)
-		}
-		return nil
-	}
-	return rigerr.Invalid("a Todo has no relation named %q to order by", relation)
-}
-
-// todoOrderJoin builds the left join an ordering across a relation needs.
-//
-// The scope predicates go into the join's own condition rather than the
-// statement's WHERE. In WHERE they would be false for a row that matched
-// nothing and would discard it, which is an inner join wearing a left join's
-// clothes.
-func todoOrderJoin(relation, column, alias string, sc filterScope) (query.Join, error) {
-	if err := todoOrderColumn(relation, column); err != nil {
-		return query.Join{}, err
-	}
-
-	switch relation {
-	case "AssigneeAccount":
-		far, j := sc.orderJoin("rig_account", alias, "id", "assignee_account_id")
-		j.Where.Add(far.tenant("tenant_id"))
-		j.Where.Add(far.live("deleted_at"))
-		return j, nil
-	}
-	return query.Join{}, rigerr.Invalid("a Todo has no relation named %q to order by", relation)
-}
-
 // todoOrder converts the model's ordering terms into the runtime's.
 func todoOrder(terms []model.TodoOrder, sc filterScope) ([]query.Order, []query.Join, error) {
 	if len(terms) == 0 {
@@ -722,29 +597,8 @@ func todoOrder(terms []model.TodoOrder, sc filterScope) ([]query.Order, []query.
 	}
 
 	out := make([]query.Order, 0, len(terms))
-	var joins []query.Join
-	// One join per relation however many of its columns are named.
-	aliases := make(map[string]string)
 
 	for _, t := range terms {
-		if t.Relation != "" {
-			alias, ok := aliases[t.Relation]
-			if !ok {
-				alias = strconv.Itoa(len(joins) + 1)
-				alias = "o" + alias
-				join, err := todoOrderJoin(t.Relation, t.Column, alias, sc)
-				if err != nil {
-					return nil, nil, err
-				}
-				joins = append(joins, join)
-				aliases[t.Relation] = alias
-			} else if err := todoOrderColumn(t.Relation, t.Column); err != nil {
-				return nil, nil, err
-			}
-			out = append(out, query.Order{Table: alias, Column: t.Column, Desc: t.Desc})
-			continue
-		}
-
 		// A column this table cannot be ordered by is the caller's mistake, not a
 		// column name to paste into a statement.
 		if !todoSortable(t.Column) {
@@ -753,7 +607,7 @@ func todoOrder(terms []model.TodoOrder, sc filterScope) ([]query.Order, []query.
 		out = append(out, query.Order{Table: sc.as, Column: t.Column, Desc: t.Desc})
 	}
 
-	return out, joins, nil
+	return out, nil, nil
 }
 
 type todoRepo struct {
@@ -959,30 +813,15 @@ func (r *todoRepo) Create(ctx context.Context, in dbhook.Create[model.TodoCreate
 	versionType := model.TodoVersionTypeOriginal
 
 	// A single INSERT is already atomic, so the transaction is opened only when a
-	// hook needs to be able to undo it — or, here, when a reference has to be
-	// checked first. A check on one connection and an insert on another leaves a
-	// window where the row it approved is deleted before the row that points at it
-	// lands.
-	needsTx := true
+	// hook needs to be able to undo it. Two round trips is not a price to pay for
+	// nothing.
+	needsTx := in.Hooks.Before != nil || in.Hooks.After != nil
 
 	var m *model.Todo
 	err = dbx.InTxIf(ctx, r.db.pool, r.db.connFor(ctx), needsTx, func(ctx context.Context, tx dbx.Conn) error {
 		if in.Hooks.Before != nil {
 			if err := in.Hooks.Before(ctx, claims, &in.Input); err != nil {
 				return err
-			}
-		}
-
-		// Every identifier this row would store has to name a row the caller could
-		// have read. One indexed lookup per key, inside the transaction that is about
-		// to do the write.
-		if in.Input.AssigneeAccountID != nil {
-			ok, err := visibleRigAccount(ctx, tx, claims, *in.Input.AssigneeAccountID)
-			if err != nil {
-				return err
-			}
-			if !ok {
-				return &model.TodoCreateInputError{AssigneeAccountID: rigerr.NewFieldError(rigerr.FieldCodeNotFound, "no RigAccount with id %s", *in.Input.AssigneeAccountID)}
 			}
 		}
 
@@ -1066,18 +905,6 @@ func (r *todoRepo) Update(ctx context.Context, id uuid.UUID, in dbhook.Update[mo
 		if in.Hooks.Validator != nil {
 			if err := in.Hooks.Validator.RunUpdate(ctx, claims, &in.Input, prev); err != nil {
 				return err
-			}
-		}
-
-		// Every identifier this update would store has to name a row the caller could
-		// have read — the ones it actually sends, and no others.
-		if v := in.Input.AssigneeAccountID.Ptr(); in.Input.AssigneeAccountID.Touched() && v != nil {
-			ok, err := visibleRigAccount(ctx, tx, claims, *v)
-			if err != nil {
-				return err
-			}
-			if !ok {
-				return &model.TodoUpdateInputError{AssigneeAccountID: rigerr.NewFieldError(rigerr.FieldCodeNotFound, "no RigAccount with id %s", *v)}
 			}
 		}
 

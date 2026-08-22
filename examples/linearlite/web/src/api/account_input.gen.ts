@@ -3,13 +3,13 @@
 // This file is rewritten on every run. Put changes in the code that calls it.
 
 /**
- * RigAccountListQuery is the query string listRigAccounts takes.
+ * AccountListQuery is the query string listAccounts takes.
  *
  * Every member is optional. The server applies a parameter's default when the
  * parameter is absent, so leaving one out is how to ask for the default rather
  * than for zero.
  */
-export type RigAccountListQuery = {
+export type AccountListQuery = {
     /** Maximum rows to return. */
     limit?: number;
     /** Rows to skip before the first returned row. */
@@ -17,13 +17,13 @@ export type RigAccountListQuery = {
 };
 
 /**
- * RigAccountListDeletedQuery is the query string listDeletedRigAccounts takes.
+ * AccountListDeletedQuery is the query string listDeletedAccounts takes.
  *
  * Every member is optional. The server applies a parameter's default when the
  * parameter is absent, so leaving one out is how to ask for the default rather
  * than for zero.
  */
-export type RigAccountListDeletedQuery = {
+export type AccountListDeletedQuery = {
     /** Maximum rows to return. */
     limit?: number;
     /** Rows to skip before the first returned row. */

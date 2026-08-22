@@ -14,11 +14,11 @@ import (
 	"github.com/simonjanss/rig/runtime/tenancy"
 )
 
-// RigAccountCreateInput is what creating a RigAccount takes.
+// AccountCreateInput is what creating a Account takes.
 //
 // The identifier, the tenant, and the audit columns are absent: those are
 // stamped by the repository from the request's claims.
-type RigAccountCreateInput struct {
+type AccountCreateInput struct {
 	// The person this account belongs to, or null for a service account, which is
 	// nobody.
 	IdentityID *uuid.UUID `json:"identityId"`
@@ -45,7 +45,7 @@ type RigAccountCreateInput struct {
 // stored: a title with a trailing space and one without are the same title,
 // and rejecting the second for a length rule the first passes would be
 // indefensible.
-func (i *RigAccountCreateInput) Normalize() {
+func (i *AccountCreateInput) Normalize() {
 	if v, ok := ParseRigAccountKind(string(i.Kind)); ok {
 		i.Kind = v
 	}
@@ -68,14 +68,14 @@ func (i *RigAccountCreateInput) Normalize() {
 	}
 }
 
-// RigAccountCreateInputError says what was wrong with each field of a
-// RigAccountCreateInput.
+// AccountCreateInputError says what was wrong with each field of a
+// AccountCreateInput.
 //
 // Its shape is the input's shape, so a client can attach every message to the
 // field it is about without matching on strings. A member is nil when that
 // field was fine, and the whole value is nil when the input was. It is what
 // the 422 carries.
-type RigAccountCreateInputError struct {
+type AccountCreateInputError struct {
 	// The person this account belongs to, or null for a service account, which is
 	// nobody.
 	IdentityID *rigerr.FieldError `json:"identityId,omitempty"`
@@ -102,7 +102,7 @@ type RigAccountCreateInputError struct {
 
 // Empty reports whether anything went wrong. A validator that found nothing
 // returns nil rather than one of these.
-func (e *RigAccountCreateInputError) Empty() bool {
+func (e *AccountCreateInputError) Empty() bool {
 	if e == nil {
 		return true
 	}
@@ -112,7 +112,7 @@ func (e *RigAccountCreateInputError) Empty() bool {
 
 // Error implements error. The sentence is for logs and for a person; the
 // structure above is what a client acts on.
-func (e *RigAccountCreateInputError) Error() string {
+func (e *AccountCreateInputError) Error() string {
 	var parts []string
 	if e.IdentityID != nil {
 		parts = append(parts, "identityId "+e.IdentityID.Error())
@@ -144,11 +144,11 @@ func (e *RigAccountCreateInputError) Error() string {
 
 // ErrorCode implements [rigerr.Coder]: the request was understood and its
 // content is what is wrong, which is 422 and not 400.
-func (e *RigAccountCreateInputError) ErrorCode() rigerr.Code { return rigerr.CodeUnprocessableEntity }
+func (e *AccountCreateInputError) ErrorCode() rigerr.Code { return rigerr.CodeUnprocessableEntity }
 
 // ErrorFields implements [rigerr.FieldReporter], which is how the HTTP layer
 // finds this and answers with it rather than with prose.
-func (e *RigAccountCreateInputError) ErrorFields() any { return e }
+func (e *AccountCreateInputError) ErrorFields() any { return e }
 
 // Validate checks what the schema can decide on its own.
 //
@@ -157,10 +157,9 @@ func (e *RigAccountCreateInputError) ErrorFields() any { return e }
 // about the business. Every field is checked before returning, because a form
 // that reports one problem per round trip is a form people give up on.
 //
-// What comes back is a *RigAccountCreateInputError, shaped like the input
-// itself.
-func (i *RigAccountCreateInput) Validate() error {
-	var failed RigAccountCreateInputError
+// What comes back is a *AccountCreateInputError, shaped like the input itself.
+func (i *AccountCreateInput) Validate() error {
+	var failed AccountCreateInputError
 
 	if !i.Kind.Valid() {
 		failed.Kind = rigerr.NewFieldError(rigerr.FieldCodeInvalidValue, "%q is not one of the allowed values", i.Kind)
@@ -181,13 +180,13 @@ func (i *RigAccountCreateInput) Validate() error {
 	return &failed
 }
 
-// RigAccountUpdateInput is what changing a RigAccount takes.
+// AccountUpdateInput is what changing a Account takes.
 //
 // A field left out is untouched. A nullable field set to null is cleared —
 // which is why the two wrappers differ: a column that cannot hold null has no
 // way to be given one, so clearing it is a compile error rather than a
 // rejection at runtime. Immutable fields are not here at all.
-type RigAccountUpdateInput struct {
+type AccountUpdateInput struct {
 	// The person this account belongs to, or null for a service account, which is
 	// nobody.
 	IdentityID patch.Nullable[uuid.UUID] `json:"identityId"`
@@ -214,7 +213,7 @@ type RigAccountUpdateInput struct {
 // columns that were sent, and filling them here would turn every update into a
 // write of every column — so two requests changing different fields of one
 // row would start overwriting each other instead of composing.
-func (i *RigAccountUpdateInput) Normalize() {
+func (i *AccountUpdateInput) Normalize() {
 	if v, ok := i.Kind.Get(); ok {
 		if parsed, ok := ParseRigAccountKind(string(v)); ok {
 			v = parsed
@@ -249,7 +248,7 @@ func (i *RigAccountUpdateInput) Normalize() {
 //
 // It returns a copy. The input keeps its patches, so the repository still
 // writes only the columns that were actually given.
-func (i RigAccountUpdateInput) Merged(prev *RigAccount) RigAccount {
+func (i AccountUpdateInput) Merged(prev *Account) Account {
 	out := *prev
 
 	if i.IdentityID.Touched() {
@@ -277,14 +276,14 @@ func (i RigAccountUpdateInput) Merged(prev *RigAccount) RigAccount {
 	return out
 }
 
-// RigAccountUpdateInputError says what was wrong with each field of a
-// RigAccountUpdateInput.
+// AccountUpdateInputError says what was wrong with each field of a
+// AccountUpdateInput.
 //
 // Its shape is the input's shape, so a client can attach every message to the
 // field it is about without matching on strings. A member is nil when that
 // field was fine, and the whole value is nil when the input was. It is what
 // the 422 carries.
-type RigAccountUpdateInputError struct {
+type AccountUpdateInputError struct {
 	// The person this account belongs to, or null for a service account, which is
 	// nobody.
 	IdentityID *rigerr.FieldError `json:"identityId,omitempty"`
@@ -311,7 +310,7 @@ type RigAccountUpdateInputError struct {
 
 // Empty reports whether anything went wrong. A validator that found nothing
 // returns nil rather than one of these.
-func (e *RigAccountUpdateInputError) Empty() bool {
+func (e *AccountUpdateInputError) Empty() bool {
 	if e == nil {
 		return true
 	}
@@ -321,7 +320,7 @@ func (e *RigAccountUpdateInputError) Empty() bool {
 
 // Error implements error. The sentence is for logs and for a person; the
 // structure above is what a client acts on.
-func (e *RigAccountUpdateInputError) Error() string {
+func (e *AccountUpdateInputError) Error() string {
 	var parts []string
 	if e.IdentityID != nil {
 		parts = append(parts, "identityId "+e.IdentityID.Error())
@@ -353,21 +352,20 @@ func (e *RigAccountUpdateInputError) Error() string {
 
 // ErrorCode implements [rigerr.Coder]: the request was understood and its
 // content is what is wrong, which is 422 and not 400.
-func (e *RigAccountUpdateInputError) ErrorCode() rigerr.Code { return rigerr.CodeUnprocessableEntity }
+func (e *AccountUpdateInputError) ErrorCode() rigerr.Code { return rigerr.CodeUnprocessableEntity }
 
 // ErrorFields implements [rigerr.FieldReporter], which is how the HTTP layer
 // finds this and answers with it rather than with prose.
-func (e *RigAccountUpdateInputError) ErrorFields() any { return e }
+func (e *AccountUpdateInputError) ErrorFields() any { return e }
 
 // Validate checks the row this update would produce.
 //
 // Against the merged state, not the request: a length rule on a field nobody
 // sent still has to hold, and a rule about two fields needs both.
 //
-// What comes back is a *RigAccountUpdateInputError, shaped like the input
-// itself.
-func (i *RigAccountUpdateInput) Validate(prev *RigAccount) error {
-	var failed RigAccountUpdateInputError
+// What comes back is a *AccountUpdateInputError, shaped like the input itself.
+func (i *AccountUpdateInput) Validate(prev *Account) error {
+	var failed AccountUpdateInputError
 
 	merged := i.Merged(prev)
 
@@ -390,8 +388,8 @@ func (i *RigAccountUpdateInput) Validate(prev *RigAccount) error {
 	return &failed
 }
 
-// RigAccountDeleteInput is what deleting a RigAccount takes.
-type RigAccountDeleteInput struct {
+// AccountDeleteInput is what deleting a Account takes.
+type AccountDeleteInput struct {
 	// ID is the row to delete.
 	ID uuid.UUID `json:"id"`
 	// Hard removes the row outright instead of retiring it. A hard delete cannot
@@ -399,15 +397,15 @@ type RigAccountDeleteInput struct {
 	Hard bool `json:"hard,omitempty"`
 }
 
-// RigAccountValidatorContext is what a rule sees.
+// AccountValidatorContext is what a rule sees.
 //
 // Values is the row as it will be if this goes through — merged from the
 // previous state on an update, so every field is set whether or not the
 // request mentioned it. That is the point: "ends after starts" cannot be
 // answered from a request that only carried one of them.
-type RigAccountValidatorContext struct {
+type AccountValidatorContext struct {
 	// Values is the intended end state.
-	Values RigAccount
+	Values Account
 
 	// Claims are who is asking. They are a value rather than something to fetch
 	// from the context because a rule that has to look them up is a rule that can
@@ -417,17 +415,17 @@ type RigAccountValidatorContext struct {
 
 	// previous is the row before this change, and is the zero value on a
 	// create — there was nothing before.
-	previous RigAccount
+	previous Account
 	isUpdate bool
 	changed  map[string]bool
 }
 
 // IsUpdate reports whether there was a row before this.
-func (c *RigAccountValidatorContext) IsUpdate() bool { return c.isUpdate }
+func (c *AccountValidatorContext) IsUpdate() bool { return c.isUpdate }
 
 // Previous is the row as it was, and the zero value on a create. Check
 // IsUpdate before reading it.
-func (c *RigAccountValidatorContext) Previous() RigAccount { return c.previous }
+func (c *AccountValidatorContext) Previous() Account { return c.previous }
 
 // Changed reports whether this request carried a new value for a column.
 //
@@ -435,41 +433,35 @@ func (c *RigAccountValidatorContext) Previous() RigAccount { return c.previous }
 // that reaches another service to confirm a reference only needs to run when
 // the reference actually moved. On a create everything is changed, because
 // everything is new.
-func (c *RigAccountValidatorContext) Changed(column string) bool { return c.changed[column] }
+func (c *AccountValidatorContext) Changed(column string) bool { return c.changed[column] }
 
 // IdentityIDChanged reports whether this request set identity_id.
-func (c *RigAccountValidatorContext) IdentityIDChanged() bool {
-	return c.changed[ColumnRigAccountIdentityID]
-}
+func (c *AccountValidatorContext) IdentityIDChanged() bool { return c.changed[ColumnAccountIdentityID] }
 
 // KindChanged reports whether this request set kind.
-func (c *RigAccountValidatorContext) KindChanged() bool { return c.changed[ColumnRigAccountKind] }
+func (c *AccountValidatorContext) KindChanged() bool { return c.changed[ColumnAccountKind] }
 
 // RoleChanged reports whether this request set role.
-func (c *RigAccountValidatorContext) RoleChanged() bool { return c.changed[ColumnRigAccountRole] }
+func (c *AccountValidatorContext) RoleChanged() bool { return c.changed[ColumnAccountRole] }
 
 // EmailAddressChanged reports whether this request set email_address.
-func (c *RigAccountValidatorContext) EmailAddressChanged() bool {
-	return c.changed[ColumnRigAccountEmailAddress]
+func (c *AccountValidatorContext) EmailAddressChanged() bool {
+	return c.changed[ColumnAccountEmailAddress]
 }
 
 // DisplayNameChanged reports whether this request set display_name.
-func (c *RigAccountValidatorContext) DisplayNameChanged() bool {
-	return c.changed[ColumnRigAccountDisplayName]
+func (c *AccountValidatorContext) DisplayNameChanged() bool {
+	return c.changed[ColumnAccountDisplayName]
 }
 
 // TimeZoneChanged reports whether this request set time_zone.
-func (c *RigAccountValidatorContext) TimeZoneChanged() bool {
-	return c.changed[ColumnRigAccountTimeZone]
-}
+func (c *AccountValidatorContext) TimeZoneChanged() bool { return c.changed[ColumnAccountTimeZone] }
 
 // IsActiveChanged reports whether this request set is_active.
-func (c *RigAccountValidatorContext) IsActiveChanged() bool {
-	return c.changed[ColumnRigAccountIsActive]
-}
+func (c *AccountValidatorContext) IsActiveChanged() bool { return c.changed[ColumnAccountIsActive] }
 
-// RigAccountCreateValidator is the rules for bringing a RigAccount into
-// existence: what the schema cannot express.
+// AccountCreateValidator is the rules for bringing a Account into existence:
+// what the schema cannot express.
 //
 // One optional function per field this operation can set, so the set of fields
 // is the set of rules that could apply — a column an update cannot touch has
@@ -479,29 +471,29 @@ func (c *RigAccountValidatorContext) IsActiveChanged() bool {
 //
 // A hook returns a FieldError to attach the message to a specific field, or
 // any other error to fail the request outright.
-type RigAccountCreateValidator struct {
+type AccountCreateValidator struct {
 	// The person this account belongs to, or null for a service account, which is
 	// nobody.
-	IdentityID func(ctx context.Context, c *RigAccountValidatorContext, value *uuid.UUID) error
+	IdentityID func(ctx context.Context, c *AccountValidatorContext, value *uuid.UUID) error
 	// Whether this is a person or a service account an integration acts as.
-	Kind func(ctx context.Context, c *RigAccountValidatorContext, value RigAccountKind) error
+	Kind func(ctx context.Context, c *AccountValidatorContext, value RigAccountKind) error
 	// The coarse level in this tenant: Owner, Admin, or Basic. Somebody can be an
 	// Owner here and Basic elsewhere.
-	Role func(ctx context.Context, c *RigAccountValidatorContext, value RigAccountRoleLevel) error
+	Role func(ctx context.Context, c *AccountValidatorContext, value RigAccountRoleLevel) error
 	// A copy of the identity's address, kept here so listing accounts is one
 	// query. For a service account it is a label nobody signs in with.
-	EmailAddress func(ctx context.Context, c *RigAccountValidatorContext, value string) error
+	EmailAddress func(ctx context.Context, c *AccountValidatorContext, value string) error
 	// What to call the person in this tenant.
-	DisplayName func(ctx context.Context, c *RigAccountValidatorContext, value string) error
+	DisplayName func(ctx context.Context, c *AccountValidatorContext, value string) error
 	// IANA name, for example Europe/Stockholm. Null means UTC.
-	TimeZone func(ctx context.Context, c *RigAccountValidatorContext, value *string) error
+	TimeZone func(ctx context.Context, c *AccountValidatorContext, value *string) error
 	// Whether the account may be used. A disabled account is refused with 403, not
 	// 401.
-	IsActive func(ctx context.Context, c *RigAccountValidatorContext, value bool) error
+	IsActive func(ctx context.Context, c *AccountValidatorContext, value bool) error
 
 	// Entity runs after the per-field hooks, for a rule that is about the row
 	// rather than about one column.
-	Entity func(ctx context.Context, c *RigAccountValidatorContext) error
+	Entity func(ctx context.Context, c *AccountValidatorContext) error
 }
 
 // RunCreate implements [dbhook.CreateValidator]: it runs the service's rules
@@ -511,23 +503,23 @@ type RigAccountCreateValidator struct {
 // and Validate first, so by the time a hook sees the input it is tidy and the
 // schema is satisfied — which is what lets a hook be about the business
 // rather than about NOT NULL.
-func (v RigAccountCreateValidator) RunCreate(ctx context.Context, claims tenancy.Claims, i *RigAccountCreateInput) error {
+func (v AccountCreateValidator) RunCreate(ctx context.Context, claims tenancy.Claims, i *AccountCreateInput) error {
 	// Everything is new, so everything counts as changed.
-	c := &RigAccountValidatorContext{Claims: claims, changed: map[string]bool{}}
+	c := &AccountValidatorContext{Claims: claims, changed: map[string]bool{}}
 	c.Values.IdentityID = i.IdentityID
-	c.changed[ColumnRigAccountIdentityID] = true
+	c.changed[ColumnAccountIdentityID] = true
 	c.Values.Kind = i.Kind
-	c.changed[ColumnRigAccountKind] = true
+	c.changed[ColumnAccountKind] = true
 	c.Values.Role = i.Role
-	c.changed[ColumnRigAccountRole] = true
+	c.changed[ColumnAccountRole] = true
 	c.Values.EmailAddress = i.EmailAddress
-	c.changed[ColumnRigAccountEmailAddress] = true
+	c.changed[ColumnAccountEmailAddress] = true
 	c.Values.DisplayName = i.DisplayName
-	c.changed[ColumnRigAccountDisplayName] = true
+	c.changed[ColumnAccountDisplayName] = true
 	c.Values.TimeZone = i.TimeZone
-	c.changed[ColumnRigAccountTimeZone] = true
+	c.changed[ColumnAccountTimeZone] = true
 	c.Values.IsActive = i.IsActive
-	c.changed[ColumnRigAccountIsActive] = true
+	c.changed[ColumnAccountIsActive] = true
 
 	failed, err := v.run(ctx, c)
 	if err != nil {
@@ -548,8 +540,8 @@ func (v RigAccountCreateValidator) RunCreate(ctx context.Context, claims tenancy
 // not reach another service — and there is nothing to tell the caller about
 // their input, so it comes back wrapped with the rule that could not be run,
 // keeping whatever code it carried and becoming Internal if it carried none.
-func (v RigAccountCreateValidator) run(ctx context.Context, c *RigAccountValidatorContext) (*RigAccountCreateInputError, error) {
-	var failed RigAccountCreateInputError
+func (v AccountCreateValidator) run(ctx context.Context, c *AccountValidatorContext) (*AccountCreateInputError, error) {
+	var failed AccountCreateInputError
 
 	if v.IdentityID != nil {
 		if err := v.IdentityID(ctx, c, c.Values.IdentityID); err != nil {
@@ -631,7 +623,7 @@ func (v RigAccountCreateValidator) run(ctx context.Context, c *RigAccountValidat
 	return &failed, nil
 }
 
-// RigAccountUpdateValidator is the rules for changing one that already exists:
+// AccountUpdateValidator is the rules for changing one that already exists:
 // what the schema cannot express.
 //
 // One optional function per field this operation can set, so the set of fields
@@ -642,49 +634,49 @@ func (v RigAccountCreateValidator) run(ctx context.Context, c *RigAccountValidat
 //
 // A hook returns a FieldError to attach the message to a specific field, or
 // any other error to fail the request outright.
-type RigAccountUpdateValidator struct {
+type AccountUpdateValidator struct {
 	// The person this account belongs to, or null for a service account, which is
 	// nobody.
-	IdentityID func(ctx context.Context, c *RigAccountValidatorContext, value *uuid.UUID) error
+	IdentityID func(ctx context.Context, c *AccountValidatorContext, value *uuid.UUID) error
 	// Whether this is a person or a service account an integration acts as.
-	Kind func(ctx context.Context, c *RigAccountValidatorContext, value RigAccountKind) error
+	Kind func(ctx context.Context, c *AccountValidatorContext, value RigAccountKind) error
 	// The coarse level in this tenant: Owner, Admin, or Basic. Somebody can be an
 	// Owner here and Basic elsewhere.
-	Role func(ctx context.Context, c *RigAccountValidatorContext, value RigAccountRoleLevel) error
+	Role func(ctx context.Context, c *AccountValidatorContext, value RigAccountRoleLevel) error
 	// A copy of the identity's address, kept here so listing accounts is one
 	// query. For a service account it is a label nobody signs in with.
-	EmailAddress func(ctx context.Context, c *RigAccountValidatorContext, value string) error
+	EmailAddress func(ctx context.Context, c *AccountValidatorContext, value string) error
 	// What to call the person in this tenant.
-	DisplayName func(ctx context.Context, c *RigAccountValidatorContext, value string) error
+	DisplayName func(ctx context.Context, c *AccountValidatorContext, value string) error
 	// IANA name, for example Europe/Stockholm. Null means UTC.
-	TimeZone func(ctx context.Context, c *RigAccountValidatorContext, value *string) error
+	TimeZone func(ctx context.Context, c *AccountValidatorContext, value *string) error
 	// Whether the account may be used. A disabled account is refused with 403, not
 	// 401.
-	IsActive func(ctx context.Context, c *RigAccountValidatorContext, value bool) error
+	IsActive func(ctx context.Context, c *AccountValidatorContext, value bool) error
 
 	// Entity runs after the per-field hooks, for a rule that is about the row
 	// rather than about one column.
-	Entity func(ctx context.Context, c *RigAccountValidatorContext) error
+	Entity func(ctx context.Context, c *AccountValidatorContext) error
 }
 
 // RunUpdate implements [dbhook.UpdateValidator]: it runs the service's rules
 // against the row this update would produce, with the row as it was available
 // for a rule about the change itself.
-func (v RigAccountUpdateValidator) RunUpdate(ctx context.Context, claims tenancy.Claims, i *RigAccountUpdateInput, prev *RigAccount) error {
-	c := &RigAccountValidatorContext{
+func (v AccountUpdateValidator) RunUpdate(ctx context.Context, claims tenancy.Claims, i *AccountUpdateInput, prev *Account) error {
+	c := &AccountValidatorContext{
 		Values:   i.Merged(prev),
 		Claims:   claims,
 		previous: *prev,
 		isUpdate: true,
 		changed:  map[string]bool{},
 	}
-	c.changed[ColumnRigAccountIdentityID] = i.IdentityID.Touched()
-	c.changed[ColumnRigAccountKind] = i.Kind.IsSet()
-	c.changed[ColumnRigAccountRole] = i.Role.IsSet()
-	c.changed[ColumnRigAccountEmailAddress] = i.EmailAddress.IsSet()
-	c.changed[ColumnRigAccountDisplayName] = i.DisplayName.IsSet()
-	c.changed[ColumnRigAccountTimeZone] = i.TimeZone.Touched()
-	c.changed[ColumnRigAccountIsActive] = i.IsActive.IsSet()
+	c.changed[ColumnAccountIdentityID] = i.IdentityID.Touched()
+	c.changed[ColumnAccountKind] = i.Kind.IsSet()
+	c.changed[ColumnAccountRole] = i.Role.IsSet()
+	c.changed[ColumnAccountEmailAddress] = i.EmailAddress.IsSet()
+	c.changed[ColumnAccountDisplayName] = i.DisplayName.IsSet()
+	c.changed[ColumnAccountTimeZone] = i.TimeZone.Touched()
+	c.changed[ColumnAccountIsActive] = i.IsActive.IsSet()
 
 	failed, err := v.run(ctx, c)
 	if err != nil {
@@ -702,21 +694,21 @@ func (v RigAccountUpdateValidator) RunUpdate(ctx context.Context, claims tenancy
 // Every rule runs, not only the ones whose field the request mentioned. The
 // row was not live, so nothing about it has been checked against the world it
 // is returning to.
-func (v RigAccountUpdateValidator) RunRestore(ctx context.Context, claims tenancy.Claims, i *RigAccountUpdateInput, prev *RigAccount) error {
-	c := &RigAccountValidatorContext{
+func (v AccountUpdateValidator) RunRestore(ctx context.Context, claims tenancy.Claims, i *AccountUpdateInput, prev *Account) error {
+	c := &AccountValidatorContext{
 		Values:   i.Merged(prev),
 		Claims:   claims,
 		previous: *prev,
 		isUpdate: true,
 		changed:  map[string]bool{},
 	}
-	c.changed[ColumnRigAccountIdentityID] = true
-	c.changed[ColumnRigAccountKind] = true
-	c.changed[ColumnRigAccountRole] = true
-	c.changed[ColumnRigAccountEmailAddress] = true
-	c.changed[ColumnRigAccountDisplayName] = true
-	c.changed[ColumnRigAccountTimeZone] = true
-	c.changed[ColumnRigAccountIsActive] = true
+	c.changed[ColumnAccountIdentityID] = true
+	c.changed[ColumnAccountKind] = true
+	c.changed[ColumnAccountRole] = true
+	c.changed[ColumnAccountEmailAddress] = true
+	c.changed[ColumnAccountDisplayName] = true
+	c.changed[ColumnAccountTimeZone] = true
+	c.changed[ColumnAccountIsActive] = true
 
 	failed, err := v.run(ctx, c)
 	if err != nil {
@@ -737,8 +729,8 @@ func (v RigAccountUpdateValidator) RunRestore(ctx context.Context, claims tenanc
 // not reach another service — and there is nothing to tell the caller about
 // their input, so it comes back wrapped with the rule that could not be run,
 // keeping whatever code it carried and becoming Internal if it carried none.
-func (v RigAccountUpdateValidator) run(ctx context.Context, c *RigAccountValidatorContext) (*RigAccountUpdateInputError, error) {
-	var failed RigAccountUpdateInputError
+func (v AccountUpdateValidator) run(ctx context.Context, c *AccountValidatorContext) (*AccountUpdateInputError, error) {
+	var failed AccountUpdateInputError
 
 	if v.IdentityID != nil {
 		if err := v.IdentityID(ctx, c, c.Values.IdentityID); err != nil {

@@ -154,9 +154,9 @@ type Config struct{}
 type Store struct {
 	pool *pgxpool.Pool
 
+	Accounts                  AccountRepository
 	AccountRoles              AccountRoleRepository
 	Permissions               PermissionRepository
-	RigAccounts               RigAccountRepository
 	RigNotifications          RigNotificationRepository
 	RigNotificationDeliveries RigNotificationDeliveryRepository
 	RigNotificationDevices    RigNotificationDeviceRepository
@@ -170,9 +170,9 @@ type Store struct {
 // New builds a store over a connection pool.
 func New(pool *pgxpool.Pool, _ Config) *Store {
 	s := &Store{pool: pool}
+	s.Accounts = &accountRepo{db: s}
 	s.AccountRoles = &accountRoleRepo{db: s}
 	s.Permissions = &permissionRepo{db: s}
-	s.RigAccounts = &rigAccountRepo{db: s}
 	s.RigNotifications = &rigNotificationRepo{db: s}
 	s.RigNotificationDeliveries = &rigNotificationDeliveryRepo{db: s}
 	s.RigNotificationDevices = &rigNotificationDeviceRepo{db: s}
@@ -251,37 +251,6 @@ func writeError(err error, table string) error {
 	default:
 		return rigerr.Internal(err, "write %s", table)
 	}
-}
-
-// visibleRigAccount reports whether this caller could have read the RigAccount
-// row named, which is what a write pointing at it has to be able to say.
-//
-// It takes the transaction rather than the pool so the answer and the write
-// that depends on it are the same unit of work.
-//
-// There is no readopt here on purpose. SkipTenantScope and SkipOwnerScope
-// exist so a background job can read past the boundary; a request handler
-// reaching a foreign key through them would be the boundary having an opt-out,
-// which is the thing this closes.
-func visibleRigAccount(ctx context.Context, tx dbx.Conn, claims tenancy.Claims, id uuid.UUID) (bool, error) {
-	args := []any{id}
-	where := "id = $1"
-
-	args = append(args, claims.TenantID)
-	where += fmt.Sprintf(" AND tenant_id = $%d", len(args))
-	// A row in the trash is not something to point new rows at: the sweeper is
-	// coming for it, and the reference would outlive it.
-	where += " AND deleted_at IS NULL"
-
-	var one int
-	err := tx.QueryRow(ctx, "SELECT 1 FROM rig_account WHERE "+where, args...).Scan(&one)
-	if dbx.IsNoRows(err) {
-		return false, nil
-	}
-	if err != nil {
-		return false, rigerr.Internal(err, "check that RigAccount %s can be referenced", id)
-	}
-	return true, nil
 }
 
 // visibleTodo reports whether this caller could have read the Todo row named,

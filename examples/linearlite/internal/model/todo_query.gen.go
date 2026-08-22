@@ -44,14 +44,6 @@ type TodoFilterEquals struct {
 	// The source row's last-updated time at the moment this snapshot was taken.
 	// This identifies the version captured, not when the copy was made.
 	SnapshotFromTodoAt *time.Time `json:"snapshotFromTodoAt,omitempty"`
-	// Conditions on this row's AssigneeAccount.
-	//
-	// A row with no AssigneeAccount never matches, and that holds for the negative
-	// operators too: under NotEquals this asks whether the AssigneeAccount is
-	// there and differs, so a row without one fails that as well. To ask the other
-	// question — no matching AssigneeAccount, which a row with none satisfies
-	// — use Without.AssigneeAccount.
-	AssigneeAccount *RigAccountFilterEquals `json:"assigneeAccount,omitempty"`
 	// Conditions on one of this row's TodoAttachments.
 	//
 	// Every condition has to hold of the same one, not of the set between them.
@@ -74,14 +66,6 @@ type TodoFilterRange struct {
 	// The source row's last-updated time at the moment this snapshot was taken.
 	// This identifies the version captured, not when the copy was made.
 	SnapshotFromTodoAt *time.Time `json:"snapshotFromTodoAt,omitempty"`
-	// Conditions on this row's AssigneeAccount.
-	//
-	// A row with no AssigneeAccount never matches, and that holds for the negative
-	// operators too: under NotEquals this asks whether the AssigneeAccount is
-	// there and differs, so a row without one fails that as well. To ask the other
-	// question — no matching AssigneeAccount, which a row with none satisfies
-	// — use Without.AssigneeAccount.
-	AssigneeAccount *RigAccountFilterRange `json:"assigneeAccount,omitempty"`
 	// Conditions on one of this row's TodoAttachments.
 	//
 	// Every condition has to hold of the same one, not of the set between them.
@@ -127,14 +111,6 @@ type TodoFilterContains struct {
 	// The source row's last-updated time at the moment this snapshot was taken.
 	// This identifies the version captured, not when the copy was made.
 	SnapshotFromTodoAt []time.Time `json:"snapshotFromTodoAt,omitempty"`
-	// Conditions on this row's AssigneeAccount.
-	//
-	// A row with no AssigneeAccount never matches, and that holds for the negative
-	// operators too: under NotEquals this asks whether the AssigneeAccount is
-	// there and differs, so a row without one fails that as well. To ask the other
-	// question — no matching AssigneeAccount, which a row with none satisfies
-	// — use Without.AssigneeAccount.
-	AssigneeAccount *RigAccountFilterContains `json:"assigneeAccount,omitempty"`
 	// Conditions on one of this row's TodoAttachments.
 	//
 	// Every condition has to hold of the same one, not of the set between them.
@@ -152,14 +128,6 @@ type TodoFilterLike struct {
 	Title *string `json:"title,omitempty"`
 	// The longer story, or null while the title says it all.
 	Description *string `json:"description,omitempty"`
-	// Conditions on this row's AssigneeAccount.
-	//
-	// A row with no AssigneeAccount never matches, and that holds for the negative
-	// operators too: under NotEquals this asks whether the AssigneeAccount is
-	// there and differs, so a row without one fails that as well. To ask the other
-	// question — no matching AssigneeAccount, which a row with none satisfies
-	// — use Without.AssigneeAccount.
-	AssigneeAccount *RigAccountFilterLike `json:"assigneeAccount,omitempty"`
 	// Conditions on one of this row's TodoAttachments.
 	//
 	// Every condition has to hold of the same one, not of the set between them.
@@ -192,14 +160,6 @@ type TodoFilterNull struct {
 	// The source row's last-updated time at the moment this snapshot was taken.
 	// This identifies the version captured, not when the copy was made.
 	SnapshotFromTodoAt *bool `json:"snapshotFromTodoAt,omitempty"`
-	// Conditions on this row's AssigneeAccount.
-	//
-	// A row with no AssigneeAccount never matches, and that holds for the negative
-	// operators too: under NotEquals this asks whether the AssigneeAccount is
-	// there and differs, so a row without one fails that as well. To ask the other
-	// question — no matching AssigneeAccount, which a row with none satisfies
-	// — use Without.AssigneeAccount.
-	AssigneeAccount *RigAccountFilterNull `json:"assigneeAccount,omitempty"`
 	// Conditions on one of this row's TodoAttachments.
 	//
 	// Every condition has to hold of the same one, not of the set between them.
@@ -213,15 +173,6 @@ type TodoFilterNull struct {
 
 // Relations a Todo must have no matching row for.
 type TodoFilterWithout struct {
-	// Match rows with no AssigneeAccount satisfying these conditions, including
-	// rows that have none at all.
-	//
-	// This negates the existence of the related row rather than the comparison,
-	// which is the whole difference from NotEquals.AssigneeAccount: that one needs
-	// the AssigneeAccount to be there and to differ, so a row without one fails it
-	// and satisfies this. An empty object asks for rows with no AssigneeAccount at
-	// all.
-	AssigneeAccount *RigAccountFilter `json:"assigneeAccount,omitempty"`
 	// Match rows with no TodoAttachments satisfying these conditions, including
 	// rows with none at all.
 	//
@@ -335,20 +286,6 @@ var (
 	TodoOrderSnapshotFromTodoAtAsc  = TodoOrder{Column: "snapshot_from_todo_at"}
 	TodoOrderSnapshotFromTodoAtDesc = TodoOrder{Column: "snapshot_from_todo_at", Desc: true}
 )
-
-// TodoOrderAssigneeAccount orders a Todo by a column of its AssigneeAccount.
-//
-// Take the term from RigAccount's own orderings:
-//
-//	TodoOrderAssigneeAccount(RigAccountOrderIDDesc)
-//
-// The repository reaches it with a left join, so a Todo with no
-// AssigneeAccount sorts to one end rather than vanishing. Only RigAccount's
-// own columns can be used; an ordering that itself reaches across a relation
-// is refused, because one join is where this stops.
-func TodoOrderAssigneeAccount(o RigAccountOrder) TodoOrder {
-	return TodoOrder{Relation: "AssigneeAccount", Column: o.Column, Desc: o.Desc}
-}
 
 // NewTodoFilterEquals builds an empty TodoFilterEquals to fill in.
 func NewTodoFilterEquals() *TodoFilterEquals { return &TodoFilterEquals{} }

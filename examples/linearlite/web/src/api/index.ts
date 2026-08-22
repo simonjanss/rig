@@ -10,14 +10,13 @@
  * @rig/client directly, which is where their documentation is.
  */
 
+export * from "./account.gen.js";
+export * from "./account_client.gen.js";
+export * from "./account_input.gen.js";
 export * from "./client.gen.js";
 export * from "./electric.gen.js";
 export * from "./objects.gen.js";
-export * from "./rig_account.gen.js";
-export * from "./rig_account_client.gen.js";
-export * from "./rig_account_input.gen.js";
 export * from "./rig_account_kind.gen.js";
-export * from "./rig_account_query.gen.js";
 export * from "./rig_account_role_level.gen.js";
 export * from "./todo.gen.js";
 export * from "./todo_attachment.gen.js";

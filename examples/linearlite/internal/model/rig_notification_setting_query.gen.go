@@ -42,14 +42,6 @@ type RigNotificationSettingFilterEquals struct {
 	// ISO weekdays, 1 being Monday. Empty means every day. An array rather than a
 	// bitmask because [1,2,3,4,5] is legible in a settings payload and 62 is not.
 	ActiveDays []int16 `json:"activeDays,omitempty"`
-	// Conditions on this row's Account.
-	//
-	// A row with no Account never matches, and that holds for the negative
-	// operators too: under NotEquals this asks whether the Account is there and
-	// differs, so a row without one fails that as well. To ask the other question
-	// — no matching Account, which a row with none satisfies — use
-	// Without.Account.
-	Account *RigAccountFilterEquals `json:"account,omitempty"`
 }
 
 // Ordering conditions on RigNotificationSetting fields that can be compared.
@@ -66,14 +58,6 @@ type RigNotificationSettingFilterRange struct {
 	// line exists either way, and a discarded copy makes the badge and the mailbox
 	// disagree.
 	ActiveUntil *time.Time `json:"activeUntil,omitempty"`
-	// Conditions on this row's Account.
-	//
-	// A row with no Account never matches, and that holds for the negative
-	// operators too: under NotEquals this asks whether the Account is there and
-	// differs, so a row without one fails that as well. To ask the other question
-	// — no matching Account, which a row with none satisfies — use
-	// Without.Account.
-	Account *RigAccountFilterRange `json:"account,omitempty"`
 }
 
 // Set-membership conditions on RigNotificationSetting fields.
@@ -105,14 +89,6 @@ type RigNotificationSettingFilterContains struct {
 	// line exists either way, and a discarded copy makes the badge and the mailbox
 	// disagree.
 	ActiveUntil []time.Time `json:"activeUntil,omitempty"`
-	// Conditions on this row's Account.
-	//
-	// A row with no Account never matches, and that holds for the negative
-	// operators too: under NotEquals this asks whether the Account is there and
-	// differs, so a row without one fails that as well. To ask the other question
-	// — no matching Account, which a row with none satisfies — use
-	// Without.Account.
-	Account *RigAccountFilterContains `json:"account,omitempty"`
 }
 
 // Pattern conditions on RigNotificationSetting text fields.
@@ -120,14 +96,6 @@ type RigNotificationSettingFilterLike struct {
 	// Null is the default for the channel, which is the second step of the
 	// resolution.
 	Kind *string `json:"kind,omitempty"`
-	// Conditions on this row's Account.
-	//
-	// A row with no Account never matches, and that holds for the negative
-	// operators too: under NotEquals this asks whether the Account is there and
-	// differs, so a row without one fails that as well. To ask the other question
-	// — no matching Account, which a row with none satisfies — use
-	// Without.Account.
-	Account *RigAccountFilterLike `json:"account,omitempty"`
 }
 
 // Presence conditions on nullable RigNotificationSetting fields.
@@ -145,26 +113,6 @@ type RigNotificationSettingFilterNull struct {
 	// line exists either way, and a discarded copy makes the badge and the mailbox
 	// disagree.
 	ActiveUntil *bool `json:"activeUntil,omitempty"`
-	// Conditions on this row's Account.
-	//
-	// A row with no Account never matches, and that holds for the negative
-	// operators too: under NotEquals this asks whether the Account is there and
-	// differs, so a row without one fails that as well. To ask the other question
-	// — no matching Account, which a row with none satisfies — use
-	// Without.Account.
-	Account *RigAccountFilterNull `json:"account,omitempty"`
-}
-
-// Relations a RigNotificationSetting must have no matching row for.
-type RigNotificationSettingFilterWithout struct {
-	// Match rows with no Account satisfying these conditions, including rows that
-	// have none at all.
-	//
-	// This negates the existence of the related row rather than the comparison,
-	// which is the whole difference from NotEquals.Account: that one needs the
-	// Account to be there and to differ, so a row without one fails it and
-	// satisfies this. An empty object asks for rows with no Account at all.
-	Account *RigAccountFilter `json:"account,omitempty"`
 }
 
 // Conditions a RigNotificationSetting must satisfy to match a search.
@@ -198,15 +146,6 @@ type RigNotificationSettingFilter struct {
 	// Sub-filters combined with this one, so that AND and OR can be mixed to any
 	// depth.
 	NestedFilters []RigNotificationSettingFilter `json:"nestedFilters,omitempty"`
-	// Relations with no row matching the given conditions. An empty one asks for
-	// no related row at all.
-	//
-	// This is where a negation belongs when what you mean is "not": it negates
-	// whether a matching related row exists, so a row with no related row at all
-	// satisfies it. The negative operators above negate the comparison instead and
-	// still require the related row to be there — "no related row called X" is
-	// here, "a related row not called X" is NotEquals.
-	Without *RigNotificationSettingFilterWithout `json:"without,omitempty"`
 }
 
 // RigNotificationSettingPage says which slice of a result to return, and in
@@ -261,21 +200,6 @@ var (
 	RigNotificationSettingOrderActiveUntilDesc = RigNotificationSettingOrder{Column: "active_until", Desc: true}
 )
 
-// RigNotificationSettingOrderAccount orders a RigNotificationSetting by a
-// column of its Account.
-//
-// Take the term from RigAccount's own orderings:
-//
-//	RigNotificationSettingOrderAccount(RigAccountOrderIDDesc)
-//
-// The repository reaches it with a left join, so a RigNotificationSetting with
-// no Account sorts to one end rather than vanishing. Only RigAccount's own
-// columns can be used; an ordering that itself reaches across a relation is
-// refused, because one join is where this stops.
-func RigNotificationSettingOrderAccount(o RigAccountOrder) RigNotificationSettingOrder {
-	return RigNotificationSettingOrder{Relation: "Account", Column: o.Column, Desc: o.Desc}
-}
-
 // NewRigNotificationSettingFilterEquals builds an empty
 // RigNotificationSettingFilterEquals to fill in.
 func NewRigNotificationSettingFilterEquals() *RigNotificationSettingFilterEquals {
@@ -304,12 +228,6 @@ func NewRigNotificationSettingFilterLike() *RigNotificationSettingFilterLike {
 // RigNotificationSettingFilterNull to fill in.
 func NewRigNotificationSettingFilterNull() *RigNotificationSettingFilterNull {
 	return &RigNotificationSettingFilterNull{}
-}
-
-// NewRigNotificationSettingFilterWithout builds an empty
-// RigNotificationSettingFilterWithout to fill in.
-func NewRigNotificationSettingFilterWithout() *RigNotificationSettingFilterWithout {
-	return &RigNotificationSettingFilterWithout{}
 }
 
 // NewRigNotificationSettingFilter builds an empty filter, which matches every

@@ -9,7 +9,7 @@ import (
 	"github.com/simonjanss/rig/runtime/dbhook"
 )
 
-// rules is RigAccount's business logic.
+// rules is Account's business logic.
 //
 // It describes itself and nothing else: the hooks it wants, the endpoints the
 // configuration declared, and the writer it is handed in return. Nothing here
@@ -22,38 +22,38 @@ import (
 // Unlike the .gen.go files, this one is yours: rig writes it once and never
 // touches it again.
 type rules struct {
-	repo store.RigAccountRepository
+	repo store.AccountRepository
 	// write performs a write with the hooks below already attached. Use it rather
 	// than the repository: reaching for the repository means passing the hooks by
 	// hand, and forgetting once is a second way into the table where the rules do
 	// not run.
-	write api.RigAccountWriter
+	write api.AccountWriter
 }
 
 // rules satisfies what the constructor asks for. The check is here so that a
 // new endpoint in the configuration becomes a compile error rather than a
 // route that answers 501 at runtime.
-var _ api.RigAccountRules = (*rules)(nil)
+var _ api.AccountRules = (*rules)(nil)
 
 // New builds the service.
 //
 // To override a generated operation, wrap what this returns and shadow the
 // promoted method:
 //
-//	type Service struct{ api.DefaultRigAccountService }
+//	type Service struct{ api.DefaultAccountService }
 //	func (s *Service) Get(ctx context.Context, r api.Request[…]) (…) { … }
 //
 // The custom endpoints keep working through the value inside it, so only what
 // you shadow changes.
-func New(repo store.RigAccountRepository) api.DefaultRigAccountService {
-	return api.NewRigAccountService(repo, &rules{repo: repo})
+func New(repo store.AccountRepository) api.DefaultAccountService {
+	return api.NewAccountService(repo, &rules{repo: repo})
 }
 
 // Bind receives the writer built from the hooks below. rig calls it once,
 // during construction.
-func (s *rules) Bind(w api.RigAccountWriter) { s.write = w }
+func (s *rules) Bind(w api.AccountWriter) { s.write = w }
 
-// Hooks is everything about RigAccount that the schema cannot describe, in the
+// Hooks is everything about Account that the schema cannot describe, in the
 // order it runs: the rules, then Before and After inside the transaction —
 // returning an error from either undoes the write — then AfterCommit once it
 // has landed, which is the only safe place to tell anything outside the
@@ -67,14 +67,14 @@ func (s *rules) Bind(w api.RigAccountWriter) { s.write = w }
 // It is asked for rather than set, so there is no way to end up with a service
 // whose rules were never attached. An empty one is a fine answer; it is just
 // an answer.
-func (s *rules) Hooks() api.RigAccountHooks {
-	return api.RigAccountHooks{
-		Read: dbhook.ReadHooks[model.RigAccountFilter, model.RigAccount]{
+func (s *rules) Hooks() api.AccountHooks {
+	return api.AccountHooks{
+		Read: dbhook.ReadHooks[model.AccountFilter, model.Account]{
 			Narrow: nil,
 			Rows:   nil,
 		},
-		Create: dbhook.CreateHooks[model.RigAccountCreateInput, model.RigAccount]{
-			Validator: model.RigAccountCreateValidator{
+		Create: dbhook.CreateHooks[model.AccountCreateInput, model.Account]{
+			Validator: model.AccountCreateValidator{
 				IdentityID:   nil,
 				Kind:         nil,
 				Role:         nil,
@@ -88,8 +88,8 @@ func (s *rules) Hooks() api.RigAccountHooks {
 			After:       nil,
 			AfterCommit: nil,
 		},
-		Update: dbhook.UpdateHooks[model.RigAccountUpdateInput, model.RigAccount]{
-			Validator: model.RigAccountUpdateValidator{
+		Update: dbhook.UpdateHooks[model.AccountUpdateInput, model.Account]{
+			Validator: model.AccountUpdateValidator{
 				IdentityID:   nil,
 				Kind:         nil,
 				Role:         nil,
@@ -103,13 +103,13 @@ func (s *rules) Hooks() api.RigAccountHooks {
 			After:       nil,
 			AfterCommit: nil,
 		},
-		Delete: dbhook.DeleteHooks[model.RigAccountDeleteInput, model.RigAccount]{
+		Delete: dbhook.DeleteHooks[model.AccountDeleteInput, model.Account]{
 			Before:      nil,
 			After:       nil,
 			AfterCommit: nil,
 		},
-		Restore: dbhook.RestoreHooks[model.RigAccountUpdateInput, model.RigAccount]{
-			Validator: model.RigAccountUpdateValidator{
+		Restore: dbhook.RestoreHooks[model.AccountUpdateInput, model.Account]{
+			Validator: model.AccountUpdateValidator{
 				IdentityID:   nil,
 				Kind:         nil,
 				Role:         nil,
@@ -127,7 +127,7 @@ func (s *rules) Hooks() api.RigAccountHooks {
 }
 
 // validateEmailAddress is an example rule. Delete it, and set EmailAddress
-// back to nil in business, if RigAccount needs none.
+// back to nil in business, if Account needs none.
 //
 // A rule that needs something reaches it through s, which is why the rules are
 // methods.
@@ -135,7 +135,7 @@ func (s *rules) Hooks() api.RigAccountHooks {
 // Returning a FieldError attaches the message to email_address, so the client
 // is answered with a 422 whose body names the field rather than a sentence it
 // has to read. Returning any other error fails the request as that error.
-func (s *rules) validateEmailAddress(ctx context.Context, c *model.RigAccountValidatorContext, value string) error {
+func (s *rules) validateEmailAddress(ctx context.Context, c *model.AccountValidatorContext, value string) error {
 	// c.Values is the whole row as it will be, c.Previous() is how it was, and
 	// c.EmailAddressChanged() reports whether this request touched it — which is
 	// how an expensive check is kept off every write.

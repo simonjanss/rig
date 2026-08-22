@@ -33,14 +33,6 @@ type RigNotificationDeviceFilterEquals struct {
 	// When it stopped being a place to send to. Kept rather than deleted, so a
 	// token that comes back can be recognised.
 	RevokedAt *time.Time `json:"revokedAt,omitempty"`
-	// Conditions on this row's Account.
-	//
-	// A row with no Account never matches, and that holds for the negative
-	// operators too: under NotEquals this asks whether the Account is there and
-	// differs, so a row without one fails that as well. To ask the other question
-	// — no matching Account, which a row with none satisfies — use
-	// Without.Account.
-	Account *RigAccountFilterEquals `json:"account,omitempty"`
 }
 
 // Ordering conditions on RigNotificationDevice fields that can be compared.
@@ -55,14 +47,6 @@ type RigNotificationDeviceFilterRange struct {
 	// When it stopped being a place to send to. Kept rather than deleted, so a
 	// token that comes back can be recognised.
 	RevokedAt *time.Time `json:"revokedAt,omitempty"`
-	// Conditions on this row's Account.
-	//
-	// A row with no Account never matches, and that holds for the negative
-	// operators too: under NotEquals this asks whether the Account is there and
-	// differs, so a row without one fails that as well. To ask the other question
-	// — no matching Account, which a row with none satisfies — use
-	// Without.Account.
-	Account *RigAccountFilterRange `json:"account,omitempty"`
 }
 
 // Set-membership conditions on RigNotificationDevice fields.
@@ -88,14 +72,6 @@ type RigNotificationDeviceFilterContains struct {
 	// When it stopped being a place to send to. Kept rather than deleted, so a
 	// token that comes back can be recognised.
 	RevokedAt []time.Time `json:"revokedAt,omitempty"`
-	// Conditions on this row's Account.
-	//
-	// A row with no Account never matches, and that holds for the negative
-	// operators too: under NotEquals this asks whether the Account is there and
-	// differs, so a row without one fails that as well. To ask the other question
-	// — no matching Account, which a row with none satisfies — use
-	// Without.Account.
-	Account *RigAccountFilterContains `json:"account,omitempty"`
 }
 
 // Pattern conditions on RigNotificationDevice text fields.
@@ -105,14 +81,6 @@ type RigNotificationDeviceFilterLike struct {
 	// What a person sees in a list of their devices, and the column that makes
 	// revoking one possible for somebody who has four.
 	Label *string `json:"label,omitempty"`
-	// Conditions on this row's Account.
-	//
-	// A row with no Account never matches, and that holds for the negative
-	// operators too: under NotEquals this asks whether the Account is there and
-	// differs, so a row without one fails that as well. To ask the other question
-	// — no matching Account, which a row with none satisfies — use
-	// Without.Account.
-	Account *RigAccountFilterLike `json:"account,omitempty"`
 }
 
 // Presence conditions on nullable RigNotificationDevice fields.
@@ -128,26 +96,6 @@ type RigNotificationDeviceFilterNull struct {
 	// When it stopped being a place to send to. Kept rather than deleted, so a
 	// token that comes back can be recognised.
 	RevokedAt *bool `json:"revokedAt,omitempty"`
-	// Conditions on this row's Account.
-	//
-	// A row with no Account never matches, and that holds for the negative
-	// operators too: under NotEquals this asks whether the Account is there and
-	// differs, so a row without one fails that as well. To ask the other question
-	// — no matching Account, which a row with none satisfies — use
-	// Without.Account.
-	Account *RigAccountFilterNull `json:"account,omitempty"`
-}
-
-// Relations a RigNotificationDevice must have no matching row for.
-type RigNotificationDeviceFilterWithout struct {
-	// Match rows with no Account satisfying these conditions, including rows that
-	// have none at all.
-	//
-	// This negates the existence of the related row rather than the comparison,
-	// which is the whole difference from NotEquals.Account: that one needs the
-	// Account to be there and to differ, so a row without one fails it and
-	// satisfies this. An empty object asks for rows with no Account at all.
-	Account *RigAccountFilter `json:"account,omitempty"`
 }
 
 // Conditions a RigNotificationDevice must satisfy to match a search.
@@ -181,15 +129,6 @@ type RigNotificationDeviceFilter struct {
 	// Sub-filters combined with this one, so that AND and OR can be mixed to any
 	// depth.
 	NestedFilters []RigNotificationDeviceFilter `json:"nestedFilters,omitempty"`
-	// Relations with no row matching the given conditions. An empty one asks for
-	// no related row at all.
-	//
-	// This is where a negation belongs when what you mean is "not": it negates
-	// whether a matching related row exists, so a row with no related row at all
-	// satisfies it. The negative operators above negate the comparison instead and
-	// still require the related row to be there — "no related row called X" is
-	// here, "a related row not called X" is NotEquals.
-	Without *RigNotificationDeviceFilterWithout `json:"without,omitempty"`
 }
 
 // RigNotificationDevicePage says which slice of a result to return, and in
@@ -242,21 +181,6 @@ var (
 	RigNotificationDeviceOrderRevokedAtDesc  = RigNotificationDeviceOrder{Column: "revoked_at", Desc: true}
 )
 
-// RigNotificationDeviceOrderAccount orders a RigNotificationDevice by a column
-// of its Account.
-//
-// Take the term from RigAccount's own orderings:
-//
-//	RigNotificationDeviceOrderAccount(RigAccountOrderIDDesc)
-//
-// The repository reaches it with a left join, so a RigNotificationDevice with
-// no Account sorts to one end rather than vanishing. Only RigAccount's own
-// columns can be used; an ordering that itself reaches across a relation is
-// refused, because one join is where this stops.
-func RigNotificationDeviceOrderAccount(o RigAccountOrder) RigNotificationDeviceOrder {
-	return RigNotificationDeviceOrder{Relation: "Account", Column: o.Column, Desc: o.Desc}
-}
-
 // NewRigNotificationDeviceFilterEquals builds an empty
 // RigNotificationDeviceFilterEquals to fill in.
 func NewRigNotificationDeviceFilterEquals() *RigNotificationDeviceFilterEquals {
@@ -285,12 +209,6 @@ func NewRigNotificationDeviceFilterLike() *RigNotificationDeviceFilterLike {
 // RigNotificationDeviceFilterNull to fill in.
 func NewRigNotificationDeviceFilterNull() *RigNotificationDeviceFilterNull {
 	return &RigNotificationDeviceFilterNull{}
-}
-
-// NewRigNotificationDeviceFilterWithout builds an empty
-// RigNotificationDeviceFilterWithout to fill in.
-func NewRigNotificationDeviceFilterWithout() *RigNotificationDeviceFilterWithout {
-	return &RigNotificationDeviceFilterWithout{}
 }
 
 // NewRigNotificationDeviceFilter builds an empty filter, which matches every

@@ -7,7 +7,6 @@ package store
 import (
 	"context"
 	"fmt"
-	"strconv"
 	"time"
 
 	"github.com/google/uuid"
@@ -21,37 +20,37 @@ import (
 	"github.com/simonjanss/rig/runtime/tenancy"
 )
 
-// RigAccountRepository reads and writes rig_account rows.
+// AccountRepository reads and writes rig_account rows.
 //
 // Every method scopes to the caller's tenant. There is no way to ask it not to
 // from a request handler, which is the point.
-type RigAccountRepository interface {
+type AccountRepository interface {
 	// Get returns one row by identifier.
 	//
 	// A lookup by primary key deliberately ignores the lifecycle filters: it
 	// returns the row whether it is live, deleted, or a snapshot, because a caller
 	// holding an identifier is usually asking about that exact row.
-	Get(ctx context.Context, id uuid.UUID, opts ...readopt.Option) (*model.RigAccount, error)
+	Get(ctx context.Context, id uuid.UUID, opts ...readopt.Option) (*model.Account, error)
 
 	// List returns matching rows and the total ignoring pagination.
 	//
 	// The filter says which rows and the page says how many of them, in what
 	// order. They are separate arguments because they arrive separately: the
 	// filter is a request body, the page is two query parameters.
-	List(ctx context.Context, f model.RigAccountFilter, page model.RigAccountPage, opts ...readopt.Option) ([]*model.RigAccount, int64, error)
+	List(ctx context.Context, f model.AccountFilter, page model.AccountPage, opts ...readopt.Option) ([]*model.Account, int64, error)
 
 	// Create inserts a row, stamping the identifier, tenant and audit columns.
 	//
 	// It takes an envelope rather than the input alone: the rules that check the
 	// input and the callbacks that run around the write belong to the same unit of
 	// work as the write itself.
-	Create(ctx context.Context, in dbhook.Create[model.RigAccountCreateInput, model.RigAccount]) (*model.RigAccount, error)
+	Create(ctx context.Context, in dbhook.Create[model.AccountCreateInput, model.Account]) (*model.Account, error)
 
 	// Update changes the fields the input mentions and leaves the rest alone.
-	Update(ctx context.Context, id uuid.UUID, in dbhook.Update[model.RigAccountUpdateInput, model.RigAccount]) (*model.RigAccount, error)
+	Update(ctx context.Context, id uuid.UUID, in dbhook.Update[model.AccountUpdateInput, model.Account]) (*model.Account, error)
 
 	// Delete retires a row by stamping its deletion time. It is idempotent.
-	Delete(ctx context.Context, in dbhook.Delete[model.RigAccountDeleteInput, model.RigAccount]) error
+	Delete(ctx context.Context, in dbhook.Delete[model.AccountDeleteInput, model.Account]) error
 
 	// Restore brings a deleted row back, if it is still inside the window.
 	//
@@ -59,18 +58,18 @@ type RigAccountRepository interface {
 	// while the row was retired: a unique value can have been taken by something
 	// created since, and the only way back is to bring the row back under a
 	// different one. An empty input restores it as it was.
-	Restore(ctx context.Context, id uuid.UUID, in dbhook.Restore[model.RigAccountUpdateInput, model.RigAccount]) (*model.RigAccount, error)
+	Restore(ctx context.Context, id uuid.UUID, in dbhook.Restore[model.AccountUpdateInput, model.Account]) (*model.Account, error)
 
 	// ListDeleted returns retired rows still inside the restore window.
-	ListDeleted(ctx context.Context, f model.RigAccountFilter, page model.RigAccountPage, opts ...readopt.Option) ([]*model.RigAccount, int64, error)
+	ListDeleted(ctx context.Context, f model.AccountFilter, page model.AccountPage, opts ...readopt.Option) ([]*model.Account, int64, error)
 }
 
-// rigAccountAssigneeAccountTodosFilter collects the conditions written on a
-// RigAccount's AssigneeAccountTodos.
+// accountAssigneeAccountTodosFilter collects the conditions written on a
+// Account's AssigneeAccountTodos.
 //
 // The bool is whether there were any: a relation nobody mentioned is not a
 // condition that everything satisfies, it is no condition at all.
-func rigAccountAssigneeAccountTodosFilter(f model.RigAccountFilter) (model.TodoFilter, bool) {
+func accountAssigneeAccountTodosFilter(f model.AccountFilter) (model.TodoFilter, bool) {
 	var (
 		sub   model.TodoFilter
 		asked bool
@@ -125,193 +124,13 @@ func rigAccountAssigneeAccountTodosFilter(f model.RigAccountFilter) (model.TodoF
 	return sub, true
 }
 
-// rigAccountCreatedByAccountFilter collects the conditions written on a
-// RigAccount's CreatedByAccount.
-//
-// The bool is whether there were any: a relation nobody mentioned is not a
-// condition that everything satisfies, it is no condition at all.
-func rigAccountCreatedByAccountFilter(f model.RigAccountFilter) (model.RigAccountFilter, bool) {
-	var (
-		sub   model.RigAccountFilter
-		asked bool
-	)
-
-	if p := f.Equals; p != nil && p.CreatedByAccount != nil {
-		sub.Equals, asked = p.CreatedByAccount, true
-	}
-	if p := f.NotEquals; p != nil && p.CreatedByAccount != nil {
-		sub.NotEquals, asked = p.CreatedByAccount, true
-	}
-	if p := f.GreaterThan; p != nil && p.CreatedByAccount != nil {
-		sub.GreaterThan, asked = p.CreatedByAccount, true
-	}
-	if p := f.SmallerThan; p != nil && p.CreatedByAccount != nil {
-		sub.SmallerThan, asked = p.CreatedByAccount, true
-	}
-	if p := f.GreaterOrEqual; p != nil && p.CreatedByAccount != nil {
-		sub.GreaterOrEqual, asked = p.CreatedByAccount, true
-	}
-	if p := f.SmallerOrEqual; p != nil && p.CreatedByAccount != nil {
-		sub.SmallerOrEqual, asked = p.CreatedByAccount, true
-	}
-	if p := f.Contains; p != nil && p.CreatedByAccount != nil {
-		sub.Contains, asked = p.CreatedByAccount, true
-	}
-	if p := f.NotContains; p != nil && p.CreatedByAccount != nil {
-		sub.NotContains, asked = p.CreatedByAccount, true
-	}
-	if p := f.Like; p != nil && p.CreatedByAccount != nil {
-		sub.Like, asked = p.CreatedByAccount, true
-	}
-	if p := f.NotLike; p != nil && p.CreatedByAccount != nil {
-		sub.NotLike, asked = p.CreatedByAccount, true
-	}
-	if p := f.Null; p != nil && p.CreatedByAccount != nil {
-		sub.Null, asked = p.CreatedByAccount, true
-	}
-	if p := f.NotNull; p != nil && p.CreatedByAccount != nil {
-		sub.NotNull, asked = p.CreatedByAccount, true
-	}
-
-	if !asked {
-		return sub, false
-	}
-
-	// The connective comes down with them, and it has to: under OR the caller
-	// asked for a related row satisfying either condition, and one subquery whose
-	// inside is a disjunction is exactly that. Under AND it is the same row
-	// satisfying both, which is the part a subquery per operator could not say.
-	sub.OrCondition = f.OrCondition
-	return sub, true
-}
-
-// rigAccountDeletedByAccountFilter collects the conditions written on a
-// RigAccount's DeletedByAccount.
-//
-// The bool is whether there were any: a relation nobody mentioned is not a
-// condition that everything satisfies, it is no condition at all.
-func rigAccountDeletedByAccountFilter(f model.RigAccountFilter) (model.RigAccountFilter, bool) {
-	var (
-		sub   model.RigAccountFilter
-		asked bool
-	)
-
-	if p := f.Equals; p != nil && p.DeletedByAccount != nil {
-		sub.Equals, asked = p.DeletedByAccount, true
-	}
-	if p := f.NotEquals; p != nil && p.DeletedByAccount != nil {
-		sub.NotEquals, asked = p.DeletedByAccount, true
-	}
-	if p := f.GreaterThan; p != nil && p.DeletedByAccount != nil {
-		sub.GreaterThan, asked = p.DeletedByAccount, true
-	}
-	if p := f.SmallerThan; p != nil && p.DeletedByAccount != nil {
-		sub.SmallerThan, asked = p.DeletedByAccount, true
-	}
-	if p := f.GreaterOrEqual; p != nil && p.DeletedByAccount != nil {
-		sub.GreaterOrEqual, asked = p.DeletedByAccount, true
-	}
-	if p := f.SmallerOrEqual; p != nil && p.DeletedByAccount != nil {
-		sub.SmallerOrEqual, asked = p.DeletedByAccount, true
-	}
-	if p := f.Contains; p != nil && p.DeletedByAccount != nil {
-		sub.Contains, asked = p.DeletedByAccount, true
-	}
-	if p := f.NotContains; p != nil && p.DeletedByAccount != nil {
-		sub.NotContains, asked = p.DeletedByAccount, true
-	}
-	if p := f.Like; p != nil && p.DeletedByAccount != nil {
-		sub.Like, asked = p.DeletedByAccount, true
-	}
-	if p := f.NotLike; p != nil && p.DeletedByAccount != nil {
-		sub.NotLike, asked = p.DeletedByAccount, true
-	}
-	if p := f.Null; p != nil && p.DeletedByAccount != nil {
-		sub.Null, asked = p.DeletedByAccount, true
-	}
-	if p := f.NotNull; p != nil && p.DeletedByAccount != nil {
-		sub.NotNull, asked = p.DeletedByAccount, true
-	}
-
-	if !asked {
-		return sub, false
-	}
-
-	// The connective comes down with them, and it has to: under OR the caller
-	// asked for a related row satisfying either condition, and one subquery whose
-	// inside is a disjunction is exactly that. Under AND it is the same row
-	// satisfying both, which is the part a subquery per operator could not say.
-	sub.OrCondition = f.OrCondition
-	return sub, true
-}
-
-// rigAccountUpdatedByAccountFilter collects the conditions written on a
-// RigAccount's UpdatedByAccount.
-//
-// The bool is whether there were any: a relation nobody mentioned is not a
-// condition that everything satisfies, it is no condition at all.
-func rigAccountUpdatedByAccountFilter(f model.RigAccountFilter) (model.RigAccountFilter, bool) {
-	var (
-		sub   model.RigAccountFilter
-		asked bool
-	)
-
-	if p := f.Equals; p != nil && p.UpdatedByAccount != nil {
-		sub.Equals, asked = p.UpdatedByAccount, true
-	}
-	if p := f.NotEquals; p != nil && p.UpdatedByAccount != nil {
-		sub.NotEquals, asked = p.UpdatedByAccount, true
-	}
-	if p := f.GreaterThan; p != nil && p.UpdatedByAccount != nil {
-		sub.GreaterThan, asked = p.UpdatedByAccount, true
-	}
-	if p := f.SmallerThan; p != nil && p.UpdatedByAccount != nil {
-		sub.SmallerThan, asked = p.UpdatedByAccount, true
-	}
-	if p := f.GreaterOrEqual; p != nil && p.UpdatedByAccount != nil {
-		sub.GreaterOrEqual, asked = p.UpdatedByAccount, true
-	}
-	if p := f.SmallerOrEqual; p != nil && p.UpdatedByAccount != nil {
-		sub.SmallerOrEqual, asked = p.UpdatedByAccount, true
-	}
-	if p := f.Contains; p != nil && p.UpdatedByAccount != nil {
-		sub.Contains, asked = p.UpdatedByAccount, true
-	}
-	if p := f.NotContains; p != nil && p.UpdatedByAccount != nil {
-		sub.NotContains, asked = p.UpdatedByAccount, true
-	}
-	if p := f.Like; p != nil && p.UpdatedByAccount != nil {
-		sub.Like, asked = p.UpdatedByAccount, true
-	}
-	if p := f.NotLike; p != nil && p.UpdatedByAccount != nil {
-		sub.NotLike, asked = p.UpdatedByAccount, true
-	}
-	if p := f.Null; p != nil && p.UpdatedByAccount != nil {
-		sub.Null, asked = p.UpdatedByAccount, true
-	}
-	if p := f.NotNull; p != nil && p.UpdatedByAccount != nil {
-		sub.NotNull, asked = p.UpdatedByAccount, true
-	}
-
-	if !asked {
-		return sub, false
-	}
-
-	// The connective comes down with them, and it has to: under OR the caller
-	// asked for a related row satisfying either condition, and one subquery whose
-	// inside is a disjunction is exactly that. Under AND it is the same row
-	// satisfying both, which is the part a subquery per operator could not say.
-	sub.OrCondition = f.OrCondition
-	return sub, true
-}
-
-// rigAccountGroup turns a filter into the condition tree the runtime renders.
+// accountGroup turns a filter into the condition tree the runtime renders.
 //
 // The scope carries what a condition needs besides the filter itself: who is
 // asking, which alias this level's columns belong to, and how deep the nesting
 // has gone. It is a value rather than three parameters because every relation
 // passes a changed copy of it down.
-func rigAccountGroup(f model.RigAccountFilter, sc filterScope) (query.Group, error) {
+func accountGroup(f model.AccountFilter, sc filterScope) (query.Group, error) {
 	if err := sc.ok(); err != nil {
 		return query.Group{}, err
 	}
@@ -741,7 +560,7 @@ func rigAccountGroup(f model.RigAccountFilter, sc filterScope) (query.Group, err
 		}
 	}
 
-	if sub, ok := rigAccountAssigneeAccountTodosFilter(f); ok {
+	if sub, ok := accountAssigneeAccountTodosFilter(f); ok {
 		inner, from, on := sc.hasMany("todo", "assignee_account_id", "id")
 		where, err := todoGroup(sub, inner)
 		if err != nil {
@@ -753,51 +572,6 @@ func rigAccountGroup(f model.RigAccountFilter, sc filterScope) (query.Group, err
 		where.Add(inner.tenant("tenant_id"))
 		where.Add(inner.live("deleted_at"))
 		where.Add(inner.original("version_type", model.TodoVersionTypeOriginal))
-
-		g.Add(query.Related(query.Exists{From: from, On: on, Where: where}))
-	}
-
-	if sub, ok := rigAccountCreatedByAccountFilter(f); ok {
-		inner, from, on := sc.belongsTo("rig_account", "id", "created_by_account_id")
-		where, err := rigAccountGroup(sub, inner)
-		if err != nil {
-			return query.Group{}, err
-		}
-
-		// The far side is scoped whatever the read asked for. A read option widens
-		// what this query returns, not what it may look through to decide.
-		where.Add(inner.tenant("tenant_id"))
-		where.Add(inner.live("deleted_at"))
-
-		g.Add(query.Related(query.Exists{From: from, On: on, Where: where}))
-	}
-
-	if sub, ok := rigAccountDeletedByAccountFilter(f); ok {
-		inner, from, on := sc.belongsTo("rig_account", "id", "deleted_by_account_id")
-		where, err := rigAccountGroup(sub, inner)
-		if err != nil {
-			return query.Group{}, err
-		}
-
-		// The far side is scoped whatever the read asked for. A read option widens
-		// what this query returns, not what it may look through to decide.
-		where.Add(inner.tenant("tenant_id"))
-		where.Add(inner.live("deleted_at"))
-
-		g.Add(query.Related(query.Exists{From: from, On: on, Where: where}))
-	}
-
-	if sub, ok := rigAccountUpdatedByAccountFilter(f); ok {
-		inner, from, on := sc.belongsTo("rig_account", "id", "updated_by_account_id")
-		where, err := rigAccountGroup(sub, inner)
-		if err != nil {
-			return query.Group{}, err
-		}
-
-		// The far side is scoped whatever the read asked for. A read option widens
-		// what this query returns, not what it may look through to decide.
-		where.Add(inner.tenant("tenant_id"))
-		where.Add(inner.live("deleted_at"))
 
 		g.Add(query.Related(query.Exists{From: from, On: on, Where: where}))
 	}
@@ -818,53 +592,8 @@ func rigAccountGroup(f model.RigAccountFilter, sc filterScope) (query.Group, err
 		g.Add(query.Related(query.Exists{From: from, On: on, Where: where, Not: true}))
 	}
 
-	if p := f.Without; p != nil && p.CreatedByAccount != nil {
-		inner, from, on := sc.belongsTo("rig_account", "id", "created_by_account_id")
-		where, err := rigAccountGroup(*p.CreatedByAccount, inner)
-		if err != nil {
-			return query.Group{}, err
-		}
-
-		// The far side is scoped whatever the read asked for. A read option widens
-		// what this query returns, not what it may look through to decide.
-		where.Add(inner.tenant("tenant_id"))
-		where.Add(inner.live("deleted_at"))
-
-		g.Add(query.Related(query.Exists{From: from, On: on, Where: where, Not: true}))
-	}
-
-	if p := f.Without; p != nil && p.DeletedByAccount != nil {
-		inner, from, on := sc.belongsTo("rig_account", "id", "deleted_by_account_id")
-		where, err := rigAccountGroup(*p.DeletedByAccount, inner)
-		if err != nil {
-			return query.Group{}, err
-		}
-
-		// The far side is scoped whatever the read asked for. A read option widens
-		// what this query returns, not what it may look through to decide.
-		where.Add(inner.tenant("tenant_id"))
-		where.Add(inner.live("deleted_at"))
-
-		g.Add(query.Related(query.Exists{From: from, On: on, Where: where, Not: true}))
-	}
-
-	if p := f.Without; p != nil && p.UpdatedByAccount != nil {
-		inner, from, on := sc.belongsTo("rig_account", "id", "updated_by_account_id")
-		where, err := rigAccountGroup(*p.UpdatedByAccount, inner)
-		if err != nil {
-			return query.Group{}, err
-		}
-
-		// The far side is scoped whatever the read asked for. A read option widens
-		// what this query returns, not what it may look through to decide.
-		where.Add(inner.tenant("tenant_id"))
-		where.Add(inner.live("deleted_at"))
-
-		g.Add(query.Related(query.Exists{From: from, On: on, Where: where, Not: true}))
-	}
-
 	for _, n := range f.NestedFilters {
-		nested, err := rigAccountGroup(n, sc)
+		nested, err := accountGroup(n, sc)
 		if err != nil {
 			return query.Group{}, err
 		}
@@ -873,8 +602,8 @@ func rigAccountGroup(f model.RigAccountFilter, sc filterScope) (query.Group, err
 	return g, nil
 }
 
-// rigAccountSortable reports whether a column can be ordered by.
-func rigAccountSortable(column string) bool {
+// accountSortable reports whether a column can be ordered by.
+func accountSortable(column string) bool {
 	switch column {
 	case "id", "tenant_id", "identity_id", "created_at", "created_by_account_id", "updated_at", "updated_by_account_id", "deleted_at", "deleted_by_account_id", "kind", "role", "email_address", "display_name", "time_zone", "is_active", "created_by_api_key_id", "updated_by_api_key_id", "deleted_by_api_key_id":
 		return true
@@ -882,113 +611,37 @@ func rigAccountSortable(column string) bool {
 	return false
 }
 
-// rigAccountOrderColumn reports whether an ordering names a column of a
-// relation that can be ordered by.
-func rigAccountOrderColumn(relation, column string) error {
-	switch relation {
-	case "CreatedByAccount":
-		if !rigAccountSortable(column) {
-			return rigerr.Invalid("a RigAccount has no CreatedByAccount that can be ordered by %q", column)
-		}
-		return nil
-	case "DeletedByAccount":
-		if !rigAccountSortable(column) {
-			return rigerr.Invalid("a RigAccount has no DeletedByAccount that can be ordered by %q", column)
-		}
-		return nil
-	case "UpdatedByAccount":
-		if !rigAccountSortable(column) {
-			return rigerr.Invalid("a RigAccount has no UpdatedByAccount that can be ordered by %q", column)
-		}
-		return nil
-	}
-	return rigerr.Invalid("a RigAccount has no relation named %q to order by", relation)
-}
-
-// rigAccountOrderJoin builds the left join an ordering across a relation
-// needs.
-//
-// The scope predicates go into the join's own condition rather than the
-// statement's WHERE. In WHERE they would be false for a row that matched
-// nothing and would discard it, which is an inner join wearing a left join's
-// clothes.
-func rigAccountOrderJoin(relation, column, alias string, sc filterScope) (query.Join, error) {
-	if err := rigAccountOrderColumn(relation, column); err != nil {
-		return query.Join{}, err
-	}
-
-	switch relation {
-	case "CreatedByAccount":
-		far, j := sc.orderJoin("rig_account", alias, "id", "created_by_account_id")
-		j.Where.Add(far.tenant("tenant_id"))
-		j.Where.Add(far.live("deleted_at"))
-		return j, nil
-	case "DeletedByAccount":
-		far, j := sc.orderJoin("rig_account", alias, "id", "deleted_by_account_id")
-		j.Where.Add(far.tenant("tenant_id"))
-		j.Where.Add(far.live("deleted_at"))
-		return j, nil
-	case "UpdatedByAccount":
-		far, j := sc.orderJoin("rig_account", alias, "id", "updated_by_account_id")
-		j.Where.Add(far.tenant("tenant_id"))
-		j.Where.Add(far.live("deleted_at"))
-		return j, nil
-	}
-	return query.Join{}, rigerr.Invalid("a RigAccount has no relation named %q to order by", relation)
-}
-
-// rigAccountOrder converts the model's ordering terms into the runtime's.
-func rigAccountOrder(terms []model.RigAccountOrder, sc filterScope) ([]query.Order, []query.Join, error) {
+// accountOrder converts the model's ordering terms into the runtime's.
+func accountOrder(terms []model.AccountOrder, sc filterScope) ([]query.Order, []query.Join, error) {
 	if len(terms) == 0 {
 		return nil, nil, nil
 	}
 
 	out := make([]query.Order, 0, len(terms))
-	var joins []query.Join
-	// One join per relation however many of its columns are named.
-	aliases := make(map[string]string)
 
 	for _, t := range terms {
-		if t.Relation != "" {
-			alias, ok := aliases[t.Relation]
-			if !ok {
-				alias = strconv.Itoa(len(joins) + 1)
-				alias = "o" + alias
-				join, err := rigAccountOrderJoin(t.Relation, t.Column, alias, sc)
-				if err != nil {
-					return nil, nil, err
-				}
-				joins = append(joins, join)
-				aliases[t.Relation] = alias
-			} else if err := rigAccountOrderColumn(t.Relation, t.Column); err != nil {
-				return nil, nil, err
-			}
-			out = append(out, query.Order{Table: alias, Column: t.Column, Desc: t.Desc})
-			continue
-		}
-
 		// A column this table cannot be ordered by is the caller's mistake, not a
 		// column name to paste into a statement.
-		if !rigAccountSortable(t.Column) {
-			return nil, nil, rigerr.Invalid("a RigAccount cannot be ordered by %q", t.Column)
+		if !accountSortable(t.Column) {
+			return nil, nil, rigerr.Invalid("a Account cannot be ordered by %q", t.Column)
 		}
 		out = append(out, query.Order{Table: sc.as, Column: t.Column, Desc: t.Desc})
 	}
 
-	return out, joins, nil
+	return out, nil, nil
 }
 
-type rigAccountRepo struct {
+type accountRepo struct {
 	db *Store
 }
 
-var _ RigAccountRepository = (*rigAccountRepo)(nil)
+var _ AccountRepository = (*accountRepo)(nil)
 
-const rigAccountRepoSelect = "rig_account.id, rig_account.tenant_id, rig_account.identity_id, rig_account.created_at, rig_account.created_by_account_id, rig_account.updated_at, rig_account.updated_by_account_id, rig_account.deleted_at, rig_account.deleted_by_account_id, rig_account.kind, rig_account.role, rig_account.email_address, rig_account.display_name, rig_account.time_zone, rig_account.is_active, rig_account.created_by_api_key_id, rig_account.updated_by_api_key_id, rig_account.deleted_by_api_key_id"
+const accountRepoSelect = "rig_account.id, rig_account.tenant_id, rig_account.identity_id, rig_account.created_at, rig_account.created_by_account_id, rig_account.updated_at, rig_account.updated_by_account_id, rig_account.deleted_at, rig_account.deleted_by_account_id, rig_account.kind, rig_account.role, rig_account.email_address, rig_account.display_name, rig_account.time_zone, rig_account.is_active, rig_account.created_by_api_key_id, rig_account.updated_by_api_key_id, rig_account.deleted_by_api_key_id"
 
-// scanRigAccount reads one row in the order rigAccountRepoSelect lists.
-func scanRigAccount(row pgx.Row) (*model.RigAccount, error) {
-	var m model.RigAccount
+// scanAccount reads one row in the order accountRepoSelect lists.
+func scanAccount(row pgx.Row) (*model.Account, error) {
+	var m model.Account
 	if err := row.Scan(&m.ID, &m.TenantID, &m.IdentityID, &m.CreatedAt, &m.CreatedByAccountID, &m.UpdatedAt, &m.UpdatedByAccountID, &m.DeletedAt, &m.DeletedByAccountID, &m.Kind, &m.Role, &m.EmailAddress, &m.DisplayName, &m.TimeZone, &m.IsActive, &m.CreatedByAPIKeyID, &m.UpdatedByAPIKeyID, &m.DeletedByAPIKeyID); err != nil {
 		return nil, err
 	}
@@ -998,8 +651,8 @@ func scanRigAccount(row pgx.Row) (*model.RigAccount, error) {
 	return &m, nil
 }
 
-// Get implements RigAccountRepository.
-func (r *rigAccountRepo) Get(ctx context.Context, id uuid.UUID, opts ...readopt.Option) (*model.RigAccount, error) {
+// Get implements AccountRepository.
+func (r *accountRepo) Get(ctx context.Context, id uuid.UUID, opts ...readopt.Option) (*model.Account, error) {
 	cfg, err := readopt.Apply(opts)
 	if err != nil {
 		return nil, err
@@ -1017,10 +670,10 @@ func (r *rigAccountRepo) Get(ctx context.Context, id uuid.UUID, opts ...readopt.
 		where += " AND tenant_id = $2"
 	}
 
-	sql := fmt.Sprintf("SELECT %s FROM rig_account WHERE %s", rigAccountRepoSelect, where)
-	m, err := scanRigAccount(r.db.connFor(ctx).QueryRow(ctx, sql, args...))
+	sql := fmt.Sprintf("SELECT %s FROM rig_account WHERE %s", accountRepoSelect, where)
+	m, err := scanAccount(r.db.connFor(ctx).QueryRow(ctx, sql, args...))
 	if dbx.IsNoRows(err) {
-		return nil, rigerr.NotFound("no RigAccount with id %s", id)
+		return nil, rigerr.NotFound("no Account with id %s", id)
 	}
 	if err != nil {
 		return nil, rigerr.Internal(err, "read rig_account")
@@ -1028,13 +681,13 @@ func (r *rigAccountRepo) Get(ctx context.Context, id uuid.UUID, opts ...readopt.
 	return m, nil
 }
 
-// List implements RigAccountRepository.
-func (r *rigAccountRepo) List(ctx context.Context, f model.RigAccountFilter, page model.RigAccountPage, opts ...readopt.Option) ([]*model.RigAccount, int64, error) {
+// List implements AccountRepository.
+func (r *accountRepo) List(ctx context.Context, f model.AccountFilter, page model.AccountPage, opts ...readopt.Option) ([]*model.Account, int64, error) {
 	return r.list(ctx, f, page, opts)
 }
 
 // list is the body of every read that takes a filter.
-func (r *rigAccountRepo) list(ctx context.Context, f model.RigAccountFilter, page model.RigAccountPage, opts []readopt.Option) ([]*model.RigAccount, int64, error) {
+func (r *accountRepo) list(ctx context.Context, f model.AccountFilter, page model.AccountPage, opts []readopt.Option) ([]*model.Account, int64, error) {
 	cfg, err := readopt.Apply(opts)
 	if err != nil {
 		return nil, 0, err
@@ -1060,12 +713,12 @@ func (r *rigAccountRepo) list(ctx context.Context, f model.RigAccountFilter, pag
 		scope.Add(sc.at(query.NotNull("deleted_at")))
 		// A row past the restore window is gone as far as anyone is concerned, so it
 		// does not appear in the trash either.
-		scope.Add(sc.at(query.Gte("deleted_at", RigAccountRestoreCutoff())))
+		scope.Add(sc.at(query.Gte("deleted_at", AccountRestoreCutoff())))
 	case !cfg.IncludeDeleted:
 		scope.Add(sc.at(query.IsNull("deleted_at")))
 	}
 
-	group, err := rigAccountGroup(f, sc)
+	group, err := accountGroup(f, sc)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -1085,12 +738,12 @@ func (r *rigAccountRepo) list(ctx context.Context, f model.RigAccountFilter, pag
 		return nil, 0, rigerr.Internal(err, "count rig_account")
 	}
 
-	order, joins, err := rigAccountOrder(page.OrderBy, sc)
+	order, joins, err := accountOrder(page.OrderBy, sc)
 	if err != nil {
 		return nil, 0, err
 	}
 	if len(order) == 0 {
-		order = RigAccountDefaultOrder
+		order = AccountDefaultOrder
 	}
 	window := query.Page{Limit: page.Limit, Offset: page.Offset}.Clamp(DefaultLimit, MaxLimit)
 
@@ -1103,16 +756,16 @@ func (r *rigAccountRepo) list(ctx context.Context, f model.RigAccountFilter, pag
 		where = " WHERE " + where
 	}
 
-	listSQL := fmt.Sprintf("SELECT %s FROM rig_account%s%s%s%s", rigAccountRepoSelect, joinSQL, where, query.OrderSQL(order), window.SQL(args))
+	listSQL := fmt.Sprintf("SELECT %s FROM rig_account%s%s%s%s", accountRepoSelect, joinSQL, where, query.OrderSQL(order), window.SQL(args))
 	rows, err := r.db.connFor(ctx).Query(ctx, listSQL, args.Values()...)
 	if err != nil {
 		return nil, 0, rigerr.Internal(err, "list rig_account")
 	}
 	defer rows.Close()
 
-	out := make([]*model.RigAccount, 0, window.Limit)
+	out := make([]*model.Account, 0, window.Limit)
 	for rows.Next() {
-		m, err := scanRigAccount(rows)
+		m, err := scanAccount(rows)
 		if err != nil {
 			return nil, 0, rigerr.Internal(err, "read rig_account")
 		}
@@ -1124,14 +777,14 @@ func (r *rigAccountRepo) list(ctx context.Context, f model.RigAccountFilter, pag
 	return out, total, nil
 }
 
-// RigAccountDefaultOrder is the ordering used when a query asks for none.
+// AccountDefaultOrder is the ordering used when a query asks for none.
 //
 // It always ends with the primary key, so the order is total and a page
 // boundary cannot repeat or skip a row.
-var RigAccountDefaultOrder = []query.Order{{Table: "rig_account", Column: "created_at", Desc: true}, {Table: "rig_account", Column: "id", Desc: false}}
+var AccountDefaultOrder = []query.Order{{Table: "rig_account", Column: "created_at", Desc: true}, {Table: "rig_account", Column: "id", Desc: false}}
 
-// Create implements RigAccountRepository.
-func (r *rigAccountRepo) Create(ctx context.Context, in dbhook.Create[model.RigAccountCreateInput, model.RigAccount]) (*model.RigAccount, error) {
+// Create implements AccountRepository.
+func (r *accountRepo) Create(ctx context.Context, in dbhook.Create[model.AccountCreateInput, model.Account]) (*model.Account, error) {
 	// Who is asking, first of all. A write from a request carrying no identity is
 	// refused here — before a rule runs, before a column notices — which is
 	// what lets every hook below take the claims as a value rather than something
@@ -1180,7 +833,7 @@ func (r *rigAccountRepo) Create(ctx context.Context, in dbhook.Create[model.RigA
 	// nothing.
 	needsTx := in.Hooks.Before != nil || in.Hooks.After != nil
 
-	var m *model.RigAccount
+	var m *model.Account
 	err = dbx.InTxIf(ctx, r.db.pool, r.db.connFor(ctx), needsTx, func(ctx context.Context, tx dbx.Conn) error {
 		if in.Hooks.Before != nil {
 			if err := in.Hooks.Before(ctx, claims, &in.Input); err != nil {
@@ -1191,9 +844,9 @@ func (r *rigAccountRepo) Create(ctx context.Context, in dbhook.Create[model.RigA
 		columns := []string{"id", "tenant_id", "created_at", "created_by_account_id", "created_by_api_key_id", "identity_id", "kind", "role", "email_address", "display_name", "time_zone", "is_active"}
 		values := []any{id, claims.TenantID, now, claims.Actor(), claims.ActorKey(), in.Input.IdentityID, in.Input.Kind, in.Input.Role, in.Input.EmailAddress, in.Input.DisplayName, in.Input.TimeZone, in.Input.IsActive}
 
-		sql := fmt.Sprintf("INSERT INTO rig_account (%s) VALUES (%s) RETURNING %s", joinColumns(columns), placeholders(len(values)), rigAccountRepoSelect)
+		sql := fmt.Sprintf("INSERT INTO rig_account (%s) VALUES (%s) RETURNING %s", joinColumns(columns), placeholders(len(values)), accountRepoSelect)
 
-		created, err := scanRigAccount(tx.QueryRow(ctx, sql, values...))
+		created, err := scanAccount(tx.QueryRow(ctx, sql, values...))
 		if err != nil {
 			return writeError(err, "rig_account")
 		}
@@ -1221,8 +874,8 @@ func (r *rigAccountRepo) Create(ctx context.Context, in dbhook.Create[model.RigA
 	return m, nil
 }
 
-// Update implements RigAccountRepository.
-func (r *rigAccountRepo) Update(ctx context.Context, id uuid.UUID, in dbhook.Update[model.RigAccountUpdateInput, model.RigAccount]) (*model.RigAccount, error) {
+// Update implements AccountRepository.
+func (r *accountRepo) Update(ctx context.Context, id uuid.UUID, in dbhook.Update[model.AccountUpdateInput, model.Account]) (*model.Account, error) {
 	in.Input.Normalize()
 
 	claims, err := tenancy.FromContext(ctx)
@@ -1231,7 +884,7 @@ func (r *rigAccountRepo) Update(ctx context.Context, id uuid.UUID, in dbhook.Upd
 	}
 	_ = claims
 
-	var updated, prev *model.RigAccount
+	var updated, prev *model.Account
 	err = dbx.InTx(ctx, r.db.pool, func(ctx context.Context, tx dbx.Conn) error {
 		prev, err = r.Get(ctx, id)
 		if err != nil {
@@ -1239,7 +892,7 @@ func (r *rigAccountRepo) Update(ctx context.Context, id uuid.UUID, in dbhook.Upd
 		}
 
 		if prev.DeletedAt != nil {
-			return rigerr.Conflict("RigAccount %s is deleted; restore it first", id)
+			return rigerr.Conflict("Account %s is deleted; restore it first", id)
 		}
 
 		// The hook shapes the input, so a field it sets is a field that gets written
@@ -1314,9 +967,9 @@ func (r *rigAccountRepo) Update(ctx context.Context, id uuid.UUID, in dbhook.Upd
 		values = append(values, claims.ActorKey())
 
 		values = append(values, id)
-		sql := fmt.Sprintf("UPDATE rig_account SET %s WHERE id = $%d RETURNING %s", assignments(columns), len(values), rigAccountRepoSelect)
+		sql := fmt.Sprintf("UPDATE rig_account SET %s WHERE id = $%d RETURNING %s", assignments(columns), len(values), accountRepoSelect)
 
-		updated, err = scanRigAccount(tx.QueryRow(ctx, sql, values...))
+		updated, err = scanAccount(tx.QueryRow(ctx, sql, values...))
 		if err != nil {
 			return writeError(err, "rig_account")
 		}
@@ -1343,15 +996,15 @@ func (r *rigAccountRepo) Update(ctx context.Context, id uuid.UUID, in dbhook.Upd
 	return updated, nil
 }
 
-// Delete implements RigAccountRepository.
-func (r *rigAccountRepo) Delete(ctx context.Context, in dbhook.Delete[model.RigAccountDeleteInput, model.RigAccount]) error {
+// Delete implements AccountRepository.
+func (r *accountRepo) Delete(ctx context.Context, in dbhook.Delete[model.AccountDeleteInput, model.Account]) error {
 	claims, err := tenancy.FromContext(ctx)
 	if err != nil {
 		return err
 	}
 	_ = claims
 
-	var prev *model.RigAccount
+	var prev *model.Account
 	err = dbx.InTx(ctx, r.db.pool, func(ctx context.Context, tx dbx.Conn) error {
 		prev, err = r.Get(ctx, in.Input.ID)
 		if err != nil {
@@ -1419,21 +1072,21 @@ func (r *rigAccountRepo) Delete(ctx context.Context, in dbhook.Delete[model.RigA
 	return nil
 }
 
-// RigAccountRestoreCutoff is the moment before which a deleted row can no
-// longer be brought back.
-func RigAccountRestoreCutoff() time.Time {
+// AccountRestoreCutoff is the moment before which a deleted row can no longer
+// be brought back.
+func AccountRestoreCutoff() time.Time {
 	return time.Now().UTC().AddDate(0, 0, -30)
 }
 
-// Restore implements RigAccountRepository.
-func (r *rigAccountRepo) Restore(ctx context.Context, id uuid.UUID, in dbhook.Restore[model.RigAccountUpdateInput, model.RigAccount]) (*model.RigAccount, error) {
+// Restore implements AccountRepository.
+func (r *accountRepo) Restore(ctx context.Context, id uuid.UUID, in dbhook.Restore[model.AccountUpdateInput, model.Account]) (*model.Account, error) {
 	claims, err := tenancy.FromContext(ctx)
 	if err != nil {
 		return nil, err
 	}
 	_ = claims
 
-	var restored, prev *model.RigAccount
+	var restored, prev *model.Account
 	err = dbx.InTx(ctx, r.db.pool, func(ctx context.Context, tx dbx.Conn) error {
 		prev, err = r.Get(ctx, id)
 		if err != nil {
@@ -1447,8 +1100,8 @@ func (r *rigAccountRepo) Restore(ctx context.Context, id uuid.UUID, in dbhook.Re
 			return nil
 		}
 
-		if prev.DeletedAt.Before(RigAccountRestoreCutoff()) {
-			return rigerr.Conflict("RigAccount %s was deleted more than 30 days ago and can no longer be restored", id)
+		if prev.DeletedAt.Before(AccountRestoreCutoff()) {
+			return rigerr.Conflict("Account %s was deleted more than 30 days ago and can no longer be restored", id)
 		}
 
 		// The request carried no fields, so this hook is where they come from. It is
@@ -1520,8 +1173,8 @@ func (r *rigAccountRepo) Restore(ctx context.Context, id uuid.UUID, in dbhook.Re
 		values = append(values, claims.ActorKey())
 		values = append(values, id)
 
-		sql := fmt.Sprintf("UPDATE rig_account SET %s WHERE id = $%d RETURNING %s", assignments(columns), len(values), rigAccountRepoSelect)
-		restored, err = scanRigAccount(tx.QueryRow(ctx, sql, values...))
+		sql := fmt.Sprintf("UPDATE rig_account SET %s WHERE id = $%d RETURNING %s", assignments(columns), len(values), accountRepoSelect)
+		restored, err = scanAccount(tx.QueryRow(ctx, sql, values...))
 		if err != nil {
 			return writeError(err, "rig_account")
 		}
@@ -1549,7 +1202,7 @@ func (r *rigAccountRepo) Restore(ctx context.Context, id uuid.UUID, in dbhook.Re
 }
 
 // ListDeleted returns retired rows still inside the restore window.
-func (r *rigAccountRepo) ListDeleted(ctx context.Context, f model.RigAccountFilter, page model.RigAccountPage, opts ...readopt.Option) ([]*model.RigAccount, int64, error) {
+func (r *accountRepo) ListDeleted(ctx context.Context, f model.AccountFilter, page model.AccountPage, opts ...readopt.Option) ([]*model.Account, int64, error) {
 	// The lifecycle option is forced and the caller's are kept: which rows the
 	// trash holds is not up for discussion, and how wide a view of it the caller
 	// gets still is.

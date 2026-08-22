@@ -11,17 +11,17 @@ import (
 	"github.com/simonjanss/rig/runtime/tenancy"
 )
 
-// registerRigAccount mounts RigAccount's routes.
-func registerRigAccount(mux *http.ServeMux, s Server, svc RigAccountService) {
-	mux.HandleFunc("GET /api/v1/rig-accounts", handleListRigAccounts(s, svc))
-	mux.HandleFunc("GET /api/v1/rig-accounts/_deleted", handleListDeletedRigAccounts(s, svc))
-	mux.HandleFunc("GET /api/v1/rig-accounts/{id}", handleGetRigAccount(s, svc))
+// registerAccount mounts Account's routes.
+func registerAccount(mux *http.ServeMux, s Server, svc AccountService) {
+	mux.HandleFunc("GET /api/v1/accounts", handleListAccounts(s, svc))
+	mux.HandleFunc("GET /api/v1/accounts/_deleted", handleListDeletedAccounts(s, svc))
+	mux.HandleFunc("GET /api/v1/accounts/{id}", handleGetAccount(s, svc))
 }
 
-// handleListRigAccounts serves GET /api/v1/rig-accounts.
+// handleListAccounts serves GET /api/v1/accounts.
 //
-// List RigAccounts.
-func handleListRigAccounts(s Server, svc RigAccountService) http.HandlerFunc {
+// List Accounts.
+func handleListAccounts(s Server, svc AccountService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		rec := reqlog.Wrap(w)
 		w = rec
@@ -37,7 +37,7 @@ func handleListRigAccounts(s Server, svc RigAccountService) http.HandlerFunc {
 			return
 		}
 
-		var query RigAccountListQuery
+		var query AccountListQuery
 		limitParam, err := queryInt(r, "limit", 50)
 		if err != nil {
 			fail(s, w, r, rc, err)
@@ -62,15 +62,15 @@ func handleListRigAccounts(s Server, svc RigAccountService) http.HandlerFunc {
 	}
 }
 
-// handleListDeletedRigAccounts serves GET /api/v1/rig-accounts/_deleted.
+// handleListDeletedAccounts serves GET /api/v1/accounts/_deleted.
 //
-// List retired RigAccounts.
+// List retired Accounts.
 //
 // A deletion stamps the row rather than removing it, so this is what was
 // deleted and can still be brought back. Only rows inside the 30-day restore
 // window appear: past it a row is gone as far as anyone is concerned, so it is
 // not in the trash either.
-func handleListDeletedRigAccounts(s Server, svc RigAccountService) http.HandlerFunc {
+func handleListDeletedAccounts(s Server, svc AccountService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		rec := reqlog.Wrap(w)
 		w = rec
@@ -86,7 +86,7 @@ func handleListDeletedRigAccounts(s Server, svc RigAccountService) http.HandlerF
 			return
 		}
 
-		var query RigAccountListDeletedQuery
+		var query AccountListDeletedQuery
 		limitParam, err := queryInt(r, "limit", 50)
 		if err != nil {
 			fail(s, w, r, rc, err)
@@ -111,10 +111,10 @@ func handleListDeletedRigAccounts(s Server, svc RigAccountService) http.HandlerF
 	}
 }
 
-// handleGetRigAccount serves GET /api/v1/rig-accounts/{id}.
+// handleGetAccount serves GET /api/v1/accounts/{id}.
 //
-// Fetch one RigAccount by identifier.
-func handleGetRigAccount(s Server, svc RigAccountService) http.HandlerFunc {
+// Fetch one Account by identifier.
+func handleGetAccount(s Server, svc AccountService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		rec := reqlog.Wrap(w)
 		w = rec
@@ -130,7 +130,7 @@ func handleGetRigAccount(s Server, svc RigAccountService) http.HandlerFunc {
 			return
 		}
 
-		var path RigAccountGetPath
+		var path AccountGetPath
 		idParam, err := pathUUID(r, "id")
 		if err != nil {
 			fail(s, w, r, rc, err)

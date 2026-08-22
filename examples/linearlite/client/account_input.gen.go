@@ -4,22 +4,22 @@
 
 package client
 
-// RigAccountListQuery is the query for RigAccount.List.
+// AccountListQuery is the query for Account.List.
 //
 // A nil member is left out of the request, and the server applies its own
 // default. rigclient.P takes the address of a value, for filling one in.
-type RigAccountListQuery struct {
+type AccountListQuery struct {
 	// Maximum rows to return. Left out, the server uses 50.
 	Limit *int `json:"limit"`
 	// Rows to skip before the first returned row. Left out, the server uses 0.
 	Offset *int `json:"offset"`
 }
 
-// RigAccountListDeletedQuery is the query for RigAccount.ListDeleted.
+// AccountListDeletedQuery is the query for Account.ListDeleted.
 //
 // A nil member is left out of the request, and the server applies its own
 // default. rigclient.P takes the address of a value, for filling one in.
-type RigAccountListDeletedQuery struct {
+type AccountListDeletedQuery struct {
 	// Maximum rows to return. Left out, the server uses 50.
 	Limit *int `json:"limit"`
 	// Rows to skip before the first returned row. Left out, the server uses 0.

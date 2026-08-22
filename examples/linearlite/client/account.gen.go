@@ -2,7 +2,7 @@
 //
 // This file is rewritten on every run. Put changes in the service layer.
 
-package model
+package client
 
 import (
 	"time"
@@ -13,10 +13,9 @@ import (
 // One person inside one tenant. The person is the identity; this is who they
 // are here.
 //
-// It is the one definition of a RigAccount: the repository scans into it and
-// the API returns it, so there is no conversion between two shapes of the same
-// thing and no field that can go missing from one of them.
-type RigAccount struct {
+// Every field the server returns, and no field it does not: this is the
+// readable projection of the row rather than the row.
+type Account struct {
 	// Unique identifier for this row.
 	ID uuid.UUID `json:"id"`
 	// Tenant this row belongs to. Every query is scoped by it.
@@ -62,30 +61,10 @@ type RigAccount struct {
 	DeletedByAPIKeyID *uuid.UUID `json:"deletedByApiKeyId,omitempty"`
 }
 
-// TableRigAccount is the table this entity is stored in.
-const TableRigAccount = "rig_account"
-
-// Column names for rig_account, so nothing has to spell one out.
-const (
-	ColumnRigAccountID                 = "id"
-	ColumnRigAccountTenantID           = "tenant_id"
-	ColumnRigAccountIdentityID         = "identity_id"
-	ColumnRigAccountCreatedAt          = "created_at"
-	ColumnRigAccountCreatedByAccountID = "created_by_account_id"
-	ColumnRigAccountUpdatedAt          = "updated_at"
-	ColumnRigAccountUpdatedByAccountID = "updated_by_account_id"
-	ColumnRigAccountDeletedAt          = "deleted_at"
-	ColumnRigAccountDeletedByAccountID = "deleted_by_account_id"
-	ColumnRigAccountKind               = "kind"
-	ColumnRigAccountRole               = "role"
-	ColumnRigAccountEmailAddress       = "email_address"
-	ColumnRigAccountDisplayName        = "display_name"
-	ColumnRigAccountTimeZone           = "time_zone"
-	ColumnRigAccountIsActive           = "is_active"
-	ColumnRigAccountCreatedByAPIKeyID  = "created_by_api_key_id"
-	ColumnRigAccountUpdatedByAPIKeyID  = "updated_by_api_key_id"
-	ColumnRigAccountDeletedByAPIKeyID  = "deleted_by_api_key_id"
-)
-
-// RigAccountColumns is every column, in the order the row is scanned.
-var RigAccountColumns = []string{"id", "tenant_id", "identity_id", "created_at", "created_by_account_id", "updated_at", "updated_by_account_id", "deleted_at", "deleted_by_account_id", "kind", "role", "email_address", "display_name", "time_zone", "is_active", "created_by_api_key_id", "updated_by_api_key_id", "deleted_by_api_key_id"}
+// A page of Accounts.
+type AccountListResponse struct {
+	// The rows in this page.
+	Data []Account `json:"data,omitempty"`
+	// Where this page sits in the full result set.
+	Pagination Pagination `json:"pagination"`
+}

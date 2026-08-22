@@ -14,124 +14,124 @@ import (
 	"github.com/simonjanss/rig/runtime/tenancy"
 )
 
-// RigAccountService is the interface your service layer implements.
+// AccountService is the interface your service layer implements.
 //
-// Embedding DefaultRigAccountService satisfies all of it, so a resource with
-// no business logic needs nothing but a constructor. Override a method to add
-// a rule and delegate to the embedded default for the rest.
-type RigAccountService interface {
-	// List RigAccounts.
-	List(ctx context.Context, r Request[struct{}, RigAccountListQuery, struct{}]) (*RigAccountListResponse, error)
+// Embedding DefaultAccountService satisfies all of it, so a resource with no
+// business logic needs nothing but a constructor. Override a method to add a
+// rule and delegate to the embedded default for the rest.
+type AccountService interface {
+	// List Accounts.
+	List(ctx context.Context, r Request[struct{}, AccountListQuery, struct{}]) (*AccountListResponse, error)
 
-	// List retired RigAccounts.
+	// List retired Accounts.
 	//
 	// A deletion stamps the row rather than removing it, so this is what was
 	// deleted and can still be brought back. Only rows inside the 30-day restore
 	// window appear: past it a row is gone as far as anyone is concerned, so it is
 	// not in the trash either.
-	ListDeleted(ctx context.Context, r Request[struct{}, RigAccountListDeletedQuery, struct{}]) (*RigAccountListResponse, error)
+	ListDeleted(ctx context.Context, r Request[struct{}, AccountListDeletedQuery, struct{}]) (*AccountListResponse, error)
 
-	// Fetch one RigAccount by identifier.
-	Get(ctx context.Context, r Request[RigAccountGetPath, struct{}, struct{}]) (*model.RigAccount, error)
+	// Fetch one Account by identifier.
+	Get(ctx context.Context, r Request[AccountGetPath, struct{}, struct{}]) (*model.Account, error)
 }
 
-// RigAccountWriter writes a RigAccount with the service's rules attached.
+// AccountWriter writes a Account with the service's rules attached.
 //
 // Every write rig generates goes through it, and so should every write a
 // custom endpoint makes: reaching for the repository directly means passing
 // the hooks by hand, and forgetting once is a second way into the table where
 // the rules do not run.
-type RigAccountWriter struct {
-	repo  store.RigAccountRepository
-	hooks RigAccountHooks
+type AccountWriter struct {
+	repo  store.AccountRepository
+	hooks AccountHooks
 }
 
-// NewRigAccountWriter pairs a repository with the rules that apply to it.
-func NewRigAccountWriter(repo store.RigAccountRepository, hooks RigAccountHooks) RigAccountWriter {
-	return RigAccountWriter{repo: repo, hooks: hooks}
+// NewAccountWriter pairs a repository with the rules that apply to it.
+func NewAccountWriter(repo store.AccountRepository, hooks AccountHooks) AccountWriter {
+	return AccountWriter{repo: repo, hooks: hooks}
 }
 
 // Create inserts a row, running the create rules and hooks.
-func (w RigAccountWriter) Create(ctx context.Context, in model.RigAccountCreateInput) (*model.RigAccount, error) {
-	return w.repo.Create(ctx, dbhook.Create[model.RigAccountCreateInput, model.RigAccount]{Input: in, Hooks: w.hooks.Create})
+func (w AccountWriter) Create(ctx context.Context, in model.AccountCreateInput) (*model.Account, error) {
+	return w.repo.Create(ctx, dbhook.Create[model.AccountCreateInput, model.Account]{Input: in, Hooks: w.hooks.Create})
 }
 
 // Update changes a row, running the update rules and hooks.
-func (w RigAccountWriter) Update(ctx context.Context, id uuid.UUID, in model.RigAccountUpdateInput) (*model.RigAccount, error) {
-	return w.repo.Update(ctx, id, dbhook.Update[model.RigAccountUpdateInput, model.RigAccount]{Input: in, Hooks: w.hooks.Update})
+func (w AccountWriter) Update(ctx context.Context, id uuid.UUID, in model.AccountUpdateInput) (*model.Account, error) {
+	return w.repo.Update(ctx, id, dbhook.Update[model.AccountUpdateInput, model.Account]{Input: in, Hooks: w.hooks.Update})
 }
 
 // Delete removes a row, running the delete hooks.
-func (w RigAccountWriter) Delete(ctx context.Context, in model.RigAccountDeleteInput) error {
-	return w.repo.Delete(ctx, dbhook.Delete[model.RigAccountDeleteInput, model.RigAccount]{Input: in, Hooks: w.hooks.Delete})
+func (w AccountWriter) Delete(ctx context.Context, in model.AccountDeleteInput) error {
+	return w.repo.Delete(ctx, dbhook.Delete[model.AccountDeleteInput, model.Account]{Input: in, Hooks: w.hooks.Delete})
 }
 
 // Restore brings a retired row back, running the restore hooks. The input
 // starts empty: what a row has to change to be allowed back is the hook's
 // decision, not the caller's.
-func (w RigAccountWriter) Restore(ctx context.Context, id uuid.UUID) (*model.RigAccount, error) {
-	return w.repo.Restore(ctx, id, dbhook.Restore[model.RigAccountUpdateInput, model.RigAccount]{Hooks: w.hooks.Restore})
+func (w AccountWriter) Restore(ctx context.Context, id uuid.UUID) (*model.Account, error) {
+	return w.repo.Restore(ctx, id, dbhook.Restore[model.AccountUpdateInput, model.Account]{Hooks: w.hooks.Restore})
 }
 
-// DefaultRigAccountService implements every operation.
+// DefaultAccountService implements every operation.
 //
 // The generated ones it answers itself, by calling the repository. A custom
 // endpoint it hands to the contract, which is where the only implementation
 // there could be lives.
-type DefaultRigAccountService struct {
-	repo     store.RigAccountRepository
-	contract RigAccountContract
+type DefaultAccountService struct {
+	repo     store.AccountRepository
+	contract AccountContract
 	// write is the same writer a custom endpoint gets through Writer, so the
 	// generated operations and the hand-written ones take one path.
-	write RigAccountWriter
+	write AccountWriter
 }
 
-// RigAccountContract is what the service layer owes RigAccount: everything
-// about it the schema cannot describe.
+// AccountContract is what the service layer owes Account: everything about it
+// the schema cannot describe.
 //
 // The members are optional in the sense that an empty one runs nothing. None
 // of them is optional in the sense of being skippable: the constructor takes
 // this value, so a resource with no rules has an empty literal somebody can
 // read rather than an absence nobody can see.
-type RigAccountContract struct {
+type AccountContract struct {
 	// Hooks is everything that happens around a write: the rules it is checked
 	// against, and the callbacks that run with it. One set per operation, because
 	// the rules for creating a row and for changing one are different questions
 	// asked about different fields.
-	Hooks RigAccountHooks
+	Hooks AccountHooks
 }
 
-// RigAccountHooks are the callbacks that run around each generated write.
+// AccountHooks are the callbacks that run around each generated write.
 //
 // Before and After run inside the write's transaction, so returning an error
 // from either undoes the write. AfterCommit runs once it has landed, which is
 // where anything outside the database belongs.
-type RigAccountHooks struct {
+type AccountHooks struct {
 	// Read shapes what a read answers with. It is the one set that is not about a
 	// write, and the only one that runs outside the repository — a write reads
 	// the row it is about to change, and narrowing that read would have the update
 	// judge a row that is not the stored one.
-	Read dbhook.ReadHooks[model.RigAccountFilter, model.RigAccount]
+	Read dbhook.ReadHooks[model.AccountFilter, model.Account]
 
-	Create dbhook.CreateHooks[model.RigAccountCreateInput, model.RigAccount]
-	Update dbhook.UpdateHooks[model.RigAccountUpdateInput, model.RigAccount]
-	Delete dbhook.DeleteHooks[model.RigAccountDeleteInput, model.RigAccount]
+	Create dbhook.CreateHooks[model.AccountCreateInput, model.Account]
+	Update dbhook.UpdateHooks[model.AccountUpdateInput, model.Account]
+	Delete dbhook.DeleteHooks[model.AccountDeleteInput, model.Account]
 	// Restore takes the update input, because a restore may have to change the row
 	// to be allowed back at all.
-	Restore dbhook.RestoreHooks[model.RigAccountUpdateInput, model.RigAccount]
+	Restore dbhook.RestoreHooks[model.AccountUpdateInput, model.Account]
 }
 
-// RigAccountRules is everything the service layer supplies about RigAccount.
+// AccountRules is everything the service layer supplies about Account.
 //
-// Implement it on a type of your own and hand it to NewRigAccountService. It
-// is an interface rather than a struct so that the rules and the endpoints are
+// Implement it on a type of your own and hand it to NewAccountService. It is
+// an interface rather than a struct so that the rules and the endpoints are
 // one value: a resource whose configuration declares an endpoint cannot be
 // wired up without an implementation of it, and the failure is at the call to
 // the constructor rather than on the route.
-type RigAccountRules interface {
+type AccountRules interface {
 	// Hooks is everything that happens around a write, plus what a read answers
 	// with. It is called once, during construction.
-	Hooks() RigAccountHooks
+	Hooks() AccountHooks
 
 	// Bind receives the writer built from those hooks, so a custom endpoint can
 	// write through the same path a generated operation does.
@@ -140,28 +140,28 @@ type RigAccountRules interface {
 	// writes says so with an empty body instead of finding out at runtime that a
 	// misspelled method left it without one. rig calls it once, before anything
 	// can reach a hook.
-	Bind(RigAccountWriter)
+	Bind(AccountWriter)
 }
 
-// NewRigAccountService is the front door.
+// NewAccountService is the front door.
 //
 // It asks the rules what they are, builds the writer from that, and hands the
 // writer back. The service layer never has to hold a half-built value or name
 // the type it is part of.
-func NewRigAccountService(repo store.RigAccountRepository, rules RigAccountRules) DefaultRigAccountService {
-	svc := NewDefaultRigAccountService(repo, RigAccountContract{Hooks: rules.Hooks()})
+func NewAccountService(repo store.AccountRepository, rules AccountRules) DefaultAccountService {
+	svc := NewDefaultAccountService(repo, AccountContract{Hooks: rules.Hooks()})
 	rules.Bind(svc.Writer())
 	return svc
 }
 
-// NewDefaultRigAccountService builds the default implementation.
+// NewDefaultAccountService builds the default implementation.
 //
 // The contract is a parameter rather than a field left to default, because a
 // rule nobody attached is a rule that does not run, and nothing at the call
-// site would have said so. An empty RigAccountContract is still allowed — it
-// is just a thing somebody wrote down.
-func NewDefaultRigAccountService(repo store.RigAccountRepository, contract RigAccountContract) DefaultRigAccountService {
-	return DefaultRigAccountService{repo: repo, contract: contract, write: NewRigAccountWriter(repo, contract.Hooks)}
+// site would have said so. An empty AccountContract is still allowed — it is
+// just a thing somebody wrote down.
+func NewDefaultAccountService(repo store.AccountRepository, contract AccountContract) DefaultAccountService {
+	return DefaultAccountService{repo: repo, contract: contract, write: NewAccountWriter(repo, contract.Hooks)}
 }
 
 // Writer is how a custom endpoint writes.
@@ -173,7 +173,7 @@ func NewDefaultRigAccountService(repo store.RigAccountRepository, contract RigAc
 //
 // It is a method rather than something the service layer holds because there
 // is then nothing to wire, and nothing to wire wrongly.
-func (s DefaultRigAccountService) Writer() RigAccountWriter { return s.write }
+func (s DefaultAccountService) Writer() AccountWriter { return s.write }
 
 // readFilter combines the caller's filter with whatever the read hook narrows
 // to.
@@ -181,7 +181,7 @@ func (s DefaultRigAccountService) Writer() RigAccountWriter { return s.write }
 // Nested rather than merged, because the two are combined with AND: a caller
 // whose own filter is an OR cannot widen its way out of the one the service
 // added.
-func (s DefaultRigAccountService) readFilter(ctx context.Context, claims tenancy.Claims, asked model.RigAccountFilter) (model.RigAccountFilter, error) {
+func (s DefaultAccountService) readFilter(ctx context.Context, claims tenancy.Claims, asked model.AccountFilter) (model.AccountFilter, error) {
 	if s.contract.Hooks.Read.Narrow == nil {
 		return asked, nil
 	}
@@ -194,21 +194,21 @@ func (s DefaultRigAccountService) readFilter(ctx context.Context, claims tenancy
 		return asked, nil
 	}
 
-	return model.RigAccountFilter{NestedFilters: []model.RigAccountFilter{*narrowed, asked}}, nil
+	return model.AccountFilter{NestedFilters: []model.AccountFilter{*narrowed, asked}}, nil
 }
 
 // readRows runs the read hook over what a read is about to answer with.
-func (s DefaultRigAccountService) readRows(ctx context.Context, claims tenancy.Claims, rows []*model.RigAccount) error {
+func (s DefaultAccountService) readRows(ctx context.Context, claims tenancy.Claims, rows []*model.Account) error {
 	if s.contract.Hooks.Read.Rows == nil {
 		return nil
 	}
 	return s.contract.Hooks.Read.Rows(ctx, caller(claims), rows)
 }
 
-// List implements RigAccountService.
-func (s DefaultRigAccountService) List(ctx context.Context, r Request[struct{}, RigAccountListQuery, struct{}]) (*RigAccountListResponse, error) {
-	page := model.RigAccountPage{Limit: r.Query.Limit, Offset: r.Query.Offset}
-	asked := model.NewRigAccountFilter()
+// List implements AccountService.
+func (s DefaultAccountService) List(ctx context.Context, r Request[struct{}, AccountListQuery, struct{}]) (*AccountListResponse, error) {
+	page := model.AccountPage{Limit: r.Query.Limit, Offset: r.Query.Offset}
+	asked := model.NewAccountFilter()
 	filter, err := s.readFilter(ctx, r.Claims, asked)
 	if err != nil {
 		return nil, err
@@ -222,16 +222,16 @@ func (s DefaultRigAccountService) List(ctx context.Context, r Request[struct{}, 
 		return nil, err
 	}
 
-	return &RigAccountListResponse{
+	return &AccountListResponse{
 		Data:       rows,
 		Pagination: Pagination{Offset: page.Offset, Limit: page.Limit, Total: total},
 	}, nil
 }
 
-// ListDeleted implements RigAccountService.
-func (s DefaultRigAccountService) ListDeleted(ctx context.Context, r Request[struct{}, RigAccountListDeletedQuery, struct{}]) (*RigAccountListResponse, error) {
-	page := model.RigAccountPage{Limit: r.Query.Limit, Offset: r.Query.Offset}
-	filter, err := s.readFilter(ctx, r.Claims, model.NewRigAccountFilter())
+// ListDeleted implements AccountService.
+func (s DefaultAccountService) ListDeleted(ctx context.Context, r Request[struct{}, AccountListDeletedQuery, struct{}]) (*AccountListResponse, error) {
+	page := model.AccountPage{Limit: r.Query.Limit, Offset: r.Query.Offset}
+	filter, err := s.readFilter(ctx, r.Claims, model.NewAccountFilter())
 	if err != nil {
 		return nil, err
 	}
@@ -244,14 +244,14 @@ func (s DefaultRigAccountService) ListDeleted(ctx context.Context, r Request[str
 		return nil, err
 	}
 
-	return &RigAccountListResponse{
+	return &AccountListResponse{
 		Data:       rows,
 		Pagination: Pagination{Offset: page.Offset, Limit: page.Limit, Total: total},
 	}, nil
 }
 
-// Get implements RigAccountService.
-func (s DefaultRigAccountService) Get(ctx context.Context, r Request[RigAccountGetPath, struct{}, struct{}]) (*model.RigAccount, error) {
+// Get implements AccountService.
+func (s DefaultAccountService) Get(ctx context.Context, r Request[AccountGetPath, struct{}, struct{}]) (*model.Account, error) {
 	row, err := s.repo.Get(ctx, r.Path.ID)
 	if err != nil {
 		return nil, err
@@ -260,7 +260,7 @@ func (s DefaultRigAccountService) Get(ctx context.Context, r Request[RigAccountG
 	// Not narrowed: Get fetches by primary key, and there is no filter to add a
 	// condition to. A rule about whether this caller may have this row belongs in
 	// Rows, which is handed it.
-	if err := s.readRows(ctx, r.Claims, []*model.RigAccount{row}); err != nil {
+	if err := s.readRows(ctx, r.Claims, []*model.Account{row}); err != nil {
 		return nil, err
 	}
 	return row, nil

@@ -14,7 +14,7 @@
 
 import type { Config } from "@rig/client";
 
-import { RigAccountClient } from "./rig_account_client.gen.js";
+import { AccountClient } from "./account_client.gen.js";
 import { TodoAttachmentClient } from "./todo_attachment_client.gen.js";
 import { TodoClient } from "./todo_client.gen.js";
 import { Runtime } from "@rig/client";
@@ -64,7 +64,7 @@ export type Client = {
      * One person inside one tenant. The person is the identity; this is who
      * they are here.
      */
-    readonly rigAccounts: RigAccountClient;
+    readonly accounts: AccountClient;
     /** One item on the board. */
     readonly todos: TodoClient;
     /** A file attached to a todo. */
@@ -93,7 +93,7 @@ export function createClient(config: Config): Client {
 
     return {
         runtime,
-        rigAccounts: new RigAccountClient(runtime),
+        accounts: new AccountClient(runtime),
         todos: new TodoClient(runtime),
         todoAttachments: new TodoAttachmentClient(runtime),
     };

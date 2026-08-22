@@ -136,7 +136,7 @@ func newAPI(ctx context.Context, pool *pgxpool.Pool, log *slog.Logger) (*http.Se
 	// the guarantee — which is why losing it in a test that passes nil is fine.
 	todos := todo.New(repos.Todos, inbox, engine.Nudge, pool)
 	attachments := todo_attachment.New(repos.TodoAttachments, api.NewFiles(pool))
-	members := rig_account.New(repos.RigAccounts)
+	members := rig_account.New(repos.Accounts)
 
 	reg.Register(api.NewTodoSubject(todos))
 
@@ -171,7 +171,7 @@ func newAPI(ctx context.Context, pool *pgxpool.Pool, log *slog.Logger) (*http.Se
 			RequestID: func(r *http.Request) string { return r.Header.Get("X-Request-Id") },
 			Logger:    log,
 		},
-		RigAccount:     members,
+		Account:        members,
 		Todo:           todos,
 		TodoAttachment: attachments,
 		Notifications:  inbox,

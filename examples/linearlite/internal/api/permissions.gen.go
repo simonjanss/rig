@@ -22,7 +22,7 @@ import (
 // already written about the table.
 func Permissions() []tenancy.Permission {
 	return []tenancy.Permission{
-		{Key: "rig_account.read", Name: "Read rigaccounts", Description: "Read rigaccounts — One person inside one tenant. The person is the identity; this is who they are here."},
+		{Key: "rig_account.read", Name: "Read accounts", Description: "Read accounts — One person inside one tenant. The person is the identity; this is who they are here."},
 		{Key: "todo.delete", Name: "Delete todos", Description: "Delete todos — One item on the board."},
 		{Key: "todo.read", Name: "Read todos", Description: "Read todos — One item on the board."},
 		{Key: "todo.write", Name: "Write todos", Description: "Create and change todos — One item on the board."},

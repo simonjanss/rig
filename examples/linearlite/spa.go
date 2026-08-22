@@ -24,6 +24,21 @@ import (
 // _stream shapes, the probes — winning over this catch-all.
 func spaHandler(dir string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// The catch-all catches what fell past the real routes, and some of
+		// that is not a page: a POST to an endpoint that does not exist, or a
+		// misspelled API path, should say so rather than answer with HTML the
+		// caller will try to parse as JSON.
+		for _, prefix := range []string{"/api/", "/auth/", "/notifications"} {
+			if strings.HasPrefix(r.URL.Path, prefix) {
+				http.NotFound(w, r)
+				return
+			}
+		}
+		if r.Method != http.MethodGet && r.Method != http.MethodHead {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
 		index := filepath.Join(dir, "index.html")
 		if _, err := os.Stat(index); err != nil {
 			notBuilt(w)

@@ -7,7 +7,6 @@ package store
 import (
 	"context"
 	"fmt"
-	"strconv"
 	"time"
 
 	"github.com/google/uuid"
@@ -53,66 +52,6 @@ type RigNotificationSettingRepository interface {
 
 	// Delete removes a row.
 	Delete(ctx context.Context, in dbhook.Delete[model.RigNotificationSettingDeleteInput, model.RigNotificationSetting]) error
-}
-
-// rigNotificationSettingAccountFilter collects the conditions written on a
-// RigNotificationSetting's Account.
-//
-// The bool is whether there were any: a relation nobody mentioned is not a
-// condition that everything satisfies, it is no condition at all.
-func rigNotificationSettingAccountFilter(f model.RigNotificationSettingFilter) (model.RigAccountFilter, bool) {
-	var (
-		sub   model.RigAccountFilter
-		asked bool
-	)
-
-	if p := f.Equals; p != nil && p.Account != nil {
-		sub.Equals, asked = p.Account, true
-	}
-	if p := f.NotEquals; p != nil && p.Account != nil {
-		sub.NotEquals, asked = p.Account, true
-	}
-	if p := f.GreaterThan; p != nil && p.Account != nil {
-		sub.GreaterThan, asked = p.Account, true
-	}
-	if p := f.SmallerThan; p != nil && p.Account != nil {
-		sub.SmallerThan, asked = p.Account, true
-	}
-	if p := f.GreaterOrEqual; p != nil && p.Account != nil {
-		sub.GreaterOrEqual, asked = p.Account, true
-	}
-	if p := f.SmallerOrEqual; p != nil && p.Account != nil {
-		sub.SmallerOrEqual, asked = p.Account, true
-	}
-	if p := f.Contains; p != nil && p.Account != nil {
-		sub.Contains, asked = p.Account, true
-	}
-	if p := f.NotContains; p != nil && p.Account != nil {
-		sub.NotContains, asked = p.Account, true
-	}
-	if p := f.Like; p != nil && p.Account != nil {
-		sub.Like, asked = p.Account, true
-	}
-	if p := f.NotLike; p != nil && p.Account != nil {
-		sub.NotLike, asked = p.Account, true
-	}
-	if p := f.Null; p != nil && p.Account != nil {
-		sub.Null, asked = p.Account, true
-	}
-	if p := f.NotNull; p != nil && p.Account != nil {
-		sub.NotNull, asked = p.Account, true
-	}
-
-	if !asked {
-		return sub, false
-	}
-
-	// The connective comes down with them, and it has to: under OR the caller
-	// asked for a related row satisfying either condition, and one subquery whose
-	// inside is a disjunction is exactly that. Under AND it is the same row
-	// satisfying both, which is the part a subquery per operator could not say.
-	sub.OrCondition = f.OrCondition
-	return sub, true
 }
 
 // rigNotificationSettingGroup turns a filter into the condition tree the
@@ -390,36 +329,6 @@ func rigNotificationSettingGroup(f model.RigNotificationSettingFilter, sc filter
 		}
 	}
 
-	if sub, ok := rigNotificationSettingAccountFilter(f); ok {
-		inner, from, on := sc.belongsTo("rig_account", "id", "account_id")
-		where, err := rigAccountGroup(sub, inner)
-		if err != nil {
-			return query.Group{}, err
-		}
-
-		// The far side is scoped whatever the read asked for. A read option widens
-		// what this query returns, not what it may look through to decide.
-		where.Add(inner.tenant("tenant_id"))
-		where.Add(inner.live("deleted_at"))
-
-		g.Add(query.Related(query.Exists{From: from, On: on, Where: where}))
-	}
-
-	if p := f.Without; p != nil && p.Account != nil {
-		inner, from, on := sc.belongsTo("rig_account", "id", "account_id")
-		where, err := rigAccountGroup(*p.Account, inner)
-		if err != nil {
-			return query.Group{}, err
-		}
-
-		// The far side is scoped whatever the read asked for. A read option widens
-		// what this query returns, not what it may look through to decide.
-		where.Add(inner.tenant("tenant_id"))
-		where.Add(inner.live("deleted_at"))
-
-		g.Add(query.Related(query.Exists{From: from, On: on, Where: where, Not: true}))
-	}
-
 	for _, n := range f.NestedFilters {
 		nested, err := rigNotificationSettingGroup(n, sc)
 		if err != nil {
@@ -439,41 +348,6 @@ func rigNotificationSettingSortable(column string) bool {
 	return false
 }
 
-// rigNotificationSettingOrderColumn reports whether an ordering names a column
-// of a relation that can be ordered by.
-func rigNotificationSettingOrderColumn(relation, column string) error {
-	switch relation {
-	case "Account":
-		if !rigAccountSortable(column) {
-			return rigerr.Invalid("a RigNotificationSetting has no Account that can be ordered by %q", column)
-		}
-		return nil
-	}
-	return rigerr.Invalid("a RigNotificationSetting has no relation named %q to order by", relation)
-}
-
-// rigNotificationSettingOrderJoin builds the left join an ordering across a
-// relation needs.
-//
-// The scope predicates go into the join's own condition rather than the
-// statement's WHERE. In WHERE they would be false for a row that matched
-// nothing and would discard it, which is an inner join wearing a left join's
-// clothes.
-func rigNotificationSettingOrderJoin(relation, column, alias string, sc filterScope) (query.Join, error) {
-	if err := rigNotificationSettingOrderColumn(relation, column); err != nil {
-		return query.Join{}, err
-	}
-
-	switch relation {
-	case "Account":
-		far, j := sc.orderJoin("rig_account", alias, "id", "account_id")
-		j.Where.Add(far.tenant("tenant_id"))
-		j.Where.Add(far.live("deleted_at"))
-		return j, nil
-	}
-	return query.Join{}, rigerr.Invalid("a RigNotificationSetting has no relation named %q to order by", relation)
-}
-
 // rigNotificationSettingOrder converts the model's ordering terms into the
 // runtime's.
 func rigNotificationSettingOrder(terms []model.RigNotificationSettingOrder, sc filterScope) ([]query.Order, []query.Join, error) {
@@ -482,29 +356,8 @@ func rigNotificationSettingOrder(terms []model.RigNotificationSettingOrder, sc f
 	}
 
 	out := make([]query.Order, 0, len(terms))
-	var joins []query.Join
-	// One join per relation however many of its columns are named.
-	aliases := make(map[string]string)
 
 	for _, t := range terms {
-		if t.Relation != "" {
-			alias, ok := aliases[t.Relation]
-			if !ok {
-				alias = strconv.Itoa(len(joins) + 1)
-				alias = "o" + alias
-				join, err := rigNotificationSettingOrderJoin(t.Relation, t.Column, alias, sc)
-				if err != nil {
-					return nil, nil, err
-				}
-				joins = append(joins, join)
-				aliases[t.Relation] = alias
-			} else if err := rigNotificationSettingOrderColumn(t.Relation, t.Column); err != nil {
-				return nil, nil, err
-			}
-			out = append(out, query.Order{Table: alias, Column: t.Column, Desc: t.Desc})
-			continue
-		}
-
 		// A column this table cannot be ordered by is the caller's mistake, not a
 		// column name to paste into a statement.
 		if !rigNotificationSettingSortable(t.Column) {
@@ -513,7 +366,7 @@ func rigNotificationSettingOrder(terms []model.RigNotificationSettingOrder, sc f
 		out = append(out, query.Order{Table: sc.as, Column: t.Column, Desc: t.Desc})
 	}
 
-	return out, joins, nil
+	return out, nil, nil
 }
 
 type rigNotificationSettingRepo struct {
@@ -706,30 +559,15 @@ func (r *rigNotificationSettingRepo) Create(ctx context.Context, in dbhook.Creat
 	_ = now
 
 	// A single INSERT is already atomic, so the transaction is opened only when a
-	// hook needs to be able to undo it — or, here, when a reference has to be
-	// checked first. A check on one connection and an insert on another leaves a
-	// window where the row it approved is deleted before the row that points at it
-	// lands.
-	needsTx := true
+	// hook needs to be able to undo it. Two round trips is not a price to pay for
+	// nothing.
+	needsTx := in.Hooks.Before != nil || in.Hooks.After != nil
 
 	var m *model.RigNotificationSetting
 	err = dbx.InTxIf(ctx, r.db.pool, r.db.connFor(ctx), needsTx, func(ctx context.Context, tx dbx.Conn) error {
 		if in.Hooks.Before != nil {
 			if err := in.Hooks.Before(ctx, claims, &in.Input); err != nil {
 				return err
-			}
-		}
-
-		// Every identifier this row would store has to name a row the caller could
-		// have read. One indexed lookup per key, inside the transaction that is about
-		// to do the write.
-		{
-			ok, err := visibleRigAccount(ctx, tx, claims, in.Input.AccountID)
-			if err != nil {
-				return err
-			}
-			if !ok {
-				return &model.RigNotificationSettingCreateInputError{AccountID: rigerr.NewFieldError(rigerr.FieldCodeNotFound, "no RigAccount with id %s", in.Input.AccountID)}
 			}
 		}
 
@@ -804,18 +642,6 @@ func (r *rigNotificationSettingRepo) Update(ctx context.Context, id uuid.UUID, i
 		if in.Hooks.Validator != nil {
 			if err := in.Hooks.Validator.RunUpdate(ctx, claims, &in.Input, prev); err != nil {
 				return err
-			}
-		}
-
-		// Every identifier this update would store has to name a row the caller could
-		// have read — the ones it actually sends, and no others.
-		if v, sent := in.Input.AccountID.Get(); sent {
-			ok, err := visibleRigAccount(ctx, tx, claims, v)
-			if err != nil {
-				return err
-			}
-			if !ok {
-				return &model.RigNotificationSettingUpdateInputError{AccountID: rigerr.NewFieldError(rigerr.FieldCodeNotFound, "no RigAccount with id %s", v)}
 			}
 		}
 

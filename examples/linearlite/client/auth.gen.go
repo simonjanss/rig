@@ -36,8 +36,8 @@ var AuthProfile = rigclient.AuthProfile{
 // The permissions this API's endpoints require. They are what an API key's
 // scopes are drawn from, and what a role grants.
 const (
-	// Read rigaccounts — One person inside one tenant. The person is the
-	// identity; this is who they are here.
+	// Read accounts — One person inside one tenant. The person is the identity;
+	// this is who they are here.
 	PermissionRigAccountRead = "rig_account.read"
 	// Delete todos — One item on the board.
 	PermissionTodoDelete = "todo.delete"

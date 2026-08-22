@@ -13,7 +13,7 @@ import type { RigAccountRoleLevel } from "./rig_account_role_level.gen.js";
  * Every field the server returns, and no field it does not: this is the
  * readable projection of the row rather than the row.
  */
-export type RigAccount = {
+export type Account = {
     /** Unique identifier for this row. */
     id: string;
     /** Tenant this row belongs to. Every query is scoped by it. */
@@ -73,10 +73,10 @@ export type RigAccount = {
     deletedByApiKeyId?: string | null;
 };
 
-/** A page of RigAccounts. */
-export type RigAccountListResponse = {
+/** A page of Accounts. */
+export type AccountListResponse = {
     /** The rows in this page. */
-    data: RigAccount[];
+    data: Account[];
     /** Where this page sits in the full result set. */
     pagination: Pagination;
 };

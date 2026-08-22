@@ -45,7 +45,7 @@ type Client struct {
 
 	// One person inside one tenant. The person is the identity; this is who they
 	// are here.
-	RigAccounts *RigAccountClient
+	Accounts *AccountClient
 	// One item on the board.
 	Todos *TodoClient
 	// A file attached to a todo.
@@ -73,7 +73,7 @@ func New(cfg rigclient.Config) (*Client, error) {
 	}
 
 	c := &Client{rt: rt}
-	c.RigAccounts = &RigAccountClient{rt: rt}
+	c.Accounts = &AccountClient{rt: rt}
 	c.Todos = &TodoClient{rt: rt}
 	c.TodoAttachments = &TodoAttachmentClient{rt: rt}
 	c.Auth = rt.Auth()

@@ -2,7 +2,7 @@
 //
 // This file is rewritten on every run. Put changes in the service layer.
 
-package client
+package model
 
 import (
 	"time"
@@ -13,9 +13,10 @@ import (
 // One person inside one tenant. The person is the identity; this is who they
 // are here.
 //
-// Every field the server returns, and no field it does not: this is the
-// readable projection of the row rather than the row.
-type RigAccount struct {
+// It is the one definition of a Account: the repository scans into it and the
+// API returns it, so there is no conversion between two shapes of the same
+// thing and no field that can go missing from one of them.
+type Account struct {
 	// Unique identifier for this row.
 	ID uuid.UUID `json:"id"`
 	// Tenant this row belongs to. Every query is scoped by it.
@@ -61,10 +62,30 @@ type RigAccount struct {
 	DeletedByAPIKeyID *uuid.UUID `json:"deletedByApiKeyId,omitempty"`
 }
 
-// A page of RigAccounts.
-type RigAccountListResponse struct {
-	// The rows in this page.
-	Data []RigAccount `json:"data,omitempty"`
-	// Where this page sits in the full result set.
-	Pagination Pagination `json:"pagination"`
-}
+// TableAccount is the table this entity is stored in.
+const TableAccount = "rig_account"
+
+// Column names for rig_account, so nothing has to spell one out.
+const (
+	ColumnAccountID                 = "id"
+	ColumnAccountTenantID           = "tenant_id"
+	ColumnAccountIdentityID         = "identity_id"
+	ColumnAccountCreatedAt          = "created_at"
+	ColumnAccountCreatedByAccountID = "created_by_account_id"
+	ColumnAccountUpdatedAt          = "updated_at"
+	ColumnAccountUpdatedByAccountID = "updated_by_account_id"
+	ColumnAccountDeletedAt          = "deleted_at"
+	ColumnAccountDeletedByAccountID = "deleted_by_account_id"
+	ColumnAccountKind               = "kind"
+	ColumnAccountRole               = "role"
+	ColumnAccountEmailAddress       = "email_address"
+	ColumnAccountDisplayName        = "display_name"
+	ColumnAccountTimeZone           = "time_zone"
+	ColumnAccountIsActive           = "is_active"
+	ColumnAccountCreatedByAPIKeyID  = "created_by_api_key_id"
+	ColumnAccountUpdatedByAPIKeyID  = "updated_by_api_key_id"
+	ColumnAccountDeletedByAPIKeyID  = "deleted_by_api_key_id"
+)
+
+// AccountColumns is every column, in the order the row is scanned.
+var AccountColumns = []string{"id", "tenant_id", "identity_id", "created_at", "created_by_account_id", "updated_at", "updated_by_account_id", "deleted_at", "deleted_by_account_id", "kind", "role", "email_address", "display_name", "time_zone", "is_active", "created_by_api_key_id", "updated_by_api_key_id", "deleted_by_api_key_id"}
