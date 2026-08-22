@@ -111,8 +111,9 @@ const detail = $("detail");
 
 let lastTraces = [];
 let lastLoad = null;
-// One trace's log lines, keyed by trace id. Safe to cache: a finished trace and
-// the lines it wrote are both already on disk and cannot change.
+// One trace's log lines, keyed by trace id. Safe to cache once the trace has
+// finished: it and the lines it wrote are then both already on disk and cannot
+// change. An unfinished one is dropped again by [loadTraces].
 const traceLogs = new Map();
 // Why a trace has no lines, when it has none, which is not the same as not
 // having asked yet.
@@ -175,6 +176,15 @@ async function loadTraces() {
   service(data.service);
   $("note-requests").textContent = data.reason || "";
   lastTraces = data.traces || [];
+
+  // A trace with no root has not finished — its child spans were exported by
+  // the batch while the request was still running — so it can still write the
+  // line that says how it ended. What was read while it was in flight is not
+  // the answer yet, and dropping it here is what makes the next render ask
+  // again.
+  const open = lastTraces.find((t) => t.id === state.trace);
+  if (open && !open.root) traceLogs.delete(open.id);
+
   renderTiles(lastTraces);
   renderTraces(lastTraces);
   renderDetail();
@@ -227,6 +237,12 @@ function syncRows(tbody, items, keyOf, build, refresh) {
     if (old) {
       refresh(old, item, i);
       next.push(old);
+      // A row that was expanded carries its detail with it. The detail is a
+      // sibling row rather than a child, so leaving it out of next is exactly
+      // the rebuild this function exists to avoid: it would collapse the line
+      // somebody had open, five seconds after they opened it.
+      const opened = old.nextElementSibling;
+      if (opened && !opened.dataset.key) next.push(opened);
       return;
     }
     next.push(build(item, key, i));
@@ -809,8 +825,24 @@ function atLeastJS(level, min) {
   return li >= mi;
 }
 
+// A line's identity is what it says, and not where it is in the list: a new
+// line arrives at the top and shifts every index below it, and a key that moved
+// is a row rebuilt — the focus and the expanded detail with it. Two lines that
+// agree on all of this are told apart by how many came before, which holds as
+// long as both are in the window.
+function logKey(seen) {
+  return (rec) => {
+    // A separator a message could contain is fine: two lines that collide on
+    // the base still get their own count, and the key stays unique.
+    const base = [rec.time, rec.level, rec.trace_id, rec.span_id, rec.msg].join("|");
+    const n = (seen.get(base) || 0) + 1;
+    seen.set(base, n);
+    return base + "|" + n;
+  };
+}
+
 function renderLogs(logs) {
-  syncRows(logsBody, logs, (rec, i) => (rec.time || "") + "/" + i,
+  syncRows(logsBody, logs, logKey(new Map()),
     (rec, key) => {
       const tr = row(key, () => toggleLogDetail(tr, rec));
       tr.classList.add("logrow");
