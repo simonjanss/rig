@@ -1,14 +1,18 @@
 package observe_test
 
 import (
+	"context"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/simonjanss/rig/observe"
+	"go.opentelemetry.io/otel/trace"
 )
 
 const password = "correct horse battery"
@@ -70,25 +74,61 @@ func TestThePageRefusesWithoutThePassword(t *testing.T) {
 		t.Errorf("the wrong password = %d, want 401", w.Code)
 	}
 
-	if res := get(t, mux, base, true); res.Code != http.StatusOK {
+	if res := get(t, mux, base+"/", true); res.Code != http.StatusOK {
 		t.Errorf("the right password = %d, want 200", res.Code)
 	}
 }
 
-// Both spellings of the base path reach the page. A trailing slash is the
+// Both spellings of the base path reach the page: the one without the trailing
+// slash by way of a redirect to the one with it, which is what lets the HTML
+// name its stylesheet and its script relatively. A trailing slash is the
 // difference between two URLs to net/http and no difference at all to somebody
 // typing one.
 func TestThePageAnswersWithAndWithoutATrailingSlash(t *testing.T) {
 	mux, base := mount(t, setup(t, observe.Config{ServiceName: "todo"}),
 		observe.PageConfig{ServiceName: "todo", Password: password})
 
-	for _, path := range []string{base, base + "/"} {
+	res := get(t, mux, base+"/", true)
+	if res.Code != http.StatusOK {
+		t.Errorf("GET %s/ = %d, want 200", base, res.Code)
+	}
+	if got := res.Header().Get("Content-Type"); !strings.HasPrefix(got, "text/html") {
+		t.Errorf("GET %s/ answered %q", base, got)
+	}
+
+	res = get(t, mux, base, true)
+	if res.Code != http.StatusMovedPermanently {
+		t.Errorf("GET %s = %d, want 301", base, res.Code)
+	}
+	if got := res.Header().Get("Location"); got != base+"/" {
+		t.Errorf("GET %s redirected to %q, want %q", base, got, base+"/")
+	}
+}
+
+// The stylesheet and the script are behind the same guard as everything else,
+// because the page's own shape is not something an address that may not see it
+// should be able to read either.
+func TestTheAssetsAreBehindThePassword(t *testing.T) {
+	mux, base := mount(t, setup(t, observe.Config{ServiceName: "todo"}),
+		observe.PageConfig{ServiceName: "todo", Password: password})
+
+	for path, want := range map[string]string{
+		base + "/page.css": "text/css",
+		base + "/page.js":  "text/javascript",
+	} {
+		if res := get(t, mux, path, false); res.Code != http.StatusUnauthorized {
+			t.Errorf("GET %s with no credentials = %d, want 401", path, res.Code)
+		}
+
 		res := get(t, mux, path, true)
 		if res.Code != http.StatusOK {
 			t.Errorf("GET %s = %d, want 200", path, res.Code)
 		}
-		if got := res.Header().Get("Content-Type"); !strings.HasPrefix(got, "text/html") {
-			t.Errorf("GET %s answered %q", path, got)
+		if got := res.Header().Get("Content-Type"); !strings.HasPrefix(got, want) {
+			t.Errorf("GET %s answered %q, want %s", path, got, want)
+		}
+		if res.Body.Len() == 0 {
+			t.Errorf("GET %s answered nothing", path)
 		}
 	}
 }
@@ -134,7 +174,7 @@ func TestThePasswordComesFromTheEnvironment(t *testing.T) {
 
 	mux := http.NewServeMux()
 	page.Mount(mux)
-	if res := get(t, mux, observe.DefaultMonitorPath, true); res.Code != http.StatusOK {
+	if res := get(t, mux, observe.DefaultMonitorPath+"/", true); res.Code != http.StatusOK {
 		t.Errorf("the password from $%s = %d, want 200", observe.PasswordEnv, res.Code)
 	}
 }
@@ -240,12 +280,186 @@ func TestThePageDoesNotAppearOnItself(t *testing.T) {
 	p := setup(t, observe.Config{ServiceName: "todo", File: path})
 	mux, base := mount(t, p, observe.PageConfig{ServiceName: "todo", Password: password})
 
-	get(t, mux, base, true)
-	get(t, mux, base+"/traces.json", true)
+	for _, path := range []string{base, base + "/", base + "/page.css", base + "/page.js",
+		base + "/traces.json", base + "/logs.json"} {
+		get(t, mux, path, true)
+	}
 	flush(t, p)
 
 	for _, rec := range mustRead(t, path) {
 		t.Errorf("looking at the page wrote a span: %q", rec.Name)
+	}
+}
+
+// The log half. It is a second file and a second reader, and the page has to
+// say which of the two ways to have no logs it is looking at, because they have
+// different remedies.
+func TestThePageSaysWhyItHasNoLogs(t *testing.T) {
+	// No sink at all: a project that never wired one.
+	mux, base := mount(t, setup(t, observe.Config{ServiceName: "todo"}),
+		observe.PageConfig{ServiceName: "todo", Password: password})
+	if reason := logReason(t, mux, base, ""); !strings.Contains(reason, "PageConfig.Logs") {
+		t.Errorf("with no sink the page says %q, and it should say what to wire", reason)
+	}
+
+	// A sink with nowhere to write: the ordinary case on a laptop.
+	t.Setenv(observe.LogFileEnv, "")
+	logs, err := observe.OpenLogs(observe.LogConfig{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mux, base = mount(t, setup(t, observe.Config{ServiceName: "todo"}),
+		observe.PageConfig{ServiceName: "todo", Password: password, Logs: logs})
+	if reason := logReason(t, mux, base, ""); !strings.Contains(reason, observe.LogFileEnv) {
+		t.Errorf("with no log file the page says %q, and it should name the variable", reason)
+	}
+}
+
+// logBody is what logs.json answers, as a test reads it.
+type logBody struct {
+	Reason string              `json:"reason"`
+	Levels map[string]int      `json:"levels"`
+	Logs   []observe.LogRecord `json:"logs"`
+}
+
+// readLogs is one request at logs.json, decoded.
+func readLogs(t *testing.T, mux *http.ServeMux, base, query string) logBody {
+	t.Helper()
+
+	var body logBody
+	res := get(t, mux, base+"/logs.json"+query, true)
+	if err := json.Unmarshal(res.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Logs == nil {
+		t.Error("logs is null rather than an empty list, so the page renders nothing at all")
+	}
+	return body
+}
+
+func logReason(t *testing.T, mux *http.ServeMux, base, query string) string {
+	t.Helper()
+	return readLogs(t, mux, base, query).Reason
+}
+
+// seedLogs is a log file with one line per level, two of them belonging to one
+// trace.
+func seedLogs(t *testing.T) *observe.Logs {
+	t.Helper()
+
+	logs, err := observe.OpenLogs(observe.LogConfig{File: filepath.Join(t.TempDir(), "log.jsonl")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { logs.Close() })
+
+	logger := slog.New(logs.Handler())
+	traced := trace.ContextWithSpanContext(context.Background(), trace.NewSpanContext(trace.SpanContextConfig{
+		TraceID: [16]byte{1, 2, 3}, SpanID: [8]byte{4, 5}, TraceFlags: trace.FlagsSampled,
+	}))
+
+	logger.DebugContext(traced, "request served", slog.Int("status", 200))
+	logger.ErrorContext(traced, "request failed", slog.String("error", "connection refused"))
+	logger.InfoContext(context.Background(), "listening", slog.String("addr", ":8080"))
+	return logs
+}
+
+// The three filters, and the counts the level chips are drawn from.
+func TestThePageFiltersTheLogs(t *testing.T) {
+	logs := seedLogs(t)
+	mux, base := mount(t, setup(t, observe.Config{ServiceName: "todo"}),
+		observe.PageConfig{ServiceName: "todo", Password: password, Logs: logs})
+
+	all := readLogs(t, mux, base, "")
+	if len(all.Logs) != 3 {
+		t.Fatalf("want three lines, got %d", len(all.Logs))
+	}
+	if all.Logs[0].Msg != "listening" {
+		t.Errorf("want the newest line first, got %q", all.Logs[0].Msg)
+	}
+	if all.Levels["DEBUG"] != 1 || all.Levels["ERROR"] != 1 || all.Levels["INFO"] != 1 {
+		t.Errorf("the level counts are %v", all.Levels)
+	}
+
+	// A level is a threshold and not an equality test, because that is what
+	// somebody filtering a log means by it.
+	warned := readLogs(t, mux, base, "?level=WARN")
+	if len(warned.Logs) != 1 || warned.Logs[0].Msg != "request failed" {
+		t.Errorf("level=WARN gave %d lines", len(warned.Logs))
+	}
+	if n := len(readLogs(t, mux, base, "?level=DEBUG").Logs); n != 3 {
+		t.Errorf("level=DEBUG gave %d lines, want everything", n)
+	}
+
+	// The search reaches attribute values, so the cause of a 500 is findable by
+	// what it says.
+	found := readLogs(t, mux, base, "?q=connection+refused")
+	if len(found.Logs) != 1 || found.Logs[0].Msg != "request failed" {
+		t.Errorf("searching an attribute value gave %d lines", len(found.Logs))
+	}
+
+	// And one trace's lines, which is what the request detail asks for.
+	id := all.Logs[1].TraceID
+	if id == "" {
+		t.Fatal("the traced lines carry no trace id")
+	}
+	one := readLogs(t, mux, base, "?trace="+id)
+	if len(one.Logs) != 2 {
+		t.Errorf("trace=%s gave %d lines, want the two written inside it", id, len(one.Logs))
+	}
+
+	// A filter that matched nothing is not a server that has logged nothing,
+	// and saying the second when the first is true contradicts the list
+	// somebody was looking at a keystroke earlier.
+	none := readLogs(t, mux, base, "?q=nothing-in-this-file")
+	if len(none.Logs) != 0 || !strings.Contains(none.Reason, "matches that filter") {
+		t.Errorf("a search that matches nothing said %q", none.Reason)
+	}
+}
+
+// Same guard as everything else. The log file holds the cause of every 500 this
+// server answered, which is more than the spans do.
+func TestTheAllowListCoversTheLogs(t *testing.T) {
+	mux, base := mount(t, setup(t, observe.Config{ServiceName: "todo"}),
+		observe.PageConfig{
+			ServiceName: "todo", Password: password, Logs: seedLogs(t),
+			Allow: []string{"10.0.0.0/8"},
+		})
+
+	if got := from(t, mux, base+"/logs.json", "192.0.2.7:41234"); got != http.StatusNotFound {
+		t.Errorf("logs.json from an outside address = %d, want 404", got)
+	}
+	if got := from(t, mux, base+"/logs.json", "10.0.0.1:41234"); got != http.StatusOK {
+		t.Errorf("logs.json from an allowed address = %d, want 200", got)
+	}
+
+	// And the password, on a page with no list, where the address is not what
+	// answers first.
+	unrestricted, base := mount(t, setup(t, observe.Config{ServiceName: "todo"}),
+		observe.PageConfig{ServiceName: "todo", Password: password, Logs: seedLogs(t)})
+	if res := get(t, unrestricted, base+"/logs.json", false); res.Code != http.StatusUnauthorized {
+		t.Errorf("logs.json with no password = %d, want 401", res.Code)
+	}
+}
+
+// Two rotating writers on one path interleave their lines and rotate each
+// other's data away. It is a configuration mistake whose symptom is a file that
+// reads as neither, so it is refused where it can still be named.
+func TestOneFileForBothIsRefused(t *testing.T) {
+	path := spanFile(t)
+	logs, err := observe.OpenLogs(observe.LogConfig{File: path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer logs.Close()
+
+	_, err = setup(t, observe.Config{ServiceName: "todo", File: path}).
+		Page(observe.PageConfig{ServiceName: "todo", Password: password, Logs: logs})
+	if err == nil {
+		t.Fatal("the span file and the log file being one file was accepted")
+	}
+	if !strings.Contains(err.Error(), "different files") {
+		t.Errorf("the error does not say what is wrong: %v", err)
 	}
 }
 
@@ -298,7 +512,7 @@ func TestTheAllowListRefusesAnAddressBeforeThePassword(t *testing.T) {
 		// when it cannot tell who is calling is not a narrowing.
 		{"pipe", http.StatusNotFound},
 	} {
-		if got := from(t, mux, base, tc.remote); got != tc.want {
+		if got := from(t, mux, base+"/", tc.remote); got != tc.want {
 			t.Errorf("from %s = %d, want %d", tc.remote, got, tc.want)
 		}
 	}
@@ -321,7 +535,7 @@ func TestAnEmptyAllowListAllowsEverything(t *testing.T) {
 	mux, base := mount(t, setup(t, observe.Config{ServiceName: "todo"}),
 		observe.PageConfig{ServiceName: "todo", Password: password})
 
-	if got := from(t, mux, base, "192.0.2.7:41234"); got != http.StatusOK {
+	if got := from(t, mux, base+"/", "192.0.2.7:41234"); got != http.StatusOK {
 		t.Errorf("with no list, an outside address = %d, want 200", got)
 	}
 }

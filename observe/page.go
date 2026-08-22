@@ -31,14 +31,29 @@ const (
 	DefaultMonitorPath = "/_rig/monitor"
 	// DefaultMaxTraces is how many requests the page lists.
 	DefaultMaxTraces = 200
+	// DefaultMaxLogs is how many log lines the page reads. Larger than
+	// [DefaultMaxTraces] because one request writes several lines, and the
+	// request line alone means there is at least one per request listed.
+	DefaultMaxLogs = 500
 	// MinPasswordLength is the shortest password the page will start with. It
 	// is the one guard against a brute force, because there is no lockout and
 	// no rate limit here — see the package documentation.
 	MinPasswordLength = 12
 )
 
-//go:embed page.html
-var pageHTML []byte
+// The page's assets: markup, style and behaviour, one file each rather than one
+// file with three languages in it. go:embed takes three as easily as one, they
+// are served through the same guard as everything else here, and a deployment
+// with a strict content security policy can serve them at all — which an inline
+// <style> and <script> would not be.
+var (
+	//go:embed page.html
+	pageHTML []byte
+	//go:embed page.css
+	pageCSS []byte
+	//go:embed page.js
+	pageJS []byte
+)
 
 // PageConfig is what the monitoring page needs that the generated Monitoring()
 // can know.
@@ -58,6 +73,25 @@ type PageConfig struct {
 	// MaxTraces is how many requests the page lists, newest first. Zero means
 	// [DefaultMaxTraces].
 	MaxTraces int
+
+	// MaxLogs is how many log lines the page reads, newest first. Zero means
+	// [DefaultMaxLogs].
+	MaxLogs int
+
+	// Logs is the log file this process is writing, and nil is a page with no
+	// log half — which is what a project that never wired one gets, and it says
+	// so rather than showing an empty list.
+	//
+	// It is the sink itself and not a path, for the reason the span file is not
+	// a field here either: the page and the writer agreeing on a file should not
+	// be something a main arranges twice. Open it with [OpenLogs], tee
+	// [Logs.Handler] into the logger the application already has, and set the
+	// same object here.
+	//
+	// It is not in rig.yaml and cannot be, because it is an object rather than a
+	// value — so this is one of the two fields a generated Monitoring() leaves
+	// for a main to fill in.
+	Logs *Logs
 
 	// Password is a literal from rig.yaml, for a project that wants the page
 	// working without an environment to set. Empty — the ordinary case — falls
@@ -97,6 +131,7 @@ type PageConfig struct {
 type Page struct {
 	cfg      PageConfig
 	file     string
+	logs     *Logs
 	password string
 	// allow is Allow, parsed. Nil means every address, which is what an empty
 	// list means: this is a narrowing and not a default-deny.
@@ -123,6 +158,7 @@ type Page struct {
 func (p *Provider) Page(cfg PageConfig) (*Page, error) {
 	cfg.BasePath = cmp.Or(cfg.BasePath, DefaultMonitorPath)
 	cfg.MaxTraces = cmp.Or(cfg.MaxTraces, DefaultMaxTraces)
+	cfg.MaxLogs = cmp.Or(cfg.MaxLogs, DefaultMaxLogs)
 	cfg.PasswordEnv = cmp.Or(cfg.PasswordEnv, PasswordEnv)
 
 	if !strings.HasPrefix(cfg.BasePath, "/") || strings.HasSuffix(cfg.BasePath, "/") {
@@ -134,9 +170,17 @@ func (p *Provider) Page(cfg PageConfig) (*Page, error) {
 		return nil, err
 	}
 
-	pg := &Page{cfg: cfg, password: cmp.Or(cfg.Password, os.Getenv(cfg.PasswordEnv)), allow: allow}
+	pg := &Page{cfg: cfg, logs: cfg.Logs, password: cmp.Or(cfg.Password, os.Getenv(cfg.PasswordEnv)), allow: allow}
 	if p != nil {
 		pg.file = p.cfg.File
+	}
+
+	// Two rotating writers on one path interleave their lines and rotate each
+	// other's data away, and the symptom is a file that reads as neither. It is
+	// a configuration mistake with a silent failure, so it is refused here
+	// rather than discovered as a page that shows nonsense.
+	if pg.file != "" && pg.file == cfg.Logs.File() {
+		return nil, fmt.Errorf("observe: the span file and the log file are both %q; they have to be different files", pg.file)
 	}
 
 	switch {
@@ -168,6 +212,14 @@ func (pg *Page) Unarmed() string {
 // tells them nothing. It is the same argument that leaves the registration
 // endpoint unmounted rather than answering 403.
 //
+// The path without its trailing slash redirects to the one with it, rather than
+// serving the same page twice. That is what lets the HTML name its stylesheet
+// and its script by a relative path: from /_rig/monitor those would resolve
+// against /_rig/, and the page's assets are the one thing here that cannot be
+// written without knowing what monitoring.base_path was set to. Behind the
+// guard, so an address that may not see the page does not learn it exists from
+// a redirect either.
+//
 // It goes on the same mux as the API, after it, so that a pattern collision is
 // a panic naming this page rather than a route the project owns. The page is
 // not traced and not logged, and that is not arranged here: rig opens its spans
@@ -179,9 +231,12 @@ func (pg *Page) Mount(mux *http.ServeMux) {
 		return
 	}
 
-	mux.Handle("GET "+pg.cfg.BasePath, pg.guard(pg.serveHTML))
+	mux.Handle("GET "+pg.cfg.BasePath, pg.guard(pg.redirectToSlash))
 	mux.Handle("GET "+pg.cfg.BasePath+"/{$}", pg.guard(pg.serveHTML))
+	mux.Handle("GET "+pg.cfg.BasePath+"/page.css", pg.guard(pg.asset("text/css; charset=utf-8", pageCSS)))
+	mux.Handle("GET "+pg.cfg.BasePath+"/page.js", pg.guard(pg.asset("text/javascript; charset=utf-8", pageJS)))
 	mux.Handle("GET "+pg.cfg.BasePath+"/traces.json", pg.guard(pg.serveTraces))
+	mux.Handle("GET "+pg.cfg.BasePath+"/logs.json", pg.guard(pg.serveLogs))
 }
 
 // guard is the address list and then the password, in that order.
@@ -311,11 +366,31 @@ func parsePrefix(entry string) (netip.Prefix, error) {
 	return netip.PrefixFrom(addr, addr.BitLen()), nil
 }
 
-// serveHTML answers the page itself, which is one embedded file and no
-// templating: everything it shows it fetches from traces.json.
+// redirectToSlash sends the base path to the base path with a slash. See
+// [Page.Mount] for why the page has one entry point rather than two.
+func (pg *Page) redirectToSlash(w http.ResponseWriter, r *http.Request) {
+	http.Redirect(w, r, pg.cfg.BasePath+"/", http.StatusMovedPermanently)
+}
+
+// serveHTML answers the page itself, which is an embedded file and no
+// templating: everything it shows it fetches from traces.json and logs.json.
 func (pg *Page) serveHTML(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	_, _ = w.Write(pageHTML)
+}
+
+// asset answers one of the embedded files beside the page.
+//
+// Behind [Page.guard] like everything else, so the style and the behaviour of a
+// page an address may not see are not readable by that address either. They are
+// sent with no-store, which the guard sets: they change only when the binary
+// does, but a caching header would be a second thing to reason about for two
+// files of a few kilobytes.
+func (pg *Page) asset(contentType string, body []byte) http.HandlerFunc {
+	return func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", contentType)
+		_, _ = w.Write(body)
+	}
 }
 
 // traceList is what traces.json answers.
@@ -376,6 +451,96 @@ func (pg *Page) serveTraces(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
+// logList is what logs.json answers.
+//
+// Levels is a count per level over the whole window, before the filters below
+// are applied, so the page's level chips can carry a number that does not move
+// while somebody types in the search box.
+type logList struct {
+	Service string         `json:"service,omitempty"`
+	File    string         `json:"file,omitempty"`
+	Reason  string         `json:"reason,omitempty"`
+	Levels  map[string]int `json:"levels,omitempty"`
+	Logs    []LogRecord    `json:"logs"`
+}
+
+// serveLogs answers the log lines, filtered by the query.
+//
+// `trace` is what makes a request and the lines it wrote one view: the page asks
+// for one trace's lines when a request is opened, rather than carrying every
+// line in the list response.
+func (pg *Page) serveLogs(w http.ResponseWriter, r *http.Request) {
+	out := logList{Service: pg.cfg.ServiceName, File: pg.logs.File(), Logs: []LogRecord{}}
+
+	// Two ways to have no logs, and they have different remedies: a project
+	// that wired no sink at all, and a sink running where nothing said where to
+	// write. Saying which is the only way anybody finds out.
+	switch {
+	case pg.logs == nil:
+		out.Reason = "No log sink. Open one with observe.OpenLogs, tee logs.Handler() into your logger, and pass it as PageConfig.Logs."
+		writeJSON(w, http.StatusOK, out)
+		return
+	case pg.logs.Unarmed() != "":
+		out.Reason = "No log file. Set $" + LogFileEnv + ", or observe.LogConfig.File, and restart."
+		writeJSON(w, http.StatusOK, out)
+		return
+	}
+
+	limit := pg.cfg.MaxLogs
+	if n, err := strconv.Atoi(r.URL.Query().Get("limit")); err == nil && n > 0 {
+		limit = min(n, pg.cfg.MaxLogs)
+	}
+
+	recs, err := pg.logs.Read(limit)
+	if err != nil {
+		out.Reason = "Cannot read " + pg.logs.File() + ": " + err.Error()
+		writeJSON(w, http.StatusOK, out)
+		return
+	}
+
+	out.Levels = make(map[string]int, len(logLevels))
+	for _, rec := range recs {
+		out.Levels[strings.ToUpper(rec.Level)]++
+	}
+
+	q := r.URL.Query()
+	for _, rec := range recs {
+		if id := q.Get("trace"); id != "" && !strings.EqualFold(rec.TraceID, id) {
+			continue
+		}
+		if level := q.Get("level"); level != "" && !atLeast(rec.Level, level) {
+			continue
+		}
+		if term := q.Get("q"); term != "" && !logMatches(rec, term) {
+			continue
+		}
+		out.Logs = append(out.Logs, rec)
+	}
+
+	if len(out.Logs) == 0 {
+		out.Reason = "No line here matches that filter."
+		if len(recs) == 0 {
+			out.Reason = "Nothing yet. This server has written no line since the log file was created."
+		}
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// logMatches is the search box, over a log line: the message, the level, the
+// trace it belongs to, or any of its attributes.
+//
+// The trace id is in it so that one search term filters both halves of the page
+// at once — paste the requestId from somebody's screenshot and the request and
+// the lines it wrote both narrow to it.
+func logMatches(rec LogRecord, term string) bool {
+	term = strings.ToLower(term)
+	return strings.Contains(strings.ToLower(rec.Msg), term) ||
+		strings.Contains(strings.ToLower(rec.Level), term) ||
+		strings.Contains(strings.ToLower(rec.TraceID), term) ||
+		strings.Contains(strings.ToLower(rec.SpanID), term) ||
+		attrsMatch(rec.Attrs, term)
+}
+
 // matches is the search box: a trace id somebody pasted, or any substring of
 // any span's name or attributes.
 //
@@ -393,11 +558,31 @@ func matches(t TraceRecord, term string) bool {
 			strings.Contains(strings.ToLower(span.Error), term) {
 			return true
 		}
-		for k, v := range span.Attributes {
-			if strings.Contains(strings.ToLower(k), term) ||
-				strings.Contains(strings.ToLower(fmt.Sprint(v)), term) {
+		if attrsMatch(span.Attributes, term) {
+			return true
+		}
+	}
+	return false
+}
+
+// attrsMatch is a case-insensitive substring over every key and every value of
+// an attribute map, a group's contents included.
+//
+// term arrives already lowered, because both callers loop and lowering it per
+// attribute would be the one allocation here that scales with the file.
+func attrsMatch(attrs map[string]any, term string) bool {
+	for k, v := range attrs {
+		if strings.Contains(strings.ToLower(k), term) {
+			return true
+		}
+		if group, ok := v.(map[string]any); ok {
+			if attrsMatch(group, term) {
 				return true
 			}
+			continue
+		}
+		if strings.Contains(strings.ToLower(fmt.Sprint(v)), term) {
+			return true
 		}
 	}
 	return false

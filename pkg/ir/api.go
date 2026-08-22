@@ -194,7 +194,7 @@ type Tracing struct {
 }
 
 // Monitoring is the resolved `monitoring:` block: rig's own page over the spans
-// this server wrote.
+// this server wrote and the lines it logged.
 //
 // A document carries it only when the project asked for the page, and only ever
 // alongside [Tracing] — the page is a reader over the span file and has nothing
@@ -219,6 +219,8 @@ type Monitoring struct {
 	BasePath string `json:"base_path"`
 	// MaxTraces is how many requests the page lists, newest first.
 	MaxTraces int `json:"max_traces"`
+	// MaxLogs is how many log lines the page reads, newest first.
+	MaxLogs int `json:"max_logs"`
 	// PasswordEnv names the variable the page reads its password from.
 	PasswordEnv string `json:"password_env"`
 	// Password is the literal from rig.yaml, and empty in every project that
