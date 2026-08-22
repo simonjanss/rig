@@ -1,6 +1,11 @@
 .DEFAULT_GOAL := help
 
 GO       ?= go
+PNPM     ?= pnpm
+
+# The TypeScript half: the two packages a generated client imports, and the
+# fixture that compiles the generator's golden output against them.
+TS_DIR   := ts
 
 # One checkout's throwaway containers, kept out of every other checkout's.
 #
@@ -54,7 +59,7 @@ help:
 ##        This is what the pre-push hook runs. The last two need Docker, and
 ##        `deps` rewrites go.mod/go.sum before comparing, so run it on a clean
 ##        tree or it will report your own work in progress back to you.
-check: fmt-check vet godoc-check build test deps lint vulncheck test-docker examples
+check: fmt-check vet godoc-check build test deps lint vulncheck ts test-docker examples
 
 ## hooks: install the repository's git hooks into this clone
 ##        Cloning does not bring hooks with it, so this is opt-in and has to be
@@ -167,9 +172,42 @@ lint:
 	@GOBIN=$(CURDIR)/bin $(GO) install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_VERSION)
 	$(eachcore) $(CURDIR)/bin/golangci-lint run ./...) || exit 1; done
 
+## ts: every check on the TypeScript packages
+##     Needs pnpm. The typecheck is the one that matters most: a golden test
+##     proves the generator emits the bytes it emitted last time, and only a
+##     compiler notices that those bytes stopped compiling because a runtime
+##     signature moved underneath them.
+ts: ts-deps ts-fmt-check ts-typecheck ts-test
+
+## ts-deps: install the TypeScript workspace, exactly as the lockfile says
+ts-deps:
+	@cd $(TS_DIR) && $(PNPM) install --frozen-lockfile
+
+## ts-build: build the published packages
+ts-build: ts-deps
+	@cd $(TS_DIR) && $(PNPM) -r --filter "@rig/*" run build
+
+## ts-typecheck: tsc over the packages and over the generator's golden output
+ts-typecheck: ts-deps
+	@cd $(TS_DIR) && $(PNPM) -r run typecheck
+
+## ts-test: the TypeScript unit suite
+ts-test: ts-deps
+	@cd $(TS_DIR) && $(PNPM) run test
+
+## ts-fmt: rewrite the hand-written TypeScript with Prettier
+##         Generated output is not in scope: it is laid out by the emitter,
+##         which is the only place a formatter it never runs through can be.
+ts-fmt: ts-deps
+	@cd $(TS_DIR) && $(PNPM) exec prettier --write .
+
+## ts-fmt-check: fail if the hand-written TypeScript is not Prettier-clean
+ts-fmt-check: ts-deps
+	@cd $(TS_DIR) && $(PNPM) exec prettier --check .
+
 ## vulncheck: scan the modules rig is written in for known vulnerabilities
 vulncheck:
 	@GOBIN=$(CURDIR)/bin $(GO) install golang.org/x/vuln/cmd/govulncheck@$(GOVULNCHECK_VERSION)
 	$(eachcore) $(CURDIR)/bin/govulncheck ./...) || exit 1; done
 
-.PHONY: help check hooks build test test-docker examples db-down update-schema update-golden vet godoc-check fmt fmt-check tidy deps lint vulncheck
+.PHONY: help check hooks build test test-docker examples db-down update-schema update-golden vet godoc-check fmt fmt-check tidy deps lint vulncheck ts ts-deps ts-build ts-typecheck ts-test ts-fmt ts-fmt-check

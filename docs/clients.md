@@ -1,11 +1,17 @@
 # Clients
 
-> **Not written yet.** This page will document the generated Go client — how to
-> configure it, how it authenticates, and how it paginates.
+> **Half written.** The Go client's configuration, authentication and pagination
+> are still to come.
 >
-> Until it exists, [examples/sdk](../examples/sdk) is a working program that
+> Until they are, [examples/sdk](../examples/sdk) is a working program that
 > calls two rig applications through their generated clients, and
 > [examples/todo/client](../examples/todo/client) is what the generator emits.
+
+rig generates two clients, and they answer the same shape because they read the
+same document: methods grouped per resource, a QUERY that falls back once and
+remembers, query parameters that are absent rather than zero, a per-input shape
+for the 422 body, and an upload that carries its bytes. The Go one is below;
+[the TypeScript one](#the-typescript-client) is after it.
 
 `go-client` generates a typed Go SDK from the same document the router is
 generated from, so the client and the server cannot disagree about what the API
@@ -408,8 +414,202 @@ refused, the POST to the alias, and the retry after the credential refreshed.
 For DNS, connect and TLS as well, wrap `Config.HTTPClient` in
 `otelhttp.NewTransport`. That import is yours.
 
+## The TypeScript client
+
+`ts-client` generates the same SDK for a browser.
+
+```yaml
+generators:
+  - name: ts-client
+    out_dir: web/src/api
+```
+
+> **Not published yet.** `@rig/client` and `@rig/electric` live in
+> [ts/](../ts) and are not on a registry, so the names below are what the
+> generator emits rather than something you can install. Point them somewhere
+> real with the `client_import` and `electric_import`
+> [options](generators.md#options-briefly) — a file: specifier, a workspace, or
+> a registry of your own.
+
+The generated half is the wire types, one method per endpoint, and — when a
+table has opted into live sync — one factory per stream. The other half is
+`@rig/client`: the request, the credential, the retries, the pagination, the
+error decoding. It has no dependencies of its own and nothing in it is React.
+
+```ts
+import { createClient } from "./api";
+
+// The empty string is the ordinary same-origin case: it resolves against the
+// page, so a front end served beside its API names no host at all.
+const client = createClient({ baseUrl: "" });
+
+const page = await client.todos.list({ limit: 20 });
+const todo = await client.todos.create({ title: "write it down" });
+```
+
+### When a call is refused
+
+A refusal throws a `RigError`, and every method that sends a body has a guard of
+its own named after the call:
+
+```ts
+import { isTodoCreateError } from "./api";
+
+try {
+    await client.todos.create({ title: "   " });
+} catch (err) {
+    if (isTodoCreateError(err)) {
+        form.title.problem = err.fields?.title?.message;
+        console.log(err.code, err.status, err.requestId);
+    }
+    throw err;
+}
+```
+
+`fields` is shaped like the input you sent — one member per member, absent where
+nothing was wrong — so each message goes beside the control it belongs to. It is
+`undefined` for every refusal but a 422, for the same reason `Fields` is nil in
+Go: a 404 has nothing to put beside a control.
+
+The guard cannot be given the wrong shape, which is the whole reason it exists.
+Every member of a field shape is optional, so a hand-named
+`fieldsAs<TodoUpdateFields>` on a failed create matches perfectly and hands back
+an empty object.
+
+### An update says which of three things it means
+
+```ts
+await client.todos.update(id, {
+    title: "a new title", // set it
+    notes: null,          // clear it
+    // priority is absent, so it is left alone
+});
+```
+
+`JSON.stringify` drops an absent key, so leaving a field out is what leaves it
+alone — no wrapper type needed. A column that cannot hold null has no `| null`
+in its member, so clearing it does not compile rather than being refused at
+runtime.
+
+### Files
+
+A file column gets an upload, a download and a delete, and the upload is the one
+method whose shape is not the ordinary one — it takes the bytes:
+
+```ts
+const file = form.elements.cover.files[0]; // a File is already a Blob
+const stored = await client.todos.uploadCoverFile(id, {
+    name: file.name,
+    body: file,
+});
+```
+
+`contentType` is optional and is a claim rather than the answer: the server
+sniffs the bytes, and the sniffed type is what it stores and what a download
+announces. A download hands the `Response` back unread, so a large file is not
+buffered first — `await res.blob()`, or read `res.body` as a stream.
+
+**An upload is never sent twice.** A rig server records no upload against an
+idempotency key, because its body is still arriving when the service is called,
+so the SDK does not retry one — a second send would store the file again. A
+failure comes back as it happened and retrying is yours to decide, which is right
+because only you still have the bytes.
+
+A not-null file column cannot be reached that way at all: the row would have to
+exist before an upload had anywhere to go. So a table with file columns also gets
+a create that carries them, beside the ordinary one rather than instead of it:
+
+```ts
+await client.todoAttachments.createWithFiles(
+    { todoId, caption: "the plan" },
+    { attachmentFile: { name: file.name, body: file } },
+);
+```
+
+The row and the bytes are committed together, so a create that fails leaves
+neither. The row travels as a part named `json` — the same body `create` sends,
+through the same validation, so a 422 is read back with the same
+`isTodoAttachmentCreateError`.
+
+Which members of that second argument are optional is the schema's answer, not a
+convenience: `attachmentFile` above is required because the column is not null,
+and `TodoCreateFiles.coverFile` is optional because `cover_file_id` is nullable.
+Leaving out a file the schema insists on does not compile.
+
+### Live sync
+
+A table with `electric: {enabled: true}` gets a factory per shape, in
+`electric.gen.ts`. Those need the second package, `@rig/electric`:
+
+```ts
+import { useLiveQuery } from "@tanstack/react-db";
+import { createTodoStream } from "./api";
+
+function Todos() {
+    // Safe to call during render: the same client and params always give back
+    // the same collection, so the stream survives a navigation and two callers
+    // share one subscription.
+    const todos = createTodoStream(client.runtime, {});
+    const { data } = useLiveQuery((q) => q.from({ todos }));
+    …
+}
+```
+
+It is a second package because it is not free: the sync client and TanStack DB
+come with it. A project with no streamed table gets no `electric.gen.ts` and
+installs neither.
+
+The trash and the history are separate factories, and the columns decide whether
+they exist — `createTodoDeletedStream` when the table has a `deleted_at`,
+`createTodoVersionsStream` when it has the snapshot columns. That is the same
+rule the [shape routes](electric.md) follow.
+
+`@rig/electric` is framework-free. `useLiveQuery` above is
+`@tanstack/react-db`'s, which your application installs; the collection a
+factory returns is a plain TanStack DB collection and works with any binding.
+
+### Two shapes for one row
+
+**A streamed row is not the same shape as the row the API sends**, and the
+generated types say so: `Todo` has `createdAt`, and `TodoRow` has `created_at`.
+
+The reason is that a shape endpoint is a proxy in front of the sync service. A
+REST response is what Go's `encoding/json` wrote, under the keys
+[`api.json_case`](rig-yaml.md) produced — camelCase by default. A stream is what
+Postgres printed, under column names, and nothing in between rewrites it. Using
+one type for both would compile and be wrong about every key, so the generator
+declares both and lets the compiler keep them apart.
+
+`TodoRow` carries the shape's projection, which is the resource's readable
+fields — so a column excluded from the API is excluded from the stream too. Its
+members are nullable rather than optional: the sync service sends every column
+on every row, with a null where the column is null.
+
+The values agree even where the keys do not. `@rig/electric` corrects what
+Postgres prints so a `timestamptz` decodes to the same RFC 3339 string the API
+would have sent, and an `int8` to a `number` rather than a BigInt.
+
+### Cross-origin
+
+rig serves the shape routes from the same mux as the rest of the API, and
+same-origin is what everything above assumes.
+
+A front end on a different origin needs two things from whatever sits in front
+of the server. `Authorization` is not a CORS-safelisted header, so a stream's GET
+becomes a preflighted request that has to be allowed. And the sync protocol's
+cursor travels in response headers, so those have to be exposed:
+
+```
+Access-Control-Expose-Headers: electric-handle, electric-offset, electric-schema, electric-cursor
+```
+
+Without the second one the browser hides the cursor from the client and the
+subscription ends after one response, which looks like a stream that stopped
+rather than like a configuration problem. rig adds no CORS headers of its own.
+
 ## See also
 
 - [observability.md](observability.md) — the server end of the same trace
-- [generators.md](generators.md) — `go-client` options
+- [electric.md](electric.md) — the shapes a table gets, and how they are scoped
+- [generators.md](generators.md) — `go-client` and `ts-client` options
 - [examples/sdk](../examples/sdk) — a program built on two generated clients

@@ -3,8 +3,8 @@
 An opinionated Postgres-first web system generator.
 
 You write a good Postgres schema and your business logic. `rig` writes everything else: models,
-repositories, HTTP handlers, routing, filter plumbing, live-sync endpoints, a typed Go client, an
-authentication foundation, file uploads, and an inbox.
+repositories, HTTP handlers, routing, filter plumbing, live-sync endpoints, typed Go and TypeScript
+clients, an authentication foundation, file uploads, and an inbox.
 
 ```
    generated            YOU WRITE THIS           generated
@@ -28,7 +28,7 @@ rig generate   # 4. compile to one IR, fan out to generators
 
 ## Generators
 
-`rig generators` lists them. All but `go-client` are scaffolded by `rig init`.
+`rig generators` lists them. All but the two clients are scaffolded by `rig init`.
 
 | Name | What it writes |
 |---|---|
@@ -38,6 +38,7 @@ rig generate   # 4. compile to one IR, fan out to generators
 | `server-go` | net/http routing, request decoding, the handler registration struct, and the delete propagation |
 | `electric` | live-sync shape endpoints, with the tenant and lifecycle filters built in |
 | `go-client` | a typed Go client: the wire types and one method per endpoint |
+| `ts-client` | a typed TypeScript client: the wire types, one method per endpoint, and the live-sync collections |
 
 ## Documentation
 
@@ -53,6 +54,7 @@ rig generate   # 4. compile to one IR, fan out to generators
 | [Authentication](docs/auth.md) | Sessions, API keys, OAuth, RBAC |
 | [Notifications](docs/notifications.md) | An inbox, with the audience worked out when it is sent |
 | [Observability](docs/observability.md) | The log, the spans, and how to read a 500 |
+| [Clients](docs/clients.md) | The generated Go and TypeScript SDKs |
 
 [examples/](examples/) holds complete applications, built and tested in CI.
 
@@ -78,7 +80,10 @@ pre-push hook that runs the checks. [AGENTS.md](AGENTS.md) has the rest.
 | `observe/` | a separate module: OpenTelemetry, for the projects that ask for it |
 | `migrate/` | a separate module: apply the project's migrations from its own binary |
 | `rigclient/` | a separate module: the half of a generated Go client that is not generated |
+| `ts/` | a pnpm workspace: the half of a generated TypeScript client that is not generated |
 
 A generated application depends on `rig/runtime` (and optionally `rig/auth` and
 `rig/migrate`) — never on the CLI. A program that *calls* one depends on
-`rig/rigclient`; see [examples/sdk](examples/sdk) for what that looks like.
+`rig/rigclient`; see [examples/sdk](examples/sdk) for what that looks like. A
+front end that calls one depends on `@rig/client`, and on `@rig/electric` as
+well if it subscribes to a live-sync stream.
