@@ -138,6 +138,40 @@ records rather than a replay of the wrong one.
 A generated Go client does all of this for you — it names every write it might
 have to send again; see [clients.md](clients.md#when-the-server-says-not-now).
 
+## The OpenAPI document
+
+The [`openapi`](generators.md) generator writes this whole surface out as an
+OpenAPI 3.1 document, from the same compiled document the router is built from —
+so it cannot describe an endpoint that does not exist, or spell a path
+differently from the one the server answers on.
+
+```yaml
+- name: openapi
+  out_dir: docs
+  options:
+    formats: [json, yaml]
+```
+
+`docs/openapi.gen.json` and `docs/openapi.gen.yaml`, rewritten on every run.
+Every resource endpoint is there, including the trash, the snapshots, the file
+routes and your own custom endpoints; so are the live-sync shape routes, the
+error responses, and the permission each operation requires.
+
+Two things about it are worth knowing before you publish it.
+
+**Search is documented as its POST alias.** OpenAPI 3.1 has no way to describe an
+operation on the QUERY method, so `QUERY /api/v1/todos` appears in the document
+as `POST /api/v1/todos/_search`, with the operation's description saying which is
+the primary form. One handler serves both, and they answer identically. If you
+turned the alias off with `api.search_method: query`, that resource's search is
+absent from the document rather than misdescribed, and its tag says so.
+
+**The `/auth/*` and `/notifications/*` routes are not in it.** They are the same
+routes in every project, so rig serves them from a hand-written module rather
+than generating them — which means they reach nothing the document is written
+from. `info.description` says as much, so a reader can tell the omission is
+deliberate. [auth.md](auth.md) documents them in full.
+
 ## See also
 
 - [tables.md](tables.md) — choosing which operations exist, and adding your own

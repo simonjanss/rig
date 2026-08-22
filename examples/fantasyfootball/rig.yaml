@@ -88,6 +88,13 @@ generators:
       package: api
       model_import: github.com/simonjanss/rig/examples/fantasyfootball/internal/model
 
+  # The OpenAPI document, written from the same compiled document the routes
+  # above are, so it cannot describe an endpoint that does not exist.
+  - name: openapi
+    out_dir: docs
+    options:
+      formats: [json, yaml]
+
   # Live-sync shape endpoints. It writes nothing until a table asks
   # for one with `electric: {enabled: true}`, so leaving it here costs
   # nothing and turning it on is one line in a table's configuration.

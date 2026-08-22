@@ -39,6 +39,7 @@ EXAMPLES        := todo fantasyfootball auth auth_oauth linearlite
 # that checking out rig does not replace the golangci-lint another project uses.
 GOLANGCI_VERSION   := v2.12.2
 GOVULNCHECK_VERSION := v1.7.0
+VACUUM_VERSION      := v0.30.0
 
 # A module with no packages yet — auth, until M4 lands — is skipped rather than
 # treated as a failure, so `make test` says something useful during the build-out.
@@ -56,10 +57,11 @@ help:
 	@grep -E '^## ' $(MAKEFILE_LIST) | sed 's/^## //' | awk -F': ' '{printf "  \033[36m%-16s\033[0m %s\n", $$1, $$2}'
 
 ## check: every check CI runs, cheapest first
-##        This is what the pre-push hook runs. The last two need Docker, and
-##        `deps` rewrites go.mod/go.sum before comparing, so run it on a clean
-##        tree or it will report your own work in progress back to you.
-check: fmt-check vet godoc-check build test deps lint vulncheck ts test-docker examples
+##        This is what the pre-push hook runs. `test-docker` and `examples` need
+##        Docker, `openapi-lint` runs after the examples that rewrite what it
+##        reads, and `deps` rewrites go.mod/go.sum before comparing, so run it on
+##        a clean tree or it will report your own work in progress back to you.
+check: fmt-check vet godoc-check build test deps lint vulncheck ts test-docker examples openapi-lint
 
 ## hooks: install the repository's git hooks into this clone
 ##        Cloning does not bring hooks with it, so this is opt-in and has to be
@@ -117,8 +119,8 @@ update-schema:
 ##                binary without the flag is a usage error, which used to fail
 ##                this target no matter what.
 GOLDEN := ./internal/compile ./internal/gen/electricgo ./internal/gen/goclient \
-          ./internal/gen/modelgo ./internal/gen/persistgo ./internal/gen/servergo \
-          ./internal/gen/servicego ./internal/gen/tsclient
+          ./internal/gen/modelgo ./internal/gen/openapigen ./internal/gen/persistgo \
+          ./internal/gen/servergo ./internal/gen/servicego ./internal/gen/tsclient
 update-golden:
 	$(GO) test $(GOLDEN) -update
 
@@ -172,6 +174,30 @@ lint:
 	@GOBIN=$(CURDIR)/bin $(GO) install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_VERSION)
 	$(eachcore) $(CURDIR)/bin/golangci-lint run ./...) || exit 1; done
 
+## openapi-lint: lint every emitted OpenAPI document against vacuum's rules
+##               Two circular-reference flags, and both are the document being
+##               right rather than the linter being wrong. A filter holds nested
+##               filters, which is how AND and OR mix to any depth; a relation
+##               filter reaches the related resource's filter, which is how you
+##               ask about a row's parent. Both cycles run through optional
+##               fields and terminate.
+##
+##               It reads what is on disk rather than depending on `examples`,
+##               the way `lint` reads the source on disk. In `check` it is
+##               ordered after `examples`, which is what rewrites the four
+##               documents under examples/*/docs; run on its own against a stale
+##               tree it lints a stale document, and `rig check` is what catches
+##               that.
+openapi-lint:
+	@GOBIN=$(CURDIR)/bin $(GO) install github.com/daveshanley/vacuum@$(VACUUM_VERSION)
+	@for f in internal/gen/openapigen/testdata/*/openapi.gen.yaml \
+	          examples/*/docs/openapi.gen.yaml; do \
+		[ -f "$$f" ] || continue; \
+		$(CURDIR)/bin/vacuum lint --ruleset .vacuum.yaml --fail-severity warn \
+			--ignore-array-circle-ref --ignore-polymorph-circle-ref \
+			--no-banner --details "$$f" || exit 1; \
+	done
+
 ## ts: every check on the TypeScript packages
 ##     Needs pnpm. The typecheck is the one that matters most: a golden test
 ##     proves the generator emits the bytes it emitted last time, and only a
@@ -219,4 +245,4 @@ vulncheck:
 	@GOBIN=$(CURDIR)/bin $(GO) install golang.org/x/vuln/cmd/govulncheck@$(GOVULNCHECK_VERSION)
 	$(eachcore) $(CURDIR)/bin/govulncheck ./...) || exit 1; done
 
-.PHONY: help check hooks build test test-docker examples db-down update-schema update-golden vet godoc-check fmt fmt-check tidy deps lint vulncheck ts ts-deps ts-build ts-typecheck ts-test ts-fmt ts-fmt-check
+.PHONY: help check hooks build test test-docker examples db-down update-schema update-golden vet godoc-check fmt fmt-check tidy deps lint openapi-lint vulncheck ts ts-deps ts-build ts-typecheck ts-test ts-fmt ts-fmt-check

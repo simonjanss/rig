@@ -1,0 +1,1149 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "authwired",
+    "description": "The authwired HTTP API.\n\nThe authentication endpoints under `/auth` are served by a hand-written module and are not described here.",
+    "version": "v1"
+  },
+  "servers": [
+    {
+      "url": "https://api.example.test"
+    }
+  ],
+  "paths": {
+    "/api/v1/todos": {
+      "get": {
+        "tags": [
+          "Todos"
+        ],
+        "summary": "List Todos.",
+        "description": "List Todos.\n\nRequires the `todo.read` permission.",
+        "operationId": "listTodos",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Maximum rows to return.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "default": 50
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "description": "Rows to skip before the first returned row.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "default": 0
+            }
+          },
+          {
+            "$ref": "#/components/parameters/ApiRevision"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of Todos.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TodoListResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-rig-permission": "todo.read"
+      },
+      "post": {
+        "tags": [
+          "Todos"
+        ],
+        "summary": "Create a Todo.",
+        "description": "Create a Todo.\n\nRequires the `todo.write` permission.",
+        "operationId": "createTodo",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ApiRevision"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "description": "The fields a new Todo is created with. A field the database cannot supply for itself is required.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TodoCreateInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "The created Todo.",
+            "headers": {
+              "Idempotency-Replayed": {
+                "$ref": "#/components/headers/IdempotencyReplayed"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Todo"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnprocessableEntity"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-rig-permission": "todo.write"
+      }
+    },
+    "/api/v1/todos/_search": {
+      "post": {
+        "tags": [
+          "Todos"
+        ],
+        "summary": "Search Todos with filters.",
+        "description": "Search Todos with filters.\n\nThe primary form of this operation is `QUERY /api/v1/todos` — a read that carries a body, and so safe and idempotent in a way POST is not. OpenAPI 3.1 cannot describe an operation on the QUERY method, so it is documented here as the POST alias that exists for intermediaries which reject unfamiliar methods. One handler serves both routes and they answer identically.\n\nRequires the `todo.read` permission.",
+        "operationId": "searchTodos",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Maximum rows to return.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "default": 50
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "description": "Rows to skip before the first returned row.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "default": 0
+            }
+          },
+          {
+            "$ref": "#/components/parameters/ApiRevision"
+          }
+        ],
+        "requestBody": {
+          "description": "The request body for Todo.Search.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TodoSearchBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "A page of matching Todos.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TodoListResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnprocessableEntity"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-rig-permission": "todo.read"
+      }
+    },
+    "/api/v1/todos/{id}": {
+      "get": {
+        "tags": [
+          "Todos"
+        ],
+        "summary": "Fetch one Todo by identifier.",
+        "description": "Fetch one Todo by identifier.\n\nRequires the `todo.read` permission.",
+        "operationId": "getTodo",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Identifier of the Todo.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/ApiRevision"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The requested Todo.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Todo"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-rig-permission": "todo.read"
+      },
+      "delete": {
+        "tags": [
+          "Todos"
+        ],
+        "summary": "Delete a Todo.",
+        "description": "Delete a Todo.\n\nRequires the `todo.delete` permission.",
+        "operationId": "deleteTodo",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Identifier of the Todo.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/ApiRevision"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "The Todo was deleted."
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-rig-permission": "todo.delete"
+      },
+      "patch": {
+        "tags": [
+          "Todos"
+        ],
+        "summary": "Update a Todo.",
+        "description": "Only the fields present in the body are changed. A field set to null is cleared; a field left out is left alone.\n\nRequires the `todo.write` permission.",
+        "operationId": "updateTodo",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Identifier of the Todo.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/ApiRevision"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "description": "The fields of a Todo to change. Every member is optional: one left out is left alone, and an explicit null clears it.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TodoUpdateInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The updated Todo.",
+            "headers": {
+              "Idempotency-Replayed": {
+                "$ref": "#/components/headers/IdempotencyReplayed"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Todo"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnprocessableEntity"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-rig-permission": "todo.write"
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Error": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "$ref": "#/components/schemas/ErrorCode",
+            "description": "Machine-readable reason the request failed."
+          },
+          "message": {
+            "type": "string",
+            "description": "Human-readable explanation. Not intended for clients to parse."
+          },
+          "requestId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Identifier of this request, for correlating with server logs."
+          },
+          "fields": {
+            "description": "Present when the failure was validation. It is shaped like the request body that failed — one member per field, holding the problem with that field — so a client can put each message beside the control it belongs to."
+          }
+        },
+        "description": "Returned whenever a request fails."
+      },
+      "ErrorCode": {
+        "type": "string",
+        "enum": [
+          "BadRequest",
+          "Unauthorized",
+          "Forbidden",
+          "NotFound",
+          "Conflict",
+          "UnprocessableEntity",
+          "RateLimited",
+          "TooLarge",
+          "UnsupportedMediaType",
+          "UpgradeRequired",
+          "Internal"
+        ],
+        "description": "Machine-readable reason a request failed.",
+        "x-enum-varnames": [
+          "BadRequest",
+          "Unauthorized",
+          "Forbidden",
+          "NotFound",
+          "Conflict",
+          "UnprocessableEntity",
+          "RateLimited",
+          "TooLarge",
+          "UnsupportedMediaType",
+          "UpgradeRequired",
+          "Internal"
+        ]
+      },
+      "Pagination": {
+        "type": "object",
+        "properties": {
+          "offset": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Number of rows skipped before this page."
+          },
+          "limit": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Maximum number of rows in this page."
+          },
+          "total": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Total number of rows matching the query, ignoring pagination."
+          }
+        },
+        "description": "Where the returned page sits within the full result set."
+      },
+      "Todo": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Unique identifier for this row.",
+            "readOnly": true
+          },
+          "tenantId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Tenant this row belongs to. Every query is scoped by it.",
+            "readOnly": true
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When this row was created. Set automatically and never changes.",
+            "readOnly": true
+          },
+          "updatedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When this row was last updated. Set automatically on every update.",
+            "readOnly": true
+          },
+          "title": {
+            "type": "string",
+            "description": "Short description of the task."
+          },
+          "notes": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Longer free-text notes."
+          },
+          "isDone": {
+            "type": "boolean",
+            "description": "Whether the task has been completed."
+          },
+          "dueDate": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "Day the task is expected to be finished by."
+          }
+        },
+        "description": "A single thing someone means to get done."
+      },
+      "TodoCreateInput": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string",
+            "description": "Short description of the task."
+          },
+          "notes": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Longer free-text notes."
+          },
+          "isDone": {
+            "type": "boolean",
+            "description": "Whether the task has been completed.",
+            "default": false
+          },
+          "dueDate": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "Day the task is expected to be finished by."
+          }
+        },
+        "required": [
+          "title"
+        ],
+        "description": "The fields a new Todo is created with. A field the database cannot supply for itself is required."
+      },
+      "TodoFilter": {
+        "type": "object",
+        "properties": {
+          "equals": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/TodoFilterEquals"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Fields that must equal the given value."
+          },
+          "notEquals": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/TodoFilterEquals"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Fields that must not equal the given value."
+          },
+          "greaterThan": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/TodoFilterRange"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Fields that must be greater than the given value."
+          },
+          "smallerThan": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/TodoFilterRange"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Fields that must be less than the given value."
+          },
+          "greaterOrEqual": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/TodoFilterRange"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Fields that must be greater than or equal to the given value."
+          },
+          "smallerOrEqual": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/TodoFilterRange"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Fields that must be less than or equal to the given value."
+          },
+          "contains": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/TodoFilterContains"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Fields that must be one of the given values."
+          },
+          "notContains": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/TodoFilterContains"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Fields that must not be one of the given values."
+          },
+          "like": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/TodoFilterLike"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Text fields that must match the given pattern."
+          },
+          "notLike": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/TodoFilterLike"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Text fields that must not match the given pattern."
+          },
+          "null": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/TodoFilterNull"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Fields that must be null."
+          },
+          "notNull": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/TodoFilterNull"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Fields that must not be null."
+          },
+          "orCondition": {
+            "type": "boolean",
+            "description": "Combine this filter's conditions with OR instead of AND."
+          },
+          "nestedFilters": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TodoFilter"
+            },
+            "description": "Sub-filters combined with this one, so that AND and OR can be mixed to any depth."
+          }
+        },
+        "description": "Conditions a Todo must satisfy to match a search."
+      },
+      "TodoFilterContains": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Unique identifier for this row."
+          },
+          "createdAt": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "description": "When this row was created. Set automatically and never changes."
+          },
+          "updatedAt": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "description": "When this row was last updated. Set automatically on every update."
+          },
+          "title": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Short description of the task."
+          },
+          "notes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Longer free-text notes."
+          },
+          "isDone": {
+            "type": "array",
+            "items": {
+              "type": "boolean"
+            },
+            "description": "Whether the task has been completed."
+          },
+          "dueDate": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "description": "Day the task is expected to be finished by."
+          }
+        },
+        "description": "Set-membership conditions on Todo fields."
+      },
+      "TodoFilterEquals": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Unique identifier for this row."
+          },
+          "createdAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When this row was created. Set automatically and never changes."
+          },
+          "updatedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When this row was last updated. Set automatically on every update."
+          },
+          "title": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Short description of the task."
+          },
+          "notes": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Longer free-text notes."
+          },
+          "isDone": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Whether the task has been completed."
+          },
+          "dueDate": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "Day the task is expected to be finished by."
+          }
+        },
+        "description": "Exact-match conditions on Todo fields."
+      },
+      "TodoFilterLike": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Short description of the task."
+          },
+          "notes": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Longer free-text notes."
+          }
+        },
+        "description": "Pattern conditions on Todo text fields."
+      },
+      "TodoFilterNull": {
+        "type": "object",
+        "properties": {
+          "updatedAt": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "When this row was last updated. Set automatically on every update."
+          },
+          "notes": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Longer free-text notes."
+          },
+          "dueDate": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Day the task is expected to be finished by."
+          }
+        },
+        "description": "Presence conditions on nullable Todo fields."
+      },
+      "TodoFilterRange": {
+        "type": "object",
+        "properties": {
+          "createdAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When this row was created. Set automatically and never changes."
+          },
+          "updatedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When this row was last updated. Set automatically on every update."
+          },
+          "dueDate": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "Day the task is expected to be finished by."
+          }
+        },
+        "description": "Ordering conditions on Todo fields that can be compared."
+      },
+      "TodoListResponse": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Todo"
+            },
+            "description": "The rows in this page."
+          },
+          "pagination": {
+            "$ref": "#/components/schemas/Pagination",
+            "description": "Where this page sits in the full result set."
+          }
+        },
+        "description": "A page of Todos."
+      },
+      "TodoSearchBody": {
+        "type": "object",
+        "properties": {
+          "filter": {
+            "$ref": "#/components/schemas/TodoFilter",
+            "description": "Conditions rows must satisfy."
+          }
+        },
+        "required": [
+          "filter"
+        ],
+        "description": "The request body for Todo.Search."
+      },
+      "TodoUpdateInput": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string",
+            "description": "Short description of the task."
+          },
+          "notes": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Longer free-text notes."
+          },
+          "isDone": {
+            "type": "boolean",
+            "description": "Whether the task has been completed.",
+            "default": false
+          },
+          "dueDate": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "Day the task is expected to be finished by."
+          }
+        },
+        "description": "The fields of a Todo to change. Every member is optional: one left out is left alone, and an explicit null clears it."
+      }
+    },
+    "responses": {
+      "BadRequest": {
+        "description": "The request was malformed or a parameter could not be parsed.\n\nThe body's `code` is `BadRequest`.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "Unauthorized": {
+        "description": "No valid session or API key was presented.\n\nThe body's `code` is `Unauthorized`.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "Forbidden": {
+        "description": "The caller is known but not permitted to do this.\n\nThe body's `code` is `Forbidden`.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "NotFound": {
+        "description": "No such resource, or it belongs to another tenant.\n\nThe body's `code` is `NotFound`.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "Conflict": {
+        "description": "The request conflicts with the current state of the resource.\n\nThe body's `code` is `Conflict`.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "UnprocessableEntity": {
+        "description": "The request was well-formed but failed validation.\n\nThe body's `code` is `UnprocessableEntity`.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "RateLimited": {
+        "description": "Too many requests. Retry after the interval in the Retry-After header.\n\nThe body's `code` is `RateLimited`.",
+        "headers": {
+          "Retry-After": {
+            "$ref": "#/components/headers/RetryAfter"
+          },
+          "RateLimit-Limit": {
+            "$ref": "#/components/headers/RateLimitLimit"
+          },
+          "RateLimit-Remaining": {
+            "$ref": "#/components/headers/RateLimitRemaining"
+          },
+          "RateLimit-Reset": {
+            "$ref": "#/components/headers/RateLimitReset"
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "Internal": {
+        "description": "Something went wrong on the server.\n\nThe body's `code` is `Internal`.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      }
+    },
+    "parameters": {
+      "ApiRevision": {
+        "name": "API-Revision",
+        "in": "header",
+        "description": "The API revision this client was built against. A server generated from an older document than the caller expects answers 426 rather than guessing.",
+        "required": false,
+        "schema": {
+          "type": "string"
+        }
+      },
+      "IdempotencyKey": {
+        "name": "Idempotency-Key",
+        "in": "header",
+        "description": "A key of the caller's choosing, so a retried write happens once. Sending the same key with the same body replays the first answer and sets Idempotency-Replayed; with a different body it is refused with 422, and while the first is still in flight, with 409.",
+        "required": false,
+        "schema": {
+          "type": "string"
+        }
+      }
+    },
+    "headers": {
+      "IdempotencyReplayed": {
+        "description": "Present and true when this answer is a replay of an earlier request carrying the same Idempotency-Key, rather than work done again.",
+        "schema": {
+          "type": "boolean"
+        }
+      },
+      "RateLimitLimit": {
+        "description": "Requests permitted in the current window.",
+        "schema": {
+          "type": "integer"
+        }
+      },
+      "RateLimitRemaining": {
+        "description": "Requests left in the current window.",
+        "schema": {
+          "type": "integer"
+        }
+      },
+      "RateLimitReset": {
+        "description": "Seconds until the current window resets.",
+        "schema": {
+          "type": "integer"
+        }
+      },
+      "RetryAfter": {
+        "description": "Seconds to wait before retrying.",
+        "schema": {
+          "type": "integer"
+        }
+      }
+    },
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "description": "A credential in `Authorization: Bearer \u003ctoken\u003e`.\n\nTwo kinds are accepted and are told apart by a prefix on the token itself. A session access token travels on every request and is good for 5m, renewed against the session endpoints before it expires. An API key does not expire: an integration key's scopes are its permissions outright, and a personal key carries what its owner carries and no more.\n\nThe endpoints that issue and renew these are mounted under `/auth` and are not described in this document.",
+        "scheme": "bearer",
+        "bearerFormat": "opaque"
+      }
+    }
+  },
+  "security": [
+    {
+      "bearerAuth": []
+    }
+  ],
+  "tags": [
+    {
+      "name": "Todos",
+      "description": "A single thing someone means to get done."
+    }
+  ]
+}

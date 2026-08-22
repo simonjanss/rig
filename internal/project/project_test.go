@@ -38,9 +38,6 @@ func TestParseAppliesDefaults(t *testing.T) {
 	if c.API.SearchMethod != project.SearchBoth {
 		t.Errorf("search_method = %q, want both", c.API.SearchMethod)
 	}
-	if c.OpenAPI.Version != "3.1" {
-		t.Errorf("openapi.version = %q, want 3.1", c.OpenAPI.Version)
-	}
 	if c.Database.ContainerName != "fantasyfootball-db" {
 		t.Errorf("container name = %q", c.Database.ContainerName)
 	}

@@ -308,7 +308,7 @@ func (e *emitter) call(b *gobuf.Buf, res *ir.Resource, ep *ir.Endpoint) {
 	// A write is recorded against the Idempotency-Key it carried, if it carried
 	// one. A read goes straight to the service, because there is nothing about a
 	// read that a second one could duplicate.
-	if idempotentWrite(ep) {
+	if genutil.IdempotentWrite(ep) {
 		e.guardedCall(b, res, ep, extra)
 		return
 	}

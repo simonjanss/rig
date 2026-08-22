@@ -2428,45 +2428,6 @@ would rather have.
 
 ---
 
-## M6 — `openapi`
-
-**Goal.** An OpenAPI document from the same IR, so it cannot describe an API
-that does not exist.
-
-**Shape.**
-
-- `internal/gen/openapigen`, generator name `openapi`.
-- `pb33f/libopenapi` to build and render. Not text templates: a document
-  assembled from strings is a document that eventually stops parsing.
-- Options: `formats: [json, yaml]`, `version: "3.1" | "3.2"`, `out_dir: docs`.
-- One `components/schemas` entry per `ir.Object` and per `ir.Enum`. The filter
-  shapes are objects too, so `Search` documents itself.
-- `ir.API.Auth` is where the security scheme comes from: which endpoints exist
-  under the auth base path, and the lifetimes and rate limits to document. It is
-  resolved rather than optional, so the numbers in the specification are the ones
-  the server enforces — that is the reason the configuration lives in rig.yaml.
-- Every endpoint's `Errors []int` becomes a response referencing the shared
-  `Error` schema. That is why the IR stores bare codes.
-- `Endpoint.Pattern` is the path, unchanged. The router, this document, and the
-  TypeScript client read the same field.
-
-**The QUERY problem.** OpenAPI 3.1 has no `query` field on a path item.
-
-- Under `"3.1"`: document the `POST /_search` alias, and note in the operation's
-  description that `QUERY` on the collection path is the primary form.
-- Under `"3.2"`: emit the `query` operation directly.
-- Default `"3.1"` until 3.2 tooling is common. `openapi.version` in `rig.yaml`.
-
-**Open question for you.** Is the 3.1 fallback worth it, or should rig emit 3.2
-and let people who need 3.1 downgrade with a tool? The fallback is roughly
-forty lines and a permanent branch in the generator.
-
-**Verification.** Validate the emitted document in-process with libopenapi, and
-in CI with an external linter (`vacuum` or `spectral`). Golden files for the
-rendered JSON and YAML.
-
----
-
 ## M7 — `ts-client`
 
 **Goal.** A TypeScript client generated from the same document, so the types a
@@ -3035,9 +2996,21 @@ embedded HTML file and a JSON endpoint beside it, behind a password; a
   `runtime/throttle`, which is a dependency this module is not going to take —
   so what stands in for it is the length minimum, `monitoring.allow`, and
   whatever TLS the deployment has.
-- **The page is trace-only.** A project with `tracing:` off has no page at all.
-  The plan imagined a log half that worked without tracing; the file-store
-  answer removed it, because nothing writes the log somewhere rig can read.
+- ~~**The page is trace-only.**~~ Closed: `observe.OpenLogs` is a `slog.Handler`
+  over the same bounded file the spans use, `observe.Tee` puts it beside the
+  handler an application already has, and `PageConfig.Logs` is the sink itself
+  rather than a path — so the page's two halves cannot disagree about which file
+  they mean. The line carries the trace id off the context, which is what makes
+  a request and the lines it wrote one view. Two things about it are worth
+  knowing: the sink keeps its own level, defaulting to debug, because rig's
+  request line *is* a debug line and a page over a server running at info would
+  otherwise list nothing; and the span file and the log file are refused when
+  they are the same path, since two rotating writers on one file rotate each
+  other's data away.
+  **Still open:** a page for a project with `tracing:` off. The log half no
+  longer needs the spans, but RIG3005 still refuses `monitoring:` without
+  `tracing:`, so a logs-only page is a config-chain change nobody has asked for
+  yet.
 - **One process, one file.** A second replica shows its own spans. That is what
   a file is, and it is the point at which a collector is the answer instead.
 - **A rotation mid-trace loses the root**, so `TraceRecord.Root` can be nil. The
@@ -3048,7 +3021,10 @@ embedded HTML file and a JSON endpoint beside it, behind a password; a
   one-time spurious bump to fix a spurious bump. Named, not fixed.
 - **Nothing renders the page in a browser.** The handler is tested, and the
   render path was run over real data against a stub DOM, but no test opens it.
-  A generated page that compiles and answers 200 can still lay out wrong.
+  A generated page that compiles and answers 200 can still lay out wrong. The
+  redesign was driven in a real browser by hand — both tabs, both schemes, both
+  breakpoints — which is a check somebody performed and not one the suite
+  repeats.
 
 ---
 

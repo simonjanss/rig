@@ -3,254 +3,110 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
 <title>rig monitor</title>
-<style>
-  :root {
-    color-scheme: light;
-    --plane: #f9f9f7;
-    --surface: #fcfcfb;
-    --ink: #0b0b0b;
-    --ink-2: #52514e;
-    --muted: #898781;
-    --grid: #e1e0d9;
-    --border: rgba(11, 11, 11, .10);
-    --span: #2a78d6;
-    --good: #0ca30c;
-    --critical: #d03b3b;
-  }
-  @media (prefers-color-scheme: dark) {
-    :root {
-      color-scheme: dark;
-      --plane: #0d0d0d;
-      --surface: #1a1a19;
-      --ink: #fff;
-      --ink-2: #c3c2b7;
-      --muted: #898781;
-      --grid: #2c2c2a;
-      --border: rgba(255, 255, 255, .10);
-      --span: #3987e5;
-    }
-  }
-
-  * { box-sizing: border-box; }
-  body {
-    margin: 0;
-    background: var(--plane);
-    color: var(--ink);
-    font: 14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
-  }
-  header {
-    position: sticky; top: 0; z-index: 1;
-    display: flex; flex-wrap: wrap; gap: 12px; align-items: baseline;
-    padding: 14px 20px;
-    background: var(--surface);
-    border-bottom: 1px solid var(--border);
-  }
-  h1 { margin: 0; font-size: 15px; font-weight: 600; }
-  h1 span { color: var(--muted); font-weight: 400; }
-  .controls { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin-left: auto; }
-  .controls label { color: var(--ink-2); display: flex; gap: 5px; align-items: center; }
-  input[type=search], button {
-    font: inherit; color: inherit;
-    background: var(--plane);
-    border: 1px solid var(--border); border-radius: 6px;
-    padding: 5px 9px;
-  }
-  input[type=search] { min-width: 22ch; }
-  button { cursor: pointer; }
-
-  main { padding: 16px 20px 64px; }
-  .note { color: var(--ink-2); max-width: 62ch; }
-  .note code { color: var(--ink); }
-
-  ol { list-style: none; margin: 0; padding: 0; }
-  li {
-    background: var(--surface);
-    border: 1px solid var(--border); border-radius: 8px;
-    margin-bottom: 6px;
-  }
-  summary {
-    cursor: pointer; padding: 9px 12px;
-    display: grid; gap: 12px; align-items: baseline;
-    grid-template-columns: 8ch 9ch 1fr auto 15ch;
-  }
-  summary::-webkit-details-marker { display: none; }
-  .when, .id { color: var(--muted); font-variant-numeric: tabular-nums; }
-  .id { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; overflow: hidden; text-overflow: ellipsis; }
-  .name { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .ms { font-variant-numeric: tabular-nums; color: var(--ink-2); }
-
-  /* Status is never colour alone: each badge ships its mark and its word. */
-  .badge { font-size: 12px; font-weight: 600; white-space: nowrap; }
-  .badge.err { color: var(--critical); }
-  .badge.ok { color: var(--good); }
-
-  table { width: 100%; border-collapse: collapse; }
-  tbody tr { border-top: 1px solid var(--grid); }
-  td { padding: 5px 12px; vertical-align: top; }
-  td.sname { white-space: nowrap; }
-  td.sms { text-align: right; font-variant-numeric: tabular-nums; color: var(--ink-2); width: 9ch; }
-  td.bar { width: 45%; padding-top: 11px; }
-  .track { position: relative; height: 6px; background: var(--grid); border-radius: 3px; }
-  .fill {
-    position: absolute; top: 0; height: 6px;
-    background: var(--span); border-radius: 3px;
-    min-width: 2px;
-    box-shadow: 0 0 0 2px var(--surface);
-  }
-  .fill.err { background: var(--critical); }
-  .err-text { color: var(--critical); font-size: 13px; }
-  .attrs { color: var(--muted); font-size: 12px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
-  @media (max-width: 720px) {
-    summary { grid-template-columns: 1fr auto; }
-    .when, .id, td.bar { display: none; }
-  }
-</style>
+<!-- Relative, and safe to be: the page is only ever served at the base path
+     with its trailing slash, because the one without redirects there. That
+     redirect exists for this line — the asset paths cannot be written by hand
+     without knowing what monitoring.base_path was set to. -->
+<link rel="stylesheet" href="page.css">
 </head>
-<body>
+<body data-tab="requests">
+
 <header>
-  <h1>rig monitor <span id="service"></span></h1>
-  <div class="controls">
-    <input id="q" type="search" placeholder="route, error, trace id" aria-label="Search">
-    <label><input type="checkbox" id="errors"> Errors only</label>
-    <label><input type="checkbox" id="auto" checked> Auto-refresh</label>
-    <button id="refresh">Refresh</button>
+  <div class="bar">
+    <h1>rig monitor <span class="service" id="service"></span></h1>
+    <div class="live">
+      <span class="pulse" id="pulse"></span>
+      <span class="updated" id="updated" aria-live="polite"></span>
+    </div>
+    <div class="tabs" role="tablist" aria-label="View">
+      <button type="button" role="tab" id="tab-requests" aria-controls="panel-requests" aria-selected="true">Requests</button>
+      <button type="button" role="tab" id="tab-logs" aria-controls="panel-logs" aria-selected="false">Logs</button>
+    </div>
+  </div>
+
+  <div class="filters">
+    <div class="field">
+      <input id="q" type="search" placeholder="route, message, error, trace id" aria-label="Search">
+      <kbd>/</kbd>
+    </div>
+    <div class="seg" id="status-seg" role="group" aria-label="Status">
+      <button type="button" data-status="" aria-pressed="true">All</button>
+      <button type="button" data-status="error" aria-pressed="false">Errors</button>
+    </div>
+    <div class="seg" id="level-seg" role="group" aria-label="Level">
+      <button type="button" data-level="" aria-pressed="true">All</button>
+      <button type="button" data-level="DEBUG" aria-pressed="false">Debug</button>
+      <button type="button" data-level="INFO" aria-pressed="false">Info</button>
+      <button type="button" data-level="WARN" aria-pressed="false">Warn</button>
+      <button type="button" data-level="ERROR" aria-pressed="false">Error</button>
+    </div>
+    <label class="check"><input type="checkbox" id="auto" checked> Live</label>
+    <button type="button" class="ghost" id="refresh">Refresh</button>
+    <button type="button" class="ghost" id="help" aria-label="Keyboard shortcuts">?</button>
   </div>
 </header>
+
 <main>
-  <p class="note" id="note"></p>
-  <ol id="traces"></ol>
+  <section id="panel-requests" role="tabpanel" aria-labelledby="tab-requests">
+    <div class="tiles" id="tiles"></div>
+    <p class="note" id="note-requests"></p>
+    <div class="split">
+      <div class="pane">
+        <table class="rows">
+          <caption class="sr-only">Requests, newest first. Enter opens one.</caption>
+          <thead>
+            <tr>
+              <th class="c-when">When</th>
+              <th class="c-method">Verb</th>
+              <th class="c-route">Route</th>
+              <th class="c-status">Status</th>
+              <th class="c-ms num">Took</th>
+              <th class="c-id">Trace</th>
+            </tr>
+          </thead>
+          <tbody id="traces-body"></tbody>
+        </table>
+      </div>
+      <aside class="detail" id="detail" aria-label="Request detail" hidden></aside>
+    </div>
+  </section>
+
+  <section id="panel-logs" role="tabpanel" aria-labelledby="tab-logs" hidden>
+    <p class="note" id="note-logs"></p>
+    <div class="pane">
+      <table class="rows">
+        <caption class="sr-only">Log lines, newest first. Enter expands one.</caption>
+        <thead>
+          <tr>
+            <th class="c-when">When</th>
+            <th class="c-level">Level</th>
+            <th>Message</th>
+            <th class="c-route">Route</th>
+            <th class="c-id">Trace</th>
+          </tr>
+        </thead>
+        <tbody id="logs-body"></tbody>
+      </table>
+    </div>
+  </section>
 </main>
-<script>
-"use strict";
 
-const el = (tag, cls, text) => {
-  const n = document.createElement(tag);
-  if (cls) n.className = cls;
-  if (text !== undefined) n.textContent = text;
-  return n;
-};
+<dialog id="shortcuts">
+  <h2>Keyboard</h2>
+  <dl>
+    <dt><kbd>/</kbd></dt><dd>search</dd>
+    <dt><kbd>j</kbd> <kbd>k</kbd></dt><dd>move down, up</dd>
+    <dt><kbd>Enter</kbd></dt><dd>open the row</dd>
+    <dt><kbd>Esc</kbd></dt><dd>close it, or leave the search box</dd>
+    <dt><kbd>e</kbd></dt><dd>errors only</dd>
+    <dt><kbd>g</kbd> <kbd>l</kbd></dt><dd>requests, logs</dd>
+    <dt><kbd>r</kbd></dt><dd>refresh now</dd>
+    <dt><kbd>?</kbd></dt><dd>this</dd>
+  </dl>
+</dialog>
 
-const ms = (n) => n >= 100 ? n.toFixed(0) + "ms" : n.toFixed(1) + "ms";
-const clock = (iso) => new Date(iso).toLocaleTimeString(undefined, {hour12: false});
-
-// depthOf walks parent_id up to the root. The file is one line per finished
-// span with no nesting of its own, so the tree is rebuilt here.
-function depths(spans) {
-  const byID = new Map(spans.map((s) => [s.span_id, s]));
-  const out = new Map();
-  const walk = (s, seen) => {
-    if (out.has(s.span_id)) return out.get(s.span_id);
-    const parent = byID.get(s.parent_id);
-    // seen guards against a cycle, which cannot happen but would hang the page.
-    const d = (!parent || seen.has(s.span_id)) ? 0 : walk(parent, seen.add(s.span_id)) + 1;
-    out.set(s.span_id, d);
-    return d;
-  };
-  spans.forEach((s) => walk(s, new Set()));
-  return out;
-}
-
-function spanRow(span, depth, t0, total) {
-  const tr = el("tr");
-
-  const name = el("td", "sname");
-  name.style.paddingLeft = (12 + depth * 16) + "px";
-  name.append(el("span", null, span.name));
-  if (span.status === "error") {
-    name.append(document.createTextNode(" "));
-    name.append(el("span", "badge err", "✕ error"));
-  }
-  tr.append(name);
-
-  tr.append(el("td", "sms", ms(span.duration_ms)));
-
-  const bar = el("td", "bar");
-  const track = el("div", "track");
-  const fill = el("div", "fill" + (span.status === "error" ? " err" : ""));
-  const offset = total > 0 ? Math.max(0, (new Date(span.start) - t0) / total * 100) : 0;
-  fill.style.left = Math.min(offset, 99) + "%";
-  fill.style.width = Math.max(total > 0 ? span.duration_ms / total * 100 : 0, 0.4) + "%";
-  track.append(fill);
-  bar.append(track);
-  tr.append(bar);
-
-  const detail = el("td");
-  if (span.error) detail.append(el("div", "err-text", span.error));
-  const attrs = span.attributes || {};
-  const keys = Object.keys(attrs).sort();
-  if (keys.length) {
-    detail.append(el("div", "attrs", keys.map((k) => k + "=" + attrs[k]).join("  ")));
-  }
-  tr.append(detail);
-
-  return tr;
-}
-
-function traceItem(t) {
-  const li = el("li");
-  const d = el("details");
-  const s = el("summary");
-
-  s.append(el("span", "when", clock(t.start)));
-  s.append(el("span", "badge " + (t.status === "error" ? "err" : "ok"),
-    t.status === "error" ? "✕ error" : "✓ ok"));
-  s.append(el("span", "name", t.name || "(root missing)"));
-  s.append(el("span", "ms", ms(t.duration_ms)));
-  s.append(el("span", "id", t.id));
-  d.append(s);
-
-  const table = el("table");
-  const body = el("tbody");
-  const depth = depths(t.spans);
-  const t0 = new Date(t.start);
-  t.spans.forEach((span) => body.append(spanRow(span, depth.get(span.span_id) || 0, t0, t.duration_ms)));
-  table.append(body);
-  d.append(table);
-
-  li.append(d);
-  return li;
-}
-
-const list = document.getElementById("traces");
-const note = document.getElementById("note");
-
-// The page answers at both /_rig/monitor and /_rig/monitor/, and a relative
-// "traces.json" means two different URLs across those two. So the path is built
-// from where this page actually is, and the base path stays configurable
-// without the asset knowing what it was set to.
-const base = location.pathname.replace(/\/$/, "");
-
-async function load() {
-  const params = new URLSearchParams();
-  const q = document.getElementById("q").value.trim();
-  if (q) params.set("q", q);
-  if (document.getElementById("errors").checked) params.set("status", "error");
-
-  let data;
-  try {
-    const res = await fetch(base + "/traces.json?" + params.toString(), {headers: {Accept: "application/json"}});
-    if (!res.ok) throw new Error(res.status + " " + res.statusText);
-    data = await res.json();
-  } catch (err) {
-    note.textContent = "Could not load traces: " + err.message;
-    return;
-  }
-
-  document.getElementById("service").textContent = data.service || "";
-  note.textContent = data.reason || "";
-  list.replaceChildren(...(data.traces || []).map(traceItem));
-}
-
-document.getElementById("refresh").addEventListener("click", load);
-let typing;
-document.getElementById("q").addEventListener("input", () => {
-  clearTimeout(typing);
-  typing = setTimeout(load, 200);
-});
-document.getElementById("errors").addEventListener("change", load);
-setInterval(() => { if (document.getElementById("auto").checked) load(); }, 5000);
-load();
-</script>
+<script src="page.js"></script>
 </body>
 </html>

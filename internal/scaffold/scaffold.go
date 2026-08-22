@@ -107,11 +107,15 @@ func rigYAML(opt ProjectOptions) string {
 	return b.String()
 }
 
-// generatorsYAML wires up the three Go layers.
+// generatorsYAML wires up the three Go layers, and the two things written from
+// the same document beside them.
 //
-// They are configured together because they only work together: the API layer
-// calls the repository and the HTTP layer calls the API layer, so a project
-// with one of the three is a project that does not build.
+// The three layers are configured together because they only work together: the
+// API layer calls the repository and the HTTP layer calls the API layer, so a
+// project with one of the three is a project that does not build. The OpenAPI
+// document and the live-sync endpoints are configured beside them because both
+// are free — one writes nothing until a table asks for it, and the other
+// describes whatever the layers above turned out to be.
 func generatorsYAML(module string) string {
 	var b strings.Builder
 	b.WriteString("generators:\n")
@@ -145,6 +149,15 @@ func generatorsYAML(module string) string {
 	b.WriteString("    options:\n")
 	b.WriteString("      package: api\n")
 	fmt.Fprintf(&b, "      model_import: %s/internal/model\n\n", module)
+	b.WriteString("  # The OpenAPI document. It describes exactly the endpoints above,\n")
+	b.WriteString("  # because it is written from the same compiled document they are.\n")
+	b.WriteString("  - name: openapi\n")
+	b.WriteString("    out_dir: docs\n")
+	b.WriteString("    options:\n")
+	b.WriteString("      formats: [json, yaml]\n")
+	b.WriteString("      # Name the deployment to make the document usable in a viewer.\n")
+	b.WriteString("      # Leave it out for anything that runs in more than one place.\n")
+	b.WriteString("      # servers: [\"https://api.example.com\"]\n\n")
 	b.WriteString("  # Live-sync shape endpoints. It writes nothing until a table asks\n")
 	b.WriteString("  # for one with `electric: {enabled: true}`, so leaving it here costs\n")
 	b.WriteString("  # nothing and turning it on is one line in a table's configuration.\n")
@@ -163,6 +176,7 @@ const gitignore = `# Generated code. Everything with .gen. in its name is rewrit
 *.gen.go
 *.gen.ts
 *.gen.json
+*.gen.yaml
 
 # rig's working directory.
 .rig/manifest.json

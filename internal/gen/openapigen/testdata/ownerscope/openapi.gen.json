@@ -1,0 +1,1559 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "demo",
+    "description": "The demo HTTP API.",
+    "version": "v1"
+  },
+  "servers": [
+    {
+      "url": "https://api.example.test"
+    }
+  ],
+  "paths": {
+    "/api/v1/memo/_deleted/_stream": {
+      "get": {
+        "tags": [
+          "Memos"
+        ],
+        "summary": "Subscribe to retired Memos.",
+        "description": "The rows a delete stamped rather than removed, kept up to date.\n\nA shape is a filtered view of one table that a client subscribes to. This route is a proxy in front of the sync service: which rows exist in the shape — the tenant, the lifecycle predicate, and the application's own scoping — is decided by the server and cannot be influenced from here. Where the client is in the stream is forwarded untouched.\n\nWith `live=true` the request is a long poll: it does not answer until something changes, so a client timeout set for an ordinary request will cut it short.\n\nThe response body is the sync protocol's own and is not described here. The `electric-*` response headers carry the cursor: send `handle` and `offset` back on the next request, or the subscription starts over.\n\nRequires a session scoped to a tenant, and the shape is filtered to it.",
+        "operationId": "streamDeletedMemos",
+        "parameters": [
+          {
+            "name": "offset",
+            "in": "query",
+            "description": "Where in the stream to resume, from the previous response's electric-offset.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "handle",
+            "in": "query",
+            "description": "The shape handle from a previous response. Omit it to start a new subscription.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "live",
+            "in": "query",
+            "description": "Long-poll until something changes, rather than answering with what is there now.",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "The sync service's own cache-busting cursor, echoed back from the last response.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "replica",
+            "in": "query",
+            "description": "Whether updates carry the whole row or only the columns that changed.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/ApiRevision"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A chunk of the shape, in the sync protocol's own format.",
+            "headers": {
+              "electric-handle": {
+                "description": "The shape handle. Send it back to continue this subscription.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "electric-offset": {
+                "description": "Where this chunk ended. Send it back to resume from here.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "electric-schema": {
+                "description": "The shape's column types.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "electric-cursor": {
+                "description": "The cursor to echo on the next request.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "electric-up-to-date": {
+                "description": "Present when the client has caught up with the shape.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {}
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "502": {
+            "description": "The sync service could not be reached.",
+            "content": {
+              "text/plain": {}
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/memo/_stream": {
+      "get": {
+        "tags": [
+          "Memos"
+        ],
+        "summary": "Subscribe to the live Memo shape.",
+        "description": "Every Memo the caller may read, kept up to date.\n\nA shape is a filtered view of one table that a client subscribes to. This route is a proxy in front of the sync service: which rows exist in the shape — the tenant, the lifecycle predicate, and the application's own scoping — is decided by the server and cannot be influenced from here. Where the client is in the stream is forwarded untouched.\n\nWith `live=true` the request is a long poll: it does not answer until something changes, so a client timeout set for an ordinary request will cut it short.\n\nThe response body is the sync protocol's own and is not described here. The `electric-*` response headers carry the cursor: send `handle` and `offset` back on the next request, or the subscription starts over.\n\nRequires a session scoped to a tenant, and the shape is filtered to it.",
+        "operationId": "streamMemos",
+        "parameters": [
+          {
+            "name": "offset",
+            "in": "query",
+            "description": "Where in the stream to resume, from the previous response's electric-offset.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "handle",
+            "in": "query",
+            "description": "The shape handle from a previous response. Omit it to start a new subscription.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "live",
+            "in": "query",
+            "description": "Long-poll until something changes, rather than answering with what is there now.",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "The sync service's own cache-busting cursor, echoed back from the last response.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "replica",
+            "in": "query",
+            "description": "Whether updates carry the whole row or only the columns that changed.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/ApiRevision"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A chunk of the shape, in the sync protocol's own format.",
+            "headers": {
+              "electric-handle": {
+                "description": "The shape handle. Send it back to continue this subscription.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "electric-offset": {
+                "description": "Where this chunk ended. Send it back to resume from here.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "electric-schema": {
+                "description": "The shape's column types.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "electric-cursor": {
+                "description": "The cursor to echo on the next request.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "electric-up-to-date": {
+                "description": "Present when the client has caught up with the shape.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {}
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "502": {
+            "description": "The sync service could not be reached.",
+            "content": {
+              "text/plain": {}
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/memos": {
+      "get": {
+        "tags": [
+          "Memos"
+        ],
+        "summary": "List Memos.",
+        "description": "List Memos.\n\nRequires the `memo.read` permission.",
+        "operationId": "listMemos",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Maximum rows to return.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "default": 50
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "description": "Rows to skip before the first returned row.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "default": 0
+            }
+          },
+          {
+            "name": "scope",
+            "in": "query",
+            "description": "How wide to read: own for the memos the caller created, which is the default, or all for every one in the tenant. Asking for all requires the memo.read.all permission and is refused without it, rather than quietly answering with fewer rows.",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "own",
+                "all"
+              ],
+              "default": "own"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/ApiRevision"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of Memos.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemoListResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-rig-permission": "memo.read",
+        "x-rig-wide-permission": "memo.read.all"
+      },
+      "post": {
+        "tags": [
+          "Memos"
+        ],
+        "summary": "Create a Memo.",
+        "description": "Create a Memo.\n\nRequires the `memo.write` permission.",
+        "operationId": "createMemo",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ApiRevision"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "description": "The fields a new Memo is created with. A field the database cannot supply for itself is required.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MemoCreateInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "The created Memo.",
+            "headers": {
+              "Idempotency-Replayed": {
+                "$ref": "#/components/headers/IdempotencyReplayed"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Memo"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnprocessableEntity"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-rig-permission": "memo.write"
+      }
+    },
+    "/api/v1/memos/_deleted": {
+      "get": {
+        "tags": [
+          "Memos"
+        ],
+        "summary": "List retired Memos.",
+        "description": "A deletion stamps the row rather than removing it, so this is what was deleted and can still be brought back. Only rows inside the 30-day restore window appear: past it a row is gone as far as anyone is concerned, so it is not in the trash either.\n\nRequires the `memo.read` permission.",
+        "operationId": "listDeletedMemos",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Maximum rows to return.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "default": 50
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "description": "Rows to skip before the first returned row.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "default": 0
+            }
+          },
+          {
+            "name": "scope",
+            "in": "query",
+            "description": "How wide to read: own for the memos the caller created, which is the default, or all for every one in the tenant. Asking for all requires the memo.read.all permission and is refused without it, rather than quietly answering with fewer rows.",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "own",
+                "all"
+              ],
+              "default": "own"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/ApiRevision"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of retired Memos.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemoListResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-rig-permission": "memo.read",
+        "x-rig-wide-permission": "memo.read.all"
+      }
+    },
+    "/api/v1/memos/_search": {
+      "post": {
+        "tags": [
+          "Memos"
+        ],
+        "summary": "Search Memos with filters.",
+        "description": "Search Memos with filters.\n\nThe primary form of this operation is `QUERY /api/v1/memos` — a read that carries a body, and so safe and idempotent in a way POST is not. OpenAPI 3.1 cannot describe an operation on the QUERY method, so it is documented here as the POST alias that exists for intermediaries which reject unfamiliar methods. One handler serves both routes and they answer identically.\n\nRequires the `memo.read` permission.",
+        "operationId": "searchMemos",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Maximum rows to return.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "default": 50
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "description": "Rows to skip before the first returned row.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "default": 0
+            }
+          },
+          {
+            "name": "scope",
+            "in": "query",
+            "description": "How wide to read: own for the memos the caller created, which is the default, or all for every one in the tenant. Asking for all requires the memo.read.all permission and is refused without it, rather than quietly answering with fewer rows.",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "own",
+                "all"
+              ],
+              "default": "own"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/ApiRevision"
+          }
+        ],
+        "requestBody": {
+          "description": "The request body for Memo.Search.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MemoSearchBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "A page of matching Memos.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemoListResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnprocessableEntity"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-rig-permission": "memo.read",
+        "x-rig-wide-permission": "memo.read.all"
+      }
+    },
+    "/api/v1/memos/{id}": {
+      "get": {
+        "tags": [
+          "Memos"
+        ],
+        "summary": "Fetch one Memo by identifier.",
+        "description": "Fetch one Memo by identifier.\n\nRequires the `memo.read` permission.",
+        "operationId": "getMemo",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Identifier of the Memo.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "scope",
+            "in": "query",
+            "description": "How wide to read: own for the memos the caller created, which is the default, or all for every one in the tenant. Asking for all requires the memo.read.all permission and is refused without it, rather than quietly answering with fewer rows.",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "own",
+                "all"
+              ],
+              "default": "own"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/ApiRevision"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The requested Memo.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Memo"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-rig-permission": "memo.read",
+        "x-rig-wide-permission": "memo.read.all"
+      },
+      "delete": {
+        "tags": [
+          "Memos"
+        ],
+        "summary": "Delete a Memo.",
+        "description": "The row is retired by stamping a deletion time; it stops appearing in reads but can be restored within the retention window.\n\nRequires the `memo.delete` permission.",
+        "operationId": "deleteMemo",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Identifier of the Memo.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/ApiRevision"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "The Memo was deleted."
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-rig-permission": "memo.delete"
+      },
+      "patch": {
+        "tags": [
+          "Memos"
+        ],
+        "summary": "Update a Memo.",
+        "description": "Only the fields present in the body are changed. A field set to null is cleared; a field left out is left alone.\n\nRequires the `memo.write` permission.",
+        "operationId": "updateMemo",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Identifier of the Memo.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/ApiRevision"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "description": "The fields of a Memo to change. Every member is optional: one left out is left alone, and an explicit null clears it.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MemoUpdateInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The updated Memo.",
+            "headers": {
+              "Idempotency-Replayed": {
+                "$ref": "#/components/headers/IdempotencyReplayed"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Memo"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnprocessableEntity"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-rig-permission": "memo.write"
+      }
+    },
+    "/api/v1/memos/{id}/_restore": {
+      "post": {
+        "tags": [
+          "Memos"
+        ],
+        "summary": "Bring a retired Memo back.",
+        "description": "The deletion stamp is cleared and the row appears in reads again. It works for 30 days after the deletion; past that the row is no longer eligible and this answers 409.\n\nRestoring a row that was never deleted is not an error. It is already in the state the caller asked for, and answering otherwise would make a retry of a request whose response went missing look like a failure.\n\nThe request carries no fields. What to do when the world has moved on while the row was retired — a unique value taken by something created since — is the application's decision, and it is made in the restore hook: refuse, or change the row so that it fits.\n\nEvery rule then runs against whatever the hook settled on, not only the ones for fields it touched. The row was not live, so nothing about it has been checked against the world it is returning to.\n\nRequires the `memo.write` permission.",
+        "operationId": "restoreMemo",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Identifier of the Memo.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/ApiRevision"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The restored Memo.",
+            "headers": {
+              "Idempotency-Replayed": {
+                "$ref": "#/components/headers/IdempotencyReplayed"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Memo"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnprocessableEntity"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-rig-permission": "memo.write"
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Error": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "$ref": "#/components/schemas/ErrorCode",
+            "description": "Machine-readable reason the request failed."
+          },
+          "message": {
+            "type": "string",
+            "description": "Human-readable explanation. Not intended for clients to parse."
+          },
+          "requestId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Identifier of this request, for correlating with server logs."
+          },
+          "fields": {
+            "description": "Present when the failure was validation. It is shaped like the request body that failed — one member per field, holding the problem with that field — so a client can put each message beside the control it belongs to."
+          }
+        },
+        "description": "Returned whenever a request fails."
+      },
+      "ErrorCode": {
+        "type": "string",
+        "enum": [
+          "BadRequest",
+          "Unauthorized",
+          "Forbidden",
+          "NotFound",
+          "Conflict",
+          "UnprocessableEntity",
+          "RateLimited",
+          "TooLarge",
+          "UnsupportedMediaType",
+          "UpgradeRequired",
+          "Internal"
+        ],
+        "description": "Machine-readable reason a request failed.",
+        "x-enum-varnames": [
+          "BadRequest",
+          "Unauthorized",
+          "Forbidden",
+          "NotFound",
+          "Conflict",
+          "UnprocessableEntity",
+          "RateLimited",
+          "TooLarge",
+          "UnsupportedMediaType",
+          "UpgradeRequired",
+          "Internal"
+        ]
+      },
+      "Memo": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Unique identifier for this row.",
+            "readOnly": true
+          },
+          "tenantId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Tenant this row belongs to. Every query is scoped by it.",
+            "readOnly": true
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When this row was created. Set automatically and never changes.",
+            "readOnly": true
+          },
+          "createdByAccountId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Who wrote it.",
+            "readOnly": true
+          },
+          "updatedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When this row was last updated. Set automatically on every update.",
+            "readOnly": true
+          },
+          "updatedByAccountId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Who last changed it.",
+            "readOnly": true
+          },
+          "deletedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When this row was soft-deleted. Null while the row is live.",
+            "readOnly": true
+          },
+          "deletedByAccountId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Who retired it.",
+            "readOnly": true
+          },
+          "body": {
+            "type": "string",
+            "description": "What the memo says."
+          }
+        },
+        "description": "A private note one person writes for themselves."
+      },
+      "MemoCreateInput": {
+        "type": "object",
+        "properties": {
+          "body": {
+            "type": "string",
+            "description": "What the memo says."
+          }
+        },
+        "required": [
+          "body"
+        ],
+        "description": "The fields a new Memo is created with. A field the database cannot supply for itself is required."
+      },
+      "MemoFilter": {
+        "type": "object",
+        "properties": {
+          "equals": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/MemoFilterEquals"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Fields that must equal the given value."
+          },
+          "notEquals": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/MemoFilterEquals"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Fields that must not equal the given value."
+          },
+          "greaterThan": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/MemoFilterRange"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Fields that must be greater than the given value."
+          },
+          "smallerThan": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/MemoFilterRange"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Fields that must be less than the given value."
+          },
+          "greaterOrEqual": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/MemoFilterRange"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Fields that must be greater than or equal to the given value."
+          },
+          "smallerOrEqual": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/MemoFilterRange"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Fields that must be less than or equal to the given value."
+          },
+          "contains": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/MemoFilterContains"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Fields that must be one of the given values."
+          },
+          "notContains": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/MemoFilterContains"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Fields that must not be one of the given values."
+          },
+          "like": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/MemoFilterLike"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Text fields that must match the given pattern."
+          },
+          "notLike": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/MemoFilterLike"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Text fields that must not match the given pattern."
+          },
+          "null": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/MemoFilterNull"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Fields that must be null."
+          },
+          "notNull": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/MemoFilterNull"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Fields that must not be null."
+          },
+          "orCondition": {
+            "type": "boolean",
+            "description": "Combine this filter's conditions with OR instead of AND."
+          },
+          "nestedFilters": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MemoFilter"
+            },
+            "description": "Sub-filters combined with this one, so that AND and OR can be mixed to any depth."
+          }
+        },
+        "description": "Conditions a Memo must satisfy to match a search."
+      },
+      "MemoFilterContains": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Unique identifier for this row."
+          },
+          "createdAt": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "description": "When this row was created. Set automatically and never changes."
+          },
+          "createdByAccountId": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Who wrote it."
+          },
+          "updatedAt": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "description": "When this row was last updated. Set automatically on every update."
+          },
+          "updatedByAccountId": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Who last changed it."
+          },
+          "deletedAt": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "description": "When this row was soft-deleted. Null while the row is live."
+          },
+          "deletedByAccountId": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Who retired it."
+          },
+          "body": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "What the memo says."
+          }
+        },
+        "description": "Set-membership conditions on Memo fields."
+      },
+      "MemoFilterEquals": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Unique identifier for this row."
+          },
+          "createdAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When this row was created. Set automatically and never changes."
+          },
+          "createdByAccountId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Who wrote it."
+          },
+          "updatedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When this row was last updated. Set automatically on every update."
+          },
+          "updatedByAccountId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Who last changed it."
+          },
+          "deletedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When this row was soft-deleted. Null while the row is live."
+          },
+          "deletedByAccountId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Who retired it."
+          },
+          "body": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "What the memo says."
+          }
+        },
+        "description": "Exact-match conditions on Memo fields."
+      },
+      "MemoFilterLike": {
+        "type": "object",
+        "properties": {
+          "body": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "What the memo says."
+          }
+        },
+        "description": "Pattern conditions on Memo text fields."
+      },
+      "MemoFilterNull": {
+        "type": "object",
+        "properties": {
+          "createdByAccountId": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Who wrote it."
+          },
+          "updatedAt": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "When this row was last updated. Set automatically on every update."
+          },
+          "updatedByAccountId": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Who last changed it."
+          },
+          "deletedAt": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "When this row was soft-deleted. Null while the row is live."
+          },
+          "deletedByAccountId": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Who retired it."
+          }
+        },
+        "description": "Presence conditions on nullable Memo fields."
+      },
+      "MemoFilterRange": {
+        "type": "object",
+        "properties": {
+          "createdAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When this row was created. Set automatically and never changes."
+          },
+          "updatedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When this row was last updated. Set automatically on every update."
+          },
+          "deletedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When this row was soft-deleted. Null while the row is live."
+          }
+        },
+        "description": "Ordering conditions on Memo fields that can be compared."
+      },
+      "MemoListResponse": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Memo"
+            },
+            "description": "The rows in this page."
+          },
+          "pagination": {
+            "$ref": "#/components/schemas/Pagination",
+            "description": "Where this page sits in the full result set."
+          }
+        },
+        "description": "A page of Memos."
+      },
+      "MemoSearchBody": {
+        "type": "object",
+        "properties": {
+          "filter": {
+            "$ref": "#/components/schemas/MemoFilter",
+            "description": "Conditions rows must satisfy."
+          }
+        },
+        "required": [
+          "filter"
+        ],
+        "description": "The request body for Memo.Search."
+      },
+      "MemoUpdateInput": {
+        "type": "object",
+        "properties": {
+          "body": {
+            "type": "string",
+            "description": "What the memo says."
+          }
+        },
+        "description": "The fields of a Memo to change. Every member is optional: one left out is left alone, and an explicit null clears it."
+      },
+      "Pagination": {
+        "type": "object",
+        "properties": {
+          "offset": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Number of rows skipped before this page."
+          },
+          "limit": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Maximum number of rows in this page."
+          },
+          "total": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Total number of rows matching the query, ignoring pagination."
+          }
+        },
+        "description": "Where the returned page sits within the full result set."
+      }
+    },
+    "responses": {
+      "BadRequest": {
+        "description": "The request was malformed or a parameter could not be parsed.\n\nThe body's `code` is `BadRequest`.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "Unauthorized": {
+        "description": "No valid session or API key was presented.\n\nThe body's `code` is `Unauthorized`.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "Forbidden": {
+        "description": "The caller is known but not permitted to do this.\n\nThe body's `code` is `Forbidden`.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "NotFound": {
+        "description": "No such resource, or it belongs to another tenant.\n\nThe body's `code` is `NotFound`.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "Conflict": {
+        "description": "The request conflicts with the current state of the resource.\n\nThe body's `code` is `Conflict`.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "UnprocessableEntity": {
+        "description": "The request was well-formed but failed validation.\n\nThe body's `code` is `UnprocessableEntity`.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "RateLimited": {
+        "description": "Too many requests. Retry after the interval in the Retry-After header.\n\nThe body's `code` is `RateLimited`.",
+        "headers": {
+          "Retry-After": {
+            "$ref": "#/components/headers/RetryAfter"
+          },
+          "RateLimit-Limit": {
+            "$ref": "#/components/headers/RateLimitLimit"
+          },
+          "RateLimit-Remaining": {
+            "$ref": "#/components/headers/RateLimitRemaining"
+          },
+          "RateLimit-Reset": {
+            "$ref": "#/components/headers/RateLimitReset"
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "Internal": {
+        "description": "Something went wrong on the server.\n\nThe body's `code` is `Internal`.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      }
+    },
+    "parameters": {
+      "ApiRevision": {
+        "name": "API-Revision",
+        "in": "header",
+        "description": "The API revision this client was built against. A server generated from an older document than the caller expects answers 426 rather than guessing.",
+        "required": false,
+        "schema": {
+          "type": "string"
+        }
+      },
+      "IdempotencyKey": {
+        "name": "Idempotency-Key",
+        "in": "header",
+        "description": "A key of the caller's choosing, so a retried write happens once. Sending the same key with the same body replays the first answer and sets Idempotency-Replayed; with a different body it is refused with 422, and while the first is still in flight, with 409.",
+        "required": false,
+        "schema": {
+          "type": "string"
+        }
+      }
+    },
+    "headers": {
+      "IdempotencyReplayed": {
+        "description": "Present and true when this answer is a replay of an earlier request carrying the same Idempotency-Key, rather than work done again.",
+        "schema": {
+          "type": "boolean"
+        }
+      },
+      "RateLimitLimit": {
+        "description": "Requests permitted in the current window.",
+        "schema": {
+          "type": "integer"
+        }
+      },
+      "RateLimitRemaining": {
+        "description": "Requests left in the current window.",
+        "schema": {
+          "type": "integer"
+        }
+      },
+      "RateLimitReset": {
+        "description": "Seconds until the current window resets.",
+        "schema": {
+          "type": "integer"
+        }
+      },
+      "RetryAfter": {
+        "description": "Seconds to wait before retrying.",
+        "schema": {
+          "type": "integer"
+        }
+      }
+    }
+  },
+  "tags": [
+    {
+      "name": "Memos",
+      "description": "A private note one person writes for themselves."
+    }
+  ]
+}

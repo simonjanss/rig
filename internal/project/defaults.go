@@ -26,7 +26,6 @@ const (
 
 	DefaultAPIVersion   = "v1"
 	DefaultSearchMethod = SearchBoth
-	DefaultOpenAPI      = "3.1"
 
 	// DefaultRevisionHeader carries the API revision, in both directions.
 	//
@@ -202,8 +201,6 @@ func (p *Project) applyDefaults() {
 		// unprotected should be the thing somebody wrote down.
 		c.API.Permissions = PermissionsDerived
 	}
-
-	setDefault(&c.OpenAPI.Version, DefaultOpenAPI)
 
 	setDefault(&c.Database.Image, DefaultImage)
 	setDefault(&c.Database.Name, DefaultDBName)

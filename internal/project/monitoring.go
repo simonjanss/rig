@@ -30,13 +30,19 @@ const (
 	// DefaultMonitorMaxTraces is how many requests the page lists.
 	DefaultMonitorMaxTraces = 200
 
+	// DefaultMonitorMaxLogs is how many log lines the page reads. Larger than
+	// the traces, because one request writes several lines and the request line
+	// alone means at least one per request listed.
+	DefaultMonitorMaxLogs = 500
+
 	// DefaultMonitorPasswordEnv is the variable the page reads its password
 	// from when the project names no other.
 	DefaultMonitorPasswordEnv = "RIG_MONITOR_PASSWORD"
 )
 
-// Monitoring is rig's own page over the spans this server wrote: the last few
-// hundred requests and what each of them spent its time on.
+// Monitoring is rig's own page over what this server wrote about itself: the
+// last few hundred requests, what each of them spent its time on, and the log
+// lines they produced.
 //
 // It exists for the deployment too small to be worth a collector and a Grafana
 // in front of it, which is most of them for most of their life. It is a reader
@@ -63,6 +69,15 @@ type Monitoring struct {
 	// MaxTraces is how many requests the page lists, newest first. Zero means
 	// [DefaultMonitorMaxTraces].
 	MaxTraces int `yaml:"max_traces,omitempty" json:"max_traces,omitempty" jsonschema_description:"How many requests the page lists, newest first. Defaults to 200."`
+
+	// MaxLogs is how many log lines the page reads, newest first. Zero means
+	// [DefaultMonitorMaxLogs].
+	//
+	// The lines themselves are a run-time arrangement — a file the deployment
+	// names and a handler the application tees in — and this is the one part of
+	// them the project decides, for [MaxTraces]'s reason: how much of a page
+	// somebody reads is a property of the page.
+	MaxLogs int `yaml:"max_logs,omitempty" json:"max_logs,omitempty" jsonschema_description:"How many log lines the page reads, newest first. Defaults to 500."`
 
 	// PasswordEnv names the variable the page reads its password from,
 	// defaulting to [DefaultMonitorPasswordEnv]. With nothing in it the page is
@@ -102,7 +117,7 @@ type Monitoring struct {
 // Configured reports whether anything in the block was set, so that a block
 // somebody filled in and never enabled is refused rather than ignored.
 func (m Monitoring) Configured() bool {
-	return m.BasePath != "" || m.MaxTraces != 0 || m.PasswordEnv != "" ||
+	return m.BasePath != "" || m.MaxTraces != 0 || m.MaxLogs != 0 || m.PasswordEnv != "" ||
 		m.Password != "" || len(m.Allow) > 0
 }
 
@@ -122,6 +137,7 @@ func (m Monitoring) IR(serviceName string) *ir.Monitoring {
 		ServiceName: serviceName,
 		BasePath:    m.BasePath,
 		MaxTraces:   m.MaxTraces,
+		MaxLogs:     m.MaxLogs,
 		PasswordEnv: m.PasswordEnv,
 		Password:    m.Password,
 		Allow:       slices.Clone(m.Allow),
@@ -143,6 +159,9 @@ func (p *Project) applyMonitoringDefaults() {
 	setDefault(&m.PasswordEnv, DefaultMonitorPasswordEnv)
 	if m.MaxTraces == 0 {
 		m.MaxTraces = DefaultMonitorMaxTraces
+	}
+	if m.MaxLogs == 0 {
+		m.MaxLogs = DefaultMonitorMaxLogs
 	}
 }
 
@@ -176,6 +195,10 @@ func (p *Project) checkMonitoring() diag.List {
 	if m.MaxTraces < 0 {
 		diags.Add(diag.CodeConfigInvalid, p.At("monitoring", "max_traces"),
 			"monitoring.max_traces is %d; it has to be positive", m.MaxTraces)
+	}
+	if m.MaxLogs < 0 {
+		diags.Add(diag.CodeConfigInvalid, p.At("monitoring", "max_logs"),
+			"monitoring.max_logs is %d; it has to be positive", m.MaxLogs)
 	}
 
 	// Inside the API's prefix the page would occupy a route the project can

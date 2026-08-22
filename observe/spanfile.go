@@ -3,9 +3,6 @@ package observe
 import (
 	"context"
 	"encoding/json"
-	"os"
-	"path/filepath"
-	"sync"
 	"time"
 
 	"go.opentelemetry.io/otel/attribute"
@@ -58,118 +55,42 @@ type SpanRecord struct {
 //
 // Behind the SDK's batch processor, so the write is off the request path: a
 // handler that opened five spans does not wait for five lines to reach a disk.
+// The file itself, and the ceiling on it, are [rotatingFile]'s — the same store
+// the log file uses.
 type fileExporter struct {
-	mu   sync.Mutex
-	path string
-	max  int64
-	f    *os.File
-	size int64
+	f *rotatingFile
 }
 
 var _ sdktrace.SpanExporter = (*fileExporter)(nil)
 
 // newFileExporter opens the file, creating the directory it lives in.
-//
-// Opened at setup rather than at the first span, so that a path nothing can
-// write is a startup error naming the path, rather than a file that quietly
-// never appears and a monitoring page that is quietly empty.
 func newFileExporter(path string, max int64) (*fileExporter, error) {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return nil, err
-	}
-
-	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	f, err := openRotating(path, max)
 	if err != nil {
 		return nil, err
 	}
-
-	// Appending to what a previous run left, so the ceiling is on the file and
-	// not on this process's share of it.
-	info, err := f.Stat()
-	if err != nil {
-		f.Close()
-		return nil, err
-	}
-
-	return &fileExporter{path: path, max: max, f: f, size: info.Size()}, nil
+	return &fileExporter{f: f}, nil
 }
 
 // ExportSpans implements [go.opentelemetry.io/otel/sdk/trace.SpanExporter].
+//
+// The whole batch is encoded before any of it is written, so a record that
+// cannot be marshalled — which a [SpanRecord] cannot, but the compiler does not
+// know that — fails without having left half a batch on the disk.
 func (e *fileExporter) ExportSpans(_ context.Context, spans []sdktrace.ReadOnlySpan) error {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-
-	if e.f == nil {
-		return nil
-	}
-
+	lines := make([][]byte, 0, len(spans))
 	for _, span := range spans {
 		line, err := json.Marshal(newSpanRecord(span))
 		if err != nil {
 			return err
 		}
-		line = append(line, '\n')
-
-		if err := e.rotateIfFull(int64(len(line))); err != nil {
-			return err
-		}
-
-		n, err := e.f.Write(line)
-		e.size += int64(n)
-		if err != nil {
-			return err
-		}
+		lines = append(lines, append(line, '\n'))
 	}
-	return nil
-}
-
-// rotateIfFull moves the file aside when the next line would not fit.
-//
-// One generation is kept, so the disk cost is twice the cap and not more. The
-// alternative — numbered generations, a count to configure — is a log rotation
-// policy, and a deployment that wants one has one already and should point this
-// somewhere it can see.
-//
-// Rotating before the line rather than after keeps the promise exact: no file
-// ever exceeds the cap, so nobody has to reason about how much one span can
-// overshoot by.
-func (e *fileExporter) rotateIfFull(next int64) error {
-	if e.size+next <= e.max {
-		return nil
-	}
-
-	if err := e.f.Close(); err != nil {
-		return err
-	}
-	if err := os.Rename(e.path, e.path+rotatedSuffix); err != nil {
-		return err
-	}
-
-	f, err := os.OpenFile(e.path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
-	if err != nil {
-		// The file is gone and nothing is open: give up on writing rather than
-		// retry per span, which would be one failed syscall per span forever.
-		e.f = nil
-		return err
-	}
-
-	e.f, e.size = f, 0
-	return nil
+	return e.f.write(lines...)
 }
 
 // Shutdown implements [go.opentelemetry.io/otel/sdk/trace.SpanExporter].
-func (e *fileExporter) Shutdown(context.Context) error {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-
-	if e.f == nil {
-		return nil
-	}
-
-	err := e.f.Close()
-	e.f = nil
-	return err
-}
+func (e *fileExporter) Shutdown(context.Context) error { return e.f.close() }
 
 // newSpanRecord flattens a finished span into what gets written.
 func newSpanRecord(span sdktrace.ReadOnlySpan) SpanRecord {

@@ -47,15 +47,8 @@ func ReadTraces(path string, maxTraces int) ([]TraceRecord, error) {
 	return traces, nil
 }
 
-// ReadSpans reads the last max records of a span file, oldest first.
-//
-// The rotated generation beside it is read first, so a file that has just
-// rotated still answers with the requests before the rotation rather than with
-// the three since. Both are read whole and the last max lines kept, which is
-// what bounds this: a span file is capped by [Config.FileMaxBytes] with one
-// generation, so the read is bounded by twice that — eight mebibytes each, by
-// default. There is no index, and building one would be a tracing backend,
-// which is the thing rig decided not to be.
+// ReadSpans reads the last max records of a span file, oldest first, counting
+// the rotated generation beside it — see [tailLines] for what bounds that.
 //
 // A line that does not parse is skipped. The last line of a file a process was
 // killed while writing is a partial JSON object, and a page that refused to
@@ -63,6 +56,34 @@ func ReadTraces(path string, maxTraces int) ([]TraceRecord, error) {
 //
 // A missing file returns no records and no error.
 func ReadSpans(path string, max int) ([]SpanRecord, error) {
+	lines, err := tailLines(path, max)
+	if err != nil {
+		return nil, err
+	}
+
+	out := make([]SpanRecord, 0, len(lines))
+	for _, line := range lines {
+		var rec SpanRecord
+		if err := json.Unmarshal(line, &rec); err != nil {
+			continue
+		}
+		out = append(out, rec)
+	}
+	return out, nil
+}
+
+// tailLines is the last max lines of a JSONL file rig wrote, oldest first,
+// counting the rotated generation beside it.
+//
+// The rotated file is read first, so a file that has just rotated still answers
+// with the records before the rotation rather than with the three since. Both
+// are read whole and the last max lines kept, which is what bounds this: a file
+// rig writes is capped with one generation, so the read is bounded by twice
+// that cap — eight mebibytes each, by default. There is no index, and building
+// one would be a tracing backend, which is the thing rig decided not to be.
+//
+// A missing file contributes no lines and no error.
+func tailLines(path string, max int) ([][]byte, error) {
 	if path == "" || max <= 0 {
 		return nil, nil
 	}
@@ -82,20 +103,8 @@ func ReadSpans(path string, max int) ([]SpanRecord, error) {
 		}
 		ring = keepLast(ring, data, max)
 	}
-
-	out := make([]SpanRecord, 0, len(ring))
-	for _, line := range ring {
-		var rec SpanRecord
-		if err := json.Unmarshal(line, &rec); err != nil {
-			continue
-		}
-		out = append(out, rec)
-	}
-	return out, nil
+	return ring, nil
 }
-
-// rotatedSuffix is what [fileExporter.rotateIfFull] renames the full file to.
-const rotatedSuffix = ".1"
 
 // keepLast appends data's non-empty lines to ring, dropping from the front so
 // that at most max are kept.

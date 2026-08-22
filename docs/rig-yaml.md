@@ -642,9 +642,9 @@ open a span each, the repositories open one per call and one per hook, and
 
 ## `monitoring`
 
-rig's own page over those spans: the last few hundred requests and what each of
-them spent its time on, at `/_rig/monitor`. Off by default, and off means the
-route does not exist.
+rig's own page over those spans: the last few hundred requests, what each of
+them spent its time on, and the log lines they wrote, at `/_rig/monitor`. Off by
+default, and off means the route does not exist.
 
 ```yaml
 monitoring:
@@ -655,11 +655,17 @@ It is a reader over the span file `tracing:` writes and stores nothing of its
 own, so **it cannot be turned on without `tracing:`** — rig refuses that
 combination (RIG3005) rather than leaving you with a page that is empty forever.
 
+The log half is a run-time arrangement rather than a key here: a sink you open,
+tee into your logger and hand to the page. `max_logs` is the one part of it this
+block decides. See
+[observability.md](observability.md#the-logs).
+
 | Key | Default | |
 |---|---|---|
 | `enabled` | `false` | Mounts the page. Requires `tracing.enabled`. |
 | `base_path` | `/_rig/monitor` | Where it is mounted. It cannot sit under `api.base_path` or `auth.base_path`, where it would take a route this project owns. |
 | `max_traces` | `200` | How many requests the page lists, newest first. |
+| `max_logs` | `500` | How many log lines the page reads, newest first. Larger than `max_traces` because one request writes several lines. |
 | `password_env` | `RIG_MONITOR_PASSWORD` | The variable the password is read from. |
 | `password` | — | The password itself. It warns (RIG3006): rig.yaml is checked in. |
 | `allow` | — | Addresses that may reach the page, as CIDR ranges or single addresses. Empty allows any. |

@@ -41,7 +41,7 @@ func (e *emitter) clientFile() (gen.Artifact, error) {
 
 	b.Comment("RevisionHeader is where [Revision] is sent: the same header the " +
 		"server generated from this document reads.")
-	b.L("const RevisionHeader = %s", gobuf.Quote(e.revisionHeader()))
+	b.L("const RevisionHeader = %s", gobuf.Quote(genutil.RevisionHeader(e.doc)))
 	b.NL()
 
 	if e.cfg.DefaultBaseURL != "" {

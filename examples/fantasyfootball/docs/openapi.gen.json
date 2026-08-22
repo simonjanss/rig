@@ -1,0 +1,3856 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "fantasyfootball",
+    "description": "The fantasyfootball HTTP API.",
+    "version": "2026-08-21"
+  },
+  "servers": [
+    {
+      "url": "/",
+      "description": "This server. Set openapi.servers to name the deployment instead."
+    }
+  ],
+  "paths": {
+    "/api/v1/fixtures": {
+      "get": {
+        "tags": [
+          "Fixtures"
+        ],
+        "summary": "List Fixtures.",
+        "description": "List Fixtures.",
+        "operationId": "listFixtures",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Maximum rows to return.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "default": 50
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "description": "Rows to skip before the first returned row.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "default": 0
+            }
+          },
+          {
+            "$ref": "#/components/parameters/ApiRevision"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of Fixtures.",
+            "headers": {
+              "API-Revision": {
+                "$ref": "#/components/headers/ApiRevision"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FixtureListResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Fixtures"
+        ],
+        "summary": "Create a Fixture.",
+        "description": "Create a Fixture.",
+        "operationId": "createFixture",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ApiRevision"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "description": "The fields a new Fixture is created with. A field the database cannot supply for itself is required.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FixtureCreateInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "The created Fixture.",
+            "headers": {
+              "API-Revision": {
+                "$ref": "#/components/headers/ApiRevision"
+              },
+              "Idempotency-Replayed": {
+                "$ref": "#/components/headers/IdempotencyReplayed"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Fixture"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnprocessableEntity"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        }
+      }
+    },
+    "/api/v1/fixtures/_search": {
+      "post": {
+        "tags": [
+          "Fixtures"
+        ],
+        "summary": "Search Fixtures with filters.",
+        "description": "Search Fixtures with filters.\n\nThe primary form of this operation is `QUERY /api/v1/fixtures` — a read that carries a body, and so safe and idempotent in a way POST is not. OpenAPI 3.1 cannot describe an operation on the QUERY method, so it is documented here as the POST alias that exists for intermediaries which reject unfamiliar methods. One handler serves both routes and they answer identically.",
+        "operationId": "searchFixtures",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Maximum rows to return.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "default": 50
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "description": "Rows to skip before the first returned row.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "default": 0
+            }
+          },
+          {
+            "$ref": "#/components/parameters/ApiRevision"
+          }
+        ],
+        "requestBody": {
+          "description": "The request body for Fixture.Search.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FixtureSearchBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "A page of matching Fixtures.",
+            "headers": {
+              "API-Revision": {
+                "$ref": "#/components/headers/ApiRevision"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FixtureListResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnprocessableEntity"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        }
+      }
+    },
+    "/api/v1/fixtures/{id}": {
+      "get": {
+        "tags": [
+          "Fixtures"
+        ],
+        "summary": "Fetch one Fixture by identifier.",
+        "description": "Fetch one Fixture by identifier.",
+        "operationId": "getFixture",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Identifier of the Fixture.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/ApiRevision"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The requested Fixture.",
+            "headers": {
+              "API-Revision": {
+                "$ref": "#/components/headers/ApiRevision"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Fixture"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Fixtures"
+        ],
+        "summary": "Delete a Fixture.",
+        "description": "Delete a Fixture.",
+        "operationId": "deleteFixture",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Identifier of the Fixture.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/ApiRevision"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "The Fixture was deleted.",
+            "headers": {
+              "API-Revision": {
+                "$ref": "#/components/headers/ApiRevision"
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "Fixtures"
+        ],
+        "summary": "Update a Fixture.",
+        "description": "Only the fields present in the body are changed. A field set to null is cleared; a field left out is left alone.",
+        "operationId": "updateFixture",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Identifier of the Fixture.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/ApiRevision"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "description": "The fields of a Fixture to change. Every member is optional: one left out is left alone, and an explicit null clears it.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FixtureUpdateInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The updated Fixture.",
+            "headers": {
+              "API-Revision": {
+                "$ref": "#/components/headers/ApiRevision"
+              },
+              "Idempotency-Replayed": {
+                "$ref": "#/components/headers/IdempotencyReplayed"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Fixture"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnprocessableEntity"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        }
+      }
+    },
+    "/api/v1/players": {
+      "get": {
+        "tags": [
+          "Players"
+        ],
+        "summary": "List Players.",
+        "description": "List Players.",
+        "operationId": "listPlayers",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Maximum rows to return.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "default": 50
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "description": "Rows to skip before the first returned row.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "default": 0
+            }
+          },
+          {
+            "$ref": "#/components/parameters/ApiRevision"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of Players.",
+            "headers": {
+              "API-Revision": {
+                "$ref": "#/components/headers/ApiRevision"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlayerListResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Players"
+        ],
+        "summary": "Create a Player.",
+        "description": "Create a Player.",
+        "operationId": "createPlayer",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ApiRevision"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "description": "The fields a new Player is created with. A field the database cannot supply for itself is required.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PlayerCreateInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "The created Player.",
+            "headers": {
+              "API-Revision": {
+                "$ref": "#/components/headers/ApiRevision"
+              },
+              "Idempotency-Replayed": {
+                "$ref": "#/components/headers/IdempotencyReplayed"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Player"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnprocessableEntity"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        }
+      }
+    },
+    "/api/v1/players/_deleted": {
+      "get": {
+        "tags": [
+          "Players"
+        ],
+        "summary": "List retired Players.",
+        "description": "A deletion stamps the row rather than removing it, so this is what was deleted and can still be brought back. Only rows inside the 30-day restore window appear: past it a row is gone as far as anyone is concerned, so it is not in the trash either.",
+        "operationId": "listDeletedPlayers",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Maximum rows to return.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "default": 50
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "description": "Rows to skip before the first returned row.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "default": 0
+            }
+          },
+          {
+            "$ref": "#/components/parameters/ApiRevision"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of retired Players.",
+            "headers": {
+              "API-Revision": {
+                "$ref": "#/components/headers/ApiRevision"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlayerListResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        }
+      }
+    },
+    "/api/v1/players/_search": {
+      "post": {
+        "tags": [
+          "Players"
+        ],
+        "summary": "Search Players with filters.",
+        "description": "Search Players with filters.\n\nThe primary form of this operation is `QUERY /api/v1/players` — a read that carries a body, and so safe and idempotent in a way POST is not. OpenAPI 3.1 cannot describe an operation on the QUERY method, so it is documented here as the POST alias that exists for intermediaries which reject unfamiliar methods. One handler serves both routes and they answer identically.",
+        "operationId": "searchPlayers",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Maximum rows to return.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "default": 50
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "description": "Rows to skip before the first returned row.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "default": 0
+            }
+          },
+          {
+            "$ref": "#/components/parameters/ApiRevision"
+          }
+        ],
+        "requestBody": {
+          "description": "The request body for Player.Search.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PlayerSearchBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "A page of matching Players.",
+            "headers": {
+              "API-Revision": {
+                "$ref": "#/components/headers/ApiRevision"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlayerListResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnprocessableEntity"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        }
+      }
+    },
+    "/api/v1/players/{id}": {
+      "get": {
+        "tags": [
+          "Players"
+        ],
+        "summary": "Fetch one Player by identifier.",
+        "description": "Fetch one Player by identifier.",
+        "operationId": "getPlayer",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Identifier of the Player.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/ApiRevision"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The requested Player.",
+            "headers": {
+              "API-Revision": {
+                "$ref": "#/components/headers/ApiRevision"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Player"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Players"
+        ],
+        "summary": "Delete a Player.",
+        "description": "The row is retired by stamping a deletion time; it stops appearing in reads but can be restored within the retention window.",
+        "operationId": "deletePlayer",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Identifier of the Player.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/ApiRevision"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "The Player was deleted.",
+            "headers": {
+              "API-Revision": {
+                "$ref": "#/components/headers/ApiRevision"
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "Players"
+        ],
+        "summary": "Update a Player.",
+        "description": "Only the fields present in the body are changed. A field set to null is cleared; a field left out is left alone.",
+        "operationId": "updatePlayer",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Identifier of the Player.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/ApiRevision"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "description": "The fields of a Player to change. Every member is optional: one left out is left alone, and an explicit null clears it.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PlayerUpdateInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The updated Player.",
+            "headers": {
+              "API-Revision": {
+                "$ref": "#/components/headers/ApiRevision"
+              },
+              "Idempotency-Replayed": {
+                "$ref": "#/components/headers/IdempotencyReplayed"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Player"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnprocessableEntity"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        }
+      }
+    },
+    "/api/v1/players/{id}/_restore": {
+      "post": {
+        "tags": [
+          "Players"
+        ],
+        "summary": "Bring a retired Player back.",
+        "description": "The deletion stamp is cleared and the row appears in reads again. It works for 30 days after the deletion; past that the row is no longer eligible and this answers 409.\n\nRestoring a row that was never deleted is not an error. It is already in the state the caller asked for, and answering otherwise would make a retry of a request whose response went missing look like a failure.\n\nThe request carries no fields. What to do when the world has moved on while the row was retired — a unique value taken by something created since — is the application's decision, and it is made in the restore hook: refuse, or change the row so that it fits.\n\nEvery rule then runs against whatever the hook settled on, not only the ones for fields it touched. The row was not live, so nothing about it has been checked against the world it is returning to.",
+        "operationId": "restorePlayer",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Identifier of the Player.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/ApiRevision"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The restored Player.",
+            "headers": {
+              "API-Revision": {
+                "$ref": "#/components/headers/ApiRevision"
+              },
+              "Idempotency-Replayed": {
+                "$ref": "#/components/headers/IdempotencyReplayed"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Player"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnprocessableEntity"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        }
+      }
+    },
+    "/api/v1/teams": {
+      "get": {
+        "tags": [
+          "Teams"
+        ],
+        "summary": "List Teams.",
+        "description": "List Teams.",
+        "operationId": "listTeams",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Maximum rows to return.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "default": 50
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "description": "Rows to skip before the first returned row.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "default": 0
+            }
+          },
+          {
+            "$ref": "#/components/parameters/ApiRevision"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of Teams.",
+            "headers": {
+              "API-Revision": {
+                "$ref": "#/components/headers/ApiRevision"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TeamListResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Teams"
+        ],
+        "summary": "Create a Team.",
+        "description": "Create a Team.",
+        "operationId": "createTeam",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ApiRevision"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "description": "The fields a new Team is created with. A field the database cannot supply for itself is required.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TeamCreateInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "The created Team.",
+            "headers": {
+              "API-Revision": {
+                "$ref": "#/components/headers/ApiRevision"
+              },
+              "Idempotency-Replayed": {
+                "$ref": "#/components/headers/IdempotencyReplayed"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Team"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnprocessableEntity"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        }
+      }
+    },
+    "/api/v1/teams/_deleted": {
+      "get": {
+        "tags": [
+          "Teams"
+        ],
+        "summary": "List retired Teams.",
+        "description": "A deletion stamps the row rather than removing it, so this is what was deleted and can still be brought back. Only rows inside the 30-day restore window appear: past it a row is gone as far as anyone is concerned, so it is not in the trash either.",
+        "operationId": "listDeletedTeams",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Maximum rows to return.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "default": 50
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "description": "Rows to skip before the first returned row.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "default": 0
+            }
+          },
+          {
+            "$ref": "#/components/parameters/ApiRevision"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of retired Teams.",
+            "headers": {
+              "API-Revision": {
+                "$ref": "#/components/headers/ApiRevision"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TeamListResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        }
+      }
+    },
+    "/api/v1/teams/_search": {
+      "post": {
+        "tags": [
+          "Teams"
+        ],
+        "summary": "Search Teams with filters.",
+        "description": "Search Teams with filters.\n\nThe primary form of this operation is `QUERY /api/v1/teams` — a read that carries a body, and so safe and idempotent in a way POST is not. OpenAPI 3.1 cannot describe an operation on the QUERY method, so it is documented here as the POST alias that exists for intermediaries which reject unfamiliar methods. One handler serves both routes and they answer identically.",
+        "operationId": "searchTeams",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Maximum rows to return.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "default": 50
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "description": "Rows to skip before the first returned row.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "default": 0
+            }
+          },
+          {
+            "$ref": "#/components/parameters/ApiRevision"
+          }
+        ],
+        "requestBody": {
+          "description": "The request body for Team.Search.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TeamSearchBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "A page of matching Teams.",
+            "headers": {
+              "API-Revision": {
+                "$ref": "#/components/headers/ApiRevision"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TeamListResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnprocessableEntity"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        }
+      }
+    },
+    "/api/v1/teams/{id}": {
+      "get": {
+        "tags": [
+          "Teams"
+        ],
+        "summary": "Fetch one Team by identifier.",
+        "description": "Fetch one Team by identifier.",
+        "operationId": "getTeam",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Identifier of the Team.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/ApiRevision"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The requested Team.",
+            "headers": {
+              "API-Revision": {
+                "$ref": "#/components/headers/ApiRevision"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Team"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Teams"
+        ],
+        "summary": "Delete a Team.",
+        "description": "The row is retired by stamping a deletion time; it stops appearing in reads but can be restored within the retention window.",
+        "operationId": "deleteTeam",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Identifier of the Team.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/ApiRevision"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "The Team was deleted.",
+            "headers": {
+              "API-Revision": {
+                "$ref": "#/components/headers/ApiRevision"
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "Teams"
+        ],
+        "summary": "Update a Team.",
+        "description": "Only the fields present in the body are changed. A field set to null is cleared; a field left out is left alone.",
+        "operationId": "updateTeam",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Identifier of the Team.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/ApiRevision"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "description": "The fields of a Team to change. Every member is optional: one left out is left alone, and an explicit null clears it.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TeamUpdateInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The updated Team.",
+            "headers": {
+              "API-Revision": {
+                "$ref": "#/components/headers/ApiRevision"
+              },
+              "Idempotency-Replayed": {
+                "$ref": "#/components/headers/IdempotencyReplayed"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Team"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnprocessableEntity"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        }
+      }
+    },
+    "/api/v1/teams/{id}/_restore": {
+      "post": {
+        "tags": [
+          "Teams"
+        ],
+        "summary": "Bring a retired Team back.",
+        "description": "The deletion stamp is cleared and the row appears in reads again. It works for 30 days after the deletion; past that the row is no longer eligible and this answers 409.\n\nRestoring a row that was never deleted is not an error. It is already in the state the caller asked for, and answering otherwise would make a retry of a request whose response went missing look like a failure.\n\nThe request carries no fields. What to do when the world has moved on while the row was retired — a unique value taken by something created since — is the application's decision, and it is made in the restore hook: refuse, or change the row so that it fits.\n\nEvery rule then runs against whatever the hook settled on, not only the ones for fields it touched. The row was not live, so nothing about it has been checked against the world it is returning to.",
+        "operationId": "restoreTeam",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Identifier of the Team.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/ApiRevision"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The restored Team.",
+            "headers": {
+              "API-Revision": {
+                "$ref": "#/components/headers/ApiRevision"
+              },
+              "Idempotency-Replayed": {
+                "$ref": "#/components/headers/IdempotencyReplayed"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Team"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnprocessableEntity"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Error": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "$ref": "#/components/schemas/ErrorCode",
+            "description": "Machine-readable reason the request failed."
+          },
+          "message": {
+            "type": "string",
+            "description": "Human-readable explanation. Not intended for clients to parse."
+          },
+          "requestId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Identifier of this request, for correlating with server logs."
+          },
+          "fields": {
+            "description": "Present when the failure was validation. It is shaped like the request body that failed — one member per field, holding the problem with that field — so a client can put each message beside the control it belongs to."
+          }
+        },
+        "description": "Returned whenever a request fails."
+      },
+      "ErrorCode": {
+        "type": "string",
+        "enum": [
+          "BadRequest",
+          "Unauthorized",
+          "Forbidden",
+          "NotFound",
+          "Conflict",
+          "UnprocessableEntity",
+          "RateLimited",
+          "TooLarge",
+          "UnsupportedMediaType",
+          "UpgradeRequired",
+          "Internal"
+        ],
+        "description": "Machine-readable reason a request failed.",
+        "x-enum-varnames": [
+          "BadRequest",
+          "Unauthorized",
+          "Forbidden",
+          "NotFound",
+          "Conflict",
+          "UnprocessableEntity",
+          "RateLimited",
+          "TooLarge",
+          "UnsupportedMediaType",
+          "UpgradeRequired",
+          "Internal"
+        ]
+      },
+      "Fixture": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Unique identifier for this row.",
+            "readOnly": true
+          },
+          "tenantId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Tenant this row belongs to. Every query is scoped by it.",
+            "readOnly": true
+          },
+          "homeTeamId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The squad playing at home."
+          },
+          "awayTeamId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The squad playing away."
+          },
+          "kickoffAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the match starts."
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When this row was created. Set automatically and never changes.",
+            "readOnly": true
+          },
+          "createdByAccountId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Account that created this row, taken from the request's claims.",
+            "readOnly": true
+          },
+          "updatedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When this row was last updated. Set automatically on every update.",
+            "readOnly": true
+          },
+          "updatedByAccountId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Account that last updated this row, taken from the request's claims.",
+            "readOnly": true
+          }
+        },
+        "description": "One match between two squads."
+      },
+      "FixtureCreateInput": {
+        "type": "object",
+        "properties": {
+          "homeTeamId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The squad playing at home."
+          },
+          "awayTeamId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The squad playing away."
+          },
+          "kickoffAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the match starts."
+          }
+        },
+        "required": [
+          "homeTeamId",
+          "awayTeamId",
+          "kickoffAt"
+        ],
+        "description": "The fields a new Fixture is created with. A field the database cannot supply for itself is required."
+      },
+      "FixtureFilter": {
+        "type": "object",
+        "properties": {
+          "equals": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/FixtureFilterEquals"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Fields that must equal the given value."
+          },
+          "notEquals": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/FixtureFilterEquals"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Fields that must not equal the given value."
+          },
+          "greaterThan": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/FixtureFilterRange"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Fields that must be greater than the given value."
+          },
+          "smallerThan": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/FixtureFilterRange"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Fields that must be less than the given value."
+          },
+          "greaterOrEqual": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/FixtureFilterRange"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Fields that must be greater than or equal to the given value."
+          },
+          "smallerOrEqual": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/FixtureFilterRange"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Fields that must be less than or equal to the given value."
+          },
+          "contains": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/FixtureFilterContains"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Fields that must be one of the given values."
+          },
+          "notContains": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/FixtureFilterContains"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Fields that must not be one of the given values."
+          },
+          "like": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/FixtureFilterLike"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Text fields that must match the given pattern."
+          },
+          "notLike": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/FixtureFilterLike"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Text fields that must not match the given pattern."
+          },
+          "null": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/FixtureFilterNull"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Fields that must be null."
+          },
+          "notNull": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/FixtureFilterNull"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Fields that must not be null."
+          },
+          "orCondition": {
+            "type": "boolean",
+            "description": "Combine this filter's conditions with OR instead of AND."
+          },
+          "nestedFilters": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FixtureFilter"
+            },
+            "description": "Sub-filters combined with this one, so that AND and OR can be mixed to any depth."
+          },
+          "without": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/FixtureFilterWithout"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Relations with no row matching the given conditions. An empty one asks for no related row at all.\n\nThis is where a negation belongs when what you mean is \"not\": it negates whether a matching related row exists, so a row with no related row at all satisfies it. The negative operators above negate the comparison instead and still require the related row to be there — \"no related row called X\" is here, \"a related row not called X\" is NotEquals."
+          }
+        },
+        "description": "Conditions a Fixture must satisfy to match a search."
+      },
+      "FixtureFilterContains": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Unique identifier for this row."
+          },
+          "homeTeamId": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "The squad playing at home."
+          },
+          "awayTeamId": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "The squad playing away."
+          },
+          "kickoffAt": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "description": "When the match starts."
+          },
+          "createdAt": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "description": "When this row was created. Set automatically and never changes."
+          },
+          "createdByAccountId": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Account that created this row, taken from the request's claims."
+          },
+          "updatedAt": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "description": "When this row was last updated. Set automatically on every update."
+          },
+          "updatedByAccountId": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Account that last updated this row, taken from the request's claims."
+          },
+          "awayTeam": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/TeamFilterContains"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Conditions on this row's AwayTeam.\n\nA row with no AwayTeam never matches, and that holds for the negative operators too: under NotEquals this asks whether the AwayTeam is there and differs, so a row without one fails that as well. To ask the other question — no matching AwayTeam, which a row with none satisfies — use Without.AwayTeam."
+          },
+          "homeTeam": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/TeamFilterContains"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Conditions on this row's HomeTeam.\n\nA row with no HomeTeam never matches, and that holds for the negative operators too: under NotEquals this asks whether the HomeTeam is there and differs, so a row without one fails that as well. To ask the other question — no matching HomeTeam, which a row with none satisfies — use Without.HomeTeam."
+          }
+        },
+        "description": "Set-membership conditions on Fixture fields."
+      },
+      "FixtureFilterEquals": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Unique identifier for this row."
+          },
+          "homeTeamId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The squad playing at home."
+          },
+          "awayTeamId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The squad playing away."
+          },
+          "kickoffAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When the match starts."
+          },
+          "createdAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When this row was created. Set automatically and never changes."
+          },
+          "createdByAccountId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Account that created this row, taken from the request's claims."
+          },
+          "updatedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When this row was last updated. Set automatically on every update."
+          },
+          "updatedByAccountId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Account that last updated this row, taken from the request's claims."
+          },
+          "awayTeam": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/TeamFilterEquals"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Conditions on this row's AwayTeam.\n\nA row with no AwayTeam never matches, and that holds for the negative operators too: under NotEquals this asks whether the AwayTeam is there and differs, so a row without one fails that as well. To ask the other question — no matching AwayTeam, which a row with none satisfies — use Without.AwayTeam."
+          },
+          "homeTeam": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/TeamFilterEquals"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Conditions on this row's HomeTeam.\n\nA row with no HomeTeam never matches, and that holds for the negative operators too: under NotEquals this asks whether the HomeTeam is there and differs, so a row without one fails that as well. To ask the other question — no matching HomeTeam, which a row with none satisfies — use Without.HomeTeam."
+          }
+        },
+        "description": "Exact-match conditions on Fixture fields."
+      },
+      "FixtureFilterLike": {
+        "type": "object",
+        "properties": {
+          "awayTeam": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/TeamFilterLike"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Conditions on this row's AwayTeam.\n\nA row with no AwayTeam never matches, and that holds for the negative operators too: under NotEquals this asks whether the AwayTeam is there and differs, so a row without one fails that as well. To ask the other question — no matching AwayTeam, which a row with none satisfies — use Without.AwayTeam."
+          },
+          "homeTeam": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/TeamFilterLike"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Conditions on this row's HomeTeam.\n\nA row with no HomeTeam never matches, and that holds for the negative operators too: under NotEquals this asks whether the HomeTeam is there and differs, so a row without one fails that as well. To ask the other question — no matching HomeTeam, which a row with none satisfies — use Without.HomeTeam."
+          }
+        },
+        "description": "Pattern conditions on Fixture text fields."
+      },
+      "FixtureFilterNull": {
+        "type": "object",
+        "properties": {
+          "createdByAccountId": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Account that created this row, taken from the request's claims."
+          },
+          "updatedAt": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "When this row was last updated. Set automatically on every update."
+          },
+          "updatedByAccountId": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Account that last updated this row, taken from the request's claims."
+          },
+          "awayTeam": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/TeamFilterNull"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Conditions on this row's AwayTeam.\n\nA row with no AwayTeam never matches, and that holds for the negative operators too: under NotEquals this asks whether the AwayTeam is there and differs, so a row without one fails that as well. To ask the other question — no matching AwayTeam, which a row with none satisfies — use Without.AwayTeam."
+          },
+          "homeTeam": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/TeamFilterNull"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Conditions on this row's HomeTeam.\n\nA row with no HomeTeam never matches, and that holds for the negative operators too: under NotEquals this asks whether the HomeTeam is there and differs, so a row without one fails that as well. To ask the other question — no matching HomeTeam, which a row with none satisfies — use Without.HomeTeam."
+          }
+        },
+        "description": "Presence conditions on nullable Fixture fields."
+      },
+      "FixtureFilterRange": {
+        "type": "object",
+        "properties": {
+          "kickoffAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When the match starts."
+          },
+          "createdAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When this row was created. Set automatically and never changes."
+          },
+          "updatedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When this row was last updated. Set automatically on every update."
+          },
+          "awayTeam": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/TeamFilterRange"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Conditions on this row's AwayTeam.\n\nA row with no AwayTeam never matches, and that holds for the negative operators too: under NotEquals this asks whether the AwayTeam is there and differs, so a row without one fails that as well. To ask the other question — no matching AwayTeam, which a row with none satisfies — use Without.AwayTeam."
+          },
+          "homeTeam": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/TeamFilterRange"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Conditions on this row's HomeTeam.\n\nA row with no HomeTeam never matches, and that holds for the negative operators too: under NotEquals this asks whether the HomeTeam is there and differs, so a row without one fails that as well. To ask the other question — no matching HomeTeam, which a row with none satisfies — use Without.HomeTeam."
+          }
+        },
+        "description": "Ordering conditions on Fixture fields that can be compared."
+      },
+      "FixtureFilterWithout": {
+        "type": "object",
+        "properties": {
+          "awayTeam": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/TeamFilter"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Match rows with no AwayTeam satisfying these conditions, including rows that have none at all.\n\nThis negates the existence of the related row rather than the comparison, which is the whole difference from NotEquals.AwayTeam: that one needs the AwayTeam to be there and to differ, so a row without one fails it and satisfies this. An empty object asks for rows with no AwayTeam at all."
+          },
+          "homeTeam": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/TeamFilter"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Match rows with no HomeTeam satisfying these conditions, including rows that have none at all.\n\nThis negates the existence of the related row rather than the comparison, which is the whole difference from NotEquals.HomeTeam: that one needs the HomeTeam to be there and to differ, so a row without one fails it and satisfies this. An empty object asks for rows with no HomeTeam at all."
+          }
+        },
+        "description": "Relations a Fixture must have no matching row for."
+      },
+      "FixtureListResponse": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Fixture"
+            },
+            "description": "The rows in this page."
+          },
+          "pagination": {
+            "$ref": "#/components/schemas/Pagination",
+            "description": "Where this page sits in the full result set."
+          }
+        },
+        "description": "A page of Fixtures."
+      },
+      "FixtureSearchBody": {
+        "type": "object",
+        "properties": {
+          "filter": {
+            "$ref": "#/components/schemas/FixtureFilter",
+            "description": "Conditions rows must satisfy."
+          }
+        },
+        "required": [
+          "filter"
+        ],
+        "description": "The request body for Fixture.Search."
+      },
+      "FixtureUpdateInput": {
+        "type": "object",
+        "properties": {
+          "homeTeamId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The squad playing at home."
+          },
+          "awayTeamId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The squad playing away."
+          },
+          "kickoffAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the match starts."
+          }
+        },
+        "description": "The fields of a Fixture to change. Every member is optional: one left out is left alone, and an explicit null clears it."
+      },
+      "Pagination": {
+        "type": "object",
+        "properties": {
+          "offset": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Number of rows skipped before this page."
+          },
+          "limit": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Maximum number of rows in this page."
+          },
+          "total": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Total number of rows matching the query, ignoring pagination."
+          }
+        },
+        "description": "Where the returned page sits within the full result set."
+      },
+      "Player": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Unique identifier for this row.",
+            "readOnly": true
+          },
+          "tenantId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Tenant this row belongs to. Every query is scoped by it.",
+            "readOnly": true
+          },
+          "fullName": {
+            "type": "string",
+            "description": "The name on the back of the shirt."
+          },
+          "position": {
+            "$ref": "#/components/schemas/PlayerPosition",
+            "description": "Where on the pitch the player lines up."
+          },
+          "shirtNumber": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "The squad number, or null if unassigned."
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When this row was created. Set automatically and never changes.",
+            "readOnly": true
+          },
+          "createdByAccountId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Account that created this row, taken from the request's claims.",
+            "readOnly": true
+          },
+          "updatedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When this row was last updated. Set automatically on every update.",
+            "readOnly": true
+          },
+          "updatedByAccountId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Account that last updated this row, taken from the request's claims.",
+            "readOnly": true
+          },
+          "deletedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When this row was soft-deleted. Null while the row is live.",
+            "readOnly": true
+          },
+          "deletedByAccountId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Account that soft-deleted this row, taken from the request's claims.",
+            "readOnly": true
+          }
+        },
+        "description": "Somebody a squad can pick."
+      },
+      "PlayerCreateInput": {
+        "type": "object",
+        "properties": {
+          "fullName": {
+            "type": "string",
+            "description": "The name on the back of the shirt."
+          },
+          "position": {
+            "$ref": "#/components/schemas/PlayerPosition",
+            "description": "Where on the pitch the player lines up."
+          },
+          "shirtNumber": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "The squad number, or null if unassigned."
+          }
+        },
+        "required": [
+          "fullName",
+          "position"
+        ],
+        "description": "The fields a new Player is created with. A field the database cannot supply for itself is required."
+      },
+      "PlayerFilter": {
+        "type": "object",
+        "properties": {
+          "equals": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PlayerFilterEquals"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Fields that must equal the given value."
+          },
+          "notEquals": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PlayerFilterEquals"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Fields that must not equal the given value."
+          },
+          "greaterThan": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PlayerFilterRange"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Fields that must be greater than the given value."
+          },
+          "smallerThan": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PlayerFilterRange"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Fields that must be less than the given value."
+          },
+          "greaterOrEqual": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PlayerFilterRange"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Fields that must be greater than or equal to the given value."
+          },
+          "smallerOrEqual": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PlayerFilterRange"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Fields that must be less than or equal to the given value."
+          },
+          "contains": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PlayerFilterContains"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Fields that must be one of the given values."
+          },
+          "notContains": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PlayerFilterContains"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Fields that must not be one of the given values."
+          },
+          "like": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PlayerFilterLike"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Text fields that must match the given pattern."
+          },
+          "notLike": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PlayerFilterLike"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Text fields that must not match the given pattern."
+          },
+          "null": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PlayerFilterNull"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Fields that must be null."
+          },
+          "notNull": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PlayerFilterNull"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Fields that must not be null."
+          },
+          "orCondition": {
+            "type": "boolean",
+            "description": "Combine this filter's conditions with OR instead of AND."
+          },
+          "nestedFilters": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PlayerFilter"
+            },
+            "description": "Sub-filters combined with this one, so that AND and OR can be mixed to any depth."
+          },
+          "without": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PlayerFilterWithout"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Relations with no row matching the given conditions. An empty one asks for no related row at all.\n\nThis is where a negation belongs when what you mean is \"not\": it negates whether a matching related row exists, so a row with no related row at all satisfies it. The negative operators above negate the comparison instead and still require the related row to be there — \"no related row called X\" is here, \"a related row not called X\" is NotEquals."
+          }
+        },
+        "description": "Conditions a Player must satisfy to match a search."
+      },
+      "PlayerFilterContains": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Unique identifier for this row."
+          },
+          "fullName": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The name on the back of the shirt."
+          },
+          "position": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PlayerPosition"
+            },
+            "description": "Where on the pitch the player lines up."
+          },
+          "shirtNumber": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int32"
+            },
+            "description": "The squad number, or null if unassigned."
+          },
+          "createdAt": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "description": "When this row was created. Set automatically and never changes."
+          },
+          "createdByAccountId": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Account that created this row, taken from the request's claims."
+          },
+          "updatedAt": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "description": "When this row was last updated. Set automatically on every update."
+          },
+          "updatedByAccountId": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Account that last updated this row, taken from the request's claims."
+          },
+          "deletedAt": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "description": "When this row was soft-deleted. Null while the row is live."
+          },
+          "deletedByAccountId": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Account that soft-deleted this row, taken from the request's claims."
+          },
+          "teams": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/TeamFilterContains"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Conditions on one of this row's Teams.\n\nEvery condition has to hold of the same one, not of the set between them.\n\nUnder the negative operators this asks whether one of them differs, which is not the same as none of them matching: a row can have one that matches and one that does not, satisfying the first and failing the second. Without.Teams asks the second."
+          }
+        },
+        "description": "Set-membership conditions on Player fields."
+      },
+      "PlayerFilterEquals": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Unique identifier for this row."
+          },
+          "fullName": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The name on the back of the shirt."
+          },
+          "position": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PlayerPosition"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Where on the pitch the player lines up."
+          },
+          "shirtNumber": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "The squad number, or null if unassigned."
+          },
+          "createdAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When this row was created. Set automatically and never changes."
+          },
+          "createdByAccountId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Account that created this row, taken from the request's claims."
+          },
+          "updatedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When this row was last updated. Set automatically on every update."
+          },
+          "updatedByAccountId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Account that last updated this row, taken from the request's claims."
+          },
+          "deletedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When this row was soft-deleted. Null while the row is live."
+          },
+          "deletedByAccountId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Account that soft-deleted this row, taken from the request's claims."
+          },
+          "teams": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/TeamFilterEquals"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Conditions on one of this row's Teams.\n\nEvery condition has to hold of the same one, not of the set between them.\n\nUnder the negative operators this asks whether one of them differs, which is not the same as none of them matching: a row can have one that matches and one that does not, satisfying the first and failing the second. Without.Teams asks the second."
+          }
+        },
+        "description": "Exact-match conditions on Player fields."
+      },
+      "PlayerFilterLike": {
+        "type": "object",
+        "properties": {
+          "fullName": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The name on the back of the shirt."
+          },
+          "teams": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/TeamFilterLike"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Conditions on one of this row's Teams.\n\nEvery condition has to hold of the same one, not of the set between them.\n\nUnder the negative operators this asks whether one of them differs, which is not the same as none of them matching: a row can have one that matches and one that does not, satisfying the first and failing the second. Without.Teams asks the second."
+          }
+        },
+        "description": "Pattern conditions on Player text fields."
+      },
+      "PlayerFilterNull": {
+        "type": "object",
+        "properties": {
+          "shirtNumber": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "The squad number, or null if unassigned."
+          },
+          "createdByAccountId": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Account that created this row, taken from the request's claims."
+          },
+          "updatedAt": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "When this row was last updated. Set automatically on every update."
+          },
+          "updatedByAccountId": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Account that last updated this row, taken from the request's claims."
+          },
+          "deletedAt": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "When this row was soft-deleted. Null while the row is live."
+          },
+          "deletedByAccountId": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Account that soft-deleted this row, taken from the request's claims."
+          },
+          "teams": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/TeamFilterNull"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Conditions on one of this row's Teams.\n\nEvery condition has to hold of the same one, not of the set between them.\n\nUnder the negative operators this asks whether one of them differs, which is not the same as none of them matching: a row can have one that matches and one that does not, satisfying the first and failing the second. Without.Teams asks the second."
+          }
+        },
+        "description": "Presence conditions on nullable Player fields."
+      },
+      "PlayerFilterRange": {
+        "type": "object",
+        "properties": {
+          "shirtNumber": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "The squad number, or null if unassigned."
+          },
+          "createdAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When this row was created. Set automatically and never changes."
+          },
+          "updatedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When this row was last updated. Set automatically on every update."
+          },
+          "deletedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When this row was soft-deleted. Null while the row is live."
+          },
+          "teams": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/TeamFilterRange"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Conditions on one of this row's Teams.\n\nEvery condition has to hold of the same one, not of the set between them.\n\nUnder the negative operators this asks whether one of them differs, which is not the same as none of them matching: a row can have one that matches and one that does not, satisfying the first and failing the second. Without.Teams asks the second."
+          }
+        },
+        "description": "Ordering conditions on Player fields that can be compared."
+      },
+      "PlayerFilterWithout": {
+        "type": "object",
+        "properties": {
+          "teams": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/TeamFilter"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Match rows with no Teams satisfying these conditions, including rows with none at all.\n\nThis negates the existence of a matching row rather than the comparison, which is the whole difference from NotEquals.Teams: that one is satisfied by one of them differing, and a row can have one that differs and one that matches at the same time. An empty object asks for rows with no Teams at all."
+          }
+        },
+        "description": "Relations a Player must have no matching row for."
+      },
+      "PlayerListResponse": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Player"
+            },
+            "description": "The rows in this page."
+          },
+          "pagination": {
+            "$ref": "#/components/schemas/Pagination",
+            "description": "Where this page sits in the full result set."
+          }
+        },
+        "description": "A page of Players."
+      },
+      "PlayerPosition": {
+        "type": "string",
+        "enum": [
+          "goalkeeper",
+          "defender",
+          "midfielder",
+          "forward"
+        ],
+        "description": "Where on the pitch a player lines up.",
+        "x-enum-varnames": [
+          "Goalkeeper",
+          "Defender",
+          "Midfielder",
+          "Forward"
+        ]
+      },
+      "PlayerSearchBody": {
+        "type": "object",
+        "properties": {
+          "filter": {
+            "$ref": "#/components/schemas/PlayerFilter",
+            "description": "Conditions rows must satisfy."
+          }
+        },
+        "required": [
+          "filter"
+        ],
+        "description": "The request body for Player.Search."
+      },
+      "PlayerUpdateInput": {
+        "type": "object",
+        "properties": {
+          "fullName": {
+            "type": "string",
+            "description": "The name on the back of the shirt."
+          },
+          "position": {
+            "$ref": "#/components/schemas/PlayerPosition",
+            "description": "Where on the pitch the player lines up."
+          },
+          "shirtNumber": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "The squad number, or null if unassigned."
+          }
+        },
+        "description": "The fields of a Player to change. Every member is optional: one left out is left alone, and an explicit null clears it."
+      },
+      "Team": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Unique identifier for this row.",
+            "readOnly": true
+          },
+          "tenantId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Tenant this row belongs to. Every query is scoped by it.",
+            "readOnly": true
+          },
+          "name": {
+            "type": "string",
+            "description": "What the manager calls their squad."
+          },
+          "isActive": {
+            "type": "boolean",
+            "description": "Whether the squad is playing this season."
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When this row was created. Set automatically and never changes.",
+            "readOnly": true
+          },
+          "createdByAccountId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Account that created this row, taken from the request's claims.",
+            "readOnly": true
+          },
+          "updatedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When this row was last updated. Set automatically on every update.",
+            "readOnly": true
+          },
+          "updatedByAccountId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Account that last updated this row, taken from the request's claims.",
+            "readOnly": true
+          },
+          "deletedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When this row was soft-deleted. Null while the row is live.",
+            "readOnly": true
+          },
+          "deletedByAccountId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Account that soft-deleted this row, taken from the request's claims.",
+            "readOnly": true
+          }
+        },
+        "description": "A squad somebody manages."
+      },
+      "TeamCreateInput": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "What the manager calls their squad."
+          },
+          "isActive": {
+            "type": "boolean",
+            "description": "Whether the squad is playing this season.",
+            "default": true
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "description": "The fields a new Team is created with. A field the database cannot supply for itself is required."
+      },
+      "TeamFilter": {
+        "type": "object",
+        "properties": {
+          "equals": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/TeamFilterEquals"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Fields that must equal the given value."
+          },
+          "notEquals": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/TeamFilterEquals"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Fields that must not equal the given value."
+          },
+          "greaterThan": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/TeamFilterRange"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Fields that must be greater than the given value."
+          },
+          "smallerThan": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/TeamFilterRange"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Fields that must be less than the given value."
+          },
+          "greaterOrEqual": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/TeamFilterRange"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Fields that must be greater than or equal to the given value."
+          },
+          "smallerOrEqual": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/TeamFilterRange"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Fields that must be less than or equal to the given value."
+          },
+          "contains": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/TeamFilterContains"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Fields that must be one of the given values."
+          },
+          "notContains": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/TeamFilterContains"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Fields that must not be one of the given values."
+          },
+          "like": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/TeamFilterLike"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Text fields that must match the given pattern."
+          },
+          "notLike": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/TeamFilterLike"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Text fields that must not match the given pattern."
+          },
+          "null": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/TeamFilterNull"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Fields that must be null."
+          },
+          "notNull": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/TeamFilterNull"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Fields that must not be null."
+          },
+          "orCondition": {
+            "type": "boolean",
+            "description": "Combine this filter's conditions with OR instead of AND."
+          },
+          "nestedFilters": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TeamFilter"
+            },
+            "description": "Sub-filters combined with this one, so that AND and OR can be mixed to any depth."
+          },
+          "without": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/TeamFilterWithout"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Relations with no row matching the given conditions. An empty one asks for no related row at all.\n\nThis is where a negation belongs when what you mean is \"not\": it negates whether a matching related row exists, so a row with no related row at all satisfies it. The negative operators above negate the comparison instead and still require the related row to be there — \"no related row called X\" is here, \"a related row not called X\" is NotEquals."
+          }
+        },
+        "description": "Conditions a Team must satisfy to match a search."
+      },
+      "TeamFilterContains": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Unique identifier for this row."
+          },
+          "name": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "What the manager calls their squad."
+          },
+          "isActive": {
+            "type": "array",
+            "items": {
+              "type": "boolean"
+            },
+            "description": "Whether the squad is playing this season."
+          },
+          "createdAt": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "description": "When this row was created. Set automatically and never changes."
+          },
+          "createdByAccountId": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Account that created this row, taken from the request's claims."
+          },
+          "updatedAt": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "description": "When this row was last updated. Set automatically on every update."
+          },
+          "updatedByAccountId": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Account that last updated this row, taken from the request's claims."
+          },
+          "deletedAt": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "description": "When this row was soft-deleted. Null while the row is live."
+          },
+          "deletedByAccountId": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Account that soft-deleted this row, taken from the request's claims."
+          },
+          "awayFixtures": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/FixtureFilterContains"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Conditions on one of this row's AwayFixtures.\n\nEvery condition has to hold of the same one, not of the set between them.\n\nUnder the negative operators this asks whether one of them differs, which is not the same as none of them matching: a row can have one that matches and one that does not, satisfying the first and failing the second. Without.AwayFixtures asks the second."
+          },
+          "homeFixtures": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/FixtureFilterContains"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Conditions on one of this row's HomeFixtures.\n\nEvery condition has to hold of the same one, not of the set between them.\n\nUnder the negative operators this asks whether one of them differs, which is not the same as none of them matching: a row can have one that matches and one that does not, satisfying the first and failing the second. Without.HomeFixtures asks the second."
+          },
+          "players": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PlayerFilterContains"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Conditions on one of this row's Players.\n\nEvery condition has to hold of the same one, not of the set between them.\n\nUnder the negative operators this asks whether one of them differs, which is not the same as none of them matching: a row can have one that matches and one that does not, satisfying the first and failing the second. Without.Players asks the second."
+          }
+        },
+        "description": "Set-membership conditions on Team fields."
+      },
+      "TeamFilterEquals": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Unique identifier for this row."
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "What the manager calls their squad."
+          },
+          "isActive": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Whether the squad is playing this season."
+          },
+          "createdAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When this row was created. Set automatically and never changes."
+          },
+          "createdByAccountId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Account that created this row, taken from the request's claims."
+          },
+          "updatedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When this row was last updated. Set automatically on every update."
+          },
+          "updatedByAccountId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Account that last updated this row, taken from the request's claims."
+          },
+          "deletedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When this row was soft-deleted. Null while the row is live."
+          },
+          "deletedByAccountId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Account that soft-deleted this row, taken from the request's claims."
+          },
+          "awayFixtures": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/FixtureFilterEquals"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Conditions on one of this row's AwayFixtures.\n\nEvery condition has to hold of the same one, not of the set between them.\n\nUnder the negative operators this asks whether one of them differs, which is not the same as none of them matching: a row can have one that matches and one that does not, satisfying the first and failing the second. Without.AwayFixtures asks the second."
+          },
+          "homeFixtures": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/FixtureFilterEquals"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Conditions on one of this row's HomeFixtures.\n\nEvery condition has to hold of the same one, not of the set between them.\n\nUnder the negative operators this asks whether one of them differs, which is not the same as none of them matching: a row can have one that matches and one that does not, satisfying the first and failing the second. Without.HomeFixtures asks the second."
+          },
+          "players": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PlayerFilterEquals"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Conditions on one of this row's Players.\n\nEvery condition has to hold of the same one, not of the set between them.\n\nUnder the negative operators this asks whether one of them differs, which is not the same as none of them matching: a row can have one that matches and one that does not, satisfying the first and failing the second. Without.Players asks the second."
+          }
+        },
+        "description": "Exact-match conditions on Team fields."
+      },
+      "TeamFilterLike": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "What the manager calls their squad."
+          },
+          "awayFixtures": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/FixtureFilterLike"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Conditions on one of this row's AwayFixtures.\n\nEvery condition has to hold of the same one, not of the set between them.\n\nUnder the negative operators this asks whether one of them differs, which is not the same as none of them matching: a row can have one that matches and one that does not, satisfying the first and failing the second. Without.AwayFixtures asks the second."
+          },
+          "homeFixtures": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/FixtureFilterLike"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Conditions on one of this row's HomeFixtures.\n\nEvery condition has to hold of the same one, not of the set between them.\n\nUnder the negative operators this asks whether one of them differs, which is not the same as none of them matching: a row can have one that matches and one that does not, satisfying the first and failing the second. Without.HomeFixtures asks the second."
+          },
+          "players": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PlayerFilterLike"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Conditions on one of this row's Players.\n\nEvery condition has to hold of the same one, not of the set between them.\n\nUnder the negative operators this asks whether one of them differs, which is not the same as none of them matching: a row can have one that matches and one that does not, satisfying the first and failing the second. Without.Players asks the second."
+          }
+        },
+        "description": "Pattern conditions on Team text fields."
+      },
+      "TeamFilterNull": {
+        "type": "object",
+        "properties": {
+          "createdByAccountId": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Account that created this row, taken from the request's claims."
+          },
+          "updatedAt": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "When this row was last updated. Set automatically on every update."
+          },
+          "updatedByAccountId": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Account that last updated this row, taken from the request's claims."
+          },
+          "deletedAt": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "When this row was soft-deleted. Null while the row is live."
+          },
+          "deletedByAccountId": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Account that soft-deleted this row, taken from the request's claims."
+          },
+          "awayFixtures": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/FixtureFilterNull"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Conditions on one of this row's AwayFixtures.\n\nEvery condition has to hold of the same one, not of the set between them.\n\nUnder the negative operators this asks whether one of them differs, which is not the same as none of them matching: a row can have one that matches and one that does not, satisfying the first and failing the second. Without.AwayFixtures asks the second."
+          },
+          "homeFixtures": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/FixtureFilterNull"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Conditions on one of this row's HomeFixtures.\n\nEvery condition has to hold of the same one, not of the set between them.\n\nUnder the negative operators this asks whether one of them differs, which is not the same as none of them matching: a row can have one that matches and one that does not, satisfying the first and failing the second. Without.HomeFixtures asks the second."
+          },
+          "players": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PlayerFilterNull"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Conditions on one of this row's Players.\n\nEvery condition has to hold of the same one, not of the set between them.\n\nUnder the negative operators this asks whether one of them differs, which is not the same as none of them matching: a row can have one that matches and one that does not, satisfying the first and failing the second. Without.Players asks the second."
+          }
+        },
+        "description": "Presence conditions on nullable Team fields."
+      },
+      "TeamFilterRange": {
+        "type": "object",
+        "properties": {
+          "createdAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When this row was created. Set automatically and never changes."
+          },
+          "updatedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When this row was last updated. Set automatically on every update."
+          },
+          "deletedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When this row was soft-deleted. Null while the row is live."
+          },
+          "awayFixtures": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/FixtureFilterRange"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Conditions on one of this row's AwayFixtures.\n\nEvery condition has to hold of the same one, not of the set between them.\n\nUnder the negative operators this asks whether one of them differs, which is not the same as none of them matching: a row can have one that matches and one that does not, satisfying the first and failing the second. Without.AwayFixtures asks the second."
+          },
+          "homeFixtures": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/FixtureFilterRange"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Conditions on one of this row's HomeFixtures.\n\nEvery condition has to hold of the same one, not of the set between them.\n\nUnder the negative operators this asks whether one of them differs, which is not the same as none of them matching: a row can have one that matches and one that does not, satisfying the first and failing the second. Without.HomeFixtures asks the second."
+          },
+          "players": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PlayerFilterRange"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Conditions on one of this row's Players.\n\nEvery condition has to hold of the same one, not of the set between them.\n\nUnder the negative operators this asks whether one of them differs, which is not the same as none of them matching: a row can have one that matches and one that does not, satisfying the first and failing the second. Without.Players asks the second."
+          }
+        },
+        "description": "Ordering conditions on Team fields that can be compared."
+      },
+      "TeamFilterWithout": {
+        "type": "object",
+        "properties": {
+          "awayFixtures": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/FixtureFilter"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Match rows with no AwayFixtures satisfying these conditions, including rows with none at all.\n\nThis negates the existence of a matching row rather than the comparison, which is the whole difference from NotEquals.AwayFixtures: that one is satisfied by one of them differing, and a row can have one that differs and one that matches at the same time. An empty object asks for rows with no AwayFixtures at all."
+          },
+          "homeFixtures": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/FixtureFilter"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Match rows with no HomeFixtures satisfying these conditions, including rows with none at all.\n\nThis negates the existence of a matching row rather than the comparison, which is the whole difference from NotEquals.HomeFixtures: that one is satisfied by one of them differing, and a row can have one that differs and one that matches at the same time. An empty object asks for rows with no HomeFixtures at all."
+          },
+          "players": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PlayerFilter"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Match rows with no Players satisfying these conditions, including rows with none at all.\n\nThis negates the existence of a matching row rather than the comparison, which is the whole difference from NotEquals.Players: that one is satisfied by one of them differing, and a row can have one that differs and one that matches at the same time. An empty object asks for rows with no Players at all."
+          }
+        },
+        "description": "Relations a Team must have no matching row for."
+      },
+      "TeamListResponse": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Team"
+            },
+            "description": "The rows in this page."
+          },
+          "pagination": {
+            "$ref": "#/components/schemas/Pagination",
+            "description": "Where this page sits in the full result set."
+          }
+        },
+        "description": "A page of Teams."
+      },
+      "TeamSearchBody": {
+        "type": "object",
+        "properties": {
+          "filter": {
+            "$ref": "#/components/schemas/TeamFilter",
+            "description": "Conditions rows must satisfy."
+          }
+        },
+        "required": [
+          "filter"
+        ],
+        "description": "The request body for Team.Search."
+      },
+      "TeamUpdateInput": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "What the manager calls their squad."
+          },
+          "isActive": {
+            "type": "boolean",
+            "description": "Whether the squad is playing this season.",
+            "default": true
+          }
+        },
+        "description": "The fields of a Team to change. Every member is optional: one left out is left alone, and an explicit null clears it."
+      }
+    },
+    "responses": {
+      "BadRequest": {
+        "description": "The request was malformed or a parameter could not be parsed.\n\nThe body's `code` is `BadRequest`.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "Unauthorized": {
+        "description": "No valid session or API key was presented.\n\nThe body's `code` is `Unauthorized`.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "Forbidden": {
+        "description": "The caller is known but not permitted to do this.\n\nThe body's `code` is `Forbidden`.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "NotFound": {
+        "description": "No such resource, or it belongs to another tenant.\n\nThe body's `code` is `NotFound`.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "Conflict": {
+        "description": "The request conflicts with the current state of the resource.\n\nThe body's `code` is `Conflict`.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "UnprocessableEntity": {
+        "description": "The request was well-formed but failed validation.\n\nThe body's `code` is `UnprocessableEntity`.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "RateLimited": {
+        "description": "Too many requests. Retry after the interval in the Retry-After header.\n\nThe body's `code` is `RateLimited`.",
+        "headers": {
+          "Retry-After": {
+            "$ref": "#/components/headers/RetryAfter"
+          },
+          "RateLimit-Limit": {
+            "$ref": "#/components/headers/RateLimitLimit"
+          },
+          "RateLimit-Remaining": {
+            "$ref": "#/components/headers/RateLimitRemaining"
+          },
+          "RateLimit-Reset": {
+            "$ref": "#/components/headers/RateLimitReset"
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "Internal": {
+        "description": "Something went wrong on the server.\n\nThe body's `code` is `Internal`.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      }
+    },
+    "parameters": {
+      "ApiRevision": {
+        "name": "API-Revision",
+        "in": "header",
+        "description": "The API revision this client was built against. A server generated from an older document than the caller expects answers 426 rather than guessing.",
+        "required": false,
+        "schema": {
+          "type": "string"
+        }
+      },
+      "IdempotencyKey": {
+        "name": "Idempotency-Key",
+        "in": "header",
+        "description": "A key of the caller's choosing, so a retried write happens once. Sending the same key with the same body replays the first answer and sets Idempotency-Replayed; with a different body it is refused with 422, and while the first is still in flight, with 409.",
+        "required": false,
+        "schema": {
+          "type": "string"
+        }
+      }
+    },
+    "headers": {
+      "ApiRevision": {
+        "description": "The revision this server was generated from.",
+        "schema": {
+          "type": "string"
+        }
+      },
+      "IdempotencyReplayed": {
+        "description": "Present and true when this answer is a replay of an earlier request carrying the same Idempotency-Key, rather than work done again.",
+        "schema": {
+          "type": "boolean"
+        }
+      },
+      "RateLimitLimit": {
+        "description": "Requests permitted in the current window.",
+        "schema": {
+          "type": "integer"
+        }
+      },
+      "RateLimitRemaining": {
+        "description": "Requests left in the current window.",
+        "schema": {
+          "type": "integer"
+        }
+      },
+      "RateLimitReset": {
+        "description": "Seconds until the current window resets.",
+        "schema": {
+          "type": "integer"
+        }
+      },
+      "RetryAfter": {
+        "description": "Seconds to wait before retrying.",
+        "schema": {
+          "type": "integer"
+        }
+      }
+    }
+  },
+  "tags": [
+    {
+      "name": "Fixtures",
+      "description": "One match between two squads."
+    },
+    {
+      "name": "Players",
+      "description": "Somebody a squad can pick."
+    },
+    {
+      "name": "Teams",
+      "description": "A squad somebody manages."
+    }
+  ]
+}

@@ -7,7 +7,7 @@
 > [examples/todo](../examples/todo/rig.yaml) is a working, commented
 > configuration for every built-in.
 
-Seven generators ship with rig. `rig init` scaffolds all but the two clients.
+Eight generators ship with rig. `rig init` scaffolds all but the two clients.
 
 | Name | What it writes |
 |---|---|
@@ -16,6 +16,7 @@ Seven generators ship with rig. `rig init` scaffolds all but the two clients.
 | `service-go` | API types, service interfaces, and a working default implementation |
 | `server-go` | net/http routing, request decoding, the handler registration struct, and the `Link` that wires deletes to the tables they reach |
 | `electric` | live-sync shape endpoints, with the tenant and lifecycle filters built in |
+| `openapi` | an OpenAPI 3.1 document: every endpoint, schema and status the API answers with |
 | `go-client` | a typed Go client: the wire types and one method per endpoint |
 | `ts-client` | a typed TypeScript client: the wire types, one method per endpoint, and the live-sync collections |
 
@@ -55,6 +56,9 @@ Every generator takes `out_dir` and an `options` block. The common ones:
 | `stub_package` | `service-go`, `electric` | Package a stub declares. Empty uses the table name |
 | `electric_url` | `electric` | The sync service to proxy to |
 | `shape_import` | `electric` | Import path of the generated shape package |
+| `formats` | `openapi` | Which renderings to write: `json`, `yaml`, or both. Both by default |
+| `servers` | `openapi` | Origins the API answers on. Defaults to a single relative server |
+| `electric` | `openapi` | Whether the live-sync routes are described. On by default |
 | `client_import` | `go-client`, `ts-client` | Import path, or npm specifier, of the SDK runtime. For a fork or a vendored copy |
 | `electric_import` | `ts-client` | npm specifier of the streaming runtime. Same reasons |
 | `default_base_url` | `go-client`, `ts-client` | Emitted as a constant. Leave it out for anything that runs in more than one place |

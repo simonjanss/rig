@@ -693,11 +693,11 @@ func applyAccessConfig(loaded *tableconf.Loaded, res *ir.Resource, cfg tableconf
 	switch cfg.Access.Scope {
 	case "", accessScopeTenant:
 		return diags
-	case accessScopeOwn:
+	case AccessScopeOwn:
 	default:
 		diags.Add(diag.CodeConfigInvalid, at,
 			"access.scope must be %q or %q, not %q",
-			accessScopeTenant, accessScopeOwn, cfg.Access.Scope)
+			accessScopeTenant, AccessScopeOwn, cfg.Access.Scope)
 		return diags
 	}
 

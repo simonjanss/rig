@@ -118,12 +118,6 @@ func queryTypeName(res *ir.Resource, ep *ir.Endpoint) string {
 	return res.Name + ep.Name + "Query"
 }
 
-// bodyTypeName is the struct an endpoint's body is built from, for the endpoints
-// whose body is not one of the shared inputs.
-func bodyTypeName(res *ir.Resource, ep *ir.Endpoint) string {
-	return res.Name + ep.Name + "Body"
-}
-
 // fieldsTypeName is the shape a validation failure on this endpoint's body
 // arrives in, and is empty when there is no body to be wrong about.
 //
@@ -162,15 +156,6 @@ func errorFuncName(res *ir.Resource, ep *ir.Endpoint) string {
 		return ""
 	}
 	return res.Name + ep.Name + "Error"
-}
-
-// inputTypeName is the create or update input an endpoint takes, or empty when
-// its body is a shape of its own.
-func inputTypeName(res *ir.Resource, ep *ir.Endpoint) string {
-	if name := genutil.ModelInputName(ep); name != "" {
-		return res.Name + name + "Input"
-	}
-	return ""
 }
 
 // searchFilterField is the member of a search body that carries the conditions.

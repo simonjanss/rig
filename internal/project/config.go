@@ -14,7 +14,6 @@ type Config struct {
 	Project    ProjectInfo `yaml:"project" json:"project" jsonschema_description:"Identity of the application being generated."`
 	Layout     Layout      `yaml:"layout,omitempty" json:"layout,omitempty" jsonschema_description:"Where table configuration and generated code live."`
 	API        API         `yaml:"api,omitempty" json:"api,omitempty" jsonschema_description:"Shape of the generated HTTP API."`
-	OpenAPI    OpenAPI     `yaml:"openapi,omitempty" json:"openapi,omitempty" jsonschema_description:"OpenAPI document settings."`
 	Database   Database    `yaml:"database,omitempty" json:"database,omitempty" jsonschema_description:"Where to run migrations and read the schema from."`
 	Migrations Migrations  `yaml:"migrations,omitempty" json:"migrations,omitempty" jsonschema_description:"Migration file location."`
 	Auth       Auth        `yaml:"auth,omitempty" json:"auth,omitempty" jsonschema_description:"How the authentication foundation's tables are treated."`
@@ -416,14 +415,6 @@ type API struct {
 	// It is configurable because it is a name in a namespace rig does not own:
 	// a gateway in front of the server may already mean something else by it.
 	RevisionHeader string `yaml:"revision_header,omitempty" json:"revision_header,omitempty" jsonschema_description:"Header carrying the API revision, in both directions. Defaults to API-Revision."`
-}
-
-// OpenAPI configures the emitted specification.
-type OpenAPI struct {
-	// Version selects the specification version. 3.1 has no way to express an
-	// operation on the QUERY method, so under 3.1 the POST alias is what gets
-	// documented; 3.2 emits the QUERY operation directly.
-	Version string `yaml:"version,omitempty" json:"version,omitempty" jsonschema:"enum=3.1,enum=3.2" jsonschema_description:"OpenAPI specification version. 3.1 documents the POST alias for Search; 3.2 emits QUERY natively."`
 }
 
 // Database says where rig runs migrations and reads the schema.
