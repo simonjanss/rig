@@ -281,7 +281,7 @@ export class TodoAttachmentClient {
      * is not. **This call is never sent twice**, for the reason an upload is
      * not — a form is the one write no idempotency key names.
      */
-    createWithFiles(input: TodoAttachmentCreateInput, files: TodoAttachmentCreateFiles, options?: CallOptions): Promise<TodoAttachment> {
+    createWithFiles(input: Omit<TodoAttachmentCreateInput, "attachmentFileId">, files: TodoAttachmentCreateFiles, options?: CallOptions): Promise<TodoAttachment> {
         const form = multipart(input, [["attachmentFile", files.attachmentFile]]);
 
         return send<TodoAttachment>(this.#rt, {

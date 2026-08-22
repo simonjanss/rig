@@ -101,6 +101,27 @@ func uploadForm(ep *ir.Endpoint) *formBody {
 	}
 }
 
+// requiredFileMembers are the json-part members a multipart create does not
+// take, quoted for an Omit: the identifiers of the NOT NULL file columns, whose
+// values the server assigns from the parts beside the row. Looked up on the
+// resource's fields rather than derived from the Go field name, because the
+// wire key is the one thing this must not misspell.
+func requiredFileMembers(res *ir.Resource, ep *ir.Endpoint) []string {
+	var out []string
+	for _, p := range ep.Request.FileParts {
+		if !p.Required {
+			continue
+		}
+		for i := range res.Fields {
+			if res.Fields[i].Name == p.Field {
+				out = append(out, tsbuf.Quote(res.Fields[i].Wire))
+				break
+			}
+		}
+	}
+	return out
+}
+
 // createForm is the body a multipart create sends: the row, and a part per file
 // column.
 //

@@ -29,6 +29,7 @@
     "include": [
         "../../internal/gen/tsclient/testdata/lifecycle",
         "../../internal/gen/tsclient/testdata/files",
-        "../../examples/todo/client-ts"
+        "../../examples/todo/client-ts",
+        "../../examples/linearlite/web/src/api"
     ]
 }

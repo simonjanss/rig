@@ -118,7 +118,7 @@ update-schema:
 ##                this target no matter what.
 GOLDEN := ./internal/compile ./internal/gen/electricgo ./internal/gen/goclient \
           ./internal/gen/modelgo ./internal/gen/persistgo ./internal/gen/servergo \
-          ./internal/gen/servicego
+          ./internal/gen/servicego ./internal/gen/tsclient
 update-golden:
 	$(GO) test $(GOLDEN) -update
 
@@ -194,6 +194,15 @@ ts-typecheck: ts-deps
 ## ts-test: the TypeScript unit suite
 ts-test: ts-deps
 	@cd $(TS_DIR) && $(PNPM) run test
+
+## linearlite-web: typecheck, lint and build the linearlite example's front end
+##                 Not part of `examples` on purpose: that target needs Go and
+##                 Docker and deliberately not pnpm, and the Go server tolerates
+##                 a missing web/dist. ts-deps first, because the app's aliases
+##                 resolve @rig/electric's own dependencies through ts/.
+linearlite-web: ts-deps
+	@cd examples/linearlite/web && $(PNPM) install --frozen-lockfile && \
+		$(PNPM) run lint && $(PNPM) run build
 
 ## ts-fmt: rewrite the hand-written TypeScript with Prettier
 ##         Generated output is not in scope: it is laid out by the emitter,

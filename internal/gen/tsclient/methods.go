@@ -202,8 +202,18 @@ func (e *emitter) signature(
 		params = append(params, "file: "+b.ImportType(e.cfg.ClientImport, "Upload"))
 		sig.form = uploadForm(ep)
 	case variant == variantCreateWithFiles:
+		// A required file column's identifier is Omit-ed from the json part:
+		// the server assigns it from the bytes travelling beside the row, and
+		// it is the whole reason this method exists — an input type that still
+		// demanded the identifier would make the documented call refuse to
+		// compile. A nullable file column stays, because a row pointing at a
+		// file that already exists is an ordinary create.
+		input := e.ref(b, inputTypeName(res, ep))
+		if omitted := requiredFileMembers(res, ep); len(omitted) > 0 {
+			input = "Omit<" + input + ", " + strings.Join(omitted, " | ") + ">"
+		}
 		params = append(params,
-			"input: "+e.ref(b, inputTypeName(res, ep)),
+			"input: "+input,
 			"files: "+e.ref(b, createFilesTypeName(res)))
 		sig.form = createForm(ep)
 	case ep.Name == ir.OpSearch:
