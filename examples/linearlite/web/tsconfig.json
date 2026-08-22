@@ -8,7 +8,14 @@
         "baseUrl": ".",
         "paths": {
             "@rig/client": ["../../../ts/packages/client/src/index.ts"],
-            "@rig/electric": ["../../../ts/packages/electric/src/index.ts"]
+            "@rig/electric": ["../../../ts/packages/electric/src/index.ts"],
+            "@electric-sql/client": [
+                "./node_modules/@electric-sql/client/dist/index.d.ts"
+            ],
+            "@tanstack/db": ["./node_modules/@tanstack/db/dist/esm/index.d.ts"],
+            "@tanstack/electric-db-collection": [
+                "./node_modules/@tanstack/electric-db-collection/dist/esm/index.d.ts"
+            ]
         }
     },
     "include": ["src", "vite.config.ts"]

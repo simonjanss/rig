@@ -224,9 +224,10 @@ ts-test: ts-deps
 ## linearlite-web: typecheck, lint and build the linearlite example's front end
 ##                 Not part of `examples` on purpose: that target needs Go and
 ##                 Docker and deliberately not pnpm, and the Go server tolerates
-##                 a missing web/dist. ts-deps first, because the app's aliases
-##                 resolve @rig/electric's own dependencies through ts/.
-linearlite-web: ts-deps
+##                 a missing web/dist. Self-contained: the app's tsconfig and
+##                 vite config pin every dependency of the aliased ts/ sources
+##                 to the app's own node_modules, so ts/ needs no install.
+linearlite-web:
 	@cd examples/linearlite/web && $(PNPM) install --frozen-lockfile && \
 		$(PNPM) run lint && $(PNPM) run build
 
