@@ -80,6 +80,21 @@ type Config struct {
 	// zero value lets anybody signed in make one called anything.
 	Tenants TenantOptions
 
+	// OnRegistered runs inside the transaction that creates a self-registered
+	// identity — after the person and their credential exist, before the
+	// identity session is issued. Returning an error rolls the whole sign-up
+	// back, so a retry is a clean retry rather than a conflict with a half-made
+	// account.
+	//
+	// It receives the service because the ordinary body is a call back into it —
+	// [Service.Provision] with Invite set, bringing the newcomer into a starter
+	// tenant — and the closure is handed to [New] before the service exists.
+	// Reach the transaction itself with dbx.Tx(ctx), the same way a generated
+	// repository does.
+	//
+	// Nil, the default, registers the person and nothing else.
+	OnRegistered func(ctx context.Context, accounts *Service, in Registered) error
+
 	// Limiter and Limits are what stop somebody guessing. A service built
 	// without a limiter refuses to exist: a login endpoint with no lockout is
 	// not a login endpoint, it is a password oracle with a queue.

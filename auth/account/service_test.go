@@ -106,6 +106,14 @@ type fixture struct {
 
 func setup(t *testing.T) *fixture {
 	t.Helper()
+	return setupWith(t, nil)
+}
+
+// setupWith builds the fixture with one chance to edit the configuration
+// before the service exists — which is the only time a hook like OnRegistered
+// can be attached.
+func setupWith(t *testing.T, edit func(*account.Config)) *fixture {
+	t.Helper()
 
 	c := &clock{at: time.Date(2026, 3, 1, 12, 0, 0, 0, time.UTC)}
 	log := &recorder{counter: throttle.NewMemory()}
@@ -125,7 +133,7 @@ func setup(t *testing.T) *fixture {
 	notify := &notifier{}
 	// Cheap argon2 parameters and no padding: the suite is about the rules,
 	// not about how long they take.
-	svc, err := account.New(account.Config{
+	cfg := account.Config{
 		Store:      store,
 		Sessions:   sessions,
 		Identities: identities,
@@ -135,7 +143,11 @@ func setup(t *testing.T) *fixture {
 		Limiter:    throttle.New(log.counter).WithClock(c.now),
 		Now:        c.now,
 		Sleep:      func(context.Context, time.Duration) {},
-	})
+	}
+	if edit != nil {
+		edit(&cfg)
+	}
+	svc, err := account.New(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}

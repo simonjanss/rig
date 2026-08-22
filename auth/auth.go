@@ -196,6 +196,15 @@ type Config struct {
 	// answering 403 to something that is there.
 	AllowRegistration bool
 
+	// OnRegistered runs inside the transaction that creates a self-registered
+	// identity, and an error rolls the sign-up back. The ordinary body is
+	// accounts.Provision with Invite set — an application that starts every
+	// newcomer in a demo or sandbox tenant leaves an invitation waiting in the
+	// picker they land in. Nil registers the person and nothing else.
+	//
+	// See [github.com/simonjanss/rig/auth/account.Config.OnRegistered].
+	OnRegistered func(ctx context.Context, accounts *account.Service, in account.Registered) error
+
 	// Limits override the rate limits. The zero value is the documented set: 5
 	// failed logins per address per 15 minutes, 50 per address range, 5 password
 	// resets an hour, and so on.
@@ -371,6 +380,7 @@ func New(cfg Config) (*Auth, error) {
 		Sessions:             sessions,
 		Identities:           identities,
 		Tenants:              cfg.Tenants,
+		OnRegistered:         cfg.OnRegistered,
 		Policy:               policy,
 		Log:                  stores.Log,
 		Notifier:             cfg.Notifier,

@@ -230,6 +230,17 @@ func (e *authEmitter) hooks(b *gobuf.Buf) {
 		b.NL()
 	}
 
+	if a.AllowRegistration {
+		b.Comment("OnRegistered runs inside the transaction that creates a " +
+			"self-registered identity, and an error rolls the sign-up back. The " +
+			"ordinary body is accounts.Provision with Invite set, so a newcomer " +
+			"lands in the picker with an invitation already waiting. Nil registers " +
+			"the person and nothing else.")
+		b.L("OnRegistered func(%s.Context, *%s.Service, %s.Registered) error",
+			b.Import("context"), account, account)
+		b.NL()
+	}
+
 	if a.Tenant.Uses(ir.TenantFromHook) {
 		uuidPkg := b.Import("github.com/google/uuid")
 		b.Comment("Tenant resolves which tenant a request is for, and is required " +
@@ -460,6 +471,9 @@ func (e *authEmitter) configFunc(b *gobuf.Buf) {
 	b.L("RequireVerifiedEmail: %t,", a.RequireVerifiedEmail)
 	if a.AllowTenantCreation {
 		b.L("Tenants: h.Tenants,")
+	}
+	if a.AllowRegistration {
+		b.L("OnRegistered: h.OnRegistered,")
 	}
 	b.NL()
 

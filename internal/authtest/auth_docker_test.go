@@ -80,8 +80,11 @@ type harness struct {
 	// tenants are the hooks the auth package is configured with, and build makes
 	// a service using them. A test that changes the policy calls rebuild.
 	tenants account.TenantOptions
-	build   func(account.TenantOptions) *account.Service
-	mount   func(*account.Service)
+	// onRegistered is read by build the same way tenants is: set it, rebuild,
+	// remount. Nil is the ordinary configuration.
+	onRegistered func(context.Context, *account.Service, account.Registered) error
+	build        func(account.TenantOptions) *account.Service
+	mount        func(*account.Service)
 	// routes is the mux the server delegates to, replaced on every rebuild.
 	routes atomic.Value
 
@@ -260,15 +263,16 @@ func setup(t *testing.T) *harness {
 	// it takes to make another one.
 	h.build = func(opts account.TenantOptions) *account.Service {
 		svc, err := account.New(account.Config{
-			Store:      h.stores.Accounts,
-			Sessions:   sessions,
-			Identities: identities,
-			Hasher:     password.New(password.Params{Memory: 8 * 1024, Iterations: 1, Parallelism: 1}),
-			Log:        h.stores.Log,
-			Notifier:   h.notify,
-			Limiter:    limiter,
-			Tenants:    opts,
-			Sleep:      func(context.Context, time.Duration) {},
+			Store:        h.stores.Accounts,
+			Sessions:     sessions,
+			Identities:   identities,
+			Hasher:       password.New(password.Params{Memory: 8 * 1024, Iterations: 1, Parallelism: 1}),
+			Log:          h.stores.Log,
+			Notifier:     h.notify,
+			Limiter:      limiter,
+			Tenants:      opts,
+			OnRegistered: h.onRegistered,
+			Sleep:        func(context.Context, time.Duration) {},
 		})
 		if err != nil {
 			t.Fatal(err)
@@ -1597,6 +1601,99 @@ func TestLeavingThePicker(t *testing.T) {
 			if res := h.do(t, "POST", path, p.AccessToken, `{"name":"x"}`); res.status != http.StatusUnauthorized {
 				t.Errorf("POST %s with a session token: %d %s, want 401", path, res.status, res.body)
 			}
+		}
+	})
+}
+
+// OnRegistered runs inside the transaction that creates a self-registered
+// identity. The canonical body — Provision with Invite — leaves an invitation
+// waiting in the picker the newcomer lands in, and a hook error takes the whole
+// sign-up with it, which only real SQL can prove.
+func TestOnRegisteredOverRealSQL(t *testing.T) {
+	h := setup(t)
+
+	register := func(t *testing.T, address string) response {
+		t.Helper()
+		return h.doUnscoped(t, "POST", "/auth/register", "",
+			`{"emailAddress":"`+address+`","displayName":"Newcomer","password":"`+goodPassword+`"}`)
+	}
+
+	t.Run("the hook leaves an invitation the picker can accept", func(t *testing.T) {
+		h.onRegistered = func(ctx context.Context, accounts *account.Service, in account.Registered) error {
+			_, err := accounts.Provision(ctx, account.ProvisionInput{
+				TenantID:     h.tenant,
+				EmailAddress: in.EmailAddress,
+				DisplayName:  in.DisplayName,
+				Invite:       true,
+			})
+			return err
+		}
+		h.mount(h.build(h.tenants))
+
+		address := "starter-" + uuid.New().String()[:8] + "@example.com"
+		res := register(t, address)
+		if res.status != http.StatusCreated {
+			t.Fatalf("register: %d %s", res.status, res.body)
+		}
+		var signedUp struct {
+			IdentityToken string `json:"identityToken"`
+		}
+		res.decode(t, &signedUp)
+
+		listed := h.do(t, "GET", "/auth/me/invitations", signedUp.IdentityToken, "")
+		var page struct {
+			Data []struct {
+				ID       uuid.UUID `json:"id"`
+				TenantID uuid.UUID `json:"tenantId"`
+			} `json:"data"`
+		}
+		listed.decode(t, &page)
+		if len(page.Data) != 1 || page.Data[0].TenantID != h.tenant {
+			t.Fatalf("want one invitation into the starter tenant, got %s", listed.body)
+		}
+
+		joined := h.do(t, "POST", "/auth/me/invitations/accept", signedUp.IdentityToken,
+			`{"invitationId":"`+page.Data[0].ID.String()+`"}`)
+		if joined.status != http.StatusOK {
+			t.Fatalf("accept: %d %s", joined.status, joined.body)
+		}
+		var out struct {
+			AccessToken string `json:"accessToken"`
+		}
+		joined.decode(t, &out)
+		if out.AccessToken == "" {
+			t.Fatal("accepting the seeded invitation should hand back a tenant session")
+		}
+	})
+
+	t.Run("a hook error rolls the sign-up back", func(t *testing.T) {
+		h.onRegistered = func(context.Context, *account.Service, account.Registered) error {
+			return errors.New("no room")
+		}
+		h.mount(h.build(h.tenants))
+
+		address := "refused-" + uuid.New().String()[:8] + "@example.com"
+		if res := register(t, address); res.status != http.StatusInternalServerError {
+			t.Fatalf("a refused registration: %d %s, want 500", res.status, res.body)
+		}
+
+		// The rollback is the claim: no identity, no credential, nothing.
+		var n int
+		if err := h.pool.QueryRow(context.Background(),
+			`SELECT count(*) FROM rig_identity WHERE lower(email_address) = lower($1)`,
+			address).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		if n != 0 {
+			t.Fatalf("the refused identity is still there (%d rows)", n)
+		}
+
+		// And a retry after the hook stops refusing is a clean retry, not a
+		// conflict with a half-made account.
+		h.onRegistered = nil
+		h.mount(h.build(h.tenants))
+		if res := register(t, address); res.status != http.StatusCreated {
+			t.Fatalf("retry after the rollback: %d %s, want 201", res.status, res.body)
 		}
 	})
 }
