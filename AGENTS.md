@@ -25,6 +25,9 @@ make test-docker # needs Docker
 make examples    # needs Docker; a few minutes on its own
 ```
 
+`make update-examples` is not in `make check`: it writes, and a check that
+rewrites what it is checking is not a check.
+
 So a push takes a few minutes and needs Docker or Podman running. That is the
 trade: CI no longer watches branches, so this is where a break gets caught.
 `git push --no-verify` skips the hook when you need it to.
@@ -43,7 +46,7 @@ it "everything" would quietly skip nine modules out of ten.
 
 ```bash
 make test-docker   # the suite behind the `docker` build tag
-make examples      # regenerate all four examples and run them for real
+make examples      # check all five examples for drift and run them for real
 ```
 
 `make test-docker` covers `.`, `runtime`, `auth`, `files`, `notify`, `observe`,
@@ -54,10 +57,17 @@ itself. The `migrate` module is the exception: it expects a database at
 silently** when there is none — so a green run there does not mean it ran.
 
 `make examples` is the strongest regression test in the repository. It runs
-`rig generate` and `rig check` in each example, then builds and tests it; the
-examples are real projects, so a generator change that breaks one breaks it
-visibly. `rig generate` starts and migrates the database each example names in
-its own `rig.yaml`.
+`rig check` in each example, then builds and tests it; the examples are real
+projects, so a generator change that breaks one breaks it visibly. `rig check`
+starts and migrates the database each example names in its own `rig.yaml`.
+
+It checks and writes nothing, which is the whole point: the examples commit their
+generated output so that a generator change shows up as a diff, and generating
+before checking would compare the generators against what they had just written.
+So a change under `internal/gen/` fails this target by design. `make
+update-examples` regenerates all five with `--prune`, and the diff it leaves is
+the review — the counterpart to `make update-golden` for output that is
+committed rather than compared.
 
 Every port a suite or an example pins is named in `internal/dockerdb/ports.go`,
 and a test there refuses two suites on one number. A new suite takes its port
@@ -93,8 +103,16 @@ under `internal/gen/` or `internal/compile/`.
 
 Anything `*.gen.go` is rewritten on every run — a fix belongs in the generator
 that emitted it. When a golden file changes because the change was intended,
-`make update-golden` rewrites the ones under `internal/`, and
+`make update-golden` rewrites the ones under `internal/`,
+`make update-examples` rewrites the committed output under `examples/`, and
 `make update-schema` rewrites the introspection golden from a real Postgres.
+
+**The banner is load-bearing.** `gen.Banner` is written by the emitters and read
+back by `gen.Orphans`, which is how `rig check` finds a file rig wrote and no
+generator produces any more — in a checkout with no manifest, which is every
+checkout CI makes. An emitter that stops writing it, or a new emitter that never
+starts, silently narrows that check to the `.gen.` naming convention. Both marks
+come from `pkg/gen` so they cannot drift apart.
 
 ## Documentation
 

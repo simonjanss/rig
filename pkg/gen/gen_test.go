@@ -152,7 +152,7 @@ func TestDiffAndWrite(t *testing.T) {
 	}
 
 	manifest := gen.NewManifest()
-	deltas, err := gen.Diff(root, results, manifest)
+	deltas, err := gen.Diff(root, results, manifest, gen.DiffOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -173,7 +173,7 @@ func TestDiffAndWrite(t *testing.T) {
 
 	// Second run: nothing to do.
 	manifest, _ = gen.LoadManifest(root)
-	deltas, _ = gen.Diff(root, results, manifest)
+	deltas, _ = gen.Diff(root, results, manifest, gen.DiffOptions{})
 	if len(deltas) != 1 || deltas[0].Status != gen.Unchanged {
 		t.Fatalf("second run should be unchanged: %+v", deltas)
 	}
@@ -192,7 +192,7 @@ func TestHandEditIsAConflict(t *testing.T) {
 	g := &fake{name: "a", artifacts: []gen.Artifact{file("x.go", "one")}}
 
 	results, _ := gen.Run(context.Background(), registryWith(g), validDoc(), root, []gen.Spec{{Name: "a"}})
-	deltas, _ := gen.Diff(root, results, gen.NewManifest())
+	deltas, _ := gen.Diff(root, results, gen.NewManifest(), gen.DiffOptions{})
 	next, _ := gen.Write(root, results, deltas, gen.WriteOptions{})
 	_ = next.Save(root)
 
@@ -202,7 +202,7 @@ func TestHandEditIsAConflict(t *testing.T) {
 	}
 
 	manifest, _ := gen.LoadManifest(root)
-	deltas, _ = gen.Diff(root, results, manifest)
+	deltas, _ = gen.Diff(root, results, manifest, gen.DiffOptions{})
 	if deltas[0].Status != gen.Conflict {
 		t.Fatalf("status = %q, want conflict", deltas[0].Status)
 	}
@@ -237,7 +237,7 @@ func TestCreateOnce(t *testing.T) {
 	g := &fake{name: "a", artifacts: []gen.Artifact{scaffold}}
 
 	results, _ := gen.Run(context.Background(), registryWith(g), validDoc(), root, []gen.Spec{{Name: "a"}})
-	deltas, _ := gen.Diff(root, results, gen.NewManifest())
+	deltas, _ := gen.Diff(root, results, gen.NewManifest(), gen.DiffOptions{})
 	if deltas[0].Status != gen.Added {
 		t.Fatalf("first run should add, got %q", deltas[0].Status)
 	}
@@ -249,7 +249,7 @@ func TestCreateOnce(t *testing.T) {
 	}
 
 	manifest, _ := gen.LoadManifest(root)
-	deltas, _ = gen.Diff(root, results, manifest)
+	deltas, _ = gen.Diff(root, results, manifest, gen.DiffOptions{})
 	if deltas[0].Status != gen.Kept {
 		t.Fatalf("status = %q, want keep", deltas[0].Status)
 	}
@@ -275,7 +275,7 @@ func TestStaleFileIsReportedAndPruned(t *testing.T) {
 
 	before := &fake{name: "a", artifacts: []gen.Artifact{file("old.go", "x"), file("keep.go", "y")}}
 	results, _ := gen.Run(context.Background(), registryWith(before), validDoc(), root, []gen.Spec{{Name: "a"}})
-	deltas, _ := gen.Diff(root, results, gen.NewManifest())
+	deltas, _ := gen.Diff(root, results, gen.NewManifest(), gen.DiffOptions{})
 	next, _ := gen.Write(root, results, deltas, gen.WriteOptions{})
 	_ = next.Save(root)
 
@@ -284,7 +284,7 @@ func TestStaleFileIsReportedAndPruned(t *testing.T) {
 	results, _ = gen.Run(context.Background(), registryWith(after), validDoc(), root, []gen.Spec{{Name: "a"}})
 
 	manifest, _ := gen.LoadManifest(root)
-	deltas, _ = gen.Diff(root, results, manifest)
+	deltas, _ = gen.Diff(root, results, manifest, gen.DiffOptions{})
 
 	var stale *gen.Delta
 	for i := range deltas {
@@ -315,6 +315,39 @@ func TestStaleFileIsReportedAndPruned(t *testing.T) {
 	}
 }
 
+// Deleting a generator from rig.yaml is not the same as holding one back with
+// --only: nothing produces its files any more, and the ones the scan cannot
+// recognize — a stub carries neither `.gen.` nor the banner — are only visible
+// in the record.
+func TestARemovedGeneratorsOutputIsStale(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	a := &fake{name: "a", artifacts: []gen.Artifact{file("a.gen.go", "package p\n")}}
+	stub := gen.Artifact{Path: "services/b/b.go", Content: []byte("package b\n"), Mode: gen.CreateOnce}
+	b := &fake{name: "b", artifacts: []gen.Artifact{stub}}
+
+	results, _ := gen.Run(context.Background(), registryWith(a, b), validDoc(), root,
+		[]gen.Spec{{Name: "a"}, {Name: "b"}})
+	deltas, _ := gen.Diff(root, results, gen.NewManifest(), gen.DiffOptions{})
+	next, _ := gen.Write(root, results, deltas, gen.WriteOptions{})
+	_ = next.Save(root)
+
+	// `b` is gone from the configuration, so this is a full run of everything
+	// that is left.
+	only, _ := gen.Run(context.Background(), registryWith(a, b), validDoc(), root, []gen.Spec{{Name: "a"}})
+	manifest, _ := gen.LoadManifest(root)
+
+	deltas, err := gen.Diff(root, only, manifest, gen.DiffOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stale := staleNames(root, deltas)
+	if len(stale) != 1 || stale[0] != "services/b/b.go" {
+		t.Fatalf("a removed generator's output should be reported: %v", stale)
+	}
+}
+
 func TestManifestRoundTrip(t *testing.T) {
 	t.Parallel()
 
@@ -341,7 +374,9 @@ func TestManifestRoundTrip(t *testing.T) {
 }
 
 // A corrupt manifest costs at most a few files reported as new, which is a far
-// better outcome than refusing to run.
+// better outcome than refusing to run. What it does not cost is the leftover
+// check — that survives a missing manifest by scanning, which
+// TestStaleWithoutAManifest covers.
 func TestCorruptManifestIsRecoverable(t *testing.T) {
 	t.Parallel()
 
