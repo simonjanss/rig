@@ -173,12 +173,16 @@ func generatorsYAML(module string) string {
 }
 
 const gitignore = `# Generated code. Everything with .gen. in its name is rewritten on every run.
+# Delete these lines to commit it instead. Either way "rig check" is the CI gate,
+# and it recognizes rig's own output rather than trusting the record below.
 *.gen.go
 *.gen.ts
 *.gen.json
 *.gen.yaml
 
-# rig's working directory.
+# rig's working directory. The manifest is a local note about what rig wrote,
+# not something to share: it is rewritten on every run, and "rig check" does not
+# need it to notice a file left behind by a renamed table.
 .rig/manifest.json
 
 # Binaries

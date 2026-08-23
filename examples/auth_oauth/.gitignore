@@ -1,7 +1,8 @@
 # An ordinary rig project ignores generated code — see the .gitignore that
-# `rig init` writes. This example commits it on purpose: CI runs
-# `rig generate && rig check` here, so any drift between the schema and the
-# generators shows up as a diff in review rather than as a surprise later.
+# `rig init` writes. This example commits it on purpose: CI runs `rig check`
+# here and writes nothing, so any drift between the schema, the generators and
+# what is committed shows up as a failure and then as a diff in review, rather
+# than as a surprise later. `make update-examples` is what regenerates it.
 
 # rig's working directory.
 .rig/manifest.json

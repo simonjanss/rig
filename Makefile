@@ -58,9 +58,9 @@ help:
 
 ## check: every check CI runs, cheapest first
 ##        This is what the pre-push hook runs. `test-docker` and `examples` need
-##        Docker, `openapi-lint` runs after the examples that rewrite what it
-##        reads, and `deps` rewrites go.mod/go.sum before comparing, so run it on
-##        a clean tree or it will report your own work in progress back to you.
+##        Docker, and `deps` rewrites go.mod/go.sum before comparing, so run it
+##        on a clean tree or it will report your own work in progress back to
+##        you.
 check: fmt-check vet godoc-check build test deps lint vulncheck ts test-docker examples openapi-lint
 
 ## hooks: install the repository's git hooks into this clone
@@ -84,17 +84,23 @@ test:
 test-docker:
 	$(eachcore) $(GO) test -tags docker ./...) || exit 1; done
 
-## examples: regenerate every example and fail on any drift
+## examples: fail on any drift between the examples and the generators
 ##           This is the strongest regression test in the repository: the
 ##           examples are real projects, so a generator change that breaks one
 ##           breaks it visibly rather than in a golden file nobody reads.
+##           It checks and does not write. Generating first and checking after
+##           compares the generators against what they had just written, which
+##           is a comparison that cannot fail; the examples commit their output
+##           precisely so that a generator change shows up as a diff, and this
+##           is what makes the diff appear. `make update-examples` is how you
+##           accept one.
 ##           Each example's tests are handed $DATABASE_URL rather than left to
 ##           the fallback compiled into them: under RIG_DB_ISOLATE the port is
 ##           the kernel's to choose, so `rig db url` is the only thing that
 ##           knows it.
 examples: build
 	@for e in $(EXAMPLES); do \
-		(cd examples/$$e && ../../bin/rig generate && ../../bin/rig check) || exit 1; \
+		(cd examples/$$e && ../../bin/rig check) || exit 1; \
 		(cd examples/$$e && DATABASE_URL=$$(../../bin/rig db url) \
 			$(GO) build ./... && DATABASE_URL=$$(../../bin/rig db url) \
 			$(GO) test -tags docker ./...) || exit 1; \
@@ -113,6 +119,15 @@ db-down: build
 ## update-schema: rewrite the introspection golden from a real Postgres
 update-schema:
 	$(GO) test -tags docker ./internal/introspect/ -update
+
+## update-examples: regenerate every example after an intended generator change
+##                  The counterpart to `update-golden` for the output that is
+##                  committed rather than compared: `make examples` reports the
+##                  drift, this accepts it, and `git diff` is the review.
+update-examples: build
+	@for e in $(EXAMPLES); do \
+		(cd examples/$$e && ../../bin/rig generate --prune) || exit 1; \
+	done
 
 ## update-golden: rewrite golden files from current behavior
 ##                Only the packages that define -update: passing it to a test
@@ -182,12 +197,10 @@ lint:
 ##               ask about a row's parent. Both cycles run through optional
 ##               fields and terminate.
 ##
-##               It reads what is on disk rather than depending on `examples`,
-##               the way `lint` reads the source on disk. In `check` it is
-##               ordered after `examples`, which is what rewrites the four
-##               documents under examples/*/docs; run on its own against a stale
-##               tree it lints a stale document, and `rig check` is what catches
-##               that.
+##               It reads what is on disk rather than regenerating, the way
+##               `lint` reads the source on disk. So it lints the five documents
+##               under examples/*/docs as committed, and `examples` is what
+##               proves those are what the generators produce.
 openapi-lint:
 	@GOBIN=$(CURDIR)/bin $(GO) install github.com/daveshanley/vacuum@$(VACUUM_VERSION)
 	@for f in internal/gen/openapigen/testdata/*/openapi.gen.yaml \
@@ -246,4 +259,4 @@ vulncheck:
 	@GOBIN=$(CURDIR)/bin $(GO) install golang.org/x/vuln/cmd/govulncheck@$(GOVULNCHECK_VERSION)
 	$(eachcore) $(CURDIR)/bin/govulncheck ./...) || exit 1; done
 
-.PHONY: help check hooks build test test-docker examples db-down update-schema update-golden vet godoc-check fmt fmt-check tidy deps lint openapi-lint vulncheck ts ts-deps ts-build ts-typecheck ts-test ts-fmt ts-fmt-check
+.PHONY: help check hooks build test test-docker examples db-down update-schema update-golden update-examples vet godoc-check fmt fmt-check tidy deps lint openapi-lint vulncheck ts ts-deps ts-build ts-typecheck ts-test ts-fmt ts-fmt-check

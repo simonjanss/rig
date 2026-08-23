@@ -516,6 +516,49 @@ func TestAHandEditedGeneratedFileNeedsForce(t *testing.T) {
 	}
 }
 
+// --only runs a subset, and the manifest is rebuilt from what ran. The
+// generators held back still wrote what they wrote: forget them and the next
+// full run cannot tell a hand edit from output it has not caught up with, and
+// overwrites the edit it should have refused.
+func TestOnlyKeepsTheRecordOfWhatDidNotRun(t *testing.T) {
+	t.Parallel()
+
+	root := generatingProject(t)
+	if _, stderr, code := runWithSchema(t, root, "generate", "-C", root); code != 0 {
+		t.Fatalf("generate:\n%s", stderr)
+	}
+
+	edited := filepath.Join(root, "internal", "model", "todo.gen.go")
+	raw, err := os.ReadFile(edited)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(edited, append(raw, []byte("\n// mine\n")...), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// A run with something to do, so it saves a manifest, and no opinion at all
+	// about model-go's files.
+	if err := os.Remove(filepath.Join(root, "internal", "store", "store.gen.go")); err != nil {
+		t.Fatal(err)
+	}
+	if _, stderr, code := runWithSchema(t, root, "generate", "-C", root, "--only", "persist-go"); code != 0 {
+		t.Fatalf("--only persist-go:\n%s", stderr)
+	}
+
+	_, stderr, code := runWithSchema(t, root, "generate", "-C", root)
+	if code == 0 {
+		t.Fatalf("the edit is still an edit, so generate should refuse:\n%s", stderr)
+	}
+	after, err := os.ReadFile(edited)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(after), "// mine") {
+		t.Error("the edit should have survived both runs")
+	}
+}
+
 // A file no generator claims any more is reported rather than deleted, because
 // deleting a file the tool no longer understands is not a decision to make on
 // somebody's behalf without saying so.
@@ -557,6 +600,104 @@ generators:
 	}
 	if _, err := os.Stat(orphan); !os.IsNotExist(err) {
 		t.Error("--prune should have removed it")
+	}
+}
+
+// The manifest is gitignored, so CI checks out a tree that has no record of
+// what rig wrote. A leftover file has to be visible anyway, or committed
+// generated code accumulates files for tables nobody has any more.
+func TestCheckFindsALeftoverWithNoManifest(t *testing.T) {
+	t.Parallel()
+
+	root := generatingProject(t)
+	if _, stderr, code := runWithSchema(t, root, "generate", "-C", root); code != 0 {
+		t.Fatalf("generate:\n%s", stderr)
+	}
+
+	// What a clone looks like: the output committed, the manifest not.
+	if err := os.Remove(filepath.Join(root, ".rig", "manifest.json")); err != nil {
+		t.Fatal(err)
+	}
+	write(t, filepath.Join(root, "internal", "model", "ghost.gen.go"), "package model\n")
+
+	_, stderr, code := runWithSchema(t, root, "check", "-C", root)
+	if code == 0 {
+		t.Fatalf("a file no generator produces should fail the gate:\n%s", stderr)
+	}
+	if !strings.Contains(stderr, "ghost.gen.go") {
+		t.Errorf("the report should name the leftover:\n%s", stderr)
+	}
+	if !strings.Contains(stderr, "stale") {
+		t.Errorf("and say what is wrong with it:\n%s", stderr)
+	}
+	// Still a report: check writes nothing, including deletions.
+	if _, err := os.Stat(filepath.Join(root, "internal", "model", "ghost.gen.go")); err != nil {
+		t.Error("check should not have removed it")
+	}
+
+	if _, stderr, code := runWithSchema(t, root, "generate", "-C", root, "--prune"); code != 0 {
+		t.Fatalf("--prune:\n%s", stderr)
+	}
+	if _, err := os.Stat(filepath.Join(root, "internal", "model", "ghost.gen.go")); !os.IsNotExist(err) {
+		t.Error("--prune should have removed it")
+	}
+}
+
+// A hand-written file is not rig's to report, whatever directory it sits in.
+func TestCheckLeavesHandWrittenCodeAlone(t *testing.T) {
+	t.Parallel()
+
+	root := generatingProject(t)
+	if _, stderr, code := runWithSchema(t, root, "generate", "-C", root); code != 0 {
+		t.Fatalf("generate:\n%s", stderr)
+	}
+	if err := os.Remove(filepath.Join(root, ".rig", "manifest.json")); err != nil {
+		t.Fatal(err)
+	}
+	write(t, filepath.Join(root, "internal", "model", "helpers.go"), "package model\n")
+	write(t, filepath.Join(root, "internal", "model", "doc.md"), "notes\n")
+
+	if _, stderr, code := runWithSchema(t, root, "check", "-C", root); code != 0 {
+		t.Fatalf("check should ignore code rig did not write:\n%s", stderr)
+	}
+}
+
+// A migration nobody ran `rig sync` for leaves a column in the generated code
+// that nothing describes. That is a warning, so only --strict fails on it.
+func TestCheckStrictFailsOnWarnings(t *testing.T) {
+	t.Parallel()
+
+	root := generatingProject(t)
+	write(t, filepath.Join(root, "rig.yaml"), `project:
+  name: demo
+  module: example.com/demo
+validate:
+  missing_comment: off
+generators:
+  - name: model-go
+    out_dir: internal/model
+    options: { package: model }
+`)
+	// Leaving the table's configuration out is what an unsynced migration looks
+	// like: the columns are real, and nothing says what they are for.
+	if err := os.Remove(filepath.Join(root, "services", "todo", "todo.yaml")); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, stderr, code := runWithSchema(t, root, "generate", "-C", root); code != 0 {
+		t.Fatalf("generate:\n%s", stderr)
+	}
+
+	if _, stderr, code := runWithSchema(t, root, "check", "-C", root); code != 0 {
+		t.Fatalf("the code is up to date, so plain check passes:\n%s", stderr)
+	}
+
+	_, stderr, code := runWithSchema(t, root, "check", "-C", root, "--strict")
+	if code == 0 {
+		t.Fatalf("--strict should fail on warnings:\n%s", stderr)
+	}
+	if !strings.Contains(stderr, "--strict was given") {
+		t.Errorf("the failure should say why it failed:\n%s", stderr)
 	}
 }
 

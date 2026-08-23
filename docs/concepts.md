@@ -92,6 +92,12 @@ examples in this repository do, so that a generator change shows up as a diff in
 review — and `rig check` is what you run in CI either way: it regenerates in
 memory and fails if the result differs from what is on disk.
 
+That covers all three ways committed generated code goes wrong. A file the
+schema has moved past differs. A file somebody edited by hand differs. And a
+file left behind by a renamed table is reported too, because rig recognizes its
+own output by name and by banner rather than by consulting a record CI does not
+have. See [cli.md](cli.md#what-the-gate-covers).
+
 ## Every query is scoped to a tenant
 
 rig is multi-tenant at the foundation, not as an add-on. Every table it
