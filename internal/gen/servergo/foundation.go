@@ -35,6 +35,7 @@ func (e *foundationEmitter) wanted() scaffold.Wanted {
 		OAuth:         api.Auth != nil && api.Auth.OAuth != nil && len(api.Auth.OAuth.Providers) > 0,
 		Files:         api.Files != nil && api.Files.Enabled,
 		Notifications: api.Notifications != nil && api.Notifications.Enabled,
+		Presence:      api.Presence != nil && api.Presence.Enabled,
 	}
 }
 

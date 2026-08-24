@@ -144,6 +144,17 @@ func (e *emitter) handlersStruct(b *gobuf.Buf) {
 		b.L("Notifications *%s.Service", b.Import(notifyModule))
 		b.NL()
 	}
+	if e.hasPresence() {
+		b.Comment("Presence is who is here. Setting it mounts the routes under " +
+			"/presence; a nil one leaves them unmounted, so a project that has " +
+			"not built a front end for presence yet serves nothing rather than " +
+			"routes that write rows nobody reads.\n\n" +
+			"Reading presence is not here, and that is the design: the live shape " +
+			"is the read path, and it is mounted by the electric generator beside " +
+			"the rest of the API.")
+		b.L("Presence *%s.Service", b.Import(presenceModule))
+		b.NL()
+	}
 	for _, res := range e.resources() {
 		b.L("%s %sService", res.Name, res.Name)
 	}
@@ -233,6 +244,25 @@ func (e *emitter) registerFunc(b *gobuf.Buf) {
 			"like every other route's — and its own metadata, so the line an inbox " +
 			"500 writes says which request it was rather than nothing at all. These " +
 			"routes do not go through resolve, so the context is built here.")
+		b.L("fail(h.Server, w, r, requestContext(h.Server, r), err)")
+		b.L("},")
+		b.L("}).Mount(mux)")
+		b.L("}")
+	}
+
+	if e.hasPresence() {
+		b.NL()
+		b.Comment("Presence, on the same mux, and hand-written for the reason the " +
+			"inbox is: the table is rig's own and identical in every project.\n\n" +
+			"No permission is checked on these routes, deliberately — everybody " +
+			"who may look at a screen may say they are looking at it — and there " +
+			"is nowhere in the request to name an account, so \"you may only " +
+			"write your own presence\" is a sentence a client cannot phrase " +
+			"rather than a rule a handler enforces.")
+		b.L("if h.Presence != nil {")
+		b.L("%s.New(h.Presence, %s.Options{", b.Import(presencehttpModule), b.Import(presencehttpModule))
+		b.L("Claims: h.Server.GetClaims,")
+		b.L("Fail: func(w %s.ResponseWriter, r *%s.Request, err error) {", httpPkg, httpPkg)
 		b.L("fail(h.Server, w, r, requestContext(h.Server, r), err)")
 		b.L("},")
 		b.L("}).Mount(mux)")
