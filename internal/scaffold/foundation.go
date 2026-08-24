@@ -30,6 +30,7 @@ const (
 	PartNotifications = "notifications"
 	PartPresence      = "presence"
 	PartIdempotency   = "idempotency"
+	PartThrottle      = "throttle"
 )
 
 // Sets are the foundation's migration sets, in the order they apply.
@@ -553,6 +554,8 @@ func foundationPart(name string) part {
 		p.configs = presenceConfigs()
 	case PartIdempotency:
 		p.configs = idempotencyConfigs()
+	case PartThrottle:
+		p.configs = throttleConfigs()
 	}
 	return p
 }

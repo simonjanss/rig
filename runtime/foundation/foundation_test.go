@@ -11,7 +11,7 @@ func TestSetIsCoherent(t *testing.T) {
 // TestTheShippedSetHasNotMoved is the append-only rule — see the same test in
 // auth/foundation for why it is a test rather than a comment.
 func TestTheShippedSetHasNotMoved(t *testing.T) {
-	want := []string{"00001_idempotency.sql"}
+	want := []string{"00001_idempotency.sql", "00002_throttle.sql"}
 
 	got := Set().Migrations
 	if len(got) < len(want) {

@@ -1,8 +1,10 @@
 // Package foundation carries the schema runtime's own tables need.
 //
-// One migration, creating rig_idempotency: the record of a write that carried
-// an Idempotency-Key, so that a client which had to send the same write twice
-// gets one row and the same answer both times.
+// Two migrations. rig_idempotency is the record of a write that carried an
+// Idempotency-Key, so that a client which had to send the same write twice gets
+// one row and the same answer both times. rig_throttle is how many calls one
+// caller has made inside one window, which is the half of rate limiting that
+// cannot be read back out of an audit trail.
 //
 // It is the one set that references nothing. An idempotency record is useful in
 // a project with no authentication and no files, and it is worth having before
@@ -42,6 +44,7 @@ func Set() dbschema.Set {
 		Table:  Table,
 		Migrations: []dbschema.Migration{
 			{Number: 1, Name: "idempotency", Tables: []string{"rig_idempotency"}},
+			{Number: 2, Name: "throttle", Tables: []string{"rig_throttle"}},
 		},
 	}
 }

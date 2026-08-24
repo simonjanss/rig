@@ -79,9 +79,34 @@ type Counter interface {
 	Count(ctx context.Context, limit Limit, key Key, since time.Time) (n int, earliest time.Time, err error)
 }
 
+// Recorder spends a slot and reports what the key has spent, in one round trip.
+//
+// It is the other half of [Counter], for the limits whose event nobody would
+// want in an audit trail. A login failure is worth a row on its own merits and
+// the limiter reads it for free; an ordinary API call is not, and there are a
+// great many more of them. So here the request *is* the event: it has to be
+// recorded to be counted, and the recording and the counting are one statement
+// because two would race.
+//
+// The returned total is the whole window, not the delta — a caller that batches
+// locally still needs the global answer to decide with.
+type Recorder interface {
+	// Incr adds delta events for the key at now and returns the total inside
+	// the limit's window, with the instant that window's oldest part expires.
+	//
+	// delta is a count rather than an implied one so that a caller which held
+	// events back can flush them together. Zero is legal and asks the question
+	// without spending anything.
+	Incr(ctx context.Context, limit Limit, key Key, now time.Time, delta int) (total int, resetAt time.Time, err error)
+}
+
 // Limiter applies limits.
 type Limiter struct {
-	counter Counter
+	// counter answers Allow, recorder answers Take. A limiter has whichever of
+	// the two its caller built it with, and asking it the other question is an
+	// error rather than a permissive default — see [Limiter.Take].
+	counter  Counter
+	recorder Recorder
 	// now is swappable so a test can age a window without sleeping through it.
 	now func() time.Time
 }
@@ -89,6 +114,11 @@ type Limiter struct {
 // New builds a limiter over a counter.
 func New(counter Counter) *Limiter {
 	return &Limiter{counter: counter, now: time.Now}
+}
+
+// NewRecording builds a limiter over a recorder, for [Limiter.Take].
+func NewRecording(recorder Recorder) *Limiter {
+	return &Limiter{recorder: recorder, now: time.Now}
 }
 
 // WithClock returns a copy that reads the time from fn. It exists for tests: a
@@ -105,6 +135,10 @@ func (l *Limiter) WithClock(fn func() time.Time) *Limiter {
 // the tightest constraint the caller is actually under rather than whichever
 // one happened to be listed first.
 func (l *Limiter) Allow(ctx context.Context, checks ...Check) (Decision, error) {
+	if l.counter == nil {
+		return Decision{}, errors.New("throttle: Allow needs a limiter built with New")
+	}
+
 	now := l.now()
 
 	var (
@@ -156,6 +190,73 @@ func (l *Limiter) evaluate(ctx context.Context, now time.Time, c Check) (Decisio
 	// the ones least worth spending a query on.
 	d.ResetAt = earliest.Add(c.Limit.Window)
 	d.RetryAfter = max(d.ResetAt.Sub(now), time.Second)
+	return d, nil
+}
+
+// Take spends a slot against every check and reports the outcome.
+//
+// It is [Limiter.Allow] for the limits that have to be written down to be
+// counted. The difference that matters is what the number means: Allow's count
+// is what happened *before* this request, so it refuses at Max; Take's count
+// includes this request, so it refuses at Max+1. Both let exactly Max through.
+//
+// Every check is spent, including after one of them has already refused. A
+// refused request is still a request, and skipping the rest would let somebody
+// sitting over one budget stay under all the others indefinitely — the count on
+// the key they were not breaching would stop moving precisely because they were
+// breaching another.
+func (l *Limiter) Take(ctx context.Context, checks ...Check) (Decision, error) {
+	if l.recorder == nil {
+		// Not a permissive default. A limiter that answered "allowed" here would
+		// be indistinguishable from a configured one until somebody attacked it.
+		return Decision{}, errors.New("throttle: Take needs a limiter built with NewRecording")
+	}
+
+	now := l.now()
+
+	var (
+		worst   Decision
+		decided bool
+	)
+
+	for _, c := range checks {
+		d, err := l.spend(ctx, now, c)
+		if err != nil {
+			return Decision{}, err
+		}
+		if !decided || d.tighterThan(worst) {
+			worst, decided = d, true
+		}
+	}
+
+	if !decided {
+		return Decision{Allowed: true}, nil
+	}
+	return worst, nil
+}
+
+func (l *Limiter) spend(ctx context.Context, now time.Time, c Check) (Decision, error) {
+	n, resetAt, err := l.recorder.Incr(ctx, c.Limit, c.Key, now, 1)
+	if err != nil {
+		return Decision{}, err
+	}
+
+	d := Decision{
+		// n counts this request, which is why this is not the `<` in evaluate.
+		Allowed:   n <= c.Limit.Max,
+		Limit:     c.Limit,
+		Key:       c.Key,
+		Used:      n,
+		Remaining: max(c.Limit.Max-n, 0),
+	}
+	if d.Allowed {
+		return d, nil
+	}
+
+	// The recorder knows when the window it counted over runs out, so unlike
+	// evaluate there is nothing to derive: it counted, so it can say.
+	d.ResetAt = resetAt
+	d.RetryAfter = max(resetAt.Sub(now), time.Second)
 	return d, nil
 }
 

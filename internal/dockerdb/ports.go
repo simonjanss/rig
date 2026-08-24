@@ -76,6 +76,11 @@ const (
 	// PortPresence is internal/presencetest: the heartbeat that is an upsert, the
 	// sweep that two replicas may run at once, and the DDL actually applying.
 	PortPresence = 55488
+
+	// PortThrottle is internal/throttletest: the one statement that both spends
+	// a slot and reports the total, and what it does when several replicas run
+	// it at once on one row.
+	PortThrottle = 55487
 )
 
 // ports is every number above, with the name a failure should mention.
@@ -93,6 +98,7 @@ var ports = map[string]int{
 	"examples/linearlite (electric)": PortExampleLinearliteElectric,
 	"internal/filestest":             PortFiles,
 	"internal/idemtest":              PortIdempotency,
+	"internal/throttletest":          PortThrottle,
 	"internal/electrictest (sync)":   PortElectricSync,
 	"internal/introspect":            PortIntrospect,
 	"internal/electrictest (db)":     PortElectricDB,
