@@ -65,6 +65,16 @@ type API struct {
 	// not track it.
 	Presence *Presence `json:"presence,omitempty"`
 
+	// Throttle is the resolved `throttle:` block, or nil for a project that
+	// does not limit API calls.
+	//
+	// It is part of the surface rather than a deployment detail, which is why it
+	// is here and not beside the database settings: the numbers travel to
+	// clients in the RateLimit-* headers and into the generated documentation,
+	// so a specification that quoted anything else would be quoting a number
+	// nobody enforces.
+	Throttle *Throttle `json:"throttle,omitempty"`
+
 	// Tracing is the spans this API's generated code opens, or nil for a
 	// project that asked for none.
 	//
@@ -1009,4 +1019,52 @@ type EndpointImpl struct {
 	ServiceMethod string `json:"service_method"`
 	// HandlerName is the generated HTTP handler's name.
 	HandlerName string `json:"handler_name"`
+}
+
+// Throttle is the resolved throttle block: how many calls one caller may make.
+//
+// Fair-use limiting rather than a defence against a flood. What reaches this is
+// a request that already cost a connection, a handshake and a goroutine, so the
+// arithmetic here bounds abuse and cost rather than volume — see docs/api.md.
+type Throttle struct {
+	Enabled bool `json:"enabled"`
+
+	// APIKey, Account and Tenant apply to a caller who said who they were; IP
+	// applies only to one who did not. A zero limit is one nobody configured,
+	// and the runtime fills it from its own defaults.
+	APIKey  ThrottleLimit `json:"api_key"`
+	Account ThrottleLimit `json:"account"`
+	Tenant  ThrottleLimit `json:"tenant"`
+	IP      ThrottleLimit `json:"ip"`
+
+	// IntervalSeconds is how long a replica may count locally before publishing.
+	// It is the accuracy of the limit stated as time, so it belongs in the
+	// document beside the numbers it qualifies.
+	//
+	// Fractional, unlike every other duration here: sub-second is a reasonable
+	// thing to ask for from something that runs on every request, where a
+	// sub-second *window* is not.
+	IntervalSeconds float64 `json:"interval_seconds,omitempty"`
+
+	// Routes are extra limits on particular patterns, on top of the per-caller
+	// ones.
+	Routes []ThrottleRoute `json:"routes,omitempty"`
+
+	// Exempt are patterns nothing applies to.
+	Exempt []string `json:"exempt,omitempty"`
+}
+
+// ThrottleLimit is how many, and over how long.
+type ThrottleLimit struct {
+	Max           int   `json:"max,omitempty"`
+	WindowSeconds int64 `json:"window_seconds,omitempty"`
+}
+
+// ThrottleRoute is one route pattern's own limit.
+type ThrottleRoute struct {
+	// Pattern is the route as the router registers it, matched against what
+	// net/http reports rather than against a path.
+	Pattern       string `json:"pattern"`
+	Max           int    `json:"max"`
+	WindowSeconds int64  `json:"window_seconds"`
 }

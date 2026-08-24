@@ -163,6 +163,25 @@ const (
 	// sweeper's can never disagree in the direction that makes a row come back.
 	DefaultPresenceGrace = 5 * time.Minute
 
+	// The API throttle defaults. Deliberately loose: these are a backstop
+	// against a client in a retry loop and against one tenant crowding out the
+	// rest, not a quota. A default tight enough to be interesting is one that
+	// breaks somebody's working integration the day they upgrade.
+	//
+	// The ladder is machines, then people, then strangers. An integration is
+	// allowed the most because that is what an integration is for; one person
+	// clicking cannot reach a thousand a minute without something being wrong;
+	// and an address nobody has authenticated is the loosest identity there is,
+	// so it gets the least.
+	DefaultThrottleAPIKeyMax  = 5000
+	DefaultThrottleAccountMax = 1000
+	DefaultThrottleTenantMax  = 10000
+	DefaultThrottleIPMax      = 300
+	// DefaultThrottleWindow is the window all four share. One window keeps the
+	// four numbers comparable, which is what makes the ladder above readable as
+	// a ladder.
+	DefaultThrottleWindow = time.Minute
+
 	// The AWS SDK's own variable names, so a deployment that already has
 	// credentials in the environment needs no configuration at all.
 	DefaultAccessKeyEnv = "AWS_ACCESS_KEY_ID"
@@ -278,6 +297,7 @@ func (p *Project) applyDefaults() {
 	p.applyFilesDefaults()
 	p.applyNotificationsDefaults()
 	p.applyPresenceDefaults()
+	p.applyThrottleDefaults()
 	p.applyMonitoringDefaults()
 }
 
@@ -311,6 +331,34 @@ func (p *Project) applyPresenceDefaults() {
 	setDuration(&c.Heartbeat, DefaultPresenceHeartbeat)
 	setDuration(&c.Sweep, DefaultPresenceSweep)
 	setDuration(&c.Grace, DefaultPresenceGrace)
+}
+
+// applyThrottleDefaults resolves every per-caller limit the throttle block
+// leaves out, for the same reason applyPresenceDefaults does: these numbers go
+// out to clients in the RateLimit-* headers and into the generated
+// documentation, so a zero meaning "the runtime decides" would leave two places
+// to ask what the limit is.
+//
+// Route limits are deliberately not defaulted. A per-caller limit left out means
+// "whatever rig thinks"; a route listed with no numbers means somebody meant
+// something and did not say it, and checkThrottle refuses that rather than
+// inventing a number for one named route.
+func (p *Project) applyThrottleDefaults() {
+	c := &p.Config.Throttle
+	if !c.Enabled {
+		return
+	}
+
+	setInt(&c.APIKey.Max, DefaultThrottleAPIKeyMax)
+	setInt(&c.Account.Max, DefaultThrottleAccountMax)
+	setInt(&c.Tenant.Max, DefaultThrottleTenantMax)
+	setInt(&c.IP.Max, DefaultThrottleIPMax)
+
+	for _, w := range []*Duration{&c.APIKey.Window, &c.Account.Window, &c.Tenant.Window, &c.IP.Window} {
+		setDuration(w, DefaultThrottleWindow)
+	}
+
+	setDuration(&c.Interval, DefaultThrottleInterval)
 }
 
 // applyFilesDefaults resolves every value the files block leaves out, for the
@@ -444,6 +492,12 @@ func setDuration(field *Duration, value time.Duration) {
 	}
 }
 
+func setInt(field *int, value int) {
+	if *field == 0 {
+		*field = value
+	}
+}
+
 // DatabaseURL is the connection string for this project.
 //
 // An explicit URL wins; otherwise one is built for the throwaway container, with
@@ -498,6 +552,7 @@ func (p *Project) check() diag.List {
 	diags.Append(p.checkFiles())
 	diags.Append(p.checkNotifications())
 	diags.Append(p.checkPresence())
+	diags.Append(p.checkThrottle())
 	diags.Append(p.checkMonitoring())
 
 	return diags
