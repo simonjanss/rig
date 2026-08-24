@@ -29,6 +29,7 @@ import (
 	"github.com/simonjanss/rig/auth/authlog"
 	"github.com/simonjanss/rig/runtime/rigerr"
 	"github.com/simonjanss/rig/runtime/tenancy"
+	"github.com/simonjanss/rig/runtime/throttle"
 )
 
 // Prefix makes a leaked key identifiable on sight — by a scanner watching a
@@ -146,6 +147,20 @@ type Config struct {
 	// should always be a decision rather than a default.
 	DefaultTTL time.Duration
 
+	// Limiter and FailureLimit bound how many times one key identifier may be
+	// presented wrongly.
+	//
+	// Both or neither; nil is a manager nobody wired a limiter into. What this
+	// stops is somebody grinding secrets against a key id they have learned —
+	// the id is the public half and turns up in logs and configuration, and
+	// without a limit the only thing between it and the secret is how fast they
+	// can ask.
+	//
+	// A success clears the window, so an integration that was misconfigured for
+	// a minute is not locked out for the rest of the hour once it is fixed.
+	Limiter      *throttle.Limiter
+	FailureLimit throttle.Limit
+
 	Now func() time.Time
 }
 
@@ -159,6 +174,9 @@ type Manager struct {
 	now   func() time.Time
 	touch time.Duration
 	ttl   time.Duration
+
+	limiter      *throttle.Limiter
+	failureLimit throttle.Limit
 }
 
 // New builds a manager.
@@ -181,6 +199,9 @@ func New(cfg Config) (*Manager, error) {
 		now:   utcClock(cfg.Now),
 		touch: cfg.TouchInterval,
 		ttl:   cfg.DefaultTTL,
+
+		limiter:      cfg.Limiter,
+		failureLimit: cfg.FailureLimit,
 	}, nil
 }
 
@@ -338,6 +359,12 @@ func (m *Manager) Verify(ctx context.Context, presented string, from netip.Addr)
 		return tenancy.Claims{}, nil, ErrInvalidKey
 	}
 
+	// Before the lookup, which is the point: a caller grinding secrets against
+	// one key id should stop costing a query long before they stop asking.
+	if err := m.checkFailureLimit(ctx, keyID); err != nil {
+		return tenancy.Claims{}, nil, err
+	}
+
 	k, err := m.store.ByKeyID(ctx, keyID)
 	if err != nil {
 		return tenancy.Claims{}, nil, err
@@ -457,7 +484,27 @@ func (m *Manager) shouldTouch(k *Key, now time.Time) bool {
 	return k.LastUsedAt == nil || now.Sub(*k.LastUsedAt) >= m.touch
 }
 
-// recordFailure writes the entry a rate limit will count.
+// checkFailureLimit bounds how many times one key id may be presented wrongly.
+//
+// Counted out of the auth log, over the failures recordFailure writes, and
+// cleared by a success — so it holds across replicas, survives a restart, and
+// releases as soon as the integration is fixed.
+func (m *Manager) checkFailureLimit(ctx context.Context, keyID string) error {
+	if m.limiter == nil || m.failureLimit.Max <= 0 {
+		return nil
+	}
+
+	d, err := m.limiter.Allow(ctx, throttle.Check{
+		Limit: m.failureLimit,
+		Key:   throttle.APIKey(keyID),
+	})
+	if err != nil {
+		return err
+	}
+	return d.Err()
+}
+
+// recordFailure writes the entry a rate limit counts.
 //
 // The reason goes in the detail rather than the response: an operator debugging
 // their integration needs it, and an attacker probing keys does not get it.

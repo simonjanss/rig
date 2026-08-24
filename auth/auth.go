@@ -335,6 +335,7 @@ func New(cfg Config) (*Auth, error) {
 	// Counted in the database rather than in memory, so two replicas cannot
 	// disagree about how many times a password has been tried and a restart does
 	// not clear somebody's lockout.
+	limits := resolvedLimits(cfg)
 	limiter := throttle.New(throttle.NewPostgres(cfg.Pool, throttle.PostgresConfig{}))
 	if cfg.Now != nil {
 		limiter = limiter.WithClock(cfg.Now)
@@ -362,6 +363,11 @@ func New(cfg Config) (*Auth, error) {
 		CacheTTL:       cfg.SessionCacheTTL,
 		OnRotate:       cfg.OnSessionRefresh,
 		Now:            cfg.Now,
+
+		// The same limiter the login limits use, over the same log. A session
+		// refreshing sixty times a minute is a client looping.
+		Limiter:      limiter,
+		RefreshLimit: limits.Refresh,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("auth: sessions: %w", err)
@@ -397,6 +403,12 @@ func New(cfg Config) (*Auth, error) {
 		Store: stores.APIKeys,
 		Log:   stores.Log,
 		Now:   cfg.Now,
+
+		// A key id is the public half and turns up in logs and configuration,
+		// so without this the only thing between one and its secret is how fast
+		// somebody can ask.
+		Limiter:      limiter,
+		FailureLimit: limits.APIKeyFailures,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("auth: api keys: %w", err)
@@ -545,6 +557,20 @@ func (a *Auth) PruneLog(ctx context.Context) (int, error) {
 	return a.parts.Stores.Log.Prune(ctx, a.now().Add(-a.retention))
 }
 
+// resolvedLimits are the limits this configuration will actually enforce.
+//
+// The zero value means the documented set. It is resolved in one place because
+// two callers need the same answer: the wiring below, which hands the numbers to
+// the managers, and checkRetention, which refuses a retention window shorter
+// than the longest of them. If those two disagreed, the check would be reasoning
+// about limits nobody enforces.
+func resolvedLimits(cfg Config) throttle.Defaults {
+	if cfg.Limits == (throttle.Defaults{}) {
+		return throttle.Standard()
+	}
+	return cfg.Limits
+}
+
 // checkRetention refuses a window the rate limits cannot survive.
 //
 // The same rule `rig.yaml` is checked against when a project is compiled, here
@@ -561,14 +587,7 @@ func checkRetention(cfg Config) error {
 			cfg.LogRetention)
 	}
 
-	limits := cfg.Limits
-	if limits == (throttle.Defaults{}) {
-		// The zero value means the documented set, and it is those windows the
-		// server will enforce — so it is those the retention has to clear.
-		limits = throttle.Standard()
-	}
-
-	if longest, name := limits.LongestWindow(); cfg.LogRetention < longest {
+	if longest, name := resolvedLimits(cfg).LongestWindow(); cfg.LogRetention < longest {
 		return fmt.Errorf("auth: LogRetention (%s) is shorter than the %s rate limit's window (%s), "+
 			"and the limits are counted from rig_auth_log — pruning would clear a lockout by deleting "+
 			"the failures it counts; keep entries for at least %s",

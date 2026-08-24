@@ -13,6 +13,7 @@ import (
 	"github.com/simonjanss/rig/auth/authlog"
 	"github.com/simonjanss/rig/runtime/rigerr"
 	"github.com/simonjanss/rig/runtime/tenancy"
+	"github.com/simonjanss/rig/runtime/throttle"
 )
 
 type clock struct{ at time.Time }
@@ -20,9 +21,20 @@ type clock struct{ at time.Time }
 func (c *clock) now() time.Time          { return c.at }
 func (c *clock) advance(d time.Duration) { c.at = c.at.Add(d) }
 
-type recorder struct{ entries []authlog.Entry }
+type recorder struct {
+	entries []authlog.Entry
+	// onWrite mirrors an entry as it is written, standing in for what
+	// rig_auth_log does for free: the limiter counts the rows the trail keeps,
+	// so in production there is nothing to keep in step and here there is.
+	onWrite func(authlog.Entry)
+}
 
-func (r *recorder) Write(_ context.Context, e authlog.Entry) { r.entries = append(r.entries, e) }
+func (r *recorder) Write(_ context.Context, e authlog.Entry) {
+	r.entries = append(r.entries, e)
+	if r.onWrite != nil {
+		r.onWrite(e)
+	}
+}
 
 func (r *recorder) last(event string) (authlog.Entry, bool) {
 	for i := len(r.entries) - 1; i >= 0; i-- {
@@ -571,4 +583,119 @@ func TestEveryShapeOfMalformedKeyLooksTheSame(t *testing.T) {
 			t.Errorf("%s: err = %v, want the one message every failure gives", name, err)
 		}
 	}
+}
+
+// limitedKeys is setup with a failure limit, and the counter behind it fed from
+// the log the manager writes.
+func limitedKeys(t *testing.T, maxN int) *fixture {
+	t.Helper()
+
+	f := setup(t)
+	counter := throttle.NewMemory()
+	limit := throttle.Limit{
+		Name:      "apikey.failed",
+		Event:     throttle.EventAPIKeyAuthFailed,
+		ClearedBy: throttle.EventAPIKeyAuthSucceeded,
+		Max:       maxN,
+		Window:    time.Minute,
+	}
+
+	m, err := apikey.New(apikey.Config{
+		Store: f.store, Log: f.log, Now: f.clock.now,
+		Limiter:      throttle.New(counter).WithClock(f.clock.now),
+		FailureLimit: limit,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.m = m
+
+	f.log.onWrite = func(e authlog.Entry) {
+		if e.APIKeyRef == "" {
+			return
+		}
+		switch e.Event {
+		case throttle.EventAPIKeyAuthFailed, throttle.EventAPIKeyAuthSucceeded:
+			counter.Record(e.Event, throttle.APIKey(e.APIKeyRef), e.At)
+		}
+	}
+	return f
+}
+
+// A key id is the public half — it turns up in logs and in configuration — so
+// without this the only thing between one and its secret is how fast somebody
+// can ask.
+func TestGrindingSecretsAgainstOneKeyIDIsLimited(t *testing.T) {
+	t.Parallel()
+
+	f := limitedKeys(t, 3)
+	ctx := context.Background()
+	minted := f.mint(t, apikey.MintInput{})
+	wrong := wrongSecret(minted)
+
+	for i := range 3 {
+		if _, _, err := f.m.Verify(ctx, wrong, anywhere); !rigerr.Is(err, rigerr.CodeUnauthorized) {
+			t.Fatalf("attempt %d answered %v, want 401", i+1, err)
+		}
+	}
+
+	_, _, err := f.m.Verify(ctx, wrong, anywhere)
+	if rigerr.CodeOf(err) != rigerr.CodeRateLimited {
+		t.Fatalf("the fourth wrong secret was refused with %v, want a rate limit", rigerr.CodeOf(err))
+	}
+
+	// And the real key is refused too, which is the point of locking the id
+	// rather than the attempt: the limit has to bite whoever is holding it.
+	if _, _, err := f.m.Verify(ctx, minted.Secret, anywhere); rigerr.CodeOf(err) != rigerr.CodeRateLimited {
+		t.Fatalf("the correct secret answered %v while the id was locked", rigerr.CodeOf(err))
+	}
+}
+
+// Cleared by a success, so an integration misconfigured for a minute is not
+// locked out for the rest of the window once somebody fixes it.
+func TestASuccessClearsTheKeyFailureWindow(t *testing.T) {
+	t.Parallel()
+
+	f := limitedKeys(t, 3)
+	ctx := context.Background()
+	minted := f.mint(t, apikey.MintInput{})
+	wrong := wrongSecret(minted)
+
+	for range 2 {
+		_, _, _ = f.m.Verify(ctx, wrong, anywhere)
+	}
+
+	f.clock.advance(time.Second)
+	if _, _, err := f.m.Verify(ctx, minted.Secret, anywhere); err != nil {
+		t.Fatalf("the correct secret was refused before the limit: %v", err)
+	}
+
+	// The earlier failures are wiped, so there is a full budget again.
+	f.clock.advance(time.Second)
+	for i := range 3 {
+		if _, _, err := f.m.Verify(ctx, wrong, anywhere); rigerr.CodeOf(err) == rigerr.CodeRateLimited {
+			t.Fatalf("attempt %d after a success hit the limit; the window did not clear", i+1)
+		}
+	}
+}
+
+func TestWithNoLimiterKeyFailuresAreUnbounded(t *testing.T) {
+	t.Parallel()
+
+	f := setup(t)
+	ctx := context.Background()
+	minted := f.mint(t, apikey.MintInput{})
+	wrong := wrongSecret(minted)
+
+	for i := range 30 {
+		if _, _, err := f.m.Verify(ctx, wrong, anywhere); rigerr.CodeOf(err) == rigerr.CodeRateLimited {
+			t.Fatalf("attempt %d was rate limited by a manager with no limiter", i+1)
+		}
+	}
+}
+
+// wrongSecret keeps the key id and replaces the secret, which is the shape of
+// the attack this limit exists for: the id is the half that leaks.
+func wrongSecret(minted apikey.Minted) string {
+	return apikey.Prefix + minted.Key.KeyID + "_" + strings.Repeat("A", 52)
 }

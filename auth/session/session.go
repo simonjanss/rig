@@ -23,6 +23,7 @@ import (
 
 	"github.com/simonjanss/rig/auth/authlog"
 	"github.com/simonjanss/rig/runtime/rigerr"
+	"github.com/simonjanss/rig/runtime/throttle"
 )
 
 // ErrInvalidToken is returned for anything a caller presented that does not
@@ -65,6 +66,20 @@ type Config struct {
 	// real replay — which turns up minutes or hours later — firmly outside.
 	RotationLeeway time.Duration
 
+	// Limiter and RefreshLimit bound how hard one session may refresh.
+	//
+	// Both or neither. Nil is a manager nobody wired a limiter into, which has
+	// to go on working: this package is constructible without the rest of auth,
+	// and a refresh limit is a backstop rather than a security boundary — what
+	// it catches is a client looping, not somebody with a stolen token, whose
+	// second use is caught by reuse detection instead.
+	//
+	// The limit counts TokenRefreshed against the token family, so it is one
+	// session's budget and not one person's: signing in on a phone and a laptop
+	// does not make either of them closer to it.
+	Limiter      *throttle.Limiter
+	RefreshLimit throttle.Limit
+
 	// CacheTTL keeps verified access tokens in memory.
 	//
 	// Zero, the default, means every request reads the row, which is what
@@ -105,6 +120,9 @@ type Manager struct {
 	leeway   time.Duration
 	cache    *cache
 	onRotate func(ctx context.Context, prev *Token) (json.RawMessage, error)
+
+	limiter      *throttle.Limiter
+	refreshLimit throttle.Limit
 }
 
 type ttls struct{ access, refresh, remember time.Duration }
@@ -143,6 +161,9 @@ func New(cfg Config) (*Manager, error) {
 		ttl:      ttls{cfg.AccessTTL, cfg.RefreshTTL, cfg.RememberTTL},
 		leeway:   cfg.RotationLeeway,
 		onRotate: cfg.OnRotate,
+
+		limiter:      cfg.Limiter,
+		refreshLimit: cfg.RefreshLimit,
 	}
 	if cfg.CacheTTL > 0 {
 		m.cache = newCache(cfg.CacheTTL)
@@ -357,6 +378,15 @@ func (m *Manager) Rotate(ctx context.Context, presented string) (Pair, error) {
 			// logout.
 		}
 
+		// Once the token is known good and before anything is written. Later
+		// and a refused refresh has already consumed the parent, which would
+		// turn a limit into a logout; earlier and it would count against a
+		// family named by whoever asked, so anybody could exhaust a stranger's
+		// budget by presenting their session id with the wrong secret.
+		if err := m.checkRefreshLimit(ctx, prev); err != nil {
+			return err
+		}
+
 		// Before the parent is consumed, and once, so that both new tokens agree
 		// about what this session now knows.
 		//
@@ -430,6 +460,26 @@ func (m *Manager) Rotate(ctx context.Context, presented string) (Pair, error) {
 		TokenRootID: &pair.RootTokenID,
 	})
 	return pair, nil
+}
+
+// checkRefreshLimit bounds how hard one session may rotate.
+//
+// A client refreshing sixty times a minute is looping, not working. The limit is
+// counted out of the auth log the same way the login limits are, so it holds
+// across replicas and survives a restart.
+func (m *Manager) checkRefreshLimit(ctx context.Context, prev *Token) error {
+	if m.limiter == nil || m.refreshLimit.Max <= 0 {
+		return nil
+	}
+
+	d, err := m.limiter.Allow(ctx, throttle.Check{
+		Limit: m.refreshLimit,
+		Key:   throttle.TokenFamily(prev.RootTokenID.String()),
+	})
+	if err != nil {
+		return err
+	}
+	return d.Err()
 }
 
 // Revoke ends one session.

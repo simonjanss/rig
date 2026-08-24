@@ -16,7 +16,6 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"net"
 	"net/http"
 	"net/netip"
 	"strings"
@@ -28,6 +27,7 @@ import (
 	"github.com/simonjanss/rig/auth/authlog"
 	"github.com/simonjanss/rig/auth/session"
 	"github.com/simonjanss/rig/runtime/authwire"
+	"github.com/simonjanss/rig/runtime/clientip"
 	"github.com/simonjanss/rig/runtime/rigerr"
 	"github.com/simonjanss/rig/runtime/tenancy"
 	"github.com/simonjanss/rig/runtime/throttle"
@@ -463,56 +463,16 @@ func bearer(r *http.Request) (string, error) {
 
 // remoteAddr is where the request came from.
 //
-// The forwarded header is believed only when the immediate peer is a proxy the
-// application named. Trusting it unconditionally would let anybody set their own
-// address, and every limit keyed on one would become decorative.
+// The rule — believe X-Forwarded-For only from a proxy the application named —
+// lives in runtime/clientip, because the API rate limiter needs the same answer
+// and two implementations of this is how one of them ends up trusting a header
+// it should not.
 func (h *Handler) remoteAddr(r *http.Request) netip.Addr {
-	peer := parseAddr(r.RemoteAddr)
-
-	if len(h.cfg.TrustedProxies) == 0 || !peer.IsValid() {
-		return peer
-	}
-	trusted := false
-	for _, p := range h.cfg.TrustedProxies {
-		if p.Contains(peer) {
-			trusted = true
-			break
-		}
-	}
-	if !trusted {
-		return peer
-	}
-
-	// The left-most entry is the original client. Everything after it was added
-	// by a hop, and everything before the first untrusted hop is a claim.
-	forwarded := r.Header.Get("X-Forwarded-For")
-	if forwarded == "" {
-		return peer
-	}
-	first, _, _ := strings.Cut(forwarded, ",")
-	if addr, err := netip.ParseAddr(strings.TrimSpace(first)); err == nil {
-		return addr
-	}
-	return peer
-}
-
-func parseAddr(remote string) netip.Addr {
-	host, _, err := net.SplitHostPort(remote)
-	if err != nil {
-		host = remote
-	}
-	addr, err := netip.ParseAddr(host)
-	if err != nil {
-		return netip.Addr{}
-	}
-	return addr.Unmap()
+	return clientip.Of(r, h.cfg.TrustedProxies)
 }
 
 func (h *Handler) addrString(r *http.Request) string {
-	if a := h.remoteAddr(r); a.IsValid() {
-		return a.String()
-	}
-	return ""
+	return clientip.String(r, h.cfg.TrustedProxies)
 }
 
 // decode reads a JSON body.
