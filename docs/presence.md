@@ -187,14 +187,40 @@ const presence = createPresence({
     stream: createRigPresenceStream(client.runtime, { scope: "board" }),
 });
 
-// Where this tab is, reported from an effect: closing a panel reports the board
-// again without anybody writing that line.
-useSpot({ table: "todo", id });
+// Everybody else, narrowed to what is on the screen.
+const others = usePresence(presence, { table: "todo", id });
 
-// And on each control. Nothing is wired to onChange — typing a two-hundred
-// character title is one presence write, on focus.
-<input onFocus={spot.onFocus} onBlur={spot.onBlur} />;
+// And where this tab is. On focus, never on onChange — typing a
+// two-hundred-character title is one presence write.
+presence.focus({ table: "todo", id, field: "title" }, "editing");
 ```
+
+### Three things the package deliberately does not do for you
+
+`@rig/presence` owns the timer, the throttle, the clock and the teardown. What it
+cannot own is where in *your* component tree those things live, and each of the
+three is a bug the first time somebody writes it.
+`examples/linearlite/web/src/presence` gets all three right, and is worth copying
+rather than rediscovering.
+
+**Build the handle in an effect, not during render.** React StrictMode mounts,
+unmounts and mounts again on the first commit. Built during render that leaves
+the first loop beating forever with nobody holding it, and calls `close()` — which
+is final — on the one that is kept. It works in a production build and is dead
+under a dev server, which is the worst way round. Answer the one commit before
+the effect with an idle handle whose `others()` returns a *stable* empty array:
+`usePresence` gives that array to `useSyncExternalStore`, which compares
+snapshots by identity.
+
+**Report a spot from one effect and end it in another.** Reporting needs the
+target in its dependency list, so moving between rows writes the move. Ending
+needs an empty one, because it is about the component's lifetime — and without it
+the last target reported stays reported, so closing a detail panel leaves that
+tab on that card for everybody else. One effect cannot have both dependency
+lists.
+
+**Mount it behind whatever gates a session.** There is nothing for an anonymous
+visitor to be present in, and the heartbeat has no credential to send.
 
 ## Wiring it up
 
@@ -206,9 +232,11 @@ closure, and `sweep-presence` in `Tasks`.
 api.Register(mux, api.Handlers{ /* ... */ Presence: api.NewPresence(pool)})
 ```
 
-No example in this repository wires it up yet — presence lands here before the
-front end that shows it off, so the pages above are the reference and there is no
-worked example to read beside them.
+[`examples/linearlite`](../examples/linearlite) is the worked one: three lines in
+`main.go`, a filled-in scope stub in `services/rig_presence`, and
+`web/src/presence` — which is where the parts a package cannot own for you live,
+and [the section above](#three-things-the-package-deliberately-does-not-do-for-you)
+is about those.
 
 Nothing checks a permission on `/presence`, deliberately: everybody who may look
 at a screen may say they are looking at it. And there is no account field in the

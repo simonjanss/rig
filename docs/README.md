@@ -49,7 +49,7 @@ a README that walks through it.
 | [fantasyfootball](../examples/fantasyfootball) | Many tables: relations, enums, filtering. |
 | [auth](../examples/auth) | Sign-in, roles, API keys, and what stays in Go. |
 | [auth_oauth](../examples/auth_oauth) | A tenant per host, and provider sign-in that survives the redirect. |
-| [linearlite](../examples/linearlite) | The full-stack one: accounts, uploads, notifications and live sync under a React front end, with spans and rig's monitoring page over the lot. |
+| [linearlite](../examples/linearlite) | The full-stack one: accounts, uploads, notifications, presence and live sync under a React front end, with spans and rig's monitoring page over the lot. |
 | [sdk](../examples/sdk) | A program that calls two rig applications through their generated clients. |
 
 ## A note on what is not here

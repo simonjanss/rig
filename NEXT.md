@@ -4880,7 +4880,7 @@ npm package, `@rig/presence`, with a React entry point behind an optional peer
 dependency. `docs/presence.md` is new. **No example wires it up** — that is a
 follow-up, deliberately: presence landed as a module, a config block, a generator
 and a package, and putting it into linearlite is a change to one project rather
-than to rig.
+than to rig. (Done in M15.1 below.)
 
 ### The rule about moving predicates decides everything
 
@@ -4973,7 +4973,9 @@ saying opposite things. It is now a table of part-owned switches.
 **The checked-in `.rig/*.schema.json` files were stale in both directions**,
 missing `monitoring.max_logs` and still carrying an `openapi` block that is not a
 config key. Nothing in `make check` regenerates them: only `rig schema` and
-`rig init` write them, so they drift silently. Worth a target.
+`rig init` write them, so they drift silently. Worth a target — and M15.1 hit it
+again immediately, in linearlite, which had no `Presence` definition while the
+other four examples did.
 
 ### What it costs, honestly
 
@@ -5010,12 +5012,11 @@ an append-only migration. Both want a real tenant to answer.
 - **`@rig/presence` is the first rig package that runs when nobody called it** — a
   timer, two window listeners, a `keepalive` fetch on teardown. Also the first
   with a second entry point and an optional peer dependency. Both are precedents.
-- **Nothing runs the browser half against a real server.** `@rig/presence` has a
-  unit suite and a typecheck fixture, and `internal/presencetest` drives the SQL,
-  but no example wires the two together — so the loop, the leave and the shape are
-  each tested and their meeting is not. That is what the follow-up buys, and it is
-  the reason to keep the front-end half of it in something `make check` compiles:
-  `make examples` runs no pnpm and `make ts` does not reach an example's front end.
+- ~~**Nothing runs the browser half against a real server.**~~ Closed in M15.1:
+  `examples/linearlite` wires the two together, and `make linearlite-web` — which
+  `make check` now runs — is the something that compiles the front-end half. What
+  is still open is narrower and is stated there: nothing *mounts* the provider, so
+  the StrictMode arrangement is compiled and not exercised.
 - **The `fk_naming` rule warns on every carved-out foundation table**, because
   `tenant_id` references `rig_tenant` and the rule wants `rig_tenant_id`.
   Pre-existing, and presence adds two to whichever project turns it on.
@@ -5107,6 +5108,86 @@ reading the package, and they are both about a lifetime rather than a value:
 Neither is presence-specific, which is the argument for the example: a package
 whose whole job is to own a timer, two listeners and a teardown cannot be checked
 by a suite that never mounts it.
+
+## M15.1 — presence in linearlite (shipped)
+
+**Goal.** The follow-up M15 named: put presence into a project rather than into
+rig, so that the loop, the leave and the shape are tested where they meet rather
+than three separately.
+
+**What shipped.** `presence: {enabled: true}` in `examples/linearlite`, migration
+00013, the filled-in scope stub in `services/rig_presence`, three lines in
+`main.go`, `web/src/presence/` (a provider, `useSpot`, and three small
+components), presence marks on the header, the board cards and the panel's two
+controls, `presence_docker_test.go`, and the presence stream added to the
+shape-route test. `presence.expose` is left off: the shape is the read path and
+the three routes are the write path, so a read-only Get/List resource would be a
+model, a repository, a client and an OpenAPI entry for a question nothing in
+`web/` asks.
+
+**And `make linearlite-web` joined `make check`.** That is the part that was not
+about presence. M15's review found six of its eight bugs in the browser half, and
+the reason was structural rather than bad luck: nothing in the repository compiled
+a front end. Now one thing does.
+
+### The two fixes M15 predicted, and one it did not
+
+The two named at the end of M15 were both real and both cost nothing to write
+once, because M15 had already written them down. Verified in a browser rather than
+argued: one `PUT /presence` every twenty-one seconds over a minute under
+StrictMode — one loop, not two — and closing the panel drops `target_id` to null
+while the account stays in the header.
+
+The third was not predicted, and it is the more general one:
+
+> **Every dependency of an aliased `ts/` source has to be named in the app.**
+
+`examples/linearlite/web` aliases `@rig/client` and `@rig/electric` to their
+sources in `ts/`, and pins the three sync packages to its own `node_modules` by
+absolute path — with a comment explaining that `resolve.dedupe` cannot reach
+imports resolved from outside the project root. `@rig/presence/react` imports
+`react`, which made that comment's rule apply to a fourth package, and the failure
+is worse than the two-copies one it was written for: `make linearlite-web` never
+installs `ts/`, so there is no `react` there at all and `tsc` says "cannot find
+module". Both `vite.config.ts` and `tsconfig.json` now name it. A fifth package
+that imports something new needs the same line, and the root `AGENTS.md` says so.
+
+### Two things it found that were already broken
+
+**`make ts` could not run on a fresh clone.** `ts-typecheck` depended on
+`ts-deps` and not `ts-build`, and `@rig/electric` resolves `@rig/client` through
+`node_modules` — which reaches its `exports`, which reach `dist/`, which is
+gitignored. So a new checkout got seven "cannot find module `@rig/client`" errors
+that read like a broken workspace rather than a missing build. One prerequisite.
+It matters more now that `check` has a second pnpm target: the whole TypeScript
+half of `check` was unreachable on any machine that had not built `ts/` by hand.
+
+**`examples/linearlite/.rig/rig.schema.json` had no `Presence` definition** while
+the other four examples did — the drift M15 predicted, arriving exactly where it
+said it would. Nothing in `make check` writes those files; only `rig schema` and
+`rig init` do. Still worth a target.
+
+### What is still not checked
+
+**Nothing automated mounts the provider.** `make linearlite-web` compiles it and
+`vite build` bundles it; no suite renders it, so the StrictMode arrangement and the
+two-effect `useSpot` are asserted by a comment and by somebody having watched the
+network panel once. A component test would need jsdom, a fake collection and a
+timer — which is a real amount of new machinery in a repository whose front-end
+tooling is currently "tsc and vite" — and it is the obvious next thing if presence
+grows.
+
+**The leave does not always land on a reload.** Observed once: a tab reloaded
+while beating left its row behind, and the TTL swept it up sixty seconds later
+exactly as designed. `keepalive` is best-effort and a document being torn down can
+lose the request; the TTL exists for that. Worth knowing before anybody reads a
+stale row as a bug.
+
+**Presence is a fourth long poll.** The board now holds `todo`,
+`rig_notification_recipient` and `rig_presence`, and the panel adds
+`todo_versions` — four, under the six-connection ceiling HTTP/1.1 imposes and that
+Electric warns about in the console on every load. Fine here; a project that adds
+two more shapes will meet that ceiling before it meets any presence limit.
 
 ## Things I would fix if nobody asked for anything else
 

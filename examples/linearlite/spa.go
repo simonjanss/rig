@@ -20,15 +20,15 @@ import (
 // Unknown extension-less paths fall back to index.html, because the router
 // inside the application owns them: /todo/123 is a client-side route, and
 // answering 404 to a page reload would make every deep link a bug. Go 1.22's
-// mux precedence keeps every real route — /api/v1, /auth, /notifications, the
-// _stream shapes, the probes — winning over this catch-all.
+// mux precedence keeps every real route — /api/v1, /auth, /notifications,
+// /presence, the _stream shapes, the probes — winning over this catch-all.
 func spaHandler(dir string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// The catch-all catches what fell past the real routes, and some of
 		// that is not a page: a POST to an endpoint that does not exist, or a
 		// misspelled API path, should say so rather than answer with HTML the
 		// caller will try to parse as JSON.
-		for _, prefix := range []string{"/api/", "/auth/", "/notifications", demoPrefix} {
+		for _, prefix := range []string{"/api/", "/auth/", "/notifications", "/presence", demoPrefix} {
 			if strings.HasPrefix(r.URL.Path, prefix) {
 				http.NotFound(w, r)
 				return

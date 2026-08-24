@@ -63,6 +63,27 @@ notifications:
   # answer anybody gets.
   expose: true
 
+# Who is here, and what they are looking at. The board draws a ring on a card
+# somebody else has open and on the control they are typing into, and the header
+# lists everybody in the workspace — over the rig_presence live shape, with no
+# socket to run and no service to add.
+#
+# The four durations are left at their defaults (ttl 1m, heartbeat 20s, sweep
+# 1m, grace 5m). The one to read docs/presence.md before touching is
+# `heartbeat`: every beat is one row changed and every subscriber to the shape
+# hears about it, so it is the write rate and the fan-out rate multiplied by
+# tabs rather than a latency knob.
+#
+# No `expose:`, unlike the notification block above, and the difference is what
+# a person writes. A preference is a row somebody owns and edits, which is why
+# it wants a resource, a filter grammar and a typed client; presence is written
+# by the three routes under /presence — which take the account from the
+# credential and have nowhere to name anybody else — and read over the shape. A
+# read-only Get/List beside them would be a model, a repository, a client and an
+# OpenAPI entry for a question nothing in web/ asks.
+presence:
+  enabled: true
+
 # Spans, from the connection and from every generated handler, repository and
 # hook. The other examples that show observability show it over a schema with
 # nothing else going on; here it is on with authentication, uploads, the

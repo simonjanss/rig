@@ -64,6 +64,7 @@ type Handlers struct {
 
 	RigNotificationRecipient        RigNotificationRecipientScope
 	RigNotificationRecipientDeleted RigNotificationRecipientDeletedScope
+	RigPresence                     RigPresenceScope
 	Todo                            TodoScope
 	TodoDeleted                     TodoDeletedScope
 	TodoVersions                    TodoVersionsScope
@@ -98,6 +99,7 @@ func Register(mux *http.ServeMux, h Handlers) {
 
 	mux.HandleFunc("GET /api/v1/rig_notification_recipient/_stream", handleRigNotificationRecipientShape(h.Server, h.RigNotificationRecipient))
 	mux.HandleFunc("GET /api/v1/rig_notification_recipient/_deleted/_stream", handleRigNotificationRecipientDeletedShape(h.Server, h.RigNotificationRecipientDeleted))
+	mux.HandleFunc("GET /api/v1/rig_presence/_stream", handleRigPresenceShape(h.Server, h.RigPresence))
 	mux.HandleFunc("GET /api/v1/todo/_stream", handleTodoShape(h.Server, h.Todo))
 	mux.HandleFunc("GET /api/v1/todo/_deleted/_stream", handleTodoDeletedShape(h.Server, h.TodoDeleted))
 	mux.HandleFunc("GET /api/v1/todo/{id}/_versions/_stream", handleTodoVersionsShape(h.Server, h.TodoVersions))

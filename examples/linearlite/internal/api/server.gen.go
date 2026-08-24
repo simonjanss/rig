@@ -21,6 +21,8 @@ import (
 	"github.com/simonjanss/rig/notify"
 	"github.com/simonjanss/rig/notify/notifyhttp"
 	"github.com/simonjanss/rig/observe"
+	"github.com/simonjanss/rig/presence"
+	"github.com/simonjanss/rig/presence/presencehttp"
 	"github.com/simonjanss/rig/runtime/apirev"
 	"github.com/simonjanss/rig/runtime/dbhook"
 	"github.com/simonjanss/rig/runtime/dbx"
@@ -168,6 +170,15 @@ type Handlers struct {
 	// rather than something reached for.
 	Notifications *notify.Service
 
+	// Presence is who is here. Setting it mounts the routes under /presence; a nil
+	// one leaves them unmounted, so a project that has not built a front end for
+	// presence yet serves nothing rather than routes that write rows nobody reads.
+	//
+	// Reading presence is not here, and that is the design: the live shape is the
+	// read path, and it is mounted by the electric generator beside the rest of
+	// the API.
+	Presence *presence.Service
+
 	Account                AccountService
 	RigNotificationDevice  RigNotificationDeviceService
 	RigNotificationSetting RigNotificationSettingService
@@ -244,6 +255,22 @@ func Register(h Handlers) *http.ServeMux {
 				// other route's — and its own metadata, so the line an inbox 500 writes says
 				// which request it was rather than nothing at all. These routes do not go
 				// through resolve, so the context is built here.
+				fail(h.Server, w, r, requestContext(h.Server, r), err)
+			},
+		}).Mount(mux)
+	}
+
+	// Presence, on the same mux, and hand-written for the reason the inbox is: the
+	// table is rig's own and identical in every project.
+	//
+	// No permission is checked on these routes, deliberately — everybody who may
+	// look at a screen may say they are looking at it — and there is nowhere in
+	// the request to name an account, so "you may only write your own presence" is
+	// a sentence a client cannot phrase rather than a rule a handler enforces.
+	if h.Presence != nil {
+		presencehttp.New(h.Presence, presencehttp.Options{
+			Claims: h.Server.GetClaims,
+			Fail: func(w http.ResponseWriter, r *http.Request, err error) {
 				fail(h.Server, w, r, requestContext(h.Server, r), err)
 			},
 		}).Mount(mux)

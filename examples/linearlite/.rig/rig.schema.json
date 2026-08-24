@@ -648,6 +648,36 @@
       "additionalProperties": false,
       "type": "object"
     },
+    "Presence": {
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Whether this project tracks presence. The server-go generator writes the wiring only when it is set."
+        },
+        "expose": {
+          "type": "boolean",
+          "description": "Project presence as a generated read-only resource as well, for the filter grammar and a typed client. The hand-written routes and the live shape exist either way."
+        },
+        "ttl": {
+          "$ref": "#/$defs/Duration",
+          "description": "How long a session stays present after its last heartbeat. Defaults to 1m; under 15s is refused, and it has to be at least three times heartbeat."
+        },
+        "heartbeat": {
+          "$ref": "#/$defs/Duration",
+          "description": "How often a browser confirms it is still there. Defaults to 20s. Every beat is one row change fanned out to every subscriber, so this is the write rate rather than a latency knob."
+        },
+        "sweep": {
+          "$ref": "#/$defs/Duration",
+          "description": "How often the in-process sweeper ticks when it is running. Defaults to 1m. Whether it runs at all is a line in main.go, not a value here."
+        },
+        "grace": {
+          "$ref": "#/$defs/Duration",
+          "description": "How long past the TTL a row survives before the sweeper removes it. Defaults to 5m. It is what keeps a row from being deleted while a subscriber is still deciding about it."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
+    },
     "ProjectInfo": {
       "properties": {
         "name": {
@@ -809,6 +839,10 @@
     "notifications": {
       "$ref": "#/$defs/Notifications",
       "description": "The inbox, and how notifications are delivered."
+    },
+    "presence": {
+      "$ref": "#/$defs/Presence",
+      "description": "Who is here, and what they are looking at."
     },
     "tracing": {
       "$ref": "#/$defs/Tracing",

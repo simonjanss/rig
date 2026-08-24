@@ -663,6 +663,101 @@ paths:
                     description: The sync service could not be reached.
                     content:
                         text/plain: {}
+    /api/v1/rig_presence/_stream:
+        get:
+            tags:
+                - RigPresences
+            summary: Subscribe to the live RigPresence shape.
+            description: |-
+                Every RigPresence the caller may read, kept up to date.
+
+                A shape is a filtered view of one table that a client subscribes to. This route is a proxy in front of the sync service: which rows exist in the shape — the tenant, the lifecycle predicate, and the application's own scoping — is decided by the server and cannot be influenced from here. Where the client is in the stream is forwarded untouched.
+
+                With `live=true` the request is a long poll: it does not answer until something changes, so a client timeout set for an ordinary request will cut it short.
+
+                The response body is the sync protocol's own and is not described here. The `electric-*` response headers carry the cursor: send `handle` and `offset` back on the next request, or the subscription starts over.
+
+                Requires a session scoped to a tenant, and the shape is filtered to it.
+            operationId: streamRigPresences
+            parameters:
+                - name: offset
+                  in: query
+                  description: Where in the stream to resume, from the previous response's electric-offset.
+                  required: false
+                  schema:
+                    type: string
+                - name: handle
+                  in: query
+                  description: The shape handle from a previous response. Omit it to start a new subscription.
+                  required: false
+                  schema:
+                    type: string
+                - name: live
+                  in: query
+                  description: Long-poll until something changes, rather than answering with what is there now.
+                  required: false
+                  schema:
+                    type: boolean
+                - name: cursor
+                  in: query
+                  description: The sync service's own cache-busting cursor, echoed back from the last response.
+                  required: false
+                  schema:
+                    type: string
+                - name: replica
+                  in: query
+                  description: Whether updates carry the whole row or only the columns that changed.
+                  required: false
+                  schema:
+                    type: string
+                - name: scope
+                  in: query
+                  description: Only presence in this part of the application.
+                  required: false
+                  schema:
+                    type: string
+                - name: target_id
+                  in: query
+                  description: Only presence on this row.
+                  required: false
+                  schema:
+                    type: string
+                    format: uuid
+                - $ref: '#/components/parameters/ApiRevision'
+            responses:
+                "200":
+                    description: A chunk of the shape, in the sync protocol's own format.
+                    headers:
+                        electric-handle:
+                            description: The shape handle. Send it back to continue this subscription.
+                            schema:
+                                type: string
+                        electric-offset:
+                            description: Where this chunk ended. Send it back to resume from here.
+                            schema:
+                                type: string
+                        electric-schema:
+                            description: The shape's column types.
+                            schema:
+                                type: string
+                        electric-cursor:
+                            description: The cursor to echo on the next request.
+                            schema:
+                                type: string
+                        electric-up-to-date:
+                            description: Present when the client has caught up with the shape.
+                            schema:
+                                type: string
+                    content:
+                        application/json: {}
+                "401":
+                    $ref: '#/components/responses/Unauthorized'
+                "403":
+                    $ref: '#/components/responses/Forbidden'
+                "502":
+                    description: The sync service could not be reached.
+                    content:
+                        text/plain: {}
     /api/v1/todo-attachments:
         get:
             tags:
@@ -3777,6 +3872,8 @@ tags:
       description: 'One inbox line: a notification, an account, and whether it has been read.'
     - name: RigNotificationSettings
       description: 'What somebody wants on a channel, and when. Resolved in three steps: this kind, then this channel, then the project default.'
+    - name: RigPresences
+      description: Who is here and what they are looking at. One row per browser tab, rewritten every heartbeat and deleted once it is stale.
     - name: Todos
       description: One item on the board.
     - name: TodoAttachments

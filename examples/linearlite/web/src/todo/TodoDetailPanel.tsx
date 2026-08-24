@@ -1,4 +1,5 @@
 import { isConflict } from "@rig/client";
+import { usePresence } from "@rig/presence/react";
 import { useLiveQuery } from "@tanstack/react-db";
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router";
@@ -13,6 +14,9 @@ import { client } from "../lib/client.js";
 import { fromRow, STATUS_LABELS, STATUSES } from "../lib/rows.js";
 import { useToasts } from "../toast/ToastContext.js";
 import { Avatar } from "../board/Avatar.js";
+import { FieldMark } from "../presence/FieldMark.js";
+import { usePresenceHandle } from "../presence/PresenceContext.js";
+import { useSpot, useSpotField } from "../presence/useSpot.js";
 import { AttachmentList } from "./AttachmentList.js";
 import { VersionHistory } from "./VersionHistory.js";
 
@@ -21,6 +25,11 @@ import { VersionHistory } from "./VersionHistory.js";
  * somebody else's edit lands here mid-sentence, which is the point of the
  * demonstration. Edits are drafts saved on blur through the REST client, and
  * what comes back arrives over the stream like everybody else's changes.
+ *
+ * It is also where presence gets specific. Opening this panel is what tells
+ * everybody else which card this tab is on, and focusing a control is what
+ * turns that into which field — reported on focus and blur only, so typing a
+ * long title is one presence write rather than one per keystroke.
  */
 export function TodoDetailPanel() {
     const { id } = useParams<{ id: string }>();
@@ -38,6 +47,24 @@ export function TodoDetailPanel() {
     // Set by a refused claim, so the override appears only for somebody who
     // has already been told no once.
     const [contested, setContested] = useState(false);
+
+    // Where this tab is, for as long as this panel is open — and nowhere the
+    // moment it closes, which is the cleanup useSpot owns in an effect of its
+    // own. This is the only caller in the application: there is one target per
+    // tab, so two of them would fight.
+    const spot = { table: "todo", id };
+    useSpot(spot);
+    const titleSpot = useSpotField(spot, "title");
+    const descriptionSpot = useSpotField(spot, "description");
+
+    // And who else has focus in each control. Two questions, not one filtered
+    // afterwards, because the handle answers a target and caches per target.
+    const handle = usePresenceHandle();
+    const onTitle = usePresence(handle, { ...spot, field: "title" });
+    const onDescription = usePresence(handle, {
+        ...spot,
+        field: "description",
+    });
 
     // The drafts follow the live row until somebody is typing; a remote edit
     // mid-keystroke stays out of the way and wins on the next open.
@@ -138,12 +165,18 @@ export function TodoDetailPanel() {
                     <>
                         <header className="detail-head">
                             <input
-                                className="detail-title"
+                                className={`detail-title${
+                                    onTitle.length > 0 ? " field-taken" : ""
+                                }`}
                                 value={title}
-                                onFocus={() => setEditing(true)}
+                                onFocus={() => {
+                                    setEditing(true);
+                                    titleSpot.onFocus();
+                                }}
                                 onChange={(e) => setTitle(e.target.value)}
                                 onBlur={() => {
                                     setEditing(false);
+                                    titleSpot.onBlur();
                                     if (title.trim() && title !== item.title) {
                                         void patch({ title });
                                     }
@@ -157,6 +190,14 @@ export function TodoDetailPanel() {
                                 ×
                             </button>
                         </header>
+                        {/* Outside the header, not beside the input: the
+                            header is a flex row, so a mark in it would sit
+                            between the title and the close button and take
+                            width off a `flex: 1` input every time somebody
+                            else focused the field. Out here it is a column
+                            item of .detail, which is where the description's
+                            mark already is. */}
+                        <FieldMark people={onTitle} />
 
                         <div className="detail-controls">
                             <label>
@@ -234,13 +275,19 @@ export function TodoDetailPanel() {
                         </div>
 
                         <textarea
-                            className="detail-description"
+                            className={`detail-description${
+                                onDescription.length > 0 ? " field-taken" : ""
+                            }`}
                             placeholder="Add a description…"
                             value={description}
-                            onFocus={() => setEditing(true)}
+                            onFocus={() => {
+                                setEditing(true);
+                                descriptionSpot.onFocus();
+                            }}
                             onChange={(e) => setDescription(e.target.value)}
                             onBlur={() => {
                                 setEditing(false);
+                                descriptionSpot.onBlur();
                                 const next = description.trim();
                                 if (next !== (item.description ?? "")) {
                                     void patch({
@@ -249,6 +296,7 @@ export function TodoDetailPanel() {
                                 }
                             }}
                         />
+                        <FieldMark people={onDescription} />
 
                         <AttachmentList todoId={item.id} />
                         <VersionHistory current={item} />
