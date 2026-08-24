@@ -57,6 +57,7 @@ func compileFrom(p *project.Project, schema ir.Schema) (*ir.Document, diag.List)
 	diags.Append(checkFoundationPresent(p))
 	diags.Append(checkFilesFoundation(p, set))
 	diags.Append(checkNotificationsFoundation(p, set))
+	diags.Append(checkPresenceFoundation(p, set))
 
 	doc, d := compile.Compile(schema, set, compile.Options{
 		Project:      p,
@@ -99,6 +100,7 @@ func foundationParts(p *project.Project) ([]string, error) {
 			OAuth:         len(p.Config.Auth.OAuth.Providers) > 0,
 			Files:         p.Config.Files.Enabled,
 			Notifications: p.Config.Notifications.Enabled,
+			Presence:      p.Config.Presence.Enabled,
 		}.Parts(), nil
 	}
 
@@ -177,6 +179,22 @@ func foundationTables(p *project.Project) (ignore, foundation []string, err erro
 		// the model and the repository and generates no endpoints.
 		if slices.Contains(compile.NotificationTables(), table) {
 			if p.Config.Notifications.Enabled {
+				continue
+			}
+			out = append(out, table)
+			continue
+		}
+		// rig_presence is the notification case again, and the consequence of
+		// getting it wrong is more direct. The live shape *is* how presence is
+		// read — a heartbeat is a row change and the stream is what carries it to
+		// everybody else — and an ignored table has no resource, so no shape, so
+		// no route. Presence would be a table nothing reads and a browser package
+		// with nowhere to subscribe, and the only symptom would be a 404.
+		//
+		// `presence.expose` marks it unexposed instead, which keeps the model, the
+		// repository and the shape and generates no endpoints.
+		if table == compile.PresenceTable {
+			if p.Config.Presence.Enabled {
 				continue
 			}
 			out = append(out, table)
@@ -335,6 +353,46 @@ func checkNotificationsFoundation(p *project.Project, set *tableconf.Set) diag.L
 					"so it would arrive with a generated write path over what somebody was told; "+
 					"run `rig setup-project --expose %s`", table, table)
 		}
+	}
+	return diags
+}
+
+// checkPresenceFoundation reports a presence block whose table is not there, and
+// an exposed presence table with no configuration saying what may be done to it.
+//
+// The second one is the dangerous half, the way it is for rig_file and for the
+// inbox, and here it is the sharpest of the three. Exposing presence is what
+// makes it a resource; the table configuration is what keeps that resource to
+// Get and List. Without it, presence would arrive with a generated Create — and a
+// Create takes a body, and a body is somewhere to name an account that is not
+// yours. The whole reason the write path is three hand-written routes is that
+// they have nowhere to put one.
+func checkPresenceFoundation(p *project.Project, set *tableconf.Set) diag.List {
+	var diags diag.List
+	if !p.Config.Presence.Enabled {
+		return diags
+	}
+
+	managed, err := foundationManaged(p)
+	if err != nil {
+		return diags
+	}
+	if !slices.Contains(managed, compile.PresenceTable) {
+		diags.Add(diag.CodeConfigInvalid, p.At("presence", "enabled"),
+			"presence.enabled is set but this project has no %s migration; "+
+				"run `rig setup-project`", compile.PresenceTable)
+		return diags
+	}
+
+	if !p.Config.Presence.Expose || set == nil {
+		return diags
+	}
+	if set.Get(compile.PresenceTable) == nil {
+		diags.Add(diag.CodeConfigInvalid, p.At("presence", "expose"),
+			"presence.expose projects %s, but there is no table configuration for it, so it "+
+				"would arrive with a generated Create — and a Create takes a body, which is "+
+				"somewhere to claim that somebody else is editing something; "+
+				"run `rig setup-project --expose %s`", compile.PresenceTable, compile.PresenceTable)
 	}
 	return diags
 }

@@ -1,0 +1,271 @@
+{
+  "name": "public",
+  "tables": [
+    {
+      "name": "rig_tenant",
+      "comment": "One customer of this application.",
+      "kind": "Base",
+      "columns": [
+        {
+          "name": "id",
+          "sql_type": "uuid",
+          "udt_name": "uuid",
+          "nullable": false,
+          "ordinal": 1,
+          "is_primary_key": true
+        },
+        {
+          "name": "name",
+          "sql_type": "text",
+          "udt_name": "text",
+          "nullable": false,
+          "ordinal": 2
+        },
+        {
+          "name": "slug",
+          "sql_type": "text",
+          "udt_name": "text",
+          "nullable": false,
+          "ordinal": 3
+        }
+      ],
+      "primary_key": [
+        "id"
+      ],
+      "indexes": [
+        {
+          "name": "rig_tenant_pkey",
+          "columns": [
+            "id"
+          ],
+          "unique": true,
+          "method": "btree"
+        }
+      ]
+    },
+    {
+      "name": "rig_account",
+      "comment": "One person's membership of one tenant.",
+      "kind": "Base",
+      "columns": [
+        {
+          "name": "id",
+          "sql_type": "uuid",
+          "udt_name": "uuid",
+          "nullable": false,
+          "ordinal": 1,
+          "is_primary_key": true
+        },
+        {
+          "name": "tenant_id",
+          "sql_type": "uuid",
+          "udt_name": "uuid",
+          "nullable": false,
+          "ordinal": 2
+        },
+        {
+          "name": "display_name",
+          "sql_type": "text",
+          "udt_name": "text",
+          "nullable": false,
+          "ordinal": 3
+        }
+      ],
+      "primary_key": [
+        "id"
+      ],
+      "indexes": [
+        {
+          "name": "rig_account_pkey",
+          "columns": [
+            "id"
+          ],
+          "method": "btree"
+        },
+        {
+          "name": "rig_account_tenant_idx",
+          "columns": [
+            "tenant_id",
+            "id"
+          ],
+          "method": "btree"
+        }
+      ]
+    },
+    {
+      "name": "rig_presence",
+      "comment": "Who is here and what they are looking at. One row per browser tab, rewritten every heartbeat and deleted once it is stale.",
+      "kind": "Base",
+      "columns": [
+        {
+          "name": "id",
+          "sql_type": "uuid",
+          "udt_name": "uuid",
+          "nullable": false,
+          "ordinal": 1,
+          "is_primary_key": true
+        },
+        {
+          "name": "tenant_id",
+          "sql_type": "uuid",
+          "udt_name": "uuid",
+          "nullable": false,
+          "ordinal": 2
+        },
+        {
+          "name": "account_id",
+          "sql_type": "uuid",
+          "udt_name": "uuid",
+          "nullable": false,
+          "ordinal": 3
+        },
+        {
+          "name": "session_key",
+          "sql_type": "text",
+          "udt_name": "text",
+          "nullable": false,
+          "ordinal": 4
+        },
+        {
+          "name": "created_at",
+          "sql_type": "timestamptz",
+          "udt_name": "timestamptz",
+          "nullable": false,
+          "ordinal": 5,
+          "has_default": true,
+          "default": "now()"
+        },
+        {
+          "name": "seen_at",
+          "sql_type": "timestamptz",
+          "udt_name": "timestamptz",
+          "nullable": false,
+          "ordinal": 6,
+          "has_default": true,
+          "default": "now()"
+        },
+        {
+          "name": "scope",
+          "sql_type": "text",
+          "udt_name": "text",
+          "nullable": false,
+          "ordinal": 7
+        },
+        {
+          "name": "target_table",
+          "sql_type": "text",
+          "udt_name": "text",
+          "nullable": true,
+          "ordinal": 8
+        },
+        {
+          "name": "target_id",
+          "sql_type": "uuid",
+          "udt_name": "uuid",
+          "nullable": true,
+          "ordinal": 9
+        },
+        {
+          "name": "target_field",
+          "sql_type": "text",
+          "udt_name": "text",
+          "nullable": true,
+          "ordinal": 10
+        },
+        {
+          "name": "activity",
+          "sql_type": "rig_presence_activity",
+          "udt_name": "rig_presence_activity",
+          "nullable": false,
+          "ordinal": 11,
+          "has_default": true,
+          "default": "'viewing'::rig_presence_activity"
+        },
+        {
+          "name": "state",
+          "sql_type": "jsonb",
+          "udt_name": "jsonb",
+          "nullable": false,
+          "ordinal": 12,
+          "has_default": true,
+          "default": "'{}'::jsonb"
+        }
+      ],
+      "primary_key": [
+        "id"
+      ],
+      "foreign_keys": [
+        {
+          "name": "rig_presence_tenant_id_fkey",
+          "columns": [
+            "tenant_id"
+          ],
+          "foreign_table": "rig_tenant",
+          "foreign_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "rig_presence_account_id_fkey",
+          "columns": [
+            "account_id"
+          ],
+          "foreign_table": "rig_account",
+          "foreign_columns": [
+            "id"
+          ]
+        }
+      ],
+      "indexes": [
+        {
+          "name": "rig_presence_pkey",
+          "columns": [
+            "id"
+          ],
+          "unique": true,
+          "method": "btree"
+        },
+        {
+          "name": "rig_presence_session_key",
+          "columns": [
+            "tenant_id",
+            "account_id",
+            "session_key"
+          ],
+          "unique": true,
+          "method": "btree"
+        },
+        {
+          "name": "rig_presence_scope_idx",
+          "columns": [
+            "tenant_id",
+            "scope",
+            "seen_at"
+          ],
+          "method": "btree"
+        },
+        {
+          "name": "rig_presence_account_idx",
+          "columns": [
+            "account_id"
+          ],
+          "method": "btree"
+        }
+      ]
+    }
+  ],
+  "enums": [
+    {
+      "name": "rig_presence_activity",
+      "comment": "Whether somebody is looking or typing.",
+      "values": [
+        {
+          "value": "viewing"
+        },
+        {
+          "value": "editing"
+        }
+      ]
+    }
+  ]
+}

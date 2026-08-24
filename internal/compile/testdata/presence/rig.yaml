@@ -1,0 +1,25 @@
+project:
+  name: demo
+  module: example.com/demo
+
+# A presence row names an account and a tenant, so presence needs the tenancy
+# half of the authentication foundation. That is its only dependency.
+auth:
+  enabled: true
+
+# Who is here. `expose` is off, which is the ordinary case: the routes under
+# /presence write it and the live shape reads it, and rig's table keeps its model
+# and its repository and gets no endpoints.
+#
+# What this fixture is for is the one thing that has to be true and cannot be
+# said in a table configuration: rig_presence must not be owner-scoped. On an
+# owner-scoped table the shape carries `account_id = claims.AccountID`, and there
+# is no ?scope=all for a stream — so a presence table with an owner would stream
+# every subscriber nothing but themselves.
+presence:
+  enabled: true
+  expose: false
+
+validate:
+  missing_comment: off
+  unmentioned_column: off

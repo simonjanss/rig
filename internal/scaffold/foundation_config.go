@@ -381,3 +381,36 @@ operations: [Get, List, Search, Delete]`,
 		),
 	}
 }
+
+// presenceConfigs is rig's presence table, as a project would configure it.
+//
+// One table, and the interesting half of this file is what is *not* here.
+//
+// There is no `access:` key. An owner scope is what a reader would reach for —
+// presence is about a person, after all — and it would break the feature: on an
+// owner-scoped table the generated shape carries `account_id = the caller's`
+// before any application scope runs, and there is no `?scope=all` for a stream.
+// A presence table with an owner streams every subscriber nothing but itself.
+// The compiler settles that rather than this file, because it is the same answer
+// in every project and a copy here could only ever disagree with it.
+//
+// There is no `electric:` key either, for the same reason and with the same
+// consequence if it disagreed.
+func presenceConfigs() []tableConfig {
+	return []tableConfig{
+		config("rig_presence", "Presence",
+			`# Read-only, and only barely. The live shape is how a browser actually
+# reads this table; Get and List are here because "who is here" is a question
+# a server-side caller and a diagnostic page also ask, and because an empty
+# operations list does not mean what it looks like — it reads as
+# "unspecified" and falls back to the full CRUD set.
+#
+# Not Create, not Update, not Delete. The routes under /presence are the
+# whole write surface: they take the account from the credential rather than
+# from a body, so "you may only write your own presence" is a sentence a
+# client cannot phrase rather than a rule somebody enforces. A generated
+# Create would take a body, and a body is somewhere to name somebody else.
+operations: [Get, List]`,
+		),
+	}
+}

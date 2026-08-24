@@ -36,6 +36,16 @@ type ConfigOptions struct {
 	// would disagree is by streaming somebody else's inbox.
 	Notifications *ir.Notifications
 
+	// Presence is the resolved presence block, or nil for a project that does
+	// not track who is here.
+	//
+	// It arrives here for the same reason Notifications does: rig_presence has no
+	// table configuration in an ordinary project, and the three things that have
+	// to be true of it are the same decision everywhere. One of them is a hole
+	// somebody could otherwise open — see applyPresenceTable on why the owner
+	// column stays nil.
+	Presence *ir.Presence
+
 	// FileRestoreWindowDays is how long a deleted rig_file row stays
 	// restorable, resolved from `files.restore_window` in rig.yaml.
 	//
@@ -85,6 +95,7 @@ func ApplyConfig(api ir.API, schema ir.Schema, set *tableconf.Set, opt ConfigOpt
 		Auth:               api.Auth,
 		Files:              api.Files,
 		Notifications:      api.Notifications,
+		Presence:           api.Presence,
 		Tracing:            api.Tracing,
 		Monitoring:         api.Monitoring,
 		EmbeddedFoundation: api.EmbeddedFoundation,
@@ -377,6 +388,7 @@ func applyTableConfig(
 
 	diags.Append(applyAccessConfig(loaded, &out, cfg))
 	applyNotificationTable(&out, t, opt)
+	applyPresenceTable(&out, t, opt, n)
 	diags.Append(applyOnDeleteConfig(loaded, &out, cfg))
 	diags.Append(applyColumnConfig(loaded, t, &out, cfg, n, opt))
 	diags.Append(applyRelationConfig(loaded, &out, cfg))
@@ -840,6 +852,78 @@ func applyNotificationTable(res *ir.Resource, t *ir.Table, opt ConfigOptions) {
 		res.Electric = &ir.ElectricEndpoint{
 			Auth: ir.ElectricAuthTenant,
 			Path: "/" + res.Storage.Table + ir.ElectricStreamSuffix,
+		}
+	}
+}
+
+// applyPresenceTable settles what is true of rig's own presence table in every
+// project, which is why none of it is a key in a YAML file.
+//
+// Three things, and the second is the one with teeth.
+//
+// **It is read-only from the outside, and unexposed unless asked for.** The
+// scaffolded configuration is `operations: [Get, List]`; `presence.expose` is
+// what decides whether even that is mounted. The write surface is the
+// hand-written /presence routes and nothing else, because a generated Create
+// would take a body — and a body is somewhere to name an account that is not
+// yours.
+//
+// **The owner column stays nil, deliberately.** On an owner-scoped table the
+// electric generator emits `where.Eq(owner, claims.AccountID)` into the shape
+// before any application scope runs, and there is no `?scope=all` for a stream.
+// Presence is the one resource where you read everybody's rows and write only
+// your own, so setting an owner here would stream each subscriber nothing but
+// themselves — a feature that fails as "presence does not work", with no error
+// anywhere and no configuration to blame. There is a test named after this.
+//
+// **It gets a live-sync shape with two params.** The shape is how presence is
+// read at all: a heartbeat is a row change, and the stream is what carries it to
+// everybody else. `scope` and `target_id` are declared so a subscriber can ask
+// for one screen's worth rather than the tenant's, which is the difference
+// between linear and quadratic in the number of people present.
+func applyPresenceTable(res *ir.Resource, t *ir.Table, opt ConfigOptions, n *naming.Namer) {
+	cfg := opt.Presence
+	if cfg == nil || !cfg.Enabled || res.Storage == nil {
+		return
+	}
+	if !isPresenceTable(t.Name) {
+		return
+	}
+
+	if !cfg.Expose {
+		res.Unexposed = true
+		res.Operations = nil
+	}
+
+	// Not set, and not merely left alone: a project that wrote `access: {scope:
+	// own}` in a configuration file for this table would otherwise get a stream
+	// of itself. Clearing is how this function is the single answer rather than
+	// the first of two.
+	res.Storage.Owner = nil
+
+	if res.Electric == nil {
+		res.Electric = &ir.ElectricEndpoint{
+			Auth: ir.ElectricAuthTenant,
+			Path: "/" + res.Storage.Table + ir.ElectricStreamSuffix,
+			// Query-string keys, with the Go identifier derived by the same
+			// namer applyElectricConfig uses — so a param rig declares here and
+			// one a project declares in YAML arrive in the same shape.
+			Params: []ir.ElectricParam{
+				{
+					Name:        PresenceScopeColumn,
+					Field:       n.Go(PresenceScopeColumn),
+					Type:        ir.TypeString,
+					Optional:    true,
+					Description: "Only presence in this part of the application.",
+				},
+				{
+					Name:        PresenceTargetIDColumn,
+					Field:       n.Go(PresenceTargetIDColumn),
+					Type:        ir.TypeUUID,
+					Optional:    true,
+					Description: "Only presence on this row.",
+				},
+			},
 		}
 	}
 }
