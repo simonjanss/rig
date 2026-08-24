@@ -289,8 +289,8 @@ what lets rig add a table to the foundation without landing on one of yours.
 
 Bookkeeping is under the prefix too, and is not a resource in any project:
 `rig_migrations` for your own migrations, and `rig_auth_migrations`,
-`rig_files_migrations`, `rig_notify_migrations` and `rig_runtime_migrations` for
-the sets those modules carry when
+`rig_files_migrations`, `rig_notify_migrations`, `rig_runtime_migrations` and
+`rig_presence_migrations` for the sets those modules carry when
 [`migrations.foundation` is `embedded`](rig-yaml.md#who-keeps-rigs-migrations).
 goose writes those tables rather than a migration creating them, so rig neither
 refuses them nor generates anything for them.
@@ -307,6 +307,7 @@ expose them:
 | `File` | `rig_file` |
 | `Notification`, `NotificationRecipient`, `NotificationDevice`, `NotificationSetting`, `NotificationDelivery` | the [notification](notifications.md) tables |
 | `Idempotency` | `rig_idempotency` |
+| `Presence` | `rig_presence`, the [presence](presence.md) table |
 
 So you cannot have a table called `account`, or `file`, or `notification`
 ([RIG2004](diagnostics.md)) — nor a table under the prefix
@@ -317,6 +318,7 @@ reserved by a foundation table's configuration asking for it, not by an entry in
 a list somebody has to remember. That is why turning `notifications.enabled` on
 does not change what is reserved — those five names were already rig's the moment
 the part existed.
+
 
 **The trade.** You give up a handful of common table names. What you get back is
 that `auth.expose: [rig_account]` stays one line in `rig.yaml` forever. Without
