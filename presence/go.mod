@@ -1,0 +1,17 @@
+module github.com/simonjanss/rig/presence
+
+go 1.26.6
+
+require (
+	github.com/google/uuid v1.6.0
+	github.com/jackc/pgx/v5 v5.10.0
+	github.com/simonjanss/rig/runtime v0.0.0-00010101000000-000000000000
+)
+
+require (
+	github.com/jackc/pgpassfile v1.0.0 // indirect
+	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect
+	golang.org/x/text v0.29.0 // indirect
+)
+
+replace github.com/simonjanss/rig/runtime => ../runtime
