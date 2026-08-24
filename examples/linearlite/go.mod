@@ -10,6 +10,7 @@ require (
 	github.com/simonjanss/rig/migrate v0.0.0-00010101000000-000000000000
 	github.com/simonjanss/rig/notify v0.0.0
 	github.com/simonjanss/rig/observe v0.0.0-00010101000000-000000000000
+	github.com/simonjanss/rig/presence v0.0.0
 	github.com/simonjanss/rig/rigclient v0.0.0
 	github.com/simonjanss/rig/runtime v0.0.0
 	go.opentelemetry.io/otel/trace v1.45.0
@@ -56,6 +57,8 @@ replace github.com/simonjanss/rig/migrate => ../../migrate
 replace github.com/simonjanss/rig/notify => ../../notify
 
 replace github.com/simonjanss/rig/observe => ../../observe
+
+replace github.com/simonjanss/rig/presence => ../../presence
 
 replace github.com/simonjanss/rig/rigclient => ../../rigclient
 

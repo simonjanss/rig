@@ -301,6 +301,74 @@
     border: 1px dashed var(--border-strong);
 }
 
+/* ---- presence ---- */
+
+/* Who else is in the workspace, in the header. Overlapping, because the row
+   has to hold a handful without pushing the nav around. */
+.here {
+    display: flex;
+    align-items: center;
+}
+
+.here .avatar {
+    width: 20px;
+    height: 20px;
+    font-size: 9px;
+    margin-right: -6px;
+    box-shadow: 0 0 0 2px var(--bg);
+}
+
+.here .avatar:last-child {
+    margin-right: 0;
+}
+
+.here-more {
+    margin-left: 10px;
+    font-size: 11px;
+    color: var(--text-dim);
+}
+
+/* A card somebody else has open, and the same card with somebody typing in it.
+   Two states rather than one: the first is the ordinary case and should be
+   quiet, and the second is the one worth interrupting for. */
+.card-watched {
+    border-color: var(--border-strong);
+}
+
+.card-edited {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 1px var(--accent);
+}
+
+.card-watchers {
+    display: flex;
+    align-items: center;
+    margin-left: auto;
+}
+
+.card-watchers .avatar {
+    width: 18px;
+    height: 18px;
+    font-size: 8px;
+    margin-right: -5px;
+    box-shadow: 0 0 0 2px var(--bg-raised);
+}
+
+/* A control somebody else has focus in. A ring and a name, and deliberately
+   not a disabled input: presence is not a lock, the write path is still
+   last-one-wins, and pretending otherwise would be a promise rig cannot keep. */
+.field-taken {
+    border-color: var(--accent) !important;
+    box-shadow: 0 0 0 1px var(--accent);
+}
+
+.field-mark {
+    display: block;
+    font-size: 11px;
+    color: var(--accent-hover);
+    padding: 2px 0 0;
+}
+
 /* ---- trash / settings shared list look ---- */
 
 .trash,

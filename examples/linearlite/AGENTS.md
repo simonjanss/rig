@@ -117,15 +117,33 @@ generated proxy points at the default and the streams answer 502.
 
 ## This example's extras
 
-Beyond the todo example's layout, four directories and one file:
+Beyond the todo example's layout, five directories and one file:
 
 - `web/` — the React front end. Its generated client is `web/src/api`
   (`*.gen.ts`, rig's, never edit) and everything else in `web/src` is yours.
   `pnpm build` writes `web/dist`, which `main.go` serves from disk; `make
   examples` deliberately never builds it, so the Go suite needs no pnpm. The
-  `linearlite-web` make target at the repository root typechecks and builds it.
+  `linearlite-web` make target at the repository root typechecks and builds it,
+  and is part of `make check` — this is the only front end in the repository that
+  anything compiles.
+- `web/src/presence/` — the browser half of presence, and the one place in
+  `web/` where reading the comments before editing actually matters. Three
+  decisions are load-bearing and each has a plausible wrong version: the handle
+  is built in an effect rather than during render (StrictMode's double mount
+  orphans one built in the body, and `close()` is final), the idle stand-in
+  returns a *stable* empty array (`useSyncExternalStore` compares snapshots by
+  identity, so a fresh one is an unbounded re-render), and `useSpot` is two
+  effects because reporting a target and ending a lifetime need different
+  dependency lists. `docs/presence.md` says all three in prose.
 - `importer/` + `import/` — the batch job over the generated Go client, split
   so the docker test drives the same loop the command runs.
+- `services/rig_presence/` — one file, the scope stub, and the only filled-in
+  scope stub in the repository. Every other shape here leaves the generated
+  tenant filter as the whole scope; this one narrows on `scope` and `target_id`,
+  because a heartbeat is a row change delivered to every subscriber and the
+  fan-out is what decides whether presence is affordable. There is no
+  `rig_presence.yaml` beside it: `presence.expose` is off, so the table has a
+  model, a repository and a shape and no REST surface.
 - `services/authz/` — the roles-and-permissions model, an adapted copy of
   examples/auth's; that copy's comments explain every decision. Note the one
   name spelled out in it: `todo.claim` is the key rig derived from the custom
@@ -155,6 +173,12 @@ list, withdraw), API keys, a password change, session listing and revocation,
 the authentication trail, and switching tenants. Those calls are hand-written in
 `web/src/auth/authApi.ts` because they are rig's endpoints rather than this
 schema's — the generated client covers the API and stops at `/auth`.
+
+`presence:` is on with nothing but `enabled`, which is why `main.go` has three
+lines for it — `Presence` on `api.Handlers`, `RigPresence` on
+`genelectric.Handlers`, and the sweeper with its own `CloseWithin` — and why
+`MaxShutdown` is thirty-five rather than thirty: a third closer changed the
+arithmetic the comment above that number states.
 
 `tracing:` and `monitoring:` are on, which is why `main.go` opens a log sink
 before `serve.Main`, tees it into the logger, passes `observe.Pool`, and takes

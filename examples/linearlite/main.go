@@ -17,6 +17,11 @@
 //   - A status change notifies the item's stakeholders — services/todo
 //     announces it inside the update's transaction, and the inbox reaches the
 //     browser over the rig_notification_recipient shape.
+//   - Who is here, and what they are looking at. `presence:` in rig.yaml is the
+//     whole configuration; a heartbeat is a write to rig_presence and the shape
+//     over it is how everybody else hears. web/src/presence owns the one
+//     heartbeat this application runs, and services/rig_presence is the scope
+//     stub that keeps the fan-out to a board rather than a tenant.
 //   - web/ is a React application served from web/dist by this binary, same
 //     origin as the API, which is what keeps CORS and cookie stories out of a
 //     demonstration that is not about them.
@@ -55,6 +60,7 @@ import (
 	"github.com/simonjanss/rig/examples/linearlite/services/rig_account"
 	"github.com/simonjanss/rig/examples/linearlite/services/rig_notification_device"
 	"github.com/simonjanss/rig/examples/linearlite/services/rig_notification_setting"
+	"github.com/simonjanss/rig/examples/linearlite/services/rig_presence"
 	"github.com/simonjanss/rig/examples/linearlite/services/todo"
 	"github.com/simonjanss/rig/examples/linearlite/services/todo_attachment"
 	"github.com/simonjanss/rig/migrate"
@@ -98,12 +104,13 @@ func main() {
 			"or point $DATABASE_URL at a database you already have",
 
 		MaxStartup: 30 * time.Second,
-		// Thirty rather than twenty, because the two closers below now declare
-		// twenty between them — fifteen for the notification engine, five for a
-		// trace flush — and a budget exactly spoken for leaves nothing for the
-		// requests still in flight. serve warns about that at startup rather
-		// than letting it turn up as a truncated shutdown under load.
-		MaxShutdown: 30 * time.Second,
+		// Thirty-five, because the three closers below now declare twenty-five
+		// between them — fifteen for the notification engine, five for a trace
+		// flush, five for the presence sweeper — and a budget exactly spoken for
+		// leaves nothing for the requests still in flight. serve warns about
+		// that at startup rather than letting it turn up as a truncated
+		// shutdown under load.
+		MaxShutdown: 35 * time.Second,
 
 		// Stderr, and the file the monitoring page reads. The two keep their
 		// own levels: this one stays at whatever the default handler is set to,
@@ -132,6 +139,15 @@ func main() {
 			// has closed.
 			"sweep-files": func(ctx context.Context, pool *pgxpool.Pool) error {
 				return api.FileSweeper(api.NewFiles(pool))(ctx, pool)
+			},
+			// Presence rows past their window, for an operator who would rather
+			// this were a cron job than the goroutine below. Unlike
+			// dispatch-notifications it is not the guarantee behind anything:
+			// who is present is decided by whoever is reading, against the
+			// clock, and correctly within a second. This only keeps the table —
+			// and every new subscriber's first fetch — from carrying yesterday.
+			"sweep-presence": func(ctx context.Context, pool *pgxpool.Pool) error {
+				return api.PresenceSweep(api.NewPresenceSweeper(api.NewPresence(pool)))(ctx, pool)
 			},
 			// The records of writes that carried an Idempotency-Key — the import
 			// job's, mostly. Zero takes the default retention, a day.
@@ -180,6 +196,20 @@ func main() {
 		engine.Start()
 		app.Drain("notifications", engine.StopClaiming)
 		app.CloseWithin("notifications", 15*time.Second, engine.Close)
+
+		// Housekeeping for rig_presence, and a goroutine rather than only the
+		// cron task above — which is a decision, not an inconsistency with the
+		// engine beside it. The dispatcher takes a lease because resolving an
+		// audience twice costs a read and sending twice costs somebody a
+		// duplicate mail; deleting rows that have already expired is
+		// idempotent, so two replicas sweeping at once agree and the loser
+		// deletes nothing.
+		//
+		// No Drain either: there is nothing in flight worth finishing. A pass
+		// interrupted mid-DELETE leaves rows the next pass takes.
+		sweeper := api.NewPresenceSweeper(api.NewPresence(app.Pool))
+		sweeper.Start()
+		app.CloseWithin("presence", 5*time.Second, sweeper.Close)
 
 		return mux, nil
 	})
@@ -305,14 +335,27 @@ func newAPI(ctx context.Context, pool *pgxpool.Pool, log *slog.Logger, page *obs
 		RigNotificationDevice:  devices,
 		RigNotificationSetting: prefs,
 		Notifications:          inbox,
+		// Who is here. Setting it mounts the three routes under /presence; nil
+		// leaves them unmounted, which is what a project that generated the
+		// wiring and has not written the front end yet wants.
+		//
+		// No service layer, and nothing to register: presence has no rules of
+		// this schema's to enforce. The account comes from the credential and
+		// the target table is checked against PresenceTargets(), which rig
+		// wrote from the compiled document.
+		Presence: api.NewPresence(pool),
 	})
 
 	// The live-sync shapes, on the same mux as everything else. The proxy is
 	// the only thing a browser talks to: it authenticates the subscriber with
 	// the same claims lookup the handlers use, builds the tenant filter, and
-	// forwards to the sync service `rig db up` started. The nil scope fields
-	// mean the generated tenant filter is the whole scope, which is right for
-	// a board the whole tenant shares.
+	// forwards to the sync service `rig db up` started.
+	//
+	// The todo shapes leave their scope nil, so the generated tenant filter is
+	// the whole scope — right for a board the whole tenant shares. Presence is
+	// the one that does not, and the reason is in services/rig_presence: every
+	// heartbeat is a row change delivered to every subscriber, so its shape is
+	// the one place where narrowing is what makes the feature affordable.
 	proxy, err := electric.New(electric.Config{
 		URL: cmp.Or(os.Getenv("ELECTRIC_URL"), genelectric.DefaultElectricURL),
 	})
@@ -320,7 +363,8 @@ func newAPI(ctx context.Context, pool *pgxpool.Pool, log *slog.Logger, page *obs
 		return nil, nil, err
 	}
 	genelectric.Register(mux, genelectric.Handlers{
-		Server: genelectric.Server{Proxy: proxy, GetClaims: front.Claims},
+		Server:      genelectric.Server{Proxy: proxy, GetClaims: front.Claims},
+		RigPresence: rig_presence.Shape,
 	})
 
 	// The permission table, made to match what the handlers check — including

@@ -8,10 +8,19 @@ import { client } from "../lib/client.js";
 import { NotificationBell } from "../notifications/NotificationBell.js";
 import { useNotificationToasts } from "../notifications/useNotificationToasts.js";
 import { readTour } from "../outbox/outboxApi.js";
+import { Here } from "../presence/Here.js";
+import { PresenceProvider } from "../presence/PresenceContext.js";
 import { Toaster } from "../toast/Toaster.js";
 import { TenantSwitcher } from "./TenantSwitcher.js";
 
-/** The frame around every signed-in screen: header, nav, toasts. */
+/**
+ * The frame around every signed-in screen: header, nav, toasts.
+ *
+ * It is also where presence starts, and that is the reason it is here rather
+ * than above the router: this component is what `RequireSession` renders, so a
+ * heartbeat only ever runs for somebody who has a tenant session. Signing out
+ * unmounts it, which sends the leave.
+ */
 export function AppShell() {
     const { signOut } = useAuth();
     useNotificationToasts();
@@ -28,41 +37,44 @@ export function AppShell() {
     }, []);
 
     return (
-        <div className="shell">
-            <header className="shell-head">
-                <div className="shell-brand">
-                    <span className="shell-logo">◧</span>
-                    <TenantSwitcher />
-                </div>
-                <nav className="shell-nav">
-                    <NavLink to="/" end>
-                        Board
-                    </NavLink>
-                    <NavLink to="/trash">Trash</NavLink>
-                    {tour?.outbox && <NavLink to="/outbox">Outbox</NavLink>}
-                    <NavLink to="/security">Security</NavLink>
-                    <NavLink to="/settings">Settings</NavLink>
-                    {tour?.monitor && (
-                        <a
-                            href="/_rig/monitor"
-                            target="_blank"
-                            rel="noreferrer"
-                        >
-                            Monitor ↗
-                        </a>
-                    )}
-                </nav>
-                <div className="shell-side">
-                    <NotificationBell />
-                    <button className="linkish" onClick={signOut}>
-                        Sign out
-                    </button>
-                </div>
-            </header>
-            <main className="shell-main">
-                <Outlet />
-            </main>
-            <Toaster />
-        </div>
+        <PresenceProvider>
+            <div className="shell">
+                <header className="shell-head">
+                    <div className="shell-brand">
+                        <span className="shell-logo">◧</span>
+                        <TenantSwitcher />
+                    </div>
+                    <nav className="shell-nav">
+                        <NavLink to="/" end>
+                            Board
+                        </NavLink>
+                        <NavLink to="/trash">Trash</NavLink>
+                        {tour?.outbox && <NavLink to="/outbox">Outbox</NavLink>}
+                        <NavLink to="/security">Security</NavLink>
+                        <NavLink to="/settings">Settings</NavLink>
+                        {tour?.monitor && (
+                            <a
+                                href="/_rig/monitor"
+                                target="_blank"
+                                rel="noreferrer"
+                            >
+                                Monitor ↗
+                            </a>
+                        )}
+                    </nav>
+                    <div className="shell-side">
+                        <Here />
+                        <NotificationBell />
+                        <button className="linkish" onClick={signOut}>
+                            Sign out
+                        </button>
+                    </div>
+                </header>
+                <main className="shell-main">
+                    <Outlet />
+                </main>
+                <Toaster />
+            </div>
+        </PresenceProvider>
     );
 }

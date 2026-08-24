@@ -18,6 +18,7 @@
  * own documentation.
  */
 
+import type { RigPresenceActivity } from "./rig_presence_activity.gen.js";
 import type { TodoRow } from "./todo.gen.js";
 import type { Runtime } from "@rig/client";
 
@@ -121,6 +122,122 @@ export const createRigNotificationRecipientDeletedStream = createCollectionCache
             runtime,
             path: "/api/v1/rig_notification_recipient/_deleted/_stream",
             params: {},
+            getKey: (row) => row.id,
+        })
+);
+
+/**
+ * RigPresenceRow is a RigPresence as a live-sync stream sends it.
+ *
+ * The same row as RigPresence, under different keys. A stream carries what
+ * Postgres printed, so the keys are column names — `created_at` where the API
+ * sends `createdAt` — and the values have been through the corrections in the
+ * streaming runtime, which is what makes a timestamp here the same string the
+ * API would have sent.
+ *
+ * A member is nullable rather than optional: the sync service sends every
+ * column of the projection on every row, with a null where the column is null,
+ * so nothing here is ever absent.
+ */
+export type RigPresenceRow = {
+    /**
+     * The row's identifier. Nothing references it: a client addresses its own
+     * presence by session key, so this identifier never leaves the server
+     * except on the stream.
+     */
+    id: string;
+    /**
+     * The tenant this presence is inside. Every read of this table is filtered
+     * on it, the stream included.
+     */
+    tenant_id: string;
+    /**
+     * Who is present. Read from the credential and never from a request body,
+     * which is what makes "you may only write your own presence" a sentence a
+     * client cannot phrase rather than a rule somebody enforces.
+     */
+    account_id: string;
+    /**
+     * Which tab this is. The browser names itself, and the name points at
+     * nothing: one sign-in can have several tabs, and each is present
+     * separately rather than overwriting the others.
+     */
+    session_key: string;
+    /**
+     * When this tab first appeared. It deliberately does not move on a
+     * heartbeat, so "joined four minutes ago" stays answerable.
+     */
+    created_at: string;
+    /**
+     * The last heartbeat. Not updated_at: this is not when the row was last
+     * edited, it is the whole meaning of the row — whoever is reading decides
+     * whether somebody is here by comparing it against the configured TTL.
+     */
+    seen_at: string;
+    /**
+     * Which part of the application this presence is in, named by the
+     * application: a board, a document, a tenant. It is what a subscriber
+     * narrows the stream by, so it decides how much presence traffic one screen
+     * pays for.
+     */
+    scope: string;
+    /**
+     * The table the row being looked at is in, checked against this API's own
+     * tables. Null means present in the scope without being on a particular
+     * row.
+     */
+    target_table: string | null;
+    /**
+     * Which row. There is deliberately no foreign key, and this is the one
+     * place rig accepts a polymorphic reference: nothing joins to a presence
+     * row, nothing embeds one, and no client filters a list of them — so the
+     * integrity a key would buy has no reader. A presence pointing at a row
+     * somebody just deleted is not a bug, it is a row that will be gone before
+     * anybody looks.
+     */
+    target_id: string | null;
+    /**
+     * Which field, when the application tracks focus that finely. This is what
+     * turns "Simon is on this issue" into "Simon is editing the title".
+     */
+    target_field: string | null;
+    /**
+     * Whether they are looking or typing. Separate from target_field because a
+     * client may know somebody is editing before it knows which control has
+     * focus.
+     */
+    activity: RigPresenceActivity;
+};
+
+/**
+ * The params the RigPresence streams accept.
+ *
+ * They are handed to the scoping function the application wrote, which can only
+ * narrow what a subscriber sees. Nothing here can widen a shape — the tenant
+ * and lifecycle filters are the server's and are not a client's to send.
+ */
+export type RigPresenceStreamParams = {
+    /** Only presence in this part of the application. */
+    scope?: string;
+    /** Only presence on this row. */
+    target_id?: string;
+};
+
+/**
+ * Streams the rows an ordinary read returns: not deleted, and not a snapshot.
+ *
+ * GET /api/v1/rig_presence/_stream
+ *
+ * The same runtime and params always give back the same collection, so the
+ * stream survives a navigation and two callers share one subscription. Safe to
+ * call during render — no memoization needed.
+ */
+export const createRigPresenceStream = createCollectionCache(
+    (runtime: Runtime, params: RigPresenceStreamParams) =>
+        createRigCollection<RigPresenceRow>({
+            runtime,
+            path: "/api/v1/rig_presence/_stream",
+            params: { scope: params.scope, target_id: params.target_id },
             getKey: (row) => row.id,
         })
 );

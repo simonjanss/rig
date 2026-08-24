@@ -666,11 +666,22 @@ in every project, and this package is compiled against them once.
 `@rig/presence` normalises both to camelCase at its boundary, so a `Person` means
 one thing whichever door it came through.
 
+### The parts this package cannot own
+
+Where the handle is built, and where a spot ends, are decisions about your
+component tree rather than about presence — and both have a wrong answer that
+only shows up under a dev server. `examples/linearlite/web/src/presence` is the
+worked version, and [presence.md](presence.md#three-things-the-package-deliberately-does-not-do-for-you)
+says what each one is and why.
+
 ## See also
 
 - [observability.md](observability.md) — the server end of the same trace
 - [electric.md](electric.md) — the shapes a table gets, and how they are scoped
-- [presence.md](presence.md) — what presence costs, and why a subscriber decides
-  who is here
+- [presence.md](presence.md) — what presence costs, why a subscriber decides who
+  is here, and [the three things](presence.md#three-things-the-package-deliberately-does-not-do-for-you)
+  `@rig/presence` leaves to your component tree
 - [generators.md](generators.md) — `go-client` and `ts-client` options
 - [examples/sdk](../examples/sdk) — a program built on two generated clients
+- [examples/linearlite](../examples/linearlite) — all three packages in one
+  React front end

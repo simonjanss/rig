@@ -14,7 +14,20 @@ function initials(name: string): string {
     return parts.map((p) => p[0]?.toUpperCase() ?? "").join("") || "?";
 }
 
-export function Avatar({ accountId }: { accountId: string | null }) {
+/**
+ * Somebody, as initials and a colour.
+ *
+ * `title` overrides the tooltip, which is what presence uses: on the board an
+ * avatar answers "who has this", and in the header it answers "who is here and
+ * what are they doing" — the same circle, a different sentence.
+ */
+export function Avatar({
+    accountId,
+    title,
+}: {
+    accountId: string | null;
+    title?: string;
+}) {
     const members = useMembers();
     if (!accountId)
         return <span className="avatar avatar-empty" title="Unassigned" />;
@@ -24,7 +37,7 @@ export function Avatar({ accountId }: { accountId: string | null }) {
     return (
         <span
             className="avatar"
-            title={name}
+            title={title ?? name}
             style={{ background: `oklch(0.45 0.11 ${hue(accountId)})` }}
         >
             {initials(name)}

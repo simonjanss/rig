@@ -56,12 +56,19 @@ eachcore = @for m in $(CORE_MODULES); do \
 help:
 	@grep -E '^## ' $(MAKEFILE_LIST) | sed 's/^## //' | awk -F': ' '{printf "  \033[36m%-16s\033[0m %s\n", $$1, $$2}'
 
-## check: every check CI runs, cheapest first
-##        This is what the pre-push hook runs. `test-docker` and `examples` need
-##        Docker, and `deps` rewrites go.mod/go.sum before comparing, so run it
-##        on a clean tree or it will report your own work in progress back to
-##        you.
-check: fmt-check vet godoc-check build test deps lint vulncheck ts test-docker examples openapi-lint
+## check: every check, cheapest first
+##        This is what the pre-push hook runs, and it is a superset of CI:
+##        `ts` and `linearlite-web` need pnpm, which no workflow job has, so
+##        the machine that wrote the commit is the only place they run.
+##        `test-docker` and `examples` need Docker, and `deps` rewrites
+##        go.mod/go.sum before comparing, so run it on a clean tree or it will
+##        report your own work in progress back to you.
+##
+##        linearlite-web is in here for a reason worth knowing: presence is the
+##        first feature rig ships whose interesting half is a browser one — a
+##        timer, two window listeners and a teardown — and six of the eight
+##        bugs review found in it were in code nothing else here compiles.
+check: fmt-check vet godoc-check build test deps lint vulncheck ts test-docker examples openapi-lint linearlite-web
 
 ## hooks: install the repository's git hooks into this clone
 ##        Cloning does not bring hooks with it, so this is opt-in and has to be
@@ -227,7 +234,14 @@ ts-build: ts-deps
 	@cd $(TS_DIR) && $(PNPM) -r --filter "@rig/*" run build
 
 ## ts-typecheck: tsc over the packages and over the generator's golden output
-ts-typecheck: ts-deps
+##               Depends on ts-build, and has to: @rig/electric and
+##               @rig/presence resolve @rig/client through node_modules, which
+##               reaches its `exports` and therefore its dist — and dist is
+##               gitignored, so on a fresh clone there is nothing there to
+##               resolve. Without this, `make ts` fails on every new checkout
+##               with seven "cannot find module @rig/client" errors that look
+##               like a broken workspace rather than a missing build.
+ts-typecheck: ts-build
 	@cd $(TS_DIR) && $(PNPM) -r run typecheck
 
 ## ts-test: the TypeScript unit suite
@@ -235,11 +249,12 @@ ts-test: ts-deps
 	@cd $(TS_DIR) && $(PNPM) run test
 
 ## linearlite-web: typecheck, lint and build the linearlite example's front end
-##                 Not part of `examples` on purpose: that target needs Go and
-##                 Docker and deliberately not pnpm, and the Go server tolerates
-##                 a missing web/dist. Self-contained: the app's tsconfig and
-##                 vite config pin every dependency of the aliased ts/ sources
-##                 to the app's own node_modules, so ts/ needs no install.
+##                 Part of `check`, and still not part of `examples`: that
+##                 target needs Go and Docker and deliberately not pnpm, and the
+##                 Go server tolerates a missing web/dist. Self-contained: the
+##                 app's tsconfig and vite config pin every dependency of the
+##                 aliased ts/ sources to the app's own node_modules, so ts/
+##                 needs no install.
 linearlite-web:
 	@cd examples/linearlite/web && $(PNPM) install --frozen-lockfile && \
 		$(PNPM) run lint && $(PNPM) run build
@@ -259,4 +274,4 @@ vulncheck:
 	@GOBIN=$(CURDIR)/bin $(GO) install golang.org/x/vuln/cmd/govulncheck@$(GOVULNCHECK_VERSION)
 	$(eachcore) $(CURDIR)/bin/govulncheck ./...) || exit 1; done
 
-.PHONY: help check hooks build test test-docker examples db-down update-schema update-golden update-examples vet godoc-check fmt fmt-check tidy deps lint openapi-lint vulncheck ts ts-deps ts-build ts-typecheck ts-test ts-fmt ts-fmt-check
+.PHONY: help check hooks build test test-docker examples db-down update-schema update-golden update-examples vet godoc-check fmt fmt-check tidy deps lint openapi-lint vulncheck ts ts-deps ts-build ts-typecheck ts-test ts-fmt ts-fmt-check linearlite-web

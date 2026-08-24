@@ -157,7 +157,11 @@ unreachable from outside — which is the point of the proxy, and why
 like.
 
 `examples/linearlite` is the worked example: a table with shapes, the proxy
-wired in `main.go`, and a front end subscribed from a browser.
+wired in `main.go`, and a front end subscribed from a browser. It is also the one
+place to read a **filled-in scope stub** — `services/rig_presence` — because
+presence is the shape where narrowing is not an optimization: a heartbeat is a row
+change delivered to every subscriber, so the scope is what decides whether the
+feature is affordable at all. See [presence.md](presence.md#scope-and-what-presence-costs).
 
 ## Subscribing to one
 

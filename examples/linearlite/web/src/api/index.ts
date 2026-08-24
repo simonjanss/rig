@@ -26,6 +26,7 @@ export * from "./rig_notification_digest.gen.js";
 export * from "./rig_notification_setting.gen.js";
 export * from "./rig_notification_setting_client.gen.js";
 export * from "./rig_notification_setting_input.gen.js";
+export * from "./rig_presence_activity.gen.js";
 export * from "./todo.gen.js";
 export * from "./todo_attachment.gen.js";
 export * from "./todo_attachment_client.gen.js";

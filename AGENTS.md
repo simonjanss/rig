@@ -23,6 +23,7 @@ make vulncheck   # govulncheck, likewise
 make ts          # the TypeScript workspace; needs pnpm
 make test-docker # needs Docker
 make examples    # needs Docker; a few minutes on its own
+make linearlite-web  # the one example front end anything compiles; needs pnpm
 ```
 
 `make update-examples` is not in `make check`: it writes, and a check that
@@ -183,6 +184,14 @@ also the only package with a second entry point (`@rig/presence/react`, behind a
 optional `react` peer dependency), so that a project which does not use React
 never has `react` reachable from the module it imports.
 
+That last point has a consequence for anything that aliases these sources rather
+than consuming a published build. `examples/linearlite/web` does, and it therefore
+pins `react` to its own copy by absolute path the way it already pins the sync
+stack — because an import resolved out of `ts/` looks for its dependencies there,
+and `make linearlite-web` never installs `ts/`. The rule the app's vite config
+states is the general one: **every dependency of an aliased `ts/` source is named
+in the app.** A fifth package that imports something new needs a line there.
+
 `make ts` is the whole of it: install, Prettier, `tsc`, and the unit suite. It
 needs pnpm on the machine and nothing else.
 
@@ -198,10 +207,18 @@ golden files and by nothing else.
 generator emits the bytes it emitted last time, which stays true after a runtime
 signature moves underneath it. `typecheck-fixture` is what closes that: its
 `tsconfig.json` includes the golden directories and `examples/todo/client-ts`
-directly — not copies — and maps `@rig/client` and `@rig/electric` to their
-`src`, so it checks what the packages say now rather than what the last build
-said. A new golden goes in that list, or the emitter can start writing something
-that does not compile and every check will stay green.
+directly — not copies — and maps `@rig/client`, `@rig/electric` and
+`@rig/presence` to their `src`, so it checks what the packages say now rather than
+what the last build said. A new golden goes in that list, or the emitter can start
+writing something that does not compile and every check will stay green.
+
+**And a fixture that never mounts anything cannot check a package that runs on
+its own.** `@rig/presence` owns a timer and two window listeners, and the
+mistakes that surface there are about *where in a component tree* it is built:
+six of the eight bugs review found in it were in the browser half. That is why
+`make linearlite-web` is in `make check` — `examples/linearlite/web` is the one
+front end in the repository that anything compiles, and `web/src/presence` is
+where the three decisions the package cannot make for you are written down.
 
 **`allowBuilds` in `pnpm-workspace.yaml` is checked in on purpose.** pnpm blocks
 install scripts by default and fails the install rather than warning once a
@@ -260,12 +277,17 @@ deterministic output, and a compile-only example is a weaker promise than none.
 
 ## CI
 
-`.github/workflows/rig.yaml` runs all of the above on every push to `main`, and
-on nothing else. Branches and pull requests are covered by the pre-push hook in
-`.githooks/`, which runs the same `make check` on the machine that wrote the
-commit — so a break is caught before the push rather than an hour later in a
-runner. Nothing in the workflow is unique to CI: each job is one of the make
-targets, so a check that fails there fails the same way locally.
+`.github/workflows/rig.yaml` runs the Go half of the above on every push to
+`main`, and on nothing else. Branches and pull requests are covered by the
+pre-push hook in `.githooks/`, which runs the whole of `make check` on the machine
+that wrote the commit — so a break is caught before the push rather than an hour
+later in a runner. Nothing in the workflow is unique to CI: each job is one of the
+make targets, so a check that fails there fails the same way locally.
+
+**The two pnpm targets are the exception, and it is a real gap.** No job installs
+node, so `make ts` and `make linearlite-web` run on the pushing machine and
+nowhere else. A push with `--no-verify` therefore skips every TypeScript check in
+the repository, including the only thing that compiles a front end.
 
 A red `main` therefore means the hook was skipped, or was never installed:
 `make hooks`.
