@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 	pgx "github.com/jackc/pgx/v5"
 	"github.com/simonjanss/rig/examples/linearlite/internal/model"
+	"github.com/simonjanss/rig/observe"
 	"github.com/simonjanss/rig/runtime/dbhook"
 	"github.com/simonjanss/rig/runtime/dbx"
 	"github.com/simonjanss/rig/runtime/query"
@@ -424,6 +425,15 @@ type rigNotificationRecipientRepo struct {
 
 var _ RigNotificationRecipientRepository = (*rigNotificationRecipientRepo)(nil)
 
+// trace runs one stage of a write inside a span of its own.
+//
+// The stage is a callback rather than something bracketed by two calls,
+// because that is what makes the span a function's: it is opened and ended in
+// one place, and nothing at the call site is holding one.
+func (r *rigNotificationRecipientRepo) trace(ctx context.Context, name string, f func(context.Context) error) error {
+	return observe.Trace(ctx, r.db.tracer, name, f)
+}
+
 const rigNotificationRecipientRepoSelect = "rig_notification_recipient.id, rig_notification_recipient.tenant_id, rig_notification_recipient.notification_id, rig_notification_recipient.account_id, rig_notification_recipient.created_at, rig_notification_recipient.updated_at, rig_notification_recipient.deleted_at, rig_notification_recipient.deleted_by_account_id, rig_notification_recipient.kind, rig_notification_recipient.group_key, rig_notification_recipient.event_count, rig_notification_recipient.read_at"
 
 // scanRigNotificationRecipient reads one row in the order
@@ -442,6 +452,9 @@ func scanRigNotificationRecipient(row pgx.Row) (*model.RigNotificationRecipient,
 
 // Get implements RigNotificationRecipientRepository.
 func (r *rigNotificationRecipientRepo) Get(ctx context.Context, id uuid.UUID, opts ...readopt.Option) (*model.RigNotificationRecipient, error) {
+	ctx, span := r.db.tracer.Start(ctx, "repository.RigNotificationRecipient.Get")
+	defer span.End()
+
 	cfg, err := readopt.Apply(opts)
 	if err != nil {
 		return nil, err
@@ -480,6 +493,9 @@ func (r *rigNotificationRecipientRepo) Get(ctx context.Context, id uuid.UUID, op
 
 // List implements RigNotificationRecipientRepository.
 func (r *rigNotificationRecipientRepo) List(ctx context.Context, f model.RigNotificationRecipientFilter, page model.RigNotificationRecipientPage, opts ...readopt.Option) ([]*model.RigNotificationRecipient, int64, error) {
+	ctx, span := r.db.tracer.Start(ctx, "repository.RigNotificationRecipient.List")
+	defer span.End()
+
 	return r.list(ctx, f, page, opts)
 }
 
@@ -594,6 +610,9 @@ var RigNotificationRecipientDefaultOrder = []query.Order{{Table: "rig_notificati
 
 // Create implements RigNotificationRecipientRepository.
 func (r *rigNotificationRecipientRepo) Create(ctx context.Context, in dbhook.Create[model.RigNotificationRecipientCreateInput, model.RigNotificationRecipient]) (*model.RigNotificationRecipient, error) {
+	ctx, span := r.db.tracer.Start(ctx, "repository.RigNotificationRecipient.Create")
+	defer span.End()
+
 	// Who is asking, first of all. A write from a request carrying no identity is
 	// refused here — before a rule runs, before a column notices — which is
 	// what lets every hook below take the claims as a value rather than something
@@ -623,7 +642,9 @@ func (r *rigNotificationRecipientRepo) Create(ctx context.Context, in dbhook.Cre
 	// across a rule that may call out to another service would be a worse trade
 	// than the one it buys.
 	if in.Hooks.Validator != nil {
-		if err := in.Hooks.Validator.RunCreate(ctx, claims, &in.Input); err != nil {
+		if err := r.trace(ctx, "repository.RigNotificationRecipient.Create.Validator", func(ctx context.Context) error {
+			return in.Hooks.Validator.RunCreate(ctx, claims, &in.Input)
+		}); err != nil {
 			return nil, err
 		}
 	}
@@ -645,7 +666,9 @@ func (r *rigNotificationRecipientRepo) Create(ctx context.Context, in dbhook.Cre
 	var m *model.RigNotificationRecipient
 	err = dbx.InTxIf(ctx, r.db.pool, r.db.connFor(ctx), needsTx, func(ctx context.Context, tx dbx.Conn) error {
 		if in.Hooks.Before != nil {
-			if err := in.Hooks.Before(ctx, claims, &in.Input); err != nil {
+			if err := r.trace(ctx, "repository.RigNotificationRecipient.Create.Before", func(ctx context.Context) error {
+				return in.Hooks.Before(ctx, claims, &in.Input)
+			}); err != nil {
 				return err
 			}
 		}
@@ -662,7 +685,9 @@ func (r *rigNotificationRecipientRepo) Create(ctx context.Context, in dbhook.Cre
 		m = created
 
 		if in.Hooks.After != nil {
-			if err := in.Hooks.After(ctx, claims, m); err != nil {
+			if err := r.trace(ctx, "repository.RigNotificationRecipient.Create.After", func(ctx context.Context) error {
+				return in.Hooks.After(ctx, claims, m)
+			}); err != nil {
 				return err
 			}
 		}
@@ -677,7 +702,12 @@ func (r *rigNotificationRecipientRepo) Create(ctx context.Context, in dbhook.Cre
 		// this runs, and reaching into a context for them then is reaching into one
 		// that has been cancelled.
 		done, who := in.Hooks.AfterCommit, claims
-		dbx.AfterCommit(ctx, func() { done(ctx, who, m) })
+		dbx.AfterCommit(ctx, func() {
+			ctx, span := r.db.tracer.Start(ctx, "repository.RigNotificationRecipient.Create.AfterCommit")
+			defer span.End()
+
+			done(ctx, who, m)
+		})
 	}
 
 	return m, nil
@@ -685,6 +715,9 @@ func (r *rigNotificationRecipientRepo) Create(ctx context.Context, in dbhook.Cre
 
 // Update implements RigNotificationRecipientRepository.
 func (r *rigNotificationRecipientRepo) Update(ctx context.Context, id uuid.UUID, in dbhook.Update[model.RigNotificationRecipientUpdateInput, model.RigNotificationRecipient]) (*model.RigNotificationRecipient, error) {
+	ctx, span := r.db.tracer.Start(ctx, "repository.RigNotificationRecipient.Update")
+	defer span.End()
+
 	in.Input.Normalize()
 
 	claims, err := tenancy.FromContext(ctx)
@@ -709,7 +742,9 @@ func (r *rigNotificationRecipientRepo) Update(ctx context.Context, id uuid.UUID,
 		// reason: a hook that ran after validation could write a value nothing had
 		// checked.
 		if in.Hooks.Before != nil {
-			if err := in.Hooks.Before(ctx, claims, &in.Input, prev); err != nil {
+			if err := r.trace(ctx, "repository.RigNotificationRecipient.Update.Before", func(ctx context.Context) error {
+				return in.Hooks.Before(ctx, claims, &in.Input, prev)
+			}); err != nil {
 				return err
 			}
 		}
@@ -723,7 +758,9 @@ func (r *rigNotificationRecipientRepo) Update(ctx context.Context, id uuid.UUID,
 		}
 
 		if in.Hooks.Validator != nil {
-			if err := in.Hooks.Validator.RunUpdate(ctx, claims, &in.Input, prev); err != nil {
+			if err := r.trace(ctx, "repository.RigNotificationRecipient.Update.Validator", func(ctx context.Context) error {
+				return in.Hooks.Validator.RunUpdate(ctx, claims, &in.Input, prev)
+			}); err != nil {
 				return err
 			}
 		}
@@ -776,7 +813,9 @@ func (r *rigNotificationRecipientRepo) Update(ctx context.Context, id uuid.UUID,
 		}
 
 		if in.Hooks.After != nil {
-			if err := in.Hooks.After(ctx, claims, updated, prev); err != nil {
+			if err := r.trace(ctx, "repository.RigNotificationRecipient.Update.After", func(ctx context.Context) error {
+				return in.Hooks.After(ctx, claims, updated, prev)
+			}); err != nil {
 				return err
 			}
 		}
@@ -791,7 +830,12 @@ func (r *rigNotificationRecipientRepo) Update(ctx context.Context, id uuid.UUID,
 		// this runs, and reaching into a context for them then is reaching into one
 		// that has been cancelled.
 		done, who := in.Hooks.AfterCommit, claims
-		dbx.AfterCommit(ctx, func() { done(ctx, who, updated, prev) })
+		dbx.AfterCommit(ctx, func() {
+			ctx, span := r.db.tracer.Start(ctx, "repository.RigNotificationRecipient.Update.AfterCommit")
+			defer span.End()
+
+			done(ctx, who, updated, prev)
+		})
 	}
 
 	return updated, nil
@@ -799,6 +843,9 @@ func (r *rigNotificationRecipientRepo) Update(ctx context.Context, id uuid.UUID,
 
 // Delete implements RigNotificationRecipientRepository.
 func (r *rigNotificationRecipientRepo) Delete(ctx context.Context, in dbhook.Delete[model.RigNotificationRecipientDeleteInput, model.RigNotificationRecipient]) error {
+	ctx, span := r.db.tracer.Start(ctx, "repository.RigNotificationRecipient.Delete")
+	defer span.End()
+
 	claims, err := tenancy.FromContext(ctx)
 	if err != nil {
 		return err
@@ -820,7 +867,9 @@ func (r *rigNotificationRecipientRepo) Delete(ctx context.Context, in dbhook.Del
 		}
 
 		if in.Hooks.Before != nil {
-			if err := in.Hooks.Before(ctx, claims, &in.Input, prev); err != nil {
+			if err := r.trace(ctx, "repository.RigNotificationRecipient.Delete.Before", func(ctx context.Context) error {
+				return in.Hooks.Before(ctx, claims, &in.Input, prev)
+			}); err != nil {
 				return err
 			}
 		}
@@ -830,7 +879,9 @@ func (r *rigNotificationRecipientRepo) Delete(ctx context.Context, in dbhook.Del
 				return writeError(err, "rig_notification_recipient")
 			}
 			if in.Hooks.After != nil {
-				if err := in.Hooks.After(ctx, claims, prev); err != nil {
+				if err := r.trace(ctx, "repository.RigNotificationRecipient.Delete.After", func(ctx context.Context) error {
+					return in.Hooks.After(ctx, claims, prev)
+				}); err != nil {
 					return err
 				}
 			}
@@ -850,7 +901,9 @@ func (r *rigNotificationRecipientRepo) Delete(ctx context.Context, in dbhook.Del
 			return writeError(err, "rig_notification_recipient")
 		}
 		if in.Hooks.After != nil {
-			if err := in.Hooks.After(ctx, claims, prev); err != nil {
+			if err := r.trace(ctx, "repository.RigNotificationRecipient.Delete.After", func(ctx context.Context) error {
+				return in.Hooks.After(ctx, claims, prev)
+			}); err != nil {
 				return err
 			}
 		}
@@ -865,7 +918,12 @@ func (r *rigNotificationRecipientRepo) Delete(ctx context.Context, in dbhook.Del
 		// this runs, and reaching into a context for them then is reaching into one
 		// that has been cancelled.
 		done, who := in.Hooks.AfterCommit, claims
-		dbx.AfterCommit(ctx, func() { done(ctx, who, prev) })
+		dbx.AfterCommit(ctx, func() {
+			ctx, span := r.db.tracer.Start(ctx, "repository.RigNotificationRecipient.Delete.AfterCommit")
+			defer span.End()
+
+			done(ctx, who, prev)
+		})
 	}
 
 	return nil
@@ -879,6 +937,9 @@ func RigNotificationRecipientRestoreCutoff() time.Time {
 
 // Restore implements RigNotificationRecipientRepository.
 func (r *rigNotificationRecipientRepo) Restore(ctx context.Context, id uuid.UUID, in dbhook.Restore[model.RigNotificationRecipientUpdateInput, model.RigNotificationRecipient]) (*model.RigNotificationRecipient, error) {
+	ctx, span := r.db.tracer.Start(ctx, "repository.RigNotificationRecipient.Restore")
+	defer span.End()
+
 	claims, err := tenancy.FromContext(ctx)
 	if err != nil {
 		return nil, err
@@ -909,7 +970,9 @@ func (r *rigNotificationRecipientRepo) Restore(ctx context.Context, id uuid.UUID
 		// taken since gets changed on the way in. Returning an error refuses the
 		// restore instead.
 		if in.Hooks.Before != nil {
-			if err := in.Hooks.Before(ctx, claims, &in.Input, prev); err != nil {
+			if err := r.trace(ctx, "repository.RigNotificationRecipient.Restore.Before", func(ctx context.Context) error {
+				return in.Hooks.Before(ctx, claims, &in.Input, prev)
+			}); err != nil {
 				return err
 			}
 		}
@@ -918,7 +981,9 @@ func (r *rigNotificationRecipientRepo) Restore(ctx context.Context, id uuid.UUID
 		// fields it touched: the row was not live, so nothing about it has been
 		// checked against the world it is returning to.
 		if in.Hooks.Validator != nil {
-			if err := in.Hooks.Validator.RunRestore(ctx, claims, &in.Input, prev); err != nil {
+			if err := r.trace(ctx, "repository.RigNotificationRecipient.Restore.Validator", func(ctx context.Context) error {
+				return in.Hooks.Validator.RunRestore(ctx, claims, &in.Input, prev)
+			}); err != nil {
 				return err
 			}
 		}
@@ -969,7 +1034,9 @@ func (r *rigNotificationRecipientRepo) Restore(ctx context.Context, id uuid.UUID
 		}
 
 		if in.Hooks.After != nil {
-			if err := in.Hooks.After(ctx, claims, restored, prev); err != nil {
+			if err := r.trace(ctx, "repository.RigNotificationRecipient.Restore.After", func(ctx context.Context) error {
+				return in.Hooks.After(ctx, claims, restored, prev)
+			}); err != nil {
 				return err
 			}
 		}
@@ -984,7 +1051,12 @@ func (r *rigNotificationRecipientRepo) Restore(ctx context.Context, id uuid.UUID
 		// this runs, and reaching into a context for them then is reaching into one
 		// that has been cancelled.
 		done, who := in.Hooks.AfterCommit, claims
-		dbx.AfterCommit(ctx, func() { done(ctx, who, restored, prev) })
+		dbx.AfterCommit(ctx, func() {
+			ctx, span := r.db.tracer.Start(ctx, "repository.RigNotificationRecipient.Restore.AfterCommit")
+			defer span.End()
+
+			done(ctx, who, restored, prev)
+		})
 	}
 
 	return restored, nil
@@ -992,6 +1064,9 @@ func (r *rigNotificationRecipientRepo) Restore(ctx context.Context, id uuid.UUID
 
 // ListDeleted returns retired rows still inside the restore window.
 func (r *rigNotificationRecipientRepo) ListDeleted(ctx context.Context, f model.RigNotificationRecipientFilter, page model.RigNotificationRecipientPage, opts ...readopt.Option) ([]*model.RigNotificationRecipient, int64, error) {
+	ctx, span := r.db.tracer.Start(ctx, "repository.RigNotificationRecipient.ListDeleted")
+	defer span.End()
+
 	// The lifecycle option is forced and the caller's are kept: which rows the
 	// trash holds is not up for discussion, and how wide a view of it the caller
 	// gets still is.

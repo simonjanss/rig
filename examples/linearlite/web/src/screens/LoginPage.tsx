@@ -63,6 +63,9 @@ export function LoginPage() {
                 <button className="primary" disabled={busy}>
                     {busy ? "Signing in…" : "Sign in"}
                 </button>
+                <Link className="linkish" to="/forgot">
+                    Forgot your password?
+                </Link>
                 <p className="auth-hint">
                     Seeded: <code>demo@linearlite.dev</code> /{" "}
                     <code>correct horse battery staple</code>

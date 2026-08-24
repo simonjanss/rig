@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 	pgx "github.com/jackc/pgx/v5"
 	"github.com/simonjanss/rig/examples/linearlite/internal/model"
+	"github.com/simonjanss/rig/observe"
 	"github.com/simonjanss/rig/runtime/dbhook"
 	"github.com/simonjanss/rig/runtime/dbx"
 	"github.com/simonjanss/rig/runtime/query"
@@ -544,6 +545,15 @@ type todoAttachmentRepo struct {
 
 var _ TodoAttachmentRepository = (*todoAttachmentRepo)(nil)
 
+// trace runs one stage of a write inside a span of its own.
+//
+// The stage is a callback rather than something bracketed by two calls,
+// because that is what makes the span a function's: it is opened and ended in
+// one place, and nothing at the call site is holding one.
+func (r *todoAttachmentRepo) trace(ctx context.Context, name string, f func(context.Context) error) error {
+	return observe.Trace(ctx, r.db.tracer, name, f)
+}
+
 const todoAttachmentRepoSelect = "todo_attachment.id, todo_attachment.tenant_id, todo_attachment.todo_id, todo_attachment.attachment_file_id, todo_attachment.caption, todo_attachment.created_at, todo_attachment.created_by_account_id, todo_attachment.updated_at, todo_attachment.updated_by_account_id, todo_attachment.deleted_at, todo_attachment.deleted_by_account_id"
 
 // scanTodoAttachment reads one row in the order todoAttachmentRepoSelect
@@ -561,6 +571,9 @@ func scanTodoAttachment(row pgx.Row) (*model.TodoAttachment, error) {
 
 // Get implements TodoAttachmentRepository.
 func (r *todoAttachmentRepo) Get(ctx context.Context, id uuid.UUID, opts ...readopt.Option) (*model.TodoAttachment, error) {
+	ctx, span := r.db.tracer.Start(ctx, "repository.TodoAttachment.Get")
+	defer span.End()
+
 	cfg, err := readopt.Apply(opts)
 	if err != nil {
 		return nil, err
@@ -591,6 +604,9 @@ func (r *todoAttachmentRepo) Get(ctx context.Context, id uuid.UUID, opts ...read
 
 // List implements TodoAttachmentRepository.
 func (r *todoAttachmentRepo) List(ctx context.Context, f model.TodoAttachmentFilter, page model.TodoAttachmentPage, opts ...readopt.Option) ([]*model.TodoAttachment, int64, error) {
+	ctx, span := r.db.tracer.Start(ctx, "repository.TodoAttachment.List")
+	defer span.End()
+
 	return r.list(ctx, f, page, opts)
 }
 
@@ -693,6 +709,9 @@ var TodoAttachmentDefaultOrder = []query.Order{{Table: "todo_attachment", Column
 
 // Create implements TodoAttachmentRepository.
 func (r *todoAttachmentRepo) Create(ctx context.Context, in dbhook.Create[model.TodoAttachmentCreateInput, model.TodoAttachment]) (*model.TodoAttachment, error) {
+	ctx, span := r.db.tracer.Start(ctx, "repository.TodoAttachment.Create")
+	defer span.End()
+
 	// Who is asking, first of all. A write from a request carrying no identity is
 	// refused here — before a rule runs, before a column notices — which is
 	// what lets every hook below take the claims as a value rather than something
@@ -722,7 +741,9 @@ func (r *todoAttachmentRepo) Create(ctx context.Context, in dbhook.Create[model.
 	// across a rule that may call out to another service would be a worse trade
 	// than the one it buys.
 	if in.Hooks.Validator != nil {
-		if err := in.Hooks.Validator.RunCreate(ctx, claims, &in.Input); err != nil {
+		if err := r.trace(ctx, "repository.TodoAttachment.Create.Validator", func(ctx context.Context) error {
+			return in.Hooks.Validator.RunCreate(ctx, claims, &in.Input)
+		}); err != nil {
 			return nil, err
 		}
 	}
@@ -746,7 +767,9 @@ func (r *todoAttachmentRepo) Create(ctx context.Context, in dbhook.Create[model.
 	var m *model.TodoAttachment
 	err = dbx.InTxIf(ctx, r.db.pool, r.db.connFor(ctx), needsTx, func(ctx context.Context, tx dbx.Conn) error {
 		if in.Hooks.Before != nil {
-			if err := in.Hooks.Before(ctx, claims, &in.Input); err != nil {
+			if err := r.trace(ctx, "repository.TodoAttachment.Create.Before", func(ctx context.Context) error {
+				return in.Hooks.Before(ctx, claims, &in.Input)
+			}); err != nil {
 				return err
 			}
 		}
@@ -776,7 +799,9 @@ func (r *todoAttachmentRepo) Create(ctx context.Context, in dbhook.Create[model.
 		m = created
 
 		if in.Hooks.After != nil {
-			if err := in.Hooks.After(ctx, claims, m); err != nil {
+			if err := r.trace(ctx, "repository.TodoAttachment.Create.After", func(ctx context.Context) error {
+				return in.Hooks.After(ctx, claims, m)
+			}); err != nil {
 				return err
 			}
 		}
@@ -791,7 +816,12 @@ func (r *todoAttachmentRepo) Create(ctx context.Context, in dbhook.Create[model.
 		// this runs, and reaching into a context for them then is reaching into one
 		// that has been cancelled.
 		done, who := in.Hooks.AfterCommit, claims
-		dbx.AfterCommit(ctx, func() { done(ctx, who, m) })
+		dbx.AfterCommit(ctx, func() {
+			ctx, span := r.db.tracer.Start(ctx, "repository.TodoAttachment.Create.AfterCommit")
+			defer span.End()
+
+			done(ctx, who, m)
+		})
 	}
 
 	return m, nil
@@ -799,6 +829,9 @@ func (r *todoAttachmentRepo) Create(ctx context.Context, in dbhook.Create[model.
 
 // Update implements TodoAttachmentRepository.
 func (r *todoAttachmentRepo) Update(ctx context.Context, id uuid.UUID, in dbhook.Update[model.TodoAttachmentUpdateInput, model.TodoAttachment]) (*model.TodoAttachment, error) {
+	ctx, span := r.db.tracer.Start(ctx, "repository.TodoAttachment.Update")
+	defer span.End()
+
 	in.Input.Normalize()
 
 	claims, err := tenancy.FromContext(ctx)
@@ -823,7 +856,9 @@ func (r *todoAttachmentRepo) Update(ctx context.Context, id uuid.UUID, in dbhook
 		// reason: a hook that ran after validation could write a value nothing had
 		// checked.
 		if in.Hooks.Before != nil {
-			if err := in.Hooks.Before(ctx, claims, &in.Input, prev); err != nil {
+			if err := r.trace(ctx, "repository.TodoAttachment.Update.Before", func(ctx context.Context) error {
+				return in.Hooks.Before(ctx, claims, &in.Input, prev)
+			}); err != nil {
 				return err
 			}
 		}
@@ -837,7 +872,9 @@ func (r *todoAttachmentRepo) Update(ctx context.Context, id uuid.UUID, in dbhook
 		}
 
 		if in.Hooks.Validator != nil {
-			if err := in.Hooks.Validator.RunUpdate(ctx, claims, &in.Input, prev); err != nil {
+			if err := r.trace(ctx, "repository.TodoAttachment.Update.Validator", func(ctx context.Context) error {
+				return in.Hooks.Validator.RunUpdate(ctx, claims, &in.Input, prev)
+			}); err != nil {
 				return err
 			}
 		}
@@ -892,7 +929,9 @@ func (r *todoAttachmentRepo) Update(ctx context.Context, id uuid.UUID, in dbhook
 		}
 
 		if in.Hooks.After != nil {
-			if err := in.Hooks.After(ctx, claims, updated, prev); err != nil {
+			if err := r.trace(ctx, "repository.TodoAttachment.Update.After", func(ctx context.Context) error {
+				return in.Hooks.After(ctx, claims, updated, prev)
+			}); err != nil {
 				return err
 			}
 		}
@@ -907,7 +946,12 @@ func (r *todoAttachmentRepo) Update(ctx context.Context, id uuid.UUID, in dbhook
 		// this runs, and reaching into a context for them then is reaching into one
 		// that has been cancelled.
 		done, who := in.Hooks.AfterCommit, claims
-		dbx.AfterCommit(ctx, func() { done(ctx, who, updated, prev) })
+		dbx.AfterCommit(ctx, func() {
+			ctx, span := r.db.tracer.Start(ctx, "repository.TodoAttachment.Update.AfterCommit")
+			defer span.End()
+
+			done(ctx, who, updated, prev)
+		})
 	}
 
 	return updated, nil
@@ -915,6 +959,9 @@ func (r *todoAttachmentRepo) Update(ctx context.Context, id uuid.UUID, in dbhook
 
 // Delete implements TodoAttachmentRepository.
 func (r *todoAttachmentRepo) Delete(ctx context.Context, in dbhook.Delete[model.TodoAttachmentDeleteInput, model.TodoAttachment]) error {
+	ctx, span := r.db.tracer.Start(ctx, "repository.TodoAttachment.Delete")
+	defer span.End()
+
 	claims, err := tenancy.FromContext(ctx)
 	if err != nil {
 		return err
@@ -936,7 +983,9 @@ func (r *todoAttachmentRepo) Delete(ctx context.Context, in dbhook.Delete[model.
 		}
 
 		if in.Hooks.Before != nil {
-			if err := in.Hooks.Before(ctx, claims, &in.Input, prev); err != nil {
+			if err := r.trace(ctx, "repository.TodoAttachment.Delete.Before", func(ctx context.Context) error {
+				return in.Hooks.Before(ctx, claims, &in.Input, prev)
+			}); err != nil {
 				return err
 			}
 		}
@@ -946,7 +995,9 @@ func (r *todoAttachmentRepo) Delete(ctx context.Context, in dbhook.Delete[model.
 				return writeError(err, "todo_attachment")
 			}
 			if in.Hooks.After != nil {
-				if err := in.Hooks.After(ctx, claims, prev); err != nil {
+				if err := r.trace(ctx, "repository.TodoAttachment.Delete.After", func(ctx context.Context) error {
+					return in.Hooks.After(ctx, claims, prev)
+				}); err != nil {
 					return err
 				}
 			}
@@ -966,7 +1017,9 @@ func (r *todoAttachmentRepo) Delete(ctx context.Context, in dbhook.Delete[model.
 			return writeError(err, "todo_attachment")
 		}
 		if in.Hooks.After != nil {
-			if err := in.Hooks.After(ctx, claims, prev); err != nil {
+			if err := r.trace(ctx, "repository.TodoAttachment.Delete.After", func(ctx context.Context) error {
+				return in.Hooks.After(ctx, claims, prev)
+			}); err != nil {
 				return err
 			}
 		}
@@ -981,7 +1034,12 @@ func (r *todoAttachmentRepo) Delete(ctx context.Context, in dbhook.Delete[model.
 		// this runs, and reaching into a context for them then is reaching into one
 		// that has been cancelled.
 		done, who := in.Hooks.AfterCommit, claims
-		dbx.AfterCommit(ctx, func() { done(ctx, who, prev) })
+		dbx.AfterCommit(ctx, func() {
+			ctx, span := r.db.tracer.Start(ctx, "repository.TodoAttachment.Delete.AfterCommit")
+			defer span.End()
+
+			done(ctx, who, prev)
+		})
 	}
 
 	return nil
@@ -995,6 +1053,9 @@ func TodoAttachmentRestoreCutoff() time.Time {
 
 // Restore implements TodoAttachmentRepository.
 func (r *todoAttachmentRepo) Restore(ctx context.Context, id uuid.UUID, in dbhook.Restore[model.TodoAttachmentUpdateInput, model.TodoAttachment]) (*model.TodoAttachment, error) {
+	ctx, span := r.db.tracer.Start(ctx, "repository.TodoAttachment.Restore")
+	defer span.End()
+
 	claims, err := tenancy.FromContext(ctx)
 	if err != nil {
 		return nil, err
@@ -1025,7 +1086,9 @@ func (r *todoAttachmentRepo) Restore(ctx context.Context, id uuid.UUID, in dbhoo
 		// taken since gets changed on the way in. Returning an error refuses the
 		// restore instead.
 		if in.Hooks.Before != nil {
-			if err := in.Hooks.Before(ctx, claims, &in.Input, prev); err != nil {
+			if err := r.trace(ctx, "repository.TodoAttachment.Restore.Before", func(ctx context.Context) error {
+				return in.Hooks.Before(ctx, claims, &in.Input, prev)
+			}); err != nil {
 				return err
 			}
 		}
@@ -1034,7 +1097,9 @@ func (r *todoAttachmentRepo) Restore(ctx context.Context, id uuid.UUID, in dbhoo
 		// fields it touched: the row was not live, so nothing about it has been
 		// checked against the world it is returning to.
 		if in.Hooks.Validator != nil {
-			if err := in.Hooks.Validator.RunRestore(ctx, claims, &in.Input, prev); err != nil {
+			if err := r.trace(ctx, "repository.TodoAttachment.Restore.Validator", func(ctx context.Context) error {
+				return in.Hooks.Validator.RunRestore(ctx, claims, &in.Input, prev)
+			}); err != nil {
 				return err
 			}
 		}
@@ -1075,7 +1140,9 @@ func (r *todoAttachmentRepo) Restore(ctx context.Context, id uuid.UUID, in dbhoo
 		}
 
 		if in.Hooks.After != nil {
-			if err := in.Hooks.After(ctx, claims, restored, prev); err != nil {
+			if err := r.trace(ctx, "repository.TodoAttachment.Restore.After", func(ctx context.Context) error {
+				return in.Hooks.After(ctx, claims, restored, prev)
+			}); err != nil {
 				return err
 			}
 		}
@@ -1090,7 +1157,12 @@ func (r *todoAttachmentRepo) Restore(ctx context.Context, id uuid.UUID, in dbhoo
 		// this runs, and reaching into a context for them then is reaching into one
 		// that has been cancelled.
 		done, who := in.Hooks.AfterCommit, claims
-		dbx.AfterCommit(ctx, func() { done(ctx, who, restored, prev) })
+		dbx.AfterCommit(ctx, func() {
+			ctx, span := r.db.tracer.Start(ctx, "repository.TodoAttachment.Restore.AfterCommit")
+			defer span.End()
+
+			done(ctx, who, restored, prev)
+		})
 	}
 
 	return restored, nil
@@ -1098,6 +1170,9 @@ func (r *todoAttachmentRepo) Restore(ctx context.Context, id uuid.UUID, in dbhoo
 
 // ListDeleted returns retired rows still inside the restore window.
 func (r *todoAttachmentRepo) ListDeleted(ctx context.Context, f model.TodoAttachmentFilter, page model.TodoAttachmentPage, opts ...readopt.Option) ([]*model.TodoAttachment, int64, error) {
+	ctx, span := r.db.tracer.Start(ctx, "repository.TodoAttachment.ListDeleted")
+	defer span.End()
+
 	// The lifecycle option is forced and the caller's are kept: which rows the
 	// trash holds is not up for discussion, and how wide a view of it the caller
 	// gets still is.

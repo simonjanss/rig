@@ -304,7 +304,8 @@
 /* ---- trash / settings shared list look ---- */
 
 .trash,
-.settings {
+.settings,
+.outbox {
     max-width: 640px;
     margin: 0 auto;
     padding: 28px 18px;
@@ -312,7 +313,6 @@
 
 .trash-row,
 .settings-key,
-.version,
 .attachment {
     display: flex;
     justify-content: space-between;
@@ -338,6 +338,8 @@
 }
 
 .trash-empty,
+.outbox-empty,
+.outbox-sub,
 .detail-quiet {
     color: var(--text-dim);
     font-size: 13px;
@@ -441,8 +443,87 @@
     gap: 12px;
 }
 
+/* ---- version history ---- */
+
+.version {
+    border: 1px solid var(--border);
+    border-radius: var(--radius-small);
+    background: var(--bg-raised);
+    margin-bottom: 8px;
+}
+
+.version-open {
+    border-color: var(--border-strong);
+}
+
+.version-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 12px;
+}
+
+/* The whole header line is the control, so opening a version is one target
+   rather than a caret somebody has to aim at. */
+.version-toggle {
+    flex: 1;
+    display: grid;
+    grid-template-columns: 14px 1fr;
+    gap: 2px 6px;
+    text-align: left;
+    min-width: 0;
+}
+
+.version-caret {
+    grid-row: span 2;
+    color: var(--text-faint);
+    line-height: 1.4;
+}
+
 .version-title {
     font-weight: 500;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.version-body {
+    margin: 0;
+    padding: 4px 12px 12px 32px;
+    display: grid;
+    gap: 6px;
+}
+
+.version-field {
+    display: grid;
+    grid-template-columns: 84px 1fr;
+    gap: 10px;
+    font-size: 13px;
+    align-items: baseline;
+}
+
+.version-field dt {
+    color: var(--text-faint);
+}
+
+.version-field dd {
+    margin: 0;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+/* What this edit touched. Marked rather than shown as old → new: the previous
+   value is the entry directly below, which is the point of a list. */
+.version-field-changed dd {
+    color: var(--text);
+    border-left: 2px solid var(--accent);
+    padding-left: 8px;
+    margin-left: -10px;
+}
+
+.version-field:not(.version-field-changed) dd {
+    color: var(--text-dim);
 }
 
 .filebtn {
@@ -472,9 +553,18 @@
     padding: 1px 5px;
 }
 
-.bell-scrim {
+/* What an outside click lands on. Two popovers, one behaviour.
+
+   The z-index is the whole of why it works: the scrim lives inside the header,
+   and the board is later in the document, so at the default stacking it paints
+   *under* the page it is supposed to be covering — a click on a card went to the
+   card and the panel stayed open. One below the panels above it, so it catches
+   everything except them. */
+.bell-scrim,
+.tenant-scrim {
     position: fixed;
     inset: 0;
+    z-index: 9;
 }
 
 .inbox {
@@ -611,4 +701,321 @@
 
 .toast-close {
     color: var(--text-faint);
+}
+
+/* ---- outbox ---- */
+
+.settings-second {
+    margin-top: 32px;
+    padding-top: 24px;
+    border-top: 1px solid var(--border);
+}
+
+.outbox-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 12px;
+}
+
+/* The one loud thing in the application, and it earns it: everything below is
+   a credential somebody could read over a shoulder. */
+.outbox-warning {
+    border: 1px solid var(--danger);
+    border-left-width: 3px;
+    border-radius: var(--radius-small);
+    background: var(--bg-raised);
+    padding: 12px 14px;
+    font-size: 13px;
+    color: var(--text-dim);
+    margin: 12px 0 16px;
+}
+
+.outbox-warning strong {
+    color: var(--text);
+}
+
+.outbox-row {
+    border: 1px solid var(--border);
+    border-radius: var(--radius-small);
+    background: var(--bg-raised);
+    padding: 12px 14px;
+    margin-bottom: 8px;
+}
+
+.outbox-row header {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+}
+
+.outbox-kind {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--accent);
+}
+
+.outbox-kind.kind-Notification {
+    color: var(--ok);
+}
+
+.outbox-to {
+    font-weight: 500;
+    flex: 1;
+}
+
+.outbox-when {
+    color: var(--text-faint);
+    font-size: 12px;
+}
+
+.outbox-subject {
+    margin-top: 6px;
+}
+
+.outbox-what {
+    color: var(--text-faint);
+    font-size: 12px;
+    margin-top: 2px;
+}
+
+.outbox-token {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 10px;
+}
+
+.outbox-token code {
+    flex: 1;
+    word-break: break-all;
+    background: var(--bg);
+    padding: 6px 8px;
+    border-radius: var(--radius-small);
+    font-size: 12px;
+}
+
+.outbox-open {
+    white-space: nowrap;
+}
+
+.outbox-ids {
+    color: var(--text-faint);
+    font-size: 12px;
+    margin-top: 8px;
+    word-break: break-all;
+}
+
+/* The Security page, and the two lists that share its shape: a line about
+   something that happened, and one control beside it. */
+.security-controls {
+    display: flex;
+    align-items: baseline;
+    gap: 16px;
+    margin: 12px 0;
+    flex-wrap: wrap;
+}
+
+.security-scope {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+/* The chosen side of the scope switch. Not a disabled button: pressing the one
+   you are already on should be a no-op, not something the browser refuses. */
+.security-scope .is-on {
+    border-color: var(--accent);
+    color: var(--text);
+}
+
+.security-filter {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    color: var(--text-dim);
+}
+
+.security-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-small);
+    background: var(--bg-raised);
+    padding: 10px 12px;
+    margin-bottom: 6px;
+}
+
+.security-head {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    font-weight: 500;
+}
+
+.security-sub {
+    color: var(--text-faint);
+    font-size: 12px;
+    margin-top: 2px;
+}
+
+/* "this one" beside the session doing the asking, and the role beside an
+   invitation: the same quiet tag either way. */
+.security-now {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--accent);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-small);
+    padding: 1px 6px;
+}
+
+.security-outcome {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--ok);
+}
+
+.security-outcome.outcome-Failed {
+    color: var(--danger);
+}
+
+.settings-third {
+    font-size: 14px;
+    margin-top: 20px;
+}
+
+/* The workspace switch, which is where the tenant's name lives now. Same
+   shape as the bell's panel — a scrim for the outside click and an absolutely
+   positioned card — because two popovers that behave differently is one more
+   thing than this application needs. */
+.tenant-wrap {
+    position: relative;
+}
+
+.tenant-trigger {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: var(--radius-small);
+    color: var(--text);
+    font-size: 13px;
+    font-weight: 500;
+    padding: 3px 6px;
+}
+
+/* The border appears on approach rather than sitting there: at rest this is the
+   application's name in its own header, and it only has to look like a control
+   once somebody is looking for one. */
+.tenant-trigger:hover,
+.tenant-trigger[aria-expanded="true"] {
+    background: var(--bg-hover);
+    border-color: var(--border);
+}
+
+.tenant-caret {
+    color: var(--text-faint);
+    font-size: 10px;
+}
+
+.tenant-menu {
+    position: absolute;
+    left: 0;
+    top: 30px;
+    width: 260px;
+    background: var(--bg-raised);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    padding: 6px;
+    z-index: 10;
+}
+
+.tenant-menu-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px;
+    color: var(--text-faint);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    padding: 4px 8px 8px;
+}
+
+.tenant-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    text-align: left;
+    background: transparent;
+    border: none;
+    border-radius: var(--radius-small);
+    color: var(--text);
+    font-size: 13px;
+    padding: 7px 8px;
+}
+
+.tenant-item:hover:not(:disabled) {
+    background: var(--bg-hover);
+}
+
+.tenant-item.is-here {
+    color: var(--text);
+}
+
+.tenant-item-name {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* A fixed gutter for the check, so the names line up whether or not the row is
+   the one you are in. */
+.tenant-check {
+    width: 12px;
+    color: var(--accent);
+    font-size: 11px;
+}
+
+.tenant-role {
+    color: var(--text-faint);
+    font-size: 11px;
+    text-transform: none;
+    letter-spacing: 0;
+}
+
+.tenant-add {
+    border-top: 1px solid var(--border);
+    border-radius: 0 0 var(--radius-small) var(--radius-small);
+    margin-top: 4px;
+    padding-top: 10px;
+    color: var(--text-dim);
+}
+
+.tenant-new {
+    display: flex;
+    gap: 6px;
+    border-top: 1px solid var(--border);
+    margin-top: 4px;
+    padding: 8px 4px 4px;
+}
+
+.tenant-new input {
+    flex: 1;
+    min-width: 0;
+    font-size: 13px;
 }

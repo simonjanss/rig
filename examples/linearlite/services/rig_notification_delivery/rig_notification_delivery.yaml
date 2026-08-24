@@ -2,6 +2,12 @@
 table: rig_notification_delivery
 comment: One copy of an inbox line on its way to a channel. Claimed by lease, sent outside any transaction, and marked afterwards.
 
+# No endpoints. This is the dispatcher's bookkeeping: one row per copy per
+# channel, claimed by lease and marked afterwards. Reading it from a browser
+# would be reading the queue rather than the mail, and the model and repository
+# — which is what the engine uses — are generated either way.
+expose: false
+
 columns:
   recipient_id:
     comment: The inbox line this is a copy of. The line is the truth and this is one way it was repeated.
@@ -31,49 +37,49 @@ columns:
 enums:
   rig_notification_channel:
     name: RigNotificationChannel
-    description: 'TODO: what does this enumeration represent?'
+    description: Where a copy of an inbox line can be sent. The inbox itself is not one of them.
     values:
       Desktop:
         name: Desktop
-        description: 'TODO: describe this.'
+        description: A browser or a desktop application, addressed by a device row.
       Mobile:
         name: Mobile
-        description: 'TODO: describe this.'
+        description: A phone, addressed by a device row.
       Email:
         name: Email
-        description: 'TODO: describe this.'
+        description: 'The address on the account. No device row: there is nothing to register, because the address is on the account already.'
   rig_notification_delivery_state:
     name: RigNotificationDeliveryState
-    description: 'TODO: what does this enumeration represent?'
+    description: What happened to one copy of an inbox line on its way to a channel.
     values:
       Pending:
         name: Pending
-        description: 'TODO: describe this.'
+        description: Owed and not yet claimed, or claimed by a dispatcher that has not marked it.
       Sent:
         name: Sent
-        description: 'TODO: describe this.'
+        description: A channel accepted it, which is not the same as it arriving — rig does not pretend to know the difference.
       Failed:
         name: Failed
-        description: 'TODO: describe this.'
+        description: Past notifications.max_attempts, and no longer claimed. Without the cap a permanently broken address would consume a lease forever.
       Skipped:
         name: Skipped
-        description: 'TODO: describe this.'
+        description: 'A setting refused it, or the row it was a copy of was retired before it went. Worth telling apart from Failed in a report: it is ''we decided against this'' rather than ''this did not work''.'
   rig_notification_digest:
     name: RigNotificationDigest
-    description: 'TODO: what does this enumeration represent?'
+    description: How often somebody wants to be told, on one channel.
     values:
       Immediate:
         name: Immediate
-        description: 'TODO: describe this.'
+        description: Each notification on its own, as soon as it is due.
       Hourly:
         name: Hourly
-        description: 'TODO: describe this.'
+        description: Whatever accumulated in an hour, as one message.
       Daily:
         name: Daily
-        description: 'TODO: describe this.'
+        description: The same, a day at a time.
       Weekly:
         name: Weekly
-        description: 'TODO: describe this.'
+        description: The widest window, and the one notifications.retention has to outlive — a weekly digest is assembled from rows a shorter retention would have pruned.
       Off:
         name: Off
-        description: 'TODO: describe this.'
+        description: 'Nothing on this channel, and the inbox line is written anyway: this is somebody preferring to look rather than be told. is_enabled false is the other thing, and says the channel is not available to them at all.'

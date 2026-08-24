@@ -4,7 +4,7 @@ import { createContext, useCallback, useContext, useState } from "react";
 
 import type { TokenPair } from "@rig/client";
 
-import type { SignInResponse } from "./wire.js";
+import type { SignInResponse, TenantView } from "./wire.js";
 import type { StoredTenant } from "../lib/storage.js";
 
 import { client, session } from "../lib/client.js";
@@ -136,20 +136,53 @@ export function useAuth(): AuthState {
 }
 
 /**
+ * Take a fresh pair for a session already in progress.
+ *
+ * Two endpoints answer with one: changing a password, which revokes every
+ * session the identity had and hands back a replacement for the one that
+ * asked, and switching tenant. It has to reach both the credential in memory
+ * and storage — a pair that only reached memory is a sign-out on the next
+ * reload.
+ */
+export function adoptPair(pair: TokenPair): void {
+    session.replace(pair);
+    update((s) => {
+        s.tokens = pair;
+    });
+}
+
+/**
+ * Enter the tenant a sign-in answered with, which is what creating one is.
+ *
+ * A new workspace comes back as a whole SignInResponse rather than a pair,
+ * because the account in it did not exist a moment ago either. The pair is
+ * picked out of it rather than the response being stored as one: it carries an
+ * identity token too, and that does not belong in the session's slot.
+ */
+export function enterTenantFromSignIn(res: SignInResponse): void {
+    const current = res.tenants.find((t) => t.current) ?? res.tenants[0];
+    if (!current) return;
+    enterTenant(pairOf(res), current);
+}
+
+/**
  * Switching tenant is a full reload, deliberately: the live-sync collections
  * are cached by runtime and not by credential, and a reload is the one
  * discard-everything the cache cannot get wrong.
+ *
+ * The pair is all the endpoint answers with — a switch produces a new session
+ * for the same person somewhere else, not a new sign-in — so the tenant that
+ * was asked for is what names it here.
  */
-export function enterTenant(res: SignInResponse): void {
-    const current = res.tenants.find((t) => t.current) ?? res.tenants[0];
-    if (!res.accessToken || !current) return;
+export function enterTenant(pair: TokenPair, tenant: TenantView): void {
+    if (!pair.accessToken) return;
+    adoptPair(pair);
     update((s) => {
-        s.tokens = pairOf(res);
         s.tenant = {
-            tenantId: current.tenantId,
-            tenantName: current.tenantName,
-            accountId: current.accountId,
-            role: current.role,
+            tenantId: tenant.tenantId,
+            tenantName: tenant.tenantName,
+            accountId: tenant.accountId,
+            role: tenant.role,
         };
     });
     window.location.assign("/");

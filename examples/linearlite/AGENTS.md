@@ -117,7 +117,7 @@ generated proxy points at the default and the streams answer 502.
 
 ## This example's extras
 
-Beyond the todo example's layout, three directories:
+Beyond the todo example's layout, four directories and one file:
 
 - `web/` — the React front end. Its generated client is `web/src/api`
   (`*.gen.ts`, rig's, never edit) and everything else in `web/src` is yours.
@@ -127,7 +127,41 @@ Beyond the todo example's layout, three directories:
 - `importer/` + `import/` — the batch job over the generated Go client, split
   so the docker test drives the same loop the command runs.
 - `services/authz/` — the roles-and-permissions model, an adapted copy of
-  examples/auth's; that copy's comments explain every decision.
+  examples/auth's; that copy's comments explain every decision. Note the one
+  name spelled out in it: `todo.claim` is the key rig derived from the custom
+  endpoint, and a derived key nobody grants is a 403 on a working button.
+- `services/outbox/` — one ring buffer implementing both interfaces rig ships
+  no transport for: `account.Notifier` (the links auth mints) and
+  `notify.Sender` (the email copy of an inbox line). It records instead of
+  sending, which is the thing a real one must never do, and the front end says
+  so where it shows them.
+- `demo.go` — the only hand-written HTTP here: `GET /_demo/outbox` and
+  `GET /_demo/tour`. Hand-written because neither is about a table, so there is
+  nothing for rig to generate from. Add a route here rather than inventing a
+  resource for something that lives in memory. Both need a session: whether
+  rig's monitoring page is mounted is not a fact to hand an anonymous caller,
+  since rig mounts no route at all rather than one that refuses.
+- `services/rig_notification_device/` + `services/rig_notification_setting/` —
+  the two notification tables a person owns rather than reads, exposed as
+  ordinary resources by `notifications: expose: true` plus an `operations:` line
+  each. Both are `access: {scope: own, owner: account_id}`, so reads and updates
+  are narrowed before any code here runs; the one thing each service layer adds
+  is the rule a create needs, because a create has no row to be narrowed by.
+  The other three notification tables say `expose: false` in their own files.
+
+The `/auth/*` screens are worth knowing about before adding another: `web/src/`
+already covers sign-in, registration, the picker, reset, invitations (send,
+list, withdraw), API keys, a password change, session listing and revocation,
+the authentication trail, and switching tenants. Those calls are hand-written in
+`web/src/auth/authApi.ts` because they are rig's endpoints rather than this
+schema's — the generated client covers the API and stops at `/auth`.
+
+`tracing:` and `monitoring:` are on, which is why `main.go` opens a log sink
+before `serve.Main`, tees it into the logger, passes `observe.Pool`, and takes
+a `*observe.Page` in `newAPI` — nil from a task, since a cron entry serving a
+page nobody can reach is not worth the wiring. The three environment variables
+the page needs are set by `make demo` into a gitignored `.run/`, never by
+rig.yaml, which is checked in.
 
 The auth foundation's tables came from `rig setup-project` (migrations 1–7),
 and `rig_account` is exposed read-only as the `Account` resource — the board's

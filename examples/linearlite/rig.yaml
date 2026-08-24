@@ -43,7 +43,50 @@ files:
 # The inbox. A todo announces a status change from its update hook, NotifyWho
 # names the stakeholders, and the browser hears about it over the
 # rig_notification_recipient live shape — no socket, no polling.
+#
+# The digest is spelled out rather than left to the default, because this
+# example registers an email channel and the demonstration depends on the mail
+# going out with the drag rather than at the top of the hour. An account with a
+# setting of its own wins over this; an account with none gets this.
 notifications:
+  enabled: true
+  default_digest: Immediate
+  # Project the notification tables as resources, so the two a person actually
+  # owns — their devices and their preferences — come with a generated client, a
+  # filter grammar and an OpenAPI entry rather than a hand-written route each.
+  # The other three say `expose: false` in their own files: the inbox already has
+  # rig's routes and a live shape, and a delivery is bookkeeping.
+  #
+  # It is the settings table that makes this worth doing. Everything above
+  # reaches a person because they were a stakeholder; this is the row where they
+  # say how, and until somebody can write one, `default_digest` is the only
+  # answer anybody gets.
+  expose: true
+
+# Spans, from the connection and from every generated handler, repository and
+# hook. The other examples that show observability show it over a schema with
+# nothing else going on; here it is on with authentication, uploads, the
+# notification engine and the Electric proxy all running, which is the only
+# arrangement where the page is worth looking at — a request that signs in, a
+# request that uploads and a shape subscription do not cost the same thing, and
+# that is the fact a trace is for.
+#
+# Where the spans go is not here. It is $OTEL_EXPORTER_OTLP_ENDPOINT or
+# $RIG_TRACE_FILE at run time, because the same binary runs on a laptop, in CI
+# and in production and only the last of those has anywhere to send them. The
+# Makefile points the demo at a file so the page below has something to read.
+tracing:
+  enabled: true
+
+# rig's own page over those spans and the log lines they wrote, at
+# /_rig/monitor. It is a reader and stores nothing, which is why it cannot be
+# turned on without `tracing:` above.
+#
+# The password is not here — it is read from $RIG_MONITOR_PASSWORD at run time,
+# and with nothing in it the page is not mounted at all. `make demo` sets one,
+# so the tour has something to open; a deployment sets a real one, and narrows
+# it further with `allow:`.
+monitoring:
   enabled: true
 
 # A throwaway Postgres with the sync service beside it: `rig db up` starts

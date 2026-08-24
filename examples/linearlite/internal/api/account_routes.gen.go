@@ -7,6 +7,7 @@ package api
 import (
 	"net/http"
 
+	"github.com/simonjanss/rig/observe"
 	"github.com/simonjanss/rig/runtime/reqlog"
 	"github.com/simonjanss/rig/runtime/tenancy"
 )
@@ -25,6 +26,9 @@ func handleListAccounts(s Server, svc AccountService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		rec := reqlog.Wrap(w)
 		w = rec
+
+		r, span := observe.Server(r, "GET /api/v1/accounts", rec.Status)
+		defer span.End()
 
 		ctx, claims, rc, ok := prepare(s, w, r)
 		defer logRequest(s, r, rec, rc)
@@ -75,6 +79,9 @@ func handleListDeletedAccounts(s Server, svc AccountService) http.HandlerFunc {
 		rec := reqlog.Wrap(w)
 		w = rec
 
+		r, span := observe.Server(r, "GET /api/v1/accounts/_deleted", rec.Status)
+		defer span.End()
+
 		ctx, claims, rc, ok := prepare(s, w, r)
 		defer logRequest(s, r, rec, rc)
 		if !ok {
@@ -118,6 +125,9 @@ func handleGetAccount(s Server, svc AccountService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		rec := reqlog.Wrap(w)
 		w = rec
+
+		r, span := observe.Server(r, "GET /api/v1/accounts/{id}", rec.Status)
+		defer span.End()
 
 		ctx, claims, rc, ok := prepare(s, w, r)
 		defer logRequest(s, r, rec, rc)

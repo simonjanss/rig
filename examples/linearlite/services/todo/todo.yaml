@@ -71,3 +71,44 @@ enums:
       Snapshot:
         name: Snapshot
         description: An immutable copy of the item as it was before an update.
+
+# Endpoints beyond the generated CRUD set. rig has no default for one — that is
+# the point of declaring it — so the service layer implements it, and the build
+# fails until it does.
+#
+# Claiming is the case that earns a custom endpoint rather than a PATCH. The
+# rule is about the value already in the column, so a client doing it with a
+# PATCH has to read, decide and write, and two people reading at the same moment
+# both decide yes. Here the decision happens once, next to the write.
+endpoints:
+  - name: Claim
+    method: POST
+    path: /{id}/_claim
+    summary: Take the item.
+    description: |
+      Taking an item somebody else holds is a conflict rather than a
+      reassignment: two people picking up the same thing should not both be
+      told they have it. Taking one nobody holds is the ordinary case, and
+      taking one you already hold is not an error — a button pressed twice is
+      not a disagreement.
+
+      `steal` is the deliberate override, for the person who means it. It goes
+      through the same update as everything else, so the previous holder hears
+      about it the way they hear about any other change to their item.
+    request:
+      path_params:
+        - name: ID
+          type: UUID
+          description: The item to take.
+      body:
+        - name: Steal
+          type: Bool
+          optional: true
+          description: Take it even if somebody else holds it.
+    responses:
+      - status: 200
+        body_object: Todo
+        description: The item, now yours.
+      - status: 409
+        body_object: Error
+        description: Somebody else holds it, and steal was not set.

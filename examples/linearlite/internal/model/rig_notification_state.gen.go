@@ -8,16 +8,21 @@ import (
 	"strings"
 )
 
-// TODO: what does this enumeration represent?
+// Where a notification is in its life. Nothing here says anything was sent:
+// that is the delivery table's business.
 type RigNotificationState string
 
 // The values of RigNotificationState.
 const (
-	// TODO: describe this.
+	// The audience has not been computed yet. Every notification starts here, and
+	// a scheduled one waits here until it is due.
 	RigNotificationStatePending RigNotificationState = "Pending"
-	// TODO: describe this.
+	// The audience was computed and the inbox lines exist. It does not mean
+	// anything was sent — a notification with an inbox line and no mail is a
+	// working notification.
 	RigNotificationStateResolved RigNotificationState = "Resolved"
-	// TODO: describe this.
+	// It never will be resolved: the row it was about was retired before its time
+	// came.
 	RigNotificationStateCancelled RigNotificationState = "Cancelled"
 )
 

@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 	pgx "github.com/jackc/pgx/v5"
 	"github.com/simonjanss/rig/examples/linearlite/internal/model"
+	"github.com/simonjanss/rig/observe"
 	"github.com/simonjanss/rig/runtime/dbhook"
 	"github.com/simonjanss/rig/runtime/dbx"
 	"github.com/simonjanss/rig/runtime/query"
@@ -222,6 +223,15 @@ type permissionRepo struct {
 
 var _ PermissionRepository = (*permissionRepo)(nil)
 
+// trace runs one stage of a write inside a span of its own.
+//
+// The stage is a callback rather than something bracketed by two calls,
+// because that is what makes the span a function's: it is opened and ended in
+// one place, and nothing at the call site is holding one.
+func (r *permissionRepo) trace(ctx context.Context, name string, f func(context.Context) error) error {
+	return observe.Trace(ctx, r.db.tracer, name, f)
+}
+
 const permissionRepoSelect = "permission.id, permission.created_at, permission.key, permission.name, permission.description"
 
 // scanPermission reads one row in the order permissionRepoSelect lists.
@@ -236,6 +246,9 @@ func scanPermission(row pgx.Row) (*model.Permission, error) {
 
 // Get implements PermissionRepository.
 func (r *permissionRepo) Get(ctx context.Context, id uuid.UUID, opts ...readopt.Option) (*model.Permission, error) {
+	ctx, span := r.db.tracer.Start(ctx, "repository.Permission.Get")
+	defer span.End()
+
 	if _, err := readopt.Apply(opts); err != nil {
 		return nil, err
 	}
@@ -260,6 +273,9 @@ func (r *permissionRepo) Get(ctx context.Context, id uuid.UUID, opts ...readopt.
 
 // List implements PermissionRepository.
 func (r *permissionRepo) List(ctx context.Context, f model.PermissionFilter, page model.PermissionPage, opts ...readopt.Option) ([]*model.Permission, int64, error) {
+	ctx, span := r.db.tracer.Start(ctx, "repository.Permission.List")
+	defer span.End()
+
 	return r.list(ctx, f, page, opts)
 }
 
@@ -348,6 +364,9 @@ var PermissionDefaultOrder = []query.Order{{Table: "permission", Column: "create
 
 // Create implements PermissionRepository.
 func (r *permissionRepo) Create(ctx context.Context, in dbhook.Create[model.PermissionCreateInput, model.Permission]) (*model.Permission, error) {
+	ctx, span := r.db.tracer.Start(ctx, "repository.Permission.Create")
+	defer span.End()
+
 	// Who is asking, first of all. A write from a request carrying no identity is
 	// refused here — before a rule runs, before a column notices — which is
 	// what lets every hook below take the claims as a value rather than something
@@ -377,7 +396,9 @@ func (r *permissionRepo) Create(ctx context.Context, in dbhook.Create[model.Perm
 	// across a rule that may call out to another service would be a worse trade
 	// than the one it buys.
 	if in.Hooks.Validator != nil {
-		if err := in.Hooks.Validator.RunCreate(ctx, claims, &in.Input); err != nil {
+		if err := r.trace(ctx, "repository.Permission.Create.Validator", func(ctx context.Context) error {
+			return in.Hooks.Validator.RunCreate(ctx, claims, &in.Input)
+		}); err != nil {
 			return nil, err
 		}
 	}
@@ -399,7 +420,9 @@ func (r *permissionRepo) Create(ctx context.Context, in dbhook.Create[model.Perm
 	var m *model.Permission
 	err = dbx.InTxIf(ctx, r.db.pool, r.db.connFor(ctx), needsTx, func(ctx context.Context, tx dbx.Conn) error {
 		if in.Hooks.Before != nil {
-			if err := in.Hooks.Before(ctx, claims, &in.Input); err != nil {
+			if err := r.trace(ctx, "repository.Permission.Create.Before", func(ctx context.Context) error {
+				return in.Hooks.Before(ctx, claims, &in.Input)
+			}); err != nil {
 				return err
 			}
 		}
@@ -416,7 +439,9 @@ func (r *permissionRepo) Create(ctx context.Context, in dbhook.Create[model.Perm
 		m = created
 
 		if in.Hooks.After != nil {
-			if err := in.Hooks.After(ctx, claims, m); err != nil {
+			if err := r.trace(ctx, "repository.Permission.Create.After", func(ctx context.Context) error {
+				return in.Hooks.After(ctx, claims, m)
+			}); err != nil {
 				return err
 			}
 		}
@@ -431,7 +456,12 @@ func (r *permissionRepo) Create(ctx context.Context, in dbhook.Create[model.Perm
 		// this runs, and reaching into a context for them then is reaching into one
 		// that has been cancelled.
 		done, who := in.Hooks.AfterCommit, claims
-		dbx.AfterCommit(ctx, func() { done(ctx, who, m) })
+		dbx.AfterCommit(ctx, func() {
+			ctx, span := r.db.tracer.Start(ctx, "repository.Permission.Create.AfterCommit")
+			defer span.End()
+
+			done(ctx, who, m)
+		})
 	}
 
 	return m, nil
@@ -439,6 +469,9 @@ func (r *permissionRepo) Create(ctx context.Context, in dbhook.Create[model.Perm
 
 // Update implements PermissionRepository.
 func (r *permissionRepo) Update(ctx context.Context, id uuid.UUID, in dbhook.Update[model.PermissionUpdateInput, model.Permission]) (*model.Permission, error) {
+	ctx, span := r.db.tracer.Start(ctx, "repository.Permission.Update")
+	defer span.End()
+
 	in.Input.Normalize()
 
 	claims, err := tenancy.FromContext(ctx)
@@ -459,7 +492,9 @@ func (r *permissionRepo) Update(ctx context.Context, id uuid.UUID, in dbhook.Upd
 		// reason: a hook that ran after validation could write a value nothing had
 		// checked.
 		if in.Hooks.Before != nil {
-			if err := in.Hooks.Before(ctx, claims, &in.Input, prev); err != nil {
+			if err := r.trace(ctx, "repository.Permission.Update.Before", func(ctx context.Context) error {
+				return in.Hooks.Before(ctx, claims, &in.Input, prev)
+			}); err != nil {
 				return err
 			}
 		}
@@ -473,7 +508,9 @@ func (r *permissionRepo) Update(ctx context.Context, id uuid.UUID, in dbhook.Upd
 		}
 
 		if in.Hooks.Validator != nil {
-			if err := in.Hooks.Validator.RunUpdate(ctx, claims, &in.Input, prev); err != nil {
+			if err := r.trace(ctx, "repository.Permission.Update.Validator", func(ctx context.Context) error {
+				return in.Hooks.Validator.RunUpdate(ctx, claims, &in.Input, prev)
+			}); err != nil {
 				return err
 			}
 		}
@@ -511,7 +548,9 @@ func (r *permissionRepo) Update(ctx context.Context, id uuid.UUID, in dbhook.Upd
 		}
 
 		if in.Hooks.After != nil {
-			if err := in.Hooks.After(ctx, claims, updated, prev); err != nil {
+			if err := r.trace(ctx, "repository.Permission.Update.After", func(ctx context.Context) error {
+				return in.Hooks.After(ctx, claims, updated, prev)
+			}); err != nil {
 				return err
 			}
 		}
@@ -526,7 +565,12 @@ func (r *permissionRepo) Update(ctx context.Context, id uuid.UUID, in dbhook.Upd
 		// this runs, and reaching into a context for them then is reaching into one
 		// that has been cancelled.
 		done, who := in.Hooks.AfterCommit, claims
-		dbx.AfterCommit(ctx, func() { done(ctx, who, updated, prev) })
+		dbx.AfterCommit(ctx, func() {
+			ctx, span := r.db.tracer.Start(ctx, "repository.Permission.Update.AfterCommit")
+			defer span.End()
+
+			done(ctx, who, updated, prev)
+		})
 	}
 
 	return updated, nil
@@ -534,6 +578,9 @@ func (r *permissionRepo) Update(ctx context.Context, id uuid.UUID, in dbhook.Upd
 
 // Delete implements PermissionRepository.
 func (r *permissionRepo) Delete(ctx context.Context, in dbhook.Delete[model.PermissionDeleteInput, model.Permission]) error {
+	ctx, span := r.db.tracer.Start(ctx, "repository.Permission.Delete")
+	defer span.End()
+
 	claims, err := tenancy.FromContext(ctx)
 	if err != nil {
 		return err
@@ -548,7 +595,9 @@ func (r *permissionRepo) Delete(ctx context.Context, in dbhook.Delete[model.Perm
 		}
 
 		if in.Hooks.Before != nil {
-			if err := in.Hooks.Before(ctx, claims, &in.Input, prev); err != nil {
+			if err := r.trace(ctx, "repository.Permission.Delete.Before", func(ctx context.Context) error {
+				return in.Hooks.Before(ctx, claims, &in.Input, prev)
+			}); err != nil {
 				return err
 			}
 		}
@@ -557,7 +606,9 @@ func (r *permissionRepo) Delete(ctx context.Context, in dbhook.Delete[model.Perm
 			return writeError(err, "permission")
 		}
 		if in.Hooks.After != nil {
-			if err := in.Hooks.After(ctx, claims, prev); err != nil {
+			if err := r.trace(ctx, "repository.Permission.Delete.After", func(ctx context.Context) error {
+				return in.Hooks.After(ctx, claims, prev)
+			}); err != nil {
 				return err
 			}
 		}
@@ -572,7 +623,12 @@ func (r *permissionRepo) Delete(ctx context.Context, in dbhook.Delete[model.Perm
 		// this runs, and reaching into a context for them then is reaching into one
 		// that has been cancelled.
 		done, who := in.Hooks.AfterCommit, claims
-		dbx.AfterCommit(ctx, func() { done(ctx, who, prev) })
+		dbx.AfterCommit(ctx, func() {
+			ctx, span := r.db.tracer.Start(ctx, "repository.Permission.Delete.AfterCommit")
+			defer span.End()
+
+			done(ctx, who, prev)
+		})
 	}
 
 	return nil

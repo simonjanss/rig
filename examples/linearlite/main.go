@@ -22,6 +22,14 @@
 //     demonstration that is not about them.
 //   - import/ is a separate program driving the generated Go client with a
 //     personal API key, slowly, so the board visibly fills while it runs.
+//   - services/outbox is the mail this example would have sent: the links the
+//     auth package mints, and the email copy of an inbox line. rig ships no
+//     transport for either, so this is the shape a real one has with none of
+//     the substance, and /_demo/outbox is where the front end reads it.
+//   - Spans, and rig's own page over them at /_rig/monitor. This is the one
+//     example where tracing is on with authentication, uploads, the
+//     notification engine and the Electric proxy all running, which is the
+//     only arrangement where a trace tells you something you did not know.
 package main
 
 import (
@@ -43,11 +51,15 @@ import (
 	genelectric "github.com/simonjanss/rig/examples/linearlite/internal/electric"
 	"github.com/simonjanss/rig/examples/linearlite/internal/store"
 	"github.com/simonjanss/rig/examples/linearlite/services/authz"
+	"github.com/simonjanss/rig/examples/linearlite/services/outbox"
 	"github.com/simonjanss/rig/examples/linearlite/services/rig_account"
+	"github.com/simonjanss/rig/examples/linearlite/services/rig_notification_device"
+	"github.com/simonjanss/rig/examples/linearlite/services/rig_notification_setting"
 	"github.com/simonjanss/rig/examples/linearlite/services/todo"
 	"github.com/simonjanss/rig/examples/linearlite/services/todo_attachment"
 	"github.com/simonjanss/rig/migrate"
 	"github.com/simonjanss/rig/notify"
+	"github.com/simonjanss/rig/observe"
 	"github.com/simonjanss/rig/runtime/dbx"
 	"github.com/simonjanss/rig/runtime/electric"
 	"github.com/simonjanss/rig/runtime/serve"
@@ -62,6 +74,19 @@ var migrations embed.FS
 const localDSN = "postgres://rig:rig@localhost:55444/rig?sslmode=disable&TimeZone=UTC"
 
 func main() {
+	// The log file rig's own monitoring page reads. Opened before the server,
+	// because the logger is built out of it and the lines written while
+	// starting up are lines worth having on the page. Nothing is written unless
+	// $RIG_LOG_FILE says where — `make demo` points it at .run/ — and then this
+	// costs one branch per log call and nothing else.
+	logs, err := observe.OpenLogs(observe.LogConfig{})
+	if err != nil {
+		// There is no logger yet: this is the thing that would have been half
+		// of one.
+		fmt.Fprintln(os.Stderr, "cannot open the log file:", err)
+		os.Exit(1)
+	}
+
 	serve.Main(serve.Config{
 		DatabaseURL: cmp.Or(os.Getenv("DATABASE_URL"), localDSN),
 		Addr:        cmp.Or(os.Getenv("ADDR"), "127.0.0.1:8084"),
@@ -72,8 +97,26 @@ func main() {
 		Hint: "run `rig db up` to start Postgres and the sync service for this project, " +
 			"or point $DATABASE_URL at a database you already have",
 
-		MaxStartup:  30 * time.Second,
-		MaxShutdown: 20 * time.Second,
+		MaxStartup: 30 * time.Second,
+		// Thirty rather than twenty, because the two closers below now declare
+		// twenty between them — fifteen for the notification engine, five for a
+		// trace flush — and a budget exactly spoken for leaves nothing for the
+		// requests still in flight. serve warns about that at startup rather
+		// than letting it turn up as a truncated shutdown under load.
+		MaxShutdown: 30 * time.Second,
+
+		// Stderr, and the file the monitoring page reads. The two keep their
+		// own levels: this one stays at whatever the default handler is set to,
+		// and the file keeps debug — which is where rig's request line is, so
+		// the page has requests to list without this process printing one per
+		// request to a terminal nobody is watching.
+		Logger: slog.New(observe.Tee(slog.Default().Handler(), logs.Handler())),
+
+		// A span per statement, from the connection rather than from the
+		// generated code: a tracer here sees every query, including the ones the
+		// notification engine, the file sweeper and the Electric proxy run and
+		// the ones no generator wrote.
+		Pool: observe.Pool,
 
 		Tasks: map[string]serve.Task{
 			"migrate": migrate.Apply(migrations, migrate.Options{Log: os.Stdout}),
@@ -96,7 +139,35 @@ func main() {
 		},
 		Migrate: migrate.Require(migrations, migrate.Options{}),
 	}, func(ctx context.Context, app *serve.App) (http.Handler, error) {
-		mux, engine, err := newAPI(ctx, app.Pool, app.Logger)
+		// Spans. Nothing is exported unless the environment says where to:
+		// $OTEL_EXPORTER_OTLP_ENDPOINT for a collector, $RIG_TRACE_FILE for a
+		// file. With neither, the spans cost nothing and the trace ids are
+		// still real — which is what the request id below is.
+		tracing, err := observe.Setup(ctx, api.Tracing())
+		if err != nil {
+			return nil, err
+		}
+		// Its own limit, because a flush to a collector that is not answering
+		// must not spend the whole shutdown budget.
+		app.CloseWithin("traces", 5*time.Second, tracing.Shutdown)
+
+		// rig's own page over those spans and those log lines, at
+		// /_rig/monitor. It reads the span file the provider above is writing,
+		// which is why it hangs off it, and the log sink opened in main, which
+		// is why that is set here rather than generated. With no
+		// $RIG_MONITOR_PASSWORD it mounts nothing and says so once, rather than
+		// serving every path, request id and error cause to anybody who asks.
+		monitoring := api.Monitoring()
+		monitoring.Logs = logs
+		page, err := tracing.Page(monitoring)
+		if err != nil {
+			return nil, err
+		}
+		if why := page.Unarmed(); why != "" {
+			app.Logger.Info("monitoring page not mounted", "reason", why)
+		}
+
+		mux, engine, err := newAPI(ctx, app.Pool, app.Logger, page)
 		if err != nil {
 			return nil, err
 		}
@@ -116,19 +187,50 @@ func main() {
 
 // newAPI is everything this server is made of, as a function taking a pool so
 // the tasks and the tests can build exactly what ships.
-func newAPI(ctx context.Context, pool *pgxpool.Pool, log *slog.Logger) (*http.ServeMux, *notify.Engine, error) {
-	repos := store.New(pool, store.Config{})
+//
+// page is the monitoring page when there is a server to mount it on, and nil
+// from a task — a cron entry that dispatched notifications and also served a
+// page over its own five-minute lifetime would be a page nobody could reach.
+// Everything else is identical either way, which is the reason this is a
+// function rather than a block inside the mount closure: the audience for a
+// notification is a method on a service, so a job has to be able to build one.
+func newAPI(ctx context.Context, pool *pgxpool.Pool, log *slog.Logger, page *observe.Page) (*http.ServeMux, *notify.Engine, error) {
+	// The tracer is a package-level value the provider in main installed, so a
+	// task that never called observe.Setup gets a no-op here and every query
+	// below runs untraced rather than differently.
+	repos := store.New(pool, store.Config{Tracer: observe.Tracer()})
+
+	// The mail this example would have sent — the links the auth package mints,
+	// and the email copy of an inbox line. Two interfaces, one ring buffer, and
+	// /_demo/outbox shows what went into it. It is per process on purpose:
+	// dispatch-notifications gets its own, which is what a separate deployment
+	// of the dispatcher actually has.
+	mail := outbox.New(20)
 
 	// The inbox's two halves, built in the order the knot demands: the
 	// registry first and empty, the engine over it, the service that answers
 	// NotifyWho registered into the registry once it exists. The engine can
 	// come this early because it does nothing until Start.
 	//
-	// No channels: the inbox is not one and cannot be turned off, which is all
-	// this example needs. examples/auth registers an email sender.
+	// Two channels, and both record rather than send. rig ships no transport:
+	// what it knows is who is owed what and when, and every provider decision
+	// after that is one it would get wrong. The inbox itself is not a channel
+	// and cannot be turned off — everything here is a copy of a line that was
+	// written either way.
+	//
+	// The two are worth having side by side because they are the two shapes a
+	// channel comes in: email has an address on the account and needs nothing
+	// registered, and a push has to be told where, which is what a device row
+	// is. Mobile is deliberately absent — a channel with no sender has no
+	// delivery rows written for it at all, which is the right answer and is
+	// what somebody's Mobile preference will show.
 	reg := notify.NewRegistry()
 	inbox := api.NewNotifications(pool, reg)
-	engine := api.NewNotificationEngine(pool, reg, nil)
+	senders := map[notify.Channel]notify.Sender{
+		notify.ChannelEmail:   mail.NotificationSender(),
+		notify.ChannelDesktop: mail.PushSender(notify.ChannelDesktop),
+	}
+	engine := api.NewNotificationEngine(pool, reg, senders)
 
 	// The engine's Nudge is handed to the service, so a status change becomes
 	// an inbox line moments after its transaction commits rather than at the
@@ -138,6 +240,16 @@ func newAPI(ctx context.Context, pool *pgxpool.Pool, log *slog.Logger) (*http.Se
 	attachments := todo_attachment.New(repos.TodoAttachments, api.NewFiles(pool))
 	members := rig_account.New(repos.Accounts)
 
+	// The two notification tables a person owns rather than reads: where a push
+	// can reach them, and what they want on each channel. Ordinary generated
+	// resources — `notifications: expose: true` and an `operations:` line each —
+	// which is the whole reason there is no hand-written HTTP for either. They
+	// are owner-scoped in the configuration, so a read is already narrowed to
+	// the caller's own rows and the service layer only has to say that a row
+	// cannot be created naming somebody else.
+	devices := rig_notification_device.New(repos.RigNotificationDevices)
+	prefs := rig_notification_setting.New(repos.RigNotificationSettings)
+
 	reg.Register(api.NewTodoSubject(todos))
 
 	// The authentication foundation, wired from the auth block in rig.yaml.
@@ -145,6 +257,12 @@ func newAPI(ctx context.Context, pool *pgxpool.Pool, log *slog.Logger) (*http.Se
 	// a new tenant needs, and what happens to a stranger who signs up.
 	front, err := api.New(pool, api.Hooks{
 		Logger: log,
+
+		// Where a reset link, a confirmation link and an invitation go. Nil
+		// would leave those flows unusable rather than silently broken — the
+		// token is in the response for a test to read and nothing reaches a
+		// person — and this example wants them walked in a browser.
+		Notifier: mail,
 
 		// rig derives the permission keys and generates the check; who holds
 		// them is this function, over the example's own role tables.
@@ -166,15 +284,27 @@ func newAPI(ctx context.Context, pool *pgxpool.Pool, log *slog.Logger) (*http.Se
 
 	mux := api.Register(api.Handlers{
 		Server: api.Server{
-			Auth:      front,
-			DB:        pool,
-			RequestID: func(r *http.Request) string { return r.Header.Get("X-Request-Id") },
-			Logger:    log,
+			Auth: front,
+			DB:   pool,
+			// The trace this request belongs to, so the identifier in an error
+			// body, the request_id on every log line and the span on the
+			// monitoring page are one string. A caller that sent its own
+			// X-Request-Id is honoured first.
+			RequestID: func(r *http.Request) string {
+				return cmp.Or(r.Header.Get("X-Request-Id"), observe.TraceID(r))
+			},
+			Logger: log,
+			// Mounted with the resource routes and after them, and not itself
+			// traced or logged: rig opens its spans inside each generated
+			// handler, so looking at the page does not appear on the page.
+			Monitor: page,
 		},
-		Account:        members,
-		Todo:           todos,
-		TodoAttachment: attachments,
-		Notifications:  inbox,
+		Account:                members,
+		Todo:                   todos,
+		TodoAttachment:         attachments,
+		RigNotificationDevice:  devices,
+		RigNotificationSetting: prefs,
+		Notifications:          inbox,
 	})
 
 	// The live-sync shapes, on the same mux as everything else. The proxy is
@@ -199,6 +329,10 @@ func newAPI(ctx context.Context, pool *pgxpool.Pool, log *slog.Logger) (*http.Se
 	if err := authz.SyncPermissions(ctx, pool, api.PermissionKeys()); err != nil {
 		return nil, nil, err
 	}
+
+	// The demonstration's own two routes: the outbox, and what the tour can
+	// offer. Neither is about a table, which is why neither is a resource.
+	registerDemo(mux, mail, page, front.Claims, senders)
 
 	// The front end, same origin as everything above. web/dist is read from
 	// disk so `make examples` — which has Go and Docker and deliberately not
@@ -264,7 +398,9 @@ func autoInvite() func(context.Context, *account.Service, account.Registered) er
 // dispatchNotifications is the inbox's cron half, built from the same
 // constructor the server uses because the audience is a method on a service.
 func dispatchNotifications(ctx context.Context, pool *pgxpool.Pool) error {
-	_, engine, err := newAPI(ctx, pool, slog.Default())
+	// No page: this is a cron entry, and its sends land in its own outbox —
+	// which is exactly what a separately deployed dispatcher has.
+	_, engine, err := newAPI(ctx, pool, slog.Default(), nil)
 	if err != nil {
 		return err
 	}

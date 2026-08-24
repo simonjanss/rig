@@ -8,18 +8,22 @@ import (
 	"strings"
 )
 
-// TODO: what does this enumeration represent?
+// What happened to one copy of an inbox line on its way to a channel.
 type RigNotificationDeliveryState string
 
 // The values of RigNotificationDeliveryState.
 const (
-	// TODO: describe this.
+	// Owed and not yet claimed, or claimed by a dispatcher that has not marked it.
 	RigNotificationDeliveryStatePending RigNotificationDeliveryState = "Pending"
-	// TODO: describe this.
+	// A channel accepted it, which is not the same as it arriving — rig does not
+	// pretend to know the difference.
 	RigNotificationDeliveryStateSent RigNotificationDeliveryState = "Sent"
-	// TODO: describe this.
+	// Past notifications.max_attempts, and no longer claimed. Without the cap a
+	// permanently broken address would consume a lease forever.
 	RigNotificationDeliveryStateFailed RigNotificationDeliveryState = "Failed"
-	// TODO: describe this.
+	// A setting refused it, or the row it was a copy of was retired before it
+	// went. Worth telling apart from Failed in a report: it is 'we decided against
+	// this' rather than 'this did not work'.
 	RigNotificationDeliveryStateSkipped RigNotificationDeliveryState = "Skipped"
 )
 

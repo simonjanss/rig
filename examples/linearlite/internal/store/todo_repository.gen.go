@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 	pgx "github.com/jackc/pgx/v5"
 	"github.com/simonjanss/rig/examples/linearlite/internal/model"
+	"github.com/simonjanss/rig/observe"
 	"github.com/simonjanss/rig/runtime/dbhook"
 	"github.com/simonjanss/rig/runtime/dbx"
 	"github.com/simonjanss/rig/runtime/patch"
@@ -616,6 +617,15 @@ type todoRepo struct {
 
 var _ TodoRepository = (*todoRepo)(nil)
 
+// trace runs one stage of a write inside a span of its own.
+//
+// The stage is a callback rather than something bracketed by two calls,
+// because that is what makes the span a function's: it is opened and ended in
+// one place, and nothing at the call site is holding one.
+func (r *todoRepo) trace(ctx context.Context, name string, f func(context.Context) error) error {
+	return observe.Trace(ctx, r.db.tracer, name, f)
+}
+
 const todoRepoSelect = "todo.id, todo.tenant_id, todo.title, todo.description, todo.status, todo.priority, todo.assignee_account_id, todo.created_at, todo.created_by_account_id, todo.updated_at, todo.updated_by_account_id, todo.deleted_at, todo.deleted_by_account_id, todo.version_type, todo.snapshot_from_todo_id, todo.snapshot_from_todo_at"
 
 // scanTodo reads one row in the order todoRepoSelect lists.
@@ -633,6 +643,9 @@ func scanTodo(row pgx.Row) (*model.Todo, error) {
 
 // Get implements TodoRepository.
 func (r *todoRepo) Get(ctx context.Context, id uuid.UUID, opts ...readopt.Option) (*model.Todo, error) {
+	ctx, span := r.db.tracer.Start(ctx, "repository.Todo.Get")
+	defer span.End()
+
 	cfg, err := readopt.Apply(opts)
 	if err != nil {
 		return nil, err
@@ -663,6 +676,9 @@ func (r *todoRepo) Get(ctx context.Context, id uuid.UUID, opts ...readopt.Option
 
 // List implements TodoRepository.
 func (r *todoRepo) List(ctx context.Context, f model.TodoFilter, page model.TodoPage, opts ...readopt.Option) ([]*model.Todo, int64, error) {
+	ctx, span := r.db.tracer.Start(ctx, "repository.Todo.List")
+	defer span.End()
+
 	return r.list(ctx, f, page, opts)
 }
 
@@ -768,6 +784,9 @@ var TodoDefaultOrder = []query.Order{{Table: "todo", Column: "created_at", Desc:
 
 // Create implements TodoRepository.
 func (r *todoRepo) Create(ctx context.Context, in dbhook.Create[model.TodoCreateInput, model.Todo]) (*model.Todo, error) {
+	ctx, span := r.db.tracer.Start(ctx, "repository.Todo.Create")
+	defer span.End()
+
 	// Who is asking, first of all. A write from a request carrying no identity is
 	// refused here — before a rule runs, before a column notices — which is
 	// what lets every hook below take the claims as a value rather than something
@@ -797,7 +816,9 @@ func (r *todoRepo) Create(ctx context.Context, in dbhook.Create[model.TodoCreate
 	// across a rule that may call out to another service would be a worse trade
 	// than the one it buys.
 	if in.Hooks.Validator != nil {
-		if err := in.Hooks.Validator.RunCreate(ctx, claims, &in.Input); err != nil {
+		if err := r.trace(ctx, "repository.Todo.Create.Validator", func(ctx context.Context) error {
+			return in.Hooks.Validator.RunCreate(ctx, claims, &in.Input)
+		}); err != nil {
 			return nil, err
 		}
 	}
@@ -820,7 +841,9 @@ func (r *todoRepo) Create(ctx context.Context, in dbhook.Create[model.TodoCreate
 	var m *model.Todo
 	err = dbx.InTxIf(ctx, r.db.pool, r.db.connFor(ctx), needsTx, func(ctx context.Context, tx dbx.Conn) error {
 		if in.Hooks.Before != nil {
-			if err := in.Hooks.Before(ctx, claims, &in.Input); err != nil {
+			if err := r.trace(ctx, "repository.Todo.Create.Before", func(ctx context.Context) error {
+				return in.Hooks.Before(ctx, claims, &in.Input)
+			}); err != nil {
 				return err
 			}
 		}
@@ -837,7 +860,9 @@ func (r *todoRepo) Create(ctx context.Context, in dbhook.Create[model.TodoCreate
 		m = created
 
 		if in.Hooks.After != nil {
-			if err := in.Hooks.After(ctx, claims, m); err != nil {
+			if err := r.trace(ctx, "repository.Todo.Create.After", func(ctx context.Context) error {
+				return in.Hooks.After(ctx, claims, m)
+			}); err != nil {
 				return err
 			}
 		}
@@ -852,7 +877,12 @@ func (r *todoRepo) Create(ctx context.Context, in dbhook.Create[model.TodoCreate
 		// this runs, and reaching into a context for them then is reaching into one
 		// that has been cancelled.
 		done, who := in.Hooks.AfterCommit, claims
-		dbx.AfterCommit(ctx, func() { done(ctx, who, m) })
+		dbx.AfterCommit(ctx, func() {
+			ctx, span := r.db.tracer.Start(ctx, "repository.Todo.Create.AfterCommit")
+			defer span.End()
+
+			done(ctx, who, m)
+		})
 	}
 
 	return m, nil
@@ -860,6 +890,9 @@ func (r *todoRepo) Create(ctx context.Context, in dbhook.Create[model.TodoCreate
 
 // Update implements TodoRepository.
 func (r *todoRepo) Update(ctx context.Context, id uuid.UUID, in dbhook.Update[model.TodoUpdateInput, model.Todo]) (*model.Todo, error) {
+	ctx, span := r.db.tracer.Start(ctx, "repository.Todo.Update")
+	defer span.End()
+
 	in.Input.Normalize()
 
 	claims, err := tenancy.FromContext(ctx)
@@ -889,7 +922,9 @@ func (r *todoRepo) Update(ctx context.Context, id uuid.UUID, in dbhook.Update[mo
 		// reason: a hook that ran after validation could write a value nothing had
 		// checked.
 		if in.Hooks.Before != nil {
-			if err := in.Hooks.Before(ctx, claims, &in.Input, prev); err != nil {
+			if err := r.trace(ctx, "repository.Todo.Update.Before", func(ctx context.Context) error {
+				return in.Hooks.Before(ctx, claims, &in.Input, prev)
+			}); err != nil {
 				return err
 			}
 		}
@@ -903,7 +938,9 @@ func (r *todoRepo) Update(ctx context.Context, id uuid.UUID, in dbhook.Update[mo
 		}
 
 		if in.Hooks.Validator != nil {
-			if err := in.Hooks.Validator.RunUpdate(ctx, claims, &in.Input, prev); err != nil {
+			if err := r.trace(ctx, "repository.Todo.Update.Validator", func(ctx context.Context) error {
+				return in.Hooks.Validator.RunUpdate(ctx, claims, &in.Input, prev)
+			}); err != nil {
 				return err
 			}
 		}
@@ -959,7 +996,9 @@ func (r *todoRepo) Update(ctx context.Context, id uuid.UUID, in dbhook.Update[mo
 		}
 
 		if in.Hooks.After != nil {
-			if err := in.Hooks.After(ctx, claims, updated, prev); err != nil {
+			if err := r.trace(ctx, "repository.Todo.Update.After", func(ctx context.Context) error {
+				return in.Hooks.After(ctx, claims, updated, prev)
+			}); err != nil {
 				return err
 			}
 		}
@@ -974,7 +1013,12 @@ func (r *todoRepo) Update(ctx context.Context, id uuid.UUID, in dbhook.Update[mo
 		// this runs, and reaching into a context for them then is reaching into one
 		// that has been cancelled.
 		done, who := in.Hooks.AfterCommit, claims
-		dbx.AfterCommit(ctx, func() { done(ctx, who, updated, prev) })
+		dbx.AfterCommit(ctx, func() {
+			ctx, span := r.db.tracer.Start(ctx, "repository.Todo.Update.AfterCommit")
+			defer span.End()
+
+			done(ctx, who, updated, prev)
+		})
 	}
 
 	return updated, nil
@@ -986,6 +1030,9 @@ func (r *todoRepo) Update(ctx context.Context, id uuid.UUID, in dbhook.Update[mo
 // of copying: that identifies the version captured, which is what a reader of
 // the history is asking about.
 func (r *todoRepo) writeSnapshot(ctx context.Context, tx dbx.Conn, prev *model.Todo) error {
+	ctx, span := r.db.tracer.Start(ctx, "repository.Todo.writeSnapshot")
+	defer span.End()
+
 	snapshotID, err := uuid.NewV7()
 	if err != nil {
 		return rigerr.Internal(err, "generate an identifier")
@@ -1008,6 +1055,9 @@ func (r *todoRepo) writeSnapshot(ctx context.Context, tx dbx.Conn, prev *model.T
 
 // Delete implements TodoRepository.
 func (r *todoRepo) Delete(ctx context.Context, in dbhook.Delete[model.TodoDeleteInput, model.Todo]) error {
+	ctx, span := r.db.tracer.Start(ctx, "repository.Todo.Delete")
+	defer span.End()
+
 	claims, err := tenancy.FromContext(ctx)
 	if err != nil {
 		return err
@@ -1037,7 +1087,9 @@ func (r *todoRepo) Delete(ctx context.Context, in dbhook.Delete[model.TodoDelete
 		}
 
 		if in.Hooks.Before != nil {
-			if err := in.Hooks.Before(ctx, claims, &in.Input, prev); err != nil {
+			if err := r.trace(ctx, "repository.Todo.Delete.Before", func(ctx context.Context) error {
+				return in.Hooks.Before(ctx, claims, &in.Input, prev)
+			}); err != nil {
 				return err
 			}
 		}
@@ -1065,7 +1117,9 @@ func (r *todoRepo) Delete(ctx context.Context, in dbhook.Delete[model.TodoDelete
 				return writeError(err, "todo")
 			}
 			if in.Hooks.After != nil {
-				if err := in.Hooks.After(ctx, claims, prev); err != nil {
+				if err := r.trace(ctx, "repository.Todo.Delete.After", func(ctx context.Context) error {
+					return in.Hooks.After(ctx, claims, prev)
+				}); err != nil {
 					return err
 				}
 			}
@@ -1093,7 +1147,9 @@ func (r *todoRepo) Delete(ctx context.Context, in dbhook.Delete[model.TodoDelete
 			return writeError(err, "todo")
 		}
 		if in.Hooks.After != nil {
-			if err := in.Hooks.After(ctx, claims, prev); err != nil {
+			if err := r.trace(ctx, "repository.Todo.Delete.After", func(ctx context.Context) error {
+				return in.Hooks.After(ctx, claims, prev)
+			}); err != nil {
 				return err
 			}
 		}
@@ -1116,7 +1172,12 @@ func (r *todoRepo) Delete(ctx context.Context, in dbhook.Delete[model.TodoDelete
 		// this runs, and reaching into a context for them then is reaching into one
 		// that has been cancelled.
 		done, who := in.Hooks.AfterCommit, claims
-		dbx.AfterCommit(ctx, func() { done(ctx, who, prev) })
+		dbx.AfterCommit(ctx, func() {
+			ctx, span := r.db.tracer.Start(ctx, "repository.Todo.Delete.AfterCommit")
+			defer span.End()
+
+			done(ctx, who, prev)
+		})
 	}
 
 	return nil
@@ -1130,6 +1191,9 @@ func TodoRestoreCutoff() time.Time {
 
 // Restore implements TodoRepository.
 func (r *todoRepo) Restore(ctx context.Context, id uuid.UUID, in dbhook.Restore[model.TodoUpdateInput, model.Todo]) (*model.Todo, error) {
+	ctx, span := r.db.tracer.Start(ctx, "repository.Todo.Restore")
+	defer span.End()
+
 	claims, err := tenancy.FromContext(ctx)
 	if err != nil {
 		return nil, err
@@ -1160,7 +1224,9 @@ func (r *todoRepo) Restore(ctx context.Context, id uuid.UUID, in dbhook.Restore[
 		// taken since gets changed on the way in. Returning an error refuses the
 		// restore instead.
 		if in.Hooks.Before != nil {
-			if err := in.Hooks.Before(ctx, claims, &in.Input, prev); err != nil {
+			if err := r.trace(ctx, "repository.Todo.Restore.Before", func(ctx context.Context) error {
+				return in.Hooks.Before(ctx, claims, &in.Input, prev)
+			}); err != nil {
 				return err
 			}
 		}
@@ -1169,7 +1235,9 @@ func (r *todoRepo) Restore(ctx context.Context, id uuid.UUID, in dbhook.Restore[
 		// fields it touched: the row was not live, so nothing about it has been
 		// checked against the world it is returning to.
 		if in.Hooks.Validator != nil {
-			if err := in.Hooks.Validator.RunRestore(ctx, claims, &in.Input, prev); err != nil {
+			if err := r.trace(ctx, "repository.Todo.Restore.Validator", func(ctx context.Context) error {
+				return in.Hooks.Validator.RunRestore(ctx, claims, &in.Input, prev)
+			}); err != nil {
 				return err
 			}
 		}
@@ -1218,7 +1286,9 @@ func (r *todoRepo) Restore(ctx context.Context, id uuid.UUID, in dbhook.Restore[
 		}
 
 		if in.Hooks.After != nil {
-			if err := in.Hooks.After(ctx, claims, restored, prev); err != nil {
+			if err := r.trace(ctx, "repository.Todo.Restore.After", func(ctx context.Context) error {
+				return in.Hooks.After(ctx, claims, restored, prev)
+			}); err != nil {
 				return err
 			}
 		}
@@ -1233,7 +1303,12 @@ func (r *todoRepo) Restore(ctx context.Context, id uuid.UUID, in dbhook.Restore[
 		// this runs, and reaching into a context for them then is reaching into one
 		// that has been cancelled.
 		done, who := in.Hooks.AfterCommit, claims
-		dbx.AfterCommit(ctx, func() { done(ctx, who, restored, prev) })
+		dbx.AfterCommit(ctx, func() {
+			ctx, span := r.db.tracer.Start(ctx, "repository.Todo.Restore.AfterCommit")
+			defer span.End()
+
+			done(ctx, who, restored, prev)
+		})
 	}
 
 	return restored, nil
@@ -1241,6 +1316,9 @@ func (r *todoRepo) Restore(ctx context.Context, id uuid.UUID, in dbhook.Restore[
 
 // ListDeleted returns retired rows still inside the restore window.
 func (r *todoRepo) ListDeleted(ctx context.Context, f model.TodoFilter, page model.TodoPage, opts ...readopt.Option) ([]*model.Todo, int64, error) {
+	ctx, span := r.db.tracer.Start(ctx, "repository.Todo.ListDeleted")
+	defer span.End()
+
 	// The lifecycle option is forced and the caller's are kept: which rows the
 	// trash holds is not up for discussion, and how wide a view of it the caller
 	// gets still is.
@@ -1249,6 +1327,9 @@ func (r *todoRepo) ListDeleted(ctx context.Context, f model.TodoFilter, page mod
 
 // ListSnapshots implements TodoRepository.
 func (r *todoRepo) ListSnapshots(ctx context.Context, id uuid.UUID) ([]*model.Todo, error) {
+	ctx, span := r.db.tracer.Start(ctx, "repository.Todo.ListSnapshots")
+	defer span.End()
+
 	claims, err := tenancy.FromContext(ctx)
 	if err != nil {
 		return nil, err
@@ -1277,6 +1358,9 @@ func (r *todoRepo) ListSnapshots(ctx context.Context, id uuid.UUID) ([]*model.To
 
 // Revert implements TodoRepository.
 func (r *todoRepo) Revert(ctx context.Context, id, versionID uuid.UUID, hooks dbhook.UpdateHooks[model.TodoUpdateInput, model.Todo]) (*model.Todo, error) {
+	ctx, span := r.db.tracer.Start(ctx, "repository.Todo.Revert")
+	defer span.End()
+
 	var reverted *model.Todo
 	err := dbx.InTx(ctx, r.db.pool, func(ctx context.Context, tx dbx.Conn) error {
 		version, err := r.Get(ctx, versionID)

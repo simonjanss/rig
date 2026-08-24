@@ -2,6 +2,25 @@
 table: rig_notification_device
 comment: 'Where a push can reach somebody. Email is refused: the address is on the account already.'
 
+# Register one, list your own, revoke one. No update: a token that changed is a
+# new registration, and a device whose label is wrong is not worth an endpoint.
+operations: [List, Create, Delete]
+
+# A device is private in the strongest sense available here: the token is what
+# addresses somebody's laptop, and the list of them is the list of places they
+# read this from. `own` narrows every read and every write to the rows whose
+# account_id is the caller's — and the owner column has to be named, because
+# rig's default is created_by_account_id and this table has none.
+#
+# rig derives a widening key from this, the same as for any owner-scoped table,
+# and services/authz grants it to nobody: the key exists, every generated read
+# checks it, and no role holds it. "Who may read everybody's push tokens" is a
+# question this product answers with nobody, and refusing at the top is stronger
+# than nobody happening to hold it.
+access:
+  scope: own
+  owner: account_id
+
 columns:
   account_id:
     comment: Whose device it is.
@@ -19,14 +38,14 @@ columns:
 enums:
   rig_notification_channel:
     name: RigNotificationChannel
-    description: 'TODO: what does this enumeration represent?'
+    description: Where a copy of an inbox line can be sent. The inbox itself is not one of them.
     values:
       Desktop:
         name: Desktop
-        description: 'TODO: describe this.'
+        description: A browser or a desktop application, addressed by a device row.
       Mobile:
         name: Mobile
-        description: 'TODO: describe this.'
+        description: A phone, addressed by a device row.
       Email:
         name: Email
-        description: 'TODO: describe this.'
+        description: 'The address on the account. No device row: there is nothing to register, because the address is on the account already.'

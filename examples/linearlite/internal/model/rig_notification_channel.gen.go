@@ -8,16 +8,18 @@ import (
 	"strings"
 )
 
-// TODO: what does this enumeration represent?
+// Where a copy of an inbox line can be sent. The inbox itself is not one of
+// them.
 type RigNotificationChannel string
 
 // The values of RigNotificationChannel.
 const (
-	// TODO: describe this.
+	// A browser or a desktop application, addressed by a device row.
 	RigNotificationChannelDesktop RigNotificationChannel = "Desktop"
-	// TODO: describe this.
+	// A phone, addressed by a device row.
 	RigNotificationChannelMobile RigNotificationChannel = "Mobile"
-	// TODO: describe this.
+	// The address on the account. No device row: there is nothing to register,
+	// because the address is on the account already.
 	RigNotificationChannelEmail RigNotificationChannel = "Email"
 )
 

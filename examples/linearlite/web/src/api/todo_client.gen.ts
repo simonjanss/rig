@@ -4,6 +4,8 @@
 
 import type { Todo, TodoListResponse } from "./todo.gen.js";
 import type {
+    TodoClaimBody,
+    TodoClaimFields,
     TodoCreateFields,
     TodoCreateInput,
     TodoListDeletedQuery,
@@ -174,6 +176,33 @@ export class TodoClient {
     }
 
     /**
+     * Taking an item somebody else holds is a conflict rather than a
+     * reassignment: two people picking up the same thing should not both be
+     * told they have it. Taking one nobody holds is the ordinary case, and
+     * taking one you already hold is not an error — a button pressed twice is
+     * not a disagreement.
+     *
+     * `steal` is the deliberate override, for the person who means it. It goes
+     * through the same update as everything else, so the previous holder hears
+     * about it the way they hear about any other change to their item.
+     *
+     * POST /api/v1/todos/{id}/_claim
+     *
+     * Operation claimTodo.
+     *
+     * A refusal is read back with `isTodoClaimError`, whose `fields` say what
+     * was wrong with each member of the body.
+     */
+    claim(iD: string, input: TodoClaimBody, options?: CallOptions): Promise<Todo> {
+        return send<Todo>(this.#rt, {
+            name: "claimTodo",
+            method: "POST",
+            path: `/todos/${pathValue(iD)}/_claim`,
+            body: input,
+        }, options);
+    }
+
+    /**
      * The deletion stamp is cleared and the row appears in reads again. It
      * works for 30 days after the deletion; past that the row is no longer
      * eligible and this answers 409.
@@ -262,5 +291,16 @@ export function isTodoCreateError(err: unknown): err is RigError<TodoCreateField
  * `fields` would be an object nobody complained about.
  */
 export function isTodoUpdateError(err: unknown): err is RigError<TodoUpdateFields> {
+    return isInvalid(err);
+}
+
+/**
+ * isTodoClaimError reads back what claimTodo refused.
+ *
+ * True only for a body the server refused field by field. Anything else — a
+ * 404, a request that never arrived — has nothing to put beside a control, so
+ * `fields` would be an object nobody complained about.
+ */
+export function isTodoClaimError(err: unknown): err is RigError<TodoClaimFields> {
     return isInvalid(err);
 }

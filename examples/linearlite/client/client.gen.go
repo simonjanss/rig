@@ -27,7 +27,7 @@ const BasePath = "/api/v1"
 // to answer before removing anything: how old is the oldest client still
 // calling. Regenerating against an unchanged API leaves it alone — it is not
 // a build stamp.
-const Revision = "2026-08-22"
+const Revision = "2026-08-24"
 
 // RevisionHeader is where [Revision] is sent: the same header the server
 // generated from this document reads.
@@ -46,6 +46,12 @@ type Client struct {
 	// One person inside one tenant. The person is the identity; this is who they
 	// are here.
 	Accounts *AccountClient
+	// Where a push can reach somebody. Email is refused: the address is on the
+	// account already.
+	RigNotificationDevices *RigNotificationDeviceClient
+	// What somebody wants on a channel, and when. Resolved in three steps: this
+	// kind, then this channel, then the project default.
+	RigNotificationSettings *RigNotificationSettingClient
 	// One item on the board.
 	Todos *TodoClient
 	// A file attached to a todo.
@@ -74,6 +80,8 @@ func New(cfg rigclient.Config) (*Client, error) {
 
 	c := &Client{rt: rt}
 	c.Accounts = &AccountClient{rt: rt}
+	c.RigNotificationDevices = &RigNotificationDeviceClient{rt: rt}
+	c.RigNotificationSettings = &RigNotificationSettingClient{rt: rt}
 	c.Todos = &TodoClient{rt: rt}
 	c.TodoAttachments = &TodoAttachmentClient{rt: rt}
 	c.Auth = rt.Auth()

@@ -139,6 +139,29 @@ export type TodoUpdateFields = {
     entity?: FieldError;
 };
 
+/** The body claimTodo sends. */
+export type TodoClaimBody = {
+    /** Take it even if somebody else holds it. */
+    steal?: boolean | null;
+};
+
+/**
+ * TodoClaimFields is what a validation failure says, shaped like the body it is
+ * about — one member per member, so each message can be put beside the
+ * control it belongs to.
+ *
+ * A member is absent when there was nothing wrong with that field. It arrives
+ * as the `fields` of the error the call threw.
+ */
+export type TodoClaimFields = {
+    steal?: FieldError;
+    /**
+     * What was wrong with the request as a whole rather than with any one
+     * field.
+     */
+    entity?: FieldError;
+};
+
 /** The body revertTodo sends. */
 export type TodoRevertBody = {
     /** The version to put back, from the Todo's history. */

@@ -22,6 +22,7 @@ export type BoardTodo = {
     createdByAccountId: string | null;
     createdAt: string;
     updatedAt: string | null;
+    updatedByAccountId: string | null;
     deletedAt: string | null;
     snapshotAt: string | null;
 };
@@ -38,6 +39,7 @@ export function fromRow(row: TodoRow): BoardTodo {
         createdByAccountId: row.created_by_account_id,
         createdAt: row.created_at,
         updatedAt: row.updated_at,
+        updatedByAccountId: row.updated_by_account_id,
         deletedAt: row.deleted_at,
         snapshotAt: row.snapshot_from_todo_at,
     };

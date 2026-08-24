@@ -1,3 +1,4 @@
+import { isConflict } from "@rig/client";
 import { useLiveQuery } from "@tanstack/react-db";
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router";
@@ -34,6 +35,9 @@ export function TodoDetailPanel() {
     const [title, setTitle] = useState("");
     const [description, setDescription] = useState("");
     const [editing, setEditing] = useState(false);
+    // Set by a refused claim, so the override appears only for somebody who
+    // has already been told no once.
+    const [contested, setContested] = useState(false);
 
     // The drafts follow the live row until somebody is typing; a remote edit
     // mid-keystroke stays out of the way and wins on the next open.
@@ -44,6 +48,8 @@ export function TodoDetailPanel() {
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [item?.title, item?.description, editing]);
+
+    useEffect(() => setContested(false), [id]);
 
     if (!id) return null;
 
@@ -60,6 +66,39 @@ export function TodoDetailPanel() {
             push({
                 kind: "error",
                 title: "The change was refused",
+                detail: err instanceof Error ? err.message : String(err),
+            });
+        }
+    }
+
+    /**
+     * Take the item, through the endpoint services/todo/todo.yaml declares.
+     *
+     * This is the one control on the board that is not CRUD, and the reason it
+     * is not: the rule depends on the value already in the column, so doing it
+     * with a PATCH means read, decide, write — and two people reading an
+     * unheld item at the same moment both decide yes. The endpoint decides
+     * once, next to the write, and the loser gets a 409 instead of a surprise.
+     *
+     * `steal` is the deliberate override, offered only after the refusal:
+     * taking somebody else's item is a thing you have to mean.
+     */
+    async function claim(steal = false) {
+        try {
+            await client.todos.claim(id!, steal ? { steal: true } : {});
+        } catch (err) {
+            if (isConflict(err)) {
+                setContested(true);
+                push({
+                    kind: "error",
+                    title: "Somebody else holds this",
+                    detail: "Take it anyway, or leave it with them.",
+                });
+                return;
+            }
+            push({
+                kind: "error",
+                title: "Could not claim it",
                 detail: err instanceof Error ? err.message : String(err),
             });
         }
@@ -171,17 +210,25 @@ export function TodoDetailPanel() {
                                         Unassign me
                                     </button>
                                 ) : (
-                                    <button
-                                        className="linkish"
-                                        onClick={() =>
-                                            void patch({
-                                                assigneeAccountId:
-                                                    tenant?.accountId ?? null,
-                                            })
-                                        }
-                                    >
-                                        Assign to me
-                                    </button>
+                                    <>
+                                        <button
+                                            className="linkish"
+                                            onClick={() => void claim()}
+                                        >
+                                            Claim it
+                                        </button>
+                                        {contested &&
+                                            item.assigneeAccountId && (
+                                                <button
+                                                    className="linkish danger"
+                                                    onClick={() =>
+                                                        void claim(true)
+                                                    }
+                                                >
+                                                    Take it anyway
+                                                </button>
+                                            )}
+                                    </>
                                 )}
                             </div>
                         </div>
@@ -204,7 +251,7 @@ export function TodoDetailPanel() {
                         />
 
                         <AttachmentList todoId={item.id} />
-                        <VersionHistory todoId={item.id} />
+                        <VersionHistory current={item} />
 
                         <footer className="detail-foot">
                             <button

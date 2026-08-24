@@ -9,6 +9,7 @@ import (
 	"net/http"
 
 	"github.com/simonjanss/rig/examples/linearlite/internal/model"
+	"github.com/simonjanss/rig/observe"
 	"github.com/simonjanss/rig/runtime/idempotency"
 	"github.com/simonjanss/rig/runtime/reqlog"
 	"github.com/simonjanss/rig/runtime/tenancy"
@@ -24,6 +25,7 @@ func registerTodo(mux *http.ServeMux, s Server, svc TodoService) {
 	mux.HandleFunc("DELETE /api/v1/todos/{id}", handleDeleteTodo(s, svc))
 	mux.HandleFunc("GET /api/v1/todos/{id}", handleGetTodo(s, svc))
 	mux.HandleFunc("PATCH /api/v1/todos/{id}", handleUpdateTodo(s, svc))
+	mux.HandleFunc("POST /api/v1/todos/{id}/_claim", handleClaimTodo(s, svc))
 	mux.HandleFunc("POST /api/v1/todos/{id}/_restore", handleRestoreTodo(s, svc))
 	mux.HandleFunc("POST /api/v1/todos/{id}/_revert", handleRevertTodo(s, svc))
 	mux.HandleFunc("GET /api/v1/todos/{id}/_versions", handleVersionsOfTodo(s, svc))
@@ -36,6 +38,9 @@ func handleListTodos(s Server, svc TodoService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		rec := reqlog.Wrap(w)
 		w = rec
+
+		r, span := observe.Server(r, "GET /api/v1/todos", rec.Status)
+		defer span.End()
 
 		ctx, claims, rc, ok := prepare(s, w, r)
 		defer logRequest(s, r, rec, rc)
@@ -80,6 +85,9 @@ func handleCreateTodo(s Server, svc TodoService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		rec := reqlog.Wrap(w)
 		w = rec
+
+		r, span := observe.Server(r, "POST /api/v1/todos", rec.Status)
+		defer span.End()
 
 		ctx, claims, rc, ok := prepare(s, w, r)
 		defer logRequest(s, r, rec, rc)
@@ -128,6 +136,9 @@ func handleSearchTodos(s Server, svc TodoService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		rec := reqlog.Wrap(w)
 		w = rec
+
+		r, span := observe.Server(r, "QUERY /api/v1/todos", rec.Status)
+		defer span.End()
 
 		ctx, claims, rc, ok := prepare(s, w, r)
 		defer logRequest(s, r, rec, rc)
@@ -184,6 +195,9 @@ func handleListDeletedTodos(s Server, svc TodoService) http.HandlerFunc {
 		rec := reqlog.Wrap(w)
 		w = rec
 
+		r, span := observe.Server(r, "GET /api/v1/todos/_deleted", rec.Status)
+		defer span.End()
+
 		ctx, claims, rc, ok := prepare(s, w, r)
 		defer logRequest(s, r, rec, rc)
 		if !ok {
@@ -231,6 +245,9 @@ func handleDeleteTodo(s Server, svc TodoService) http.HandlerFunc {
 		rec := reqlog.Wrap(w)
 		w = rec
 
+		r, span := observe.Server(r, "DELETE /api/v1/todos/{id}", rec.Status)
+		defer span.End()
+
 		ctx, claims, rc, ok := prepare(s, w, r)
 		defer logRequest(s, r, rec, rc)
 		if !ok {
@@ -267,6 +284,9 @@ func handleGetTodo(s Server, svc TodoService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		rec := reqlog.Wrap(w)
 		w = rec
+
+		r, span := observe.Server(r, "GET /api/v1/todos/{id}", rec.Status)
+		defer span.End()
 
 		ctx, claims, rc, ok := prepare(s, w, r)
 		defer logRequest(s, r, rec, rc)
@@ -308,6 +328,9 @@ func handleUpdateTodo(s Server, svc TodoService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		rec := reqlog.Wrap(w)
 		w = rec
+
+		r, span := observe.Server(r, "PATCH /api/v1/todos/{id}", rec.Status)
+		defer span.End()
 
 		ctx, claims, rc, ok := prepare(s, w, r)
 		defer logRequest(s, r, rec, rc)
@@ -357,6 +380,74 @@ func handleUpdateTodo(s Server, svc TodoService) http.HandlerFunc {
 	}
 }
 
+// handleClaimTodo serves POST /api/v1/todos/{id}/_claim.
+//
+// Take the item.
+//
+// Taking an item somebody else holds is a conflict rather than a reassignment:
+// two people picking up the same thing should not both be told they have it.
+// Taking one nobody holds is the ordinary case, and taking one you already
+// hold is not an error — a button pressed twice is not a disagreement.
+//
+// `steal` is the deliberate override, for the person who means it. It goes
+// through the same update as everything else, so the previous holder hears
+// about it the way they hear about any other change to their item.
+func handleClaimTodo(s Server, svc TodoService) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		rec := reqlog.Wrap(w)
+		w = rec
+
+		r, span := observe.Server(r, "POST /api/v1/todos/{id}/_claim", rec.Status)
+		defer span.End()
+
+		ctx, claims, rc, ok := prepare(s, w, r)
+		defer logRequest(s, r, rec, rc)
+		if !ok {
+			return
+		}
+
+		if err := tenancy.Require(claims, "todo.claim"); err != nil {
+			fail(s, w, r, rc, err)
+			return
+		}
+
+		var path TodoClaimPath
+		idParam, err := pathUUID(r, "id")
+		if err != nil {
+			fail(s, w, r, rc, err)
+			return
+		}
+		path.ID = idParam
+
+		var body TodoClaimBody
+		if err := decodeBody(r, &body); err != nil {
+			fail(s, w, r, rc, err)
+			return
+		}
+
+		req := NewRequest(claims, path, struct{}{}, body, rc)
+
+		result, err := idempotency.Run(ctx, s.DB, idempotency.Request{
+			TenantID: claims.TenantID,
+			Key:      r.Header.Get("Idempotency-Key"),
+			// The route pattern rather than the path, so the same key against the same
+			// endpoint is one record however many rows it names. What the path said is in
+			// the fingerprint.
+			Endpoint:    rc.Route,
+			Fingerprint: idempotency.Fingerprint([]any{path, struct{}{}, body}),
+			RequestID:   rc.RequestID,
+		}, func(ctx context.Context) (int, any, error) {
+			out, err := svc.Claim(ctx, req)
+			return http.StatusOK, out, err
+		})
+		if err != nil {
+			fail(s, w, r, rc, err)
+			return
+		}
+		writeResult(w, result)
+	}
+}
+
 // handleRestoreTodo serves POST /api/v1/todos/{id}/_restore.
 //
 // Bring a retired Todo back.
@@ -381,6 +472,9 @@ func handleRestoreTodo(s Server, svc TodoService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		rec := reqlog.Wrap(w)
 		w = rec
+
+		r, span := observe.Server(r, "POST /api/v1/todos/{id}/_restore", rec.Status)
+		defer span.End()
 
 		ctx, claims, rc, ok := prepare(s, w, r)
 		defer logRequest(s, r, rec, rc)
@@ -436,6 +530,9 @@ func handleRevertTodo(s Server, svc TodoService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		rec := reqlog.Wrap(w)
 		w = rec
+
+		r, span := observe.Server(r, "POST /api/v1/todos/{id}/_revert", rec.Status)
+		defer span.End()
 
 		ctx, claims, rc, ok := prepare(s, w, r)
 		defer logRequest(s, r, rec, rc)
@@ -499,6 +596,9 @@ func handleVersionsOfTodo(s Server, svc TodoService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		rec := reqlog.Wrap(w)
 		w = rec
+
+		r, span := observe.Server(r, "GET /api/v1/todos/{id}/_versions", rec.Status)
+		defer span.End()
 
 		ctx, claims, rc, ok := prepare(s, w, r)
 		defer logRequest(s, r, rec, rc)

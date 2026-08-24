@@ -4,8 +4,11 @@ package main
 
 import (
 	"bytes"
+	"io"
 	"mime/multipart"
 	"net/http"
+	"slices"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -222,4 +225,161 @@ func TestAttachments(t *testing.T) {
 	if res := api.do(t, request{method: http.MethodDelete, path: "/api/v1/todo-attachments/" + attachment.ID.String(), token: token}); res.status != http.StatusNoContent {
 		t.Fatalf("delete attachment: %d %s", res.status, res.body)
 	}
+}
+
+// The custom endpoint, and the reason it is one.
+//
+// Claiming is a decision about the value already in the column, which is what a
+// PATCH cannot make safely: the read and the write are two requests, and two
+// people who read an unheld item at the same moment both decide yes. Here the
+// decision is one statement before the write, so the second person is told no.
+func TestClaimingAnItem(t *testing.T) {
+	api := newServer(t)
+	tenant := api.seed(t)
+
+	demo := api.login(t, SeedEmail)
+	alex := api.login(t, SeedEmail2)
+	demoID := api.accountID(t, tenant, SeedEmail)
+
+	var item struct {
+		ID                uuid.UUID  `json:"id"`
+		AssigneeAccountID *uuid.UUID `json:"assigneeAccountId"`
+	}
+	res := api.do(t, request{
+		method: http.MethodPost, path: "/api/v1/todos", token: demo,
+		body: map[string]any{"title": "Somebody should take this"},
+	})
+	if res.status != http.StatusCreated {
+		t.Fatalf("create: %d %s", res.status, res.body)
+	}
+	res.decode(t, &item)
+	if item.AssigneeAccountID != nil {
+		t.Fatalf("a new item should be unheld: %s", res.body)
+	}
+
+	claim := "/api/v1/todos/" + item.ID.String() + "/_claim"
+
+	t.Run("an unheld item goes to whoever asks", func(t *testing.T) {
+		res := api.do(t, request{method: http.MethodPost, path: claim, token: demo, body: map[string]any{}})
+		if res.status != http.StatusOK {
+			t.Fatalf("claim: %d %s", res.status, res.body)
+		}
+		res.decode(t, &item)
+		if item.AssigneeAccountID == nil || *item.AssigneeAccountID != demoID {
+			t.Fatalf("the claimer should hold it: %s", res.body)
+		}
+	})
+
+	t.Run("claiming again is not an error", func(t *testing.T) {
+		// A button pressed twice is not a disagreement. It is also not a
+		// write: nothing changed, so nobody is notified about nothing.
+		res := api.do(t, request{method: http.MethodPost, path: claim, token: demo, body: map[string]any{}})
+		if res.status != http.StatusOK {
+			t.Fatalf("re-claim: %d %s, want 200", res.status, res.body)
+		}
+	})
+
+	t.Run("somebody else is refused", func(t *testing.T) {
+		res := api.do(t, request{method: http.MethodPost, path: claim, token: alex, body: map[string]any{}})
+		if res.status != http.StatusConflict {
+			t.Fatalf("contested claim: %d %s, want 409", res.status, res.body)
+		}
+	})
+
+	t.Run("steal is the deliberate override", func(t *testing.T) {
+		res := api.do(t, request{
+			method: http.MethodPost, path: claim, token: alex,
+			body: map[string]any{"steal": true},
+		})
+		if res.status != http.StatusOK {
+			t.Fatalf("steal: %d %s", res.status, res.body)
+		}
+		res.decode(t, &item)
+		alexID := api.accountID(t, tenant, SeedEmail2)
+		if item.AssigneeAccountID == nil || *item.AssigneeAccountID != alexID {
+			t.Fatalf("the thief should hold it: %s", res.body)
+		}
+	})
+}
+
+// Two people claiming the same unheld item at the same moment. One of them gets
+// it, and the other is told so.
+//
+// This is the whole reason the endpoint exists rather than a PATCH, and the
+// reason its read holds the row: with an ordinary SELECT both requests see
+// nobody holding the item, both write, and both are answered 200 — the item
+// ends up with one of them and the other has been told something untrue. The
+// assertion is the same whether the two requests overlap or not, which is what
+// makes it a test rather than a race detector.
+func TestTwoPeopleClaimingAtOnce(t *testing.T) {
+	api := newServer(t)
+	api.seed(t)
+
+	demo := api.login(t, SeedEmail)
+	alex := api.login(t, SeedEmail2)
+
+	res := api.do(t, request{
+		method: http.MethodPost, path: "/api/v1/todos", token: demo,
+		body: map[string]any{"title": "Two people want this"},
+	})
+	if res.status != http.StatusCreated {
+		t.Fatalf("create: %d %s", res.status, res.body)
+	}
+	var item struct {
+		ID uuid.UUID `json:"id"`
+	}
+	res.decode(t, &item)
+
+	type outcome struct {
+		status int
+		err    error
+	}
+	got := make(chan outcome, 2)
+	start := make(chan struct{})
+	for _, token := range []string{demo, alex} {
+		go func() {
+			<-start
+			status, err := api.claim(item.ID, token)
+			got <- outcome{status, err}
+		}()
+	}
+	close(start)
+
+	statuses := make([]int, 0, 2)
+	for range 2 {
+		o := <-got
+		if o.err != nil {
+			t.Fatal(o.err)
+		}
+		statuses = append(statuses, o.status)
+	}
+	slices.Sort(statuses)
+
+	// One winner and one refusal. Not two winners — that is the bug this
+	// endpoint is for — and not two refusals either: the item was held by
+	// nobody, so the first claim to arrive cannot be refused.
+	if want := []int{http.StatusOK, http.StatusConflict}; !slices.Equal(statuses, want) {
+		t.Errorf("statuses = %v, want %v", statuses, want)
+	}
+}
+
+// claim is one claim, with no *testing.T in reach: this is called from a
+// goroutine, and t.Fatal anywhere but the test's own goroutine stops the wrong
+// one.
+func (s *server) claim(id uuid.UUID, token string) (int, error) {
+	req, err := http.NewRequest(http.MethodPost,
+		s.http.URL+"/api/v1/todos/"+id.String()+"/_claim", strings.NewReader("{}"))
+	if err != nil {
+		return 0, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+token)
+
+	res, err := s.http.Client().Do(req)
+	if err != nil {
+		return 0, err
+	}
+	defer res.Body.Close()
+	_, _ = io.Copy(io.Discard, res.Body)
+	return res.StatusCode, nil
 }

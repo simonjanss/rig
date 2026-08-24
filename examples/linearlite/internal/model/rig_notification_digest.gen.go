@@ -8,20 +8,23 @@ import (
 	"strings"
 )
 
-// TODO: what does this enumeration represent?
+// How often somebody wants to be told, on one channel.
 type RigNotificationDigest string
 
 // The values of RigNotificationDigest.
 const (
-	// TODO: describe this.
+	// Each notification on its own, as soon as it is due.
 	RigNotificationDigestImmediate RigNotificationDigest = "Immediate"
-	// TODO: describe this.
+	// Whatever accumulated in an hour, as one message.
 	RigNotificationDigestHourly RigNotificationDigest = "Hourly"
-	// TODO: describe this.
+	// The same, a day at a time.
 	RigNotificationDigestDaily RigNotificationDigest = "Daily"
-	// TODO: describe this.
+	// The widest window, and the one notifications.retention has to outlive — a
+	// weekly digest is assembled from rows a shorter retention would have pruned.
 	RigNotificationDigestWeekly RigNotificationDigest = "Weekly"
-	// TODO: describe this.
+	// Nothing on this channel, and the inbox line is written anyway: this is
+	// somebody preferring to look rather than be told. is_enabled false is the
+	// other thing, and says the channel is not available to them at all.
 	RigNotificationDigestOff RigNotificationDigest = "Off"
 )
 

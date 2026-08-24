@@ -14,6 +14,7 @@ import (
 	"github.com/simonjanss/rig/notify"
 	"github.com/simonjanss/rig/runtime/dbhook"
 	"github.com/simonjanss/rig/runtime/readopt"
+	"github.com/simonjanss/rig/runtime/rigerr"
 	"github.com/simonjanss/rig/runtime/tenancy"
 )
 
@@ -54,6 +55,18 @@ type TodoService interface {
 	// Only the fields present in the body are changed. A field set to null is
 	// cleared; a field left out is left alone.
 	Update(ctx context.Context, r Request[TodoUpdatePath, struct{}, model.TodoUpdateInput]) (*model.Todo, error)
+
+	// Take the item.
+	//
+	// Taking an item somebody else holds is a conflict rather than a reassignment:
+	// two people picking up the same thing should not both be told they have it.
+	// Taking one nobody holds is the ordinary case, and taking one you already
+	// hold is not an error — a button pressed twice is not a disagreement.
+	//
+	// `steal` is the deliberate override, for the person who means it. It goes
+	// through the same update as everything else, so the previous holder hears
+	// about it the way they hear about any other change to their item.
+	Claim(ctx context.Context, r Request[TodoClaimPath, struct{}, TodoClaimBody]) (*model.Todo, error)
 
 	// Bring a retired Todo back.
 	//
@@ -200,11 +213,36 @@ type TodoContract struct {
 	// asked about different fields.
 	Hooks TodoHooks
 
+	// Endpoints holds the operations the configuration declared and rig cannot
+	// write. It is required, because a resource that declares one has no working
+	// answer without it.
+	Endpoints TodoEndpoints
+
 	// Notify answers when notifications about a row are due and who should hear
 	// about them. It is required, because this table declared itself notifiable by
 	// being joined to rig_notification, and a nil one would be an audience of
 	// nobody discovered hours later in a job.
 	Notify TodoNotify
+}
+
+// TodoEndpoints are the endpoints the table configuration declares.
+//
+// There is nothing sensible for rig to do by default with any of them — an
+// endpoint nobody could describe from the schema is exactly the one that has
+// to be written — so the whole set is the service layer's, and it arrives
+// through the contract.
+type TodoEndpoints interface {
+	// Take the item.
+	//
+	// Taking an item somebody else holds is a conflict rather than a reassignment:
+	// two people picking up the same thing should not both be told they have it.
+	// Taking one nobody holds is the ordinary case, and taking one you already
+	// hold is not an error — a button pressed twice is not a disagreement.
+	//
+	// `steal` is the deliberate override, for the person who means it. It goes
+	// through the same update as everything else, so the previous holder hears
+	// about it the way they hear about any other change to their item.
+	Claim(ctx context.Context, r Request[TodoClaimPath, struct{}, TodoClaimBody]) (*model.Todo, error)
 }
 
 // TodoNotify is what rig asks about notifications concerning a Todo: when they
@@ -280,6 +318,10 @@ type TodoHooks struct {
 // up without an implementation of it, and the failure is at the call to the
 // constructor rather than on the route.
 type TodoRules interface {
+	// The endpoints the table configuration declares, which rig has no way to
+	// write.
+	TodoEndpoints
+
 	// The two questions notifications ask of this table, which it declared by
 	// being joined to rig_notification.
 	TodoNotify
@@ -304,7 +346,7 @@ type TodoRules interface {
 // writer back. The service layer never has to hold a half-built value or name
 // the type it is part of.
 func NewTodoService(repo store.TodoRepository, rules TodoRules) DefaultTodoService {
-	svc := NewDefaultTodoService(repo, TodoContract{Hooks: rules.Hooks(), Notify: rules})
+	svc := NewDefaultTodoService(repo, TodoContract{Hooks: rules.Hooks(), Endpoints: rules, Notify: rules})
 	rules.Bind(svc.Writer())
 	return svc
 }
@@ -316,6 +358,13 @@ func NewTodoService(repo store.TodoRepository, rules TodoRules) DefaultTodoServi
 // site would have said so. An empty TodoContract is still allowed — it is
 // just a thing somebody wrote down.
 func NewDefaultTodoService(repo store.TodoRepository, contract TodoContract) DefaultTodoService {
+	// A nil set is not a service with no custom endpoints; it is one whose custom
+	// endpoints all answer 500. Failing at startup beats finding that out from a
+	// caller.
+	if contract.Endpoints == nil {
+		panic("api.NewDefaultTodoService: Contract.Endpoints is required: todo declares custom endpoints")
+	}
+
 	// Likewise. A nil one is not a table nobody notifies about; it is one whose
 	// every announcement resolves to an audience of nobody, in a background job,
 	// hours later — which is the failure mode this whole design is arranged to
@@ -521,6 +570,14 @@ func (s DefaultTodoService) Get(ctx context.Context, r Request[TodoGetPath, stru
 // Update implements TodoService.
 func (s DefaultTodoService) Update(ctx context.Context, r Request[TodoUpdatePath, struct{}, model.TodoUpdateInput]) (*model.Todo, error) {
 	return s.write.Update(ctx, r.Path.ID, r.Body)
+}
+
+// Claim implements TodoService.
+func (s DefaultTodoService) Claim(ctx context.Context, r Request[TodoClaimPath, struct{}, TodoClaimBody]) (*model.Todo, error) {
+	if s.contract.Endpoints == nil {
+		return nil, rigerr.Internal(nil, "Todo.Claim has no implementation")
+	}
+	return s.contract.Endpoints.Claim(ctx, r)
 }
 
 // Restore implements TodoService.

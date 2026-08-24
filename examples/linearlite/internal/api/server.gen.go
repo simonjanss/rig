@@ -20,6 +20,7 @@ import (
 	"github.com/simonjanss/rig/files"
 	"github.com/simonjanss/rig/notify"
 	"github.com/simonjanss/rig/notify/notifyhttp"
+	"github.com/simonjanss/rig/observe"
 	"github.com/simonjanss/rig/runtime/apirev"
 	"github.com/simonjanss/rig/runtime/dbhook"
 	"github.com/simonjanss/rig/runtime/dbx"
@@ -46,6 +47,17 @@ type Authenticator interface {
 	Claims(*http.Request) (tenancy.Claims, error)
 	// Mount registers the authentication routes — signing in, refreshing, keys
 	// — on the same mux the resource routes are on.
+	Mount(*http.ServeMux)
+}
+
+// MonitoringPage serves rig's page over the spans this server wrote.
+//
+// [github.com/simonjanss/rig/observe.Page] satisfies it, and is what
+// [Monitoring] is for. Declared here rather than imported so that the type of
+// this field is not a dependency.
+type MonitoringPage interface {
+	// Mount registers the page's routes on the same mux the resource routes are
+	// on. It registers nothing when there is no password to guard it with.
 	Mount(*http.ServeMux)
 }
 
@@ -130,6 +142,16 @@ type Server struct {
 	// the path it always took, with no transaction and no extra round trip. See
 	// [github.com/simonjanss/rig/runtime/idempotency].
 	DB dbx.Beginner
+
+	// Monitor serves rig's monitoring page, and nil means it is not served.
+	//
+	//	page, err := tracing.Page(api.Monitoring())
+	//
+	// It is mounted on the mux Register returns, after the resource routes. It is
+	// not itself a traced or logged route — spans and request lines are opened
+	// inside each generated handler, so nothing that is not one appears in either
+	// — which is what keeps looking at the page off the page.
+	Monitor MonitoringPage
 }
 
 // Handlers is every resource's service, plus the shared behavior.
@@ -146,9 +168,11 @@ type Handlers struct {
 	// rather than something reached for.
 	Notifications *notify.Service
 
-	Account        AccountService
-	Todo           TodoService
-	TodoAttachment TodoAttachmentService
+	Account                AccountService
+	RigNotificationDevice  RigNotificationDeviceService
+	RigNotificationSetting RigNotificationSettingService
+	Todo                   TodoService
+	TodoAttachment         TodoAttachmentService
 }
 
 // Register mounts every route and returns the mux.
@@ -194,6 +218,12 @@ func Register(h Handlers) *http.ServeMux {
 	if h.Account != nil {
 		registerAccount(mux, h.Server, h.Account)
 	}
+	if h.RigNotificationDevice != nil {
+		registerRigNotificationDevice(mux, h.Server, h.RigNotificationDevice)
+	}
+	if h.RigNotificationSetting != nil {
+		registerRigNotificationSetting(mux, h.Server, h.RigNotificationSetting)
+	}
 	if h.Todo != nil {
 		registerTodo(mux, h.Server, h.Todo)
 	}
@@ -224,6 +254,12 @@ func Register(h Handlers) *http.ServeMux {
 	// routes are the ones this project owns.
 	if h.Server.Auth != nil {
 		h.Server.Auth.Mount(mux)
+	}
+
+	// Last, for the reason the auth routes are late: a collision here is a panic
+	// naming rig's own page rather than a route this project owns.
+	if h.Server.Monitor != nil {
+		h.Server.Monitor.Mount(mux)
 	}
 
 	return mux
@@ -314,6 +350,12 @@ func requestContext(s Server, r *http.Request) RequestContext {
 	}
 	if s.RequestID != nil {
 		rc.RequestID = s.RequestID(r)
+	} else {
+		// This project traces, so this request already has an identifier, and
+		// inventing a second one would be inventing a second answer to the same
+		// question. The requestId in the error body, the request_id on every log line
+		// and the trace in a collector are one string, and nobody had to wire it up.
+		rc.RequestID = observe.TraceID(r)
 	}
 	return rc
 }
@@ -414,6 +456,12 @@ func fail(s Server, w http.ResponseWriter, r *http.Request, rc RequestContext, e
 // becomes a thing nobody reads.
 func logFailure(s Server, r *http.Request, rc RequestContext, err error) {
 	code := rigerr.CodeOf(err)
+	// On the span the handler opened, which this does not end: the span belongs to
+	// the handler and is closed by its defer. Only an internal failure makes the
+	// span itself red — the same distinction the two log levels below draw, and
+	// for the same reason.
+	observe.Fail(r.Context(), code.HTTPStatus(), err)
+
 	attrs := []any{
 		slog.Any("request", rc),
 		slog.Int("status", code.HTTPStatus()),

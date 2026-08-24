@@ -155,6 +155,33 @@ func (c *TodoClient) Update(ctx context.Context, id uuid.UUID, in TodoUpdateInpu
 	return rigclient.Do[Todo](ctx, c.rt, op, opts...)
 }
 
+// Take the item.
+//
+// Taking an item somebody else holds is a conflict rather than a reassignment:
+// two people picking up the same thing should not both be told they have it.
+// Taking one nobody holds is the ordinary case, and taking one you already
+// hold is not an error — a button pressed twice is not a disagreement.
+//
+// `steal` is the deliberate override, for the person who means it. It goes
+// through the same update as everything else, so the previous holder hears
+// about it the way they hear about any other change to their item.
+//
+// POST /api/v1/todos/{id}/_claim
+//
+// Operation claimTodo.
+//
+// A refusal is read back with [TodoClaimError], whose Fields say what was
+// wrong with each member of the body.
+func (c *TodoClient) Claim(ctx context.Context, id uuid.UUID, in TodoClaimBody, opts ...rigclient.CallOption) (*Todo, error) {
+	op := rigclient.Op{
+		Name:   "claimTodo",
+		Method: http.MethodPost,
+		Path:   strings.Replace("/todos/{id}/_claim", "{id}", rigclient.PathValue(id.String()), 1),
+		Body:   in,
+	}
+	return rigclient.Do[Todo](ctx, c.rt, op, opts...)
+}
+
 // Bring a retired Todo back.
 //
 // The deletion stamp is cleared and the row appears in reads again. It works

@@ -6,6 +6,13 @@ comment: 'One inbox line: a notification, an account, and whether it has been re
 # dismissed line is kept is notifications.retention in rig.yaml, and RIG5031
 # refuses a second copy of that number here.
 
+# No endpoints, although this is the one table a person reads constantly. The
+# inbox has rig's own routes for the actions — read, read-all, dismiss — and a
+# live shape for the reading, and a third way in would be a third thing to keep
+# in step. Exposing the notification tables is for the two rows a person owns:
+# their devices and their preferences.
+expose: false
+
 columns:
   notification_id:
     comment: What happened. The line is separate from it so that one person clearing their inbox changes nothing anybody else sees.

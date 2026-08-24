@@ -28,7 +28,7 @@ func spaHandler(dir string) http.Handler {
 		// that is not a page: a POST to an endpoint that does not exist, or a
 		// misspelled API path, should say so rather than answer with HTML the
 		// caller will try to parse as JSON.
-		for _, prefix := range []string{"/api/", "/auth/", "/notifications"} {
+		for _, prefix := range []string{"/api/", "/auth/", "/notifications", demoPrefix} {
 			if strings.HasPrefix(r.URL.Path, prefix) {
 				http.NotFound(w, r)
 				return
