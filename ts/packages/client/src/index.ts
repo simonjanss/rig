@@ -72,6 +72,16 @@ export {
 } from "./retry.js";
 export type { Retry } from "./retry.js";
 
+export {
+    RATE_LIMIT_LIMIT,
+    RATE_LIMIT_REMAINING,
+    RATE_LIMIT_RESET,
+    fraction,
+    rateLimitOf,
+    used,
+} from "./rate-limit.js";
+export type { RateLimitStatus } from "./rate-limit.js";
+
 export { paginate } from "./paginate.js";
 export type { Page } from "./paginate.js";
 

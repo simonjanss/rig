@@ -407,6 +407,10 @@ func (rt *Runtime) attempt(ctx context.Context, op Op, call *call, leash time.Du
 	}
 
 	res, err := call.client(rt.http, leash).Do(req)
+	// Here rather than where the call returns, so that a response a retry is
+	// about to replace is still observed. Each one is a real thing the server
+	// said about the budget, and a 429 that was retried away spent it too.
+	rt.observeRateLimit(op.Name, res)
 	return res, true, err
 }
 

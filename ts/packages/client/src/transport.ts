@@ -361,12 +361,18 @@ async function attemptOnce(
     const signal =
         leashMs === undefined ? opts.signal : combine(opts.signal, leashMs);
 
-    return await rt.fetch(url, {
+    const res = await rt.fetch(url, {
         method: op.method,
         headers,
         ...(body !== undefined ? { body } : {}),
         ...(signal !== undefined ? { signal } : {}),
     });
+
+    // Here rather than where the call returns, so that a response a retry is
+    // about to replace is still observed. Each one is a real thing the server
+    // said about the budget, and a 429 that was retried away spent it too.
+    rt.observeRateLimit(op.name, res);
+    return res;
 }
 
 /** What is left of the time this call was given. */
