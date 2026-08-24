@@ -81,6 +81,13 @@ const (
 	// a slot and reports the total, and what it does when several replicas run
 	// it at once on one row.
 	PortThrottle = 55487
+
+	// PortCache is internal/cachetest: whether a notification really is
+	// delivered on commit and discarded on rollback, and what a listener that
+	// lost its connection knows when it comes back. Its own container because
+	// one of those tests kills a backend, and a suite sharing the database would
+	// see it as its own connection dying.
+	PortCache = 55486
 )
 
 // ports is every number above, with the name a failure should mention.
@@ -109,4 +116,5 @@ var ports = map[string]int{
 	"internal/cli (electric sync)":   PortCLIElectricSync,
 	"internal/authtest":              PortAuth,
 	"internal/presencetest":          PortPresence,
+	"internal/cachetest":             PortCache,
 }
