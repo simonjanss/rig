@@ -65,11 +65,26 @@ func Unmarshal(b []byte) (*Document, error) {
 // project that turned the page on and spent a revision on it would be telling
 // every client it was built against something older than the server, over a
 // change none of them can see.
+//
+// [Presence] is cleared in *part*, and it is the only field here that is. Two of
+// its numbers are answered to the browser on every heartbeat, so a client built
+// when the TTL was a minute behaves differently against twenty seconds — those
+// stay, because that is exactly what a revision is for. The sweeper's interval
+// and its grace period are housekeeping: no response carries them and no caller
+// can tell what they are, so they are cleared for the reason Monitoring is.
 func (d *Document) Hash() (string, error) {
 	unstamped := *d
 	unstamped.API.Revision = ""
 	unstamped.API.EmbeddedFoundation = false
 	unstamped.API.Monitoring = nil
+	if p := unstamped.API.Presence; p != nil {
+		// A copy, because the shallow copy above shares the pointer and the
+		// caller's document must not come back with its sweep interval erased.
+		visible := *p
+		visible.SweepSeconds = 0
+		visible.GraceSeconds = 0
+		unstamped.API.Presence = &visible
+	}
 
 	b, err := Marshal(&unstamped)
 	if err != nil {

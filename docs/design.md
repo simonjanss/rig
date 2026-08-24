@@ -104,6 +104,17 @@ memory and fails on any difference, without writing anything. Committed
 generated code that nobody regenerated is how a schema change quietly stops
 matching the code that reads it.
 
+**A leftover is a difference too.** rig records what it wrote in
+`.rig/manifest.json`, and that file is gitignored — so the checkout CI makes has
+no record at all. A gate that depended on it would pass on a tree still carrying
+the generated files of a table that was renamed three commits ago. So rig also
+recognizes its own output from the output: `.gen.` in the name, or its banner on
+the first line. The cost is that the naming convention becomes a rule rather
+than a habit, and a hand-written `*.gen.go` inside a project will be reported
+and pruned. That is the trade — rig owning a namespace it already documented, in
+exchange for a check that means the same thing in a clone as it does on your
+machine.
+
 ---
 
 ## Configuration is keyed by physical names

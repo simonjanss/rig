@@ -249,6 +249,34 @@ func isNotificationTable(name string) bool {
 	return slices.Contains(NotificationTables(), name)
 }
 
+// PresenceTable is who is here, and what they are looking at.
+//
+// One table, unlike the inbox's five, because a presence row is complete on its
+// own: nothing collapses into it and nothing is pending about it.
+const PresenceTable = "rig_presence"
+
+// isPresenceTable reports whether a table is rig's own presence table.
+//
+// A function rather than a comparison at each call site, so that it reads like
+// isNotificationTable beside it and so a second presence table — if one is ever
+// needed — is one edit rather than a grep.
+func isPresenceTable(name string) bool {
+	return name == PresenceTable
+}
+
+// PresenceScopeColumn and PresenceTargetIDColumn are the two the shape lets a
+// subscriber narrow by.
+//
+// A subscriber chooses how much presence traffic its screen pays for, and these
+// are the two questions worth asking: which part of the application, and which
+// row. A tenant-wide presence stream sends every heartbeat of every tab to every
+// tab, which is quadratic in people; narrowed to one board it is linear in the
+// people on it.
+const (
+	PresenceScopeColumn    = "scope"
+	PresenceTargetIDColumn = "target_id"
+)
+
 // NotificationRecipientOwner is the column an inbox read narrows to.
 //
 // Not the created-by audit column every other owner-scoped table filters on: an

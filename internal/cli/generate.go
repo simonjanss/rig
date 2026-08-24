@@ -50,7 +50,7 @@ func newGenerateCmd(e *env) *cobra.Command {
 				return err
 			}
 
-			results, deltas, _, err := e.plan(cmd.Context(), p, doc, only)
+			results, deltas, manifest, err := e.plan(cmd.Context(), p, doc, only)
 			if err != nil {
 				return err
 			}
@@ -75,7 +75,9 @@ func newGenerateCmd(e *env) *cobra.Command {
 
 			gen.Report(e.errOut, p.Root, deltas, false)
 
-			next, err := gen.Write(p.Root, results, deltas, gen.WriteOptions{Force: force, Prune: prune})
+			next, err := gen.Write(p.Root, results, deltas, gen.WriteOptions{
+				Force: force, Prune: prune, Previous: manifest,
+			})
 			if err != nil {
 				return err
 			}
@@ -103,6 +105,7 @@ func newCheckCmd(e *env) *cobra.Command {
 	var (
 		schemaPath string
 		only       []string
+		strict     bool
 	)
 
 	cmd := &cobra.Command{
@@ -112,7 +115,12 @@ func newCheckCmd(e *env) *cobra.Command {
 		Long: "Runs every generator in memory and compares the result to what is on disk,\n" +
 			"without writing anything. Exits non-zero on any difference.\n\n" +
 			"This is the CI gate: committed generated code that nobody regenerated is\n" +
-			"how a schema change quietly stops matching the code that reads it.",
+			"how a schema change quietly stops matching the code that reads it. A file\n" +
+			"edited by hand, one the schema has moved past, and one left behind by a\n" +
+			"renamed table are all reported, with no help from git and none from the\n" +
+			"manifest, which a clean checkout does not have.\n\n" +
+			"--strict also fails on warnings, which is what catches a migration nobody\n" +
+			"ran `rig sync` for.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			p, err := e.mustProject()
@@ -124,6 +132,16 @@ func newCheckCmd(e *env) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			// A warning nobody ever fails on is a warning nobody ever fixes, and
+			// the one that matters here says a column exists in the database and
+			// in the generated code without anybody having described it.
+			if strict && diags.Count(diag.SeverityWarning) > 0 && !diags.HasErrors() {
+				fmt.Fprintf(e.errOut, "\n%d warnings, and --strict was given\n",
+					diags.Count(diag.SeverityWarning))
+				_ = e.report(&diags)
+				return ErrDiagnostics
+			}
+
 			if err := e.report(&diags); err != nil {
 				return err
 			}
@@ -153,6 +171,7 @@ func newCheckCmd(e *env) *cobra.Command {
 
 	cmd.Flags().StringVar(&schemaPath, "schema", "", "compile a schema dump instead of reading the database")
 	cmd.Flags().StringSliceVar(&only, "only", nil, "check only these generators")
+	cmd.Flags().BoolVar(&strict, "strict", false, "treat warnings as failures")
 	return cmd
 }
 
@@ -194,7 +213,9 @@ func (e *env) plan(ctx context.Context, p *project.Project, doc *ir.Document, on
 		return nil, nil, nil, err
 	}
 
-	deltas, err := gen.Diff(p.Root, results, manifest)
+	deltas, err := gen.Diff(p.Root, results, manifest, gen.DiffOptions{
+		Partial: len(specs) < len(p.Config.Generators),
+	})
 	if err != nil {
 		return nil, nil, nil, err
 	}

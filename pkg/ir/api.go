@@ -61,6 +61,10 @@ type API struct {
 	// none. Here for the reason [API.Auth] and [API.Files] are.
 	Notifications *Notifications `json:"notifications,omitempty"`
 
+	// Presence is the resolved `presence:` block, or nil for a project that does
+	// not track it.
+	Presence *Presence `json:"presence,omitempty"`
+
 	// Tracing is the spans this API's generated code opens, or nil for a
 	// project that asked for none.
 	//
@@ -173,6 +177,37 @@ type Notifications struct {
 	BackoffBaseSeconds int64 `json:"backoff_base_seconds"`
 	// RetentionSeconds is how long a read and deleted inbox line is kept.
 	RetentionSeconds int64 `json:"retention_seconds"`
+}
+
+// Presence is the resolved presence block: whether this project tracks who is
+// here, and the four numbers that decide what that costs.
+//
+// Two of them are answered to the browser on every heartbeat, which is why they
+// are in the revision hash and the other two are not — see the presence
+// milestone in NEXT.md, and internal/revision for the clearing.
+type Presence struct {
+	// Enabled says this project tracks presence. It is what makes server-go
+	// write the wiring, and what keeps rig_presence in the schema.
+	Enabled bool `json:"enabled"`
+	// Expose says presence is projected as a read-only resource as well, so it
+	// gets the filter grammar and a generated client. The hand-written routes and
+	// the live shape exist either way.
+	Expose bool `json:"expose,omitempty"`
+
+	// TTLSeconds is how long a session stays present after its last heartbeat.
+	// Seconds because a document is JSON and a Go duration in one is either a
+	// number nobody can read or a string every consumer has to parse.
+	TTLSeconds int64 `json:"ttl_seconds"`
+	// HeartbeatSeconds is how often a browser should confirm it is still there.
+	// It is carried so the heartbeat route can answer with it, which is what puts
+	// the interval on the server's side of the wire.
+	HeartbeatSeconds int64 `json:"heartbeat_seconds"`
+	// SweepSeconds is how often the in-process sweeper runs. Negative leaves the
+	// generated task as the only sweeper.
+	SweepSeconds int64 `json:"sweep_seconds"`
+	// GraceSeconds is how long past the TTL a row survives, which is what keeps
+	// the reader's arithmetic and the sweeper's from disagreeing.
+	GraceSeconds int64 `json:"grace_seconds"`
 }
 
 // Tracing is the resolved `tracing:` block: whether the generated code opens

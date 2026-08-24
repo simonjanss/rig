@@ -45,17 +45,36 @@ type Delta struct {
 	perm    fs.FileMode
 }
 
+// DiffOptions scope what a comparison is entitled to call stale.
+type DiffOptions struct {
+	// Partial says some of the configured generators were held back, as --only
+	// does.
+	//
+	// Staleness is relative to the run. A generator that did not run still owns
+	// every file it wrote, and calling those leftovers would turn a narrow
+	// regeneration into a proposal to delete most of the project. Which
+	// generators ran is read from the results; that a generator was held back
+	// is the one thing the results cannot say, because a generator nobody asked
+	// leaves nothing behind to be missing from.
+	Partial bool
+}
+
 // Diff compares generated artifacts against the filesystem.
 //
-// The manifest is what makes two of these statuses possible at all. Without a
-// record of what rig wrote, a hand-edited generated file is indistinguishable
-// from one rig has not caught up with, and a file left behind by a renamed
-// table is indistinguishable from one somebody added on purpose.
-func Diff(root string, results []Result, m *Manifest) ([]Delta, error) {
+// Three things can be wrong with a file, and they are found three ways. What a
+// generator produces now is compared against what is on disk. What the manifest
+// records is what makes a hand edit distinguishable from output rig has not
+// caught up with. And what is on disk under rig's own naming — see [Orphans] —
+// is what makes a leftover visible in a checkout that has no manifest, which is
+// every checkout CI makes.
+func Diff(root string, results []Result, m *Manifest, opt DiffOptions) ([]Delta, error) {
 	var deltas []Delta
 	claimed := map[string]bool{}
+	ran := map[string]bool{}
 
 	for _, res := range results {
+		ran[res.Generator] = true
+
 		for _, a := range res.Artifacts {
 			rel := relSlash(root, a.Path)
 			claimed[rel] = true
@@ -99,21 +118,42 @@ func Diff(root string, results []Result, m *Manifest) ([]Delta, error) {
 		}
 	}
 
-	// Anything rig recorded writing that no generator claims any more.
+	// Anything rig recorded writing that no generator claims any more. A
+	// generator held back by --only claims nothing, so its record is left alone
+	// rather than read as a shelf of leftovers; one that has been deleted from
+	// rig.yaml is a different thing, and what it wrote is a leftover like any
+	// other.
+	reported := map[string]bool{}
 	for _, e := range m.Files {
-		if claimed[e.Path] {
+		if claimed[e.Path] || (opt.Partial && !ran[e.Generator]) {
 			continue
 		}
 		abs := filepath.Join(root, filepath.FromSlash(e.Path))
 		if _, err := os.Stat(abs); errors.Is(err, fs.ErrNotExist) {
 			continue // already gone
 		}
+		reported[e.Path] = true
 		deltas = append(deltas, Delta{
 			Generator: e.Generator,
 			Path:      abs,
 			Status:    Stale,
 			Reason:    "no generator produces this any more",
 		})
+	}
+
+	// And anything on disk that rig wrote, whether or not there is a manifest
+	// left to say so. The manifest is the only thing that can attribute such a
+	// file to a generator, so one found this way carries no generator name.
+	if !opt.Partial {
+		orphans, err := Orphans(root, claimed)
+		if err != nil {
+			return nil, err
+		}
+		for _, d := range orphans {
+			if !reported[relSlash(root, d.Path)] {
+				deltas = append(deltas, d)
+			}
+		}
 	}
 
 	slices.SortFunc(deltas, func(a, b Delta) int { return cmp.Compare(a.Path, b.Path) })
@@ -126,6 +166,14 @@ type WriteOptions struct {
 	Force bool
 	// Prune deletes files no generator claims any more.
 	Prune bool
+	// Previous is the manifest this run started from, if there was one.
+	//
+	// The new manifest is built from this run's deltas, and a run narrowed by
+	// --only has no deltas for the generators it held back. Without their old
+	// entries carried across, a narrow regeneration would cost every other
+	// generator's files the one record that tells a hand edit from output rig
+	// has not caught up with.
+	Previous *Manifest
 }
 
 // Write applies the deltas and returns the manifest describing the result.
@@ -151,8 +199,10 @@ func Write(root string, results []Result, deltas []Delta, opt WriteOptions) (*Ma
 	}
 
 	next := NewManifest()
+	ran := map[string]bool{}
 	for _, res := range results {
 		next.Generators[res.Generator] = res.Version
+		ran[res.Generator] = true
 	}
 
 	for _, d := range deltas {
@@ -162,6 +212,12 @@ func Write(root string, results []Result, deltas []Delta, opt WriteOptions) (*Ma
 				if err := os.Remove(d.Path); err != nil && !errors.Is(err, fs.ErrNotExist) {
 					return nil, fmt.Errorf("remove %s: %w", d.Path, err)
 				}
+				continue
+			}
+			// A file found by scanning has no generator to attribute it to, and
+			// an entry naming none would claim rig wrote it on the strength of
+			// its name. The scan finds it again next run either way.
+			if d.Generator == "" {
 				continue
 			}
 			// Not pruned, so it is still on disk and still rig's to remember.
@@ -195,7 +251,44 @@ func Write(root string, results []Result, deltas []Delta, opt WriteOptions) (*Ma
 		}
 	}
 
+	carryForward(root, next, opt.Previous, ran)
 	return next, nil
+}
+
+// carryForward copies the record of the generators that did not run into the
+// new manifest.
+//
+// Staleness is relative to the run — see [DiffOptions] — and so is the record:
+// a file this run had no opinion about keeps the one it had. A file that is no
+// longer on disk is the exception, since there is nothing left to remember.
+func carryForward(root string, next, prev *Manifest, ran map[string]bool) {
+	if prev == nil {
+		return
+	}
+
+	recorded := make(map[string]bool, len(next.Files))
+	for _, e := range next.Files {
+		recorded[e.Path] = true
+	}
+
+	for _, e := range prev.Files {
+		if ran[e.Generator] || recorded[e.Path] {
+			continue
+		}
+		if _, err := os.Stat(filepath.Join(root, filepath.FromSlash(e.Path))); err != nil {
+			continue
+		}
+		next.Files = append(next.Files, e)
+
+		// The version that wrote them comes along, since it is what the next
+		// full run compares against. Only for a generator whose files survived:
+		// one that left nothing behind is a generator this project no longer
+		// has, and remembering its version forever is how a manifest fills up
+		// with names nobody recognizes.
+		if v, ok := prev.Generators[e.Generator]; ok {
+			next.Generators[e.Generator] = v
+		}
+	}
 }
 
 func writeArtifact(d Delta) error {

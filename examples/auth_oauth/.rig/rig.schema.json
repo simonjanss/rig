@@ -551,6 +551,10 @@
           "type": "integer",
           "description": "How many requests the page lists, newest first. Defaults to 200."
         },
+        "max_logs": {
+          "type": "integer",
+          "description": "How many log lines the page reads, newest first. Defaults to 500."
+        },
         "password_env": {
           "type": "string",
           "description": "Variable the page reads its password from. Defaults to RIG_MONITOR_PASSWORD. Empty at run time means the page is not mounted."
@@ -644,15 +648,31 @@
       "additionalProperties": false,
       "type": "object"
     },
-    "OpenAPI": {
+    "Presence": {
       "properties": {
-        "version": {
-          "type": "string",
-          "enum": [
-            "3.1",
-            "3.2"
-          ],
-          "description": "OpenAPI specification version. 3.1 documents the POST alias for Search; 3.2 emits QUERY natively."
+        "enabled": {
+          "type": "boolean",
+          "description": "Whether this project tracks presence. The server-go generator writes the wiring only when it is set."
+        },
+        "expose": {
+          "type": "boolean",
+          "description": "Project presence as a generated read-only resource as well, for the filter grammar and a typed client. The hand-written routes and the live shape exist either way."
+        },
+        "ttl": {
+          "$ref": "#/$defs/Duration",
+          "description": "How long a session stays present after its last heartbeat. Defaults to 1m; under 15s is refused, and it has to be at least three times heartbeat."
+        },
+        "heartbeat": {
+          "$ref": "#/$defs/Duration",
+          "description": "How often a browser confirms it is still there. Defaults to 20s. Every beat is one row change fanned out to every subscriber, so this is the write rate rather than a latency knob."
+        },
+        "sweep": {
+          "$ref": "#/$defs/Duration",
+          "description": "How often the in-process sweeper ticks when it is running. Defaults to 1m. Whether it runs at all is a line in main.go, not a value here."
+        },
+        "grace": {
+          "$ref": "#/$defs/Duration",
+          "description": "How long past the TTL a row survives before the sweeper removes it. Defaults to 5m. It is what keeps a row from being deleted while a subscriber is still deciding about it."
         }
       },
       "additionalProperties": false,
@@ -800,10 +820,6 @@
       "$ref": "#/$defs/API",
       "description": "Shape of the generated HTTP API."
     },
-    "openapi": {
-      "$ref": "#/$defs/OpenAPI",
-      "description": "OpenAPI document settings."
-    },
     "database": {
       "$ref": "#/$defs/Database",
       "description": "Where to run migrations and read the schema from."
@@ -823,6 +839,10 @@
     "notifications": {
       "$ref": "#/$defs/Notifications",
       "description": "The inbox, and how notifications are delivered."
+    },
+    "presence": {
+      "$ref": "#/$defs/Presence",
+      "description": "Who is here, and what they are looking at."
     },
     "tracing": {
       "$ref": "#/$defs/Tracing",

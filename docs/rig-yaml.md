@@ -609,6 +609,61 @@ rig ships **no transport**. Channels are an interface an application implements,
 for the reason the mail notifier already gives — see
 [notifications.md](notifications.md#delivery).
 
+## `presence`
+
+Who is here, and what they are looking at. Off by default, and what makes
+`server-go` write the service, the sweeper and the routes at all — a project
+without this block carries none of it, and does not name the module.
+
+```yaml
+presence:
+  enabled: true
+  expose: false     # also project rig_presence as a read-only resource
+  ttl: 1m           # how long a session stays present after its last heartbeat
+  heartbeat: 20s    # how often a browser confirms it is there
+  sweep: 1m         # how often the in-process sweeper ticks
+  grace: 5m         # how long past the TTL a row survives before deletion
+```
+
+`enabled` needs the migrations behind it (`rig setup-project` writes them) and
+the tenancy tables they depend on, because a presence row names an account and a
+tenant. Like `notifications:` it does **not** need the `auth:` block.
+
+**`heartbeat` is a write rate, not a latency knob.** Every beat is one row
+changed and every subscriber to the presence shape hears about it, so lowering it
+multiplies traffic by the number of people present. The arithmetic is in
+[presence.md](presence.md#scope-and-what-presence-costs); read it before
+changing this number.
+
+`ttl` has to be at least three times `heartbeat`, and rig refuses the pair
+otherwise. Three beats is the floor because each one covers a different failure:
+a garbage-collection pause, a slow network, and the request that was actually
+lost. At two, an ordinary hiccup makes somebody vanish from everybody else's
+screen. Under fifteen seconds is refused outright — presence that flickers on an
+ordinary mobile connection presents as a broken feature rather than as a number
+somebody chose.
+
+`ttl` and `heartbeat` are the two values here **answered to the browser**, on
+every heartbeat, rather than compiled into the front end. So changing either is a
+deploy of your server and not a release of your client, and there is no copy of
+the number in the browser to disagree with this one.
+
+`grace` is what stops the two halves of expiry contradicting each other. A
+subscriber stops drawing a row at `ttl`; the sweeper deletes it at `ttl + grace`.
+A row is therefore always invisible before it is gone, never the other way round
+— which would be a row that came back when a slow client caught up.
+
+`sweep` is how often the in-process sweeper ticks **when it is running**. Whether
+it runs at all is a line in your `main.go`, not a value here, the same way the
+notification engine is started rather than configured on. A sweep faster than
+`ttl` is a warning rather than a refusal: it works, it just spends deletes on
+rows every subscriber had already stopped drawing.
+
+`expose` is the second answer again. Without it presence is written through the
+hand-written routes under `/presence` and read over its live shape, which is all
+a front end needs; with it, `rig_presence` is also projected as a read-only
+`Get`/`List` resource.
+
 ## `tracing`
 
 Spans. Off by default, and what makes every generator emit them at all — a

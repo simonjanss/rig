@@ -179,6 +179,16 @@ func (g *Generator) Generate(_ context.Context, doc *ir.Document, opts gen.Optio
 		artifacts = append(artifacts, notifications)
 	}
 
+	// The presence wiring, when the project tracks it. Same rule again: without
+	// the block there is no file, no import of rig/presence, and no sweeper.
+	if e.hasPresence() {
+		presence, err := e.presenceFile()
+		if err != nil {
+			return nil, err
+		}
+		artifacts = append(artifacts, presence)
+	}
+
 	return artifacts, nil
 }
 

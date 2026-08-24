@@ -13,6 +13,7 @@ use (
 	./migrate
 	./notify
 	./observe
+	./presence
 	./rigclient
 	./runtime
 )

@@ -52,11 +52,28 @@ func (c ElectricConfig) databaseURL() string {
 		c.DBUser, c.DBPassword, c.DBPort, c.DBName)
 }
 
+// startWait is how long [Electric.waitReady] polls before giving up.
+//
+// Two minutes rather than one, and the extra minute is slack for a busy machine
+// rather than headroom for anything this package does. On an idle laptop the
+// service reports its replication stream active in a few seconds; what the
+// budget is really covering is a Docker VM under memory pressure, where the
+// container starts slowly because it is competing with every other database on
+// the host.
+//
+// **A longer budget does not rescue the failure that looks the same.** The
+// symptom to know is `connection refused` on a port the container's own log says
+// it is serving, and it has two causes that want different answers. Slow is one,
+// and waiting is the fix. Killed is the other — Docker Desktop ships with a few
+// gigabytes and a sync service is not a small process, so with a dozen
+// checkouts' databases up it is the thing the kernel reaps. That one exits 137
+// and no timeout helps it; `docker ps -a` is where it says so, and `make db-down`
+// in the checkouts that are not in use is the fix.
 func (c ElectricConfig) startWait() time.Duration {
 	if c.StartWait > 0 {
 		return c.StartWait
 	}
-	return 60 * time.Second
+	return 2 * time.Minute
 }
 
 // Electric is a running sync service.
