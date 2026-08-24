@@ -664,6 +664,117 @@ hand-written routes under `/presence` and read over its live shape, which is all
 a front end needs; with it, `rig_presence` is also projected as a read-only
 `Get`/`List` resource.
 
+## `throttle`
+
+How many API calls one caller may make. Off by default, and what makes
+`server-go` write the check into every route at all — a project without this
+block carries no limiter and writes to no counters.
+
+```yaml
+throttle:
+  enabled: true
+  api_key: {max: 5000, window: 1m}    # per API key
+  account: {max: 1000, window: 1m}    # per signed-in account
+  tenant:  {max: 10000, window: 1m}   # per tenant, across all their accounts
+  ip:      {max: 300, window: 1m}     # per address, for callers who are not signed in
+  interval: 1s                        # how long a replica counts before publishing
+
+  routes:                             # extra limits on particular routes
+    - pattern: POST /api/v1/todos
+      max: 60
+      window: 1m
+
+  exempt:                             # and routes nothing applies to
+    - GET /api/v1/todos/{id}/live_stream
+```
+
+**This is fair-use limiting and not a defence against a flood.** A request that
+reaches your handler has already cost a connection, a TLS handshake and a
+goroutine; under a volumetric attack an application-level limiter is more load on
+the thing that fails first, not less. Volumetric defence belongs in front of the
+application — a CDN, an L7 proxy, or your provider's WAF. What this block does
+buy is real and is what most people mean: a client stuck in a retry loop that
+would otherwise drink the connection pool, one tenant's batch job crowding out
+every other tenant, scraping and enumeration, and cost control on an API that
+fans out to something metered.
+
+The four per-caller limits are a ladder — machines, then people, then strangers.
+An integration is allowed the most because that is what an integration is for; a
+person clicking cannot reach a thousand a minute without something being wrong;
+and an address nobody has authenticated gets the least, because addresses are the
+cheapest identity there is. `tenant` sits above all of them and is a different
+question: it is what stops one customer crowding out the rest, not what stops one
+of their users.
+
+A call is counted on one rung of that ladder and not several. A request made with
+an API key spends `api_key` and not also the `account` the key acts as — the
+tightest limit is the one that decides, so counting both would put every
+integration under the account number and leave `api_key` decorative. `tenant` is
+the exception and applies on top, because it is the different question.
+
+**`ip` applies only to callers who are not signed in.** Once a request carries an
+identity, that identity is the better key: an office behind one NAT is one
+address, and a phone is a different address every few minutes. Leaving out `ip`
+entirely means anonymous routes are unlimited.
+
+`ip` also depends on [`auth.trusted_proxies`](#auth). Behind a load balancer
+every request arrives from the balancer, so with no trusted list the per-address
+limit is one budget for the entire internet. With one, `X-Forwarded-For` is
+believed — but only from a peer inside it, because an address read from a header
+the client controls is an address the client chooses.
+
+**`interval` is the accuracy of every number above, stated as time.** Each
+replica counts locally and publishes to the database on this interval,
+reconciling sooner as a caller approaches their limit. That is not an
+optimisation you can turn off by setting it to zero and forget: without it, every
+API call is a write to a single contended row, and the limiter becomes the
+bottleneck at exactly the traffic it was added for. The cost is that the limit is
+approximate — several replicas can collectively miss up to one interval of
+traffic each. A caller who is already over their limit is refused from memory, so
+an attack costs at most one write per interval however fast it arrives.
+
+`routes` are extra budgets on top of the per-caller ones, counted against the
+same caller. A route listed here must give both `max` and `window`: unlike the
+per-caller limits there is no default to fall back on, and a route somebody named
+with no numbers is one they meant something by and did not say.
+
+Patterns are matched against the route pattern `net/http` reports for the route
+it dispatched — `POST /api/v1/todos`, including the method and the `{id}`
+placeholders — and not against the request path. rig refuses a pattern with no
+method or with a `*` in it.
+
+`exempt` wins over `routes`, and rig refuses a pattern listed in both. Streaming
+endpoints belong here: a live-sync connection is one long-lived request, so
+counting it per request means an idle client and a reconnect loop look the same.
+
+**The limiter fails open.** If the counters cannot be reached the request is
+served and a warning is logged. This is the opposite of what the
+[auth limits](auth.md) do, and deliberately: a login limiter that failed open
+would be a credential-stuffing window held open by anybody who can make your
+database slow, while an API limiter that failed closed would turn a database blip
+into the outage it exists to prevent. The trade is worth knowing — somebody who
+can degrade your database can also switch this off.
+
+Refused calls get `429` with `Retry-After`, and every call gets `RateLimit-Limit`
+and `RateLimit-Remaining` so a well-behaved client can slow down before it is
+refused. Both SDKs honour all three — see
+[clients.md](clients.md#seeing-the-limit-before-you-hit-it).
+
+**The counters need sweeping.** They live in `rig_throttle`, which `rig
+setup-project` writes, and it gains a row per caller per window — for the address
+limit, a row per address per minute. `api.ThrottleSweeper(0)` is the `serve.Task`
+that deletes the dead ones, and it wants a cron entry the way
+`IdempotencyPruner` does:
+
+```go
+Tasks: map[string]serve.Task{"sweep-throttle": api.ThrottleSweeper(0)},
+```
+
+Nothing schedules it for you. Zero means twice the longest window you configured,
+which is as far back as anything counts; unlike the auth log there is no lockout
+to preserve here, so a bucket past that point cannot free a caller who is still
+over their limit — deleting it is free.
+
 ## `tracing`
 
 Spans. Off by default, and what makes every generator emit them at all — a
