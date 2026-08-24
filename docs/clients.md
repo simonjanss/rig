@@ -607,9 +607,70 @@ Without the second one the browser hides the cursor from the client and the
 subscription ends after one response, which looks like a stream that stopped
 rather than like a configuration problem. rig adds no CORS headers of its own.
 
+## Presence
+
+A project with `presence: {enabled: true}` gets a third package,
+`@rig/presence`. It is not a generated one — no generator writes it — and it
+mirrors the hand-written `/presence` routes the way `web/src/auth` mirrors
+`/auth/*` in every rig front end.
+
+```tsx
+import { createPresence } from "@rig/presence";
+import { usePresence } from "@rig/presence/react";
+
+const presence = createPresence({
+    runtime: client.runtime,
+    scope: "board",
+    stream: createRigPresenceStream(client.runtime, { scope: "board" }),
+});
+```
+
+Create it **once**, above your router, and hand it down. Everything with a timer
+in it lives inside — the heartbeat, the write throttle, the tick that ages rows
+out, the visibility rule, the leave on teardown — so a second one is a second
+heartbeat, and every heartbeat is a row change fanned out to everybody else in
+the tenant.
+
+Then two questions, from anywhere:
+
+```tsx
+presence.focus({ table: "todo", id, field: "title" }, "editing");
+const others = usePresence(presence, { table: "todo", id });
+```
+
+`focus` is throttled and de-duplicated, so it is safe to call from a handler that
+fires on every render — and it belongs on `onFocus`, never on `onChange`. Typing a
+two-hundred-character title should be one presence write.
+
+**It is the first rig package with side effects.** `@rig/client` retries and
+`@rig/electric` maps; neither does anything until it is called. This one runs a
+timer and listens on `window`, which is why it is a package of its own rather than
+part of `@rig/electric`: a project that streams a table but shows no presence
+should install none of it.
+
+`@rig/presence/react` is a second entry point, three lines over
+`useSyncExternalStore`, behind an optional `react` peer dependency. The core
+exports `subscribe` and `others` in exactly that contract, so a binding for
+another framework is the same size.
+
+### One row, two spellings — again
+
+The trap [above](#two-shapes-for-one-row) has a third instance, and this package
+exists partly to hide it. A presence row arrives two ways: off the live shape it
+carries Postgres column names (`seen_at`, `account_id`, `target_field`), and off
+`GET /presence` it carries what the hand-written route's Go struct declares
+(`seenAt`, `accountId`, `targetField`). Those routes answer camelCase whatever
+`api.json_case` you set, for the reason `/auth/*` does — they are rig's, identical
+in every project, and this package is compiled against them once.
+
+`@rig/presence` normalises both to camelCase at its boundary, so a `Person` means
+one thing whichever door it came through.
+
 ## See also
 
 - [observability.md](observability.md) — the server end of the same trace
 - [electric.md](electric.md) — the shapes a table gets, and how they are scoped
+- [presence.md](presence.md) — what presence costs, and why a subscriber decides
+  who is here
 - [generators.md](generators.md) — `go-client` and `ts-client` options
 - [examples/sdk](../examples/sdk) — a program built on two generated clients

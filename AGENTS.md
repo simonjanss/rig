@@ -50,7 +50,7 @@ make examples      # check all five examples for drift and run them for real
 ```
 
 `make test-docker` covers `.`, `runtime`, `auth`, `files`, `notify`, `observe`,
-`migrate` and `rigclient`.
+`presence`, `migrate` and `rigclient`.
 Most of it starts its own Postgres on a port of its own and cleans up after
 itself. The `migrate` module is the exception: it expects a database at
 `localhost:55440`, or wherever `DATABASE_URL` points, and **skips itself
@@ -141,6 +141,7 @@ the same commit.** The pages are short and the mapping is mechanical:
 | `runtime/electric`, `internal/gen/electricgo` | `docs/electric.md` |
 | `internal/gen/openapigen` | `docs/api.md`, `docs/generators.md`, `README.md` |
 | `notify/`, `internal/project/notifications.go` | `docs/notifications.md` |
+| `presence/`, `internal/project/presence.go` | `docs/presence.md`, `docs/rig-yaml.md` |
 | `runtime/serve`, `runtime/dbhook` | `docs/services.md` |
 | `runtime/reqlog`, `observe/`, or what a generator emits about logging or spans | `docs/observability.md` |
 | `internal/project/tracing.go` — the `tracing:` block | `docs/observability.md`, `docs/rig-yaml.md` |
@@ -168,9 +169,19 @@ of the files above is edited. It reminds; it does not gate.
 
 ## The TypeScript workspace
 
-`ts/` is a pnpm workspace holding the two packages a generated TypeScript client
-imports — `@rig/client` and `@rig/electric` — plus `typecheck-fixture`, which is
-not published and exists only to be compiled.
+`ts/` is a pnpm workspace holding the packages a front end imports —
+`@rig/client`, `@rig/electric` and `@rig/presence` — plus `typecheck-fixture`,
+which is not published and exists only to be compiled.
+
+The third one is not like the other two, and it is worth knowing why before
+adding a fourth. `@rig/client` retries and `@rig/electric` maps; neither does
+anything until it is called. `@rig/presence` owns a timer, two window listeners
+and a `keepalive` fetch on teardown — **it is the first thing rig ships that runs
+when nobody called it**, which is why it is a package of its own rather than part
+of `@rig/electric`, and why it is the one place a side effect is expected. It is
+also the only package with a second entry point (`@rig/presence/react`, behind an
+optional `react` peer dependency), so that a project which does not use React
+never has `react` reachable from the module it imports.
 
 `make ts` is the whole of it: install, Prettier, `tsc`, and the unit suite. It
 needs pnpm on the machine and nothing else.
@@ -199,8 +210,8 @@ approved once per clone.
 
 ## Godoc
 
-`runtime/`, `auth/`, `files/`, `notify/`, `observe/`, `migrate/` and
-`rigclient/` are separate modules
+`runtime/`, `auth/`, `files/`, `notify/`, `observe/`, `presence/`, `migrate/`
+and `rigclient/` are separate modules
 that a generated application imports. Their godoc is the only documentation
 their Go surface has: `docs/` covers what somebody writes — `rig.yaml`, a
 migration, a service — and never what they call. So a doc comment there is
@@ -234,7 +245,7 @@ and reads fine where it is. Nothing catches this, so after a rename:
 
 ```bash
 grep -rn '^\s*//.*\[[A-Z][A-Za-z0-9_]*\.[a-z][A-Za-z0-9_]*\]' --include='*.go' \
-  runtime auth files notify observe migrate rigclient
+  runtime auth files notify observe presence migrate rigclient
 ```
 
 **A doc on a `const (` block covers every name in it**, so the block is where a

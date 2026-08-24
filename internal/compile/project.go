@@ -30,6 +30,9 @@ type ProjectOptions struct {
 	Files *ir.Files
 	// Notifications is the resolved inbox, or nil for a project with none.
 	Notifications *ir.Notifications
+	// Presence is the resolved presence block, or nil for a project that does
+	// not track who is here.
+	Presence *ir.Presence
 	// Monitoring is the resolved monitoring block, or nil for a project with no
 	// page. Never set without Tracing; the config check is what guarantees it.
 	Monitoring *ir.Monitoring
@@ -63,6 +66,7 @@ func Project(schema ir.Schema, opt ProjectOptions) (ir.API, diag.List) {
 		Auth:           opt.Auth,
 		Files:          opt.Files,
 		Notifications:  opt.Notifications,
+		Presence:       opt.Presence,
 		Tracing:        opt.Tracing,
 		Monitoring:     opt.Monitoring,
 

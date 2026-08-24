@@ -42,6 +42,8 @@ case "$rel" in
 internal/project/config.go) pages="docs/rig-yaml.md" ;;
 internal/project/auth.go) pages="docs/auth.md" ;;
 internal/project/tracing.go | internal/project/monitoring.go) pages="docs/observability.md docs/rig-yaml.md" ;;
+internal/project/notifications.go) pages="docs/notifications.md docs/rig-yaml.md" ;;
+internal/project/presence.go) pages="docs/presence.md docs/rig-yaml.md" ;;
 internal/tableconf/config.go) pages="docs/tables.md" ;;
 internal/compile/convention.go) pages="docs/schema.md" ;;
 internal/compile/builtin.go) pages="docs/api.md" ;;
@@ -55,6 +57,13 @@ runtime/electric/*) pages="docs/electric.md" ;;
 runtime/reqlog/* | observe/*) pages="docs/observability.md" ;;
 runtime/serve/* | runtime/dbhook/*) pages="docs/services.md" ;;
 auth/*) pages="docs/auth.md" ;;
+# These four were missing, and the comment at the top of this file is why that
+# matters: the mapping is AGENTS.md's table and the two have to move together.
+# files/ has no page of its own — uploads are documented as a column convention.
+notify/*) pages="docs/notifications.md" ;;
+files/*) pages="docs/schema.md" ;;
+presence/*) pages="docs/presence.md" ;;
+ts/packages/*) pages="docs/clients.md" ;;
 rigclient/*) pages="docs/clients.md" ;;
 *) exit 0 ;;
 esac

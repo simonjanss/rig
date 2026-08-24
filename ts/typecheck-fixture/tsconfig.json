@@ -11,7 +11,9 @@
         "baseUrl": ".",
         "paths": {
             "@rig/client": ["../packages/client/src/index.ts"],
-            "@rig/electric": ["../packages/electric/src/index.ts"]
+            "@rig/electric": ["../packages/electric/src/index.ts"],
+            "@rig/presence": ["../packages/presence/src/index.ts"],
+            "@rig/presence/react": ["../packages/presence/src/react.ts"]
         }
     },
     // The generator's own output, rather than a copy of it. A copy is a second
@@ -27,6 +29,7 @@
     // examples` from a live Postgres — so it is the one that notices a compiler
     // the generator has never been run against.
     "include": [
+        "src",
         "../../internal/gen/tsclient/testdata/lifecycle",
         "../../internal/gen/tsclient/testdata/files",
         "../../examples/todo/client-ts",

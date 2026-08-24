@@ -8,6 +8,7 @@ import (
 	authfnd "github.com/simonjanss/rig/auth/foundation"
 	filesfnd "github.com/simonjanss/rig/files/foundation"
 	notifyfnd "github.com/simonjanss/rig/notify/foundation"
+	presencefnd "github.com/simonjanss/rig/presence/foundation"
 	"github.com/simonjanss/rig/runtime/dbschema"
 	runtimefnd "github.com/simonjanss/rig/runtime/foundation"
 )
@@ -27,16 +28,17 @@ const (
 	PartOAuth         = "oauth"
 	PartFiles         = "files"
 	PartNotifications = "notifications"
+	PartPresence      = "presence"
 	PartIdempotency   = "idempotency"
 )
 
 // Sets are the foundation's migration sets, in the order they apply.
 //
-// Four of them, because the schema belongs to the four modules that write SQL
-// against it, and each records how far it has been applied in a table of its own.
-// The private table is what lets those modules be tagged separately: a shared one
-// would mean a shared numbering sequence, and two modules adding a migration in
-// the same release would collide on a version number.
+// One per module that writes SQL against the schema, and each records how far it
+// has been applied in a table of its own. The private table is what lets those
+// modules be tagged separately: a shared one would mean a shared numbering
+// sequence, and two modules adding a migration in the same release would collide
+// on a version number.
 //
 // The order is the dependency order, and each set says why in its own package
 // documentation. auth first because everything references its tenancy migration;
@@ -44,12 +46,17 @@ const (
 // uploads work in a project with no authentication; notify after that because an
 // inbox line names an account, which auth creates.
 //
-// runtime is last and could have gone anywhere: rig_idempotency references
-// nothing either. Last because it is the newest, and a project that vendored
-// the foundation before it existed then finds it as a migration to add rather
-// than as a renumbering of the ones it already applied.
+// runtime and presence are last, and the rule is the same one: **a set is
+// appended, never inserted.** Neither had to be here rather than earlier —
+// rig_idempotency references nothing, and rig_presence references only what auth
+// already created — so both went at the end because that is where a new set
+// belongs. A project that vendored the foundation before one existed then finds
+// it as a migration to add rather than as a renumbering of the ones it has
+// already applied.
 func Sets() []dbschema.Set {
-	return []dbschema.Set{authfnd.Set(), filesfnd.Set(), notifyfnd.Set(), runtimefnd.Set()}
+	return []dbschema.Set{
+		authfnd.Set(), filesfnd.Set(), notifyfnd.Set(), runtimefnd.Set(), presencefnd.Set(),
+	}
 }
 
 // Parts in the order they must be applied.
@@ -151,6 +158,8 @@ type Wanted struct {
 	Files bool
 	// Notifications is `notifications.enabled`.
 	Notifications bool
+	// Presence is `presence.enabled`.
+	Presence bool
 
 	// There is no Idempotency field. Every project brings that part — see
 	// [Wanted.Parts] — so a bool here could only ever be true, and a knob with
@@ -206,6 +215,9 @@ func (w Wanted) Parts() []string {
 	}
 	if w.Notifications {
 		add(PartNotifications)
+	}
+	if w.Presence {
+		add(PartPresence)
 	}
 
 	// Unconditionally, and it is the only part that is. Every generated project
@@ -470,6 +482,13 @@ func Requires(part string) []string {
 		// Not sessions: reading your own inbox needs claims, and where those
 		// come from is not this foundation's business.
 		return []string{PartTenancy}
+	case PartPresence:
+		// A presence row names an account and a tenant, both of which the
+		// tenancy part creates. Not sessions, for the reason above: being
+		// present needs claims and this schema does not care where they came
+		// from — and deliberately not a foreign key to a session either, because
+		// the identity of a presence is the *tab*, and one sign-in has several.
+		return []string{PartTenancy}
 	default:
 		return nil
 	}
@@ -530,6 +549,8 @@ func foundationPart(name string) part {
 		p.configs = fileConfigs()
 	case PartNotifications:
 		p.configs = notificationConfigs()
+	case PartPresence:
+		p.configs = presenceConfigs()
 	case PartIdempotency:
 		p.configs = idempotencyConfigs()
 	}

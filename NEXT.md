@@ -4865,6 +4865,249 @@ direction stores the file twice.
   retries a hundred rows in lockstep. Same fix, different module; it is on the
   list below.
 
+## M15 — presence: who is here, and what they are looking at (shipped)
+
+**Goal.** A rig application can show a teammate's avatar on the card they have
+open and a ring on the field they are typing into, from a `presence:` block,
+with no socket to run and no service to add.
+
+**What shipped.** A fifth foundation module, `presence/`, with `rig_presence`,
+`Service` (`Beat`/`Leave`/`Here`), `Sweeper` and `presencehttp`'s three routes.
+`presence:` in rig.yaml with five keys, `ir.Presence`, `applyPresenceTable`, a
+`PartPresence` the scaffold vendors, `internal/gen/servergo/presence.go` writing
+`NewPresence`/`PresenceTargets`/`NewPresenceSweeper`/`PresenceSweep`, and a third
+npm package, `@rig/presence`, with a React entry point behind an optional peer
+dependency. `docs/presence.md` is new. **No example wires it up** — that is a
+follow-up, deliberately: presence landed as a module, a config block, a generator
+and a package, and putting it into linearlite is a change to one project rather
+than to rig.
+
+### The rule about moving predicates decides everything
+
+`docs/electric.md` had already written it down, about the trash shape: the sync
+service evaluates a shape's filter when a row *changes*. So "seen in the last
+minute" is not expressible as a shape filter — a row that simply stopped being
+written would never fire it again, and would sit in every subscriber's copy
+forever, filtered in appearance and not in fact.
+
+Presence is the second feature that rule decides, and it decides it the opposite
+way from the inbox:
+
+> **Whoever is reading decides who is here. The sweeper decides how much of the
+> past a new subscriber has to download.**
+
+There, the durable row is the truth and the in-process engine is only latency.
+Here the reader's own subtraction is the truth — correct within a second, free,
+and working on the day a project is generated before anybody has wired a cron —
+and the sweeper is housekeeping whose absence costs space.
+
+Two consequences worth keeping:
+
+**The sweeper needs no claim lease, and that is why it may be a goroutine.** The
+dispatcher's lease exists because resolving an audience twice costs a read and
+sending twice costs somebody a duplicate mail. `DELETE … WHERE seen_at < $1` is
+idempotent and commutative, so two replicas agree and the loser deletes nothing.
+The doctrine sentence — "a subcommand rather than a goroutine, so it is a cron job
+rather than something racing itself in every replica" — is about work racing can
+get wrong, and there is none here. It is said out loud on the type, because a
+reader who knows the notify engine will look for the lease.
+
+**`grace` is what stops the two halves contradicting each other.** Subscribers
+stop drawing at `ttl`, the sweeper deletes at `ttl + grace`, so a row is always
+invisible before it is gone rather than the other way round — which would be a row
+that came back when a slow client caught up.
+
+### The clock problem does not exist
+
+A browser cannot compare `seen_at` against `Date.now()`; a laptop five minutes
+fast shows an empty room. The design called for deriving an offset from a response
+header, which needs a seam the generated client does not have.
+
+It needs nothing. **The freshest `seen_at` in the collection is itself a reading
+of the server's clock**, taken at most one heartbeat ago by whichever tab beat
+most recently, so comparing every row against the newest one cancels the skew
+entirely. Its one blind spot is being alone in the scope, where every comparison
+is against yourself — and the answer there is "nobody else is here", which an
+empty list already gives.
+
+This is the clearest case in the milestone of something only writing it revealed.
+It deleted a wire field and a whole class of bug.
+
+### Four things the build refused, and each improved the design
+
+1. **`sweep: -1s` is unrepresentable.** "Negative means never" was the plan's way
+   to leave the sweep to a cron job, and `DurationPattern` admits no sign. That
+   turned out to be right rather than a limitation: whether a process runs a
+   background loop is a line in its own main function, which is already how the
+   notification engine works. A test now stops somebody adding an escape hatch the
+   schema would reject in an editor and accept nowhere.
+
+2. **`state jsonb` made the table unstreamable.** It was meant as the honest
+   admission that rig does not know what else an application wants drawn beside a
+   name. A generated streamed row is what parameterises a live collection, and
+   that type's index signature does not admit an opaque value — so the escape
+   hatch broke the only read path presence has. Gone, and the DDL says so where
+   somebody will look for it. The vocabulary is three target columns and
+   `activity`, closed rather than open.
+
+3. **`rig_presence` was being ignored entirely.** `foundationTables` sends any
+   foundation table not named in `auth.expose` to the ignore list, so presence got
+   no resource, no shape, no route, and a 404 as the only symptom. It needed the
+   carve-out the notification tables have, and the argument is sharper here: for
+   the inbox an ignored table breaks link-table classification, and for presence
+   it breaks the read path outright.
+
+4. **`ir.API` is copied field by field in two places.** `api.presence` arrived nil
+   until both `ApplyConfig` and `Expand` named it — and the comment in one of them
+   already warns that "a field nobody listed is a field silently dropped". It is
+   the third time that shape has cost something; a test that reflected over the
+   struct and refused an unlisted field would end it.
+
+### Two pre-existing bugs this surfaced
+
+**`exposeAdvice` sent everything but `rig_file` to `auth.expose`.** That was
+already wrong for the five notification tables, which own
+`notifications.expose` — a project following the advice would have had two keys
+saying opposite things. It is now a table of part-owned switches.
+
+**The checked-in `.rig/*.schema.json` files were stale in both directions**,
+missing `monitoring.max_logs` and still carrying an `openapi` block that is not a
+config key. Nothing in `make check` regenerates them: only `rig schema` and
+`rig init` write them, so they drift silently. Worth a target.
+
+### What it costs, honestly
+
+Fifty people with two tabs each, at the defaults: about eight writes a second,
+2.5 KB/s of WAL — nothing — and **about 800 shape messages a second on one
+tenant-wide scope**, which is two orders of magnitude more than the writes and the
+number that actually decides whether a design works. Narrowed to a screen it is
+roughly the ratio of the tenant to that screen. That is why the shape declares
+`scope` and `target_id`, and why the scope stub is the one rig writes that is
+worth filling in before this reaches a real tenant rather than left as the no-op.
+docs/presence.md carries the four lines.
+
+The honest framing for anybody reading this before building on it: presence over
+live sync is a durable, authenticated, tenant-scoped **state** channel with about
+a second of resolution, whose cost is one WAL record per change multiplied by
+every subscriber. It is not a transport. Cursors at frame rate and collaborative
+text want one, and rig has none.
+
+### The concern that stands
+
+**This is the first rig feature where "the table is the channel" is a compromise
+rather than a win.** M12's version of that boast is strong because an inbox line
+is durable state somebody reads tomorrow. A presence row is worthless in sixty
+seconds, and putting it through a WAL record, a replication slot, logical decoding
+and a long poll is paying for durability nobody wants. `LISTEN/NOTIFY` or a socket
+is the textbook primitive for ephemeral state and rig has ruled out both.
+
+Two numbers are still calculated rather than measured: the fan-out cost at fifty
+subscribers, and whether `scope` is a column applications want or dead weight in
+an append-only migration. Both want a real tenant to answer.
+
+### Honest gaps
+
+- **`@rig/presence` is the first rig package that runs when nobody called it** — a
+  timer, two window listeners, a `keepalive` fetch on teardown. Also the first
+  with a second entry point and an optional peer dependency. Both are precedents.
+- **Nothing runs the browser half against a real server.** `@rig/presence` has a
+  unit suite and a typecheck fixture, and `internal/presencetest` drives the SQL,
+  but no example wires the two together — so the loop, the leave and the shape are
+  each tested and their meeting is not. That is what the follow-up buys, and it is
+  the reason to keep the front-end half of it in something `make check` compiles:
+  `make examples` runs no pnpm and `make ts` does not reach an example's front end.
+- **The `fk_naming` rule warns on every carved-out foundation table**, because
+  `tenant_id` references `rig_tenant` and the rule wants `rig_tenant_id`.
+  Pre-existing, and presence adds two to whichever project turns it on.
+- **Electric's readiness budget was a minute with no slack.** Adding a suite that
+  starts its own database tipped it over reproducibly. Raised to two, and the
+  first diagnosis was wrong: the cause is a Docker VM under memory pressure, not
+  a port Docker records before it listens. An OOM-killed container exits 137 and
+  no timeout helps it.
+- **The shape carries `session_key` to everyone in the tenant**, because a shape's
+  projection is the resource's readable fields and cannot be narrowed. It is a
+  random UUID, so what leaks is that somebody has two tabs open — which is what
+  presence is for. An `electric.columns:` key would pay for itself here.
+
+### What review changed, and the one thing it says about the milestone
+
+Eight fixes, and **six of the eight were in the browser half** — the half that
+nothing in `make check` compiles or runs. That is the gap above stated as a result
+rather than as a worry, and it is the argument for the front end arriving inside
+something that is checked rather than beside it.
+
+Six are here. The other two are in the example's own code and travel with it into
+the follow-up; they are named at the end because the pair is the whole point.
+
+Three were the package:
+
+1. **`others()` returned a fresh array on every call**, and `usePresence` handed
+   it to `useSyncExternalStore` — which compares snapshots by identity and
+   re-reads one in a passive effect after every commit. That is an unbounded
+   re-render, on an empty collection as much as a full one, so *any* component
+   reading presence hits it on its first render. The cache belongs in the store
+   rather than in the binding, which is React's own advice and also what keeps the
+   "a binding for another framework is the same size" boast true.
+   `seen_at` is deliberately not part of what counts as a change: it moves on
+   every heartbeat and nothing draws it.
+
+2. **`isFresh` guarded on the clock and not on the TTL.** The rows arrive over
+   the stream and the TTL arrives with the first answered beat, independently — so
+   a full collection with a zero TTL compares every row against `now - 0` and
+   hides all of them, including the freshest, which is the row that *set* `now`.
+   The empty room the guard was written to avoid, in the one state it did not
+   cover: a stream that is delivering while this tab's heartbeat keeps failing.
+
+3. **The loop beat at half the interval the server named.** Written as headroom
+   for a lost beat, which the server's numbers already carry — `ttl >= 3 *
+   heartbeat` is refused otherwise — so it was a second copy of that headroom
+   bought at twice the write and fan-out rate. It also made every number in *What
+   it costs, honestly* above half of the truth. Beating at the interval is what
+   makes `presence.heartbeat` mean what it says.
+
+And a fourth, found by the test written for the first: **the leave's `void
+fetch(...)` had no `catch`**, so a teardown while offline was an uncaught
+rejection. Not awaited is not the same as not handled.
+
+The other two were the server, and both were a comment disagreeing with the code
+beside it:
+
+- **`rig_presence_scope_idx` indexed `seen_at`**, twenty lines above the note
+  explaining that indexing `seen_at` is the one thing this table cannot afford. An
+  UPDATE touching an indexed column is not HOT, and every heartbeat updates
+  `seen_at` — so the write path paid index maintenance per beat and the
+  `fillfactor = 70` set for those HOT updates bought nothing. Now
+  `(tenant_id, scope)`; the ordering it would have made free is over a few hundred
+  rows.
+
+- **`Sweeper.Close` ignored its context and waited on a goroutine that need not
+  exist.** `Start` is optional by design — it is how an operator says the cron job
+  owns this — and the doc comment puts `CloseWithin` on the next line, so "no
+  Start, keep the registration" is a documented arrangement that hung shutdown for
+  the whole timeout. `notify.Engine.Close` already had the right shape.
+
+### What the follow-up carries, and why these two are worth naming now
+
+The two fixes that stayed with the example are the two nobody would have found by
+reading the package, and they are both about a lifetime rather than a value:
+
+- **A provider that builds the loop during render dies under StrictMode.** Mount →
+  unmount → mount on the first commit leaves one loop beating forever with nobody
+  holding it, and calls `close()` — which is final — on the one that is held. It
+  works in a production build and is dead under `vite dev`. Build it in the effect,
+  which is the arrangement StrictMode exists to force, and answer the one commit
+  before that with an idle handle whose `others()` returns a stable empty array.
+
+- **Reporting a spot from an effect needs a cleanup, and not in the same effect.**
+  Without one the last target reported stays reported: closing a detail panel
+  leaves the tab on that card for everybody else. With the target in the
+  dependency list it fires on every move between rows as well, which is a write
+  the effect after it was going to make anyway. Two effects, two lifetimes.
+
+Neither is presence-specific, which is the argument for the example: a package
+whose whole job is to own a timer, two listeners and a teardown cannot be checked
+by a suite that never mounts it.
+
 ## Things I would fix if nobody asked for anything else
 
 - `internal/gen/servicego/servicego.go` still has an `elemType` helper that is

@@ -511,8 +511,12 @@ func TestWantedExpandsToPartsInOrder(t *testing.T) {
 			everything,
 		},
 		{
+			// Every field set, so this case is what fails when a part is added and
+			// Wanted grows a flag nobody wired into Parts.
 			"everything",
-			scaffold.Wanted{Auth: true, OAuth: true, Files: true, Notifications: true},
+			scaffold.Wanted{
+				Auth: true, OAuth: true, Files: true, Notifications: true, Presence: true,
+			},
 			scaffold.Parts(),
 		},
 	}

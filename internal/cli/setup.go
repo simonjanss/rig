@@ -153,21 +153,42 @@ func newSetupProjectCmd(e *env) *cobra.Command {
 
 // exposeAdvice renders the rig.yaml the exposed tables need.
 //
-// rig_file is not in `auth.expose`. It has `files.expose`, because the reason
-// to project it is not the reason to project any of the others — the url lives
-// on the row, and a client that cannot read rig_file cannot use the column that
-// exists for it. Naming it in `auth.expose` would happen to work and would
-// leave the switch every other part of rig reads saying the opposite.
+// **Three of rig's parts have a switch of their own, and `auth.expose` is not
+// it.** files, notifications and presence each own the decision to project their
+// tables, because in each case the reason to do so is not the reason to project
+// an account: the file url lives on the row, so a client that cannot read
+// rig_file cannot use the column that exists for it; the inbox has hand-written
+// routes that serve it either way; and presence is read over a live shape rather
+// than over REST at all. Naming any of them in `auth.expose` would happen to work
+// and would leave the switch the rest of rig reads saying the opposite — which is
+// advice that produces a project whose two answers disagree.
 func exposeAdvice(expose []string) string {
 	var b strings.Builder
 
-	if rest := slices.DeleteFunc(slices.Clone(expose), func(s string) bool {
-		return s == compile.FileTable
-	}); len(rest) > 0 {
-		fmt.Fprintf(&b, "  auth:\n    expose: [%s]\n", strings.Join(rest, ", "))
+	// The part-owned switches, each with the tables it speaks for. Listed rather
+	// than special-cased one at a time, so a fourth part is a line here.
+	owned := []struct {
+		tables []string
+		yaml   string
+	}{
+		{[]string{compile.FileTable}, "  files:\n    enabled: true\n    expose: true\n"},
+		{compile.NotificationTables(), "  notifications:\n    enabled: true\n    expose: true\n"},
+		{[]string{compile.PresenceTable}, "  presence:\n    enabled: true\n    expose: true\n"},
 	}
-	if slices.Contains(expose, compile.FileTable) {
-		b.WriteString("  files:\n    enabled: true\n    expose: true\n")
+
+	rest := slices.Clone(expose)
+	for _, o := range owned {
+		if !slices.ContainsFunc(rest, func(s string) bool { return slices.Contains(o.tables, s) }) {
+			continue
+		}
+		rest = slices.DeleteFunc(rest, func(s string) bool { return slices.Contains(o.tables, s) })
+		b.WriteString(o.yaml)
+	}
+
+	// Whatever is left is the tenancy half, which is what `auth.expose` is for.
+	// Written first in the output because it is the one a reader expects.
+	if len(rest) > 0 {
+		return fmt.Sprintf("  auth:\n    expose: [%s]\n", strings.Join(rest, ", ")) + b.String()
 	}
 	return b.String()
 }

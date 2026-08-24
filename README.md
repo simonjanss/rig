@@ -54,6 +54,7 @@ rig generate   # 4. compile to one IR, fan out to generators
 | [rig.yaml](docs/rig-yaml.md) · [Tables](docs/tables.md) | The two files you write |
 | [Authentication](docs/auth.md) | Sessions, API keys, OAuth, RBAC |
 | [Notifications](docs/notifications.md) | An inbox, with the audience worked out when it is sent |
+| [Presence](docs/presence.md) | Who is here, and which field they are editing |
 | [Observability](docs/observability.md) | The log, the spans, and how to read a 500 |
 | [Clients](docs/clients.md) | The generated Go and TypeScript SDKs |
 

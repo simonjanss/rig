@@ -698,6 +698,115 @@ func TestNotificationWiringCompiles(t *testing.T) {
 
 // What a project with an inbox gets that a project without one does not — and
 // the second half matters as much: a table with no notifications must carry no
+// TestPresenceWiringCompiles is the check a golden file cannot make.
+//
+// A golden proves the generator emits the bytes it emitted last time, which stays
+// true after a signature in rig/presence moves underneath it — and the presence
+// module and this generator are separate modules, so nothing else in the build
+// notices. `NewService`, `NewSweeper`, `SweeperConfig` and `serve.Task` all have
+// to still mean what this file assumes.
+func TestPresenceWiringCompiles(t *testing.T) {
+	t.Parallel()
+
+	doc := gentest.LoadDocument(t, filepath.Join("testdata", "presence.ir.json"))
+
+	api := gentest.Run(t, servicego.New(), doc, gen.Options{Raw: map[string]any{
+		"package": "api", "model_import": "rigtest/model", "store_import": "rigtest/store",
+	}})
+	api = append(api, gentest.Run(t, servergo.New(), doc, opts())...)
+
+	gentest.MustCompileAll(t,
+		gentest.Package{
+			Dir: "model",
+			Artifacts: gentest.Run(t, modelgo.New(), doc,
+				gen.Options{Raw: map[string]any{"package": "model"}}),
+		},
+		gentest.Package{
+			Dir: "store",
+			Artifacts: gentest.Run(t, persistgo.New(), doc, gen.Options{Raw: map[string]any{
+				"package": "store", "model_import": "rigtest/model",
+			}}),
+		},
+		gentest.Package{Dir: "api", Artifacts: api},
+	)
+}
+
+// TestPresenceWiring is the emitted wiring, as a golden.
+//
+// A golden rather than assertions on substrings, because what matters here is
+// mostly prose: the four numbers come from the block, and the doc comments are
+// where the contrast with the notification dispatcher is written down. A reviewer
+// reading this diff is reading the file a project will read.
+func TestPresenceWiring(t *testing.T) {
+	t.Parallel()
+
+	doc := gentest.LoadDocument(t, filepath.Join("testdata", "presence.ir.json"))
+	artifacts := gentest.Run(t, servergo.New(), doc, opts())
+
+	gentest.Golden(t, filepath.Join("testdata", "presence"), artifacts, *update)
+}
+
+// TestPresenceIsWiredOnlyWhereItExists is the rule every optional block follows:
+// without it there is no file, no field on Handlers, and no import of the module.
+//
+// The import matters as much as the routes. A project that serves a list of
+// chores should not carry a sweeper and a presence table in its dependency graph
+// because rig can write one.
+func TestPresenceIsWiredOnlyWhereItExists(t *testing.T) {
+	t.Parallel()
+
+	with := gentest.LoadDocument(t, filepath.Join("testdata", "presence.ir.json"))
+	server := find(t, gentest.Run(t, servergo.New(), with, opts()), "server.gen.go")
+
+	for _, want := range []string{
+		"Presence *presence.Service",
+		"presencehttp.New(h.Presence,",
+		// The project's own error shape and its own request metadata, for the
+		// reason the inbox routes take them: these do not go through resolve.
+		"fail(h.Server, w, r, requestContext(h.Server, r), err)",
+	} {
+		if !strings.Contains(server, want) {
+			t.Errorf("server.gen.go does not mount presence: missing %q", want)
+		}
+	}
+
+	without := gentest.LoadDocument(t, filepath.Join("testdata", "lifecycle.ir.json"))
+	artifacts := gentest.Run(t, servergo.New(), without, opts())
+	for _, a := range artifacts {
+		if strings.HasSuffix(a.Path, "presence.gen.go") {
+			t.Errorf("a project with no presence block got %s", a.Path)
+		}
+		if strings.Contains(string(a.Content), presenceImport) {
+			t.Errorf("%s imports %s in a project with no presence block", a.Path, presenceImport)
+		}
+	}
+}
+
+// presenceImport is the module a project without presence must not name.
+const presenceImport = "github.com/simonjanss/rig/presence"
+
+// TestPresenceTargetsComeFromTheDocument. The list is a typo boundary, so what
+// makes it worth anything is that it is derived rather than declared — and that
+// rig's own table is not in it, because a presence on a presence is nonsense.
+func TestPresenceTargetsComeFromTheDocument(t *testing.T) {
+	t.Parallel()
+
+	doc := gentest.LoadDocument(t, filepath.Join("testdata", "presence.ir.json"))
+	file := find(t, gentest.Run(t, servergo.New(), doc, opts()), "presence.gen.go")
+
+	if strings.Contains(file, `"rig_presence"`) {
+		t.Error("rig_presence is a presence target, so a client could say it is " +
+			"looking at somebody looking at something")
+	}
+	// The fixture's other tables are there, which is what says the list is read
+	// off the document rather than written out.
+	for _, want := range []string{`"rig_account"`, `"rig_tenant"`} {
+		if !strings.Contains(file, want) {
+			t.Errorf("PresenceTargets is missing %s", want)
+		}
+	}
+}
+
 // dispatcher, no routes and no import of either.
 func TestTheInboxIsWiredOnlyWhereItExists(t *testing.T) {
 	t.Parallel()

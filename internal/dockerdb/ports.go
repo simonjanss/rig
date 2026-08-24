@@ -72,6 +72,10 @@ const (
 	// `rig db up` managing the sync service beside the database.
 	PortCLIElectricDB   = 55499
 	PortCLIElectricSync = 55489
+
+	// PortPresence is internal/presencetest: the heartbeat that is an upsert, the
+	// sweep that two replicas may run at once, and the DDL actually applying.
+	PortPresence = 55488
 )
 
 // ports is every number above, with the name a failure should mention.
@@ -98,4 +102,5 @@ var ports = map[string]int{
 	"internal/cli (electric db)":     PortCLIElectricDB,
 	"internal/cli (electric sync)":   PortCLIElectricSync,
 	"internal/authtest":              PortAuth,
+	"internal/presencetest":          PortPresence,
 }

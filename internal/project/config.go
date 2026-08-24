@@ -20,6 +20,7 @@ type Config struct {
 	Files      Files       `yaml:"files,omitempty" json:"files,omitempty" jsonschema_description:"Where uploaded files are kept, and what an upload may be."`
 
 	Notifications Notifications `yaml:"notifications,omitempty" json:"notifications,omitempty" jsonschema_description:"The inbox, and how notifications are delivered."`
+	Presence      Presence      `yaml:"presence,omitempty" json:"presence,omitempty" jsonschema_description:"Who is here, and what they are looking at."`
 
 	Tracing Tracing `yaml:"tracing,omitempty" json:"tracing,omitempty" jsonschema_description:"Whether the generated code emits OpenTelemetry spans."`
 

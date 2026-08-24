@@ -1,0 +1,43 @@
+{
+    "name": "@rig/presence",
+    "version": "0.1.0",
+    "type": "module",
+    "sideEffects": false,
+    "description": "Who is here, and what they are looking at, in a rig application",
+    "license": "MIT",
+    "files": [
+        "dist"
+    ],
+    "exports": {
+        ".": {
+            "types": "./dist/index.d.mts",
+            "default": "./dist/index.mjs"
+        },
+        "./react": {
+            "types": "./dist/react.d.mts",
+            "default": "./dist/react.mjs"
+        }
+    },
+    "scripts": {
+        "build": "tsdown",
+        "typecheck": "tsc --noEmit"
+    },
+    "peerDependencies": {
+        "@rig/client": "workspace:^",
+        "@rig/electric": "workspace:^",
+        "react": ">=18"
+    },
+    "peerDependenciesMeta": {
+        "react": {
+            "optional": true
+        }
+    },
+    "devDependencies": {
+        "@rig/client": "workspace:*",
+        "@rig/electric": "workspace:*",
+        "@types/react": "19.2.2",
+        "react": "19.2.0",
+        "tsdown": "0.21.10",
+        "typescript": "5.9.3"
+    }
+}

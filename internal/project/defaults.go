@@ -141,6 +141,28 @@ const (
 	// currently does, and which is named as known and unfixed.
 	DefaultNotificationRetention = 90 * 24 * time.Hour
 
+	// The presence block's numbers. Each is the cost of the feature stated one
+	// way, and the presence module carries the same four — being resolved here is
+	// what lets the generated wiring pass them explicitly rather than relying on
+	// the module's own zero handling, so `rig schema project` can quote what a
+	// deployment is actually running.
+	//
+	// DefaultPresenceTTL is a minute: a generous window for a ghost, affordable
+	// because an ordinary close sends a leave, so the TTL only covers a crashed
+	// tab and a dead network.
+	DefaultPresenceTTL = time.Minute
+	// DefaultPresenceHeartbeat is a third of the TTL, which is the floor
+	// checkPresence enforces — three beats before somebody vanishes.
+	DefaultPresenceHeartbeat = 20 * time.Second
+	// DefaultPresenceSweep is how often the in-process sweeper looks. It is
+	// housekeeping rather than a guarantee: nothing about who is present waits
+	// for it.
+	DefaultPresenceSweep = time.Minute
+	// DefaultPresenceGrace keeps an expired row for five minutes after the last
+	// subscriber stopped drawing it, so the reader's arithmetic and the
+	// sweeper's can never disagree in the direction that makes a row come back.
+	DefaultPresenceGrace = 5 * time.Minute
+
 	// The AWS SDK's own variable names, so a deployment that already has
 	// credentials in the environment needs no configuration at all.
 	DefaultAccessKeyEnv = "AWS_ACCESS_KEY_ID"
@@ -255,6 +277,7 @@ func (p *Project) applyDefaults() {
 	p.applyAuthDefaults()
 	p.applyFilesDefaults()
 	p.applyNotificationsDefaults()
+	p.applyPresenceDefaults()
 	p.applyMonitoringDefaults()
 }
 
@@ -274,6 +297,20 @@ func (p *Project) applyNotificationsDefaults() {
 	if n.MaxAttempts == 0 {
 		n.MaxAttempts = DefaultMaxAttempts
 	}
+}
+
+// applyPresenceDefaults resolves every value the presence block leaves out, for
+// the same reason applyNotificationsDefaults does.
+func (p *Project) applyPresenceDefaults() {
+	c := &p.Config.Presence
+	if !c.Enabled {
+		return
+	}
+
+	setDuration(&c.TTL, DefaultPresenceTTL)
+	setDuration(&c.Heartbeat, DefaultPresenceHeartbeat)
+	setDuration(&c.Sweep, DefaultPresenceSweep)
+	setDuration(&c.Grace, DefaultPresenceGrace)
 }
 
 // applyFilesDefaults resolves every value the files block leaves out, for the
@@ -460,6 +497,7 @@ func (p *Project) check() diag.List {
 	diags.Append(p.checkAuth())
 	diags.Append(p.checkFiles())
 	diags.Append(p.checkNotifications())
+	diags.Append(p.checkPresence())
 	diags.Append(p.checkMonitoring())
 
 	return diags

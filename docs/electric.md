@@ -110,6 +110,12 @@ subscriber's copy forever, filtered in appearance and not in fact. Nothing
 hard-deletes past-window rows either, so on a table that is deleted from heavily
 this stream grows without bound. Use `GET /_deleted` when you want the window.
 
+That rule about moving predicates is not only about the trash. It is the reason
+[presence](presence.md) puts its freshness test in the subscriber rather than in
+SQL: "seen in the last minute" is the same kind of predicate, and a row that
+simply stopped being written would never fire the filter again. Anything you were
+thinking of expiring inside a shape belongs on that page first.
+
 ## Running Electric alongside your application
 
 The shapes are served by ElectricSQL — a separate service that follows your
@@ -162,8 +168,29 @@ generated types are `TodoRow` and `Todo` rather than one type used twice.
 
 Both are in [clients.md](clients.md#live-sync).
 
+### A stream pauses in a hidden tab
+
+The most surprising thing about subscribing from a browser, and the first thing to
+check when live sync looks broken: **the sync client stops polling while
+`document.visibilityState` is `hidden`.** A backgrounded tab, a tab behind another
+window, a minimised window — none of them receive, and each resumes where it left
+off when it comes back.
+
+That is the right behaviour and it costs nothing to somebody using your
+application. It costs a great deal to somebody testing one, because the obvious
+way to test live sync is two tabs of one window — where only one of them is ever
+visible, so the other looks dead. Two windows side by side, both visible, is the
+arrangement that works; so is spoofing `visibilityState` from a browser driver.
+
+Nothing in rig changes this and nothing should. A tab nobody is looking at asking
+for updates every twenty seconds is a cost with no reader — which is also why
+[presence](presence.md) stops heartbeating when a tab is hidden rather than
+working around it.
+
 ## See also
 
 - [clients.md](clients.md#live-sync) — subscribing from a browser
+- [presence.md](presence.md) — the other thing a shape is used for, and what the
+  moving-predicate rule decides there
 - [tables.md](tables.md#electric) — the configuration keys
 - [generators.md](generators.md) — `electric_url`, `shape_import`, `stub_dir`
