@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 	pgx "github.com/jackc/pgx/v5"
 	"github.com/simonjanss/rig/examples/linearlite/internal/model"
+	"github.com/simonjanss/rig/observe"
 	"github.com/simonjanss/rig/runtime/dbhook"
 	"github.com/simonjanss/rig/runtime/dbx"
 	"github.com/simonjanss/rig/runtime/query"
@@ -62,6 +63,126 @@ type AccountRepository interface {
 
 	// ListDeleted returns retired rows still inside the restore window.
 	ListDeleted(ctx context.Context, f model.AccountFilter, page model.AccountPage, opts ...readopt.Option) ([]*model.Account, int64, error)
+}
+
+// accountAccountRigNotificationDevicesFilter collects the conditions written
+// on a Account's AccountRigNotificationDevices.
+//
+// The bool is whether there were any: a relation nobody mentioned is not a
+// condition that everything satisfies, it is no condition at all.
+func accountAccountRigNotificationDevicesFilter(f model.AccountFilter) (model.RigNotificationDeviceFilter, bool) {
+	var (
+		sub   model.RigNotificationDeviceFilter
+		asked bool
+	)
+
+	if p := f.Equals; p != nil && p.AccountRigNotificationDevices != nil {
+		sub.Equals, asked = p.AccountRigNotificationDevices, true
+	}
+	if p := f.NotEquals; p != nil && p.AccountRigNotificationDevices != nil {
+		sub.NotEquals, asked = p.AccountRigNotificationDevices, true
+	}
+	if p := f.GreaterThan; p != nil && p.AccountRigNotificationDevices != nil {
+		sub.GreaterThan, asked = p.AccountRigNotificationDevices, true
+	}
+	if p := f.SmallerThan; p != nil && p.AccountRigNotificationDevices != nil {
+		sub.SmallerThan, asked = p.AccountRigNotificationDevices, true
+	}
+	if p := f.GreaterOrEqual; p != nil && p.AccountRigNotificationDevices != nil {
+		sub.GreaterOrEqual, asked = p.AccountRigNotificationDevices, true
+	}
+	if p := f.SmallerOrEqual; p != nil && p.AccountRigNotificationDevices != nil {
+		sub.SmallerOrEqual, asked = p.AccountRigNotificationDevices, true
+	}
+	if p := f.Contains; p != nil && p.AccountRigNotificationDevices != nil {
+		sub.Contains, asked = p.AccountRigNotificationDevices, true
+	}
+	if p := f.NotContains; p != nil && p.AccountRigNotificationDevices != nil {
+		sub.NotContains, asked = p.AccountRigNotificationDevices, true
+	}
+	if p := f.Like; p != nil && p.AccountRigNotificationDevices != nil {
+		sub.Like, asked = p.AccountRigNotificationDevices, true
+	}
+	if p := f.NotLike; p != nil && p.AccountRigNotificationDevices != nil {
+		sub.NotLike, asked = p.AccountRigNotificationDevices, true
+	}
+	if p := f.Null; p != nil && p.AccountRigNotificationDevices != nil {
+		sub.Null, asked = p.AccountRigNotificationDevices, true
+	}
+	if p := f.NotNull; p != nil && p.AccountRigNotificationDevices != nil {
+		sub.NotNull, asked = p.AccountRigNotificationDevices, true
+	}
+
+	if !asked {
+		return sub, false
+	}
+
+	// The connective comes down with them, and it has to: under OR the caller
+	// asked for a related row satisfying either condition, and one subquery whose
+	// inside is a disjunction is exactly that. Under AND it is the same row
+	// satisfying both, which is the part a subquery per operator could not say.
+	sub.OrCondition = f.OrCondition
+	return sub, true
+}
+
+// accountAccountRigNotificationSettingsFilter collects the conditions written
+// on a Account's AccountRigNotificationSettings.
+//
+// The bool is whether there were any: a relation nobody mentioned is not a
+// condition that everything satisfies, it is no condition at all.
+func accountAccountRigNotificationSettingsFilter(f model.AccountFilter) (model.RigNotificationSettingFilter, bool) {
+	var (
+		sub   model.RigNotificationSettingFilter
+		asked bool
+	)
+
+	if p := f.Equals; p != nil && p.AccountRigNotificationSettings != nil {
+		sub.Equals, asked = p.AccountRigNotificationSettings, true
+	}
+	if p := f.NotEquals; p != nil && p.AccountRigNotificationSettings != nil {
+		sub.NotEquals, asked = p.AccountRigNotificationSettings, true
+	}
+	if p := f.GreaterThan; p != nil && p.AccountRigNotificationSettings != nil {
+		sub.GreaterThan, asked = p.AccountRigNotificationSettings, true
+	}
+	if p := f.SmallerThan; p != nil && p.AccountRigNotificationSettings != nil {
+		sub.SmallerThan, asked = p.AccountRigNotificationSettings, true
+	}
+	if p := f.GreaterOrEqual; p != nil && p.AccountRigNotificationSettings != nil {
+		sub.GreaterOrEqual, asked = p.AccountRigNotificationSettings, true
+	}
+	if p := f.SmallerOrEqual; p != nil && p.AccountRigNotificationSettings != nil {
+		sub.SmallerOrEqual, asked = p.AccountRigNotificationSettings, true
+	}
+	if p := f.Contains; p != nil && p.AccountRigNotificationSettings != nil {
+		sub.Contains, asked = p.AccountRigNotificationSettings, true
+	}
+	if p := f.NotContains; p != nil && p.AccountRigNotificationSettings != nil {
+		sub.NotContains, asked = p.AccountRigNotificationSettings, true
+	}
+	if p := f.Like; p != nil && p.AccountRigNotificationSettings != nil {
+		sub.Like, asked = p.AccountRigNotificationSettings, true
+	}
+	if p := f.NotLike; p != nil && p.AccountRigNotificationSettings != nil {
+		sub.NotLike, asked = p.AccountRigNotificationSettings, true
+	}
+	if p := f.Null; p != nil && p.AccountRigNotificationSettings != nil {
+		sub.Null, asked = p.AccountRigNotificationSettings, true
+	}
+	if p := f.NotNull; p != nil && p.AccountRigNotificationSettings != nil {
+		sub.NotNull, asked = p.AccountRigNotificationSettings, true
+	}
+
+	if !asked {
+		return sub, false
+	}
+
+	// The connective comes down with them, and it has to: under OR the caller
+	// asked for a related row satisfying either condition, and one subquery whose
+	// inside is a disjunction is exactly that. Under AND it is the same row
+	// satisfying both, which is the part a subquery per operator could not say.
+	sub.OrCondition = f.OrCondition
+	return sub, true
 }
 
 // accountAssigneeAccountTodosFilter collects the conditions written on a
@@ -560,6 +681,34 @@ func accountGroup(f model.AccountFilter, sc filterScope) (query.Group, error) {
 		}
 	}
 
+	if sub, ok := accountAccountRigNotificationDevicesFilter(f); ok {
+		inner, from, on := sc.hasMany("rig_notification_device", "account_id", "id")
+		where, err := rigNotificationDeviceGroup(sub, inner)
+		if err != nil {
+			return query.Group{}, err
+		}
+
+		// The far side is scoped whatever the read asked for. A read option widens
+		// what this query returns, not what it may look through to decide.
+		where.Add(inner.tenant("tenant_id"))
+
+		g.Add(query.Related(query.Exists{From: from, On: on, Where: where}))
+	}
+
+	if sub, ok := accountAccountRigNotificationSettingsFilter(f); ok {
+		inner, from, on := sc.hasMany("rig_notification_setting", "account_id", "id")
+		where, err := rigNotificationSettingGroup(sub, inner)
+		if err != nil {
+			return query.Group{}, err
+		}
+
+		// The far side is scoped whatever the read asked for. A read option widens
+		// what this query returns, not what it may look through to decide.
+		where.Add(inner.tenant("tenant_id"))
+
+		g.Add(query.Related(query.Exists{From: from, On: on, Where: where}))
+	}
+
 	if sub, ok := accountAssigneeAccountTodosFilter(f); ok {
 		inner, from, on := sc.hasMany("todo", "assignee_account_id", "id")
 		where, err := todoGroup(sub, inner)
@@ -574,6 +723,34 @@ func accountGroup(f model.AccountFilter, sc filterScope) (query.Group, error) {
 		where.Add(inner.original("version_type", model.TodoVersionTypeOriginal))
 
 		g.Add(query.Related(query.Exists{From: from, On: on, Where: where}))
+	}
+
+	if p := f.Without; p != nil && p.AccountRigNotificationDevices != nil {
+		inner, from, on := sc.hasMany("rig_notification_device", "account_id", "id")
+		where, err := rigNotificationDeviceGroup(*p.AccountRigNotificationDevices, inner)
+		if err != nil {
+			return query.Group{}, err
+		}
+
+		// The far side is scoped whatever the read asked for. A read option widens
+		// what this query returns, not what it may look through to decide.
+		where.Add(inner.tenant("tenant_id"))
+
+		g.Add(query.Related(query.Exists{From: from, On: on, Where: where, Not: true}))
+	}
+
+	if p := f.Without; p != nil && p.AccountRigNotificationSettings != nil {
+		inner, from, on := sc.hasMany("rig_notification_setting", "account_id", "id")
+		where, err := rigNotificationSettingGroup(*p.AccountRigNotificationSettings, inner)
+		if err != nil {
+			return query.Group{}, err
+		}
+
+		// The far side is scoped whatever the read asked for. A read option widens
+		// what this query returns, not what it may look through to decide.
+		where.Add(inner.tenant("tenant_id"))
+
+		g.Add(query.Related(query.Exists{From: from, On: on, Where: where, Not: true}))
 	}
 
 	if p := f.Without; p != nil && p.AssigneeAccountTodos != nil {
@@ -637,6 +814,15 @@ type accountRepo struct {
 
 var _ AccountRepository = (*accountRepo)(nil)
 
+// trace runs one stage of a write inside a span of its own.
+//
+// The stage is a callback rather than something bracketed by two calls,
+// because that is what makes the span a function's: it is opened and ended in
+// one place, and nothing at the call site is holding one.
+func (r *accountRepo) trace(ctx context.Context, name string, f func(context.Context) error) error {
+	return observe.Trace(ctx, r.db.tracer, name, f)
+}
+
 const accountRepoSelect = "rig_account.id, rig_account.tenant_id, rig_account.identity_id, rig_account.created_at, rig_account.created_by_account_id, rig_account.updated_at, rig_account.updated_by_account_id, rig_account.deleted_at, rig_account.deleted_by_account_id, rig_account.kind, rig_account.role, rig_account.email_address, rig_account.display_name, rig_account.time_zone, rig_account.is_active, rig_account.created_by_api_key_id, rig_account.updated_by_api_key_id, rig_account.deleted_by_api_key_id"
 
 // scanAccount reads one row in the order accountRepoSelect lists.
@@ -653,6 +839,9 @@ func scanAccount(row pgx.Row) (*model.Account, error) {
 
 // Get implements AccountRepository.
 func (r *accountRepo) Get(ctx context.Context, id uuid.UUID, opts ...readopt.Option) (*model.Account, error) {
+	ctx, span := r.db.tracer.Start(ctx, "repository.Account.Get")
+	defer span.End()
+
 	cfg, err := readopt.Apply(opts)
 	if err != nil {
 		return nil, err
@@ -683,6 +872,9 @@ func (r *accountRepo) Get(ctx context.Context, id uuid.UUID, opts ...readopt.Opt
 
 // List implements AccountRepository.
 func (r *accountRepo) List(ctx context.Context, f model.AccountFilter, page model.AccountPage, opts ...readopt.Option) ([]*model.Account, int64, error) {
+	ctx, span := r.db.tracer.Start(ctx, "repository.Account.List")
+	defer span.End()
+
 	return r.list(ctx, f, page, opts)
 }
 
@@ -785,6 +977,9 @@ var AccountDefaultOrder = []query.Order{{Table: "rig_account", Column: "created_
 
 // Create implements AccountRepository.
 func (r *accountRepo) Create(ctx context.Context, in dbhook.Create[model.AccountCreateInput, model.Account]) (*model.Account, error) {
+	ctx, span := r.db.tracer.Start(ctx, "repository.Account.Create")
+	defer span.End()
+
 	// Who is asking, first of all. A write from a request carrying no identity is
 	// refused here — before a rule runs, before a column notices — which is
 	// what lets every hook below take the claims as a value rather than something
@@ -814,7 +1009,9 @@ func (r *accountRepo) Create(ctx context.Context, in dbhook.Create[model.Account
 	// across a rule that may call out to another service would be a worse trade
 	// than the one it buys.
 	if in.Hooks.Validator != nil {
-		if err := in.Hooks.Validator.RunCreate(ctx, claims, &in.Input); err != nil {
+		if err := r.trace(ctx, "repository.Account.Create.Validator", func(ctx context.Context) error {
+			return in.Hooks.Validator.RunCreate(ctx, claims, &in.Input)
+		}); err != nil {
 			return nil, err
 		}
 	}
@@ -836,7 +1033,9 @@ func (r *accountRepo) Create(ctx context.Context, in dbhook.Create[model.Account
 	var m *model.Account
 	err = dbx.InTxIf(ctx, r.db.pool, r.db.connFor(ctx), needsTx, func(ctx context.Context, tx dbx.Conn) error {
 		if in.Hooks.Before != nil {
-			if err := in.Hooks.Before(ctx, claims, &in.Input); err != nil {
+			if err := r.trace(ctx, "repository.Account.Create.Before", func(ctx context.Context) error {
+				return in.Hooks.Before(ctx, claims, &in.Input)
+			}); err != nil {
 				return err
 			}
 		}
@@ -853,7 +1052,9 @@ func (r *accountRepo) Create(ctx context.Context, in dbhook.Create[model.Account
 		m = created
 
 		if in.Hooks.After != nil {
-			if err := in.Hooks.After(ctx, claims, m); err != nil {
+			if err := r.trace(ctx, "repository.Account.Create.After", func(ctx context.Context) error {
+				return in.Hooks.After(ctx, claims, m)
+			}); err != nil {
 				return err
 			}
 		}
@@ -868,7 +1069,12 @@ func (r *accountRepo) Create(ctx context.Context, in dbhook.Create[model.Account
 		// this runs, and reaching into a context for them then is reaching into one
 		// that has been cancelled.
 		done, who := in.Hooks.AfterCommit, claims
-		dbx.AfterCommit(ctx, func() { done(ctx, who, m) })
+		dbx.AfterCommit(ctx, func() {
+			ctx, span := r.db.tracer.Start(ctx, "repository.Account.Create.AfterCommit")
+			defer span.End()
+
+			done(ctx, who, m)
+		})
 	}
 
 	return m, nil
@@ -876,6 +1082,9 @@ func (r *accountRepo) Create(ctx context.Context, in dbhook.Create[model.Account
 
 // Update implements AccountRepository.
 func (r *accountRepo) Update(ctx context.Context, id uuid.UUID, in dbhook.Update[model.AccountUpdateInput, model.Account]) (*model.Account, error) {
+	ctx, span := r.db.tracer.Start(ctx, "repository.Account.Update")
+	defer span.End()
+
 	in.Input.Normalize()
 
 	claims, err := tenancy.FromContext(ctx)
@@ -900,7 +1109,9 @@ func (r *accountRepo) Update(ctx context.Context, id uuid.UUID, in dbhook.Update
 		// reason: a hook that ran after validation could write a value nothing had
 		// checked.
 		if in.Hooks.Before != nil {
-			if err := in.Hooks.Before(ctx, claims, &in.Input, prev); err != nil {
+			if err := r.trace(ctx, "repository.Account.Update.Before", func(ctx context.Context) error {
+				return in.Hooks.Before(ctx, claims, &in.Input, prev)
+			}); err != nil {
 				return err
 			}
 		}
@@ -914,7 +1125,9 @@ func (r *accountRepo) Update(ctx context.Context, id uuid.UUID, in dbhook.Update
 		}
 
 		if in.Hooks.Validator != nil {
-			if err := in.Hooks.Validator.RunUpdate(ctx, claims, &in.Input, prev); err != nil {
+			if err := r.trace(ctx, "repository.Account.Update.Validator", func(ctx context.Context) error {
+				return in.Hooks.Validator.RunUpdate(ctx, claims, &in.Input, prev)
+			}); err != nil {
 				return err
 			}
 		}
@@ -975,7 +1188,9 @@ func (r *accountRepo) Update(ctx context.Context, id uuid.UUID, in dbhook.Update
 		}
 
 		if in.Hooks.After != nil {
-			if err := in.Hooks.After(ctx, claims, updated, prev); err != nil {
+			if err := r.trace(ctx, "repository.Account.Update.After", func(ctx context.Context) error {
+				return in.Hooks.After(ctx, claims, updated, prev)
+			}); err != nil {
 				return err
 			}
 		}
@@ -990,7 +1205,12 @@ func (r *accountRepo) Update(ctx context.Context, id uuid.UUID, in dbhook.Update
 		// this runs, and reaching into a context for them then is reaching into one
 		// that has been cancelled.
 		done, who := in.Hooks.AfterCommit, claims
-		dbx.AfterCommit(ctx, func() { done(ctx, who, updated, prev) })
+		dbx.AfterCommit(ctx, func() {
+			ctx, span := r.db.tracer.Start(ctx, "repository.Account.Update.AfterCommit")
+			defer span.End()
+
+			done(ctx, who, updated, prev)
+		})
 	}
 
 	return updated, nil
@@ -998,6 +1218,9 @@ func (r *accountRepo) Update(ctx context.Context, id uuid.UUID, in dbhook.Update
 
 // Delete implements AccountRepository.
 func (r *accountRepo) Delete(ctx context.Context, in dbhook.Delete[model.AccountDeleteInput, model.Account]) error {
+	ctx, span := r.db.tracer.Start(ctx, "repository.Account.Delete")
+	defer span.End()
+
 	claims, err := tenancy.FromContext(ctx)
 	if err != nil {
 		return err
@@ -1019,7 +1242,9 @@ func (r *accountRepo) Delete(ctx context.Context, in dbhook.Delete[model.Account
 		}
 
 		if in.Hooks.Before != nil {
-			if err := in.Hooks.Before(ctx, claims, &in.Input, prev); err != nil {
+			if err := r.trace(ctx, "repository.Account.Delete.Before", func(ctx context.Context) error {
+				return in.Hooks.Before(ctx, claims, &in.Input, prev)
+			}); err != nil {
 				return err
 			}
 		}
@@ -1029,7 +1254,9 @@ func (r *accountRepo) Delete(ctx context.Context, in dbhook.Delete[model.Account
 				return writeError(err, "rig_account")
 			}
 			if in.Hooks.After != nil {
-				if err := in.Hooks.After(ctx, claims, prev); err != nil {
+				if err := r.trace(ctx, "repository.Account.Delete.After", func(ctx context.Context) error {
+					return in.Hooks.After(ctx, claims, prev)
+				}); err != nil {
 					return err
 				}
 			}
@@ -1051,7 +1278,9 @@ func (r *accountRepo) Delete(ctx context.Context, in dbhook.Delete[model.Account
 			return writeError(err, "rig_account")
 		}
 		if in.Hooks.After != nil {
-			if err := in.Hooks.After(ctx, claims, prev); err != nil {
+			if err := r.trace(ctx, "repository.Account.Delete.After", func(ctx context.Context) error {
+				return in.Hooks.After(ctx, claims, prev)
+			}); err != nil {
 				return err
 			}
 		}
@@ -1066,7 +1295,12 @@ func (r *accountRepo) Delete(ctx context.Context, in dbhook.Delete[model.Account
 		// this runs, and reaching into a context for them then is reaching into one
 		// that has been cancelled.
 		done, who := in.Hooks.AfterCommit, claims
-		dbx.AfterCommit(ctx, func() { done(ctx, who, prev) })
+		dbx.AfterCommit(ctx, func() {
+			ctx, span := r.db.tracer.Start(ctx, "repository.Account.Delete.AfterCommit")
+			defer span.End()
+
+			done(ctx, who, prev)
+		})
 	}
 
 	return nil
@@ -1080,6 +1314,9 @@ func AccountRestoreCutoff() time.Time {
 
 // Restore implements AccountRepository.
 func (r *accountRepo) Restore(ctx context.Context, id uuid.UUID, in dbhook.Restore[model.AccountUpdateInput, model.Account]) (*model.Account, error) {
+	ctx, span := r.db.tracer.Start(ctx, "repository.Account.Restore")
+	defer span.End()
+
 	claims, err := tenancy.FromContext(ctx)
 	if err != nil {
 		return nil, err
@@ -1110,7 +1347,9 @@ func (r *accountRepo) Restore(ctx context.Context, id uuid.UUID, in dbhook.Resto
 		// taken since gets changed on the way in. Returning an error refuses the
 		// restore instead.
 		if in.Hooks.Before != nil {
-			if err := in.Hooks.Before(ctx, claims, &in.Input, prev); err != nil {
+			if err := r.trace(ctx, "repository.Account.Restore.Before", func(ctx context.Context) error {
+				return in.Hooks.Before(ctx, claims, &in.Input, prev)
+			}); err != nil {
 				return err
 			}
 		}
@@ -1119,7 +1358,9 @@ func (r *accountRepo) Restore(ctx context.Context, id uuid.UUID, in dbhook.Resto
 		// fields it touched: the row was not live, so nothing about it has been
 		// checked against the world it is returning to.
 		if in.Hooks.Validator != nil {
-			if err := in.Hooks.Validator.RunRestore(ctx, claims, &in.Input, prev); err != nil {
+			if err := r.trace(ctx, "repository.Account.Restore.Validator", func(ctx context.Context) error {
+				return in.Hooks.Validator.RunRestore(ctx, claims, &in.Input, prev)
+			}); err != nil {
 				return err
 			}
 		}
@@ -1180,7 +1421,9 @@ func (r *accountRepo) Restore(ctx context.Context, id uuid.UUID, in dbhook.Resto
 		}
 
 		if in.Hooks.After != nil {
-			if err := in.Hooks.After(ctx, claims, restored, prev); err != nil {
+			if err := r.trace(ctx, "repository.Account.Restore.After", func(ctx context.Context) error {
+				return in.Hooks.After(ctx, claims, restored, prev)
+			}); err != nil {
 				return err
 			}
 		}
@@ -1195,7 +1438,12 @@ func (r *accountRepo) Restore(ctx context.Context, id uuid.UUID, in dbhook.Resto
 		// this runs, and reaching into a context for them then is reaching into one
 		// that has been cancelled.
 		done, who := in.Hooks.AfterCommit, claims
-		dbx.AfterCommit(ctx, func() { done(ctx, who, restored, prev) })
+		dbx.AfterCommit(ctx, func() {
+			ctx, span := r.db.tracer.Start(ctx, "repository.Account.Restore.AfterCommit")
+			defer span.End()
+
+			done(ctx, who, restored, prev)
+		})
 	}
 
 	return restored, nil
@@ -1203,6 +1451,9 @@ func (r *accountRepo) Restore(ctx context.Context, id uuid.UUID, in dbhook.Resto
 
 // ListDeleted returns retired rows still inside the restore window.
 func (r *accountRepo) ListDeleted(ctx context.Context, f model.AccountFilter, page model.AccountPage, opts ...readopt.Option) ([]*model.Account, int64, error) {
+	ctx, span := r.db.tracer.Start(ctx, "repository.Account.ListDeleted")
+	defer span.End()
+
 	// The lifecycle option is forced and the caller's are kept: which rows the
 	// trash holds is not up for discussion, and how wide a view of it the caller
 	// gets still is.

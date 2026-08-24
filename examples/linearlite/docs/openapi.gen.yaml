@@ -7,7 +7,7 @@ info:
         The authentication endpoints under `/auth` are served by a hand-written module and are not described here.
 
         The notification inbox endpoints are served by a hand-written module and are not described here.
-    version: "2026-08-22"
+    version: "2026-08-24"
 servers:
     - url: /
       description: This server. Set openapi.servers to name the deployment instead.
@@ -152,6 +152,353 @@ paths:
                 "500":
                     $ref: '#/components/responses/Internal'
             x-rig-permission: rig_account.read
+    /api/v1/rig-notification-devices:
+        get:
+            tags:
+                - RigNotificationDevices
+            summary: List RigNotificationDevices.
+            description: |-
+                List RigNotificationDevices.
+
+                Requires the `rig_notification_device.read` permission.
+            operationId: listRigNotificationDevices
+            parameters:
+                - name: limit
+                  in: query
+                  description: Maximum rows to return.
+                  required: false
+                  schema:
+                    type: integer
+                    format: int32
+                    default: 50
+                - name: offset
+                  in: query
+                  description: Rows to skip before the first returned row.
+                  required: false
+                  schema:
+                    type: integer
+                    format: int32
+                    default: 0
+                - name: scope
+                  in: query
+                  description: 'How wide to read: own for the rignotificationdevices the caller created, which is the default, or all for every one in the tenant. Asking for all requires the rig_notification_device.read.all permission and is refused without it, rather than quietly answering with fewer rows.'
+                  required: false
+                  schema:
+                    type: string
+                    enum:
+                        - own
+                        - all
+                    default: own
+                - $ref: '#/components/parameters/ApiRevision'
+            responses:
+                "200":
+                    description: A page of RigNotificationDevices.
+                    headers:
+                        API-Revision:
+                            $ref: '#/components/headers/ApiRevision'
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/RigNotificationDeviceListResponse'
+                "400":
+                    $ref: '#/components/responses/BadRequest'
+                "401":
+                    $ref: '#/components/responses/Unauthorized'
+                "403":
+                    $ref: '#/components/responses/Forbidden'
+                "429":
+                    $ref: '#/components/responses/RateLimited'
+                "500":
+                    $ref: '#/components/responses/Internal'
+            x-rig-permission: rig_notification_device.read
+            x-rig-wide-permission: rig_notification_device.read.all
+        post:
+            tags:
+                - RigNotificationDevices
+            summary: Create a RigNotificationDevice.
+            description: |-
+                Create a RigNotificationDevice.
+
+                Requires the `rig_notification_device.write` permission.
+            operationId: createRigNotificationDevice
+            parameters:
+                - $ref: '#/components/parameters/ApiRevision'
+                - $ref: '#/components/parameters/IdempotencyKey'
+            requestBody:
+                description: The fields a new RigNotificationDevice is created with. A field the database cannot supply for itself is required.
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/RigNotificationDeviceCreateInput'
+                required: true
+            responses:
+                "201":
+                    description: The created RigNotificationDevice.
+                    headers:
+                        API-Revision:
+                            $ref: '#/components/headers/ApiRevision'
+                        Idempotency-Replayed:
+                            $ref: '#/components/headers/IdempotencyReplayed'
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/RigNotificationDevice'
+                "400":
+                    $ref: '#/components/responses/BadRequest'
+                "401":
+                    $ref: '#/components/responses/Unauthorized'
+                "403":
+                    $ref: '#/components/responses/Forbidden'
+                "409":
+                    $ref: '#/components/responses/Conflict'
+                "422":
+                    $ref: '#/components/responses/UnprocessableEntity'
+                "429":
+                    $ref: '#/components/responses/RateLimited'
+                "500":
+                    $ref: '#/components/responses/Internal'
+            x-rig-permission: rig_notification_device.write
+    /api/v1/rig-notification-devices/{id}:
+        delete:
+            tags:
+                - RigNotificationDevices
+            summary: Delete a RigNotificationDevice.
+            description: |-
+                Delete a RigNotificationDevice.
+
+                Requires the `rig_notification_device.delete` permission.
+            operationId: deleteRigNotificationDevice
+            parameters:
+                - name: id
+                  in: path
+                  description: Identifier of the RigNotificationDevice.
+                  required: true
+                  schema:
+                    type: string
+                    format: uuid
+                - $ref: '#/components/parameters/ApiRevision'
+            responses:
+                "204":
+                    description: The RigNotificationDevice was deleted.
+                    headers:
+                        API-Revision:
+                            $ref: '#/components/headers/ApiRevision'
+                "400":
+                    $ref: '#/components/responses/BadRequest'
+                "401":
+                    $ref: '#/components/responses/Unauthorized'
+                "403":
+                    $ref: '#/components/responses/Forbidden'
+                "404":
+                    $ref: '#/components/responses/NotFound'
+                "409":
+                    $ref: '#/components/responses/Conflict'
+                "429":
+                    $ref: '#/components/responses/RateLimited'
+                "500":
+                    $ref: '#/components/responses/Internal'
+            x-rig-permission: rig_notification_device.delete
+    /api/v1/rig-notification-settings:
+        get:
+            tags:
+                - RigNotificationSettings
+            summary: List RigNotificationSettings.
+            description: |-
+                List RigNotificationSettings.
+
+                Requires the `rig_notification_setting.read` permission.
+            operationId: listRigNotificationSettings
+            parameters:
+                - name: limit
+                  in: query
+                  description: Maximum rows to return.
+                  required: false
+                  schema:
+                    type: integer
+                    format: int32
+                    default: 50
+                - name: offset
+                  in: query
+                  description: Rows to skip before the first returned row.
+                  required: false
+                  schema:
+                    type: integer
+                    format: int32
+                    default: 0
+                - name: scope
+                  in: query
+                  description: 'How wide to read: own for the rignotificationsettings the caller created, which is the default, or all for every one in the tenant. Asking for all requires the rig_notification_setting.read.all permission and is refused without it, rather than quietly answering with fewer rows.'
+                  required: false
+                  schema:
+                    type: string
+                    enum:
+                        - own
+                        - all
+                    default: own
+                - $ref: '#/components/parameters/ApiRevision'
+            responses:
+                "200":
+                    description: A page of RigNotificationSettings.
+                    headers:
+                        API-Revision:
+                            $ref: '#/components/headers/ApiRevision'
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/RigNotificationSettingListResponse'
+                "400":
+                    $ref: '#/components/responses/BadRequest'
+                "401":
+                    $ref: '#/components/responses/Unauthorized'
+                "403":
+                    $ref: '#/components/responses/Forbidden'
+                "429":
+                    $ref: '#/components/responses/RateLimited'
+                "500":
+                    $ref: '#/components/responses/Internal'
+            x-rig-permission: rig_notification_setting.read
+            x-rig-wide-permission: rig_notification_setting.read.all
+        post:
+            tags:
+                - RigNotificationSettings
+            summary: Create a RigNotificationSetting.
+            description: |-
+                Create a RigNotificationSetting.
+
+                Requires the `rig_notification_setting.write` permission.
+            operationId: createRigNotificationSetting
+            parameters:
+                - $ref: '#/components/parameters/ApiRevision'
+                - $ref: '#/components/parameters/IdempotencyKey'
+            requestBody:
+                description: The fields a new RigNotificationSetting is created with. A field the database cannot supply for itself is required.
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/RigNotificationSettingCreateInput'
+                required: true
+            responses:
+                "201":
+                    description: The created RigNotificationSetting.
+                    headers:
+                        API-Revision:
+                            $ref: '#/components/headers/ApiRevision'
+                        Idempotency-Replayed:
+                            $ref: '#/components/headers/IdempotencyReplayed'
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/RigNotificationSetting'
+                "400":
+                    $ref: '#/components/responses/BadRequest'
+                "401":
+                    $ref: '#/components/responses/Unauthorized'
+                "403":
+                    $ref: '#/components/responses/Forbidden'
+                "409":
+                    $ref: '#/components/responses/Conflict'
+                "422":
+                    $ref: '#/components/responses/UnprocessableEntity'
+                "429":
+                    $ref: '#/components/responses/RateLimited'
+                "500":
+                    $ref: '#/components/responses/Internal'
+            x-rig-permission: rig_notification_setting.write
+    /api/v1/rig-notification-settings/{id}:
+        delete:
+            tags:
+                - RigNotificationSettings
+            summary: Delete a RigNotificationSetting.
+            description: |-
+                Delete a RigNotificationSetting.
+
+                Requires the `rig_notification_setting.delete` permission.
+            operationId: deleteRigNotificationSetting
+            parameters:
+                - name: id
+                  in: path
+                  description: Identifier of the RigNotificationSetting.
+                  required: true
+                  schema:
+                    type: string
+                    format: uuid
+                - $ref: '#/components/parameters/ApiRevision'
+            responses:
+                "204":
+                    description: The RigNotificationSetting was deleted.
+                    headers:
+                        API-Revision:
+                            $ref: '#/components/headers/ApiRevision'
+                "400":
+                    $ref: '#/components/responses/BadRequest'
+                "401":
+                    $ref: '#/components/responses/Unauthorized'
+                "403":
+                    $ref: '#/components/responses/Forbidden'
+                "404":
+                    $ref: '#/components/responses/NotFound'
+                "409":
+                    $ref: '#/components/responses/Conflict'
+                "429":
+                    $ref: '#/components/responses/RateLimited'
+                "500":
+                    $ref: '#/components/responses/Internal'
+            x-rig-permission: rig_notification_setting.delete
+        patch:
+            tags:
+                - RigNotificationSettings
+            summary: Update a RigNotificationSetting.
+            description: |-
+                Only the fields present in the body are changed. A field set to null is cleared; a field left out is left alone.
+
+                Requires the `rig_notification_setting.write` permission.
+            operationId: updateRigNotificationSetting
+            parameters:
+                - name: id
+                  in: path
+                  description: Identifier of the RigNotificationSetting.
+                  required: true
+                  schema:
+                    type: string
+                    format: uuid
+                - $ref: '#/components/parameters/ApiRevision'
+                - $ref: '#/components/parameters/IdempotencyKey'
+            requestBody:
+                description: 'The fields of a RigNotificationSetting to change. Every member is optional: one left out is left alone, and an explicit null clears it.'
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/RigNotificationSettingUpdateInput'
+                required: true
+            responses:
+                "200":
+                    description: The updated RigNotificationSetting.
+                    headers:
+                        API-Revision:
+                            $ref: '#/components/headers/ApiRevision'
+                        Idempotency-Replayed:
+                            $ref: '#/components/headers/IdempotencyReplayed'
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/RigNotificationSetting'
+                "400":
+                    $ref: '#/components/responses/BadRequest'
+                "401":
+                    $ref: '#/components/responses/Unauthorized'
+                "403":
+                    $ref: '#/components/responses/Forbidden'
+                "404":
+                    $ref: '#/components/responses/NotFound'
+                "409":
+                    $ref: '#/components/responses/Conflict'
+                "422":
+                    $ref: '#/components/responses/UnprocessableEntity'
+                "429":
+                    $ref: '#/components/responses/RateLimited'
+                "500":
+                    $ref: '#/components/responses/Internal'
+            x-rig-permission: rig_notification_setting.write
     /api/v1/rig_notification_recipient/_deleted/_stream:
         get:
             tags:
@@ -1443,6 +1790,73 @@ paths:
                 "500":
                     $ref: '#/components/responses/Internal'
             x-rig-permission: todo.write
+    /api/v1/todos/{id}/_claim:
+        post:
+            tags:
+                - Todos
+            summary: Take the item.
+            description: |-
+                Taking an item somebody else holds is a conflict rather than a
+                reassignment: two people picking up the same thing should not both be
+                told they have it. Taking one nobody holds is the ordinary case, and
+                taking one you already hold is not an error — a button pressed twice is
+                not a disagreement.
+
+                `steal` is the deliberate override, for the person who means it. It goes
+                through the same update as everything else, so the previous holder hears
+                about it the way they hear about any other change to their item.
+
+
+                Requires the `todo.claim` permission.
+            operationId: claimTodo
+            parameters:
+                - name: id
+                  in: path
+                  description: The item to take.
+                  required: true
+                  schema:
+                    type: string
+                    format: uuid
+                - $ref: '#/components/parameters/ApiRevision'
+                - $ref: '#/components/parameters/IdempotencyKey'
+            requestBody:
+                description: The request body for Todo.Claim.
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/TodoClaimBody'
+                required: true
+            responses:
+                "200":
+                    description: The item, now yours.
+                    headers:
+                        API-Revision:
+                            $ref: '#/components/headers/ApiRevision'
+                        Idempotency-Replayed:
+                            $ref: '#/components/headers/IdempotencyReplayed'
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Todo'
+                "400":
+                    $ref: '#/components/responses/BadRequest'
+                "401":
+                    $ref: '#/components/responses/Unauthorized'
+                "403":
+                    $ref: '#/components/responses/Forbidden'
+                "404":
+                    $ref: '#/components/responses/NotFound'
+                "409":
+                    description: Somebody else holds it, and steal was not set.
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Error'
+                "429":
+                    $ref: '#/components/responses/RateLimited'
+                "500":
+                    $ref: '#/components/responses/Internal'
+            x-rig-permission: todo.claim
     /api/v1/todos/{id}/_restore:
         post:
             tags:
@@ -1816,6 +2230,291 @@ components:
                     format: int64
                     description: How large the file is, in bytes.
             description: One uploaded file. Metadata only; the bytes are fetched from Url.
+        RigNotificationChannel:
+            type: string
+            enum:
+                - Desktop
+                - Mobile
+                - Email
+            description: Where a copy of an inbox line can be sent. The inbox itself is not one of them.
+            x-enum-varnames:
+                - Desktop
+                - Mobile
+                - Email
+        RigNotificationDevice:
+            type: object
+            properties:
+                id:
+                    type: string
+                    format: uuid
+                    description: Unique identifier for this row.
+                    readOnly: true
+                tenantId:
+                    type: string
+                    format: uuid
+                    description: Tenant this row belongs to. Every query is scoped by it.
+                    readOnly: true
+                accountId:
+                    type: string
+                    format: uuid
+                    description: Whose device it is.
+                createdAt:
+                    type: string
+                    format: date-time
+                    description: When this row was created. Set automatically and never changes.
+                    readOnly: true
+                updatedAt:
+                    type:
+                        - string
+                        - "null"
+                    format: date-time
+                    description: When this row was last updated. Set automatically on every update.
+                    readOnly: true
+                channel:
+                    $ref: '#/components/schemas/RigNotificationChannel'
+                    description: Desktop or Mobile. Email is refused by the CHECK above.
+                token:
+                    type: string
+                    description: What the provider was given to address this device. Opaque to rig.
+                label:
+                    type:
+                        - string
+                        - "null"
+                    description: What a person sees in a list of their devices, and the column that makes revoking one possible for somebody who has four.
+                lastSeenAt:
+                    type:
+                        - string
+                        - "null"
+                    format: date-time
+                    description: When this device last checked in, so a stale one can be told apart from a revoked one.
+                revokedAt:
+                    type:
+                        - string
+                        - "null"
+                    format: date-time
+                    description: When it stopped being a place to send to. Kept rather than deleted, so a token that comes back can be recognised.
+            description: 'Where a push can reach somebody. Email is refused: the address is on the account already.'
+        RigNotificationDeviceCreateInput:
+            type: object
+            properties:
+                accountId:
+                    type: string
+                    format: uuid
+                    description: Whose device it is.
+                channel:
+                    $ref: '#/components/schemas/RigNotificationChannel'
+                    description: Desktop or Mobile. Email is refused by the CHECK above.
+                token:
+                    type: string
+                    description: What the provider was given to address this device. Opaque to rig.
+                label:
+                    type:
+                        - string
+                        - "null"
+                    description: What a person sees in a list of their devices, and the column that makes revoking one possible for somebody who has four.
+                lastSeenAt:
+                    type:
+                        - string
+                        - "null"
+                    format: date-time
+                    description: When this device last checked in, so a stale one can be told apart from a revoked one.
+                revokedAt:
+                    type:
+                        - string
+                        - "null"
+                    format: date-time
+                    description: When it stopped being a place to send to. Kept rather than deleted, so a token that comes back can be recognised.
+            required:
+                - accountId
+                - channel
+                - token
+            description: The fields a new RigNotificationDevice is created with. A field the database cannot supply for itself is required.
+        RigNotificationDeviceListResponse:
+            type: object
+            properties:
+                data:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/RigNotificationDevice'
+                    description: The rows in this page.
+                pagination:
+                    $ref: '#/components/schemas/Pagination'
+                    description: Where this page sits in the full result set.
+            description: A page of RigNotificationDevices.
+        RigNotificationDigest:
+            type: string
+            enum:
+                - Immediate
+                - Hourly
+                - Daily
+                - Weekly
+                - Off
+            description: How often somebody wants to be told, on one channel.
+            x-enum-varnames:
+                - Immediate
+                - Hourly
+                - Daily
+                - Weekly
+                - Off
+        RigNotificationSetting:
+            type: object
+            properties:
+                id:
+                    type: string
+                    format: uuid
+                    description: Unique identifier for this row.
+                    readOnly: true
+                tenantId:
+                    type: string
+                    format: uuid
+                    description: Tenant this row belongs to. Every query is scoped by it.
+                    readOnly: true
+                accountId:
+                    type: string
+                    format: uuid
+                    description: Whose preference it is.
+                createdAt:
+                    type: string
+                    format: date-time
+                    description: When this row was created. Set automatically and never changes.
+                    readOnly: true
+                updatedAt:
+                    type:
+                        - string
+                        - "null"
+                    format: date-time
+                    description: When this row was last updated. Set automatically on every update.
+                    readOnly: true
+                kind:
+                    type:
+                        - string
+                        - "null"
+                    description: Null is the default for the channel, which is the second step of the resolution.
+                channel:
+                    $ref: '#/components/schemas/RigNotificationChannel'
+                    description: Which channel it answers for.
+                isEnabled:
+                    type: boolean
+                    description: False writes no delivery row at all. Not the same as digest Off, which is about preferring to look rather than be told.
+                digest:
+                    $ref: '#/components/schemas/RigNotificationDigest'
+                    description: Immediate sends each on its own; anything else waits for the window and goes out as one message.
+                activeFrom:
+                    type:
+                        - string
+                        - "null"
+                    format: date-time
+                    description: 'When to start delivering, in the account time zone. Null means all day. A window that wraps midnight is ordinary: 22:00 to 06:00 is how somebody says "not overnight".'
+                activeUntil:
+                    type:
+                        - string
+                        - "null"
+                    format: date-time
+                    description: 'When to stop. Outside the window a delivery is held, not dropped: the inbox line exists either way, and a discarded copy makes the badge and the mailbox disagree.'
+                activeDays:
+                    type: array
+                    items:
+                        type: integer
+                        format: int32
+                    description: ISO weekdays, 1 being Monday. Empty means every day. An array rather than a bitmask because [1,2,3,4,5] is legible in a settings payload and 62 is not.
+            description: 'What somebody wants on a channel, and when. Resolved in three steps: this kind, then this channel, then the project default.'
+        RigNotificationSettingCreateInput:
+            type: object
+            properties:
+                accountId:
+                    type: string
+                    format: uuid
+                    description: Whose preference it is.
+                kind:
+                    type:
+                        - string
+                        - "null"
+                    description: Null is the default for the channel, which is the second step of the resolution.
+                channel:
+                    $ref: '#/components/schemas/RigNotificationChannel'
+                    description: Which channel it answers for.
+                isEnabled:
+                    type: boolean
+                    description: False writes no delivery row at all. Not the same as digest Off, which is about preferring to look rather than be told.
+                    default: true
+                digest:
+                    $ref: '#/components/schemas/RigNotificationDigest'
+                    description: Immediate sends each on its own; anything else waits for the window and goes out as one message.
+                activeFrom:
+                    type:
+                        - string
+                        - "null"
+                    format: date-time
+                    description: 'When to start delivering, in the account time zone. Null means all day. A window that wraps midnight is ordinary: 22:00 to 06:00 is how somebody says "not overnight".'
+                activeUntil:
+                    type:
+                        - string
+                        - "null"
+                    format: date-time
+                    description: 'When to stop. Outside the window a delivery is held, not dropped: the inbox line exists either way, and a discarded copy makes the badge and the mailbox disagree.'
+                activeDays:
+                    type: array
+                    items:
+                        type: integer
+                        format: int32
+                    description: ISO weekdays, 1 being Monday. Empty means every day. An array rather than a bitmask because [1,2,3,4,5] is legible in a settings payload and 62 is not.
+            required:
+                - accountId
+                - channel
+            description: The fields a new RigNotificationSetting is created with. A field the database cannot supply for itself is required.
+        RigNotificationSettingListResponse:
+            type: object
+            properties:
+                data:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/RigNotificationSetting'
+                    description: The rows in this page.
+                pagination:
+                    $ref: '#/components/schemas/Pagination'
+                    description: Where this page sits in the full result set.
+            description: A page of RigNotificationSettings.
+        RigNotificationSettingUpdateInput:
+            type: object
+            properties:
+                accountId:
+                    type: string
+                    format: uuid
+                    description: Whose preference it is.
+                kind:
+                    type:
+                        - string
+                        - "null"
+                    description: Null is the default for the channel, which is the second step of the resolution.
+                channel:
+                    $ref: '#/components/schemas/RigNotificationChannel'
+                    description: Which channel it answers for.
+                isEnabled:
+                    type: boolean
+                    description: False writes no delivery row at all. Not the same as digest Off, which is about preferring to look rather than be told.
+                    default: true
+                digest:
+                    $ref: '#/components/schemas/RigNotificationDigest'
+                    description: Immediate sends each on its own; anything else waits for the window and goes out as one message.
+                activeFrom:
+                    type:
+                        - string
+                        - "null"
+                    format: date-time
+                    description: 'When to start delivering, in the account time zone. Null means all day. A window that wraps midnight is ordinary: 22:00 to 06:00 is how somebody says "not overnight".'
+                activeUntil:
+                    type:
+                        - string
+                        - "null"
+                    format: date-time
+                    description: 'When to stop. Outside the window a delivery is held, not dropped: the inbox line exists either way, and a discarded copy makes the badge and the mailbox disagree.'
+                activeDays:
+                    type: array
+                    items:
+                        type: integer
+                        format: int32
+                    description: ISO weekdays, 1 being Monday. Empty means every day. An array rather than a bitmask because [1,2,3,4,5] is legible in a settings payload and 62 is not.
+            description: 'The fields of a RigNotificationSetting to change. Every member is optional: one left out is left alone, and an explicit null clears it.'
         Todo:
             type: object
             properties:
@@ -2380,6 +3079,15 @@ components:
             required:
                 - attachmentFile
             description: The same body UploadAttachmentFile takes, in a part named `json`, plus one part per file column. The row and its bytes are committed together, so a request that fails leaves neither.
+        TodoClaimBody:
+            type: object
+            properties:
+                steal:
+                    type:
+                        - boolean
+                        - "null"
+                    description: Take it even if somebody else holds it.
+            description: The request body for Todo.Claim.
         TodoCreateInput:
             type: object
             properties:
@@ -3063,8 +3771,12 @@ security:
 tags:
     - name: Accounts
       description: One person inside one tenant. The person is the identity; this is who they are here.
+    - name: RigNotificationDevices
+      description: 'Where a push can reach somebody. Email is refused: the address is on the account already.'
     - name: RigNotificationRecipients
       description: 'One inbox line: a notification, an account, and whether it has been read.'
+    - name: RigNotificationSettings
+      description: 'What somebody wants on a channel, and when. Resolved in three steps: this kind, then this channel, then the project default.'
     - name: Todos
       description: One item on the board.
     - name: TodoAttachments

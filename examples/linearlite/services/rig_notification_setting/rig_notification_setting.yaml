@@ -2,6 +2,19 @@
 table: rig_notification_setting
 comment: 'What somebody wants on a channel, and when. Resolved in three steps: this kind, then this channel, then the project default.'
 
+# Read your own, write one, change one, and delete one — which is how somebody
+# goes back to the project default, because the absence of a row is what
+# `default_digest` answers for.
+operations: [List, Create, Update, Delete]
+
+# Owner-scoped for the reason the devices are, and named for the same reason:
+# there is no created_by_account_id here, and account_id is whose preference it
+# is. The engine reads these by account_id too, so the column a read narrows on
+# and the column a send resolves on are one column.
+access:
+  scope: own
+  owner: account_id
+
 columns:
   account_id:
     comment: Whose preference it is.
@@ -20,36 +33,40 @@ columns:
   active_days:
     comment: 'ISO weekdays, 1 being Monday. Empty means every day. An array rather than a bitmask because [1,2,3,4,5] is legible in a settings payload and 62 is not.'
 
+# rig's own enums, described here because this is the table where a person meets
+# both of them. rig ships the types and no prose for them — they are foundation
+# tables, and what a value means to a product is the product's to say — so
+# without this the generated clients and the OpenAPI document carry TODOs.
 enums:
   rig_notification_channel:
     name: RigNotificationChannel
-    description: 'TODO: what does this enumeration represent?'
+    description: Where a copy of an inbox line can be sent. The inbox itself is not one of them.
     values:
       Desktop:
         name: Desktop
-        description: 'TODO: describe this.'
+        description: A browser or a desktop application, addressed by a device row.
       Mobile:
         name: Mobile
-        description: 'TODO: describe this.'
+        description: A phone, addressed by a device row.
       Email:
         name: Email
-        description: 'TODO: describe this.'
+        description: 'The address on the account. No device row: there is nothing to register, because the address is on the account already.'
   rig_notification_digest:
     name: RigNotificationDigest
-    description: 'TODO: what does this enumeration represent?'
+    description: How often somebody wants to be told, on one channel.
     values:
       Immediate:
         name: Immediate
-        description: 'TODO: describe this.'
+        description: Each notification on its own, as soon as it is due.
       Hourly:
         name: Hourly
-        description: 'TODO: describe this.'
+        description: Whatever accumulated in an hour, as one message.
       Daily:
         name: Daily
-        description: 'TODO: describe this.'
+        description: The same, a day at a time.
       Weekly:
         name: Weekly
-        description: 'TODO: describe this.'
+        description: The widest window, and the one notifications.retention has to outlive — a weekly digest is assembled from rows a shorter retention would have pruned.
       Off:
         name: Off
-        description: 'TODO: describe this.'
+        description: 'Nothing on this channel, and the inbox line is written anyway: this is somebody preferring to look rather than be told. is_enabled false is the other thing, and says the channel is not available to them at all.'

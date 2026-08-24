@@ -18,11 +18,19 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/simonjanss/rig/examples/linearlite/services/outbox"
+	"github.com/simonjanss/rig/notify"
 )
 
 type server struct {
 	pool *pgxpool.Pool
 	http *httptest.Server
+	// engine is this server's own, kept so a test can run a dispatch pass
+	// against the sender this server registered. dispatchNotifications builds
+	// a second API and therefore a second outbox — which is right for cron and
+	// wrong for asserting on what this server sent.
+	engine *notify.Engine
 }
 
 func newServer(t *testing.T) *server {
@@ -44,15 +52,49 @@ func newServer(t *testing.T) *server {
 	}
 	t.Cleanup(pool.Close)
 
-	// The same function main uses, so what the tests drive is what ships.
-	handler, _, err := newAPI(ctx, pool, slog.Default())
+	// The same function main uses, so what the tests drive is what ships. No
+	// monitoring page: mounting one would need a password in the environment
+	// and a span file to read, and what it serves is covered on its own in
+	// monitor_test.go without a database.
+	handler, engine, err := newAPI(ctx, pool, slog.Default(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	srv := httptest.NewServer(handler)
 	t.Cleanup(srv.Close)
-	return &server{pool: pool, http: srv}
+	return &server{pool: pool, http: srv, engine: engine}
+}
+
+// dispatch runs one whole notification pass on this server's engine: resolve,
+// which turns notifications into inbox lines and the delivery rows a channel
+// owes, and then dispatch, which is what actually calls a sender.
+//
+// Both halves, because they are two different guarantees and a test that ran
+// only the first would assert that a copy was owed rather than that it was
+// sent. This server's engine rather than dispatchNotifications, which builds a
+// second API and therefore a second outbox — right for cron, wrong here.
+func (s *server) dispatch(t *testing.T) {
+	t.Helper()
+	ctx := context.Background()
+	if _, err := s.engine.Resolve(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.engine.Dispatch(ctx); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// outbox reads /_demo/outbox as the front end does.
+func (s *server) outbox(t *testing.T, token string) []outbox.Message {
+	t.Helper()
+	res := s.do(t, request{method: http.MethodGet, path: "/_demo/outbox", token: token})
+	if res.status != http.StatusOK {
+		t.Fatalf("outbox: %d %s", res.status, res.body)
+	}
+	var out []outbox.Message
+	res.decode(t, &out)
+	return out
 }
 
 // seed runs the example's own seed task and answers the tenant it made.

@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 	pgx "github.com/jackc/pgx/v5"
 	"github.com/simonjanss/rig/examples/linearlite/internal/model"
+	"github.com/simonjanss/rig/observe"
 	"github.com/simonjanss/rig/runtime/dbhook"
 	"github.com/simonjanss/rig/runtime/dbx"
 	"github.com/simonjanss/rig/runtime/query"
@@ -276,6 +277,15 @@ type roleRepo struct {
 
 var _ RoleRepository = (*roleRepo)(nil)
 
+// trace runs one stage of a write inside a span of its own.
+//
+// The stage is a callback rather than something bracketed by two calls,
+// because that is what makes the span a function's: it is opened and ended in
+// one place, and nothing at the call site is holding one.
+func (r *roleRepo) trace(ctx context.Context, name string, f func(context.Context) error) error {
+	return observe.Trace(ctx, r.db.tracer, name, f)
+}
+
 const roleRepoSelect = "role.id, role.tenant_id, role.created_at, role.updated_at, role.key, role.name, role.description, role.is_system"
 
 // scanRole reads one row in the order roleRepoSelect lists.
@@ -291,6 +301,9 @@ func scanRole(row pgx.Row) (*model.Role, error) {
 
 // Get implements RoleRepository.
 func (r *roleRepo) Get(ctx context.Context, id uuid.UUID, opts ...readopt.Option) (*model.Role, error) {
+	ctx, span := r.db.tracer.Start(ctx, "repository.Role.Get")
+	defer span.End()
+
 	cfg, err := readopt.Apply(opts)
 	if err != nil {
 		return nil, err
@@ -321,6 +334,9 @@ func (r *roleRepo) Get(ctx context.Context, id uuid.UUID, opts ...readopt.Option
 
 // List implements RoleRepository.
 func (r *roleRepo) List(ctx context.Context, f model.RoleFilter, page model.RolePage, opts ...readopt.Option) ([]*model.Role, int64, error) {
+	ctx, span := r.db.tracer.Start(ctx, "repository.Role.List")
+	defer span.End()
+
 	return r.list(ctx, f, page, opts)
 }
 
@@ -414,6 +430,9 @@ var RoleDefaultOrder = []query.Order{{Table: "role", Column: "created_at", Desc:
 
 // Create implements RoleRepository.
 func (r *roleRepo) Create(ctx context.Context, in dbhook.Create[model.RoleCreateInput, model.Role]) (*model.Role, error) {
+	ctx, span := r.db.tracer.Start(ctx, "repository.Role.Create")
+	defer span.End()
+
 	// Who is asking, first of all. A write from a request carrying no identity is
 	// refused here — before a rule runs, before a column notices — which is
 	// what lets every hook below take the claims as a value rather than something
@@ -443,7 +462,9 @@ func (r *roleRepo) Create(ctx context.Context, in dbhook.Create[model.RoleCreate
 	// across a rule that may call out to another service would be a worse trade
 	// than the one it buys.
 	if in.Hooks.Validator != nil {
-		if err := in.Hooks.Validator.RunCreate(ctx, claims, &in.Input); err != nil {
+		if err := r.trace(ctx, "repository.Role.Create.Validator", func(ctx context.Context) error {
+			return in.Hooks.Validator.RunCreate(ctx, claims, &in.Input)
+		}); err != nil {
 			return nil, err
 		}
 	}
@@ -465,7 +486,9 @@ func (r *roleRepo) Create(ctx context.Context, in dbhook.Create[model.RoleCreate
 	var m *model.Role
 	err = dbx.InTxIf(ctx, r.db.pool, r.db.connFor(ctx), needsTx, func(ctx context.Context, tx dbx.Conn) error {
 		if in.Hooks.Before != nil {
-			if err := in.Hooks.Before(ctx, claims, &in.Input); err != nil {
+			if err := r.trace(ctx, "repository.Role.Create.Before", func(ctx context.Context) error {
+				return in.Hooks.Before(ctx, claims, &in.Input)
+			}); err != nil {
 				return err
 			}
 		}
@@ -482,7 +505,9 @@ func (r *roleRepo) Create(ctx context.Context, in dbhook.Create[model.RoleCreate
 		m = created
 
 		if in.Hooks.After != nil {
-			if err := in.Hooks.After(ctx, claims, m); err != nil {
+			if err := r.trace(ctx, "repository.Role.Create.After", func(ctx context.Context) error {
+				return in.Hooks.After(ctx, claims, m)
+			}); err != nil {
 				return err
 			}
 		}
@@ -497,7 +522,12 @@ func (r *roleRepo) Create(ctx context.Context, in dbhook.Create[model.RoleCreate
 		// this runs, and reaching into a context for them then is reaching into one
 		// that has been cancelled.
 		done, who := in.Hooks.AfterCommit, claims
-		dbx.AfterCommit(ctx, func() { done(ctx, who, m) })
+		dbx.AfterCommit(ctx, func() {
+			ctx, span := r.db.tracer.Start(ctx, "repository.Role.Create.AfterCommit")
+			defer span.End()
+
+			done(ctx, who, m)
+		})
 	}
 
 	return m, nil
@@ -505,6 +535,9 @@ func (r *roleRepo) Create(ctx context.Context, in dbhook.Create[model.RoleCreate
 
 // Update implements RoleRepository.
 func (r *roleRepo) Update(ctx context.Context, id uuid.UUID, in dbhook.Update[model.RoleUpdateInput, model.Role]) (*model.Role, error) {
+	ctx, span := r.db.tracer.Start(ctx, "repository.Role.Update")
+	defer span.End()
+
 	in.Input.Normalize()
 
 	claims, err := tenancy.FromContext(ctx)
@@ -525,7 +558,9 @@ func (r *roleRepo) Update(ctx context.Context, id uuid.UUID, in dbhook.Update[mo
 		// reason: a hook that ran after validation could write a value nothing had
 		// checked.
 		if in.Hooks.Before != nil {
-			if err := in.Hooks.Before(ctx, claims, &in.Input, prev); err != nil {
+			if err := r.trace(ctx, "repository.Role.Update.Before", func(ctx context.Context) error {
+				return in.Hooks.Before(ctx, claims, &in.Input, prev)
+			}); err != nil {
 				return err
 			}
 		}
@@ -539,7 +574,9 @@ func (r *roleRepo) Update(ctx context.Context, id uuid.UUID, in dbhook.Update[mo
 		}
 
 		if in.Hooks.Validator != nil {
-			if err := in.Hooks.Validator.RunUpdate(ctx, claims, &in.Input, prev); err != nil {
+			if err := r.trace(ctx, "repository.Role.Update.Validator", func(ctx context.Context) error {
+				return in.Hooks.Validator.RunUpdate(ctx, claims, &in.Input, prev)
+			}); err != nil {
 				return err
 			}
 		}
@@ -584,7 +621,9 @@ func (r *roleRepo) Update(ctx context.Context, id uuid.UUID, in dbhook.Update[mo
 		}
 
 		if in.Hooks.After != nil {
-			if err := in.Hooks.After(ctx, claims, updated, prev); err != nil {
+			if err := r.trace(ctx, "repository.Role.Update.After", func(ctx context.Context) error {
+				return in.Hooks.After(ctx, claims, updated, prev)
+			}); err != nil {
 				return err
 			}
 		}
@@ -599,7 +638,12 @@ func (r *roleRepo) Update(ctx context.Context, id uuid.UUID, in dbhook.Update[mo
 		// this runs, and reaching into a context for them then is reaching into one
 		// that has been cancelled.
 		done, who := in.Hooks.AfterCommit, claims
-		dbx.AfterCommit(ctx, func() { done(ctx, who, updated, prev) })
+		dbx.AfterCommit(ctx, func() {
+			ctx, span := r.db.tracer.Start(ctx, "repository.Role.Update.AfterCommit")
+			defer span.End()
+
+			done(ctx, who, updated, prev)
+		})
 	}
 
 	return updated, nil
@@ -607,6 +651,9 @@ func (r *roleRepo) Update(ctx context.Context, id uuid.UUID, in dbhook.Update[mo
 
 // Delete implements RoleRepository.
 func (r *roleRepo) Delete(ctx context.Context, in dbhook.Delete[model.RoleDeleteInput, model.Role]) error {
+	ctx, span := r.db.tracer.Start(ctx, "repository.Role.Delete")
+	defer span.End()
+
 	claims, err := tenancy.FromContext(ctx)
 	if err != nil {
 		return err
@@ -621,7 +668,9 @@ func (r *roleRepo) Delete(ctx context.Context, in dbhook.Delete[model.RoleDelete
 		}
 
 		if in.Hooks.Before != nil {
-			if err := in.Hooks.Before(ctx, claims, &in.Input, prev); err != nil {
+			if err := r.trace(ctx, "repository.Role.Delete.Before", func(ctx context.Context) error {
+				return in.Hooks.Before(ctx, claims, &in.Input, prev)
+			}); err != nil {
 				return err
 			}
 		}
@@ -630,7 +679,9 @@ func (r *roleRepo) Delete(ctx context.Context, in dbhook.Delete[model.RoleDelete
 			return writeError(err, "role")
 		}
 		if in.Hooks.After != nil {
-			if err := in.Hooks.After(ctx, claims, prev); err != nil {
+			if err := r.trace(ctx, "repository.Role.Delete.After", func(ctx context.Context) error {
+				return in.Hooks.After(ctx, claims, prev)
+			}); err != nil {
 				return err
 			}
 		}
@@ -645,7 +696,12 @@ func (r *roleRepo) Delete(ctx context.Context, in dbhook.Delete[model.RoleDelete
 		// this runs, and reaching into a context for them then is reaching into one
 		// that has been cancelled.
 		done, who := in.Hooks.AfterCommit, claims
-		dbx.AfterCommit(ctx, func() { done(ctx, who, prev) })
+		dbx.AfterCommit(ctx, func() {
+			ctx, span := r.db.tracer.Start(ctx, "repository.Role.Delete.AfterCommit")
+			defer span.End()
+
+			done(ctx, who, prev)
+		})
 	}
 
 	return nil

@@ -140,8 +140,12 @@ serve.Main(serve.Config{
     ...
 ```
 
-`examples/fantasyfootball` is the one that turns it on, and is worth reading
-next to this.
+`examples/fantasyfootball` turns it on over a schema with nothing else going on,
+which is the smallest version of the wiring above. `examples/linearlite` turns
+it on with authentication, uploads, the notification engine and the Electric
+proxy all running, which is the arrangement where a trace tells you something
+you did not already know — a request that signs in, a request that uploads and
+a shape subscription do not cost the same thing.
 
 ### Where the spans go
 

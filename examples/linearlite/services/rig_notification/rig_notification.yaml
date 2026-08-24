@@ -2,6 +2,12 @@
 table: rig_notification
 comment: 'Something worth telling somebody about, and when it is due. Carries no recipients: the audience is computed when it is sent.'
 
+# No endpoints. A notification carries no recipients — the audience is computed
+# when it is sent — so a client reading this table would be reading rows that
+# name nobody, including ones nobody will ever be told about. What a person is
+# owed is the inbox, and that has rig's own routes and a live shape.
+expose: false
+
 columns:
   kind:
     comment: What happened, as the application names it. Narrow it to an enum of your own to get a switch the compiler can see.
@@ -27,14 +33,14 @@ columns:
 enums:
   rig_notification_state:
     name: RigNotificationState
-    description: 'TODO: what does this enumeration represent?'
+    description: 'Where a notification is in its life. Nothing here says anything was sent: that is the delivery table''s business.'
     values:
       Pending:
         name: Pending
-        description: 'TODO: describe this.'
+        description: The audience has not been computed yet. Every notification starts here, and a scheduled one waits here until it is due.
       Resolved:
         name: Resolved
-        description: 'TODO: describe this.'
+        description: The audience was computed and the inbox lines exist. It does not mean anything was sent — a notification with an inbox line and no mail is a working notification.
       Cancelled:
         name: Cancelled
-        description: 'TODO: describe this.'
+        description: 'It never will be resolved: the row it was about was retired before its time came.'

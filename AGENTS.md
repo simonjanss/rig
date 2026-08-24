@@ -43,7 +43,7 @@ it "everything" would quietly skip nine modules out of ten.
 
 ```bash
 make test-docker   # the suite behind the `docker` build tag
-make examples      # regenerate all four examples and run them for real
+make examples      # regenerate every example and run them for real
 ```
 
 `make test-docker` covers `.`, `runtime`, `auth`, `files`, `notify`, `observe`,

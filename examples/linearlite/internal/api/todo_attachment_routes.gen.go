@@ -13,6 +13,7 @@ import (
 	"github.com/simonjanss/rig/examples/linearlite/internal/model"
 	"github.com/simonjanss/rig/files"
 	"github.com/simonjanss/rig/files/filehttp"
+	"github.com/simonjanss/rig/observe"
 	"github.com/simonjanss/rig/runtime/idempotency"
 	"github.com/simonjanss/rig/runtime/reqlog"
 	"github.com/simonjanss/rig/runtime/tenancy"
@@ -40,6 +41,9 @@ func handleListTodoAttachments(s Server, svc TodoAttachmentService) http.Handler
 	return func(w http.ResponseWriter, r *http.Request) {
 		rec := reqlog.Wrap(w)
 		w = rec
+
+		r, span := observe.Server(r, "GET /api/v1/todo-attachments", rec.Status)
+		defer span.End()
 
 		ctx, claims, rc, ok := prepare(s, w, r)
 		defer logRequest(s, r, rec, rc)
@@ -84,6 +88,9 @@ func handleCreateTodoAttachment(s Server, svc TodoAttachmentService) http.Handle
 	return func(w http.ResponseWriter, r *http.Request) {
 		rec := reqlog.Wrap(w)
 		w = rec
+
+		r, span := observe.Server(r, "POST /api/v1/todo-attachments", rec.Status)
+		defer span.End()
 
 		ctx, claims, rc, ok := prepare(s, w, r)
 		defer logRequest(s, r, rec, rc)
@@ -184,6 +191,9 @@ func handleSearchTodoAttachments(s Server, svc TodoAttachmentService) http.Handl
 		rec := reqlog.Wrap(w)
 		w = rec
 
+		r, span := observe.Server(r, "QUERY /api/v1/todo-attachments", rec.Status)
+		defer span.End()
+
 		ctx, claims, rc, ok := prepare(s, w, r)
 		defer logRequest(s, r, rec, rc)
 		if !ok {
@@ -240,6 +250,9 @@ func handleListDeletedTodoAttachments(s Server, svc TodoAttachmentService) http.
 		rec := reqlog.Wrap(w)
 		w = rec
 
+		r, span := observe.Server(r, "GET /api/v1/todo-attachments/_deleted", rec.Status)
+		defer span.End()
+
 		ctx, claims, rc, ok := prepare(s, w, r)
 		defer logRequest(s, r, rec, rc)
 		if !ok {
@@ -287,6 +300,9 @@ func handleDeleteTodoAttachment(s Server, svc TodoAttachmentService) http.Handle
 		rec := reqlog.Wrap(w)
 		w = rec
 
+		r, span := observe.Server(r, "DELETE /api/v1/todo-attachments/{id}", rec.Status)
+		defer span.End()
+
 		ctx, claims, rc, ok := prepare(s, w, r)
 		defer logRequest(s, r, rec, rc)
 		if !ok {
@@ -323,6 +339,9 @@ func handleGetTodoAttachment(s Server, svc TodoAttachmentService) http.HandlerFu
 	return func(w http.ResponseWriter, r *http.Request) {
 		rec := reqlog.Wrap(w)
 		w = rec
+
+		r, span := observe.Server(r, "GET /api/v1/todo-attachments/{id}", rec.Status)
+		defer span.End()
 
 		ctx, claims, rc, ok := prepare(s, w, r)
 		defer logRequest(s, r, rec, rc)
@@ -364,6 +383,9 @@ func handleUpdateTodoAttachment(s Server, svc TodoAttachmentService) http.Handle
 	return func(w http.ResponseWriter, r *http.Request) {
 		rec := reqlog.Wrap(w)
 		w = rec
+
+		r, span := observe.Server(r, "PATCH /api/v1/todo-attachments/{id}", rec.Status)
+		defer span.End()
 
 		ctx, claims, rc, ok := prepare(s, w, r)
 		defer logRequest(s, r, rec, rc)
@@ -439,6 +461,9 @@ func handleRestoreTodoAttachment(s Server, svc TodoAttachmentService) http.Handl
 		rec := reqlog.Wrap(w)
 		w = rec
 
+		r, span := observe.Server(r, "POST /api/v1/todo-attachments/{id}/_restore", rec.Status)
+		defer span.End()
+
 		ctx, claims, rc, ok := prepare(s, w, r)
 		defer logRequest(s, r, rec, rc)
 		if !ok {
@@ -499,6 +524,9 @@ func handleUploadTodoAttachmentAttachmentFile(s Server, svc TodoAttachmentServic
 		rec := reqlog.Wrap(w)
 		w = rec
 
+		r, span := observe.Server(r, "POST /api/v1/todo-attachments/{id}/attachment-file", rec.Status)
+		defer span.End()
+
 		ctx, claims, rc, ok := prepare(s, w, r)
 		defer logRequest(s, r, rec, rc)
 		if !ok {
@@ -546,6 +574,9 @@ func handleDownloadTodoAttachmentAttachmentFile(s Server, svc TodoAttachmentServ
 	return func(w http.ResponseWriter, r *http.Request) {
 		rec := reqlog.Wrap(w)
 		w = rec
+
+		r, span := observe.Server(r, "GET /api/v1/todo-attachments/{id}/attachment-file/{fileId}/{filename}", rec.Status)
+		defer span.End()
 
 		ctx, claims, rc, ok := prepare(s, w, r)
 		defer logRequest(s, r, rec, rc)

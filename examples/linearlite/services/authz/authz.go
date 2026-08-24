@@ -28,6 +28,24 @@ import (
 	"github.com/simonjanss/rig/runtime/dbx"
 )
 
+// The derived keys this file names on purpose. Each is spelled out once, here,
+// so that renaming what it came from is a grep away rather than a silent 403.
+const (
+	// PermissionClaimTodo is the key rig derived from the Claim endpoint in
+	// services/todo/todo.yaml.
+	PermissionClaimTodo = "todo.claim"
+
+	// The two owner-scoped tables' deletes: a person's own devices and their own
+	// notification preferences.
+	PermissionDeleteDevice     = "rig_notification_device.delete"
+	PermissionDeletePreference = "rig_notification_setting.delete"
+
+	// PermissionReadAllDevices is the widening rig derived from the device table
+	// being owner-scoped — and the one key in this catalogue that no role below
+	// grants, not even the Owner.
+	PermissionReadAllDevices = "rig_notification_device.read.all"
+)
+
 // Levels maps a coarse level to the permissions it holds.
 //
 // The example's policy, not rig's. An Owner does everything; an Admin does
@@ -42,6 +60,15 @@ import (
 // and Admin and never reaches Basic. That is the intent and it is worth saying out
 // loud: somebody Basic reads and writes the board, and reading everybody's is an
 // administrative thing to be able to do.
+//
+// A custom endpoint's key — todo.claim, from the endpoints block in
+// services/todo/todo.yaml — matches neither suffix either, and unlike the
+// widening one that is not what anybody meant. It is the seam working exactly
+// as documented: rig derived the key from the endpoint and generated the check,
+// and stopped, because who holds it is a product decision. This is the product
+// deciding, and the shape of the answer is a name in the list below rather than
+// a rule. Declaring an endpoint and forgetting this is a 403 on a button that
+// looks like it should work, which is why it is named here and not inferred.
 //
 // apikey.own is named for Basic on purpose, and apikey.manage is not. A personal
 // key is intersected with its owner's grants on every request, so it can never do
@@ -59,8 +86,28 @@ func Levels(all []string) map[string][]string {
 		}
 	}
 
-	admin := make([]string, 0, len(all))
+	// What the Owner holds, which is everything except one thing.
+	//
+	// Declaring the device table owner-scoped made rig derive a way to widen it,
+	// the same as it does for any such table — and reading everybody's push
+	// tokens is not a question this product answers. A token addresses somebody's
+	// laptop and the list of them is the list of places they read this from, so
+	// the key exists, every generated read checks it, and nobody is granted it.
+	// That is a stronger statement than nobody happening to hold it.
+	//
+	// rig_notification_setting.read.all is not treated the same way, deliberately:
+	// "why did they not get the mail" is a real question with a real answer, and
+	// somebody's digest window is not their credentials.
+	everything := make([]string, 0, len(all))
 	for _, key := range all {
+		if key == PermissionReadAllDevices {
+			continue
+		}
+		everything = append(everything, key)
+	}
+
+	admin := make([]string, 0, len(everything))
+	for _, key := range everything {
 		if key != "apikey.manage" {
 			admin = append(admin, key)
 		}
@@ -68,9 +115,27 @@ func Levels(all []string) map[string][]string {
 
 	basic := append(reads, writes...)
 	basic = append(basic, authhttp.PermissionOwnAPIKey)
+	// Claiming an item is a write on the board in everything but its name, so
+	// everybody who may drag a card may take one. Only if the endpoint is still
+	// declared: a key nobody checks is a grant nobody uses, and a stale name
+	// here would outlive the endpoint it came from without anybody noticing.
+	if slices.Contains(all, PermissionClaimTodo) {
+		basic = append(basic, PermissionClaimTodo)
+	}
+	// Delete is administrative on the board and ordinary on your own row. The
+	// suffix rule above keeps every delete with Owner and Admin, which is right
+	// for an item somebody else can see and wrong for these two: both tables are
+	// owner-scoped, so the only row anybody can reach is their own, and deleting
+	// a preference row is how somebody goes back to the project default rather
+	// than destroying anything.
+	for _, key := range []string{PermissionDeleteDevice, PermissionDeletePreference} {
+		if slices.Contains(all, key) {
+			basic = append(basic, key)
+		}
+	}
 
 	return map[string][]string{
-		string(account.RoleOwner): all,
+		string(account.RoleOwner): everything,
 		string(account.RoleAdmin): admin,
 		string(account.RoleBasic): basic,
 	}

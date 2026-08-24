@@ -9,6 +9,10 @@
 # directory, which `go build ./...` in examples/sdk does.
 /examples/sdk/sdk
 
+# Where linearlite's demo writes the span file and the log file its monitoring
+# page reads. Throwaway, like the database `rig db up` starts.
+/examples/linearlite/.run/
+
 # Go
 *.test
 *.out

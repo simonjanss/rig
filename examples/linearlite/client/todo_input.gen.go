@@ -152,6 +152,40 @@ func TodoUpdateError(err error) (*rigclient.Failure[TodoUpdateFields], bool) {
 	return rigclient.As[TodoUpdateFields](err)
 }
 
+// TodoClaimBody is the request body for Todo.Claim.
+type TodoClaimBody struct {
+	// Take it even if somebody else holds it.
+	Steal *bool `json:"steal,omitempty"`
+}
+
+// TodoClaimFields is what a validation failure says, shaped like the body it
+// is about — one member per member, so each message can be put beside the
+// control it belongs to.
+//
+// A member is nil when there was nothing wrong with that field. It arrives as
+// the Fields of the error the call returns.
+type TodoClaimFields struct {
+	Steal *rigerr.FieldError `json:"steal,omitempty"`
+	// Entity carries what was wrong with the request as a whole rather than with
+	// any one field.
+	Entity *rigerr.FieldError `json:"entity,omitempty"`
+}
+
+// TodoClaimError reads back what the server said about a refused Todos.Claim:
+// the envelope — Code, Message, RequestID, Status, RetryAfter — and, when
+// the refusal was about the body, Fields shaped like the body that failed.
+//
+//	if refused, ok := TodoClaimError(err); ok {
+//		if refused.Fields != nil && refused.Fields.Steal != nil {
+//
+// Fields is nil for every refusal but a 422: a 404 has a code and a message
+// and nothing to put beside a control. The second value is false for anything
+// that is not a refusal at all, which is where a request that never reached
+// the server ends up.
+func TodoClaimError(err error) (*rigclient.Failure[TodoClaimFields], bool) {
+	return rigclient.As[TodoClaimFields](err)
+}
+
 // TodoRevertBody is the request body for Todo.Revert.
 type TodoRevertBody struct {
 	// The version to put back, from the Todo's history.

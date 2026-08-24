@@ -4881,3 +4881,31 @@ direction stores the file twice.
 - `throttle.Postgres.qualify` prefixes known column names by string replacement.
   It is fed from a closed map rig owns, and it is still the least pleasant code
   in the runtime.
+- **Impersonation may not belong in rig.** `POST /auth/impersonate` and its
+  `DELETE` are mounted unconditionally by `authhttp.Handler.Mount`. The handler
+  is careful — it requires `account.impersonate` and refuses to nest, so an
+  impersonating session cannot impersonate again — but no configuration key
+  gates the routes the way `allow_registration` and `allow_tenant_creation` gate
+  theirs, which makes this the one authentication feature a project gets whether
+  or not it asked.
+
+  And the key is in `authhttp.Permissions()`, so any role model that grants an
+  owner everything grants this too. `examples/linearlite/services/authz` is
+  exactly that model, which means the seeded Owner can already act as anybody in
+  the tenant and nobody decided that — the same shape as the
+  `rig_notification_device.read.all` widening that file now subtracts on
+  purpose.
+
+  Nothing in any example calls it, and no front end has a control for it.
+  `account.Service.Impersonate` does write `ImpersonationStarted` and
+  `ImpersonationEnded`, so the trail is honest and `GET /auth/audit` shows them.
+
+  What to settle: whether rig should have an opinion here at all. Who may act as
+  whom, what the application looks like while it is happening, and how somebody
+  gets back out are product decisions, and the ones a product gets wrong here
+  are expensive. Three answers, in the order I would consider them: **remove it**
+  and let a project that needs it mint a session itself; **gate it** on an
+  `auth.allow_impersonation` that defaults to off; or **keep it** and have
+  `Levels()` in the examples refuse the key out loud, so the shipped role models
+  stop granting it by accident. Leaving it mounted, permitted by default, and
+  demonstrated nowhere is the one answer that is hard to defend.

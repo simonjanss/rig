@@ -112,3 +112,67 @@ func TestAChangeNotifiesTheStakeholders(t *testing.T) {
 		t.Errorf("kinds = %v, want [%s %s]", kinds, todo.KindTodoStatusChanged, todo.KindTodoUpdated)
 	}
 }
+
+// The change the row cannot name an audience for: a steal.
+//
+// By the time the notification is sent the item belongs to whoever took it, so
+// the person it was taken from is not a stakeholder in it any more — and losing
+// your item is not the change to be quiet about. The previous holder rides in
+// the notification's payload for exactly this, and NotifyWho reads it back.
+func TestAStealNotifiesThePreviousHolder(t *testing.T) {
+	api := newServer(t)
+	tenant := api.seed(t)
+
+	demoToken := api.login(t, SeedEmail)
+	demo := api.accountID(t, tenant, SeedEmail)
+	alex := api.accountID(t, tenant, SeedEmail2)
+
+	// Created by demo and held by alex, which is the shape two of the seeded
+	// items have and the one that matters: once demo takes it, the creator and
+	// the assignee are both demo, who made the change, so the row names nobody
+	// left to tell.
+	created := api.do(t, request{
+		method: http.MethodPost, path: "/api/v1/todos", token: demoToken,
+		body: map[string]any{"title": "Alex's item, until demo takes it", "assigneeAccountId": alex},
+	})
+	if created.status != http.StatusCreated {
+		t.Fatalf("create: %d %s", created.status, created.body)
+	}
+	var item struct {
+		ID uuid.UUID `json:"id"`
+	}
+	created.decode(t, &item)
+
+	if res := api.do(t, request{
+		method: http.MethodPost, path: "/api/v1/todos/" + item.ID.String() + "/_claim",
+		token: demoToken, body: map[string]any{"steal": true},
+	}); res.status != http.StatusOK {
+		t.Fatalf("steal: %d %s", res.status, res.body)
+	}
+
+	if err := dispatchNotifications(context.Background(), api.pool); err != nil {
+		t.Fatal(err)
+	}
+
+	const q = `SELECT count(*) FROM rig_notification_recipient r
+		 JOIN todo_notification l ON l.notification_id = r.notification_id
+		 WHERE r.tenant_id = $1 AND r.account_id = $2 AND l.todo_id = $3`
+
+	var lines int
+	if err := api.pool.QueryRow(context.Background(), q, tenant, alex, item.ID).Scan(&lines); err != nil {
+		t.Fatal(err)
+	}
+	if lines == 0 {
+		t.Error("the person the item was taken from should hear that it was taken")
+	}
+
+	// And the thief still does not hear about their own change, which is the
+	// rule the previous holder is an addition to rather than an exception from.
+	var actorLines int
+	if err := api.pool.QueryRow(context.Background(), q, tenant, demo, item.ID).Scan(&actorLines); err != nil {
+		t.Fatal(err)
+	}
+	if actorLines != 0 {
+		t.Errorf("demo took the item and must not hear about it, got %d line(s)", actorLines)
+	}
+}

@@ -23,6 +23,15 @@ import (
 func Permissions() []tenancy.Permission {
 	return []tenancy.Permission{
 		{Key: "rig_account.read", Name: "Read accounts", Description: "Read accounts — One person inside one tenant. The person is the identity; this is who they are here."},
+		{Key: "rig_notification_device.delete", Name: "Delete rignotificationdevices", Description: "Delete rignotificationdevices — Where a push can reach somebody. Email is refused: the address is on the account already."},
+		{Key: "rig_notification_device.read", Name: "Read rignotificationdevices", Description: "Read rignotificationdevices — Where a push can reach somebody. Email is refused: the address is on the account already."},
+		{Key: "rig_notification_device.read.all", Name: "Read all rignotificationdevices", Description: "Read every rignotificationdevice in the tenant, not only the caller's own. Held in addition to rig_notification_device.read rather than instead of it: the endpoint's own check runs first, so this one widens a read somebody may already do and grants nothing on its own. Without it, ?scope=all is refused."},
+		{Key: "rig_notification_device.write", Name: "Write rignotificationdevices", Description: "Create and change rignotificationdevices — Where a push can reach somebody. Email is refused: the address is on the account already."},
+		{Key: "rig_notification_setting.delete", Name: "Delete rignotificationsettings", Description: "Delete rignotificationsettings — What somebody wants on a channel, and when. Resolved in three steps: this kind, then this channel, then the project default."},
+		{Key: "rig_notification_setting.read", Name: "Read rignotificationsettings", Description: "Read rignotificationsettings — What somebody wants on a channel, and when. Resolved in three steps: this kind, then this channel, then the project default."},
+		{Key: "rig_notification_setting.read.all", Name: "Read all rignotificationsettings", Description: "Read every rignotificationsetting in the tenant, not only the caller's own. Held in addition to rig_notification_setting.read rather than instead of it: the endpoint's own check runs first, so this one widens a read somebody may already do and grants nothing on its own. Without it, ?scope=all is refused."},
+		{Key: "rig_notification_setting.write", Name: "Write rignotificationsettings", Description: "Create and change rignotificationsettings — What somebody wants on a channel, and when. Resolved in three steps: this kind, then this channel, then the project default."},
+		{Key: "todo.claim", Name: "Claim todo", Description: "Take the item."},
 		{Key: "todo.delete", Name: "Delete todos", Description: "Delete todos — One item on the board."},
 		{Key: "todo.read", Name: "Read todos", Description: "Read todos — One item on the board."},
 		{Key: "todo.write", Name: "Write todos", Description: "Create and change todos — One item on the board."},
@@ -41,7 +50,7 @@ func Permissions() []tenancy.Permission {
 // — a hand-written one goes stale the moment a table is added, and the owner
 // of a brand new tenant silently cannot touch it.
 func PermissionKeys() []string {
-	out := make([]string, 0, 9)
+	out := make([]string, 0, 18)
 	for _, p := range Permissions() {
 		out = append(out, p.Key)
 	}
