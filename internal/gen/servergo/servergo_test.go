@@ -865,3 +865,115 @@ func TestNotifyGolden(t *testing.T) {
 
 	gentest.Golden(t, filepath.Join("testdata", "notify"), artifacts, *update)
 }
+
+// TestThrottleWiringCompiles is the check a golden cannot make.
+//
+// The generator writes calls into runtime/throttle, which is a separate module:
+// nothing else in the build notices when NewTally, NewLocal, NewGate or Caller
+// change shape underneath it, so a golden would go on passing while the emitted
+// file stopped compiling.
+func TestThrottleWiringCompiles(t *testing.T) {
+	t.Parallel()
+
+	doc := gentest.LoadDocument(t, filepath.Join("testdata", "throttle.ir.json"))
+
+	api := gentest.Run(t, servicego.New(), doc, gen.Options{Raw: map[string]any{
+		"package": "api", "model_import": "rigtest/model", "store_import": "rigtest/store",
+	}})
+	api = append(api, gentest.Run(t, servergo.New(), doc, opts())...)
+
+	gentest.MustCompileAll(t,
+		gentest.Package{
+			Dir: "model",
+			Artifacts: gentest.Run(t, modelgo.New(), doc,
+				gen.Options{Raw: map[string]any{"package": "model"}}),
+		},
+		gentest.Package{
+			Dir: "store",
+			Artifacts: gentest.Run(t, persistgo.New(), doc, gen.Options{Raw: map[string]any{
+				"package": "store", "model_import": "rigtest/model",
+			}}),
+		},
+		gentest.Package{Dir: "api", Artifacts: api},
+	)
+}
+
+// TestThrottleWiring is the emitted wiring, as a golden.
+//
+// A golden rather than substring assertions, for the reason TestPresenceWiring
+// gives: most of what matters here is prose. The numbers come from the block,
+// and the comments are where the two decisions a reader will want to argue with
+// — fail open, and hold counts locally — are written down.
+func TestThrottleWiring(t *testing.T) {
+	t.Parallel()
+
+	doc := gentest.LoadDocument(t, filepath.Join("testdata", "throttle.ir.json"))
+	artifacts := gentest.Run(t, servergo.New(), doc, opts())
+
+	gentest.Golden(t, filepath.Join("testdata", "throttle"), artifacts, *update)
+}
+
+// TestThrottleIsWiredOnlyWhereItExists is the rule every optional block follows.
+//
+// The cost of getting this wrong is not a stray import: it is every project that
+// never asked for a limiter suddenly writing to a counter table on every request.
+func TestThrottleIsWiredOnlyWhereItExists(t *testing.T) {
+	t.Parallel()
+
+	without := gentest.LoadDocument(t, filepath.Join("testdata", "authwired.ir.json"))
+	for _, a := range gentest.Run(t, servergo.New(), without, opts()) {
+		src := string(a.Content)
+		for _, forbidden := range []string{
+			"throttle.Gate", "NewThrottle", "ThrottleLimits", "throttleCaller",
+			"s.Throttle", "throttleTrustedProxies", "ThrottleSweeper",
+		} {
+			if strings.Contains(src, forbidden) {
+				t.Errorf("%s names %q in a project with no throttle block", a.Path, forbidden)
+			}
+		}
+	}
+
+	// And the positive half, so this cannot pass by the generator emitting
+	// nothing at all.
+	with := gentest.LoadDocument(t, filepath.Join("testdata", "throttle.ir.json"))
+	server := find(t, gentest.Run(t, servergo.New(), with, opts()), "server.gen.go")
+	for _, want := range []string{
+		"Throttle *throttle.Gate",
+		"func NewThrottle(",
+		"func ThrottleLimits()",
+		"s.Throttle.Check(r.Context(), throttleCaller(r, claims), r.Pattern, w.Header())",
+		// The counters are the one runtime table with nothing else pruning it,
+		// so the task that empties it is part of the feature rather than an
+		// extra: without it rig_throttle gains a row per caller per window and
+		// loses none.
+		"func ThrottleSweeper(",
+	} {
+		if !strings.Contains(server, want) {
+			t.Errorf("server.gen.go is missing %q", want)
+		}
+	}
+}
+
+// The check has to run after the claims and before the handler, and the ordering
+// is the whole design: earlier and it cannot key on who is calling, later and the
+// work it exists to refuse has already been done.
+func TestTheThrottleCheckRunsAfterTheClaims(t *testing.T) {
+	t.Parallel()
+
+	doc := gentest.LoadDocument(t, filepath.Join("testdata", "throttle.ir.json"))
+	server := find(t, gentest.Run(t, servergo.New(), doc, opts()), "server.gen.go")
+
+	resolve, ok := between(server, "func resolve(", "\nfunc ")
+	if !ok {
+		t.Fatal("no resolve function")
+	}
+
+	claims := strings.Index(resolve, "claims, err := s.GetClaims(r)")
+	check := strings.Index(resolve, "s.Throttle.Check(")
+	if claims < 0 || check < 0 {
+		t.Fatalf("resolve is missing a step: claims=%d check=%d", claims, check)
+	}
+	if check < claims {
+		t.Error("the limit is checked before the caller is identified, so it cannot key on them")
+	}
+}

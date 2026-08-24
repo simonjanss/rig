@@ -323,6 +323,25 @@ expose: false`,
 	}
 }
 
+// throttleConfigs is rig_throttle's, and it is the other one that exists only to
+// reserve a name.
+//
+// The table holds one integer per caller per window and nothing a person would
+// ever want a page of. Exposing it would also be a small privacy leak in its own
+// right: the rows are a list of which addresses and which accounts have been
+// calling and how hard, which is not a question a client should be able to ask.
+func throttleConfigs() []tableConfig {
+	return []tableConfig{
+		config("rig_throttle", "Throttle",
+			`# Never exposed. The rows are rate-limit counters — one integer per
+# caller per window — so there is nothing here to serve, and a listing
+# would answer "which accounts and addresses have been calling, and how
+# much" to anybody who could read it.
+expose: false`,
+		),
+	}
+}
+
 // notificationConfigs are the two notification tables', and like rig_file's they
 // are written for a project that wants them read rather than for one that wants
 // CRUD.

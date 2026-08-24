@@ -1,7 +1,9 @@
 import type { Credential } from "./credential.js";
 import type { Retry } from "./retry.js";
+import type { RateLimitStatus } from "./rate-limit.js";
 
 import { isBindable } from "./credential.js";
+import { rateLimitOf } from "./rate-limit.js";
 
 /**
  * The authentication profile, as the document describes it.
@@ -109,6 +111,27 @@ export type Config = {
 
     /** How a call the server could not answer is sent again. See {@link Retry}. */
     retry?: Retry;
+
+    /**
+     * Called with what each response said about the caller's budget, when the
+     * server said anything at all.
+     *
+     * It is the other half of rate limiting, and the half a client can act on. A
+     * 429 is already handled without it — the client reads `Retry-After` and
+     * backs off — but by then the call has been refused. These numbers arrive on
+     * every response, so a caller that watches them can slow down, shed work, or
+     * raise an alarm while its calls are still succeeding.
+     *
+     * Deliberately a callback and not automatic pacing. A client library that
+     * silently waited because `remaining` was low would turn a batch job's
+     * throughput into a mystery, and it cannot know whether this caller would
+     * rather go slower or fail sooner. The numbers are handed over; the policy
+     * is the application's.
+     *
+     * Called once per attempt, before the call returns. Keep it quick, do not
+     * throw from it, and do not call back into the client.
+     */
+    onRateLimit?: (status: RateLimitStatus) => void;
 };
 
 /** Where the generated server looks for a caller's own request identifier. */
@@ -152,6 +175,7 @@ export class Runtime {
     private readonly revision: string;
     private readonly revisionHeader: string;
     private credential: Credential | undefined;
+    private readonly onRateLimit: ((s: RateLimitStatus) => void) | undefined;
 
     /** Records that QUERY was refused once and is not worth trying again. */
     private searchByPost = false;
@@ -176,8 +200,28 @@ export class Runtime {
         this.now = config.now ?? Date.now;
         this.retry = config.retry ?? {};
         this.timeoutMs = config.timeoutMs;
+        this.onRateLimit = config.onRateLimit;
 
         if (isBindable(this.credential)) this.credential.bind(this);
+    }
+
+    /**
+     * Hands the caller's budget to the configured callback, if the response said
+     * anything about it and anybody is listening.
+     *
+     * A throwing callback must not fail the call it was observing: it is
+     * telemetry about a request that otherwise succeeded, and turning a bad
+     * gauge into a failed write would be the wrong trade in both directions.
+     */
+    observeRateLimit(op: string, res: Response): void {
+        if (this.onRateLimit === undefined) return;
+        const status = rateLimitOf(op, res);
+        if (status === undefined) return;
+        try {
+            this.onRateLimit(status);
+        } catch {
+            // Deliberately swallowed. See above.
+        }
     }
 
     /** The origin requests go to. */

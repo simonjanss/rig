@@ -117,6 +117,58 @@ Not retried: every other 4xx, a 501, and a 505. A 501 is what something in the
 chain says when it has never heard of the `QUERY` method — the SDK falls back to
 the `_search` alias for that, and asking again a second later would not help.
 
+### Seeing the limit before you hit it
+
+The retry above is the reaction. There is also a signal that arrives *before*
+anything is refused: a server with [`throttle:`](rig-yaml.md#throttle) configured
+puts `RateLimit-Limit` and `RateLimit-Remaining` on **every** response, not only
+on the 429. A client that watches them can slow down, shed work or raise an alarm
+while its calls are still succeeding.
+
+Both SDKs hand you those numbers through one callback.
+
+```go
+rt, err := rigclient.New(rigclient.Config{
+    BaseURL: "https://api.example.com",
+    OnRateLimit: func(s rigclient.RateLimitStatus) {
+        if s.Fraction() > 0.8 {
+            log.Warn("close to the API limit",
+                "op", s.Op, "remaining", s.Remaining, "limit", s.Limit)
+        }
+    },
+}, api)
+```
+
+```ts
+import { fraction } from "@rig/client";
+import { createClient } from "./api";
+
+const client = createClient({
+    baseUrl: "https://api.example.com",
+    onRateLimit: (s) => {
+        if (fraction(s) > 0.8) {
+            console.warn(`${s.op}: ${s.remaining} of ${s.limit} left`);
+        }
+    },
+});
+```
+
+The generated `createClient` takes `@rig/client`'s own `Config`, so this is one
+setting rather than something the generator had to learn.
+
+It runs once per attempt — including attempts a retry replaced, because a 429
+that was retried away spent budget too — and only when the server said something.
+A server with no `throttle:` block sends none of these headers and the callback
+never fires, which is why an absent header is not read as a limit of zero.
+
+`resetAfter` is only stated on a refusal. An allowed response says how much is
+left, not when it comes back.
+
+**The SDKs deliberately do not slow themselves down for you.** A client library
+that silently waited because `remaining` was low would turn a batch job's
+throughput into a mystery, and it cannot know whether you would rather go slower
+or fail sooner. You get the numbers; the policy is yours.
+
 ### Writes are retried too, because they go out named
 
 A `POST` whose answer went missing may already have written the row. Sending it

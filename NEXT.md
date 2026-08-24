@@ -61,6 +61,33 @@ Next:
   first draft's. It also settled M9's correlation question for free: point
   `Server.RequestID` at the trace id and the log, the error body and the
   collector all say the same string.
+- ~~**M15** — a rate limit on the API.~~ Shipped: a `throttle:` block in
+  rig.yaml, a `rig_throttle` counter table in runtime's foundation, and a check
+  in the generated `resolve` that counts every call against whoever made it —
+  the API key, the account, the tenant, or the address for a caller who is not
+  signed in. Two departures worth knowing about. The counters are held
+  **locally and reconciled on an interval** rather than written per request:
+  the obvious implementation puts every call from one caller on one row, which
+  makes the limiter the bottleneck at exactly the traffic it was added for, and
+  a caller already over their limit is refused from memory so an attack costs at
+  most one write per interval. And it **fails open**, which is the opposite of
+  what the auth limits do — the asymmetry is written down in both places. The
+  same milestone enforced `Refresh` and `APIKeyFailures`, which had been in
+  `Standard()`, in rig.yaml, in the IR, in generated `limits()` and in
+  `docs/auth.md` since M4 with nothing calling `Allow` for either.
+
+  The SDK half landed with it, and half of it was already there: both clients
+  had classified 429, parsed `Retry-After` in either form and backed off by the
+  server's own number since the auth limits shipped. What neither did was read
+  `RateLimit-Limit` / `-Remaining`, which the server puts on *every* response —
+  three headers going out to nobody, and the whole reason for sending them on a
+  success. `Config.OnRateLimit` in Go and `onRateLimit` in TypeScript now carry
+  them, once per attempt including the ones a retry replaced. Deliberately a
+  callback and not automatic pacing: a client that silently slept because
+  `Remaining` was low would turn a batch job's throughput into a mystery, and it
+  cannot know whether the caller would rather go slower or fail sooner. No
+  generator change — the generated `createClient` already takes `@rig/client`'s
+  own `Config`.
 - ~~**M9** — tracing.~~ Shipped: an `observe/` module that is where
   OpenTelemetry lives so that nothing else has to depend on it, a one-key
   `tracing:` block, and spans in the generated code — one per request named by

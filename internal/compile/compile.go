@@ -68,6 +68,7 @@ func Compile(raw ir.Schema, set *tableconf.Set, opt Options) (*ir.Document, diag
 		Files:          cfg.Files.IR(),
 		Notifications:  cfg.Notifications.IR(),
 		Presence:       cfg.Presence.IR(),
+		Throttle:       cfg.Throttle.IR(),
 		Tracing:        cfg.Tracing.IR(cfg.Project.Name),
 		Monitoring:     cfg.Monitoring.IR(cfg.Project.Name),
 

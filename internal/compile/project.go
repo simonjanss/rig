@@ -33,6 +33,9 @@ type ProjectOptions struct {
 	// Presence is the resolved presence block, or nil for a project that does
 	// not track who is here.
 	Presence *ir.Presence
+	// Throttle is the resolved throttle block, or nil for a project that does
+	// not limit API calls.
+	Throttle *ir.Throttle
 	// Monitoring is the resolved monitoring block, or nil for a project with no
 	// page. Never set without Tracing; the config check is what guarantees it.
 	Monitoring *ir.Monitoring
@@ -67,6 +70,7 @@ func Project(schema ir.Schema, opt ProjectOptions) (ir.API, diag.List) {
 		Files:          opt.Files,
 		Notifications:  opt.Notifications,
 		Presence:       opt.Presence,
+		Throttle:       opt.Throttle,
 		Tracing:        opt.Tracing,
 		Monitoring:     opt.Monitoring,
 

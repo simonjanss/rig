@@ -13,6 +13,7 @@ import (
 	"github.com/simonjanss/rig/auth/authlog"
 	"github.com/simonjanss/rig/auth/session"
 	"github.com/simonjanss/rig/runtime/rigerr"
+	"github.com/simonjanss/rig/runtime/throttle"
 )
 
 type clock struct{ at time.Time }
@@ -23,9 +24,21 @@ func (c *clock) advance(d time.Duration) { c.at = c.at.Add(d) }
 // recorder collects entries so a test can assert on what was written. The log
 // is the audit trail and the rate-limit substrate, so an event that never lands
 // is two failures, not one.
-type recorder struct{ entries []authlog.Entry }
+type recorder struct {
+	entries []authlog.Entry
+	// onWrite lets a test mirror an entry somewhere else as it is written. It
+	// stands in for the thing rig_auth_log does for free in production: the
+	// limiter counts the same rows the trail keeps, so there is nothing to keep
+	// in step there and something to keep in step here.
+	onWrite func(authlog.Entry)
+}
 
-func (r *recorder) Write(_ context.Context, e authlog.Entry) { r.entries = append(r.entries, e) }
+func (r *recorder) Write(_ context.Context, e authlog.Entry) {
+	r.entries = append(r.entries, e)
+	if r.onWrite != nil {
+		r.onWrite(e)
+	}
+}
 
 func (r *recorder) count(event string) int {
 	n := 0
@@ -68,6 +81,114 @@ func setup(t *testing.T) *fixture {
 		t.Fatal(err)
 	}
 	return &fixture{m: m, store: store, log: log, clock: c, tenant: uuid.New(), account: uuid.New()}
+}
+
+// limited is setup with a refresh limit and the counter behind it, so a test can
+// both drive the limit and record what the manager would have written.
+func limited(t *testing.T, maxN int) (*fixture, *throttle.Memory) {
+	t.Helper()
+
+	f := setup(t)
+	counter := throttle.NewMemory()
+	limit := throttle.Limit{
+		Name:   "token.refresh",
+		Event:  throttle.EventTokenRefreshed,
+		Max:    maxN,
+		Window: time.Minute,
+	}
+
+	m, err := session.New(session.Config{
+		Store: f.store, Log: f.log, Now: f.clock.now,
+		Limiter:      throttle.New(counter).WithClock(f.clock.now),
+		RefreshLimit: limit,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.m = m
+
+	// The manager writes TokenRefreshed to the log; the in-memory counter is
+	// what stands in for reading it back, so the test has to keep the two in
+	// step the way rig_auth_log does for free.
+	f.log.onWrite = func(e authlog.Entry) {
+		if e.Event == throttle.EventTokenRefreshed && e.TokenRootID != nil {
+			counter.Record(e.Event, throttle.TokenFamily(e.TokenRootID.String()), e.At)
+		}
+	}
+	return f, counter
+}
+
+// The limit is one session's, not one person's, and it is counted against the
+// token family — so signing in on a phone and a laptop does not make either of
+// them closer to it.
+func TestRefreshIsLimitedPerSession(t *testing.T) {
+	t.Parallel()
+
+	f, _ := limited(t, 2)
+	ctx := context.Background()
+
+	a, b := f.issue(t), f.issue(t)
+
+	for i := range 2 {
+		var err error
+		if a, err = f.m.Rotate(ctx, a.Refresh.Token); err != nil {
+			t.Fatalf("refresh %d of the first session: %v", i+1, err)
+		}
+	}
+
+	if _, err := f.m.Rotate(ctx, a.Refresh.Token); err == nil {
+		t.Fatal("the third refresh of a session limited to two was allowed")
+	} else if rigerr.CodeOf(err) != rigerr.CodeRateLimited {
+		t.Fatalf("refused with %v, want a rate limit", rigerr.CodeOf(err))
+	}
+
+	// The other session has its own budget.
+	if _, err := f.m.Rotate(ctx, b.Refresh.Token); err != nil {
+		t.Fatalf("a second session was refused on the first one's budget: %v", err)
+	}
+}
+
+// A refused refresh must not have consumed the token on its way to being
+// refused. Otherwise the limit is a logout: the client waits, retries with the
+// token it still holds, and finds the whole family revoked for reuse.
+func TestARefusedRefreshLeavesTheTokenUsable(t *testing.T) {
+	t.Parallel()
+
+	f, _ := limited(t, 1)
+	ctx := context.Background()
+
+	pair := f.issue(t)
+	next, err := f.m.Rotate(ctx, pair.Refresh.Token)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := f.m.Rotate(ctx, next.Refresh.Token); err == nil {
+		t.Fatal("the second refresh was allowed")
+	}
+
+	// The window passes and the same token still works.
+	f.clock.at = f.clock.at.Add(2 * time.Minute)
+	if _, err := f.m.Rotate(ctx, next.Refresh.Token); err != nil {
+		t.Fatalf("the token was consumed by the refusal: %v", err)
+	}
+}
+
+// Nil is a manager nobody wired a limiter into, and this package is
+// constructible without the rest of auth.
+func TestWithNoLimiterRefreshIsUnbounded(t *testing.T) {
+	t.Parallel()
+
+	f := setup(t)
+	ctx := context.Background()
+
+	pair := f.issue(t)
+	for i := range 20 {
+		var err error
+		if pair, err = f.m.Rotate(ctx, pair.Refresh.Token); err != nil {
+			t.Fatalf("refresh %d: %v", i+1, err)
+		}
+	}
 }
 
 func (f *fixture) issue(t *testing.T) session.Pair {

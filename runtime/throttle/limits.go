@@ -9,6 +9,12 @@ const (
 	KeyAccount      = "account"
 	KeyAPIKey       = "api_key"
 	KeyTokenFamily  = "token_family"
+	// KeyTenant is one customer's whole share, across every account and key
+	// they have. It is the only kind with no column in the auth log, because it
+	// belongs to the API limits rather than the auth ones: what it bounds is a
+	// tenant starving the other tenants, which is not a question about
+	// credentials.
+	KeyTenant = "tenant"
 )
 
 // The events the standard limits count. They match the auth log's event names,
@@ -148,3 +154,6 @@ func APIKey(keyID string) Key { return Key{Kind: KeyAPIKey, Value: keyID} }
 
 // TokenFamily builds a key from a session's root token.
 func TokenFamily(rootID string) Key { return Key{Kind: KeyTokenFamily, Value: rootID} }
+
+// Tenant builds a key from a tenant identifier.
+func Tenant(id string) Key { return Key{Kind: KeyTenant, Value: id} }

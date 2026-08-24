@@ -67,6 +67,25 @@ type Config struct {
 	// server reads.
 	RequestIDHeader string
 
+	// OnRateLimit is called with what each response said about the caller's
+	// budget, when the server said anything at all.
+	//
+	// It is the other half of rate limiting, and the half a client can act on.
+	// A 429 is already handled without it — the SDK reads Retry-After and backs
+	// off — but by then the call has been refused. These numbers arrive on every
+	// response, so a caller that watches them can slow down, shed work, or raise
+	// an alarm while its calls are still succeeding.
+	//
+	// Deliberately a callback and not automatic pacing. A client library that
+	// silently slept because Remaining was low would turn a batch job's
+	// throughput into a mystery, and it cannot know whether this caller would
+	// rather go slower or fail sooner. The numbers are handed over; the policy
+	// is the application's.
+	//
+	// Called on the request's own goroutine, once per attempt, before the call
+	// returns. Keep it quick and do not call back into the client from it.
+	OnRateLimit func(RateLimitStatus)
+
 	// Revision overrides the API revision this client says it was built against.
 	//
 	// Almost nobody should set it. The generated client carries the revision
@@ -146,6 +165,7 @@ type Runtime struct {
 	now             func() time.Time
 	trace           func(ctx context.Context, name string, f func(context.Context) error) error
 	retry           Retry
+	onRateLimit     func(RateLimitStatus)
 	// jitter is the randomness in a backoff, held here so a test can make one
 	// deterministic. It answers in [0, n).
 	jitter func(int64) int64
@@ -217,6 +237,8 @@ func New(cfg Config, api API) (*Runtime, error) {
 		trace:     cfg.Trace,
 		cred:      cfg.Credential,
 		retry:     cfg.Retry,
+
+		onRateLimit: cfg.OnRateLimit,
 		// math/rand/v2 rather than math/rand: its source is per-P and lock-free
 		// where the older one is a global mutex, and a client called from a
 		// hundred goroutines that are all backing off at once is exactly the

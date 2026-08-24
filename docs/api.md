@@ -138,6 +138,50 @@ records rather than a replay of the wrong one.
 A generated Go client does all of this for you — it names every write it might
 have to send again; see [clients.md](clients.md#when-the-server-says-not-now).
 
+## How many calls a caller may make
+
+Off unless [`throttle:`](rig-yaml.md#throttle) is in your `rig.yaml`. With it,
+every generated route counts the call against whoever made it — the API key, the
+account, the tenant, or, for a caller who is not signed in, the address.
+
+Past the limit the answer is `429` with `Retry-After`. Under it, every response
+still carries `RateLimit-Limit` and `RateLimit-Remaining`, so a client can slow
+down before it is refused rather than after. The Go SDK already reads all three
+and retries for you, and hands you the numbers through one callback so you can
+slow down first — see [clients.md](clients.md#seeing-the-limit-before-you-hit-it).
+
+```
+HTTP/1.1 429 Too Many Requests
+Retry-After: 34
+RateLimit-Limit: 1000
+RateLimit-Remaining: 0
+```
+
+Two things worth knowing before you rely on it.
+
+**It is fair-use limiting, not DDoS protection.** A request that gets here has
+already cost a connection, a handshake and a goroutine — under a real flood an
+application-level limiter is more load on the part that fails first. Put a CDN or
+an L7 proxy in front for that. What this stops is a client stuck in a retry loop,
+one tenant crowding out the others, scraping, and runaway cost on an API that
+calls something metered.
+
+**The count is approximate, and it fails open.** Each replica counts locally and
+reconciles with the database periodically, tightening as a caller approaches
+their limit — so several replicas can collectively allow a little more than the
+configured number. And if the counters cannot be reached at all, requests are
+served rather than refused. Both are deliberate; the reasoning, and the knob for
+the first, are in [rig-yaml.md](rig-yaml.md#throttle).
+
+**The counters want a cron entry.** `rig_throttle` gains a row per caller per
+window and nothing prunes it for you; `api.ThrottleSweeper(0)` is the
+`serve.Task` that does, the way `IdempotencyPruner` is for keys. See
+[rig-yaml.md](rig-yaml.md#throttle).
+
+The [auth endpoints](auth.md) have limits of their own, counted differently —
+exactly, out of the audit log — because a login limiter that guessed high or
+failed open would be a way in rather than a nuisance.
+
 ## The OpenAPI document
 
 The [`openapi`](generators.md) generator writes this whole surface out as an
@@ -176,6 +220,7 @@ deliberate. [auth.md](auth.md) documents them in full.
 
 - [tables.md](tables.md) — choosing which operations exist, and adding your own
 - [rig-yaml.md](rig-yaml.md#api) — `base_path`, `permissions`, `search_method`
+- [rig-yaml.md](rig-yaml.md#throttle) — how many calls a caller may make
 - [auth.md](auth.md) — the authentication endpoints, which are documented in full
 
 ## The inbox

@@ -14,6 +14,7 @@ func (e *emitter) serverFile() (gen.Artifact, error) {
 	e.serverType(b)
 	e.handlersStruct(b)
 	e.registerFunc(b)
+	e.throttleWiring(b)
 	e.idempotencyPrunerFunc(b)
 	e.linkFunc(b)
 	e.helpers(b)
@@ -109,6 +110,8 @@ func (e *emitter) serverType(b *gobuf.Buf) {
 	b.NL()
 	b.Comment("Context lets a hook attach values a service will read.")
 	b.L("Context func(ctx %s.Context, r *%s.Request) %s.Context", ctxPkg, httpPkg, ctxPkg)
+	b.NL()
+	e.throttleField(b)
 	b.NL()
 	b.Comment("DB is what a write carrying an Idempotency-Key is recorded in, so " +
 		"that a client which had to send the same write twice gets one row and " +
@@ -217,6 +220,28 @@ func (e *emitter) registerFunc(b *gobuf.Buf) {
 		"DB: app.Pool\")")
 	b.L("}")
 	b.NL()
+	if e.throttleEnabled() {
+		dbxPkg := b.Import(runtimeModule + "/dbx")
+		b.Comment("The limiter, unless one was handed in. It needs the pool and " +
+			"the logger, both of which are on the server already, so building it " +
+			"here is one less thing to remember — and a project that wants its own " +
+			"is not prevented from setting the field.\n\n" +
+			"DB is declared as the narrower interface, because everything else " +
+			"here only ever begins a transaction. The counters run statements " +
+			"outside one, so this asks for the wider half — which a pool has, and " +
+			"which anything standing in for a pool in a test may not.")
+		b.L("if h.Server.Throttle == nil {")
+		b.L("conn, ok := h.Server.DB.(%s.Conn)", dbxPkg)
+		b.L("if !ok {")
+		b.L("panic(\"api.Register: throttle is configured but Server.DB cannot run " +
+			"queries, so there is nowhere to count; set Server.Throttle yourself, or " +
+			"set DB to the pool\")")
+		b.L("}")
+		b.L("h.Server.Throttle = NewThrottle(conn, h.Server.Logger)")
+		b.L("}")
+		b.NL()
+	}
+
 	b.L("Link(h)")
 	b.NL()
 
@@ -392,6 +417,8 @@ func (e *emitter) helpers(b *gobuf.Buf) {
 	b.L("claims = %s.Claims{}", tenPkg)
 	b.L("}")
 	b.NL()
+	e.throttleCheck(b, tenPkg)
+
 	b.L("ctx := %s.NewContext(r.Context(), claims)", tenPkg)
 	b.Comment("So that what only the service method is handed reaches everything " +
 		"under it: a validator and a hook are given a context and nothing else, " +
