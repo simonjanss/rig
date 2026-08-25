@@ -538,6 +538,54 @@ exists.
 
 ---
 
+## Verifying without a row read
+
+Every authenticated request resolves a session token or an API key, and that is a
+row read. Turning on [`cache:`](rig-yaml.md#cache) in `rig.yaml` holds the answer
+in memory instead:
+
+```yaml
+cache:
+  enabled: true
+```
+
+**This is not a time-to-live over authentication.** A cache over authorization
+with only a timer on it is a revoked session that keeps working, which is why rig
+never shipped one. What this switches on is a Postgres `NOTIFY` channel: every
+revocation the foundation performs — a logout, an administrative revoke, a
+password change ending every session, reuse detection killing a family, an API
+key revoked or rotated — publishes **inside the transaction that performed it**.
+Postgres delivers a notification when its transaction commits and throws it away
+if that transaction rolls back, so the invalidation is atomic with the change,
+reaches every replica, and needs no outbox, no trigger and no second piece of
+infrastructure.
+
+So a session ended on one replica stops working on all of them at the moment the
+revocation commits. `ttl` is only the backstop, for a replica that was not
+listening at that moment — and a replica that knows it has lost the channel stops
+caching altogether rather than serving what it can no longer withdraw.
+
+Nothing here is yours to wire. There is no map to build and no invalidation to
+publish, because rig caches exactly the reads it owns on both sides — it makes
+the read and it makes every write that withdraws it. The only line it adds to
+your `main.go` is a shutdown, and forgetting it costs a connection rather than
+correctness:
+
+```go
+app.CloseWithin("auth", 5*time.Second, front.Close)
+```
+
+**Your `Grants` function is not cached, and that is deliberate.** It is the
+expensive read on this path — a join over role tables, per request — but the
+tables are yours and so are the writes, and rig cannot see them. Caching it would
+mean you publishing your own invalidations, and a write path left out there is a
+permission you revoked that goes on working with nothing to say so. If you decide
+to take that on, `Parts().Cache` is the same bus and
+[`rig/runtime/cache`](https://pkg.go.dev/github.com/simonjanss/rig/runtime/cache)
+is the package; serve a topic of your own and publish wherever roles change.
+
+---
+
 ## The authentication trail
 
 Every sign-in, failure, lockout, logout, refresh, replay, key use, impersonation,
@@ -661,7 +709,6 @@ auth:
     remember_ttl: 30d
     rotation_leeway: 30s
     identity_ttl: 30m
-    cache_ttl: 0s
 
   password:
     min_length: 12
@@ -845,7 +892,6 @@ you get by writing none of them.
 | `session.refresh_ttl` / `remember_ttl` | 12h / 30d | How long a stolen refresh token is worth having |
 | `session.identity_ttl` | 30m | How long somebody has to pick a tenant |
 | `session.rotation_leeway` | 30s | Longer forgives more retries and widens the replay window |
-| `session.cache_ttl` | `0s` — off | Setting it trades immediate revocation for throughput. A revoked session keeps working for up to this long. Do not set it above a few seconds, and do not set it at all unless the read is measurably a problem. |
 | `oauth.state_ttl` | 10m | How long a sign-in round trip may take. Generous for a redirect, short enough that a stolen state is useless. |
 | `password.min_length` | 12 | Length is what helps; composition rules push people toward `Password1!` |
 

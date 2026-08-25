@@ -775,6 +775,74 @@ which is as far back as anything counts; unlike the auth log there is no lockout
 to preserve here, so a bucket past that point cannot free a caller who is still
 over their limit — deleting it is free.
 
+## `cache`
+
+Whether rig holds its own per-request reads in memory. Off by default.
+
+```yaml
+cache:
+  enabled: true
+  ttl: 30s                  # the backstop, not the guarantee
+  channel: rig_cache        # the Postgres channel invalidations travel on
+  max_entries: 50000        # per cache, before the whole map is dropped
+```
+
+The reads are the two rig makes on behalf of every caller: resolving a session
+token, and resolving an API key. Both are a row read on every authenticated
+request, for an answer that changes when somebody signs out.
+
+Which is why it needs an [`auth`](#auth) block beside it: those two reads are the
+whole of what this covers, so `cache.enabled` on a project that does not
+authenticate its callers is refused when `rig.yaml` is read rather than left as
+four numbers nothing looks at.
+
+**It is not a time-to-live over authentication.** That would be a revoked session
+that keeps working, and rig does not offer it. Every revocation rig performs
+publishes a Postgres `NOTIFY` **inside the transaction that performed it** — so
+the invalidation is delivered exactly when that transaction commits, discarded if
+it rolls back, and reaches every replica listening on `channel`. A session ended
+on one replica stops working on all of them at the moment the revocation commits,
+not when a timer runs out.
+
+`ttl` is what remains for a replica that was not listening at that moment. It is
+the honest cost of the block, stated as time: with no invalidation arriving, a
+change takes effect this long after it was made. And a replica that knows it has
+lost the channel does not fall back on `ttl` — it stops caching entirely and
+reads through, because serving permissions nobody can withdraw is worse than
+serving them slowly. That is the opposite of what [`throttle`](#throttle) does,
+and for the opposite reason.
+
+**There is nothing to wire.** No map to build, no publish to add, no hook to
+register. rig caches these two reads *because* it owns both halves — it makes the
+read and it makes every write that invalidates it — so there is no write path an
+application can forget. The one line this adds to a `main.go` is a shutdown, and
+it is safe to leave out: a listener that is not running reports itself as not
+live, and a cache that is not live reads through.
+
+```go
+app.CloseWithin("auth", 5*time.Second, front.Close)
+```
+
+**The read this deliberately does not cover is your `Grants` function.** It is
+the most expensive one on the path — a join over role tables, on every request —
+and it is over *your* tables, written to by *your* code. rig cannot see those
+writes, so caching that answer would mean publishing your own invalidations, and
+one forgotten write path there is a permission you took away that goes on
+working. If you want it anyway, `auth.Parts().Cache` is the same bus: serve a
+topic of your own on it and publish wherever roles change. See the
+[`rig/runtime/cache`](https://pkg.go.dev/github.com/simonjanss/rig/runtime/cache)
+package documentation.
+
+`channel` matters when two deployments share one database and must not share
+invalidations. It has to be a plain identifier — letters, digits and
+underscores — because it reaches Postgres both inside a `LISTEN` and as a
+parameter to `pg_notify`, and both have to name the same channel.
+
+`max_entries` bounds each cache. Past it the whole map is dropped rather than
+swept: nothing outlives `ttl` anyway, so reaching the bound costs one window
+behaving as though there were no cache — where refusing to store anything new
+would leave a process answering forever out of whichever keys arrived first.
+
 ## `tracing`
 
 Spans. Off by default, and what makes every generator emit them at all — a

@@ -22,7 +22,6 @@ auth:
     remember_ttl: 14d
     rotation_leeway: 45s
     identity_ttl: 20m
-    cache_ttl: 2s
 
   password:
     min_length: 14
@@ -97,3 +96,11 @@ throttle:
   # And one nothing applies to at all.
   exempt:
     - GET /api/v1/lessons
+
+# The counterpart to the block above, and the opposite trade: the limiter fails
+# open because refusing traffic is worse than allowing a little too much, and
+# this fails closed because serving permissions nobody can withdraw is worse than
+# serving them slowly.
+cache:
+  enabled: true
+  ttl: 30s

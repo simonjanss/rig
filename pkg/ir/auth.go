@@ -107,9 +107,6 @@ type AuthSession struct {
 	// IdentityTTL is the lifetime of the tenant-less credential somebody holds
 	// between signing in and picking a tenant.
 	IdentityTTL Duration `json:"identity_ttl"`
-	// CacheTTL keeps verified access tokens in memory. Zero reads the row every
-	// time, which is what makes revocation immediate.
-	CacheTTL Duration `json:"cache_ttl"`
 }
 
 // AuthPassword is what a new password must satisfy.

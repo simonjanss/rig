@@ -36,6 +36,9 @@ type ProjectOptions struct {
 	// Throttle is the resolved throttle block, or nil for a project that does
 	// not limit API calls.
 	Throttle *ir.Throttle
+	// Cache is the resolved cache block, or nil for a project that caches none
+	// of the reads rig makes on its own behalf.
+	Cache *ir.Cache
 	// Monitoring is the resolved monitoring block, or nil for a project with no
 	// page. Never set without Tracing; the config check is what guarantees it.
 	Monitoring *ir.Monitoring
@@ -71,6 +74,7 @@ func Project(schema ir.Schema, opt ProjectOptions) (ir.API, diag.List) {
 		Notifications:  opt.Notifications,
 		Presence:       opt.Presence,
 		Throttle:       opt.Throttle,
+		Cache:          opt.Cache,
 		Tracing:        opt.Tracing,
 		Monitoring:     opt.Monitoring,
 

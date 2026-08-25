@@ -66,6 +66,14 @@ func Unmarshal(b []byte) (*Document, error) {
 // every client it was built against something older than the server, over a
 // change none of them can see.
 //
+// [API.Cache] is cleared for that reason too, and it is the clearest case of it:
+// whether a replica answered out of memory or out of the database is not
+// something a client can observe at all. The generated clients are told the
+// backstop lifetime all the same — see rigclient.AuthProfile — because a
+// document consumer should be able to read how long a lost invalidation could
+// go unnoticed. Being told a number is not the same as behaving differently for
+// it, and only the second one is what a revision means.
+//
 // [Presence] is cleared in *part*, and it is the only field here that is. Two of
 // its numbers are answered to the browser on every heartbeat, so a client built
 // when the TTL was a minute behaves differently against twenty seconds — those
@@ -77,6 +85,7 @@ func (d *Document) Hash() (string, error) {
 	unstamped.API.Revision = ""
 	unstamped.API.EmbeddedFoundation = false
 	unstamped.API.Monitoring = nil
+	unstamped.API.Cache = nil
 	if p := unstamped.API.Presence; p != nil {
 		// A copy, because the shallow copy above shares the pointer and the
 		// caller's document must not come back with its sweep interval erased.

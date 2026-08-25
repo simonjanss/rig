@@ -1,7 +1,9 @@
 package session
 
 import (
+	"bytes"
 	"context"
+	"slices"
 	"sort"
 	"sync"
 	"time"
@@ -86,20 +88,23 @@ func (s *MemoryStore) MarkRotated(_ context.Context, id uuid.UUID, at time.Time)
 }
 
 // RevokeFamily implements [Store].
-func (s *MemoryStore) RevokeFamily(_ context.Context, rootID uuid.UUID, at time.Time) (int, error) {
+func (s *MemoryStore) RevokeFamily(_ context.Context, rootID uuid.UUID, at time.Time) ([]uuid.UUID, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	n := 0
+	var killed []uuid.UUID
 	for _, t := range s.tokens {
 		if t.RootTokenID != rootID || t.RevokedAt != nil {
 			continue
 		}
 		when := at
 		t.RevokedAt = &when
-		n++
+		killed = append(killed, t.ID)
 	}
-	return n, nil
+	// Sorted, because iterating a map is iterating it in a different order every
+	// time and a caller comparing what was revoked should not have to care.
+	slices.SortFunc(killed, func(a, b uuid.UUID) int { return bytes.Compare(a[:], b[:]) })
+	return killed, nil
 }
 
 // Families implements [Store].

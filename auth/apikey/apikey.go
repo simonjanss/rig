@@ -27,6 +27,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/simonjanss/rig/auth/authlog"
+	"github.com/simonjanss/rig/runtime/dbx"
 	"github.com/simonjanss/rig/runtime/rigerr"
 	"github.com/simonjanss/rig/runtime/tenancy"
 	"github.com/simonjanss/rig/runtime/throttle"
@@ -127,6 +128,14 @@ type Store interface {
 	SetExpiry(ctx context.Context, tenantID, id uuid.UUID, at time.Time) error
 	// List returns a tenant's keys, newest first.
 	List(ctx context.Context, tenantID uuid.UUID) ([]*Key, error)
+
+	// InTx runs fn inside one transaction, joining one already in progress.
+	//
+	// Here for the reason [session.Store] has it: a revocation and the
+	// notification that withdraws the cached copy of what was revoked have to
+	// commit together, or a replica can be told to forget something that was
+	// never revoked — or, worse, not told about one that was.
+	InTx(ctx context.Context, fn func(ctx context.Context) error) error
 }
 
 // Config builds a manager.
@@ -161,6 +170,13 @@ type Config struct {
 	Limiter      *throttle.Limiter
 	FailureLimit throttle.Limit
 
+	// Cache keeps verified keys in memory, and is told to stop.
+	//
+	// Nil, the default, reads the row on every request. A cache built by
+	// [NewKeyCache] means most requests do not, and that a revocation or a
+	// rotation reaches every replica on the transaction that performed it.
+	Cache *KeyCache
+
 	Now func() time.Time
 }
 
@@ -177,6 +193,8 @@ type Manager struct {
 
 	limiter      *throttle.Limiter
 	failureLimit throttle.Limit
+
+	cache *KeyCache
 }
 
 // New builds a manager.
@@ -202,6 +220,7 @@ func New(cfg Config) (*Manager, error) {
 
 		limiter:      cfg.Limiter,
 		failureLimit: cfg.FailureLimit,
+		cache:        cfg.Cache,
 	}, nil
 }
 
@@ -365,14 +384,20 @@ func (m *Manager) Verify(ctx context.Context, presented string, from netip.Addr)
 		return tenancy.Claims{}, nil, err
 	}
 
-	k, err := m.store.ByKeyID(ctx, keyID)
-	if err != nil {
+	// Every check below runs on the answer whether it came from the cache or
+	// from the row: caching changes where the key was read and nothing else.
+	// The secret is compared here rather than being part of the lookup key — the
+	// lookup key is the public identifier, and a secret is never one.
+	k, err := m.cache.load(keyID, func() (*Key, error) {
+		return m.store.ByKeyID(ctx, keyID)
+	})
+	if err != nil && !errors.Is(err, errNoKey) {
 		return tenancy.Claims{}, nil, err
 	}
 
 	now := m.now()
 	switch {
-	case k == nil:
+	case errors.Is(err, errNoKey):
 		m.recordFailure(ctx, keyID, from, "unknown")
 		return tenancy.Claims{}, nil, ErrInvalidKey
 	case subtle.ConstantTimeCompare(k.SecretHash, hash(secret)) != 1:
@@ -390,6 +415,15 @@ func (m *Manager) Verify(ctx context.Context, presented string, from netip.Addr)
 		if err := m.store.TouchLastUsed(ctx, k.ID, now); err != nil {
 			return tenancy.Claims{}, nil, err
 		}
+		// Dropped here rather than published, and that is the difference between
+		// this write and a revocation. A last-used timestamp decides nothing —
+		// no other replica answers differently for not having it, and telling
+		// them all would be a notification per key per touch interval for a
+		// column nobody authorises against. What it must not do is stay stale
+		// *here*, because shouldTouch reads it: a cached copy carrying the old
+		// timestamp would touch again on the next request, turning a write every
+		// five minutes into a write every time.
+		m.cache.drop(keyID)
 	}
 
 	m.log.Write(ctx, authlog.Entry{
@@ -454,7 +488,9 @@ func (m *Manager) Rotate(ctx context.Context, tenantID, id uuid.UUID, overlap ti
 	// legitimate choice when the old value is known to have leaked.
 	end := now.Add(overlap)
 	if overlap <= 0 {
-		if err := m.store.Revoke(ctx, tenantID, old.ID, now); err != nil {
+		if err := m.write(ctx, old.KeyID, func(ctx context.Context) error {
+			return m.store.Revoke(ctx, tenantID, old.ID, now)
+		}); err != nil {
 			return Minted{}, err
 		}
 		return minted, nil
@@ -463,15 +499,74 @@ func (m *Manager) Rotate(ctx context.Context, tenantID, id uuid.UUID, overlap ti
 	if old.ExpiresAt != nil && old.ExpiresAt.Before(end) {
 		return minted, nil
 	}
-	if err := m.store.SetExpiry(ctx, tenantID, old.ID, end); err != nil {
+	// An expiry is an invalidation like any other: the cached copy carries the
+	// old one, and Live reads it.
+	if err := m.write(ctx, old.KeyID, func(ctx context.Context) error {
+		return m.store.SetExpiry(ctx, tenantID, old.ID, end)
+	}); err != nil {
 		return Minted{}, err
 	}
 	return minted, nil
 }
 
 // Revoke kills a key immediately.
+//
+// It reads the key before killing it, which is one query on a path nobody calls
+// twice a second. The public identifier is what a request presents and therefore
+// what anything holding this key is holding it under, and this method is given
+// the row's uuid — so without the read there is nothing to name in the
+// invalidation.
 func (m *Manager) Revoke(ctx context.Context, tenantID, id uuid.UUID) error {
-	return m.store.Revoke(ctx, tenantID, id, m.now())
+	now := m.now()
+	if m.cache == nil {
+		return m.store.Revoke(ctx, tenantID, id, now)
+	}
+	return m.store.InTx(ctx, func(ctx context.Context) error {
+		k, err := m.store.Find(ctx, tenantID, id)
+		if err != nil {
+			return err
+		}
+		if err := m.store.Revoke(ctx, tenantID, id, now); err != nil {
+			return err
+		}
+		if k == nil {
+			// A key nobody has is still revoked — the statement affects nothing
+			// — and there is no identifier to withdraw.
+			return nil
+		}
+		return m.forget(ctx, k.KeyID)
+	})
+}
+
+// write runs a change to one key and withdraws the cached copy of it, together.
+//
+// One transaction over both, because a notification is delivered when the
+// transaction issuing it commits and discarded when that transaction rolls back
+// — which is what makes the invalidation atomic with the change rather than a
+// second event that can arrive without it, or fail to.
+func (m *Manager) write(ctx context.Context, keyID string, fn func(ctx context.Context) error) error {
+	if m.cache == nil {
+		return fn(ctx)
+	}
+	return m.store.InTx(ctx, func(ctx context.Context) error {
+		if err := fn(ctx); err != nil {
+			return err
+		}
+		return m.forget(ctx, keyID)
+	})
+}
+
+// forget tells every replica to stop believing in a key.
+//
+// A store with no transaction on the context is one that is not Postgres — a
+// [MemoryStore] in a test — so there is no channel to publish on and no other
+// replica to reach.
+func (m *Manager) forget(ctx context.Context, keyID string) error {
+	if tx, ok := dbx.Tx(ctx); ok {
+		return m.cache.forget(ctx, tx, keyID)
+	}
+	m.cache.drop(keyID)
+	return nil
 }
 
 // List returns a tenant's keys. The secrets are not in them; there is nothing

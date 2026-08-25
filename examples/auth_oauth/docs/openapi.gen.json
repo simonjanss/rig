@@ -3,7 +3,7 @@
   "info": {
     "title": "auth_oauth",
     "description": "The auth_oauth HTTP API.\n\nThe authentication endpoints under `/auth` are served by a hand-written module and are not described here.",
-    "version": "2026-08-20"
+    "version": "2026-08-24"
   },
   "servers": [
     {

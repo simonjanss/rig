@@ -145,6 +145,28 @@ func Config(pool *pgxpool.Pool, h Hooks) (auth.Config, error) {
 		RotationLeeway:     30 * time.Second,
 		IdentitySessionTTL: 30 * time.Minute,
 
+		// Verifying a session and verifying an API key are the two reads rig makes on
+		// behalf of every caller, and this is what stops them being a row read each.
+		//
+		// Not a time-to-live over authentication, which would be a revoked session
+		// that keeps working. The lifetime below is the backstop: a revocation
+		// publishes on the transaction that performed it, over a Postgres channel
+		// every replica listens on, so the ordinary case is that everybody has
+		// forgotten by the time that transaction commits. A replica that lost the
+		// channel stops caching rather than serving what it cannot withdraw.
+		//
+		// Every number came from `cache:` in rig.yaml.
+		Cache: auth.CacheOptions{
+			Enabled:    true,
+			TTL:        30 * time.Second,
+			Channel:    "rig_cache",
+			MaxEntries: 50000,
+			// The one line anybody reads when this stops working. The fallback — reading
+			// the row again — is correct and silent, so nothing else about the server
+			// would say so.
+			Logger: h.Logger,
+		},
+
 		Policy: password.Policy{MinLength: 12, MaxLength: 1024},
 
 		AllowRegistration:    true,

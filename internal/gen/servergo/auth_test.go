@@ -65,6 +65,10 @@ func TestAuthGoldenDefaults(t *testing.T) {
 
 	doc := gentest.LoadDocument(t, filepath.Join("testdata", authFixture))
 	doc.API.Auth = defaultAuth(t)
+	// The cache is a block of its own, and this fixture is "configure nothing" —
+	// so it goes too, or the golden would be showing one thing that was
+	// configured next to everything that was not.
+	doc.API.Cache = nil
 
 	artifacts := gentest.Run(t, servergo.New(), doc, authOpts())
 
@@ -115,7 +119,11 @@ func TestTheConfiguredValuesReachTheOutput(t *testing.T) {
 		"RememberTTL:        14 * 24 * time.Hour",
 		"RotationLeeway:     45 * time.Second",
 		"IdentitySessionTTL: 20 * time.Minute",
-		"SessionCacheTTL: 2 * time.Second",
+		"Cache: auth.CacheOptions{",
+		"TTL:        45 * time.Second",
+		`Channel:    "rig_cache_authwired"`,
+		"MaxEntries: 25000",
+		"Logger: h.Logger",
 		"MinLength: 14, MaxLength: 512",
 		"password.NewHIBP()",
 		"d.LoginByEmail.Max, d.LoginByEmail.Window = 3, 10*time.Minute",

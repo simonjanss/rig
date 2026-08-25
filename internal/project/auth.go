@@ -170,11 +170,6 @@ func (p *Project) checkAuthSession(s AuthSession) diag.List {
 			"auth.session.rotation_leeway (%s) is not shorter than refresh_ttl (%s), so a "+
 				"consumed refresh token never stops being usable", s.RotationLeeway, s.RefreshTTL)
 	}
-	if s.CacheTTL > s.AccessTTL {
-		diags.Add(diag.CodeConfigInvalid, p.At("auth", "session", "cache_ttl"),
-			"auth.session.cache_ttl (%s) is longer than access_ttl (%s), which caches a "+
-				"token for longer than it is valid", s.CacheTTL, s.AccessTTL)
-	}
 
 	return diags
 }
@@ -277,7 +272,6 @@ func (a Auth) IR() *ir.Auth {
 			RememberTTL:    a.Session.RememberTTL.IR(),
 			RotationLeeway: a.Session.RotationLeeway.IR(),
 			IdentityTTL:    a.Session.IdentityTTL.IR(),
-			CacheTTL:       a.Session.CacheTTL.IR(),
 		},
 		Password: ir.AuthPassword{
 			MinLength:   a.Password.MinLength,

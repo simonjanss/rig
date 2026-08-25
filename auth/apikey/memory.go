@@ -109,3 +109,8 @@ func (s *MemoryStore) List(_ context.Context, tenantID uuid.UUID) ([]*Key, error
 	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.After(out[j].CreatedAt) })
 	return out, nil
 }
+
+// InTx implements [Store]. There is no transaction to open in one map.
+func (s *MemoryStore) InTx(ctx context.Context, fn func(ctx context.Context) error) error {
+	return fn(ctx)
+}

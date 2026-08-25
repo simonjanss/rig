@@ -240,10 +240,11 @@ func TestDeletingANoteTakesItsNotifications(t *testing.T) {
 // notifications builds the engine the same way main does.
 func (s *server) notifications(t *testing.T) (*notify.Engine, *notify.Service) {
 	t.Helper()
-	_, engine, err := newAPI(context.Background(), s.pool, slog.Default())
+	_, front, engine, err := newAPI(context.Background(), s.pool, slog.Default())
 	if err != nil {
 		t.Fatal(err)
 	}
+	closeAuth(t, front)
 	return engine, nil
 }
 

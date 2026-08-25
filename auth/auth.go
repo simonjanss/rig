@@ -55,6 +55,7 @@ import (
 	"github.com/simonjanss/rig/auth/oauth"
 	"github.com/simonjanss/rig/auth/password"
 	"github.com/simonjanss/rig/auth/session"
+	"github.com/simonjanss/rig/runtime/cache"
 	"github.com/simonjanss/rig/runtime/rigerr"
 	"github.com/simonjanss/rig/runtime/tenancy"
 	"github.com/simonjanss/rig/runtime/throttle"
@@ -110,12 +111,21 @@ type Config struct {
 	// network blip. See [session.Config.RotationLeeway].
 	RotationLeeway time.Duration
 
-	// SessionCacheTTL keeps verified access tokens in memory. Zero, the default,
-	// reads the row on every request, which is what makes revocation immediate.
+	// Cache holds the reads this package makes on every request — verifying a
+	// session, verifying an API key — and withdraws them when they stop being
+	// true.
 	//
-	// See [session.Config.CacheTTL], including why anything above a few seconds
-	// is a revoked session that keeps working.
-	SessionCacheTTL time.Duration
+	// The zero value caches nothing, which is a row read per authenticated
+	// request and the behaviour rig had before this existed. Setting
+	// [CacheOptions.Enabled] is not a time-to-live over authentication: it opens
+	// a Postgres channel, and every revocation this package performs publishes
+	// on the transaction that performed it, so a permission taken away stops
+	// working at the moment the change commits rather than when a timer expires.
+	//
+	// It is [New]'s to own. The bus is built, registered and started here and
+	// closed by [Auth.Close], so there is no cache to wire, no publish to
+	// remember, and no write path that can be left out.
+	Cache CacheOptions
 
 	// Policy is the password policy. The zero value is a minimum length of 12
 	// and no composition rules, which is current advice.
@@ -293,6 +303,9 @@ type Auth struct {
 	endpoints *authhttp.Handler
 	oauth     *oauth.Handler
 	parts     Parts
+	// cache is the invalidation channel, nil for a project that configured none.
+	// Held here so that [Auth.Close] has something to close.
+	cache *cache.Bus
 	// retention and clock are what PruneLog needs, kept here rather than read
 	// back out of a stored Config so there is one copy of each.
 	retention time.Duration
@@ -319,6 +332,18 @@ type Parts struct {
 	APIKeys    *apikey.Manager
 	Limiter    *throttle.Limiter
 	Stores     *authpg.Stores
+
+	// Cache is the invalidation channel rig's own caches run over, or nil when
+	// the project configured none.
+	//
+	// Here for the one thing rig cannot do on an application's behalf. rig
+	// caches what it owns end to end — it makes the read and it makes every
+	// write that withdraws it — and the read it does not own is Grants, over
+	// role tables belonging to the application. A project that wants that answer
+	// cached serves a topic of its own on this bus and publishes on it wherever
+	// its roles change; see runtime/cache. Nothing in rig will do it for you,
+	// because nothing in rig can see those writes.
+	Cache *cache.Bus
 }
 
 // New assembles the foundation over a pool.
@@ -331,6 +356,13 @@ func New(cfg Config) (*Auth, error) {
 	}
 
 	stores := authpg.New(cfg.Pool)
+
+	// Built before anything that caches, because [cache.Bus.Serve] is what hands
+	// back the publisher and a manager cannot be given one that does not exist
+	// yet. Nil when the project configured no cache, and every constructor below
+	// answers a nil bus with a nil cache — so "off" is a shape rather than a
+	// condition threaded through five call sites.
+	bus := newCacheBus(cfg)
 
 	// Counted in the database rather than in memory, so two replicas cannot
 	// disagree about how many times a password has been tried and a restart does
@@ -360,9 +392,13 @@ func New(cfg Config) (*Auth, error) {
 		RefreshTTL:     cfg.RefreshTTL,
 		RememberTTL:    cfg.RememberTTL,
 		RotationLeeway: cfg.RotationLeeway,
-		CacheTTL:       cfg.SessionCacheTTL,
-		OnRotate:       cfg.OnSessionRefresh,
-		Now:            cfg.Now,
+		Cache: session.NewTokenCache(bus, session.TokenCacheConfig{
+			TTL:        cfg.Cache.cacheTTL(),
+			MaxEntries: cfg.Cache.MaxEntries,
+			Now:        cfg.Now,
+		}),
+		OnRotate: cfg.OnSessionRefresh,
+		Now:      cfg.Now,
 
 		// The same limiter the login limits use, over the same log. A session
 		// refreshing sixty times a minute is a client looping.
@@ -403,6 +439,11 @@ func New(cfg Config) (*Auth, error) {
 		Store: stores.APIKeys,
 		Log:   stores.Log,
 		Now:   cfg.Now,
+		Cache: apikey.NewKeyCache(bus, apikey.KeyCacheConfig{
+			TTL:        cfg.Cache.cacheTTL(),
+			MaxEntries: cfg.Cache.MaxEntries,
+			Now:        cfg.Now,
+		}),
 
 		// A key id is the public half and turns up in logs and configuration,
 		// so without this the only thing between one and its secret is how fast
@@ -452,6 +493,7 @@ func New(cfg Config) (*Auth, error) {
 
 	out := &Auth{
 		endpoints: endpoints,
+		cache:     bus,
 		parts: Parts{
 			Accounts:   accounts,
 			Sessions:   sessions,
@@ -459,6 +501,7 @@ func New(cfg Config) (*Auth, error) {
 			APIKeys:    keys,
 			Limiter:    limiter,
 			Stores:     stores,
+			Cache:      bus,
 		},
 		retention: cfg.LogRetention,
 		clock:     cfg.Now,
@@ -499,7 +542,39 @@ func New(cfg Config) (*Auth, error) {
 			return nil, fmt.Errorf("auth: oauth: %w", err)
 		}
 	}
+
+	// Last, after every error return in this function — including oauth.New's,
+	// which is the one below the assembled Auth rather than above it. A bus
+	// started any earlier would leave a goroutine and a connection behind on
+	// whichever of them fired, in a function whose caller was handed nothing to
+	// close.
+	if bus != nil {
+		bus.Start()
+	}
 	return out, nil
+}
+
+// Close stops the invalidation channel and waits for it.
+//
+// Register it with the shutdown, within a timeout — there is nothing in flight
+// worth finishing, so this only needs long enough to close a connection:
+//
+//	app.CloseWithin("auth", 5*time.Second, front.Close)
+//
+// A project that configured no cache has nothing to close and this returns at
+// once, which is what makes registering it unconditionally the right thing to
+// write.
+//
+// Forgetting it is not a correctness problem, and that is deliberate. A bus that
+// is not running reports itself as not live, and a cache that is not live reads
+// through and stores nothing — so the failure mode of every mistake around this
+// lifecycle is a slower server, never a server answering out of a cache nobody
+// can withdraw from.
+func (a *Auth) Close(ctx context.Context) error {
+	if a.cache == nil {
+		return nil
+	}
+	return a.cache.Close(ctx)
 }
 
 // Mount registers the endpoints on a mux.

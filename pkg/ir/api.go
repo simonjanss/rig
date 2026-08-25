@@ -75,6 +75,16 @@ type API struct {
 	// nobody enforces.
 	Throttle *Throttle `json:"throttle,omitempty"`
 
+	// Cache is the resolved `cache:` block, or nil for a project that caches
+	// nothing.
+	//
+	// It is the one part of this document no client can observe, which is why
+	// [Document.Hash] clears it: whether a replica answered a request out of
+	// memory or out of the database is invisible over HTTP, and a project that
+	// spent a revision turning it on would be telling every client it was built
+	// against something older than the server.
+	Cache *Cache `json:"cache,omitempty"`
+
 	// Tracing is the spans this API's generated code opens, or nil for a
 	// project that asked for none.
 	//
@@ -1067,4 +1077,34 @@ type ThrottleRoute struct {
 	Pattern       string `json:"pattern"`
 	Max           int    `json:"max"`
 	WindowSeconds int64  `json:"window_seconds"`
+}
+
+// Cache is the resolved cache block: whether rig holds its own per-request reads
+// in memory, and the channel that withdraws them.
+//
+// The three numbers here describe a mechanism rather than a surface. Nothing a
+// client sends or receives changes when they do, which is what makes this the
+// one field [Document.Hash] clears outright rather than in part.
+type Cache struct {
+	// Enabled says rig caches the reads it owns end to end — session and API key
+	// verification. It is what makes server-go write the wiring.
+	Enabled bool `json:"enabled"`
+
+	// TTLSeconds is how long an answer may be reused with no invalidation
+	// arriving. It is the backstop rather than the guarantee: a revocation is
+	// published on the transaction that made it, and reaches every replica when
+	// that transaction commits.
+	//
+	// Fractional for the reason [Throttle.IntervalSeconds] is: this is a number
+	// somebody may reasonably want below a second.
+	TTLSeconds float64 `json:"ttl_seconds"`
+
+	// Channel is the Postgres NOTIFY channel invalidations travel on. Validated
+	// as an identifier when the configuration was read, because it reaches
+	// Postgres both quoted in a LISTEN and as a parameter to pg_notify.
+	Channel string `json:"channel"`
+
+	// MaxEntries bounds one cache. Past it the whole map is dropped rather than
+	// swept — see runtime/cache.
+	MaxEntries int `json:"max_entries,omitempty"`
 }

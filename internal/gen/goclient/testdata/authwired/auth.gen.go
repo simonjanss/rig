@@ -23,7 +23,7 @@ var AuthProfile = rigclient.AuthProfile{
 	RememberTTL:    14 * 24 * time.Hour,
 	RotationLeeway: 45 * time.Second,
 	IdentityTTL:    20 * time.Minute,
-	CacheTTL:       2 * time.Second,
+	CacheTTL:       45 * time.Second,
 
 	TenantHeader: "X-Tenant-Id",
 

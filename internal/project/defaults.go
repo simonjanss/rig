@@ -297,6 +297,7 @@ func (p *Project) applyDefaults() {
 	p.applyFilesDefaults()
 	p.applyNotificationsDefaults()
 	p.applyPresenceDefaults()
+	p.applyCacheDefaults()
 	p.applyThrottleDefaults()
 	p.applyMonitoringDefaults()
 }
@@ -426,8 +427,6 @@ func (p *Project) applyAuthDefaults() {
 	setDuration(&a.Session.RememberTTL, DefaultRememberTTL)
 	setDuration(&a.Session.RotationLeeway, DefaultRotationLeeway)
 	setDuration(&a.Session.IdentityTTL, DefaultIdentityTTL)
-	// CacheTTL is left alone: zero is the documented default and means the token
-	// row is read on every request, which is what makes revocation immediate.
 
 	policy := password.DefaultPolicy()
 	if a.Password.MinLength == 0 {
@@ -553,6 +552,7 @@ func (p *Project) check() diag.List {
 	diags.Append(p.checkNotifications())
 	diags.Append(p.checkPresence())
 	diags.Append(p.checkThrottle())
+	diags.Append(p.checkCache())
 	diags.Append(p.checkMonitoring())
 
 	return diags

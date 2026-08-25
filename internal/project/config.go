@@ -22,6 +22,7 @@ type Config struct {
 	Notifications Notifications `yaml:"notifications,omitempty" json:"notifications,omitempty" jsonschema_description:"The inbox, and how notifications are delivered."`
 	Presence      Presence      `yaml:"presence,omitempty" json:"presence,omitempty" jsonschema_description:"Who is here, and what they are looking at."`
 	Throttle      Throttle      `yaml:"throttle,omitempty" json:"throttle,omitempty" jsonschema_description:"How many API calls one caller may make. Fair-use limiting, counted in the database so replicas cannot disagree."`
+	Cache         Cache         `yaml:"cache,omitempty" json:"cache,omitempty" jsonschema_description:"Whether rig caches its own per-request reads, behind a Postgres NOTIFY channel that invalidates them when the transaction causing it commits."`
 
 	Tracing Tracing `yaml:"tracing,omitempty" json:"tracing,omitempty" jsonschema_description:"Whether the generated code emits OpenTelemetry spans."`
 
@@ -205,14 +206,6 @@ type AuthSession struct {
 	// IdentityTTL is the lifetime of the tenant-less credential somebody holds
 	// between signing in and picking a tenant. Default 30m.
 	IdentityTTL Duration `yaml:"identity_ttl,omitempty" json:"identity_ttl,omitempty" jsonschema_description:"Lifetime of the tenant-less credential held between signing in and picking a tenant. Defaults to 30m."`
-
-	// CacheTTL keeps verified access tokens in memory. Zero, the default, reads
-	// the row every time, which is what makes revocation immediate.
-	//
-	// Setting it trades that for throughput: a revoked session keeps working for
-	// up to this long. Do not set it above a few seconds, and do not set it at
-	// all unless the read is measurably a problem.
-	CacheTTL Duration `yaml:"cache_ttl,omitempty" json:"cache_ttl,omitempty" jsonschema_description:"Keep verified access tokens in memory for this long. Zero, the default, reads the row every time, which makes revocation immediate. Anything above a few seconds is a revoked session that keeps working."`
 }
 
 // AuthPassword is what a new password must satisfy.

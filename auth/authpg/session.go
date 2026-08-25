@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/simonjanss/rig/auth/session"
 	"github.com/simonjanss/rig/runtime/dbx"
@@ -92,14 +93,25 @@ func (s *SessionStore) MarkRotated(ctx context.Context, id uuid.UUID, at time.Ti
 }
 
 // RevokeFamily implements [session.Store].
-func (s *SessionStore) RevokeFamily(ctx context.Context, rootID uuid.UUID, at time.Time) (int, error) {
-	tag, err := conn(ctx, s.db).Exec(ctx,
-		`UPDATE rig_account_token SET revoked_at = $2 WHERE root_token_id = $1 AND revoked_at IS NULL`,
+//
+// RETURNING rather than a row count, because what the caller does with it is
+// tell every replica to forget those tokens — and one statement that both kills
+// them and says which is one statement fewer than a count plus a second read,
+// with no window in between for a token to be missed.
+func (s *SessionStore) RevokeFamily(ctx context.Context, rootID uuid.UUID, at time.Time) ([]uuid.UUID, error) {
+	rows, err := conn(ctx, s.db).Query(ctx,
+		`UPDATE rig_account_token SET revoked_at = $2
+		 WHERE root_token_id = $1 AND revoked_at IS NULL
+		 RETURNING id`,
 		rootID, at)
 	if err != nil {
-		return 0, fmt.Errorf("authpg: revoke family: %w", err)
+		return nil, fmt.Errorf("authpg: revoke family: %w", err)
 	}
-	return int(tag.RowsAffected()), nil
+	killed, err := pgx.CollectRows(rows, pgx.RowTo[uuid.UUID])
+	if err != nil {
+		return nil, fmt.Errorf("authpg: revoke family: %w", err)
+	}
+	return killed, nil
 }
 
 // Families implements [session.Store].
