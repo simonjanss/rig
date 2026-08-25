@@ -5,11 +5,13 @@ package main
 import (
 	"context"
 	"net/http"
+	"slices"
 	"testing"
 
 	"github.com/google/uuid"
 
 	"github.com/simonjanss/rig/examples/linearlite/services/outbox"
+	"github.com/simonjanss/rig/notify"
 )
 
 // The two notification tables a person owns, as ordinary generated resources.
@@ -253,5 +255,39 @@ func clearPreference(t *testing.T, api *server, token, channel string) {
 		}); res.status != http.StatusNoContent {
 			t.Fatalf("clear the %s preference: %d %s", channel, res.status, res.body)
 		}
+	}
+}
+
+// What the preferences screen is told about channels.
+//
+// The list is one key of `/_demo/tour`, and the screen badges every channel
+// missing from it as having no sender in this build. So a build that registers
+// a sender and does not say so reads as one that cannot deliver at all — a
+// screen about channels, wrong about channels, with nothing else asserting on
+// it.
+func TestTheTourNamesTheChannelsWithASender(t *testing.T) {
+	api := newServer(t)
+	api.seed(t)
+	token := api.login(t, SeedEmail)
+
+	res := api.do(t, request{method: http.MethodGet, path: "/_demo/tour", token: token})
+	if res.status != http.StatusOK {
+		t.Fatalf("tour: %d %s", res.status, res.body)
+	}
+	var tour struct {
+		Channels []string `json:"channels"`
+	}
+	res.decode(t, &tour)
+
+	// The two main.go registers, and the one it does not. Mobile is the whole
+	// reason the key exists: it is a channel rig knows about that this build
+	// cannot deliver on, and the badge is the only place that is said.
+	for _, want := range []notify.Channel{notify.ChannelEmail, notify.ChannelDesktop} {
+		if !slices.Contains(tour.Channels, string(want)) {
+			t.Errorf("the tour names %v, without %s: the screen will say this build has no sender for it", tour.Channels, want)
+		}
+	}
+	if slices.Contains(tour.Channels, string(notify.ChannelMobile)) {
+		t.Errorf("the tour names %s, which this build registered no sender for", notify.ChannelMobile)
 	}
 }

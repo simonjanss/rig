@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/google/uuid"
+
 	internalelectric "github.com/simonjanss/rig/examples/linearlite/internal/electric"
 	"github.com/simonjanss/rig/examples/linearlite/internal/model"
 	"github.com/simonjanss/rig/examples/linearlite/internal/store"
@@ -53,5 +55,45 @@ func Fallback(repo store.TodoRepository) internalelectric.TodoFallback {
 			return nil, fmt.Errorf("the board holds %d todos, past the %d a snapshot may send", total, snapshotLimit)
 		}
 		return rows, nil
+	}
+}
+
+// DeletedFallback answers the trash shape from this application's own read.
+//
+// `ListDeleted` rather than `List`, which is the read the shape corresponds to.
+// One difference is worth knowing and is not worth a fourth read path to avoid:
+// the repository applies `restore_window_days` and the shape does not, so the
+// degraded trash is *narrower* than the live one. A row past its restore window
+// is missing from this snapshot and present in the stream. Narrower is the safe
+// direction — nothing appears that a subscriber was not entitled to — and the
+// alternative is a read that exists only to be less correct than the one the API
+// already has.
+func DeletedFallback(repo store.TodoRepository) internalelectric.TodoDeletedFallback {
+	return func(ctx context.Context, _ *http.Request, _ tenancy.Claims, _ internalelectric.TodoShapeParams) ([]*model.Todo, error) {
+		rows, total, err := repo.ListDeleted(ctx, model.TodoFilter{}, model.TodoPage{Limit: snapshotLimit})
+		if err != nil {
+			return nil, err
+		}
+		if total > int64(len(rows)) {
+			return nil, fmt.Errorf("the trash holds %d todos, past the %d a snapshot may send", total, snapshotLimit)
+		}
+		return rows, nil
+	}
+}
+
+// VersionsFallback answers one row's history.
+//
+// The only one of the three that takes an identifier, because the shape does:
+// `/todo/{id}/_versions/_stream` is a subscription to one row's past, and the id
+// arrives parsed. No count check, because `ListSnapshots` is not paginated —
+// there is no page to mistake for the whole answer, and the proxy's own
+// `MaxSnapshotRows` is what bounds a row with an implausible history.
+//
+// The tenant is not checked here and does not need to be: the claims on the
+// context scope the read, so an id belonging to somebody else answers with
+// nothing rather than with their history.
+func VersionsFallback(repo store.TodoRepository) internalelectric.TodoVersionsFallback {
+	return func(ctx context.Context, _ *http.Request, _ tenancy.Claims, id uuid.UUID, _ internalelectric.TodoShapeParams) ([]*model.Todo, error) {
+		return repo.ListSnapshots(ctx, id)
 	}
 }

@@ -211,9 +211,11 @@ and a repository clamps a larger `Limit` to `MaxLimit` without saying so — so 
 total is the only thing that can tell a complete answer from the first page of
 one, and refusing is the right answer for the same reason `MaxSnapshotRows`
 refuses. The rows go out in the sync protocol's own format, so
-**a subscriber needs no change and cannot tell** — `X-Rig-Sync-Fallback:
-snapshot` on the response is the only sign, and it is there so a browser's
-network tab and your logs have one.
+**a subscriber needs no change and cannot tell** — `X-Rig-Sync-Fallback` on the
+response is the only sign, and it is there so a browser's network tab and your
+logs have one. `snapshot` on the rows themselves, and `must-refetch` on the 409
+that sends a resuming subscriber to fetch them, which is what tells that 409
+apart from the sync service's own.
 
 Two settings on the proxy, both with defaults:
 `electric.Config.InitialTimeout` (10s) is how long a first read waits for the
@@ -257,6 +259,12 @@ those requests are answered from a fallback, or refused, for as long as one
 cooldown — where without the circuit they would have waited and then usually
 succeeded. `BreakerThreshold: -1` turns it off and every request goes on asking.
 
+`examples/linearlite` has a button in its header that stops the sync service's
+container and starts it again, so all of this is something to watch rather than
+read: the board surviving on a snapshot, the lag in both directions between the
+container's state and `SyncReachable`, and the subscription recovering onto real
+sync. Its README calls the walkthrough "Take the sync service down".
+
 ### What a subscriber actually gets
 
 **A snapshot, not a stream.** Correct at the moment it was read and not updated
@@ -265,12 +273,57 @@ afterwards. What follows is:
 | Request | While the sync service is gone |
 |---|---|
 | a read from the beginning | the snapshot, with a handle of rig's own |
-| the poll after it | `503` and a `Retry-After`. The subscriber keeps its rows |
-| the same poll, once the service is back | `409 must-refetch` — the sync service's own answer to a handle it never issued, so the subscriber starts again on real sync |
+| **a poll resuming from the sync service's own handle** | **`409 must-refetch`, so the subscriber reads from the beginning and lands on the snapshot — or `502` and its rows kept, if the fallback would have refused** |
+| the poll after the snapshot | `503` and a `Retry-After`. The subscriber keeps its rows |
+| that poll, once the service is back | `409 must-refetch` — the sync service's own answer to a handle it never issued, so the subscriber starts again on real sync |
 
-Nothing in rig arranges that last step, which is the reason it is the design:
-recovery is a mechanism the protocol already has for exactly this, so there is no
-second one to get wrong. A subscription resumes without a reload.
+**The second row is the one to understand, because it is the difference between
+a degraded board and a board that was only ever saved by a reload.** A tab that
+was already streaming when the outage began is not asking to read the shape; it
+is asking what changed since an offset, and a snapshot is not a smaller answer
+to that question. So the answer for as long as the outage lasted used to be a
+502 per poll, forever — on a page nobody reloads, because the rows are still on
+the screen. Being told to start again is what gets it somewhere: the request
+after a `must-refetch` *is* a read from the beginning, which is the one request a
+snapshot answers.
+
+It is `must-refetch` in both directions and that is not a coincidence — it is the
+same mechanism used twice, because the protocol already has exactly one way to
+say "the handle you are holding is no good, start over". Only a subscription
+that has somewhere to start again *to* is told it. For anything else the 502
+stands, since resetting one that does not would cost it the rows it is holding
+and then refuse the request anyway.
+
+"Somewhere to start again to" is checked rather than assumed, and it is a
+stronger condition than the shape having a fallback: the snapshot is read on the
+resuming request too and thrown away, so that a fallback which fails — or one
+past `MaxSnapshotRows` — leaves the rows where they are instead of taking them
+and then refusing the read it sent the subscriber to make.
+
+A subscription therefore survives an outage in both directions without a reload,
+and rig arranges only the first half of that: the recovery 409 is the sync
+service's own.
+
+**A snapshot is read per request, not once per outage.** Every read from the
+beginning runs the fallback again, so what comes back is the table as it is at
+that moment. The sync service was the thing that was down, not the API, so a
+write during an outage commits — and the next read from the beginning has it.
+What is frozen is not the data; it is one subscription's copy of it. A tab that
+reloads, a tab that opens, and a tab that was just told to start again all see
+current rows, while a tab holding a snapshot taken a minute ago holds a
+minute-old one until something makes it read again.
+
+**Which means the thing to tell a front end is that a write will not echo.** A
+subscriber that renders a change optimistically and clears the overlay when the
+stream confirms it is waiting for a confirmation that cannot arrive, so what a
+person sees is whatever that code does on its timeout — usually the change
+appearing and then reverting, over a row that held the new value the whole time.
+It corrects itself when the sync service comes back, and a reload before then
+shows the new value too, which is the confusing part: the board is more correct
+after a reload than the tab that was watching. `examples/linearlite`'s
+`usePendingMoves` is exactly this shape of code and step 3 of its README is what
+it looks like. A page with optimistic writes has more reason to ask
+`Proxy.SyncReachable` than a read-only one does.
 
 Which reads correspond to which shape:
 
@@ -302,15 +355,22 @@ the subscriber's claims, so a generated repository read scopes itself.
 **A sync outage becomes database load.** Every subscriber falls back at the same
 moment, because what they have in common is the service being gone — so a shape's
 fallback is one `List` per subscriber against the database the sync service was
-shielding. That is why this is off until you turn it on, per shape, and why
-`MaxSnapshotRows` refuses rather than truncates: a subscriber cannot tell a short
-answer from a complete one. Turn it on for the shapes a page cannot render
-without, and leave it off for the rest.
+shielding. Every subscriber, not only the ones arriving: a tab that was already
+streaming is told to start again and reads too, which is the price of it not
+needing a reload. Twice, in fact — once to establish that there is a snapshot to
+send it to, and once to get it — so an outage costs one `List` per tab that
+arrives during it and two per tab that was already there. A network that is
+briefly not there costs that where without a fallback it would have cost some
+retries. That is why this is
+off until you turn it on, per shape, and why `MaxSnapshotRows` refuses rather
+than truncates: a subscriber cannot tell a short answer from a complete one. Turn
+it on for the shapes a page cannot render without, and leave it off for the rest.
 
 **Some shapes should not have one.** [Presence](presence.md) is the clearest: a
 snapshot of who was here a moment ago, that then stops updating, is worth less
 than an empty list, because the feature *is* the freshness. `examples/linearlite`
-wires exactly one fallback, on the board.
+wires one on every shape a screen subscribes to — the board, the trash, one row's
+history and the inbox — and leaves presence without one for that reason.
 
 ## Subscribing to one
 

@@ -3,7 +3,8 @@ import type { Runtime } from "@rig/client";
 import { send } from "@rig/client";
 
 /**
- * The demonstration's own two routes, at `/_demo/`.
+ * Two of the demonstration's own routes, at `/_demo/`. The third, the switch
+ * that stops the sync service, is in `../sync/syncApi.ts`.
  *
  * They are hand-written for the same reason the `/auth/*` calls are: neither
  * is a resource. The outbox is a ring buffer in the server's memory and the
@@ -39,6 +40,12 @@ export type OutboxMessage = {
 export type Tour = {
     monitor: boolean;
     outbox: boolean;
+    /**
+     * Whether this build can stop and start the sync service. It cannot unless
+     * it was told which container that is, which is a demonstration on a laptop
+     * and nothing else — so the pill that operates it is not rendered here.
+     */
+    sync: boolean;
     /**
      * The channels this build registered a sender for. A channel with none has
      * no delivery rows written for it at all, which is the right answer and an

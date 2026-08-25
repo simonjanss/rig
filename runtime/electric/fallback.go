@@ -16,6 +16,14 @@ import (
 // on a live poll. What it returns is sent in the sync protocol's own format, so
 // a client that already speaks the protocol needs to know nothing about it.
 //
+// Once per such request, so a snapshot is as fresh as the request that asked for
+// it: what does not update is one subscriber's copy of the rows, not the rows.
+// An outage takes the sync service and not the API, so writes during one commit
+// and the next read from the beginning has them — which is why a reload sees a
+// change that the tab it was made in does not. A front end that renders a write
+// optimistically and waits for the stream to confirm it is waiting for something
+// that cannot arrive until the sync service is back.
+//
 // A shape with no Fallback answers a sync outage the way this package always
 // did: 502, and a subscriber with no rows.
 type Fallback func(ctx context.Context) (Snapshot, error)
@@ -87,6 +95,11 @@ const fallbackHandlePrefix = "rig-fallback-"
 // subscriptions served during one outage are not told they are the same shape.
 var fallbackHandles atomic.Uint64
 
+// nextFallbackHandle is one of this proxy's own handles.
+func nextFallbackHandle() string {
+	return fallbackHandlePrefix + strconv.FormatUint(fallbackHandles.Add(1), 10)
+}
+
 // isFallbackHandle reports whether a handle came from here.
 func isFallbackHandle(handle string) bool {
 	return strings.HasPrefix(handle, fallbackHandlePrefix)
@@ -145,7 +158,7 @@ func writeSnapshot(w http.ResponseWriter, s Shape, snap Snapshot) {
 	if snap.Schema != "" {
 		h.Set("electric-schema", snap.Schema)
 	}
-	h.Set("electric-handle", fallbackHandlePrefix+strconv.FormatUint(fallbackHandles.Add(1), 10))
+	h.Set("electric-handle", nextFallbackHandle())
 	// The offset a subscriber holds when it is caught up. It is sent back on the
 	// next poll, and that poll is the one the sync service refuses.
 	h.Set("electric-offset", "0_inf")
@@ -167,4 +180,49 @@ func writeSnapshot(w http.ResponseWriter, s Shape, snap Snapshot) {
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(body)
 	_ = http.NewResponseController(w).Flush()
+}
+
+// writeMustRefetch tells a subscriber to drop the handle it is holding and read
+// the shape from the beginning.
+//
+// This is what a subscriber that was already streaming gets when the sync
+// service goes away: it is resuming from a handle the sync service issued, and
+// this package can neither extend that stream nor answer it with a snapshot —
+// [initial] says why, and the answer without this is a 502 per poll for as long
+// as the outage lasts. Which is not a degraded board. It is a board that was
+// only ever rescued by a reload, on a page nobody reloads because the rows are
+// still on the screen.
+//
+// So it is told the one thing that gets it somewhere: start again. The next
+// request is a read from the beginning, which *is* a question a snapshot
+// answers, and the subscription lands on one without a reload. Only once the
+// caller has established that the snapshot is there — a shape with a fallback
+// that refuses is a shape with nothing to start again *to*, and sending a
+// subscriber there would cost it the rows it is holding and hand it a 502
+// anyway, which is strictly worse than the 502 it would have had.
+//
+// 409 rather than something invented, because it is the protocol's own signal
+// and the recovery path in the other direction already relies on it: the sync
+// service answers a handle it never issued exactly this way. A client reacts to
+// the status and reads the handle to resume with off the response, so both are
+// set; the body carries the control message too, for anybody reading a network
+// tab rather than a client's internals.
+func writeMustRefetch(w http.ResponseWriter) {
+	h := w.Header()
+	h.Set("Content-Type", "application/json; charset=utf-8")
+	// A handle of this proxy's own. Without it a client warns that something
+	// between here and there stripped the header — misleading, since the thing
+	// that did not send one is this function.
+	h.Set("electric-handle", nextFallbackHandle())
+	// The one header a cross-origin subscriber has to be able to read here, and
+	// the sync service's own responses are what usually say so. This response
+	// never went near it.
+	h.Set("Access-Control-Expose-Headers", "electric-handle")
+	h.Set("Cache-Control", "no-store")
+	// So a network tab can tell this from the sync service's own 409, which is
+	// the same status for a different reason.
+	h.Set("X-Rig-Sync-Fallback", "must-refetch")
+
+	w.WriteHeader(http.StatusConflict)
+	_, _ = w.Write([]byte(`[{"headers":{"control":"must-refetch"}}]`))
 }

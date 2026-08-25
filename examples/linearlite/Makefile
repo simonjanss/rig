@@ -20,10 +20,24 @@ RUN_DIR ?= .run
 # rather than serving the page behind something guessable. Overridden by
 # anything already in the environment.
 DEMO_MONITOR_PASSWORD := watch-this-demo
+
+# The container the sync service runs in, so the board can offer a button that
+# stops it — the demonstration of what an Electric outage costs, which is live
+# updates and not the board. Without this variable the route does not exist,
+# which is the right default for something that shells out to `docker stop` and
+# the reason it is here rather than in rig.yaml, which is checked in.
+#
+# The name is what `rig db up` gave the container: database.electric's
+# container_name, which defaults to <project name>-electric. Under
+# RIG_DB_ISOLATE it gains a digest of the checkout — the same caveat AGENTS.md
+# records for ELECTRIC_URL, and the same answer: pass the name `docker ps` shows.
+DEMO_SYNC_CONTAINER ?= linearlite-electric
+
 DEMO_ENV := \
 	RIG_LOG_FILE=$(RUN_DIR)/linearlite.log \
 	RIG_TRACE_FILE=$(RUN_DIR)/linearlite.spans \
-	RIG_MONITOR_PASSWORD=$${RIG_MONITOR_PASSWORD:-$(DEMO_MONITOR_PASSWORD)}
+	RIG_MONITOR_PASSWORD=$${RIG_MONITOR_PASSWORD:-$(DEMO_MONITOR_PASSWORD)} \
+	RIG_DEMO_SYNC_CONTAINER=$(DEMO_SYNC_CONTAINER)
 
 .PHONY: demo up seed front run down
 
@@ -33,6 +47,7 @@ demo: up seed front
 	@echo
 	@echo "open http://localhost:8084 — demo@linearlite.dev / \"correct horse battery staple\""
 	@echo "traces and logs at http://localhost:8084/_rig/monitor — password \"$${RIG_MONITOR_PASSWORD:-$(DEMO_MONITOR_PASSWORD)}\""
+	@echo "the pill in the header stops $(DEMO_SYNC_CONTAINER); the board keeps working without it"
 	@echo
 	@DATABASE_URL=$$($(RIG) db url) $(DEMO_ENV) go run .
 

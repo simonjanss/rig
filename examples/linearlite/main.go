@@ -59,6 +59,7 @@ import (
 	"github.com/simonjanss/rig/examples/linearlite/services/outbox"
 	"github.com/simonjanss/rig/examples/linearlite/services/rig_account"
 	"github.com/simonjanss/rig/examples/linearlite/services/rig_notification_device"
+	"github.com/simonjanss/rig/examples/linearlite/services/rig_notification_recipient"
 	"github.com/simonjanss/rig/examples/linearlite/services/rig_notification_setting"
 	"github.com/simonjanss/rig/examples/linearlite/services/rig_presence"
 	"github.com/simonjanss/rig/examples/linearlite/services/todo"
@@ -356,8 +357,9 @@ func newAPI(ctx context.Context, pool *pgxpool.Pool, log *slog.Logger, page *obs
 	// the one that does not, and the reason is in services/rig_presence: every
 	// heartbeat is a row change delivered to every subscriber, so its shape is
 	// the one place where narrowing is what makes the feature affordable.
+	upstream := cmp.Or(os.Getenv("ELECTRIC_URL"), genelectric.DefaultElectricURL)
 	proxy, err := electric.New(electric.Config{
-		URL: cmp.Or(os.Getenv("ELECTRIC_URL"), genelectric.DefaultElectricURL),
+		URL: upstream,
 		// Why the sync service was not the one that answered. There is no logger
 		// inside the proxy, on purpose, so this is the only way the reason for a
 		// 502 on a shape route reaches the log everything else writes to.
@@ -378,15 +380,36 @@ func newAPI(ctx context.Context, pool *pgxpool.Pool, log *slog.Logger, page *obs
 	if err != nil {
 		return nil, nil, err
 	}
-	// TodoFallback is the one shape this example answers without the sync
-	// service: the board is what the demonstration is, and a subscriber that
-	// gets nothing gets a blank page. The other shapes leave it nil and keep
-	// the 502 — presence in particular, where a snapshot of who was here a
-	// moment ago is worth less than nothing.
+	// Every shape a screen here subscribes to answers without the sync service,
+	// except one. The board, the trash, one row's history and the bell all have
+	// a fallback, because each is a screen that renders nothing without its
+	// rows — and a subscriber that gets nothing gets a blank page.
+	//
+	// Presence is the exception and it is a decision rather than an omission. A
+	// snapshot of who was here a moment ago, that then stops updating, is worth
+	// less than an empty list, because the feature *is* the freshness. It is
+	// also the one that would come out right anyway: the heartbeat is a REST
+	// call that an outage does not touch, so it keeps supplying a fresh reading
+	// of the server's clock while the streamed rows sit still, and
+	// @rig/presence ages them out at the TTL. A fallback there would buy a
+	// minute of ghosts and then the empty room it already shows.
+	//
+	// RigNotificationRecipientDeleted is left nil too, for the plainer reason:
+	// nothing subscribes to it.
+	//
+	// The cost of all of this is in one place — every subscriber falls back at
+	// the same moment, so an outage is one read per shape per subscriber against
+	// the database the sync service was shielding. That is the trade, and it is
+	// why each of these is a line somebody wrote rather than a default.
 	genelectric.Register(mux, genelectric.Handlers{
-		Server:       genelectric.Server{Proxy: proxy, GetClaims: front.Claims},
-		RigPresence:  rig_presence.Shape,
-		TodoFallback: todo.Fallback(repos.Todos),
+		Server:      genelectric.Server{Proxy: proxy, GetClaims: front.Claims},
+		RigPresence: rig_presence.Shape,
+
+		TodoFallback:         todo.Fallback(repos.Todos),
+		TodoDeletedFallback:  todo.DeletedFallback(repos.Todos),
+		TodoVersionsFallback: todo.VersionsFallback(repos.Todos),
+
+		RigNotificationRecipientFallback: rig_notification_recipient.Fallback(repos.RigNotificationRecipients),
 	})
 
 	// The permission table, made to match what the handlers check — including
@@ -396,9 +419,14 @@ func newAPI(ctx context.Context, pool *pgxpool.Pool, log *slog.Logger, page *obs
 		return nil, nil, err
 	}
 
-	// The demonstration's own two routes: the outbox, and what the tour can
-	// offer. Neither is about a table, which is why neither is a resource.
-	registerDemo(mux, mail, page, front.Claims, senders)
+	// The demonstration's own routes: the outbox, what the tour can offer, and
+	// the switch that stops the sync service. None is about a table, which is
+	// why none is a resource. The proxy goes in because the switch reports what
+	// its circuit breaker believes beside what the container is actually doing,
+	// and the gap between the two is the thing worth seeing; the URL goes in
+	// because a container the kernel gave a port to comes back on a different
+	// one, and this is where the process was told which port to forward to.
+	registerDemo(mux, mail, page, front.Claims, senders, proxy, upstream)
 
 	// The front end, same origin as everything above. web/dist is read from
 	// disk so `make examples` — which has Go and Docker and deliberately not

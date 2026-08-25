@@ -1,26 +1,35 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
+	"net"
 	"net/http"
+	"net/url"
+	"os"
+	"os/exec"
+	"strings"
+	"time"
 
 	"github.com/google/uuid"
 
 	"github.com/simonjanss/rig/examples/linearlite/services/outbox"
 	"github.com/simonjanss/rig/notify"
 	"github.com/simonjanss/rig/observe"
+	"github.com/simonjanss/rig/runtime/electric"
 	"github.com/simonjanss/rig/runtime/tenancy"
 )
 
-// The demonstration's own two routes, and the only hand-written HTTP in this
+// The demonstration's own routes, and the only hand-written HTTP in this
 // example.
 //
-// They are here rather than in the schema because neither is about a table.
-// The outbox is a ring buffer in this process's memory — it has no rows, no
-// tenant column and nothing to filter — and the tour is a question about how
-// the binary was started. A resource for either would be a resource that lies
-// about what it is, and rig would generate a client, a filter grammar and an
-// OpenAPI entry for something that vanishes on restart.
+// They are here rather than in the schema because none of them is about a
+// table. The outbox is a ring buffer in this process's memory — it has no rows,
+// no tenant column and nothing to filter; the tour is a question about how the
+// binary was started; and the sync switch operates a container. A resource for
+// any of them would be a resource that lies about what it is, and rig would
+// generate a client, a filter grammar and an OpenAPI entry for something that
+// vanishes on restart.
 //
 // `/_demo/` is a prefix nothing else claims: rig owns `/_rig/`, the API owns
 // `/api/v1`, and the front end owns everything left over.
@@ -32,7 +41,10 @@ const demoPrefix = "/_demo/"
 func registerDemo(mux *http.ServeMux, mail *outbox.Box, page *observe.Page,
 	getClaims func(*http.Request) (tenancy.Claims, error),
 	senders map[notify.Channel]notify.Sender,
+	proxy *electric.Proxy, upstream string,
 ) {
+	sync := newSyncSwitch(proxy, upstream)
+
 	// What the tour can offer, so the front end can leave out a link that would
 	// only 404. The monitoring page is not mounted without a password in the
 	// environment, and that is the ordinary case on a laptop.
@@ -59,11 +71,17 @@ func registerDemo(mux *http.ServeMux, mail *outbox.Box, page *observe.Page,
 			}
 		}
 		writeJSON(w, http.StatusOK, map[string]any{
-			"monitor":  page != nil && page.Unarmed() == "",
-			"outbox":   mail != nil,
+			"monitor": page != nil && page.Unarmed() == "",
+			"outbox":  mail != nil,
+			// Whether this build can take the sync service down. The pill that
+			// reads this is a button, and a button that answers 404 is worse
+			// than no button.
+			"sync":     sync != nil,
 			"channels": channels,
 		})
 	})
+
+	registerSyncSwitch(mux, sync, getClaims)
 
 	if mail == nil {
 		return
@@ -86,6 +104,194 @@ func registerDemo(mux *http.ServeMux, mail *outbox.Box, page *observe.Page,
 	})
 }
 
+// SyncSwitchEnv names the container the sync service runs in, and mounting the
+// switch at all is conditional on it being set.
+//
+// This is the same gate rig puts on its monitoring page, for a stronger version
+// of the same reason. A route that runs `docker stop` is a route no deployment
+// may have, so the answer to "is it there?" has to default to no — and it has
+// to be a route that *does not exist* rather than one that refuses, because a
+// route answering 403 still tells a scanner what this process can reach.
+//
+// `make demo` sets it to the name `rig db up` gave the container. It is not in
+// rig.yaml, which is checked in, for the same reason RIG_MONITOR_PASSWORD is
+// not: a switch like this is a fact about one laptop.
+const SyncSwitchEnv = "RIG_DEMO_SYNC_CONTAINER"
+
+// syncSwitch stops and starts the sync service, and says what the proxy in
+// front of it currently believes.
+//
+// It shells out to the container engine rather than using rig's own
+// internal/dockerdb, which is not importable from an example — and would drag
+// the CLI's dependencies into a module that only serves a board. Three
+// subcommands is not enough code to be worth that.
+type syncSwitch struct {
+	// engine is an absolute path, resolved once: `docker` then `podman`, the
+	// order rig's own container code tries them in.
+	engine    string
+	container string
+	proxy     *electric.Proxy
+	// upstream is the host port this process forwards shapes to, taken from the
+	// same URL the proxy was built with. Kept so the state can notice the
+	// container coming back somewhere else — see syncState.Moved.
+	upstream string
+}
+
+// newSyncSwitch is nil when this build cannot offer the switch, which is every
+// build but a demonstration on a machine with a container engine.
+func newSyncSwitch(proxy *electric.Proxy, upstream string) *syncSwitch {
+	name := strings.TrimSpace(os.Getenv(SyncSwitchEnv))
+	if name == "" || proxy == nil {
+		return nil
+	}
+	for _, bin := range []string{"docker", "podman"} {
+		if engine, err := exec.LookPath(bin); err == nil {
+			return &syncSwitch{
+				engine:    engine,
+				container: name,
+				proxy:     proxy,
+				upstream:  portOf(upstream),
+			}
+		}
+	}
+	return nil
+}
+
+// portOf is the port in a URL, and "" for one that does not parse — which is
+// not worth refusing to start over, since the only thing it costs is the
+// warning in syncState.Moved.
+func portOf(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return ""
+	}
+	if _, port, err := net.SplitHostPort(u.Host); err == nil {
+		return port
+	}
+	return ""
+}
+
+// syncState is what the pill in the header renders, and it reports several
+// separate facts rather than one "is sync up" boolean on purpose.
+//
+// Container is the truth about the process. Reachable is what this proxy's
+// circuit breaker last learned, which lags it in both directions and is the
+// interesting part: stopping the container leaves Reachable true until enough
+// requests in a row have failed to open the circuit, and starting it leaves
+// Reachable false until the cooldown lets one request through to find out.
+// Showing them side by side is the only way that mechanism is visible from a
+// browser.
+type syncState struct {
+	// Container is "running", "stopped", or "missing" for one that was never
+	// created — which is what `make examples` sees, since it brings up a
+	// database and no sync service.
+	Container string `json:"container"`
+	Reachable bool   `json:"reachable"`
+
+	// Upstream is the port this process forwards shapes to, and Published is
+	// where the container actually answers — empty while it is not running.
+	Upstream  string `json:"upstream"`
+	Published string `json:"published"`
+
+	// Moved says those two disagree, which is a dead end and the one failure
+	// this switch can cause rather than demonstrate.
+	//
+	// A container published on a port the kernel chose gets a *different* one
+	// when it is started again, and rig asks the kernel to choose whenever
+	// RIG_DB_ISOLATE is set — which is every checkout of rig itself, because
+	// its own Makefile sets it so two clones cannot adopt each other's
+	// containers. The proxy's URL is fixed when the process starts, so a
+	// container that came back elsewhere is a sync service that is running,
+	// healthy, and permanently unreachable from here. Restarting the server is
+	// the whole fix; noticing is the hard part, which is why this field exists.
+	Moved bool `json:"moved"`
+}
+
+// registerSyncSwitch mounts the three routes, and mounts nothing when the
+// switch is nil.
+func registerSyncSwitch(mux *http.ServeMux, sw *syncSwitch, getClaims func(*http.Request) (tenancy.Claims, error)) {
+	if sw == nil {
+		return
+	}
+
+	// Signed in, like the tour and for the same reason: what this process can
+	// reach is not a fact to hand an anonymous caller.
+	guard := func(next func(http.ResponseWriter, *http.Request)) http.HandlerFunc {
+		return func(w http.ResponseWriter, r *http.Request) {
+			if _, ok := tenantOf(r, getClaims); !ok {
+				writeJSON(w, http.StatusUnauthorized, map[string]string{"message": "sign in first"})
+				return
+			}
+			next(w, r)
+		}
+	}
+
+	mux.HandleFunc("GET "+demoPrefix+"sync", guard(func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusOK, sw.state(r.Context()))
+	}))
+
+	// Both answer with the state afterwards, so the front end needs no second
+	// request to know what it did. The engine's own subcommand is the route's
+	// last segment, which is why one loop covers both.
+	for _, verb := range []string{"stop", "start"} {
+		mux.HandleFunc("POST "+demoPrefix+"sync/"+verb, guard(func(w http.ResponseWriter, r *http.Request) {
+			// Detached from the request on purpose. The engine does the work
+			// either way, so a browser that navigates away mid-stop would
+			// otherwise leave this handler reporting a failure for something
+			// that succeeded.
+			ctx := context.WithoutCancel(r.Context())
+			if out, err := sw.run(ctx, verb, sw.container); err != nil {
+				writeJSON(w, http.StatusBadGateway, map[string]string{
+					"message": strings.TrimSpace(out),
+				})
+				return
+			}
+			writeJSON(w, http.StatusOK, sw.state(ctx))
+		}))
+	}
+}
+
+// inspectFormat asks for both facts in one call: whether the container is
+// running, and which host port it publishes the sync service on. A stopped
+// container has the mapping but no port, and both `with`s are what keep that
+// from being a template error rather than an empty second field.
+const inspectFormat = `{{.State.Running}} {{with index .NetworkSettings.Ports "3000/tcp"}}{{with index . 0}}{{.HostPort}}{{end}}{{end}}`
+
+// state asks the engine about the container and the proxy about itself.
+func (s *syncSwitch) state(ctx context.Context) syncState {
+	st := syncState{Container: "missing", Reachable: s.proxy.SyncReachable(), Upstream: s.upstream}
+	// A container that does not exist is an error here, not a false — which is
+	// the answer `make examples` gets, and not a failure.
+	out, err := s.run(ctx, "inspect", "--format", inspectFormat, s.container)
+	if err != nil {
+		return st
+	}
+	fields := strings.Fields(out)
+	if len(fields) == 0 {
+		return st
+	}
+	if fields[0] == "true" {
+		st.Container = "running"
+	} else {
+		st.Container = "stopped"
+	}
+	if len(fields) > 1 {
+		st.Published = fields[1]
+	}
+	st.Moved = st.Published != "" && st.Upstream != "" && st.Published != st.Upstream
+	return st
+}
+
+// run is one engine command, with a ceiling. `stop` sends SIGTERM and waits ten
+// seconds for the process to go before killing it, so the budget has to be
+// larger than that or a graceful stop reads as a failed one.
+func (s *syncSwitch) run(ctx context.Context, args ...string) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, s.engine, args...).CombinedOutput()
+	return string(out), err
+}
+
 // tenantOf is the caller's tenant, and false for anybody these routes should
 // not answer at all.
 func tenantOf(r *http.Request, getClaims func(*http.Request) (tenancy.Claims, error)) (uuid.UUID, bool) {
@@ -98,7 +304,7 @@ func tenantOf(r *http.Request, getClaims func(*http.Request) (tenancy.Claims, er
 
 func writeJSON(w http.ResponseWriter, status int, body any) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	// Nothing here is cacheable: one is a credential and the other is a fact
+	// Nothing here is cacheable: one is a credential and the others are facts
 	// about this process.
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(status)
