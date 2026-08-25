@@ -22,15 +22,20 @@ import (
 // is why [Managed] can read a project's migrations directory and say which parts
 // arrived with the foundation.
 const (
-	PartTenancy       = "tenancy"
-	PartSessions      = "sessions"
-	PartAPIKeys       = "apikeys"
-	PartOAuth         = "oauth"
-	PartFiles         = "files"
-	PartNotifications = "notifications"
-	PartPresence      = "presence"
-	PartIdempotency   = "idempotency"
-	PartThrottle      = "throttle"
+	PartTenancy  = "tenancy"
+	PartSessions = "sessions"
+	PartAPIKeys  = "apikeys"
+	PartOAuth    = "oauth"
+	// PartVerificationDelivery is the mail queue for the links tenancy mints. Its
+	// own part because it is its own migration, and it arrives with auth for the
+	// reason the table it queues for does: a project that mints links can always
+	// choose to queue them, and the choice is a Go one rather than a rig.yaml one.
+	PartVerificationDelivery = "verification_delivery"
+	PartFiles                = "files"
+	PartNotifications        = "notifications"
+	PartPresence             = "presence"
+	PartIdempotency          = "idempotency"
+	PartThrottle             = "throttle"
 )
 
 // Sets are the foundation's migration sets, in the order they apply.
@@ -478,6 +483,10 @@ func Requires(part string) []string {
 		return []string{PartTenancy, PartAPIKeys}
 	case PartAPIKeys, PartOAuth:
 		return []string{PartTenancy}
+	case PartVerificationDelivery:
+		// It references rig_identity_verification and alters it, both of which
+		// are the tenancy part.
+		return []string{PartTenancy}
 	case PartNotifications:
 		// An inbox line names an account, and rig_account is the tenancy part.
 		// Not sessions: reading your own inbox needs claims, and where those
@@ -546,6 +555,8 @@ func foundationPart(name string) part {
 		p.configs = apiKeyConfigs()
 	case PartOAuth:
 		p.configs = oauthConfigs()
+	case PartVerificationDelivery:
+		p.configs = verificationDeliveryConfigs()
 	case PartFiles:
 		p.configs = fileConfigs()
 	case PartNotifications:

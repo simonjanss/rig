@@ -14,7 +14,6 @@ import (
 	"cmp"
 	"context"
 	"embed"
-	"fmt"
 	"net/http"
 	"os"
 	"time"
@@ -266,7 +265,11 @@ func dispatchNotifications(ctx context.Context, pool *pgxpool.Pool) error {
 	svc := todo.New(repos.Todos, api.NewFiles(pool), nil, inbox, pool, nil)
 	reg.Register(api.NewTodoSubject(svc))
 
-	report, err := api.NewNotificationEngine(pool, reg, nil).Resolve(ctx)
-	fmt.Fprintln(os.Stdout, report)
-	return err
+	// The generated task rather than its steps written out again: it resolves,
+	// dispatches and prunes, and this function used to do only the first of the
+	// three. There are no senders here — this example is an inbox and nothing
+	// else — so dispatching finds no delivery rows and returns immediately; what
+	// is gained is the pruning, which was not happening at all.
+	return api.NotificationDispatcher(
+		api.NewNotificationEngine(pool, reg, nil), os.Stdout)(ctx, pool)
 }

@@ -6,9 +6,11 @@ package electric
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 
 	"github.com/google/uuid"
+	"github.com/simonjanss/rig/examples/linearlite/internal/model"
 	"github.com/simonjanss/rig/runtime/electric"
 	"github.com/simonjanss/rig/runtime/tenancy"
 )
@@ -41,8 +43,35 @@ func parseTodoShapeParams(r *http.Request) (TodoShapeParams, error) {
 // Returning an error refuses the subscription.
 type TodoScope func(ctx context.Context, r *http.Request, claims tenancy.Claims, p TodoShapeParams, w *electric.Where) error
 
+// TodoFallback answers this shape from the application's own read path when
+// the sync service cannot be reached.
+//
+// It is called for a subscriber reading the shape from the beginning, and
+// never for one resuming a subscription — so what it returns is every row
+// the shape holds, not a change to one. The rows go out in the sync protocol's
+// own format, which is why a subscriber needs to know nothing about this and
+// why what it gets is a snapshot rather than a stream: correct when it was
+// read, and not updated until the sync service is back.
+//
+// The context already carries the subscriber's claims, so a generated
+// repository read scopes itself to the right tenant without being asked.
+//
+// The read this corresponds to is List, with the repository's default filters:
+// this tenant, not deleted, not a snapshot.
+//
+// **Whatever the scope narrows, narrow here too.** A scope is a filter the
+// proxy sends to the sync service and can therefore promise; this is a read
+// the proxy cannot see inside. A shape scoped to less than its table, with a
+// fallback that is not, shows a subscriber rows the subscription would have
+// withheld — and only while something else is broken, which is the worst
+// time to find out.
+//
+// Returning an error answers 502, which is what a shape with no fallback
+// answers anyway.
+type TodoFallback func(ctx context.Context, r *http.Request, claims tenancy.Claims, p TodoShapeParams) ([]*model.Todo, error)
+
 // handleTodoShape serves GET /api/v1/todo/_stream.
-func handleTodoShape(s Server, scope TodoScope) http.HandlerFunc {
+func handleTodoShape(s Server, scope TodoScope, fallback TodoFallback) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		claims, where, ok := prepare(s, w, r, false)
 		if !ok {
@@ -81,7 +110,44 @@ func handleTodoShape(s Server, scope TodoScope) http.HandlerFunc {
 			// every column it names to every subscriber, and a column that is not in the
 			// API has no business in a live stream either.
 			Columns: TodoShapeColumns,
+			// What answers this if the sync service cannot be reached. Nil unless the
+			// application wired one, and nil is the 502 this route answered before the
+			// field existed.
+			Fallback: todoFallback(fallback, r, claims, params),
 		})
+	}
+}
+
+// todoFallback adapts one of these reads to what the proxy asks for.
+//
+// The claims go onto the context here, and not in the function an application
+// writes, for the reason the tenant condition is built in the handler: a
+// generated read takes its claims from the context, and one that reached it
+// without them is a read with no tenant filter. Making that somebody's job to
+// remember is making it somebody's job to forget.
+//
+// Nil stays nil, which is how the proxy knows there is nothing to fall back
+// to.
+func todoFallback(fn TodoFallback, r *http.Request, claims tenancy.Claims, p TodoShapeParams) electric.Fallback {
+	if fn == nil {
+		return nil
+	}
+	return func(ctx context.Context) (electric.Snapshot, error) {
+		rows, err := fn(tenancy.NewContext(ctx, claims), r, claims, p)
+		if err != nil {
+			return electric.Snapshot{}, err
+		}
+
+		out := make([]electric.Row, 0, len(rows))
+		for _, m := range rows {
+			// A nil in the slice is not a row, and rendering one would send a subscriber a
+			// row of nulls with an empty key.
+			if m == nil {
+				continue
+			}
+			out = append(out, todoShapeRow(m))
+		}
+		return electric.Snapshot{Rows: out, Schema: TodoShapeSchema}, nil
 	}
 }
 
@@ -97,8 +163,36 @@ func handleTodoShape(s Server, scope TodoScope) http.HandlerFunc {
 // Returning an error refuses the subscription.
 type TodoDeletedScope func(ctx context.Context, r *http.Request, claims tenancy.Claims, p TodoShapeParams, w *electric.Where) error
 
+// TodoDeletedFallback answers this shape from the application's own read path
+// when the sync service cannot be reached.
+//
+// It is called for a subscriber reading the shape from the beginning, and
+// never for one resuming a subscription — so what it returns is every row
+// the shape holds, not a change to one. The rows go out in the sync protocol's
+// own format, which is why a subscriber needs to know nothing about this and
+// why what it gets is a snapshot rather than a stream: correct when it was
+// read, and not updated until the sync service is back.
+//
+// The context already carries the subscriber's claims, so a generated
+// repository read scopes itself to the right tenant without being asked.
+//
+// The read this corresponds to is ListDeleted — the trash, which the API
+// also exposes as GET /_deleted. Note that the repository applies the restore
+// window and this shape does not, so the fallback is the narrower of the two.
+//
+// **Whatever the scope narrows, narrow here too.** A scope is a filter the
+// proxy sends to the sync service and can therefore promise; this is a read
+// the proxy cannot see inside. A shape scoped to less than its table, with a
+// fallback that is not, shows a subscriber rows the subscription would have
+// withheld — and only while something else is broken, which is the worst
+// time to find out.
+//
+// Returning an error answers 502, which is what a shape with no fallback
+// answers anyway.
+type TodoDeletedFallback func(ctx context.Context, r *http.Request, claims tenancy.Claims, p TodoShapeParams) ([]*model.Todo, error)
+
 // handleTodoDeletedShape serves GET /api/v1/todo/_deleted/_stream.
-func handleTodoDeletedShape(s Server, scope TodoDeletedScope) http.HandlerFunc {
+func handleTodoDeletedShape(s Server, scope TodoDeletedScope, fallback TodoDeletedFallback) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		claims, where, ok := prepare(s, w, r, false)
 		if !ok {
@@ -137,7 +231,44 @@ func handleTodoDeletedShape(s Server, scope TodoDeletedScope) http.HandlerFunc {
 			// every column it names to every subscriber, and a column that is not in the
 			// API has no business in a live stream either.
 			Columns: TodoShapeColumns,
+			// What answers this if the sync service cannot be reached. Nil unless the
+			// application wired one, and nil is the 502 this route answered before the
+			// field existed.
+			Fallback: todoDeletedFallback(fallback, r, claims, params),
 		})
+	}
+}
+
+// todoDeletedFallback adapts one of these reads to what the proxy asks for.
+//
+// The claims go onto the context here, and not in the function an application
+// writes, for the reason the tenant condition is built in the handler: a
+// generated read takes its claims from the context, and one that reached it
+// without them is a read with no tenant filter. Making that somebody's job to
+// remember is making it somebody's job to forget.
+//
+// Nil stays nil, which is how the proxy knows there is nothing to fall back
+// to.
+func todoDeletedFallback(fn TodoDeletedFallback, r *http.Request, claims tenancy.Claims, p TodoShapeParams) electric.Fallback {
+	if fn == nil {
+		return nil
+	}
+	return func(ctx context.Context) (electric.Snapshot, error) {
+		rows, err := fn(tenancy.NewContext(ctx, claims), r, claims, p)
+		if err != nil {
+			return electric.Snapshot{}, err
+		}
+
+		out := make([]electric.Row, 0, len(rows))
+		for _, m := range rows {
+			// A nil in the slice is not a row, and rendering one would send a subscriber a
+			// row of nulls with an empty key.
+			if m == nil {
+				continue
+			}
+			out = append(out, todoShapeRow(m))
+		}
+		return electric.Snapshot{Rows: out, Schema: TodoShapeSchema}, nil
 	}
 }
 
@@ -157,8 +288,35 @@ func handleTodoDeletedShape(s Server, scope TodoDeletedScope) http.HandlerFunc {
 // Returning an error refuses the subscription.
 type TodoVersionsScope func(ctx context.Context, r *http.Request, claims tenancy.Claims, id uuid.UUID, p TodoShapeParams, w *electric.Where) error
 
+// TodoVersionsFallback answers this shape from the application's own read path
+// when the sync service cannot be reached.
+//
+// It is called for a subscriber reading the shape from the beginning, and
+// never for one resuming a subscription — so what it returns is every row
+// the shape holds, not a change to one. The rows go out in the sync protocol's
+// own format, which is why a subscriber needs to know nothing about this and
+// why what it gets is a snapshot rather than a stream: correct when it was
+// read, and not updated until the sync service is back.
+//
+// The context already carries the subscriber's claims, so a generated
+// repository read scopes itself to the right tenant without being asked.
+//
+// The read this corresponds to is ListSnapshots on the id this shape is the
+// history of.
+//
+// **Whatever the scope narrows, narrow here too.** A scope is a filter the
+// proxy sends to the sync service and can therefore promise; this is a read
+// the proxy cannot see inside. A shape scoped to less than its table, with a
+// fallback that is not, shows a subscriber rows the subscription would have
+// withheld — and only while something else is broken, which is the worst
+// time to find out.
+//
+// Returning an error answers 502, which is what a shape with no fallback
+// answers anyway.
+type TodoVersionsFallback func(ctx context.Context, r *http.Request, claims tenancy.Claims, id uuid.UUID, p TodoShapeParams) ([]*model.Todo, error)
+
 // handleTodoVersionsShape serves GET /api/v1/todo/{id}/_versions/_stream.
-func handleTodoVersionsShape(s Server, scope TodoVersionsScope) http.HandlerFunc {
+func handleTodoVersionsShape(s Server, scope TodoVersionsScope, fallback TodoVersionsFallback) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		claims, where, ok := prepare(s, w, r, false)
 		if !ok {
@@ -208,6 +366,10 @@ func handleTodoVersionsShape(s Server, scope TodoVersionsScope) http.HandlerFunc
 			// every column it names to every subscriber, and a column that is not in the
 			// API has no business in a live stream either.
 			Columns: TodoShapeColumns,
+			// What answers this if the sync service cannot be reached. Nil unless the
+			// application wired one, and nil is the 502 this route answered before the
+			// field existed.
+			Fallback: todoVersionsFallback(fallback, r, claims, id, params),
 		})
 	}
 }
@@ -222,6 +384,39 @@ func versionsFromLiveTodo(live TodoScope) TodoVersionsScope {
 	}
 	return func(ctx context.Context, r *http.Request, claims tenancy.Claims, _ uuid.UUID, p TodoShapeParams, w *electric.Where) error {
 		return live(ctx, r, claims, p, w)
+	}
+}
+
+// todoVersionsFallback adapts one of these reads to what the proxy asks for.
+//
+// The claims go onto the context here, and not in the function an application
+// writes, for the reason the tenant condition is built in the handler: a
+// generated read takes its claims from the context, and one that reached it
+// without them is a read with no tenant filter. Making that somebody's job to
+// remember is making it somebody's job to forget.
+//
+// Nil stays nil, which is how the proxy knows there is nothing to fall back
+// to.
+func todoVersionsFallback(fn TodoVersionsFallback, r *http.Request, claims tenancy.Claims, id uuid.UUID, p TodoShapeParams) electric.Fallback {
+	if fn == nil {
+		return nil
+	}
+	return func(ctx context.Context) (electric.Snapshot, error) {
+		rows, err := fn(tenancy.NewContext(ctx, claims), r, claims, id, p)
+		if err != nil {
+			return electric.Snapshot{}, err
+		}
+
+		out := make([]electric.Row, 0, len(rows))
+		for _, m := range rows {
+			// A nil in the slice is not a row, and rendering one would send a subscriber a
+			// row of nulls with an empty key.
+			if m == nil {
+				continue
+			}
+			out = append(out, todoShapeRow(m))
+		}
+		return electric.Snapshot{Rows: out, Schema: TodoShapeSchema}, nil
 	}
 }
 
@@ -248,3 +443,42 @@ var TodoShapeColumns = []string{
 	"snapshot_from_todo_id",
 	"snapshot_from_todo_at",
 }
+
+// todoShapeRow renders one row the way the sync service renders it.
+//
+// Every value is the text Postgres prints for it, or null, because that is
+// what a subscriber's parsers expect — the type each column is read as comes
+// from TodoShapeSchema and not from the JSON.
+func todoShapeRow(m *model.Todo) electric.Row {
+	return electric.Row{
+		Key: electric.RowKey("todo", fmt.Sprint(m.ID)),
+		Value: map[string]any{
+			"id":                    electric.Value(m.ID),
+			"tenant_id":             electric.Value(m.TenantID),
+			"title":                 electric.Value(m.Title),
+			"description":           electric.Value(m.Description),
+			"status":                electric.Value(m.Status),
+			"priority":              electric.Value(m.Priority),
+			"assignee_account_id":   electric.Value(m.AssigneeAccountID),
+			"created_at":            electric.Value(m.CreatedAt),
+			"created_by_account_id": electric.Value(m.CreatedByAccountID),
+			"updated_at":            electric.Value(m.UpdatedAt),
+			"updated_by_account_id": electric.Value(m.UpdatedByAccountID),
+			"deleted_at":            electric.Value(m.DeletedAt),
+			"deleted_by_account_id": electric.Value(m.DeletedByAccountID),
+			"version_type":          electric.Value(m.VersionType),
+			"snapshot_from_todo_id": electric.Value(m.SnapshotFromTodoID),
+			"snapshot_from_todo_at": electric.Value(m.SnapshotFromTodoAt),
+		},
+	}
+}
+
+// TodoShapeSchema describes the columns this shape carries, in the form the
+// sync service describes them.
+//
+// It is sent with a fallback snapshot and is how a subscriber knows to read a
+// count as a number and a timestamp as a moment. The types are Postgres's own
+// names — int8, timestamptz, an enum's type name — because those are what
+// the sync service sends and a subscriber has one set of parsers for both
+// paths.
+const TodoShapeSchema = "{\"assignee_account_id\":{\"type\":\"uuid\"},\"created_at\":{\"not_null\":true,\"type\":\"timestamptz\"},\"created_by_account_id\":{\"type\":\"uuid\"},\"deleted_at\":{\"type\":\"timestamptz\"},\"deleted_by_account_id\":{\"type\":\"uuid\"},\"description\":{\"type\":\"text\"},\"id\":{\"not_null\":true,\"pk_index\":0,\"type\":\"uuid\"},\"priority\":{\"not_null\":true,\"type\":\"todo_priority\"},\"snapshot_from_todo_at\":{\"type\":\"timestamptz\"},\"snapshot_from_todo_id\":{\"type\":\"uuid\"},\"status\":{\"not_null\":true,\"type\":\"todo_status\"},\"tenant_id\":{\"not_null\":true,\"type\":\"uuid\"},\"title\":{\"not_null\":true,\"type\":\"text\"},\"updated_at\":{\"type\":\"timestamptz\"},\"updated_by_account_id\":{\"type\":\"uuid\"},\"version_type\":{\"not_null\":true,\"type\":\"todo_version_type\"}}"

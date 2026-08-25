@@ -4801,12 +4801,12 @@ because they are different modules and one of them is a different argument:
   retry and no outbox, and the rate-limit budget is spent *before* the send — so a
   provider outage burns somebody's five-an-hour on mail that never left. The
   engine three directories over solves this exact problem properly; the asymmetry
-  is worth a milestone rather than a patch.
+  is worth a milestone rather than a patch. (Fixed in M17.)
 
-Two smaller ones, same class: the delivery backoff has **no jitter**, so a hundred
-failures in one pass retry in lockstep for all five attempts; and `files/sweep.go`
-returns on its first error, so one un-deletable object stalls every pass behind it
-— where `notify`'s `address()` deliberately swallows to avoid precisely that.
+One smaller one, same class: `files/sweep.go` returns on its first error, so one
+un-deletable object stalls every pass behind it — where `notify`'s `address()`
+deliberately swallows to avoid precisely that. (The other one recorded here, that
+the delivery backoff had no jitter, is fixed in M16.)
 
 ---
 
@@ -5474,6 +5474,302 @@ stale row as a bug.
 `todo_versions` — four, under the six-connection ceiling HTTP/1.1 imposes and that
 Electric warns about in the console on every load. Fine here; a project that adds
 two more shapes will meet that ceiling before it meets any presence limit.
+
+## M15.2 — a shape answers when the sync service does not (shipped)
+
+**Goal.** A subscriber whose sync service is unreachable gets rows instead of a
+502, from the read the application already has, in the format it already speaks.
+
+**What it is.** `electric.Shape` grew a `Fallback`, and `Proxy.Serve` calls it
+when a subscriber reading from the beginning cannot be answered upstream. What
+goes out is a snapshot in the sync protocol's own format, so nothing on the
+client changes and nothing on the client can tell — `X-Rig-Sync-Fallback:
+snapshot` is the only sign, and it is there for a person reading a network tab.
+The generator emits the seam when `model_import` names the model, because the
+seam is made of the model's types; without it nothing is emitted at all and the
+package is what it was.
+
+### Everything about the protocol was read rather than reasoned about
+
+The design turns on four facts about ElectricSQL 1.6.9, and each of them was
+answered by running a container and looking, not by thinking about it:
+
+- **Every value on the wire is a string or null**, in Postgres's text form, and
+  the column's type comes from the `electric-schema` header. So a snapshot that
+  sent a JSON number would be decoded twice.
+- **A boolean is `true`, not `t`.** Postgres prints `t`; the sync service
+  normalises. pgx's text encoder prints `t`, so the one type where the obvious
+  implementation is wrong is the one where it fails silently — `"t"` decodes as
+  false.
+- **An initial response ends with `snapshot-end`, not `up-to-date`**, and takes a
+  second request to get there, because the sync service has a log to catch up on
+  between the two. A snapshot has no log, so it ends `up-to-date` in one
+  response. Had it copied `snapshot-end`, the collection would have held every
+  row and stayed in its loading state forever — rows on the client and a blank
+  page, which is worse than the 502 it replaced.
+- **A handle the sync service never issued is a `409` and a `must-refetch`**, at
+  any offset, live or not. That is the whole recovery path, and rig arranges none
+  of it: the snapshot's handle is prefixed `rig-fallback-`, the proxy forwards it
+  like any other, and the sync service resets the subscriber onto real sync the
+  moment it is reachable. A recovery mechanism this package invented would have
+  been a second one to get wrong.
+
+The last of those is why there is no code for recovery to be a bug in. It is also
+why the handle has to be a handle rather than nothing: a subscriber needs
+something to send back, and what it sends back is what triggers the reset.
+
+### The encoder is one function, and a container found its bugs
+
+`electric.Value` is reflective rather than generated per column, which is a
+departure from how this repository usually does things — the alternative was a
+generator emitting a conversion per Postgres type, and one tested function beats
+sixteen emitted ones for something whose correctness is entirely about edge
+cases. It is `time.Time` first (because `String` is Go's layout, not Postgres's),
+then `json.RawMessage` before `[]byte` (which it is underneath), then the scalar
+kinds, then `fmt.Stringer` for a uuid, then pgx's own text codec for arrays and
+`pgtype.Numeric`, then JSON.
+
+`internal/electrictest` is what makes that trustworthy: it inserts one row of
+every type and one row of nulls, fetches the shape twice — once through the real
+sync service and once through a proxy pointed at a closed port — and compares
+column by column. It found two bugs on its first run, both the same shape of
+mistake: a null `numeric` and a null `text[]` were rendering as `""`, because an
+invalid `pgtype.Numeric` and a nil slice both encode to the empty string and an
+empty string is a value. `isNull` exists because of that test.
+
+Two columns are equal without being identical, and the test says which and why: a
+`timestamptz` is compared as an instant (the sync service writes a space and a
+two-digit offset; rig writes the RFC 3339 the API sends, which is the form a
+subscriber is already parsing), and a `jsonb` is compared as a document
+(Postgres normalises key order and spacing; Go prints what it was handed).
+
+### What is deliberately not there
+
+- **No stub.** The plan had one, and it came out because a stub cannot reach a
+  repository: it would have to invent a store import and a repository type for the
+  generator to name. So the seam is a type and a field, and the worked example is
+  `examples/linearlite/services/todo/todo_fallback.go` — a constructor taking the
+  repository, wired where `Register` is called, which is where somebody wiring a
+  shape endpoint is already looking.
+- **No inheritance between the derived shapes.** The scopes inherit because the
+  three shapes carry the same table's rows and a narrowing that mattered for one
+  matters for the others. The fallbacks are the opposite: three shapes, three
+  reads, and a trash route quietly answering with live rows is the worst outcome
+  available. Nil stays nil.
+- **No client change.** `@rig/electric` does not surface the header, so nothing
+  renders a "reconnecting" banner. The test that matters is there instead —
+  `ts/packages/electric/src/fallback.test.ts` drives a real `ShapeStream` over
+  the exact bytes the Go side writes, because the envelope is rig's invention and
+  a client that rejected it would make the whole feature a 200 with no effect.
+- **No collapsing of the herd.** Every subscriber falls back at the same moment,
+  because what they have in common is the service being gone, so a shape's
+  fallback is one `List` per subscriber against the database the sync service was
+  shielding. `MaxSnapshotRows` bounds the memory and refuses past the bound
+  rather than truncating — a subscriber cannot tell a short answer from a complete
+  one — and being off until somebody turns it on, per shape, is the rest of the
+  answer. Collapsing identical concurrent snapshots through `runtime/cache`'s
+  `Map`, keyed by shape and tenant and params with a few seconds' TTL, is the
+  obvious next step and is not here.
+
+### Honest gaps
+
+- **Nothing checks that a scope and its fallback narrow the same way.** A scope
+  is a filter the proxy sends and can promise; a fallback is a read it cannot see
+  inside, so a shape scoped to a team with a fallback that lists the tenant shows
+  more than the subscription would — and only while something else is broken. It
+  is the same class of trap as the inherited scope, and it is documented in the
+  same places, and a linter cannot see it.
+- **The trash fallback applies a restore window the trash shape does not.**
+  `ListDeleted` forces `WithOnlyDeleted`, which adds the cutoff; the shape
+  deliberately has none. Narrower is the safe direction and a fourth read path to
+  avoid it is not worth having, so this is written down rather than fixed.
+- **`InitialTimeout` is a guess with a default.** Ten seconds, applied only to a
+  read from the beginning, so a sync service that is running and not answering
+  falls back rather than being waited on. A project whose shapes are large enough
+  that the service legitimately takes longer to build one gets a snapshot when it
+  wanted a stream, and has to say so.
+- **Shape routes are still not throttled**, which the fallback makes more
+  expensive rather than less: a subscriber can now cost a query rather than a
+  proxied request. Named in M15.1's gaps too.
+- **A `date` column over the fallback and the same column over REST still
+  disagree**, because the sync service prints `2026-08-25` and Go marshals a
+  `time.Time` as a full timestamp. `DateOnly` matches the sync service, which is
+  the side a subscriber's parsers are written for, so the fallback is consistent
+  with the stream and the pre-existing REST difference is untouched.
+
+---
+
+## M16 — delivery that outlasts an outage (shipped)
+
+**The question that started it was "do we retry if the mail provider is down",
+and the answer was yes and it did not matter.** `notify` already had the hard
+part: a lease-based queue, `SKIP LOCKED`, three short transactions, attempts,
+backoff, a bounded send, and eight Docker tests. What it did not have was a
+window worth the machinery. Five attempts doubling from a minute is thirty-one
+minutes, so a provider down for a morning had every message rig was holding for
+it marked `Failed` — and `Failed` in that table means "we gave up", which reads
+as a decision rather than as a schedule that was too short to have made one.
+
+**Three defaults, one number.** `max_attempts` 5 → 14, and a new `backoff_cap` of
+an hour: 1m, 2m, 4m, 8m, 16m, 32m, then hourly, stopping at about eight hours. The
+thing to tune is the total, because elapsed time is exponential in the count and
+nobody can convert "outlast a bad morning" into an integer. The cap is what makes
+the longer count safe — doubling fourteen times from a minute is five days, so
+without a ceiling the late attempts are a row nobody will look at again.
+
+A `retry_window` duration was the first design, and it was dropped. It would have
+been the honest expression of the rule, but it cannot be measured from
+`created_at`: a digest row's `deliver_at` is a window close up to a week out, so a
+weekly digest would arrive with its envelope already spent. Measuring from the
+first *attempt* needs a `first_attempt_at` column, which is a migration, which is
+vendored SQL in every example — for an outcome a cap and a bigger count already
+reach. Part of the shape is worth remembering if a window is ever wanted for real.
+
+**Jitter is added, not subtracted, and that is the interesting decision.**
+`rigclient/retry.go` spreads by giving up half its window — `half + rand(half)` —
+because a caller is blocked on the answer and a wait that could only lengthen is
+a cost somebody sits through. A queue has nobody waiting: the row is in a table
+and the next pass is a minute away regardless. So `wait + rand(wait/2)`, which
+keeps `backoff_base` a floor, keeps "about eight hours" arithmetic rather than an
+average, and keeps the config-time check exact. The two files now disagree on
+purpose, and each says why in a comment naming the other.
+
+A `Retry-After` is spread the same way, and it took a moment to see that this is
+*because* it is a boundary rather than in spite of it: one call can honour a
+boundary exactly, a hundred rows carrying one provider's boundary cannot, without
+rebuilding the herd at the instant it asked everybody back. Adding never returns
+early. There is deliberately no `MaxRetryAfter` analogue — `rigclient` caps at 30s
+because sleeping is a decision about somebody's program, and a queue's wait is
+free.
+
+**`notify.Permanent` is what made the long schedule affordable.** Eight hours of
+attempts is only reasonable if a provider that knows the recipient is wrong can
+skip them, and `Sender` returned a bare error, so it could not. The alternative
+was a second return value; it was refused because that interface spends thirty
+lines establishing that everything past `Send` belongs to the application and
+rig's leverage is cooperative. A wrapped error is optional in a way a signature is
+not, and every `Sender` written before `notify/failure.go` existed is still
+correct. `Permanent(nil)` returning nil is the one rule in that file that would
+have been a bug rather than a nuisance: `mark` decides success by testing against
+nil.
+
+**Two things found on the way that were not the task.**
+
+`API.Notifications` had been in the revision hash since M12. Nothing answers a
+`claim_ttl` or any of the retry arithmetic to anybody — no route in
+`notify/notifyhttp` carries them, no client reads them, the OpenAPI document
+mentions notifications only to say its endpoints are not described there. So every
+project that ever retuned its dispatcher spent a revision telling every client it
+was built against something older than the server. Cleared now, on a copy, the way
+`Presence` is; `enabled`, `expose` and `default_digest` stay. The one-time cost is
+that this commit moves every example's revision once.
+
+And the cron half of the inbox had never dispatched. All three examples'
+hand-written `dispatchNotifications` called `Resolve` and nothing else, while the
+generated `NotificationDispatcher` — which does `Resolve`, `Dispatch`, `Prune`
+correctly — was defined in all three and called from none. So "the task is the
+guarantee and the goroutine is only latency", the sentence `notify/engine.go` and
+`docs/notifications.md` both lean on hardest, was unbacked in everything shipped:
+mail was resolved and never sent from the cron path, and nothing was ever pruned.
+The generated task now takes an `io.Writer`, which is why the examples had
+reimplemented it in the first place — it printed nothing, so each one wrote its own
+version and lost two of the three steps doing it.
+
+**And one test that had to be rewritten to mean anything.** The lockstep test
+read `deliver_at` off a batch of failed rows and asserted they differed. It passed
+with the jitter removed: `mark` runs once per message, so with a real clock every
+row picks up its own microsecond of wall time. Worse, the shared seeded tenant
+accumulates accounts across runs and holds digest rows waiting out their windows,
+so the spread it measured was an hour that had nothing to do with the schedule.
+Frozen clock, and only rows with `attempts > 0` — now an unspread schedule puts
+100 rows on exactly 1 timestamp, and the test says so. Worth recording because the
+first version would have passed forever.
+
+---
+
+## M17 — the links auth mints get a queue (shipped)
+
+**The asymmetry M13.1 recorded, closed.** `notify` had a lease-based queue with
+retries and `auth/account` called its `Notifier` inline in the request path — no
+timeout, no retry, no queue — so a provider having a bad minute failed the
+caller's request, spent their rate-limit budget against the limiter, and killed a
+token that had already been minted. Asking again cost them another attempt. The
+engine three directories over had solved this properly; this is the same solution
+for the other seam.
+
+**The design is forced by one fact, and it took a wrong turn to see it.**
+`mintVerification` stores only a SHA-256 and returns the one plaintext copy, which
+goes into memory and then into the mail and nowhere else. So a queue row cannot
+carry the token: it would put live bearer tokens at rest for the length of the
+retention, and encrypting them is worse rather than better — rig has no
+key-management seam and inventing one for three mail templates ends with a key in
+an environment variable beside the database URL.
+
+So the row carries **intent** and the dispatcher mints. The first version of that
+inserted a fresh verification row per attempt, and it is wrong in a way that is
+easy to miss: `PendingInvitations` lists live invitation rows, so N attempts list
+one person N times — and `RevokeVerification` cancels *one* row, so withdrawing an
+invitation would leave the others live. That is a security bug, not a cosmetic
+one. The delivery therefore owns exactly one link, written with a null hash, and
+each attempt **rotates** a fresh hash into it. One delivery, one link, however
+many attempts.
+
+Which buys three things that were not on the list. A link's expiry now runs from
+the send rather than from the request, so a mail that waited out an outage arrives
+with its whole window. A link consumed or withdrawn between being queued and being
+sent is `Skipped` — withdrawing an invitation can now recall a mail that has not
+gone, which the inline path could not do at all. And `token_hash` becomes nullable,
+which is safe for a reason worth writing down: every lookup is an equality against
+it and equality against NULL is never true, so an unsent link is unreachable by
+token. NULL rather than a placeholder, because a placeholder looks redeemable and
+is safe only because nobody knows its preimage — an invariant carried by luck
+instead of by the schema.
+
+The cost, stated because it is real: a mail that arrived but whose third
+transaction failed has its link killed by the retry. The person gets two mails and
+the newest works. Better than two live reset tokens for one request. It is also
+why `Notifier` now says, at length, **not** to give these a provider-side
+idempotency key — otherwise good advice that here delivers a link that does not
+work.
+
+**Duplicated rather than shared, deliberately.** `auth/go.mod` depends on
+`runtime` and not on `notify`, so sharing the queue would mean a public package
+in `runtime/` that every rig application imports, with table names interpolated
+into its SQL by its callers. The row shapes differ anyway — notify's claim feeds a
+grouping pass with digests and quiet windows, this one is one row per mail — so
+the abstraction would have given up the thing it was for. What is genuinely shared
+is under 175 lines, most of it comments that had to be rewritten. The one
+invariant that must not drift is the claim-TTL against send-timeout refusal, and
+`account.resolveMail` names `notify.NewEngine` where it makes it.
+
+**Off by default, and it has to be.** Queueing by default would mean every
+existing deployment upgrades, keeps passing its `Notifier`, does not add the cron
+entry, and silently stops sending mail — a worse outage than the one this fixes.
+The switch is `Config.Outbox`, nil being today's path byte for byte, and the
+whole existing account suite passing unchanged is the compatibility assertion.
+
+**And the example did not turn it on, which was a finding rather than a
+decision.** `examples/auth` has a web page where you invite somebody and see the
+mail in an outbox immediately. With the queue on that page shows nothing until a
+cron job runs, and four `TestTheInterface` subtests failed saying so. A
+demonstration that needs a cron job before it demonstrates anything is a worse
+demonstration, so the example stays on the inline path with the queued
+configuration written out in a comment beside it, and `mail_docker_test.go` turns
+it on and proves it end to end: provider hard down, request still 204, provider
+back, `DispatchMail`, and the token from the mail redeems. The real fix for that
+page is notify's other half — an in-process nudge on commit, where the task is the
+guarantee and the goroutine is only latency — and that is the next commit rather
+than this one.
+
+**Two smaller things.** `Config.Notifier`'s doc comment claimed "the token is in
+the response for a test to read"; it is not, and never was — the tests use a fake
+notifier. `NoNotifier`'s claimed that `Service` "says so out loud when it is
+used"; nothing anywhere logs, warns or refuses. Both now say what is true, which
+is that a nil notifier silently drops every link. Making it *required* is the
+stronger move and still not made: it would break anyone who left it nil, and they
+are already broken.
+
+---
 
 ## Things I would fix if nobody asked for anything else
 

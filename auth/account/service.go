@@ -17,12 +17,14 @@ package account
 
 import (
 	"context"
-	"crypto/rand"
+	cryptorand "crypto/rand"
 	"crypto/sha256"
 	"encoding/base32"
 	"errors"
 	"fmt"
+	"math/rand/v2"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -75,6 +77,29 @@ type Config struct {
 	Log        authlog.Log
 	Notifier   Notifier
 
+	// Outbox turns mail queueing on, and its presence is the whole switch.
+	//
+	// Nil is the inline path this package shipped with, byte for byte: a link is
+	// minted in the request that asked for it and handed straight to the
+	// Notifier. That is the default, and it has to be — queueing by default would
+	// mean every existing deployment upgrades, keeps passing its Notifier, does
+	// not add the cron job, and silently stops sending mail. That is a worse
+	// outage than the one the queue fixes.
+	//
+	// Set it and a link is written to rig_identity_verification_delivery instead,
+	// in the transaction that asked for it, and sent by [Service.DispatchMail] —
+	// which something has to run. See [Outbox].
+	//
+	// The trade to know about before turning it on: a reset mail now arrives up
+	// to one dispatch interval late, where inline it was sent inside the request.
+	// What is bought is that a provider having a bad hour no longer fails the
+	// request, spends the caller's rate-limit budget, and kills a token that was
+	// already minted.
+	Outbox Outbox
+	// Mail is what the queue runs on. Every field is optional, and it is read
+	// only when Outbox is set.
+	Mail MailOptions
+
 	// Tenants is what an application decides about making tenants: who may, what
 	// a name may be, and what else a new one needs. Every field is optional; the
 	// zero value lets anybody signed in make one called anything.
@@ -121,6 +146,20 @@ type Service struct {
 	cfg   Config
 	now   func() time.Time
 	sleep func(context.Context, time.Duration)
+
+	// The mail queue's own state, resolved once at construction so that a
+	// dispatch pass reads no configuration. Zero-valued and unused on the inline
+	// path.
+	mail MailOptions
+	// mailClaimedBy is one identifier per process, so a stuck lease traces to a
+	// pod rather than to a mystery.
+	mailClaimedBy uuid.UUID
+
+	mailMu       sync.Mutex
+	mailClaiming bool
+	// mailHeld are the leases this process currently owns, so a clean shutdown
+	// can give them back rather than leaving them to expire.
+	mailHeld map[uuid.UUID]bool
 }
 
 // New builds a service.
@@ -166,15 +205,91 @@ func New(cfg Config) (*Service, error) {
 		cfg.Now = time.Now
 	}
 
+	mail, err := resolveMail(cfg)
+	if err != nil {
+		return nil, err
+	}
+
 	// UTC at the source, for the same reason the session manager does it: a
 	// verification's expiry and an account this service builds are answered
 	// without being read back, so nothing else would settle their zone.
 	utc := func() time.Time { return cfg.Now().UTC() }
-	s := &Service{cfg: cfg, now: utc, sleep: cfg.Sleep}
+	s := &Service{
+		cfg: cfg, now: utc, sleep: cfg.Sleep,
+		mail:          mail,
+		mailClaimedBy: uuid.New(),
+		mailClaiming:  true,
+		mailHeld:      make(map[uuid.UUID]bool),
+	}
 	if s.sleep == nil {
 		s.sleep = sleepUntil
 	}
 	return s, nil
+}
+
+// resolveMail fills in the queue's numbers and refuses the pairs that cannot both
+// be true.
+//
+// Refused at construction rather than found later, which is the argument
+// notify.NewEngine makes for the same three checks: the failure they prevent is
+// duplicate mail six weeks from now, and there is nothing in a running system
+// that would point at the configuration. Both numbers appear in every message,
+// because the fix is to change one of them and the reader should not have to work
+// out which two disagreed.
+func resolveMail(cfg Config) (MailOptions, error) {
+	m := cfg.Mail
+	if cfg.Outbox == nil {
+		// Nothing reads these on the inline path, and resolving them anyway
+		// would mean refusing a configuration nobody is using.
+		return m, nil
+	}
+
+	if _, ok := cfg.Notifier.(NoNotifier); ok || cfg.Notifier == nil {
+		return m, errors.New("account: an Outbox is set but no Notifier is, so every " +
+			"queued link would be written and then dropped; set a Notifier, or leave " +
+			"the Outbox nil to keep sending inline")
+	}
+
+	if m.ClaimTTL == 0 {
+		m.ClaimTTL = DefaultMailClaimTTL
+	}
+	if m.ClaimTTL < MinMailClaimTTL {
+		return m, fmt.Errorf("account: Mail.ClaimTTL is %s, and under %s every mail a "+
+			"slow provider is still sending is claimed twice; set it longer than that "+
+			"provider's own timeout", m.ClaimTTL, MinMailClaimTTL)
+	}
+
+	if m.SendTimeout == 0 {
+		m.SendTimeout = DefaultMailSendTimeout
+	}
+	if m.SendTimeout >= m.ClaimTTL {
+		// Equal is refused with longer, because a lease is stamped before the
+		// send it protects starts: a send allowed to run the whole lease ends
+		// after it.
+		return m, fmt.Errorf("account: Mail.SendTimeout is %s and Mail.ClaimTTL is %s, "+
+			"so a send may still be running when its own lease expires and another "+
+			"dispatcher takes the row; set SendTimeout below ClaimTTL",
+			m.SendTimeout, m.ClaimTTL)
+	}
+
+	if m.MaxAttempts <= 0 {
+		m.MaxAttempts = DefaultMailMaxAttempts
+	}
+	if m.BackoffBase <= 0 {
+		m.BackoffBase = DefaultMailBackoffBase
+	}
+	if m.BackoffCap <= 0 {
+		m.BackoffCap = DefaultMailBackoffCap
+	}
+	if m.BackoffCap < m.BackoffBase {
+		return m, fmt.Errorf("account: Mail.BackoffCap is %s and Mail.BackoffBase is %s, "+
+			"so the cap binds before the first doubling and every retry waits the same "+
+			"%s; set BackoffCap above BackoffBase", m.BackoffCap, m.BackoffBase, m.BackoffCap)
+	}
+	if m.Jitter == nil {
+		m.Jitter = rand.Int64N
+	}
+	return m, nil
 }
 
 // LoginInput is a sign-in attempt.
@@ -512,13 +627,9 @@ func (s *Service) RequestPasswordReset(ctx context.Context, tenantID uuid.UUID, 
 
 	entry.Outcome = authlog.Succeeded
 
-	token, err := s.mintVerification(ctx, ident, nil, KindPasswordReset, s.cfg.ResetTTL)
-	if err != nil {
-		return err
-	}
 	s.write(ctx, entry)
 
-	return s.cfg.Notifier.SendPasswordReset(ctx, ident, token)
+	return s.deliver(ctx, ident, nil, KindPasswordReset, s.cfg.ResetTTL)
 }
 
 // ConfirmPasswordReset sets a new password from a reset link.
@@ -661,17 +772,12 @@ func (s *Service) SendEmailVerification(ctx context.Context, tenantID, accountID
 		return nil
 	}
 
-	token, err := s.mintVerification(ctx, ident, nil, KindEmailVerification, s.cfg.VerificationTTL)
-	if err != nil {
-		return err
-	}
-
 	s.write(ctx, authlog.Entry{
 		Event: authlog.EventVerificationResent, Outcome: authlog.Succeeded,
 		TenantID: &acct.TenantID, AccountID: &acct.ID,
 		EmailAddress: normalizeEmail(ident.EmailAddress),
 	})
-	return s.cfg.Notifier.SendEmailVerification(ctx, ident, token)
+	return s.deliver(ctx, ident, nil, KindEmailVerification, s.cfg.VerificationTTL)
 }
 
 // VerifyEmail confirms an address from a link.
@@ -878,29 +984,100 @@ func (s *Service) storePassword(ctx context.Context, ident *Identity, plain stri
 
 // mintVerification creates a link and returns its token.
 func (s *Service) mintVerification(ctx context.Context, ident *Identity, tenantID *uuid.UUID, kind VerificationKind, ttl time.Duration) (string, error) {
-	raw := make([]byte, tokenBytes)
-	if _, err := rand.Read(raw); err != nil {
-		return "", fmt.Errorf("account: generate token: %w", err)
+	token, hash, err := s.mintToken()
+	if err != nil {
+		return "", err
 	}
+	if _, err := s.newVerification(ctx, ident, tenantID, kind, ttl, hash); err != nil {
+		return "", err
+	}
+	return token, nil
+}
+
+// mintToken is the secret half: thirty-two random bytes, the hash that is stored,
+// and the plaintext that is not.
+//
+// It is separate from the row so that the queue can write the row now and make
+// the secret later — see [Outbox] for why a queued link cannot carry its own
+// token. The inline path is the two of them called together, which is what
+// mintVerification is, so there is one code path rather than a copy.
+func (s *Service) mintToken() (token string, hash []byte, err error) {
+	raw := make([]byte, tokenBytes)
+	if _, err := cryptorand.Read(raw); err != nil {
+		return "", nil, fmt.Errorf("account: generate token: %w", err)
+	}
+	sum := sha256.Sum256(raw)
+	return tokenEncoding.EncodeToString(raw), sum[:], nil
+}
+
+// newVerification writes the link row.
+//
+// A nil hash is a link that has been queued and not yet sent: the secret does not
+// exist yet, and nothing can reach the row by token because every lookup is an
+// equality against token_hash and equality against NULL is never true.
+func (s *Service) newVerification(ctx context.Context, ident *Identity, tenantID *uuid.UUID, kind VerificationKind, ttl time.Duration, hash []byte) (*Verification, error) {
 	id, err := uuid.NewV7()
 	if err != nil {
-		return "", fmt.Errorf("account: generate verification id: %w", err)
+		return nil, fmt.Errorf("account: generate verification id: %w", err)
 	}
 
 	now := s.now()
-	sum := sha256.Sum256(raw)
-	if err := s.cfg.Store.CreateVerification(ctx, &Verification{
+	v := &Verification{
 		ID:                id,
 		IdentityID:        ident.ID,
 		InvitedToTenantID: tenantID,
 		Kind:              kind,
-		TokenHash:         sum[:],
+		TokenHash:         hash,
 		CreatedAt:         now,
 		ExpiresAt:         now.Add(ttl),
-	}); err != nil {
-		return "", err
 	}
-	return tokenEncoding.EncodeToString(raw), nil
+	if err := s.cfg.Store.CreateVerification(ctx, v); err != nil {
+		return nil, err
+	}
+	return v, nil
+}
+
+// deliver is the one place the queued and inline paths differ, and every caller
+// that mints a link goes through it.
+//
+// acct is only read for an invitation, which is the one link that is about a
+// tenant rather than about a person.
+func (s *Service) deliver(ctx context.Context, ident *Identity, acct *Account, kind VerificationKind, ttl time.Duration) error {
+	var tenantID *uuid.UUID
+	if acct != nil {
+		id := acct.TenantID
+		tenantID = &id
+	}
+
+	if s.cfg.Outbox == nil {
+		token, err := s.mintVerification(ctx, ident, tenantID, kind, ttl)
+		if err != nil {
+			return err
+		}
+		return s.notify(ctx, kind, ident, acct, token)
+	}
+
+	// Both writes together, and in the caller's transaction when there is one.
+	// A verification without its delivery is an orphan link nobody will ever
+	// mail — invisible, except as an invitation in a listing that was never
+	// sent. InTx is re-entrant, so this joins rather than nests.
+	return s.cfg.Store.InTx(ctx, func(ctx context.Context) error {
+		v, err := s.newVerification(ctx, ident, tenantID, kind, ttl, nil)
+		if err != nil {
+			return err
+		}
+		id, err := uuid.NewV7()
+		if err != nil {
+			return fmt.Errorf("account: generate delivery id: %w", err)
+		}
+		return s.cfg.Outbox.Enqueue(ctx, &Delivery{
+			ID:             id,
+			VerificationID: v.ID,
+			Kind:           kind,
+			State:          DeliveryPending,
+			DeliverAt:      s.now(),
+		})
+	})
 }
 
 // redeem resolves a link token to its row and the person it is for.

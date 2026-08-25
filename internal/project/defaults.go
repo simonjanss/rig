@@ -125,15 +125,31 @@ const (
 	// seconds for the breach check, ten for a token exchange.
 	DefaultNotificationSendTimeout = 30 * time.Second
 
-	// DefaultMaxAttempts is five, after which a delivery is Failed and stops
+	// DefaultMaxAttempts is fourteen, after which a delivery is Failed and stops
 	// being claimed. Without a cap a permanently broken address consumes a lease
 	// and a log line forever.
-	DefaultMaxAttempts = 5
+	//
+	// It was five, and five at a doubling minute spans thirty-one minutes. That
+	// outlasts a blip and nothing else: a provider down for a morning had every
+	// message rig held for it permanently failed, and the row said Failed rather
+	// than "was never really tried". The number that matters is the total, and an
+	// outage is measured in hours by everyone who has had one.
+	DefaultMaxAttempts = 14
 
-	// DefaultBackoffBase is a minute, doubling: one, two, four, eight, sixteen.
-	// Five attempts therefore span about half an hour, which outlasts the
-	// ordinary provider blip and does not outlast anybody's patience.
+	// DefaultBackoffBase is a minute, doubling: one, two, four, eight, sixteen,
+	// thirty-two, and then the cap.
 	DefaultBackoffBase = time.Minute
+
+	// DefaultBackoffCap is an hour, and it is what makes fourteen attempts a
+	// schedule rather than a sleep.
+	//
+	// Doubling from a minute fourteen times is five days. Capped here, the
+	// fourteen attempts span about eight hours: 1m, 2m, 4m, 8m, 16m, 32m, and
+	// then seven waits at the hour. The trade against the old thirty-one minutes
+	// is that a genuinely undeliverable message now occupies a row for eight
+	// hours — notify.Permanent is the answer to that, and it is why these numbers
+	// could be raised at all.
+	DefaultBackoffCap = time.Hour
 
 	// DefaultNotificationRetention is ninety days. Long enough that "what was I
 	// told in the spring" has an answer, and short enough that the busiest table
@@ -314,6 +330,7 @@ func (p *Project) applyNotificationsDefaults() {
 	setDuration(&n.ClaimTTL, DefaultClaimTTL)
 	setDuration(&n.SendTimeout, DefaultNotificationSendTimeout)
 	setDuration(&n.BackoffBase, DefaultBackoffBase)
+	setDuration(&n.BackoffCap, DefaultBackoffCap)
 	setDuration(&n.Retention, DefaultNotificationRetention)
 	if n.MaxAttempts == 0 {
 		n.MaxAttempts = DefaultMaxAttempts

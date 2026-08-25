@@ -58,10 +58,13 @@ func TestSetupProject(t *testing.T) {
 			"00002_rig_apikeys.sql",
 			"00003_rig_sessions.sql",
 			"00004_rig_oauth.sql",
-			"00005_rig_files.sql",
+			// The queue for the links tenancy mints, which alters the table that
+			// holds them — so after it, and before anything that does not care.
+			"00005_rig_verification_delivery.sql",
+			"00006_rig_files.sql",
 			// Last, and after tenancy for a reason of its own: an inbox line
 			// names an account.
-			"00006_rig_notifications.sql",
+			"00007_rig_notifications.sql",
 		} {
 			if !strings.Contains(stderr, want) {
 				t.Errorf("expected %s to be written:\n%s", want, stderr)

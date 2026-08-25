@@ -369,17 +369,43 @@ type Store interface {
 // one tenant: the mail has to say which tenant somebody is being invited to,
 // and "you have been invited" with no answer to "invited where" is a mail nobody
 // can act on.
+//
+// **Where this is called from depends on [Config.Outbox].** Nil and it is the
+// request that asked for the link, so a slow provider is a slow page. Set and it
+// is [Service.DispatchMail], so a slow provider costs a lease and nothing else.
+// The signature is the same either way, and turning the queue on changes no mail
+// code.
+//
+// **The context carries a deadline when the queue is on** —
+// [MailOptions.SendTimeout], thirty seconds by default — and honouring it is this
+// method's job. rig cannot enforce it: what happens inside these calls is
+// application code. Pass ctx to the request, and do not hand a provider SDK an
+// http.Client with no timeout of its own, which is Go's default.
+//
+// **Do not deduplicate these at the provider.** It is otherwise good advice, and
+// it is wrong here: every attempt carries a *different* token, because the
+// queue rotates the secret before each send and the previous one stops working.
+// Suppressing the second mail as a duplicate delivers a link that does not work.
+// This is the one seam in rig where an idempotency key is the wrong answer —
+// notify.Delivery.ID says the opposite, and means it.
 type Notifier interface {
 	SendPasswordReset(ctx context.Context, i *Identity, token string) error
 	SendEmailVerification(ctx context.Context, i *Identity, token string) error
 	SendInvitation(ctx context.Context, i *Identity, a *Account, token string) error
 }
 
-// NoNotifier drops every link.
+// NoNotifier drops every link, silently and successfully.
 //
 // It is the default so that a manager can be built in one line during
-// development. In production it means nobody can ever reset a password, which
-// is why [Service] says so out loud when it is used.
+// development. In production it means nobody can ever reset a password, and
+// nothing anywhere says so — this type is substituted for a nil Notifier without
+// a warning, which is a thing to know rather than a thing to rely on. Compare
+// notify.NoSender, which refuses instead, having been written after somebody met
+// this failure.
+//
+// [New] does refuse one combination: a [Config.Outbox] with this as the notifier
+// is a queue whose rows are written and then dropped, which is a table that grows
+// forever behind mail that never goes.
 type NoNotifier struct{}
 
 // SendPasswordReset implements [Notifier].

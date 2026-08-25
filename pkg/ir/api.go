@@ -195,6 +195,10 @@ type Notifications struct {
 	SendTimeoutSeconds int64 `json:"send_timeout_seconds"`
 	MaxAttempts        int   `json:"max_attempts"`
 	BackoffBaseSeconds int64 `json:"backoff_base_seconds"`
+	// BackoffCapSeconds is the longest one wait may be. It is what makes a long
+	// attempt count a schedule rather than a sleep: doubling from a minute
+	// fourteen times is five days, and capped at an hour it is eight.
+	BackoffCapSeconds int64 `json:"backoff_cap_seconds"`
 	// RetentionSeconds is how long a read and deleted inbox line is kept.
 	RetentionSeconds int64 `json:"retention_seconds"`
 }

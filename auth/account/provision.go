@@ -127,30 +127,58 @@ func (s *Service) Provision(ctx context.Context, in ProvisionInput) (*Account, e
 	if ident != nil {
 		acct.IdentityID = &ident.ID
 	}
-	if err := s.cfg.Store.Insert(ctx, acct); err != nil {
+	// A service account has no person to invite, and inviting one would send mail
+	// to an address nobody reads.
+	invite := in.Invite && ident != nil
+
+	// The account and the delivery it owes are one transaction, and the queued
+	// path is the whole reason for one. Without it the insert has already
+	// committed by the time an enqueue fails, so the error returned below would
+	// leave the tenant with a member nobody ever invited and a caller whose retry
+	// is refused as a duplicate — which is what returning an error is meant to
+	// prevent. InTx is re-entrant, so this joins a caller's transaction — the
+	// registration hook's, most often — rather than nesting inside one.
+	//
+	// The log entry is inside it and unmoved by it: authpg writes the auth log
+	// outside whatever transaction noticed the event, deliberately, because an
+	// entry describing a failure has to survive that transaction's rollback.
+	if err := s.cfg.Store.InTx(ctx, func(ctx context.Context) error {
+		if err := s.cfg.Store.Insert(ctx, acct); err != nil {
+			return err
+		}
+
+		tenantID := in.TenantID
+		s.write(ctx, authlog.Entry{
+			TenantID:     &tenantID,
+			Event:        authlog.EventAccountProvisioned,
+			Outcome:      authlog.Succeeded,
+			AccountID:    &acct.ID,
+			EmailAddress: email,
+			APIKeyID:     in.ByAPIKeyID,
+			Detail:       map[string]any{"by_account_id": in.ByAccountID, "kind": string(acct.Kind)},
+		})
+
+		if !invite || s.cfg.Outbox == nil {
+			return nil
+		}
+		// Queued, so this is two local writes and no provider call at all: a
+		// database that cannot take the delivery is a database that should not
+		// have taken the account either, and the transaction is what makes that
+		// sentence true rather than aspirational.
+		return s.invite(ctx, ident, acct)
+	}); err != nil {
 		return nil, err
 	}
 
-	tenantID := in.TenantID
-	s.write(ctx, authlog.Entry{
-		TenantID:     &tenantID,
-		Event:        authlog.EventAccountProvisioned,
-		Outcome:      authlog.Succeeded,
-		AccountID:    &acct.ID,
-		EmailAddress: email,
-		APIKeyID:     in.ByAPIKeyID,
-		Detail:       map[string]any{"by_account_id": in.ByAccountID, "kind": string(acct.Kind)},
-	})
-
-	// A service account has no person to invite, and inviting one would send
-	// mail to an address nobody reads.
-	if in.Invite && ident != nil {
-		if err := s.invite(ctx, ident, acct); err != nil {
-			// The account exists; the mail is a best effort. Failing the request
-			// would leave the caller unsure whether to retry, and a retry would
-			// then be refused as a duplicate.
-			return acct, nil
-		}
+	if invite && s.cfg.Outbox == nil {
+		// Inline, and outside the transaction on purpose: this one calls the
+		// Notifier, and a provider that hangs inside a transaction holds the
+		// connection that made the account for as long as it hangs.
+		//
+		// The mail is a best effort here. The account exists; failing the request
+		// would leave the caller unsure whether to retry, and a retry would then
+		// be refused as a duplicate.
+		_ = s.invite(ctx, ident, acct)
 	}
 	return acct, nil
 }
@@ -164,17 +192,16 @@ func (s *Service) Provision(ctx context.Context, in ProvisionInput) (*Account, e
 // get in, is a sign-up nobody finishes.
 func (s *Service) invite(ctx context.Context, ident *Identity, acct *Account) error {
 	tenantID := acct.TenantID
-	token, err := s.mintVerification(ctx, ident, &tenantID, KindInvitation, s.cfg.InvitationTTL)
-	if err != nil {
-		return err
-	}
-
 	s.write(ctx, authlog.Entry{
 		Event: authlog.EventInvitationSent, Outcome: authlog.Succeeded,
 		TenantID: &tenantID, AccountID: &acct.ID,
 		EmailAddress: normalizeEmail(ident.EmailAddress),
 	})
-	return s.cfg.Notifier.SendInvitation(ctx, ident, acct, token)
+	// The log entry stays here rather than moving to the dispatcher, and that is
+	// deliberate: rig_auth_log is both the audit trail and what the rate limits
+	// count, so a row written from a cron job an hour later is a row the limiter
+	// reads at the wrong time.
+	return s.deliver(ctx, ident, acct, KindInvitation, s.cfg.InvitationTTL)
 }
 
 // identityFor finds the person an account is for, creating them if this is the

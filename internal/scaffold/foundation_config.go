@@ -342,6 +342,45 @@ expose: false`,
 	}
 }
 
+// verificationDeliveryConfigs is the mail queue's, and it is the third table here
+// that exists only to reserve a name.
+//
+// Never exposed, and the reason is stronger than rig_throttle's. A row here is
+// one owed mail, keyed to the single-use link it will carry — so a listing would
+// answer "who has asked to reset their password, and whose invitation has not
+// gone out yet" to anybody who could read it, and a write would let somebody
+// re-queue a link they do not hold. The queue's only doors are the flows that
+// mint links and the dispatcher that sends them.
+func verificationDeliveryConfigs() []tableConfig {
+	return []tableConfig{
+		config("rig_identity_verification_delivery", "IdentityVerificationDelivery",
+			`# Never exposed. A row is one owed mail, keyed to a single-use link:
+# a listing would say who has asked to reset their password and whose
+# invitation has not gone out, and a write would let somebody re-queue a
+# link they never held. The flows that mint links and the dispatcher that
+# sends them are the only doors.
+expose: false`,
+			`enums:
+  rig_identity_verification_delivery_state:
+    name: VerificationDeliveryState
+    description: Where one queued link is in its life.
+    values:
+      Pending:
+        name: Pending
+        description: Owed, and not yet sent.
+      Sent:
+        name: Sent
+        description: The notifier accepted it, which is not the same as it arriving.
+      Failed:
+        name: Failed
+        description: Past max_attempts, or refused permanently. It stops being claimed.
+      Skipped:
+        name: Skipped
+        description: The link was consumed or withdrawn before the mail went out.`,
+		),
+	}
+}
+
 // notificationConfigs are the two notification tables', and like rig_file's they
 // are written for a project that wants them read rather than for one that wants
 // CRUD.

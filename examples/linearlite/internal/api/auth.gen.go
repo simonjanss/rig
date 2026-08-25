@@ -8,6 +8,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"time"
@@ -18,6 +20,7 @@ import (
 	"github.com/simonjanss/rig/auth/authhttp"
 	"github.com/simonjanss/rig/auth/password"
 	"github.com/simonjanss/rig/auth/session"
+	"github.com/simonjanss/rig/runtime/serve"
 	"github.com/simonjanss/rig/runtime/throttle"
 )
 
@@ -48,10 +51,23 @@ type Hooks struct {
 	Grants authhttp.Grants
 
 	// Notifier sends the mail a flow needs: a reset link, a verification link, an
-	// invitation. Nil sends none, which makes those flows unusable rather than
-	// silently broken — the token is in the response for a test to read, and
-	// nothing reaches a person.
+	// invitation. Nil sends none, and it does so silently — account.NoNotifier
+	// is substituted and answers success from every method, so in production
+	// nobody can reset a password and nothing anywhere says so.
 	Notifier account.Notifier
+
+	// Mail is the queue for those links, and it is off by default.
+	//
+	// Off, a link is minted in the request that asked for it and handed straight
+	// to the Notifier, so a provider having a bad minute fails that request,
+	// spends the caller's rate-limit budget, and kills a token that was already
+	// minted. On, the link is written to the database in the same transaction and
+	// sent by AuthMailDispatcher — which an operator's cron has to run. Turning
+	// it on without that entry is turning mail off.
+	//
+	// The trade in the other direction is latency: a queued reset mail arrives up
+	// to one dispatch interval late, where inline it went out inside the request.
+	Mail auth.MailOptions
 
 	// Tenants is this application's policy for making one: who may, what a name
 	// may be, how a slug is derived, and what else a new tenant needs in the
@@ -147,6 +163,7 @@ func Config(pool *pgxpool.Pool, h Hooks) (auth.Config, error) {
 
 		Grants:           h.Grants,
 		Notifier:         h.Notifier,
+		Mail:             h.Mail,
 		OnSessionRefresh: h.OnSessionRefresh,
 		OnError:          h.OnError,
 		Limits:           limits(),
@@ -189,4 +206,35 @@ func limits() throttle.Defaults {
 	d.Refresh.Max, d.Refresh.Window = 60, time.Minute
 	d.APIKeyFailures.Max, d.APIKeyFailures.Window = 20, time.Minute
 	return d
+}
+
+// AuthMailDispatcher is the guarantee behind every link rig mints: it sends
+// what a request queued, retries what a provider refused, and gives back the
+// claims of a process that died mid-pass. It prunes the deliveries that are
+// done in the same pass, the way the notification dispatcher does.
+//
+// A subcommand rather than a goroutine, so it is a cron job rather than
+// something racing itself in every replica. Register it in serve.Config.Tasks
+// and run `<binary> dispatch-auth-mail`.
+//
+// **With Hooks.Mail.Queue set and no cron entry for this, links are queued and
+// never sent.** With the queue off it claims nothing and returns, so
+// registering it either way costs nothing.
+//
+// The writer is where each pass's report goes, and os.Stdout is the answer for
+// a cron job — every count including the zeros, because a pass that sent
+// nothing is the ordinary case and the absence of a line cannot be told from
+// the job not running. A nil writer prints nothing and is for a test.
+func AuthMailDispatcher(front *auth.Auth, log io.Writer) serve.Task {
+	return func(ctx context.Context, _ *pgxpool.Pool) error {
+		report, err := front.DispatchMail(ctx)
+		if log != nil {
+			fmt.Fprintln(log, report)
+		}
+		if err != nil {
+			return err
+		}
+		_, err = front.PruneMail(ctx)
+		return err
+	}
 }

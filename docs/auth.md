@@ -888,6 +888,11 @@ front, err := api.New(pool, api.Hooks{
     // nobody sends is an account nobody can ever use.
     Notifier: mail,
 
+    // Whether those links are queued rather than sent inside the request. Off by
+    // default; see "Mail that survives a provider outage" below, and note that
+    // turning it on without a cron entry turns mail off.
+    Mail: auth.MailOptions{Queue: true, Retention: 30 * 24 * time.Hour},
+
     // What a tenant is beyond its row and its first account. The configuration
     // says the endpoint exists; this says what it does.
     Tenants: account.TenantOptions{
@@ -947,6 +952,79 @@ project that needs one field this generator cannot express: take it, change that
 field, and call `auth.New` yourself rather than abandoning the generated wiring.
 
 ---
+
+## Mail that survives a provider outage
+
+Every link rig mints — a password reset, an address confirmation, an invitation —
+goes out through your `Notifier`. By default that call happens **inside the
+request that asked for it**, which is the simplest thing and has one bad
+afternoon in it: when your provider is down, the request fails, the caller's
+rate-limit budget is already spent, and the token that was just minted is dead.
+The person asks again and it costs them another attempt against the limiter.
+
+Set `Mail.Queue` and the link is written to `rig_identity_verification_delivery`
+in the same transaction instead, and sent later:
+
+```go
+front, err := api.New(pool, api.Hooks{
+    Notifier: mail,
+    Mail:     auth.MailOptions{Queue: true, Retention: 30 * 24 * time.Hour},
+    Grants:   myGrants(pool),
+})
+```
+
+**Then register the dispatcher, in the same change.** Nothing runs it for you.
+
+```go
+serve.Config{Tasks: map[string]serve.Task{
+    "dispatch-auth-mail": api.AuthMailDispatcher(front, os.Stdout),
+}}
+```
+
+```cron
+*/1 * * * *  /srv/app dispatch-auth-mail
+```
+
+With the queue on and no such entry, links are queued and never sent, which is
+the one way turning this on is worse than leaving it off. Register the task
+first; it claims nothing and returns while the queue is off.
+
+The schedule is notify's, deliberately: doubling from a minute up to an hour,
+giving up after about eight hours, each wait spread upward so a provider refusing
+a batch does not meet the whole batch again at one instant. Your `Notifier` can
+say more than "it failed" — `account.PermanentMailError` stops a delivery on this
+attempt when the provider refuses the *recipient*, and `account.RetryMailAfter`
+honours a `Retry-After`. Both are optional and a plain error keeps working.
+
+**The trade is latency.** A queued reset mail arrives up to one dispatch interval
+late where inline it went out inside the request. That is the whole cost, and it
+is why this is off by default.
+
+### The token changes on every attempt
+
+This is the part to know before you write your `Notifier`.
+
+A queued row does **not** carry the token. rig stores only a SHA-256 of it and
+the plaintext is never written down, so a queue that held one would put live
+bearer tokens at rest. Instead the row holds the *intent*, and the dispatcher
+generates the secret immediately before each send and rotates it into the link.
+
+Three things follow:
+
+- **Do not give your provider an idempotency key for these.** It is good advice
+  everywhere else in rig and wrong here: each attempt carries a different token
+  and the previous one has stopped working, so a provider that suppresses the
+  second mail as a duplicate delivers a link that does not work.
+- **A link's expiry runs from the send, not from the request.** A mail that
+  waited out an outage arrives with its full window rather than the remains of
+  one.
+- **A link consumed or withdrawn before the mail went out is never sent.** The
+  delivery is marked `Skipped`. Inline, withdrawing an invitation cannot recall a
+  mail that has already gone; queued, it can.
+
+Deliveries that are done are removed after `Mail.Retention` by the same task, and
+zero keeps them forever. The link rows themselves are never pruned by it — those
+are the record of who was invited and when.
 
 ## Tuning
 

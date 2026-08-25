@@ -101,7 +101,8 @@ func TestTheReportLineNamesEveryCount(t *testing.T) {
 
 	line := notify.DispatchReport{}.String()
 	for _, want := range []string{
-		"claimed", "sent", "failed", "retrying", "held", "digested", "released", "abandoned",
+		"claimed", "sent", "failed", "rejected", "retrying", "deferred", "held",
+		"digested", "released", "abandoned",
 	} {
 		if !strings.Contains(line, want) {
 			t.Errorf("the report line does not mention %q: %s", want, line)

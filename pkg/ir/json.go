@@ -81,7 +81,24 @@ func Unmarshal(b []byte) (*Document, error) {
 // slice rather than a field, so clearing it copies — the caller's document must
 // not come back with its opt-ins erased.
 //
-// [Presence] is cleared in *part*, and it is the only field here that is. Two of
+// [API.Notifications] is cleared in part, and it is the second field here to be
+// — the dispatcher's numbers go, and the three that say what the API looks like
+// stay. Nothing answers a claim_ttl, a send_timeout or any of the retry
+// arithmetic to anybody: no route in notify/notifyhttp carries them, no
+// generated client reads them, and the OpenAPI document mentions notifications
+// only to say its endpoints are not described there. So they are cleared for
+// Monitoring's reason, and it took until they were being changed to notice they
+// had never been — a project that retuned its dispatcher was spending a revision
+// telling every client it was built against something older than the server.
+//
+// Enabled and Expose stay: the first decides whether the routes exist at all and
+// the second projects a resource. DefaultDigest stays too, and it is the only
+// judgement call in the set. No response carries it, but it decides what an
+// account with no setting actually receives, so a settings page built when the
+// default was Immediate behaves differently against Weekly — which is the thing
+// a revision is for.
+//
+// [Presence] is cleared in *part*, and it was the first field here to be. Two of
 // its numbers are answered to the browser on every heartbeat, so a client built
 // when the TTL was a minute behaves differently against twenty seconds — those
 // stay, because that is exactly what a revision is for. The sweeper's interval
@@ -94,7 +111,7 @@ func (d *Document) Hash() (string, error) {
 	unstamped.API.Monitoring = nil
 	unstamped.API.Cache = nil
 	if slices.ContainsFunc(unstamped.API.Resources, func(r Resource) bool { return r.Cached }) {
-		// A copy for the reason Presence takes one below: the shallow copy above
+		// A copy for the reason the two below take one: the shallow copy above
 		// shares the backing array, and clearing in place would reach the
 		// caller's document.
 		plain := slices.Clone(unstamped.API.Resources)
@@ -102,6 +119,19 @@ func (d *Document) Hash() (string, error) {
 			plain[i].Cached = false
 		}
 		unstamped.API.Resources = plain
+	}
+	if n := unstamped.API.Notifications; n != nil {
+		// A copy, for the reason the one below takes one: the shallow copy above
+		// shares the pointer, and the caller's document must not come back with
+		// its dispatcher tuning erased.
+		visible := *n
+		visible.ClaimTTLSeconds = 0
+		visible.SendTimeoutSeconds = 0
+		visible.MaxAttempts = 0
+		visible.BackoffBaseSeconds = 0
+		visible.BackoffCapSeconds = 0
+		visible.RetentionSeconds = 0
+		unstamped.API.Notifications = &visible
 	}
 	if p := unstamped.API.Presence; p != nil {
 		// A copy, because the shallow copy above shares the pointer and the

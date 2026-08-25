@@ -149,6 +149,9 @@ So a project on port 55445 writes `electric_url: http://localhost:55445`, or
 overrides it at runtime the way the examples do, with an environment variable
 read in `main.go`.
 
+What happens to a subscription while that service is unreachable is
+[its own section](#when-the-sync-service-is-down).
+
 In a deployment, run Electric as a service of its own against your real
 database and point the proxy's URL at it. Nothing else changes: the proxy is
 the only thing a browser ever talks to, so the sync service itself stays
@@ -162,6 +165,152 @@ place to read a **filled-in scope stub** — `services/rig_presence` — because
 presence is the shape where narrowing is not an optimization: a heartbeat is a row
 change delivered to every subscriber, so the scope is what decides whether the
 feature is affordable at all. See [presence.md](presence.md#scope-and-what-presence-costs).
+
+## When the sync service is down
+
+A shape endpoint is a filter in front of the sync service, so by default a sync
+service that cannot be reached is a **502** and a subscriber with no rows. On a
+page whose list *is* a shape, that is a blank page.
+
+A shape can answer from your own read path instead:
+
+```yaml
+- name: electric
+  options:
+    package: electric
+    model_import: github.com/you/app/internal/model   # turns the seam on
+```
+
+Naming the model gives every shape a `Fallback` field on `Handlers` beside its
+scope, and you wire the ones worth wiring:
+
+```go
+genelectric.Register(mux, genelectric.Handlers{
+    Server:       genelectric.Server{Proxy: proxy, GetClaims: front.Claims},
+    TodoFallback: todo.Fallback(repos.Todos),
+})
+```
+
+```go
+func Fallback(repo store.TodoRepository) genelectric.TodoFallback {
+    return func(ctx context.Context, _ *http.Request, _ tenancy.Claims, _ genelectric.TodoShapeParams) ([]*model.Todo, error) {
+        rows, total, err := repo.List(ctx, model.TodoFilter{}, model.TodoPage{Limit: store.MaxLimit})
+        if err != nil {
+            return nil, err
+        }
+        if total > int64(len(rows)) {
+            return nil, fmt.Errorf("%d rows, past the %d a snapshot may send", total, store.MaxLimit)
+        }
+        return rows, nil
+    }
+}
+```
+
+That is the whole of it. Note the count: a read is paginated and a shape is not,
+and a repository clamps a larger `Limit` to `MaxLimit` without saying so — so the
+total is the only thing that can tell a complete answer from the first page of
+one, and refusing is the right answer for the same reason `MaxSnapshotRows`
+refuses. The rows go out in the sync protocol's own format, so
+**a subscriber needs no change and cannot tell** — `X-Rig-Sync-Fallback:
+snapshot` on the response is the only sign, and it is there so a browser's
+network tab and your logs have one.
+
+Two settings on the proxy, both with defaults:
+`electric.Config.InitialTimeout` (10s) is how long a first read waits for the
+sync service to *begin* answering before it counts as unreachable — the answer
+itself is then copied out however long it takes — and `MaxSnapshotRows` (20,000)
+is how large a snapshot may be. `OnError` is worth setting too — it is the only way the reason
+for a 502 on a shape route reaches your log.
+
+### Rig stops asking
+
+A sync service that is down is down for every shape and every subscriber, so
+asking it once per request means each of them paying `InitialTimeout` to learn
+what the request before it learned: a held goroutine, a held connection, and a
+spinner for ten seconds in front of a snapshot that was ready immediately.
+
+So the proxy counts. After `BreakerThreshold` failures **in a row** (5) it stops
+asking for `BreakerCooldown` (5s), and every request in that window is answered
+from here — the snapshot where the shape has a fallback, and the status it always
+had where it does not. When the cooldown is up, *one* request is let through to
+find out; if it succeeds the circuit closes and everything is forwarded again. A
+single failure among successes never counts, and nothing polls in the background,
+so a service that comes back is found by the next subscriber through the door.
+
+Two ways to know, and neither is the error log:
+
+```go
+proxy, err := electric.New(electric.Config{
+    URL: os.Getenv("ELECTRIC_URL"),
+    OnSyncState: func(ctx context.Context, reachable bool) {
+        // Twice per outage rather than once per request. This is the line to
+        // alert on.
+        log.WarnContext(ctx, "live sync", slog.Bool("reachable", reachable))
+    },
+})
+...
+proxy.SyncReachable() // the same answer, for a health endpoint or a banner
+```
+
+The trade is a sync service that is fine behind a network that briefly is not:
+those requests are answered from a fallback, or refused, for as long as one
+cooldown — where without the circuit they would have waited and then usually
+succeeded. `BreakerThreshold: -1` turns it off and every request goes on asking.
+
+### What a subscriber actually gets
+
+**A snapshot, not a stream.** Correct at the moment it was read and not updated
+afterwards. What follows is:
+
+| Request | While the sync service is gone |
+|---|---|
+| a read from the beginning | the snapshot, with a handle of rig's own |
+| the poll after it | `503` and a `Retry-After`. The subscriber keeps its rows |
+| the same poll, once the service is back | `409 must-refetch` — the sync service's own answer to a handle it never issued, so the subscriber starts again on real sync |
+
+Nothing in rig arranges that last step, which is the reason it is the design:
+recovery is a mechanism the protocol already has for exactly this, so there is no
+second one to get wrong. A subscription resumes without a reload.
+
+Which reads correspond to which shape:
+
+| Shape | The read |
+|---|---|
+| `/todo/_stream` | `List` with the repository's defaults |
+| `/todo/_deleted/_stream` | `ListDeleted` |
+| `/todo/{id}/_versions/_stream` | `ListSnapshots` on that id |
+
+`_deleted` differs on one point: the repository applies `restore_window_days` and
+[the shape does not](#three-shapes-decided-by-your-columns), so the degraded
+trash is **narrower** than the stream. Narrower is the safe direction, and a
+fourth read path to avoid it is not worth having.
+
+### Three things to get right
+
+**Whatever your scope narrows, your fallback must narrow too.** A scope is a
+filter rig sends to the sync service and can therefore promise; a fallback is a
+read rig cannot see inside. A shape scoped to a team, with a fallback that lists
+the tenant, shows a subscriber rows the subscription would have withheld — and
+only while something else is broken, which is the worst time to find out. Nothing
+checks this. It is the same class of trap as [the inherited
+scope](#scoping-them), and the reason a fallback is a field you set rather than
+something rig wires for you.
+
+The tenant is not on that list: the context a fallback receives already carries
+the subscriber's claims, so a generated repository read scopes itself.
+
+**A sync outage becomes database load.** Every subscriber falls back at the same
+moment, because what they have in common is the service being gone — so a shape's
+fallback is one `List` per subscriber against the database the sync service was
+shielding. That is why this is off until you turn it on, per shape, and why
+`MaxSnapshotRows` refuses rather than truncates: a subscriber cannot tell a short
+answer from a complete one. Turn it on for the shapes a page cannot render
+without, and leave it off for the rest.
+
+**Some shapes should not have one.** [Presence](presence.md) is the clearest: a
+snapshot of who was here a moment ago, that then stops updating, is worth less
+than an empty list, because the feature *is* the freshness. `examples/linearlite`
+wires exactly one fallback, on the board.
 
 ## Subscribing to one
 
@@ -197,4 +346,5 @@ working around it.
 - [presence.md](presence.md) — the other thing a shape is used for, and what the
   moving-predicate rule decides there
 - [tables.md](tables.md#electric) — the configuration keys
+- [api.md](api.md) — what a shape route answers with, including the two failures
 - [generators.md](generators.md) — `electric_url`, `shape_import`, `stub_dir`

@@ -62,7 +62,7 @@ auth/*) pages="docs/auth.md" ;;
 # These four were missing, and the comment at the top of this file is why that
 # matters: the mapping is AGENTS.md's table and the two have to move together.
 # files/ has no page of its own — uploads are documented as a column convention.
-notify/*) pages="docs/notifications.md" ;;
+notify/*) pages="docs/notifications.md docs/rig-yaml.md" ;;
 files/*) pages="docs/schema.md" ;;
 presence/*) pages="docs/presence.md" ;;
 ts/packages/*) pages="docs/clients.md" ;;

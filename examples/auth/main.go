@@ -99,6 +99,14 @@ func main() {
 			// exists because that key is set — a project that keeps everything
 			// gets no subcommand rather than one that silently does nothing.
 			"prune-auth-log": pruneAuthLog,
+			// The other half of Mail.Queue: without this entry the links a
+			// foundation with the queue on mints are written to the database and
+			// never sent, which is the one way turning it on is worse than
+			// leaving it off. Registered here with the queue off, where it claims
+			// nothing and returns — because the order to do these two things in is
+			// this one, and a project that turns the queue on first has a window
+			// where its mail silently stops.
+			"dispatch-auth-mail": dispatchAuthMail,
 			// The same shape for the other thing kept only until nobody will ask
 			// for it again: the records of writes that carried an
 			// Idempotency-Key. Zero takes the default retention, a day.
@@ -152,9 +160,13 @@ func dispatchNotifications(ctx context.Context, pool *pgxpool.Pool) error {
 	if err != nil {
 		return err
 	}
-	report, err := engine.Resolve(ctx)
-	fmt.Fprintln(os.Stdout, report)
-	return err
+	// The generated task rather than its steps written out again, and that is the
+	// whole point of this line. Resolving is only half of it — dispatching is
+	// what sends, and pruning is what stops the busiest tables in the schema
+	// growing forever. This function used to call Resolve alone, so the sentence
+	// notify leans on hardest, that the task is the guarantee and the goroutine
+	// is only latency, was not true of anything shipped here.
+	return api.NotificationDispatcher(engine, os.Stdout)(ctx, pool)
 }
 
 // newAPI is everything this server is made of.
@@ -227,6 +239,25 @@ func newAPI(ctx context.Context, pool *pgxpool.Pool, log *slog.Logger) (http.Han
 		Logger: log,
 
 		Notifier: mail,
+
+		// Mail is left off, which is the default, and the reason is this
+		// example's own web page rather than a doubt about the queue. Invite
+		// somebody here and the outbox shows the mail immediately; queued, it
+		// would show nothing until the dispatcher ran, and a demonstration that
+		// needs a cron job before it demonstrates anything is a worse
+		// demonstration. That is the trade the queue makes, stated where somebody
+		// deciding will meet it:
+		//
+		//	Mail: auth.MailOptions{Queue: true, Retention: 30 * 24 * time.Hour},
+		//
+		// Turn it on and a provider having a bad hour stops failing the request
+		// that asked for the link, spending the caller's rate-limit budget, and
+		// killing a token that was already minted. The mail then arrives up to one
+		// dispatch interval late. mail_docker_test.go turns it on and proves it.
+		//
+		// That one line is the whole change: dispatchAuthMail below already runs
+		// with the queue on, so the cron job starts sending the moment this side
+		// starts queueing.
 
 		// The one thing rig asks an application to decide. It derives the
 		// permission keys from the schema and generates the check; who holds them
@@ -344,6 +375,32 @@ func newAPI(ctx context.Context, pool *pgxpool.Pool, log *slog.Logger) (http.Han
 // repeat — and the number is the one thing about this job that must not be
 // guessed, because too short a window clears a lockout by deleting the failures
 // the rate limit counts.
+func dispatchAuthMail(ctx context.Context, pool *pgxpool.Pool) error {
+	// The same object graph the server builds, because the notifier is part of
+	// it: what goes out is this example's outbox, which is what a separately
+	// deployed dispatcher has too.
+	//
+	// Queue is on here and off in newAPI, which is the one place in this file the
+	// two halves are allowed to disagree. Queue is what gives a service its outbox
+	// at all, so a dispatcher without it claims nothing however much is waiting —
+	// and a reader who turns the queue on in newAPI and not here would find the
+	// links piling up unsent, which is the failure the subcommand exists to
+	// prevent. On this side it costs nothing while the server queues nothing:
+	// there is simply never a row to claim.
+	//
+	// Grants is unwrapped for pruneAuthLog's reason: a task that runs once and
+	// exits has no second request to answer from memory.
+	front, err := api.New(pool, api.Hooks{
+		Notifier: outbox.New(20),
+		Mail:     auth.MailOptions{Queue: true, Retention: 30 * 24 * time.Hour},
+		Grants:   authz.Grants(pool),
+	})
+	if err != nil {
+		return err
+	}
+	return api.AuthMailDispatcher(front, os.Stdout)(ctx, pool)
+}
+
 func pruneAuthLog(ctx context.Context, pool *pgxpool.Pool) error {
 	// Unwrapped, and not because it would be wrong: a cache nobody serves holds
 	// nothing. A task that runs once and exits has no second request to answer
