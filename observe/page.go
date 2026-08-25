@@ -22,6 +22,18 @@ import (
 // one there anyway, and rig says so once rather than refusing.
 const PasswordEnv = "RIG_MONITOR_PASSWORD"
 
+// AddrEnv is where the monitoring page's listen address comes from when the
+// deployment would rather say it than take what rig.yaml resolved.
+//
+// It overrides [PageConfig.Addr] rather than filling it in, which is the
+// opposite of how [PasswordEnv] works and is deliberate. The password has no
+// sensible value in a checked-in file, so rig.yaml is the fallback and the
+// environment is the ordinary answer. A listen address does have one — the
+// project decided it once, and `rig validate` refuses a project that did not —
+// so the environment is the exception, for the deployment that has to move the
+// port off whatever the project picked.
+const AddrEnv = "RIG_MONITOR_ADDR"
+
 // The page's defaults, applied by [Provider.Page] to whatever it is given.
 const (
 	// DefaultMonitorPath is where the page is mounted. Under a prefix that
@@ -66,8 +78,33 @@ type PageConfig struct {
 	// project.name in rig.yaml.
 	ServiceName string
 
-	// BasePath is where the page is mounted. Empty means
+	// Addr is where the page listens, as host:port — "127.0.0.1:9090", or
+	// ":9090" for every interface. $RIG_MONITOR_ADDR overrides it; see
+	// [AddrEnv].
+	//
+	// The page gets a listener of its own rather than a route on the API's mux,
+	// and this is the whole reason: [PageConfig.Allow] is matched against the
+	// connection's own address, so behind a load balancer it matches everything
+	// or nothing, and the only boundary left that a client cannot talk its way
+	// around is which interface the socket is bound to. Loopback is a boundary
+	// the kernel keeps.
+	//
+	// Empty is not defaulted. Nothing here knows what port is free on the
+	// machine this runs on, and a page reachable from an interface nobody chose
+	// is the failure this field exists to prevent — so an empty one is a page
+	// that does not listen, the same as a missing password, and [Page.Unarmed]
+	// says which.
+	//
+	// Serving it is [Page.Handler] and the application's own server; this
+	// package opens no listeners.
+	Addr string
+
+	// BasePath is where the page is mounted on that listener. Empty means
 	// [DefaultMonitorPath]. It must be absolute and must not end in a slash.
+	//
+	// Nothing else is on the listener to collide with. It is kept because it is
+	// the URL projects already have, and because a reverse proxy in front of
+	// [PageConfig.Addr] needs a prefix to key on.
 	BasePath string
 
 	// MaxTraces is how many requests the page lists, newest first. Zero means
@@ -117,8 +154,9 @@ type PageConfig struct {
 	//
 	// The cost of that choice is worth knowing before you rely on this: behind
 	// a load balancer every request arrives from the balancer, so the list
-	// matches everything or nothing and is no boundary at all. There, restrict
-	// at the proxy and let the password be the check here.
+	// matches everything or nothing and is no boundary at all. There,
+	// [PageConfig.Addr] is the boundary — bind the page somewhere the balancer
+	// is not — and this list is what narrows the addresses on that network.
 	Allow []string
 }
 
@@ -136,26 +174,32 @@ type Page struct {
 	// allow is Allow, parsed. Nil means every address, which is what an empty
 	// list means: this is a narrowing and not a default-deny.
 	allow []netip.Prefix
-	// unarmed is why this page will mount nothing, or empty when it will.
+	// unarmed is why this page will serve nothing, or empty when it will.
 	unarmed string
 }
 
 // Page builds the monitoring page over the span file this provider is writing.
 //
 // It returns an error only for a configuration that is wrong — a base path that
-// is not one, a password too short to be worth having. Having no password at
-// all is not wrong: it is how a project that generated the page decides not to
-// serve it in this environment, and [Page.Mount] then registers nothing.
-// [Page.Unarmed] says which, in one line a main can log.
+// is not one, a password too short to be worth having. Having no password, or
+// no address to listen on, is not wrong: it is how a project that generated the
+// page decides not to serve it in this environment, and [Page.Handler] is then
+// nil and [Page.Addr] empty. [Page.Unarmed] says which, in one line a main can
+// log.
 //
 //	page, err := tracing.Page(api.Monitoring())
 //	if err != nil {
 //	    return nil, err
 //	}
 //	if why := page.Unarmed(); why != "" {
-//	    app.Logger.Info("monitoring page not mounted", "reason", why)
+//	    app.Logger.Info("monitoring page not listening", "reason", why)
 //	}
+//
+// Then hand both halves to whatever runs the servers:
+//
+//	serve.Config{Monitor: page.Handler(), MonitorAddr: page.Addr()}
 func (p *Provider) Page(cfg PageConfig) (*Page, error) {
+	cfg.Addr = cmp.Or(os.Getenv(AddrEnv), cfg.Addr)
 	cfg.BasePath = cmp.Or(cfg.BasePath, DefaultMonitorPath)
 	cfg.MaxTraces = cmp.Or(cfg.MaxTraces, DefaultMaxTraces)
 	cfg.MaxLogs = cmp.Or(cfg.MaxLogs, DefaultMaxLogs)
@@ -183,14 +227,75 @@ func (p *Provider) Page(cfg PageConfig) (*Page, error) {
 		return nil, fmt.Errorf("observe: the span file and the log file are both %q; they have to be different files", pg.file)
 	}
 
-	switch {
-	case pg.password == "":
-		pg.unarmed = "no password: set $" + cfg.PasswordEnv
-	case len(pg.password) < MinPasswordLength:
+	// A password too short is refused, and whether there is anywhere to listen
+	// does not come into it: somebody who set a five-character password made a
+	// mistake either way, and finding out about it only after also setting an
+	// address is finding out twice.
+	if pg.password != "" && len(pg.password) < MinPasswordLength {
 		return nil, fmt.Errorf("observe: the monitoring password is %d characters, and %d is the minimum",
 			len(pg.password), MinPasswordLength)
 	}
+
+	// Missing altogether is not a mistake. It is an environment saying it does
+	// not want the page — a laptop, CI, a one-off container — and refusing to
+	// start there would be rig deciding that a server without a monitoring page
+	// is not worth running.
+	//
+	// The address is reported first because it is the coarser answer. With
+	// nothing to listen on, whether there is a password to compare has not come
+	// up yet, and naming the password would send somebody to set a variable
+	// that changes nothing.
+	switch {
+	case cfg.Addr == "":
+		pg.unarmed = "no address: set monitoring.addr in rig.yaml, or $" + AddrEnv
+	case pg.password == "":
+		pg.unarmed = "no password: set $" + cfg.PasswordEnv
+	}
 	return pg, nil
+}
+
+// Addr is where this page listens, or empty when it is unarmed.
+//
+// Empty and nil from [Page.Handler] travel together: a caller that passes both
+// on gets no listener, which is the whole of what an unarmed page does.
+func (pg *Page) Addr() string {
+	if pg == nil || pg.unarmed != "" {
+		return ""
+	}
+	return pg.cfg.Addr
+}
+
+// BasePath is where the page is mounted on its own listener, resolved.
+//
+// It is here for the caller that has to build a link to the page — the page is
+// on an origin of its own now, so a relative href no longer reaches it — and it
+// answers even when the page is unarmed, because it is a fact about the
+// configuration rather than about whether anything is serving. [Page.Addr] is
+// the half that goes empty.
+func (pg *Page) BasePath() string {
+	if pg == nil {
+		return ""
+	}
+	return pg.cfg.BasePath
+}
+
+// Handler is the page, ready to be served, and nil when it is unarmed.
+//
+// Nil rather than a handler that refuses, for the reason [Page.Mount] registers
+// nothing: a port answering 401 tells anybody scanning that there is a page
+// here, and a port that is not open tells them nothing. Passing it to
+// [github.com/simonjanss/rig/runtime/serve.Config] Monitor is what makes the
+// difference — nil there means no second listener is opened at all.
+//
+// It is a mux of its own rather than the API's, which is what keeps the page
+// off the network the API is on. See [PageConfig.Addr].
+func (pg *Page) Handler() http.Handler {
+	if pg == nil || pg.unarmed != "" {
+		return nil
+	}
+	mux := http.NewServeMux()
+	pg.Mount(mux)
+	return mux
 }
 
 // Unarmed is why this page will serve nothing, or empty when it will serve.
@@ -205,12 +310,19 @@ func (pg *Page) Unarmed() string {
 	return pg.unarmed
 }
 
-// Mount registers the page's routes, and registers nothing when it is unarmed.
+// Mount registers the page's routes on a mux, and registers nothing when it is
+// unarmed.
 //
 // Nothing rather than a handler that refuses: a route that answers 401 tells
 // anybody scanning that there is a page here, and a route that does not exist
 // tells them nothing. It is the same argument that leaves the registration
 // endpoint unmounted rather than answering 403.
+//
+// [Page.Handler] is the ordinary way in, and it is this call onto a mux of the
+// page's own. This one is exported for the caller who has a mux already and a
+// reason — a test, or a reverse proxy arrangement where the page shares a
+// listener with something that is not this application's API. Sharing it with
+// that API is what [PageConfig.Addr] exists to stop.
 //
 // The path without its trailing slash redirects to the one with it, rather than
 // serving the same page twice. That is what lets the HTML name its stylesheet
@@ -220,12 +332,11 @@ func (pg *Page) Unarmed() string {
 // guard, so an address that may not see the page does not learn it exists from
 // a redirect either.
 //
-// It goes on the same mux as the API, after it, so that a pattern collision is
-// a panic naming this page rather than a route the project owns. The page is
-// not traced and not logged, and that is not arranged here: rig opens its spans
-// and writes its request lines inside each generated handler, so anything else
-// on the mux is already invisible to both. Looking at the page does not appear
-// on the page.
+// The page is not traced and not logged, and that is not arranged here: rig
+// opens its spans and writes its request lines inside each generated handler,
+// so anything that is not one is already invisible to both. Looking at the page
+// does not appear on the page — which was true when it shared the API's mux and
+// is now true twice over, since it does not.
 func (pg *Page) Mount(mux *http.ServeMux) {
 	if pg == nil || pg.unarmed != "" {
 		return

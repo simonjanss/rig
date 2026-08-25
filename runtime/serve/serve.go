@@ -71,6 +71,37 @@ type Config struct {
 	// Addr is the listen address. Empty means $ADDR, then ":8080".
 	Addr string
 
+	// Monitor is served on a listener of its own, at MonitorAddr, in this same
+	// process. Nil — the default — opens no second listener.
+	//
+	// It is an http.Handler and not rig's monitoring page, because this package
+	// is imported by every generated server and rig/observe brings
+	// OpenTelemetry with it. Pass observe's:
+	//
+	//	Monitor:     page.Handler(),
+	//	MonitorAddr: page.Addr(),
+	//
+	// which are both zero when the page is unarmed, so a deployment with no
+	// monitoring password opens no port rather than one that refuses.
+	//
+	// A separate listener rather than a route on the handler below, because a
+	// bind address is a boundary the kernel keeps and a path is not: bound to
+	// loopback, the page is reachable by this machine and by nothing else, in
+	// every deployment and behind every proxy. Anything else that should be
+	// reachable on those terms and not on the API's — a pprof mux, an operator
+	// endpoint — belongs here too.
+	Monitor http.Handler
+
+	// MonitorAddr is where Monitor listens, as host:port. Required when Monitor
+	// is set, and refused when it is not: the two say one thing together, and
+	// either one alone is a monitoring page somebody believes is running.
+	//
+	// There is no default and no environment fallback here, unlike Addr. What
+	// fills it in is observe's own $RIG_MONITOR_ADDR, resolved before the page
+	// is built, so that the address and the page's own idea of it cannot
+	// disagree.
+	MonitorAddr string
+
 	// LivenessPath answers whether the process is running, and nothing else.
 	// It never touches the database, and that is the whole point: a liveness
 	// probe that fails when a dependency does turns one database blip into
@@ -202,6 +233,14 @@ type Config struct {
 	// OnListen is called with the address actually bound, which is the only
 	// way to learn it when Addr asks for port zero.
 	OnListen func(net.Addr)
+
+	// OnMonitorListen is OnListen for MonitorAddr, and is not called at all
+	// when there is no second listener.
+	//
+	// A second callback rather than a role argument on the first, so that a
+	// test waiting for one port cannot be handed the other and block until it
+	// times out.
+	OnMonitorListen func(net.Addr)
 }
 
 // Main runs a server until it is asked to stop, then exits.
@@ -312,6 +351,28 @@ func Run(ctx context.Context, cfg Config, mount Mount) (err error) {
 	if err := cfg.checkStartup(); err != nil {
 		return err
 	}
+
+	// The monitoring listener, first and stopped last.
+	//
+	// First, because everything below this can fail slowly — a database that
+	// will not answer, a migration that will not finish — and those are the
+	// startups somebody most wants to look at the log page during. It needs
+	// nothing from the pool: the page reads files.
+	//
+	// Stopped last, which is what registering the defer here rather than after
+	// the pool buys. Deferred teardown runs in reverse, so this closes after
+	// the API has drained, after the App.Close hooks and after the pool — and a
+	// drain that can be watched while it happens is most of the reason the page
+	// is on a listener of its own.
+	//
+	// A port already taken is an error from Run for the reason the API's is: a
+	// page somebody believes is running is worse than one that refused to
+	// start.
+	stopMonitor, err := cfg.serveMonitor(ctx)
+	if err != nil {
+		return err
+	}
+	defer stopMonitor()
 
 	// Everything up to the first accepted connection happens under one budget.
 	// It is released before serving: a deadline that outlived the boot would
@@ -444,6 +505,81 @@ func Run(ctx context.Context, cfg Config, mount Mount) (err error) {
 		return &ShutdownError{Err: drained}
 	}
 	return nil
+}
+
+// monitorGrace is how long the monitoring listener gets to finish what it has.
+//
+// It is a constant and not a budget the caller divides up, because the page
+// serves six routes that read a bounded slice of a file and answer: there is no
+// request here that legitimately takes longer, and nothing downstream is
+// waiting on it either. It is deliberately outside MaxShutdown, which
+// checkShutdown polices — that budget is for work the application declared, and
+// this listener is stopped after all of it precisely so that the drain can be
+// watched while it happens.
+const monitorGrace = 2 * time.Second
+
+// serveMonitor opens the second listener and returns the function that closes
+// it, which does nothing when there is no second listener.
+//
+// The two fields are refused separately from the rest of the configuration
+// because the failure they guard against is silent: a Monitor with no
+// MonitorAddr is a page nothing serves, and a MonitorAddr with no Monitor is a
+// port that answers 404 to the person who went looking for the page. Either one
+// looks wired from the main that wrote it.
+func (c Config) serveMonitor(ctx context.Context) (func(), error) {
+	switch {
+	case c.Monitor == nil && c.MonitorAddr == "":
+		return func() {}, nil
+	case c.Monitor == nil:
+		return nil, fmt.Errorf("serve: MonitorAddr is %q and Monitor is nil: "+
+			"pass the handler too, or leave both empty", c.MonitorAddr)
+	case c.MonitorAddr == "":
+		return nil, errors.New("serve: Monitor is set and MonitorAddr is empty: " +
+			"say where it listens, for example MonitorAddr: \"127.0.0.1:9090\"")
+	}
+
+	ln, err := net.Listen("tcp", c.MonitorAddr)
+	if err != nil {
+		return nil, fmt.Errorf("listen on %s for the monitoring page: %w", c.MonitorAddr, err)
+	}
+	if c.OnMonitorListen != nil {
+		c.OnMonitorListen(ln.Addr())
+	}
+
+	// A server of its own, so that draining the API leaves this one answering —
+	// but the application's own timeouts on it, rather than a second set only
+	// this listener obeys. They are what this process was told to hold a
+	// connection open for, and every request here is lighter than the ones they
+	// were sized for: a bounded slice of a file, or one of three assets.
+	srv := &http.Server{
+		Handler:           c.Monitor,
+		ReadHeaderTimeout: c.ReadHeaderTimeout,
+		ReadTimeout:       c.ReadTimeout,
+		WriteTimeout:      c.WriteTimeout,
+		IdleTimeout:       c.IdleTimeout,
+	}
+	// WithoutCancel because both of the things that log through it happen after
+	// the context that started the stop is already cancelled: a listener that
+	// died on its own, and the shutdown below.
+	stopping := context.WithoutCancel(ctx)
+
+	go func() {
+		if err := srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			c.Logger.ErrorContext(stopping, "the monitoring listener stopped",
+				"addr", ln.Addr().String(), "error", err)
+		}
+	}()
+	c.Logger.InfoContext(ctx, "monitoring", "addr", ln.Addr().String())
+
+	return func() {
+		// A deadline off the cancelled context would give this no time at all,
+		// which is the same reason Run derives its own shutdown from one.
+		ctx, cancel := context.WithTimeout(stopping, monitorGrace)
+		defer cancel()
+		if err := srv.Shutdown(ctx); err != nil {
+			c.Logger.ErrorContext(stopping, "the monitoring listener would not stop", "error", err)
+		}
+	}, nil
 }
 
 // checkStartup refuses a budget that cannot hold its own parts.

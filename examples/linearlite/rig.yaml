@@ -99,16 +99,24 @@ presence:
 tracing:
   enabled: true
 
-# rig's own page over those spans and the log lines they wrote, at
-# /_rig/monitor. It is a reader and stores nothing, which is why it cannot be
-# turned on without `tracing:` above.
+# rig's own page over those spans and the log lines they wrote. It is a reader
+# and stores nothing, which is why it cannot be turned on without `tracing:`
+# above.
+#
+# `addr:` is required and rig defaults no part of it. The page gets a listener
+# of its own in this same binary — not a route on the API's mux — because which
+# interface it is bound to is the only thing in front of it that a client
+# cannot talk its way around. 127.0.0.1 here means this machine and nothing
+# else, which is what an example that runs wherever it is cloned should say;
+# $RIG_MONITOR_ADDR moves it without a regenerate.
 #
 # The password is not here — it is read from $RIG_MONITOR_PASSWORD at run time,
-# and with nothing in it the page is not mounted at all. `make demo` sets one,
+# and with nothing in it the page does not listen at all. `make demo` sets one,
 # so the tour has something to open; a deployment sets a real one, and narrows
 # it further with `allow:`.
 monitoring:
   enabled: true
+  addr: 127.0.0.1:9084
 
 # A throwaway Postgres with the sync service beside it: `rig db up` starts
 # both, waits for Electric's replication stream to report active, and

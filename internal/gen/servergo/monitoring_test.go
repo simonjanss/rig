@@ -20,6 +20,7 @@ func monitored(t *testing.T) *ir.Document {
 	doc.API.Monitoring = &ir.Monitoring{
 		Enabled:     true,
 		ServiceName: "lifecycle",
+		Addr:        "127.0.0.1:9090",
 		BasePath:    "/_rig/monitor",
 		MaxTraces:   200,
 		MaxLogs:     500,
@@ -36,7 +37,7 @@ func TestMonitoringGolden(t *testing.T) {
 }
 
 // Absent rather than disabled. A project that traces and did not ask for the
-// page gets no page: no file, no field to set, and nothing on the mux.
+// page gets no page: no file, and nothing anywhere else that names one.
 func TestWithoutTheBlockThereIsNoPage(t *testing.T) {
 	t.Parallel()
 
@@ -44,8 +45,8 @@ func TestWithoutTheBlockThereIsNoPage(t *testing.T) {
 		if a.Path == "monitoring.gen.go" {
 			t.Error("a project with no monitoring block got a monitoring.gen.go")
 		}
-		if strings.Contains(string(a.Content), "MonitoringPage") {
-			t.Errorf("%s declares the page's interface in a project that asked for no page", a.Path)
+		if strings.Contains(string(a.Content), "Monitor") {
+			t.Errorf("%s names the page in a project that asked for no page", a.Path)
 		}
 	}
 }
@@ -60,6 +61,7 @@ func TestTheGeneratedConfigurationCarriesTheBlock(t *testing.T) {
 
 	for _, want := range []string{
 		`ServiceName: "lifecycle"`,
+		`Addr:        "127.0.0.1:9090"`,
 		`BasePath:    "/_rig/monitor"`,
 		`MaxTraces:   200`,
 		`MaxLogs:     500`,
@@ -106,23 +108,39 @@ func TestALiteralPasswordIsCarriedThrough(t *testing.T) {
 	}
 }
 
-// The page is mounted after everything else, so a collision is a panic naming
-// rig's own route rather than one this project owns.
-func TestThePageIsMountedLast(t *testing.T) {
+// The page is not on the API's mux, and there is no field that would put it
+// there.
+//
+// This is the whole of what giving it a listener was for: the address it binds
+// to is the only boundary in front of the page that a client cannot talk its
+// way around, and a project that mounted it on the API's mux instead would have
+// given that up. So the generated server does not offer the choice — Register
+// never sees the page, and Server has nowhere to put one.
+func TestThePageIsNotOnTheAPIMux(t *testing.T) {
 	t.Parallel()
 
 	src := artifactNamed(t, gentest.Run(t, servergo.New(), monitored(t), opts()), "server.gen.go")
 
-	monitor := strings.Index(src, "h.Server.Monitor.Mount(mux)")
-	auth := strings.Index(src, "h.Server.Auth.Mount(mux)")
-	ret := strings.Index(src, "return mux")
-	if monitor < 0 {
-		t.Fatalf("the page is never mounted:\n%s", src)
+	// "observe" on its own would match the tracing this fixture also has —
+	// rig opens a span inside each handler, which is a different thing on the
+	// same import.
+	for _, unwanted := range []string{"Monitor", "MonitoringPage", "PageConfig"} {
+		if strings.Contains(src, unwanted) {
+			t.Errorf("the generated server names %q; the page is served on its own listener:\n%s", unwanted, src)
+		}
 	}
-	if auth < 0 || monitor < auth {
-		t.Error("the page is mounted before the auth routes")
-	}
-	if ret < 0 || monitor > ret {
-		t.Error("the page is mounted after Register has returned its mux")
+}
+
+// The address is where a main learns to put the listener, so it has to survive
+// the trip from rig.yaml into the one function that main calls.
+func TestTheAddressIsCarriedThrough(t *testing.T) {
+	t.Parallel()
+
+	doc := monitored(t)
+	doc.API.Monitoring.Addr = "10.0.0.4:9999"
+
+	src := artifactNamed(t, gentest.Run(t, servergo.New(), doc, opts()), "monitoring.gen.go")
+	if !strings.Contains(src, `Addr:        "10.0.0.4:9999"`) {
+		t.Errorf("the address did not reach the generated source:\n%s", src)
 	}
 }

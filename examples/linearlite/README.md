@@ -38,10 +38,11 @@ pnpm build         # the server serves web/dist; use `pnpm dev` for a dev loop
 
 `make demo` also sets `$RIG_LOG_FILE`, `$RIG_TRACE_FILE` and
 `$RIG_MONITOR_PASSWORD` — the three things rig's monitoring page needs and no
-build can know — into a throwaway `.run/`. Without them the page is not mounted
-at all, which is the right default everywhere else and useless on a tour, so
-the Makefile says so out loud rather than the configuration file doing it
-quietly.
+build can know — into a throwaway `.run/`. Without them no port is opened for
+the page at all, which is the right default everywhere else and useless on a
+tour, so the Makefile says so out loud rather than the configuration file doing
+it quietly. Where it listens is in rig.yaml: `127.0.0.1:9084`, its own port
+beside the API's 8084.
 
 Open [localhost:8084](http://localhost:8084) and sign in as
 `demo@linearlite.dev` / `correct horse battery staple` — or register a fresh
@@ -72,7 +73,7 @@ twice.
 | The import job | `go run ./import -key rig_sk_…` — the generated Go client (`client/`), a todo per CSV row, a deliberate delay so the board fills card by card, and idempotency keys so a rerun creates nothing |
 | **Claim it**, and its 409 | the `endpoints:` block in `services/todo/todo.yaml` and `Claim` in `services/todo/todo.go` — the one control that is not CRUD, because the rule is about the value already in the column |
 | **Outbox** | `services/outbox` implements both interfaces rig ships no transport for: `account.Notifier` for the links auth mints, and `notify.Sender` for the email copy of an inbox line. `/_demo/outbox` reads it, and the reset and invite flows end there |
-| **Monitor ↗** | `tracing:` and `monitoring:` in rig.yaml, wired in `main.go` — the last few hundred requests, what each spent its time on, and the log lines it wrote, at `/_rig/monitor` |
+| **Monitor ↗** | `tracing:` and `monitoring:` in rig.yaml, wired in `main.go` — the last few hundred requests, what each spent its time on, and the log lines it wrote, at `http://localhost:9084/_rig/monitor`. Its own port, not the API's: which interface it is bound to is the only boundary in front of it a client cannot talk its way around |
 | **Security**: sessions and the sign-in trail | `GET /auth/sessions` and `GET /auth/audit`, both rig's own, neither generated from this schema. The trail is written whether or not anybody reads it. The **Just me / Everybody** switch is `?scope=all`, refused without `authlog.read.all` — which the Owner holds and a member does not |
 | Pending invitations, and changing your password | `GET /auth/invitations` + `DELETE`, and `POST /auth/password/change` — which answers with a fresh pair, because setting a password revokes every session the identity had, including the one that asked |
 | The workspace menu in the header | `GET /auth/tenants`, `POST /auth/tenants/{id}/switch`, and `POST /auth/tenants` to start one — three endpoints behind one control, in `web/src/shell/TenantSwitcher.tsx`. A switch answers with a pair and nothing else and then reloads, because the live-sync collections are cached by runtime rather than by credential |
@@ -115,10 +116,11 @@ generating a client, a filter grammar and an OpenAPI entry for either would be
 generating them for something that vanishes on restart.
 
 The **Outbox** and **Monitor ↗** items appear only when the server says they
-will work. `GET /_demo/tour` is one handler and one boolean each, and it is
-there because a nav item that leads to a 404 is worse than no nav item — the
-monitoring page is unmounted without a password, which is the ordinary case
-for anybody running `go run .` by hand.
+will work. `GET /_demo/tour` is one handler, and it is there because a nav item
+that leads nowhere is worse than no nav item — no password means no port for the
+monitoring page, which is the ordinary case for anybody running `go run .` by
+hand. It hands back the monitor's URL rather than a boolean, because the page is
+on a port of its own and a relative href no longer reaches it.
 
 One behavior to know before demonstrating on a projector: the sync client
 pauses streams while a tab is hidden and resumes on focus, so a background
@@ -193,8 +195,10 @@ owner's, and one notification arriving on both channels at once.
 `presence_docker_test.go` covers the half of presence a browser writes — a beat,
 the two numbers every answer carries, two tabs of one account staying two rows, a
 leave that takes one of them, and a target table this API has never heard of.
-`monitor_test.go` needs no database: whether the page exists at all is decided
-by the environment before anything is served, so that is where it is asserted.
+`monitor_test.go` needs no database: whether the page exists at all, and which
+port it would be on, is decided by the environment and rig.yaml before anything
+is served, so that is where it is asserted — including the absolute URL the nav
+link needs now that the page is on an origin of its own.
 `make examples` runs it all; the
 shape-route test runs its live half — the todo shapes and the presence one — only
 when `$ELECTRIC_URL` points at the sync service `rig db up` started.

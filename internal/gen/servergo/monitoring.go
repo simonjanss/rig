@@ -8,68 +8,17 @@ import (
 	"github.com/simonjanss/rig/pkg/gen"
 )
 
+// observeAddrEnv is observe.AddrEnv, spelled rather than imported for the
+// reason internal/project spells the defaults: importing rig/observe would put
+// OpenTelemetry in the CLI's binary, and this is one string in one comment.
+const observeAddrEnv = "RIG_MONITOR_ADDR"
+
 // monitoring reports whether this document asked for rig's monitoring page.
 //
 // It cannot be true without [emitter.tracing] — the compiler refuses the
 // combination — so everything here may assume the spans it reads exist.
 func (e *emitter) monitoring() bool {
 	return e.doc.API.Monitoring != nil && e.doc.API.Monitoring.Enabled
-}
-
-// monitorInterface declares what the page has to be, without naming what it is.
-//
-// The same trick Authenticator is: a field typed as rig/observe's own would put
-// OpenTelemetry in the API package of every project, including the ones with no
-// page. One method is the whole surface, so anything that mounts routes fits —
-// including a wrapper that puts the page behind something else.
-func (e *emitter) monitorInterface(b *gobuf.Buf) {
-	if !e.monitoring() {
-		return
-	}
-
-	b.Comment("MonitoringPage serves rig's page over the spans this server " +
-		"wrote.\n\n" +
-		"[github.com/simonjanss/rig/observe.Page] satisfies it, and is what " +
-		"[Monitoring] is for. Declared here rather than imported so that the type " +
-		"of this field is not a dependency.")
-	b.L("type MonitoringPage interface {")
-	b.Comment("Mount registers the page's routes on the same mux the resource " +
-		"routes are on. It registers nothing when there is no password to guard " +
-		"it with.")
-	b.L("Mount(*%s.ServeMux)", b.Import("net/http"))
-	b.L("}")
-	b.NL()
-}
-
-// monitorField is the page, on the Server struct.
-func (e *emitter) monitorField(b *gobuf.Buf) {
-	if !e.monitoring() {
-		return
-	}
-
-	b.Comment("Monitor serves rig's monitoring page, and nil means it is not " +
-		"served.\n\n" +
-		"\tpage, err := tracing.Page(api.Monitoring())\n\n" +
-		"It is mounted on the mux Register returns, after the resource routes. It " +
-		"is not itself a traced or logged route — spans and request lines are " +
-		"opened inside each generated handler, so nothing that is not one appears " +
-		"in either — which is what keeps looking at the page off the page.")
-	b.L("Monitor MonitoringPage")
-	b.NL()
-}
-
-// mountMonitor mounts the page, last.
-func (e *emitter) mountMonitor(b *gobuf.Buf) {
-	if !e.monitoring() {
-		return
-	}
-
-	b.NL()
-	b.Comment("Last, for the reason the auth routes are late: a collision here " +
-		"is a panic naming rig's own page rather than a route this project owns.")
-	b.L("if h.Server.Monitor != nil {")
-	b.L("h.Server.Monitor.Mount(mux)")
-	b.L("}")
 }
 
 // monitoringFile emits the one thing a main function needs to serve the page.
@@ -85,13 +34,18 @@ func (e *emitter) monitoringFile() (gen.Artifact, error) {
 
 	b.Comment("Monitoring is this API's monitoring page, as far as generated code " +
 		"can know it.\n\n" +
+		"The page listens on " + m.Addr + ", on a listener of its own inside this " +
+		"same binary. It is not a route on the mux Register returns, and it " +
+		"cannot be made into one: which interface the page is bound to is the " +
+		"only boundary in front of it that a client cannot talk its way around, " +
+		"and sharing the API's listener would be giving that up. Serving it is " +
+		"two fields on the server this application already runs:\n\n" +
 		"\tpage, err := tracing.Page(api.Monitoring())\n" +
 		"\tif err != nil { return nil, err }\n" +
 		"\tif why := page.Unarmed(); why != \"\" {\n" +
-		"\t\tapp.Logger.Info(\"monitoring page not mounted\", \"reason\", why)\n" +
+		"\t\tapp.Logger.Info(\"monitoring page not listening\", \"reason\", why)\n" +
 		"\t}\n\n" +
-		"Then set it as Server.Monitor, and it is mounted with the resource " +
-		"routes.\n\n" +
+		"\t// ... serve.Config{Monitor: page.Handler(), MonitorAddr: page.Addr()}\n\n" +
 		"For the log half, open a sink, tee its handler into the logger this " +
 		"application already has, and set it on what this returns:\n\n" +
 		"\tlogs, err := observe.OpenLogs(observe.LogConfig{})\n" +
@@ -111,16 +65,20 @@ func (e *emitter) monitoringFile() (gen.Artifact, error) {
 		"What is not here is where the spans go — that is the deployment's, the " +
 		"same as it is for [Tracing] — and, unless this project wrote one into " +
 		"its rig.yaml, the password, which is read from $" + m.PasswordEnv + " " +
-		"at run time. With nothing in it the page is not mounted at all, which " +
-		"is what Unarmed is for.\n\n" +
-		"`monitoring.allow` is here, because which networks may reach the page " +
-		"is a decision about this application rather than about the machine it " +
-		"happens to be on. It narrows the password rather than replacing it: an " +
-		"address that is not on the list is answered 404 before the password is " +
-		"compared.")
+		"at run time. With nothing in it the page does not listen at all: the " +
+		"port is closed rather than guarded, and Unarmed is what says so.\n\n" +
+		"The address is here and overridable — $" + observeAddrEnv + " wins over " +
+		"it — for the reason the span destination is the deployment's: moving a " +
+		"port should not need a regenerate. `monitoring.allow` is here because " +
+		"which networks may reach the page is a decision about this application " +
+		"rather than about the machine it happens to be on. It is the layer " +
+		"above the address rather than a substitute for it: the port decides who " +
+		"can open a connection, and the list decides which of them is answered, " +
+		"404 before the password is compared.")
 	b.L("func Monitoring() %s.PageConfig {", obsPkg)
 	b.L("return %s.PageConfig{", obsPkg)
 	b.L("ServiceName: %s,", gobuf.Quote(m.ServiceName))
+	b.L("Addr: %s,", gobuf.Quote(m.Addr))
 	b.L("BasePath: %s,", gobuf.Quote(m.BasePath))
 	b.L("MaxTraces: %s,", strconv.Itoa(m.MaxTraces))
 	b.L("MaxLogs: %s,", strconv.Itoa(m.MaxLogs))

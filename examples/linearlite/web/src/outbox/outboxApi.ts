@@ -37,7 +37,15 @@ export type OutboxMessage = {
 
 /** What this build can show. A link that would 404 is worse than no link. */
 export type Tour = {
-    monitor: boolean;
+    /**
+     * The absolute URL of rig's monitoring page, and empty when there is none.
+     *
+     * Absolute because the page listens on a port of its own — a different
+     * origin from the one this document came from — so a relative href does
+     * not reach it. The server builds it: which port and which interface come
+     * from rig.yaml, and guessing here would be guessing.
+     */
+    monitor: string;
     outbox: boolean;
     /**
      * The channels this build registered a sender for. A channel with none has
@@ -48,10 +56,11 @@ export type Tour = {
 };
 
 /**
- * Signed in, deliberately. Whether rig's monitoring page is mounted is not a
- * fact to hand an anonymous caller: rig registers no route for it rather than
- * one that refuses, so that a scan learns nothing, and an open endpoint here
- * would give that away. The only caller is the nav inside a session.
+ * Signed in, deliberately. Where rig's monitoring page listens is not a fact to
+ * hand an anonymous caller: rig opens no port for it at all rather than one
+ * that refuses, so that a scan learns nothing, and an open endpoint here would
+ * give that away — the address, now, and not just that there is one. The only
+ * caller is the nav inside a session.
  */
 export function readTour(rt: Runtime): Promise<Tour> {
     return send(rt, {

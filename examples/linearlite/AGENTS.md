@@ -156,9 +156,11 @@ Beyond the todo example's layout, five directories and one file:
 - `demo.go` — the only hand-written HTTP here: `GET /_demo/outbox` and
   `GET /_demo/tour`. Hand-written because neither is about a table, so there is
   nothing for rig to generate from. Add a route here rather than inventing a
-  resource for something that lives in memory. Both need a session: whether
-  rig's monitoring page is mounted is not a fact to hand an anonymous caller,
-  since rig mounts no route at all rather than one that refuses.
+  resource for something that lives in memory. Both need a session: where rig's
+  monitoring page listens is not a fact to hand an anonymous caller, since rig
+  opens no port at all rather than one that refuses. `/_demo/tour` hands back
+  the page's absolute URL, because it is on a port of its own and a relative
+  href reaches the API instead.
 - `services/rig_notification_device/` + `services/rig_notification_setting/` —
   the two notification tables a person owns rather than reads, exposed as
   ordinary resources by `notifications: expose: true` plus an `operations:` line
@@ -180,12 +182,18 @@ lines for it — `Presence` on `api.Handlers`, `RigPresence` on
 `MaxShutdown` is thirty-five rather than thirty: a third closer changed the
 arithmetic the comment above that number states.
 
-`tracing:` and `monitoring:` are on, which is why `main.go` opens a log sink
-before `serve.Main`, tees it into the logger, passes `observe.Pool`, and takes
-a `*observe.Page` in `newAPI` — nil from a task, since a cron entry serving a
-page nobody can reach is not worth the wiring. The three environment variables
-the page needs are set by `make demo` into a gitignored `.run/`, never by
-rig.yaml, which is checked in.
+`tracing:` and `monitoring:` are on, which is why `main.go` opens a log sink and
+builds the tracing provider and the page *before* `serve.Main` rather than inside
+the mount closure: the page is half of `serve.Config` now — `Monitor:
+page.Handler()` and `MonitorAddr: page.Addr()` — and it listens on
+`127.0.0.1:9084`, its own port beside the API's 8084. The `CloseWithin("traces",
+…)` that stops the provider stays in the closure, where there is an `App`.
+`newAPI` still takes a `*observe.Page`, but only so `/_demo/tour` can say where
+the page is; nil from a task, since a cron entry serving a page nobody can reach
+is not worth the wiring. The password and the two file paths are set by `make
+demo` into a gitignored `.run/`, never by rig.yaml, which is checked in — the
+address is the one part of it that *is* in rig.yaml, because who can reach the
+page is a decision worth reading off the file.
 
 The auth foundation's tables came from `rig setup-project` (migrations 1–7),
 and `rig_account` is exposed read-only as the `Account` resource — the board's

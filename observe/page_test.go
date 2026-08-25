@@ -1,6 +1,7 @@
 package observe_test
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"log/slog"
@@ -17,10 +18,18 @@ import (
 
 const password = "correct horse battery"
 
+// testAddr is an address the page can be armed with.
+//
+// These tests serve the handler directly and open no listener, so the number is
+// never bound and never has to be free. It is here because an address is half
+// of what arms a page, the same as the password is — see [observe.PageConfig].
+const testAddr = "127.0.0.1:9090"
+
 // mount is the page on a mux of its own, and the base path it answers under.
 func mount(t *testing.T, p *observe.Provider, cfg observe.PageConfig) (*http.ServeMux, string) {
 	t.Helper()
 
+	cfg.Addr = cmp.Or(cfg.Addr, testAddr)
 	page, err := p.Page(cfg)
 	if err != nil {
 		t.Fatal(err)
@@ -140,7 +149,7 @@ func TestAPageWithNoPasswordMountsNothing(t *testing.T) {
 	t.Setenv(observe.PasswordEnv, "")
 
 	p := setup(t, observe.Config{ServiceName: "todo"})
-	page, err := p.Page(observe.PageConfig{ServiceName: "todo"})
+	page, err := p.Page(observe.PageConfig{ServiceName: "todo", Addr: testAddr})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -158,13 +167,104 @@ func TestAPageWithNoPasswordMountsNothing(t *testing.T) {
 	}
 }
 
+// The other half of what arms a page, and the reason it is half of one.
+//
+// A page with no address has nowhere to be, and the only alternative to saying
+// so is picking a port — which is a port to collide over and an interface
+// nobody chose, in front of a list of what every caller did.
+func TestAPageWithNoAddressServesNothing(t *testing.T) {
+	t.Setenv(observe.AddrEnv, "")
+
+	p := setup(t, observe.Config{ServiceName: "todo"})
+	page, err := p.Page(observe.PageConfig{ServiceName: "todo", Password: password})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if page.Unarmed() == "" {
+		t.Fatal("a page with nowhere to listen says it will serve")
+	}
+	if !strings.Contains(page.Unarmed(), observe.AddrEnv) {
+		t.Errorf("the reason does not name the variable to set: %q", page.Unarmed())
+	}
+	if page.Handler() != nil {
+		t.Error("an unarmed page handed back a handler")
+	}
+	if page.Addr() != "" {
+		t.Errorf("an unarmed page handed back the address %q", page.Addr())
+	}
+}
+
+// Both halves go empty together, so a caller passing them straight on opens no
+// listener rather than one serving a page that will not answer.
+func TestAnArmedPageHandsBackBothHalves(t *testing.T) {
+	p := setup(t, observe.Config{ServiceName: "todo"})
+	page, err := p.Page(observe.PageConfig{ServiceName: "todo", Password: password, Addr: testAddr})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if why := page.Unarmed(); why != "" {
+		t.Fatalf("the page will serve nothing: %s", why)
+	}
+	if got := page.Addr(); got != testAddr {
+		t.Errorf("address is %q, want %q", got, testAddr)
+	}
+	if got := page.BasePath(); got != observe.DefaultMonitorPath {
+		t.Errorf("base path is %q, want %q", got, observe.DefaultMonitorPath)
+	}
+
+	h := page.Handler()
+	if h == nil {
+		t.Fatal("an armed page handed back no handler")
+	}
+
+	// The handler is the page, not a mux with the page somewhere on it: what
+	// comes back is the whole of what that listener answers.
+	r := httptest.NewRequest(http.MethodGet, observe.DefaultMonitorPath+"/", nil)
+	r.SetBasicAuth("rig", password)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	if w.Code != http.StatusOK {
+		t.Errorf("the handler answered %d, want 200", w.Code)
+	}
+}
+
+// Where a thing listens is the deployment's, the same as where the spans go —
+// so a port can be moved without a regenerate.
+//
+// It overrides rather than fills in, which is the opposite of the password and
+// is the point: rig.yaml has to name an address for a project to compile at
+// all, so an environment that says one is an environment overruling a decision
+// somebody already made.
+func TestTheAddressCanBeMovedByTheEnvironment(t *testing.T) {
+	t.Setenv(observe.AddrEnv, "127.0.0.1:9999")
+
+	p := setup(t, observe.Config{ServiceName: "todo"})
+	page, err := p.Page(observe.PageConfig{ServiceName: "todo", Password: password, Addr: testAddr})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := page.Addr(); got != "127.0.0.1:9999" {
+		t.Errorf("address is %q, want the one the environment named", got)
+	}
+}
+
+// A password that is too short is a mistake whether or not there is anywhere to
+// serve it from, and finding out about it only after also setting an address is
+// finding out twice.
+func TestAShortPasswordIsRefusedWithoutAnAddress(t *testing.T) {
+	p := setup(t, observe.Config{ServiceName: "todo"})
+	if _, err := p.Page(observe.PageConfig{Password: "short"}); err == nil {
+		t.Error("a five-character password on a page with no address was accepted")
+	}
+}
+
 // The environment is where a password normally comes from, and rig.yaml's
 // literal wins when a project wrote one.
 func TestThePasswordComesFromTheEnvironment(t *testing.T) {
 	t.Setenv(observe.PasswordEnv, password)
 
 	p := setup(t, observe.Config{ServiceName: "todo"})
-	page, err := p.Page(observe.PageConfig{ServiceName: "todo"})
+	page, err := p.Page(observe.PageConfig{ServiceName: "todo", Addr: testAddr})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -189,7 +289,7 @@ func TestAConfigurationThatIsWrongIsAnError(t *testing.T) {
 		t.Error("a five-character password was accepted")
 	}
 	for _, base := range []string{"monitor", "/monitor/"} {
-		if _, err := p.Page(observe.PageConfig{BasePath: base, Password: password}); err == nil {
+		if _, err := p.Page(observe.PageConfig{BasePath: base, Password: password, Addr: testAddr}); err == nil {
 			t.Errorf("base path %q was accepted", base)
 		}
 	}

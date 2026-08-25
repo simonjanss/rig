@@ -1,6 +1,9 @@
 package project
 
 import (
+	"errors"
+	"fmt"
+	"net"
 	"net/netip"
 	"slices"
 	"strconv"
@@ -21,10 +24,10 @@ import (
 // always resolves these before a generator sees them, so observe's copies are
 // reached only by a hand-written main that left the fields zero.
 const (
-	// DefaultMonitorBasePath is where the page is mounted. Under a prefix no
-	// generator writes a route beneath, so it cannot collide with a table
-	// somebody adds later — the routing counterpart of the reserved rig_ prefix
-	// in the database.
+	// DefaultMonitorBasePath is where the page is mounted on its own listener.
+	// Nothing else is on that listener to collide with; the prefix is kept
+	// because it is the URL projects already have, and because it gives a
+	// reverse proxy in front of the port something to key on.
 	DefaultMonitorBasePath = "/_rig/monitor"
 
 	// DefaultMonitorMaxTraces is how many requests the page lists.
@@ -47,7 +50,7 @@ const (
 // It exists for the deployment too small to be worth a collector and a Grafana
 // in front of it, which is most of them for most of their life. It is a reader
 // and not a store — the span file `tracing:` already writes is the store — so
-// turning it on costs a route and an HTML asset, and no schema, no retention
+// turning it on costs a listener and an HTML asset, and no schema, no retention
 // policy and nothing to run beside the server.
 //
 // Which is also why it cannot be turned on alone: with no spans there is
@@ -55,16 +58,40 @@ const (
 // discovered as a page that is permanently empty.
 type Monitoring struct {
 	// Enabled says this project serves the page. Off by default, and off means
-	// the route does not exist rather than answering 404 from a handler that is
-	// there — `server-go` writes no wiring for a project without it, so the API
-	// package names no page at all.
+	// there is no listener rather than a port answering 404 — `server-go`
+	// writes no wiring for a project without it, so the API package names no
+	// page at all.
 	Enabled bool `yaml:"enabled,omitempty" json:"enabled,omitempty" jsonschema_description:"Whether this project serves rig's monitoring page. It requires tracing.enabled, because the spans are what the page reads."`
 
-	// BasePath is where the page is mounted, defaulting to
-	// [DefaultMonitorBasePath]. It has to sit outside the API's own prefix and
-	// outside the authentication routes: those are the project's namespace, and
-	// a page inside one is a route the project cannot then have.
-	BasePath string `yaml:"base_path,omitempty" json:"base_path,omitempty" jsonschema_description:"Where the page is mounted. Defaults to /_rig/monitor, and cannot sit under api.base_path or auth.base_path."`
+	// Addr is where the page listens, as host:port — "127.0.0.1:9090", or
+	// ":9090" for every interface. Required when [Monitoring.Enabled] is set.
+	//
+	// The page has its own listener and its own [net/http.Server] inside the
+	// same binary, rather than a route on the API's mux, because the bind
+	// address is the only boundary here that a client cannot talk its way
+	// around. [Monitoring.Allow] is matched against the connection's own
+	// address, which behind a load balancer is the balancer's, so it matches
+	// everything or nothing; a port bound to loopback is enforced by the kernel
+	// and says the same thing in every deployment.
+	//
+	// There is no default, deliberately. A default port is one two rig services
+	// on a host would fight over, and a default interface is a decision about
+	// who can reach a page that lists every path, request id and error cause
+	// this server has seen — neither is rig's to make quietly.
+	//
+	// $RIG_MONITOR_ADDR overrides it at run time, for the reason the span
+	// destination is an environment variable: where a thing listens is a
+	// property of the deployment, and moving it should not need a regenerate.
+	Addr string `yaml:"addr,omitempty" json:"addr,omitempty" jsonschema_description:"Where the monitoring page listens, as host:port, for example 127.0.0.1:9090. Required when monitoring.enabled is set; there is no default. $RIG_MONITOR_ADDR overrides it at run time."`
+
+	// BasePath is where the page is mounted on its own listener, defaulting to
+	// [DefaultMonitorBasePath].
+	//
+	// It has nothing to collide with now that the page is not on the API's mux,
+	// so this is a prefix a reverse proxy in front of [Monitoring.Addr] can key
+	// on, and the reason the default is kept is that it is the URL projects
+	// already have.
+	BasePath string `yaml:"base_path,omitempty" json:"base_path,omitempty" jsonschema_description:"Where the page is mounted on its own listener. Defaults to /_rig/monitor."`
 
 	// MaxTraces is how many requests the page lists, newest first. Zero means
 	// [DefaultMonitorMaxTraces].
@@ -80,11 +107,12 @@ type Monitoring struct {
 	MaxLogs int `yaml:"max_logs,omitempty" json:"max_logs,omitempty" jsonschema_description:"How many log lines the page reads, newest first. Defaults to 500."`
 
 	// PasswordEnv names the variable the page reads its password from,
-	// defaulting to [DefaultMonitorPasswordEnv]. With nothing in it the page is
-	// not mounted, and the server says so once at startup: a project running
-	// where there is no password to give is a project that gets no page rather
-	// than one that gets an open one.
-	PasswordEnv string `yaml:"password_env,omitempty" json:"password_env,omitempty" jsonschema_description:"Variable the page reads its password from. Defaults to RIG_MONITOR_PASSWORD. Empty at run time means the page is not mounted."`
+	// defaulting to [DefaultMonitorPasswordEnv]. With nothing in it the page
+	// does not listen at all — the port is closed, not guarded — and the server
+	// says so once at startup: a project running where there is no password to
+	// give is a project that gets no page rather than one that gets an open
+	// one.
+	PasswordEnv string `yaml:"password_env,omitempty" json:"password_env,omitempty" jsonschema_description:"Variable the page reads its password from. Defaults to RIG_MONITOR_PASSWORD. Empty at run time means the page does not listen at all."`
 
 	// Password is the password itself, for a project that would rather write it
 	// here than arrange an environment.
@@ -108,6 +136,11 @@ type Monitoring struct {
 	// every request arrives from the balancer, and that failure is silent and
 	// total.
 	//
+	// [Monitoring.Addr] is the boundary that does hold in that deployment, and
+	// this list is the layer above it: the port decides which networks can open
+	// a connection at all, and this decides which addresses on those networks
+	// are answered.
+	//
 	// It is matched against the connection's own address and never against a
 	// forwarded header, for the reason [Auth.TrustedProxies] exists: an address
 	// read from a header a client controls is an address a client chooses.
@@ -117,8 +150,8 @@ type Monitoring struct {
 // Configured reports whether anything in the block was set, so that a block
 // somebody filled in and never enabled is refused rather than ignored.
 func (m Monitoring) Configured() bool {
-	return m.BasePath != "" || m.MaxTraces != 0 || m.MaxLogs != 0 || m.PasswordEnv != "" ||
-		m.Password != "" || len(m.Allow) > 0
+	return m.Addr != "" || m.BasePath != "" || m.MaxTraces != 0 || m.MaxLogs != 0 ||
+		m.PasswordEnv != "" || m.Password != "" || len(m.Allow) > 0
 }
 
 // IR is the resolved block, as a document carries it.
@@ -135,6 +168,7 @@ func (m Monitoring) IR(serviceName string) *ir.Monitoring {
 	return &ir.Monitoring{
 		Enabled:     true,
 		ServiceName: serviceName,
+		Addr:        m.Addr,
 		BasePath:    m.BasePath,
 		MaxTraces:   m.MaxTraces,
 		MaxLogs:     m.MaxLogs,
@@ -201,18 +235,18 @@ func (p *Project) checkMonitoring() diag.List {
 			"monitoring.max_logs is %d; it has to be positive", m.MaxLogs)
 	}
 
-	// Inside the API's prefix the page would occupy a route the project can
-	// then never have, and net/http would say so as a panic at startup rather
-	// than as a diagnostic here.
-	for _, owned := range []struct{ key, path string }{
-		{"api.base_path", p.Config.API.BasePath},
-		{"auth.base_path", authBasePath(p.Config.Auth)},
-	} {
-		if owned.path != "" && under(m.BasePath, owned.path) {
-			diags.Add(diag.CodeConfigInvalid, p.At("monitoring", "base_path"),
-				"monitoring.base_path %q is inside %s (%q), where it would take a route this project owns",
-				m.BasePath, owned.key, owned.path)
-		}
+	// The listener the page gets instead of a route on the API's mux, and the
+	// one field here rig will not pick for you. See [Monitoring.Addr] for why
+	// there is no default; the short version is that both halves of one are a
+	// decision — the port is a thing to collide over and the interface is a
+	// decision about who can reach the page.
+	if m.Addr == "" {
+		diags.Add(diag.CodeMonitoringWithoutAddr, p.At("monitoring", "enabled"),
+			"monitoring.enabled needs monitoring.addr: the page listens on its own port, and rig picks no default; "+
+				"`addr: 127.0.0.1:9090` serves it to this machine only")
+	} else if err := checkListenAddr(m.Addr); err != nil {
+		diags.Add(diag.CodeConfigInvalid, p.At("monitoring", "addr"),
+			"monitoring.addr is %q: %s; it has to be host:port, for example 127.0.0.1:9090 or :9090", m.Addr, err)
 	}
 
 	// Parsed here so that a typo is a diagnostic when rig.yaml is read rather
@@ -252,17 +286,29 @@ func parseAllowEntry(entry string) (netip.Prefix, error) {
 	return netip.PrefixFrom(addr, addr.BitLen()), nil
 }
 
-// authBasePath is the authentication prefix, or empty for a project with no
-// authentication — where the field holds a default nothing mounts.
-func authBasePath(a Auth) string {
-	if !a.Enabled {
-		return ""
+// checkListenAddr refuses an address net.Listen would refuse, so that a typo is
+// a diagnostic when rig.yaml is read rather than a server that will not start.
+//
+// It is deliberately only the shape, and only the port half of that. Whether
+// the host resolves and whether the port is free are questions about the
+// machine this eventually runs on, and answering them here would mean a `rig
+// validate` that passes on a laptop and fails in CI for reasons that have
+// nothing to do with the project. The host is left alone for the same reason: a
+// literal and a name are both things a project may legitimately mean, and
+// telling them apart tells us nothing we would act on.
+func checkListenAddr(addr string) error {
+	_, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return err
 	}
-	return a.BasePath
-}
-
-// under reports whether path is prefix itself or sits beneath it, comparing
-// whole segments so that /apiary is not inside /api.
-func under(path, prefix string) bool {
-	return path == prefix || strings.HasPrefix(path, strings.TrimSuffix(prefix, "/")+"/")
+	if port == "" {
+		return errors.New("no port")
+	}
+	// "0" is the port that means "any free one", which a test wants and a
+	// deployment does not — but refusing it here would be rig deciding what a
+	// project may do with its own listener.
+	if n, err := strconv.Atoi(port); err != nil || n < 0 || n > 65535 {
+		return fmt.Errorf("%q is not a port number", port)
+	}
+	return nil
 }

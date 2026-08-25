@@ -43,8 +43,12 @@ func TestTheMonitoringPageShowsARealWrite(t *testing.T) {
 	// reads a file rather than the provider's buffer.
 	w.stop(t)
 
+	// An address as well as a password: the page listens on one of its own, and
+	// both halves have to be there for it to be armed. Nothing here binds it —
+	// the handler is served directly — so the number only has to be well
+	// formed.
 	page, err2 := w.provider.Page(observe.PageConfig{
-		ServiceName: "fantasyfootball", Password: monitorPassword,
+		ServiceName: "fantasyfootball", Password: monitorPassword, Addr: "127.0.0.1:9081",
 	})
 	if err2 != nil {
 		t.Fatal(err2)

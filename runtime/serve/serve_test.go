@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -152,6 +153,106 @@ func TestNoProbesNoWrapper(t *testing.T) {
 
 	if got := withProbes(Config{}.withDefaults(), nil, &ready, inner); got == nil {
 		t.Fatal("the handler should still be there")
+	}
+}
+
+// Half a pair is refused, because the failure it guards against is silent: a
+// handler with nowhere to listen is a page nothing serves, and an address with
+// no handler is a port answering 404 to the person who went looking. Either one
+// reads as wired from the main that wrote it.
+func TestTheMonitorNeedsBothHalves(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		cfg  Config
+	}{
+		{"a handler and nowhere to put it", Config{Monitor: http.NotFoundHandler()}},
+		{"an address and nothing to serve", Config{MonitorAddr: "127.0.0.1:0"}},
+	} {
+		if _, err := tc.cfg.withDefaults().serveMonitor(t.Context()); err == nil {
+			t.Errorf("%s was accepted", tc.name)
+		}
+	}
+}
+
+// Neither half is no second listener, which is what a deployment with no
+// monitoring password gets: observe hands back a nil handler and an empty
+// address together, and this is where that turns into nothing being opened.
+func TestNoMonitorNoListener(t *testing.T) {
+	stop, err := Config{}.withDefaults().serveMonitor(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	stop()
+}
+
+// The listener is its own, and what is on it is only the monitor: nothing the
+// application mounted answers there, which is the whole of what binding it
+// somewhere else is worth.
+func TestTheMonitorIsOnItsOwnListener(t *testing.T) {
+	var bound net.Addr
+	cfg := Config{
+		Monitor: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusTeapot)
+		}),
+		MonitorAddr:     "127.0.0.1:0",
+		OnMonitorListen: func(a net.Addr) { bound = a },
+	}.withDefaults()
+
+	stop, err := cfg.serveMonitor(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stop()
+
+	if bound == nil {
+		t.Fatal("the callback never said which port was bound")
+	}
+	res, err := http.Get("http://" + bound.String() + "/anything")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusTeapot {
+		t.Errorf("the monitor listener answered %d, want the handler's 418", res.StatusCode)
+	}
+}
+
+// Stopping it closes the port. It is deferred from Run before the pool is
+// opened, so this is the last thing in the process to go — a drain can be
+// watched while it happens.
+func TestStoppingTheMonitorClosesThePort(t *testing.T) {
+	var bound net.Addr
+	cfg := Config{
+		Monitor:         http.NotFoundHandler(),
+		MonitorAddr:     "127.0.0.1:0",
+		OnMonitorListen: func(a net.Addr) { bound = a },
+	}.withDefaults()
+
+	stop, err := cfg.serveMonitor(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	stop()
+
+	if _, err := http.Get("http://" + bound.String() + "/"); err == nil {
+		t.Error("the port still answered after the listener was stopped")
+	}
+}
+
+// A port already taken is an error from the call rather than a line in a log,
+// for the reason the API's listener is: a monitoring page somebody believes is
+// running is worse than one that refused to start.
+func TestAMonitorPortAlreadyTakenIsAnError(t *testing.T) {
+	taken, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer taken.Close()
+
+	cfg := Config{Monitor: http.NotFoundHandler(), MonitorAddr: taken.Addr().String()}.withDefaults()
+	if stop, err := cfg.serveMonitor(t.Context()); err == nil {
+		stop()
+		t.Error("a port already in use was accepted")
 	}
 }
 

@@ -266,15 +266,25 @@ type Tracing struct {
 // guards the page is a property of the deployment too — which is why
 // PasswordEnv is the ordinary way to say it — and Password is the project that
 // decided otherwise, warned about once when rig.yaml is read.
+//
+// Addr is here on the same terms. It is where the page's own listener binds, so
+// it is as much a deployment fact as the span file is, and $RIG_MONITOR_ADDR
+// overrides it at run time for exactly that reason; what it is doing in the
+// document is being the value that variable defaults to, so that a project
+// which never sets one still has to have made the decision once.
 type Monitoring struct {
-	// Enabled says the generated server mounts the page. A document carrying
+	// Enabled says the generated server serves the page. A document carrying
 	// this block always has it set, since a block that is off resolves to no
 	// block at all.
 	Enabled bool `json:"enabled"`
 	// ServiceName is what the page calls this application, taken from the
 	// project's own name.
 	ServiceName string `json:"service_name"`
-	// BasePath is where the page is mounted, resolved and absolute.
+	// Addr is where the page listens, as host:port. Always set, because the
+	// page has its own listener and rig defaults no part of one.
+	Addr string `json:"addr"`
+	// BasePath is where the page is mounted on that listener, resolved and
+	// absolute.
 	BasePath string `json:"base_path"`
 	// MaxTraces is how many requests the page lists, newest first.
 	MaxTraces int `json:"max_traces"`
