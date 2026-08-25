@@ -418,6 +418,10 @@
       "$ref": "#/$defs/Access",
       "description": "How wide a read of this table reaches by default."
     },
+    "cache": {
+      "type": "boolean",
+      "description": "Hold this table's Get in memory. Requires the project cache block, and promises every write goes through the generated repository."
+    },
     "on_delete": {
       "$ref": "#/$defs/OnDelete",
       "description": "The order tables referencing this one are told about a delete."

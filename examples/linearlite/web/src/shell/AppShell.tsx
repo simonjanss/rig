@@ -28,9 +28,9 @@ export function AppShell() {
     const { signOut } = useAuth();
     useNotificationToasts();
 
-    // What this build can offer. The monitoring page is not mounted without a
+    // What this build can offer. The monitoring page does not listen without a
     // password in the server's environment, which is the ordinary case on a
-    // laptop — and a nav item that leads to a 404 is worse than no nav item.
+    // laptop — and a nav item that leads nowhere is worse than no nav item.
     // Asked once, because neither answer changes while the process runs.
     const [tour, setTour] = useState<Tour | null>(null);
     useEffect(() => {
@@ -62,7 +62,7 @@ export function AppShell() {
                         <NavLink to="/settings">Settings</NavLink>
                         {tour?.monitor && (
                             <a
-                                href="/_rig/monitor"
+                                href={tour.monitor}
                                 target="_blank"
                                 rel="noreferrer"
                             >

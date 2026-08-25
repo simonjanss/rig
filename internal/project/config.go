@@ -22,7 +22,7 @@ type Config struct {
 	Notifications Notifications `yaml:"notifications,omitempty" json:"notifications,omitempty" jsonschema_description:"The inbox, and how notifications are delivered."`
 	Presence      Presence      `yaml:"presence,omitempty" json:"presence,omitempty" jsonschema_description:"Who is here, and what they are looking at."`
 	Throttle      Throttle      `yaml:"throttle,omitempty" json:"throttle,omitempty" jsonschema_description:"How many API calls one caller may make. Fair-use limiting, counted in the database so replicas cannot disagree."`
-	Cache         Cache         `yaml:"cache,omitempty" json:"cache,omitempty" jsonschema_description:"Whether rig caches its own per-request reads, behind a Postgres NOTIFY channel that invalidates them when the transaction causing it commits."`
+	Cache         Cache         `yaml:"cache,omitempty" json:"cache,omitempty" jsonschema_description:"Whether reads are held in memory between requests, behind a Postgres NOTIFY channel that invalidates them when the transaction causing it commits."`
 
 	Tracing Tracing `yaml:"tracing,omitempty" json:"tracing,omitempty" jsonschema_description:"Whether the generated code emits OpenTelemetry spans."`
 

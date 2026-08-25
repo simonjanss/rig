@@ -11,13 +11,20 @@ import (
 // Monitoring is this API's monitoring page, as far as generated code can know
 // it.
 //
+// The page listens on 127.0.0.1:9084, on a listener of its own inside this
+// same binary. It is not a route on the mux Register returns, and it cannot be
+// made into one: which interface the page is bound to is the only boundary in
+// front of it that a client cannot talk its way around, and sharing the API's
+// listener would be giving that up. Serving it is two fields on the server
+// this application already runs:
+//
 //	page, err := tracing.Page(api.Monitoring())
 //	if err != nil { return nil, err }
 //	if why := page.Unarmed(); why != "" {
-//		app.Logger.Info("monitoring page not mounted", "reason", why)
+//		app.Logger.Info("monitoring page not listening", "reason", why)
 //	}
 //
-// Then set it as Server.Monitor, and it is mounted with the resource routes.
+//	// ... serve.Config{Monitor: page.Handler(), MonitorAddr: page.Addr()}
 //
 // For the log half, open a sink, tee its handler into the logger this
 // application already has, and set it on what this returns:
@@ -42,16 +49,21 @@ import (
 // What is not here is where the spans go — that is the deployment's, the
 // same as it is for [Tracing] — and, unless this project wrote one into its
 // rig.yaml, the password, which is read from $RIG_MONITOR_PASSWORD at run
-// time. With nothing in it the page is not mounted at all, which is what
-// Unarmed is for.
+// time. With nothing in it the page does not listen at all: the port is closed
+// rather than guarded, and Unarmed is what says so.
 //
-// `monitoring.allow` is here, because which networks may reach the page is a
-// decision about this application rather than about the machine it happens to
-// be on. It narrows the password rather than replacing it: an address that is
-// not on the list is answered 404 before the password is compared.
+// The address is here and overridable — $RIG_MONITOR_ADDR wins over it —
+// for the reason the span destination is the deployment's: moving a port
+// should not need a regenerate. `monitoring.allow` is here because which
+// networks may reach the page is a decision about this application rather than
+// about the machine it happens to be on. It is the layer above the address
+// rather than a substitute for it: the port decides who can open a connection,
+// and the list decides which of them is answered, 404 before the password is
+// compared.
 func Monitoring() observe.PageConfig {
 	return observe.PageConfig{
 		ServiceName: "linearlite",
+		Addr:        "127.0.0.1:9084",
 		BasePath:    "/_rig/monitor",
 		MaxTraces:   200,
 		MaxLogs:     500,

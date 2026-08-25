@@ -266,15 +266,25 @@ type Tracing struct {
 // guards the page is a property of the deployment too — which is why
 // PasswordEnv is the ordinary way to say it — and Password is the project that
 // decided otherwise, warned about once when rig.yaml is read.
+//
+// Addr is here on the same terms. It is where the page's own listener binds, so
+// it is as much a deployment fact as the span file is, and $RIG_MONITOR_ADDR
+// overrides it at run time for exactly that reason; what it is doing in the
+// document is being the value that variable defaults to, so that a project
+// which never sets one still has to have made the decision once.
 type Monitoring struct {
-	// Enabled says the generated server mounts the page. A document carrying
+	// Enabled says the generated server serves the page. A document carrying
 	// this block always has it set, since a block that is off resolves to no
 	// block at all.
 	Enabled bool `json:"enabled"`
 	// ServiceName is what the page calls this application, taken from the
 	// project's own name.
 	ServiceName string `json:"service_name"`
-	// BasePath is where the page is mounted, resolved and absolute.
+	// Addr is where the page listens, as host:port. Always set, because the
+	// page has its own listener and rig defaults no part of one.
+	Addr string `json:"addr"`
+	// BasePath is where the page is mounted on that listener, resolved and
+	// absolute.
 	BasePath string `json:"base_path"`
 	// MaxTraces is how many requests the page lists, newest first.
 	MaxTraces int `json:"max_traces"`
@@ -578,6 +588,22 @@ type Resource struct {
 	// notifications about a row are due, and — at the moment of sending — who
 	// should hear about it.
 	Notifiable bool `json:"notifiable,omitempty"`
+
+	// Cached says this resource's Get is held in memory between requests, keyed
+	// by the row and the scope the read was made under, and withdrawn by a
+	// Postgres NOTIFY published on the transaction of every write the generated
+	// repository makes to the row.
+	//
+	// Declared per table rather than derived, because it is a promise about the
+	// application as much as a fact about the schema: rig can only publish the
+	// withdrawal from writes it makes, so a project that writes this table
+	// through Store.Pool or with raw SQL from inside a dbhook is a project where
+	// this serves a stale row until the entry expires. Nothing in the schema says
+	// whether that is true, so nothing but a person can turn this on.
+	//
+	// It needs [API.Cache], which is what owns the channel the withdrawals
+	// travel on.
+	Cached bool `json:"cached,omitempty"`
 
 	// Parents are the resources this one points at, one per foreign key, in the
 	// order the columns appear on the table. Each becomes a pair of hook fields

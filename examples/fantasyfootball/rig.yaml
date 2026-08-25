@@ -22,9 +22,14 @@ tracing:
 # collector and a Grafana in front of it. It is a reader over the span file and
 # stores nothing, which is why it cannot be turned on without `tracing:` above.
 # The password is not here — it is read from $RIG_MONITOR_PASSWORD at run time,
-# and with nothing in it the page is not mounted at all.
+# and with nothing in it the page does not listen at all.
 monitoring:
   enabled: true
+  # Its own listener, in this same binary, beside the API's 8081. Required, and
+  # rig picks neither half for you: the port is a thing to collide over, and
+  # the interface decides who can reach a page that lists every path, request
+  # id and error cause this server has seen. $RIG_MONITOR_ADDR moves it.
+  addr: 127.0.0.1:9081
   # And optionally the networks that may reach it, which narrows the password
   # rather than replacing it — anything else is answered 404 before the
   # password is compared. Left out here because this example runs wherever it

@@ -264,6 +264,118 @@ Next:
   was waiting for, and no later attempt could see the refusal. What a success does
   to the window is the internal test's subject; what is here is the channel.
 
+- ~~**M16.2** — one of the application's own reads.~~ Shipped: `cache: true` on a
+  table holds its `Get` — the lookup by identifier behind every
+  `GET /resource/{id}` — in the generated repository, withdrawn by a `NOTIFY` on
+  the transaction of every write that repository makes to the row.
+
+  **What the question was, and what the answer narrowed to.** The ask was whether
+  the generated API's read endpoints could be cached, so a caller hitting one
+  twice in a second pays once. That is refused, and the reason is the reason this
+  landed on `Get`. A list or a search cannot be keyed: `runtime/readopt` scopes
+  every read by tenant and by owner, and `internal/gen/servergo/handler.go` is
+  explicit that the generated permission check answers "may this caller do this at
+  all" and never "to this row" — the row rule is a hook. So the key would have to
+  name the caller, while the invalidation would have to be `Clear()` per resource,
+  because any write to the table can change any list. Near-zero hit rate and a
+  notification per write. And the handler is the wrong altitude regardless:
+  `svc.List` is the application's method, and caching there caches logic rig
+  cannot see the inputs to. `Get` has neither problem — it takes an identifier,
+  its only readopt-sensitive branches are the two scopes, and it is rig's own SQL.
+
+  **The transaction rule is the load-bearing part, and it was nearly a bug.** All
+  four generated writes read the previous row through `Get`, inside the
+  transaction that then writes — `Update` to snapshot it and to judge the
+  transition, `Delete` to find out whether it is already gone. `Update`'s own
+  comment says that nothing can change underneath it, and a held row makes that
+  false three ways: a snapshot recording a version nobody ever saw, a
+  `RunUpdate` judging a transition from a row somebody had moved past, and the
+  `DeletedAt` and `VersionType` conflict checks looking at the wrong row. So `Get`
+  consults the cache only when `dbx.Tx` reports no transaction — the same
+  predicate `connFor` already uses, so the cached path and the uncached path
+  cannot disagree about the answer, and every `dbhook` is covered without being
+  mentioned. `TestAWriteSnapshotsTheRowAsItActuallyWas` moves the row behind rig's
+  back and asserts the history got the real value.
+
+  **Lazy load, never write-through**, and the reasons compound. `cache.Map` has no
+  way to insert a value — the surface is `Load`, `Forget`, `Clear` — which is a
+  design statement rather than a gap. `Bus.listen` opens its own connection, so
+  the publishing replica receives its own invalidation like every other, and a
+  write-through entry would be deleted by its own `Forget` moments later with no
+  ordering guarantee between them. A put cannot be rolled back, while the
+  published notification is discarded by Postgres. And the transaction rule makes
+  it nearly worthless anyway: the put would buy one query. Lazy load fails toward
+  an extra query; write-through fails toward serving a row that is not in the
+  database.
+
+  **`forget` does both halves, and each covers what the other cannot.** The
+  notification reaches the other replicas on the writing transaction. What it
+  cannot do is reach *this* replica in time — it travels out through Postgres and
+  back on the listener's own connection, and those moments belong to the caller
+  who just wrote. Somebody who saves a change and is shown the old value has been
+  told their write did not happen. So the local drop is registered on
+  `dbx.AfterCommit`, which runs after the commit and before the write returns.
+  This was a failing test before it was a design: read-your-own-writes is not
+  something the channel provides on its own.
+
+  **Three departures from the plan this was built to.** The store owns its own
+  bus rather than being handed auth's — built, served and started inside
+  `store.New`, for the same reason `auth.New` does it: a `Serve` a `main.go` has to
+  remember is one more thing to forget, and forgetting it is invisible. Two LISTEN
+  connections in a project with both, which is cheaper than threading one bus into
+  something constructed before it exists. Second, `cache.enabled` **no longer
+  requires an `auth:` block** — a cached table satisfies it instead — and because
+  neither `internal/project` nor `internal/tableconf` can see the other, the
+  "nothing reads this" rule moved to `compile.checkCacheHasReaders`. Third,
+  `Resource.Cached` is cleared in `Document.Hash` the way `API.Cache` already was,
+  or the two halves of one switch would disagree about whether a client can
+  observe it.
+
+  **Two bounds worth knowing.** A hard delete says `RETURNING id` on the statement
+  that removes the snapshots, because each of them is a row reachable through the
+  history and through a revert, and that statement is the only place their
+  identifiers are ever known — the `Store.RevokeFamily` shape, arrived at from the
+  same direction. It returns the owner column with them on an owner-scoped table,
+  because `access.owner` may name a column somebody can change and a snapshot
+  carries the owner the row had when it was taken, which is the scope the read
+  holding it matched. And a cached table's fields have to be copyable: the clone
+  goes exactly as deep as a scan did, so a jsonb column with a `go_type` of its
+  own is refused at generate time rather than shallow-copied, and so is an array
+  whose elements are not themselves copyable — `numeric[]`, `bytea[]`, `jsonb[]`,
+  where cloning the backing array leaves every element pointing where it pointed
+  before.
+
+  **The one write rig makes to *your* table that is not a repository write** is a
+  `<role>_file_id` column: `files.Service` writes it inside the transaction that
+  finalizes an upload, which is why it cannot go through `Update`. Left alone that
+  is the whole bug in miniature — attach a cover to a held row and every replica
+  goes on saying it has none, which the download endpoint answers as a 404 for a
+  file that had just been uploaded successfully. So `files.Owner` grew a `Forget`
+  closure, called in that transaction, and the repository grew
+  `ForgetCached(ctx, row)` for the generated service to hand it. Exported rather
+  than hidden, because the same escape hatch is what a project needs on the day it
+  has to write the table some other way: it is the difference between a promise
+  that can be kept and one that can only be broken.
+
+  **rig's own tables are the other side of that**, and they are refused rather than
+  wired: `rig_file`, `rig_notification_delivery` and the rest are written by the
+  module that owns them — `auth`, `files`, `notify`, `presence`, `throttle`,
+  `idempotency` — in that module's own SQL, and the dispatcher writing delivery
+  state on a background connection has no repository to withdraw through. So
+  `cache: true` on a foundation table is `RIG3008`. The predicate is
+  `scaffold.PartOf`, so a part added later refuses itself by existing rather than by
+  being remembered, and it does not care about `auth.own`: that changes who owns the
+  schema, and this is about which Go code writes the rows.
+
+  The hole that is left is the `Grants` hole, applied to a table you own, and it is
+  why the key is per table: rig publishes from the writes it makes, so a write
+  through `Store.Pool` or raw SQL from inside a `dbhook` serves a stale row until
+  the lifetime expires unless it withdraws the row itself. Nothing in a schema says
+  whether the promise is true. `examples/todo` keeps it and is wired end to end,
+  with eleven Docker tests in `internal/store` that all work the same way — move
+  the row behind rig's back, then read it through the repository, because that is
+  the only way to prove an answer came from memory.
+
 ### Modules
 
 ```

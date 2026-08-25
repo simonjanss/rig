@@ -10,12 +10,16 @@ package store
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strconv"
 	"strings"
+	"sync/atomic"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/simonjanss/rig/examples/todo/internal/model"
+	"github.com/simonjanss/rig/runtime/cache"
 	"github.com/simonjanss/rig/runtime/dbx"
 	"github.com/simonjanss/rig/runtime/query"
 	"github.com/simonjanss/rig/runtime/rigerr"
@@ -145,14 +149,23 @@ func (s filterScope) orderJoin(farTable, alias, farColumn, localColumn string) (
 
 // Config is what a Store needs beyond a connection.
 //
-// It is empty today. It is still taken, and taken by value, so that giving a
-// store something to hold is a new field rather than a signature change every
-// caller has to follow.
-type Config struct{}
+// Taken by value, so that giving a store something else to hold is a new field
+// rather than a signature change every caller has to follow.
+type Config struct {
+	// Logger is where the invalidation channel reports losing touch with Postgres,
+	// which is the one thing about this cache worth hearing about: the fallback is
+	// to read every row again, and that is correct and silent. Nil takes
+	// slog.Default.
+	//
+	//	store.New(pool, store.Config{Logger: app.Logger})
+	Logger *slog.Logger
+}
 
 // Store holds the connection pool and hands out repositories.
 type Store struct {
-	pool *pgxpool.Pool
+	pool      *pgxpool.Pool
+	cacheBus  *cache.Bus
+	todoCache *rowCache[*model.Todo]
 
 	RigNotifications          RigNotificationRepository
 	RigNotificationDeliveries RigNotificationDeliveryRepository
@@ -164,8 +177,28 @@ type Store struct {
 }
 
 // New builds a store over a connection pool.
-func New(pool *pgxpool.Pool, _ Config) *Store {
+func New(pool *pgxpool.Pool, cfg Config) *Store {
 	s := &Store{pool: pool}
+
+	// The invalidation channel, listening from here on. Every held row is
+	// withdrawn over it by the transaction that changed the row, so this is what
+	// makes the lifetime a backstop rather than a promise about staleness.
+	s.cacheBus = cache.NewBus(cache.BusConfig{
+		Pool:    pool,
+		Channel: "rig_cache",
+		// The one line anybody reads when this stops working. Losing the channel is
+		// correct and silent — the caches go dead and every read is a query again
+		// — so nothing else about the process would say so.
+		Logger: cfg.Logger,
+	})
+
+	s.todoCache = newRowCache[*model.Todo](30*time.Second, 50000)
+	s.todoCache.serve(s.cacheBus, "todo")
+
+	// After the caches are attached, so nothing can be delivered a notification
+	// for a topic that is not registered yet.
+	s.cacheBus.Start()
+
 	s.RigNotifications = &rigNotificationRepo{db: s}
 	s.RigNotificationDeliveries = &rigNotificationDeliveryRepo{db: s}
 	s.RigNotificationDevices = &rigNotificationDeviceRepo{db: s}
@@ -200,6 +233,20 @@ func (s *Store) Pool() *pgxpool.Pool { return s.pool }
 // it provides join that transaction rather than opening their own.
 func (s *Store) InTx(ctx context.Context, fn func(ctx context.Context) error) error {
 	return dbx.InTx(ctx, s.pool, func(ctx context.Context, _ dbx.Conn) error { return fn(ctx) })
+}
+
+// Close stops listening for invalidations.
+//
+// Worth registering beside the rest of a program's shutdown:
+//
+//	app.CloseWithin("store", 5*time.Second, repos.Close)
+//
+// and safe to leave out. A bus that has stopped is a bus that is not live, and
+// a cache that is not live reads through and holds nothing — so forgetting
+// this costs a connection held until the process exits rather than a row
+// somebody cannot withdraw.
+func (s *Store) Close(ctx context.Context) error {
+	return s.cacheBus.Close(ctx)
 }
 
 // joinColumns renders a column list. The names come from generated constants,
@@ -243,6 +290,105 @@ func writeError(err error, table string) error {
 	default:
 		return rigerr.Internal(err, "write %s", table)
 	}
+}
+
+// rowCacheServed is the channel a rowCache was attached to, or nil for one
+// that never was.
+type rowCacheServed struct {
+	bus   *cache.Bus
+	topic *cache.Topic
+}
+
+// rowCache holds one table's rows between requests.
+//
+// Every entry in it is withdrawn by a Postgres NOTIFY published inside the
+// transaction of the write that made it wrong, so the lifetime is the backstop
+// rather than the guarantee. Nothing here is shared between replicas except
+// the word "forget".
+type rowCache[V any] struct {
+	m *cache.Map[V]
+	// An atomic pointer rather than a field, because serve happens after New and
+	// on a different goroutine than the reads.
+	served atomic.Pointer[rowCacheServed]
+}
+
+// newRowCache builds a cache that holds nothing until it is served.
+func newRowCache[V any](ttl time.Duration, maxEntries int) *rowCache[V] {
+	c := &rowCache[V]{}
+	c.m = cache.NewMap[V](cache.MapConfig{TTL: ttl, MaxEntries: maxEntries, Live: c.live})
+	return c
+}
+
+// live reports whether an entry could be withdrawn if one were held.
+//
+// Two ways to answer no, and both have to: never attached to a channel, and
+// attached to one that has dropped. Every mistake around the lifecycle lands
+// on one of them, which is what makes those mistakes cost latency rather than
+// correctness — a cache that is not live reads through and stores nothing.
+func (c *rowCache[V]) live() bool {
+	s := c.served.Load()
+	switch {
+	case s == nil:
+		// Never served. There is no channel, so nothing could withdraw an entry and
+		// nothing may be kept.
+		return false
+	}
+	return s.bus.Live()
+}
+
+// serve attaches this cache to a bus, so its entries can be withdrawn.
+//
+// A nil bus leaves it unserved, and therefore dead: a cache with no channel is
+// a plain time-to-live over the application's own rows, which is the trade
+// this whole mechanism exists to refuse. Reading through costs queries;
+// holding a row nothing can withdraw costs correctness, and only one of those
+// is worth defaulting to.
+func (c *rowCache[V]) serve(bus *cache.Bus, topic string) {
+	if bus == nil {
+		return
+	}
+	c.served.Store(&rowCacheServed{bus: bus, topic: bus.Serve(topic, c.m)})
+}
+
+// load answers from the cache, or reads through it.
+func (c *rowCache[V]) load(key string, fn func() (V, error)) (V, error) {
+	return c.m.Load(key, fn)
+}
+
+// forget withdraws one row: here once the change lands, and everywhere else on
+// the transaction that made it.
+//
+// Both, and each covers what the other cannot.
+//
+// The notification is what reaches the other replicas, and it is published
+// inside the writing transaction because that is the whole mechanism: Postgres
+// delivers it when that transaction commits and throws it away if it rolls
+// back, so the invalidation is atomic with the write and nobody forgets a row
+// a rollback put back.
+//
+// What it cannot do is reach *this* replica in time. It travels out through
+// Postgres and back in on the listener's own connection, which takes some
+// moments — and those moments belong to the caller who just wrote, who would
+// spend them reading the row as it was. Somebody who saves a change and is
+// shown the old value has been told their write did not happen. So the local
+// drop is registered on the commit instead, where it runs before the write
+// returns to whoever asked for it.
+//
+// Dropping an entry that a rollback made valid again costs one query, and
+// AfterCommit does not run on a rollback anyway. With no transaction at all it
+// runs immediately, which is the whole of what is available and the whole of
+// what is needed.
+func (c *rowCache[V]) forget(ctx context.Context, key string) error {
+	dbx.AfterCommit(ctx, func() { c.m.Forget(key) })
+
+	s := c.served.Load()
+	tx, ok := dbx.Tx(ctx)
+	if !ok || s == nil || s.topic == nil {
+		// No channel, or no transaction to publish on. The drop above is all there is,
+		// and there is no other replica it could have reached.
+		return nil
+	}
+	return s.topic.Forget(ctx, tx, key)
 }
 
 // visibleTodo reports whether this caller could have read the Todo row named,

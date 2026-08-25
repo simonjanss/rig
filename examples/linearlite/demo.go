@@ -46,15 +46,21 @@ func registerDemo(mux *http.ServeMux, mail *outbox.Box, page *observe.Page,
 	sync := newSyncSwitch(proxy, upstream)
 
 	// What the tour can offer, so the front end can leave out a link that would
-	// only 404. The monitoring page is not mounted without a password in the
+	// only 404. The monitoring page does not listen without a password in the
 	// environment, and that is the ordinary case on a laptop.
 	//
+	// A URL and not a boolean, because the page is on a listener of its own now
+	// and a relative href no longer reaches it. That is also why this is the
+	// only place in the example that builds one: which port and which interface
+	// come from rig.yaml, and the front end should not be guessing at either.
+	//
 	// Signed in, like the outbox below, and for a reason worth saying out loud:
-	// rig mounts that page as no route at all rather than one that answers 401,
-	// so that a scan cannot learn there is a page there. An anonymous endpoint
-	// answering "monitor": true would hand back exactly the fact rig went out
-	// of its way not to leak. Nothing is lost — the nav that reads this is only
-	// rendered for a session anyway.
+	// rig gives that page no port at all rather than one that answers 401, so
+	// that a scan cannot learn there is a page there. An anonymous endpoint
+	// handing back its address would give away exactly the fact rig went out of
+	// its way not to leak — more of it, now that the answer is where rather
+	// than whether. Nothing is lost: the nav that reads this is only rendered
+	// for a session anyway.
 	mux.HandleFunc("GET "+demoPrefix+"tour", func(w http.ResponseWriter, r *http.Request) {
 		if _, ok := tenantOf(r, getClaims); !ok {
 			writeJSON(w, http.StatusUnauthorized, map[string]string{"message": "sign in first"})
@@ -71,7 +77,7 @@ func registerDemo(mux *http.ServeMux, mail *outbox.Box, page *observe.Page,
 			}
 		}
 		writeJSON(w, http.StatusOK, map[string]any{
-			"monitor": page != nil && page.Unarmed() == "",
+			"monitor": monitorURL(page),
 			"outbox":  mail != nil,
 			// Whether this build can take the sync service down. The pill that
 			// reads this is a button, and a button that answers 404 is worse
@@ -290,6 +296,35 @@ func (s *syncSwitch) run(ctx context.Context, args ...string) (string, error) {
 	defer cancel()
 	out, err := exec.CommandContext(ctx, s.engine, args...).CombinedOutput()
 	return string(out), err
+}
+
+// monitorURL is where a browser reaches the monitoring page, and empty when
+// there is none to reach.
+//
+// It has to be absolute: the page listens on a port of its own, so it is a
+// different origin from the one this document was served from. The scheme is
+// http because that is what a listener bound to loopback is — a demo running on
+// the machine you are sitting at. A deployment that put the page behind TLS put
+// something in front of it, and that something knows its own address better
+// than this does.
+//
+// A wildcard bind is rewritten to localhost. ":9084" is a valid thing to listen
+// on and not a valid thing to put in an href, and the browser asking is on this
+// machine by construction — it is reading a page this process served.
+func monitorURL(page *observe.Page) string {
+	addr := page.Addr()
+	if addr == "" {
+		return ""
+	}
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return ""
+	}
+	switch host {
+	case "", "0.0.0.0", "::", "[::]":
+		host = "localhost"
+	}
+	return "http://" + net.JoinHostPort(host, port) + page.BasePath() + "/"
 }
 
 // tenantOf is the caller's tenant, and false for anybody these routes should

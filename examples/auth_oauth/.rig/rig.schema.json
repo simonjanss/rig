@@ -280,10 +280,6 @@
         "identity_ttl": {
           "$ref": "#/$defs/Duration",
           "description": "Lifetime of the tenant-less credential held between signing in and picking a tenant. Defaults to 30m."
-        },
-        "cache_ttl": {
-          "$ref": "#/$defs/Duration",
-          "description": "Keep verified access tokens in memory for this long. Zero, the default, reads the row every time, which makes revocation immediate. Anything above a few seconds is a revoked session that keeps working."
         }
       },
       "additionalProperties": false,
@@ -324,7 +320,7 @@
       "properties": {
         "enabled": {
           "type": "boolean",
-          "description": "Whether rig caches its own per-request reads — session and API key verification — behind a Postgres NOTIFY channel that invalidates them. Off by default."
+          "description": "Whether reads are held in memory between requests — session and API key verification, and the Get of any table setting cache: true — behind a Postgres NOTIFY channel that invalidates them. Off by default."
         },
         "ttl": {
           "$ref": "#/$defs/Duration",
@@ -565,9 +561,13 @@
           "type": "boolean",
           "description": "Whether this project serves rig's monitoring page. It requires tracing.enabled, because the spans are what the page reads."
         },
+        "addr": {
+          "type": "string",
+          "description": "Where the monitoring page listens, as host:port, for example 127.0.0.1:9090. Required when monitoring.enabled is set; there is no default. $RIG_MONITOR_ADDR overrides it at run time."
+        },
         "base_path": {
           "type": "string",
-          "description": "Where the page is mounted. Defaults to /_rig/monitor, and cannot sit under api.base_path or auth.base_path."
+          "description": "Where the page is mounted on its own listener. Defaults to /_rig/monitor."
         },
         "max_traces": {
           "type": "integer",
@@ -579,7 +579,7 @@
         },
         "password_env": {
           "type": "string",
-          "description": "Variable the page reads its password from. Defaults to RIG_MONITOR_PASSWORD. Empty at run time means the page is not mounted."
+          "description": "Variable the page reads its password from. Defaults to RIG_MONITOR_PASSWORD. Empty at run time means the page does not listen at all."
         },
         "password": {
           "type": "string",
@@ -656,11 +656,15 @@
         },
         "max_attempts": {
           "type": "integer",
-          "description": "How many times a delivery is tried before it is marked failed. Defaults to 5."
+          "description": "How many times a delivery is tried before it is marked failed. Defaults to 14, which with the default base and cap spans about eight hours."
         },
         "backoff_base": {
           "$ref": "#/$defs/Duration",
-          "description": "Delay before the first retry. Each attempt doubles it. Defaults to 1m."
+          "description": "Delay before the first retry. Each attempt doubles it, up to backoff_cap. Defaults to 1m."
+        },
+        "backoff_cap": {
+          "$ref": "#/$defs/Duration",
+          "description": "The longest one retry delay may be, once the doubling reaches it. Has to be at least backoff_base. Defaults to 1h."
         },
         "retention": {
           "$ref": "#/$defs/Duration",
@@ -938,7 +942,7 @@
     },
     "cache": {
       "$ref": "#/$defs/Cache",
-      "description": "Whether rig caches its own per-request reads, behind a Postgres NOTIFY channel that invalidates them when the transaction causing it commits."
+      "description": "Whether reads are held in memory between requests, behind a Postgres NOTIFY channel that invalidates them when the transaction causing it commits."
     },
     "tracing": {
       "$ref": "#/$defs/Tracing",

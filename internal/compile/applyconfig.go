@@ -8,6 +8,7 @@ import (
 	"github.com/simonjanss/rig/internal/diag"
 	"github.com/simonjanss/rig/internal/naming"
 	"github.com/simonjanss/rig/internal/pgtypes"
+	"github.com/simonjanss/rig/internal/scaffold"
 	"github.com/simonjanss/rig/internal/tableconf"
 	"github.com/simonjanss/rig/pkg/ir"
 )
@@ -56,6 +57,16 @@ type ConfigOptions struct {
 	// means the project has no files block, and rig_file — if it is projected
 	// at all — is an ordinary table subject to the ordinary rule.
 	FileRestoreWindowDays int
+
+	// Cache is the resolved project `cache:` block, or nil for a project that
+	// caches nothing.
+	//
+	// It arrives here to answer one question: whether a table's `cache: true` has
+	// a channel to be withdrawn over. The block and the tables are separate files
+	// and neither can see the other, so this is where a table asking for
+	// something the project did not turn on is caught — and where the flag is
+	// dropped rather than carried into a document nothing would honour.
+	Cache *ir.Cache
 }
 
 // ApplyConfig merges the per-table YAML onto the projected API.
@@ -361,6 +372,42 @@ func applyTableConfig(
 		// generator without each of them having to remember.
 		out.Unexposed = true
 		out.Operations = nil
+	}
+
+	// Unexposed is deliberately not a bar to this one. The repository is what
+	// holds the cache and `Get` is what reads it, and both of those exist for a
+	// table with no endpoints — a service layer calling a hidden table's Get on
+	// every request is exactly the shape this is for.
+	if cfg.Cache != nil && *cfg.Cache {
+		switch part := scaffold.PartOf(t.Name); {
+		case opt.Cache == nil || !opt.Cache.Enabled:
+			// Refused rather than ignored, and refused here rather than in
+			// `internal/project`, because this is the first place both halves of
+			// the switch are visible. Without the block there is no bus, so an
+			// entry could be held and never withdrawn — which is the one failure
+			// this whole design is arranged to make impossible.
+			diags.Add(diag.CodeTableCacheUnavailable, loaded.At("cache"),
+				"cache is true on %s but this project has no `cache:` block, so there would be "+
+					"no channel to withdraw a held row over", t.Name)
+		case part != "":
+			// A table the foundation created is written by the module that owns it
+			// — auth, files, notify, presence — in that module's own SQL, and
+			// those writes are exactly the ones rig cannot publish a withdrawal
+			// from. `cache: true` is a promise a project makes about its own
+			// writes, and this is a table whose writes are not the project's to
+			// promise about.
+			//
+			// Asked of the foundation rather than of a list here, so a part added
+			// later refuses itself by existing. Not conditional on `auth.own`
+			// either: that changes who owns the schema, and this is about which
+			// Go code writes the rows.
+			diags.Add(diag.CodeTableCacheNotYours, loaded.At("cache"),
+				"cache is true on %s, which rig created for its own %s and writes itself; "+
+					"holding it would promise something only the writes rig makes could keep",
+				t.Name, part)
+		default:
+			out.Cached = true
+		}
 	}
 
 	if out.Storage != nil {

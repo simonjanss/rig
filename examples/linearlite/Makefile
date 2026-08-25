@@ -10,9 +10,13 @@ RIG := ../../bin/rig
 #
 # The span file and the log file are what rig's monitoring page reads — it is a
 # reader and stores nothing of its own, so with neither of these set the page
-# has nothing to show. The password is what mounts it at all: with the variable
-# empty the route does not exist, which is the right default on a laptop and the
-# reason it has to be said here rather than in rig.yaml, which is checked in.
+# has nothing to show. The password is what serves it at all: with the variable
+# empty no port is opened, which is the right default on a laptop and the reason
+# it has to be said here rather than in rig.yaml, which is checked in.
+#
+# Where it listens is in rig.yaml — 127.0.0.1:9084, a port of its own beside the
+# API's 8084 — because that is a decision worth being able to read off the file
+# rather than one buried in a Makefile.
 #
 # .run/ is throwaway and gitignored, like the database.
 RUN_DIR ?= .run
@@ -46,7 +50,7 @@ demo: up seed front
 	@mkdir -p $(RUN_DIR)
 	@echo
 	@echo "open http://localhost:8084 — demo@linearlite.dev / \"correct horse battery staple\""
-	@echo "traces and logs at http://localhost:8084/_rig/monitor — password \"$${RIG_MONITOR_PASSWORD:-$(DEMO_MONITOR_PASSWORD)}\""
+	@echo "traces and logs at http://localhost:9084/_rig/monitor — its own port, password \"$${RIG_MONITOR_PASSWORD:-$(DEMO_MONITOR_PASSWORD)}\""
 	@echo "the pill in the header stops $(DEMO_SYNC_CONTAINER); the board keeps working without it"
 	@echo
 	@DATABASE_URL=$$($(RIG) db url) $(DEMO_ENV) go run .

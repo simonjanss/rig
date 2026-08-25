@@ -51,7 +51,13 @@ func (e *emitter) fileServiceField(b *gobuf.Buf, res *ir.Resource) {
 // The table and column names are constants here, written from the document. That
 // is what makes it safe for the files module to build a statement around them:
 // nothing a request carries reaches the string.
-func (e *emitter) ownerLiteral(b *gobuf.Buf, res *ir.Resource, fc ir.FileColumn, id string) string {
+//
+// row is the variable holding the row as it was read, before the file service
+// touches it. For a table that holds its rows between requests it is also what
+// Forget is keyed by, which is the one thing in this literal that is a closure
+// rather than a name: the files module writes the file column with a statement of
+// its own, and a held row would go on saying there is no file there.
+func (e *emitter) ownerLiteral(b *gobuf.Buf, res *ir.Resource, fc ir.FileColumn, row string) string {
 	filesPkg := b.Import(filesModule)
 
 	tenant := ""
@@ -63,9 +69,25 @@ func (e *emitter) ownerLiteral(b *gobuf.Buf, res *ir.Resource, fc ir.FileColumn,
 		pk = res.Storage.PrimaryKey[0]
 	}
 
+	forget := ""
+	if e.cached(res) {
+		ctxPkg := b.Import("context")
+		forget = ", Forget: func(ctx " + ctxPkg + ".Context) error { return s.repo.ForgetCached(ctx, " + row + ") }"
+	}
+
 	return filesPkg + ".Owner{Table: " + gobuf.Quote(res.Storage.Table) +
 		", IDColumn: " + gobuf.Quote(pk) + tenant +
-		", FileColumn: " + gobuf.Quote(fc.Column) + ", ID: " + id + "}"
+		", FileColumn: " + gobuf.Quote(fc.Column) + ", ID: " + row + ".ID" + forget + "}"
+}
+
+// cached reports whether this resource's rows are held between requests.
+//
+// Both halves, the same question persistgo asks: the block owns the channel a
+// withdrawal travels on and the table is what asked to be held, and neither
+// implies the other.
+func (e *emitter) cached(res *ir.Resource) bool {
+	c := e.doc.API.Cache
+	return c != nil && c.Enabled && res.Cached
 }
 
 // fileURLHelper emits the function that renders a file's stable URL.
@@ -149,7 +171,7 @@ func (e *emitter) uploadBody(b *gobuf.Buf, res *ir.Resource, ep *ir.Endpoint) {
 	b.L("f, err := s.files.Attach(ctx, %s.AttachRequest{", filesPkg)
 	b.L("TenantID: r.Claims.TenantID,")
 	b.L("Upload: r.Body,")
-	b.L("Owner: %s,", e.ownerLiteral(b, res, fc, "row.ID"))
+	b.L("Owner: %s,", e.ownerLiteral(b, res, fc, "row"))
 	b.L("URL: func(fileID %s.UUID, name string) string { return %s(row.ID, fileID, name) },",
 		uuidPkg, fileURLName(res, fc))
 	b.L("})")
@@ -190,7 +212,7 @@ func (e *emitter) deleteFileBody(b *gobuf.Buf, res *ir.Resource, ep *ir.Endpoint
 	b.L("if row.%s == nil { return nil }", fc.Field)
 	b.NL()
 	b.L("return s.files.Detach(ctx, r.Claims.TenantID, %s, *row.%s)",
-		e.ownerLiteral(b, res, fc, "row.ID"), fc.Field)
+		e.ownerLiteral(b, res, fc, "row"), fc.Field)
 }
 
 // fileMismatch is the condition that says the path's file is not this row's.

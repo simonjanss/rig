@@ -75,6 +75,24 @@ type TodoRepository interface {
 	// Writing the old values straight over the row would skip both, and a revert
 	// that cannot itself be reverted is not much of a safety net.
 	Revert(ctx context.Context, id, versionID uuid.UUID, hooks dbhook.UpdateHooks[model.TodoUpdateInput, model.Todo]) (*model.Todo, error)
+
+	// ForgetCached withdraws whatever is held of one row, on the transaction that
+	// changed it.
+	//
+	// Nothing that goes through this repository needs to call it: every write here
+	// publishes its own withdrawal. It is for the writes that cannot — the file
+	// service setting a `<role>_file_id` inside the transaction that finalizes an
+	// upload, which is where rig calls it, and whatever a project has to do
+	// through Store.Pool or in raw SQL, which is where a project would.
+	//
+	// The row rather than an identifier, because the key names every scope a read
+	// of it applied and those values are the row's own. Pass the row as it was
+	// before the write, and call this inside the transaction that made the change:
+	// the withdrawal is a notification Postgres delivers on commit and discards on
+	// a rollback. Withdrawing something nothing holds is not an error.
+	//
+	//	if err := repos.Todos.ForgetCached(ctx, row); err != nil { return err }
+	ForgetCached(ctx context.Context, row *model.Todo) error
 }
 
 // todoTodoAttachmentsFilter collects the conditions written on a Todo's
@@ -670,8 +688,128 @@ func scanTodo(row pgx.Row) (*model.Todo, error) {
 	return &m, nil
 }
 
+// todoCacheKey is what one held row is keyed by.
+//
+// Every scope the read applied is in it, because a cached answer is only
+// reusable by a caller the same filters would have answered the same way. A
+// read that widened either scope is not held at all — see Get — so there
+// is no wide answer here for a narrow key to collide with.
+func todoCacheKey(tenantID, id uuid.UUID) string {
+	return tenantID.String() + "/" + id.String()
+}
+
+// cloneTodo is a caller's own copy of a held row.
+//
+// A cached read hands one of these back rather than the row it holds, so that
+// a caller which writes to what it was given is writing to its own copy. Nil
+// in, nil out: a miss is an error rather than a nil row, but a helper that
+// says so at the top is one less thing for a call site to be careful about.
+func cloneTodo(m *model.Todo) *model.Todo {
+	if m == nil {
+		return nil
+	}
+	cp := *m
+	if m.Notes != nil {
+		v := *m.Notes
+		cp.Notes = &v
+	}
+	if m.DueAt != nil {
+		v := *m.DueAt
+		cp.DueAt = &v
+	}
+	if m.CreatedByAccountID != nil {
+		v := *m.CreatedByAccountID
+		cp.CreatedByAccountID = &v
+	}
+	if m.UpdatedAt != nil {
+		v := *m.UpdatedAt
+		cp.UpdatedAt = &v
+	}
+	if m.UpdatedByAccountID != nil {
+		v := *m.UpdatedByAccountID
+		cp.UpdatedByAccountID = &v
+	}
+	if m.DeletedAt != nil {
+		v := *m.DeletedAt
+		cp.DeletedAt = &v
+	}
+	if m.DeletedByAccountID != nil {
+		v := *m.DeletedByAccountID
+		cp.DeletedByAccountID = &v
+	}
+	if m.SnapshotFromTodoID != nil {
+		v := *m.SnapshotFromTodoID
+		cp.SnapshotFromTodoID = &v
+	}
+	if m.SnapshotFromTodoAt != nil {
+		v := *m.SnapshotFromTodoAt
+		cp.SnapshotFromTodoAt = &v
+	}
+	if m.CoverFileID != nil {
+		v := *m.CoverFileID
+		cp.CoverFileID = &v
+	}
+	return &cp
+}
+
 // Get implements TodoRepository.
+//
+// The row may come from memory: this table set `cache: true`, so a read of it
+// is held until a write to it publishes the withdrawal. Two kinds of read are
+// never held — one inside a transaction, and one that widened its scope —
+// and the reasons are worth knowing, so they are on the branch below.
+//
+// What comes back is always this caller's own copy.
 func (r *todoRepo) Get(ctx context.Context, id uuid.UUID, opts ...readopt.Option) (*model.Todo, error) {
+	cfg, err := readopt.Apply(opts)
+	if err != nil {
+		return nil, err
+	}
+
+	claims, err := tenancy.FromContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	// A read inside a transaction is a read something is about to write against,
+	// and it has to see the row as the transaction sees it. Every generated write
+	// begins with one — to snapshot the previous version, and to judge the
+	// change against it — so a held row here would put a version that never
+	// existed into the history and show a transition rule a row somebody had
+	// already moved past.
+	//
+	// dbx.Tx is the same question connFor asks, which is what keeps the two paths
+	// from disagreeing about the answer. A hook is covered by it without being
+	// mentioned, because a hook runs inside the write's transaction.
+	if _, inTx := dbx.Tx(ctx); inTx {
+		return r.readTodo(ctx, id, opts...)
+	}
+
+	// A read that widened a scope is not the read the key describes. These are the
+	// administrative ones — across tenants — and they are rare, privileged,
+	// and cheaper to answer with a query than to give a second key nothing else
+	// would hit.
+	if cfg.SkipTenantScope {
+		return r.readTodo(ctx, id, opts...)
+	}
+
+	// A miss is an error rather than a nil row, which is what keeps it out of the
+	// map: runtime/cache never stores what a failing loader returned. So nothing
+	// has to withdraw a not-found, and a create has nothing to publish.
+	held, err := r.db.todoCache.load(todoCacheKey(claims.TenantID, id), func() (*model.Todo, error) {
+		return r.readTodo(ctx, id, opts...)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return cloneTodo(held), nil
+}
+
+// readTodo is the row read itself, with no cache in front of it.
+//
+// Called by Get on a miss, and called directly by Get whenever the answer must
+// not come from memory — see there for which reads those are.
+func (r *todoRepo) readTodo(ctx context.Context, id uuid.UUID, opts ...readopt.Option) (*model.Todo, error) {
 	cfg, err := readopt.Apply(opts)
 	if err != nil {
 		return nil, err
@@ -1001,6 +1139,12 @@ func (r *todoRepo) Update(ctx context.Context, id uuid.UUID, in dbhook.Update[mo
 			return writeError(err, "todo")
 		}
 
+		// Every replica forgets this row when this transaction commits, and none of
+		// them does if it rolls back.
+		if err := r.db.todoCache.forget(ctx, todoCacheKey(prev.TenantID, id)); err != nil {
+			return err
+		}
+
 		if in.Hooks.After != nil {
 			if err := in.Hooks.After(ctx, claims, updated, prev); err != nil {
 				return err
@@ -1101,12 +1245,32 @@ func (r *todoRepo) Delete(ctx context.Context, in dbhook.Delete[model.TodoDelete
 
 		if in.Input.Hard {
 			// The snapshots reference this row, so they go first.
-			if _, err := tx.Exec(ctx, "DELETE FROM todo WHERE snapshot_from_todo_id = $1", in.Input.ID); err != nil {
+			//
+			// RETURNING because each of them is a row of its own — reachable through the
+			// history and through a revert — so each may be held under a key of its own,
+			// and this statement is the only place their identifiers are ever known.
+			gone, err := tx.Query(ctx, "DELETE FROM todo WHERE snapshot_from_todo_id = $1 RETURNING id", in.Input.ID)
+			if err != nil {
 				return writeError(err, "todo")
 			}
+			versions, err := pgx.CollectRows(gone, pgx.RowTo[uuid.UUID])
+			if err != nil {
+				return writeError(err, "todo")
+			}
+			for _, version := range versions {
+				if err := r.db.todoCache.forget(ctx, todoCacheKey(prev.TenantID, version)); err != nil {
+					return err
+				}
+			}
+
 			if _, err := tx.Exec(ctx, "DELETE FROM todo WHERE id = $1", in.Input.ID); err != nil {
 				return writeError(err, "todo")
 			}
+			// The row is gone, so the held copy of it has to be.
+			if err := r.db.todoCache.forget(ctx, todoCacheKey(prev.TenantID, in.Input.ID)); err != nil {
+				return err
+			}
+
 			if in.Hooks.After != nil {
 				if err := in.Hooks.After(ctx, claims, prev); err != nil {
 					return err
@@ -1135,6 +1299,12 @@ func (r *todoRepo) Delete(ctx context.Context, in dbhook.Delete[model.TodoDelete
 		if _, err := tx.Exec(ctx, sql, values...); err != nil {
 			return writeError(err, "todo")
 		}
+		// Get returns a row whatever its lifecycle state, so a retirement changes what
+		// a held copy says rather than whether there is one.
+		if err := r.db.todoCache.forget(ctx, todoCacheKey(prev.TenantID, in.Input.ID)); err != nil {
+			return err
+		}
+
 		if in.Hooks.After != nil {
 			if err := in.Hooks.After(ctx, claims, prev); err != nil {
 				return err
@@ -1264,6 +1434,11 @@ func (r *todoRepo) Restore(ctx context.Context, id uuid.UUID, in dbhook.Restore[
 			return writeError(err, "todo")
 		}
 
+		// The row came back, and a held copy of it still says it was retired.
+		if err := r.db.todoCache.forget(ctx, todoCacheKey(prev.TenantID, id)); err != nil {
+			return err
+		}
+
 		if in.Hooks.After != nil {
 			if err := in.Hooks.After(ctx, claims, restored, prev); err != nil {
 				return err
@@ -1358,4 +1533,30 @@ func (r *todoRepo) Revert(ctx context.Context, id, versionID uuid.UUID, hooks db
 	}
 
 	return reverted, nil
+}
+
+// ForgetCached withdraws whatever is held of one row, on the transaction that
+// changed it.
+//
+// Nothing that goes through this repository needs to call it: every write here
+// publishes its own withdrawal. It is for the writes that cannot — the file
+// service setting a `<role>_file_id` inside the transaction that finalizes an
+// upload, which is where rig calls it, and whatever a project has to do
+// through Store.Pool or in raw SQL, which is where a project would.
+//
+// The row rather than an identifier, because the key names every scope a read
+// of it applied and those values are the row's own. Pass the row as it was
+// before the write, and call this inside the transaction that made the change:
+// the withdrawal is a notification Postgres delivers on commit and discards on
+// a rollback. Withdrawing something nothing holds is not an error.
+//
+//	if err := repos.Todos.ForgetCached(ctx, row); err != nil { return err }
+func (r *todoRepo) ForgetCached(ctx context.Context, row *model.Todo) error {
+	// Nil is the state the caller asked for: there is no row, so there is no key,
+	// and a helper that says so here is one less thing for a call site to be
+	// careful about.
+	if row == nil {
+		return nil
+	}
+	return r.db.todoCache.forget(ctx, todoCacheKey(row.TenantID, row.ID))
 }

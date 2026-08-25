@@ -5,6 +5,24 @@ comment: One thing somebody means to do.
 # Days a soft-deleted row stays restorable.
 restore_window_days: 30
 
+# Held between requests: a Get of one todo is answered out of memory until a
+# write to that row publishes the withdrawal.
+#
+# It is a promise as much as a setting. rig publishes from the writes it makes,
+# so every change to this table has to go through the generated repository — a
+# write through Store.Pool, or raw SQL from inside a dbhook, serves a stale row
+# until the entry expires. Nothing here does either.
+#
+# cover_file_id is the interesting one: the file service writes that column with a
+# statement of its own, inside the transaction that finalizes an upload, so it is
+# not a repository write. It withdraws the row through Todos.ForgetCached in the
+# same transaction — see files.Owner.Forget — which is why uploading a cover and
+# downloading it back is not a 404.
+#
+# Only the Get. A list cannot be keyed by anything a write could withdraw, so it
+# is a query every time; see docs/rig-yaml.md.
+cache: true
+
 # Newest first, then by identifier so the order is total and paging is stable.
 order_by: [-created_at, id]
 

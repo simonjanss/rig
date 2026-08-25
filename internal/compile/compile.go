@@ -84,6 +84,7 @@ func Compile(raw ir.Schema, set *tableconf.Set, opt Options) (*ir.Document, diag
 		Notifications:         cfg.Notifications.IR(),
 		Presence:              cfg.Presence.IR(),
 		FileRestoreWindowDays: fileRestoreWindowDays(p),
+		Cache:                 cfg.Cache.IR(),
 	})
 	diags.Append(d)
 

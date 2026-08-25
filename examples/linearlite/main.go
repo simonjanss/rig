@@ -94,9 +94,66 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Spans. Nothing is exported unless the environment says where to:
+	// $OTEL_EXPORTER_OTLP_ENDPOINT for a collector, $RIG_TRACE_FILE for a file.
+	// With neither, the spans cost nothing and the trace ids are still real —
+	// which is what the request id in every error body is.
+	//
+	// Out here rather than inside the mount closure below, because the page
+	// hanging off it is half of serve.Config and the closure runs after that is
+	// built. context.Background rather than the startup budget for the same
+	// reason; setting a provider up talks to nothing.
+	tracing, err := observe.Setup(context.Background(), api.Tracing())
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "cannot set tracing up:", err)
+		os.Exit(1)
+	}
+
+	// And the flush, here as well as in the CloseWithin below, because a
+	// provider built in main is reached by both ways out of this process. A
+	// `Tasks:` entry — `migrate`, `seed`, the two cron ones — never reaches the
+	// mount closure: serve.Main runs the task and returns. Without this, an
+	// hourly dispatch-notifications with $RIG_TRACE_FILE set would open a
+	// second rotating writer on the span file the server is already rotating
+	// and then drop everything it buffered on the way out.
+	//
+	// The server path runs both, and the second finds nothing left to do:
+	// Shutdown is idempotent.
+	defer func() {
+		flushing, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := tracing.Shutdown(flushing); err != nil {
+			fmt.Fprintln(os.Stderr, "cannot flush the spans:", err)
+		}
+	}()
+
+	// rig's own page over those spans and those log lines. It reads the span
+	// file the provider above is writing, which is why it hangs off it, and the
+	// log sink opened above, which is why that is set here rather than
+	// generated.
+	//
+	// It listens on 127.0.0.1:9084 — rig.yaml says so — rather than answering
+	// on the API's 8084, because a page that lists every path, request id and
+	// error cause this server has seen should be reachable on terms the kernel
+	// enforces rather than on a path. With no $RIG_MONITOR_PASSWORD it opens no
+	// port at all and says so once.
+	monitoring := api.Monitoring()
+	monitoring.Logs = logs
+	page, err := tracing.Page(monitoring)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "cannot build the monitoring page:", err)
+		os.Exit(1)
+	}
+
 	serve.Main(serve.Config{
 		DatabaseURL: cmp.Or(os.Getenv("DATABASE_URL"), localDSN),
 		Addr:        cmp.Or(os.Getenv("ADDR"), "127.0.0.1:8084"),
+
+		// The monitoring page, on a listener of its own in this same process.
+		// Both are zero when the page is unarmed, and then no second port is
+		// opened — which is what a laptop with no password set gets.
+		Monitor:     page.Handler(),
+		MonitorAddr: page.Addr(),
 
 		LivenessPath:  "/livez",
 		ReadinessPath: "/readyz",
@@ -156,32 +213,17 @@ func main() {
 		},
 		Migrate: migrate.Require(migrations, migrate.Options{}),
 	}, func(ctx context.Context, app *serve.App) (http.Handler, error) {
-		// Spans. Nothing is exported unless the environment says where to:
-		// $OTEL_EXPORTER_OTLP_ENDPOINT for a collector, $RIG_TRACE_FILE for a
-		// file. With neither, the spans cost nothing and the trace ids are
-		// still real — which is what the request id below is.
-		tracing, err := observe.Setup(ctx, api.Tracing())
-		if err != nil {
-			return nil, err
-		}
 		// Its own limit, because a flush to a collector that is not answering
-		// must not spend the whole shutdown budget.
+		// must not spend the whole shutdown budget. The provider it stops was
+		// built in main; this is the first place there is an App to register a
+		// closer with, and it is the server's half of the pair — the defer in
+		// main is the half a task run reaches.
 		app.CloseWithin("traces", 5*time.Second, tracing.Shutdown)
 
-		// rig's own page over those spans and those log lines, at
-		// /_rig/monitor. It reads the span file the provider above is writing,
-		// which is why it hangs off it, and the log sink opened in main, which
-		// is why that is set here rather than generated. With no
-		// $RIG_MONITOR_PASSWORD it mounts nothing and says so once, rather than
-		// serving every path, request id and error cause to anybody who asks.
-		monitoring := api.Monitoring()
-		monitoring.Logs = logs
-		page, err := tracing.Page(monitoring)
-		if err != nil {
-			return nil, err
-		}
+		// Said here rather than in main because this is where there is a logger
+		// that writes to the file the page would have read.
 		if why := page.Unarmed(); why != "" {
-			app.Logger.Info("monitoring page not mounted", "reason", why)
+			app.Logger.Info("monitoring page not listening", "reason", why)
 		}
 
 		mux, engine, err := newAPI(ctx, app.Pool, app.Logger, page)
@@ -325,10 +367,6 @@ func newAPI(ctx context.Context, pool *pgxpool.Pool, log *slog.Logger, page *obs
 				return cmp.Or(r.Header.Get("X-Request-Id"), observe.TraceID(r))
 			},
 			Logger: log,
-			// Mounted with the resource routes and after them, and not itself
-			// traced or logged: rig opens its spans inside each generated
-			// handler, so looking at the page does not appear on the page.
-			Monitor: page,
 		},
 		Account:                members,
 		Todo:                   todos,

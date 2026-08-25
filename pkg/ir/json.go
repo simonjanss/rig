@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"slices"
 )
 
 // Marshal encodes a document canonically: two-space indent, struct fields in
@@ -74,6 +75,12 @@ func Unmarshal(b []byte) (*Document, error) {
 // go unnoticed. Being told a number is not the same as behaving differently for
 // it, and only the second one is what a revision means.
 //
+// [Resource.Cached] is cleared for the same reason as [API.Cache], and it has to
+// be: it is the per-table half of the same switch, so leaving it in would let
+// turning a cache on move a revision that turning the block on does not. It is a
+// slice rather than a field, so clearing it copies — the caller's document must
+// not come back with its opt-ins erased.
+//
 // [API.Notifications] is cleared in part, and it is the second field here to be
 // — the dispatcher's numbers go, and the three that say what the API looks like
 // stay. Nothing answers a claim_ttl, a send_timeout or any of the retry
@@ -103,6 +110,16 @@ func (d *Document) Hash() (string, error) {
 	unstamped.API.EmbeddedFoundation = false
 	unstamped.API.Monitoring = nil
 	unstamped.API.Cache = nil
+	if slices.ContainsFunc(unstamped.API.Resources, func(r Resource) bool { return r.Cached }) {
+		// A copy for the reason the two below take one: the shallow copy above
+		// shares the backing array, and clearing in place would reach the
+		// caller's document.
+		plain := slices.Clone(unstamped.API.Resources)
+		for i := range plain {
+			plain[i].Cached = false
+		}
+		unstamped.API.Resources = plain
+	}
 	if n := unstamped.API.Notifications; n != nil {
 		// A copy, for the reason the one below takes one: the shallow copy above
 		// shares the pointer, and the caller's document must not come back with
