@@ -39,17 +39,20 @@ func TestCacheIsNilUntilItIsAskedFor(t *testing.T) {
 	}
 }
 
-// The dependency, and the reason it is a diagnostic rather than a comment: the
-// wiring is written by the same emitter that writes the rest of the
-// authentication, so a project with no `auth:` block gets no cache at all. A
-// `cache:` block on its own would be four numbers somebody set and believed in,
-// silently unread — which is the failure a disabled-but-configured block is
-// already refused for.
-func TestTheCacheNeedsAuth(t *testing.T) {
+// The dependency the block used to carry alone. It is still refused, but not
+// here: a table's `cache: true` satisfies it just as an `auth:` block does, and
+// this package cannot see table configuration. The rule moved to
+// compile.checkCacheHasReaders, which is where both halves are visible, and
+// TestACacheNobodyReadsIsRefused there is the test that used to live here.
+//
+// What this asserts is the half that did not move: a block with nothing beside
+// it parses, because whether anything reads it is not a question about the
+// block's own values.
+func TestTheCacheAloneIsNotRefusedHere(t *testing.T) {
 	t.Parallel()
 
-	if _, out := parseCache(t, "cache:\n  enabled: true\n"); !strings.Contains(out, "RIG3002") {
-		t.Errorf("a cache block without auth was accepted:\n%s", out)
+	if _, out := parseCache(t, "cache:\n  enabled: true\n"); out != "" {
+		t.Errorf("a cache block should parse on its own; the reader check is compile's:\n%s", out)
 	}
 	if _, out := parseCache(t, authOn+"cache:\n  enabled: true\n"); out != "" {
 		t.Errorf("a cache block with auth was refused:\n%s", out)

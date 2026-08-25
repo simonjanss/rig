@@ -28,6 +28,7 @@
 package files
 
 import (
+	"context"
 	"errors"
 	"io"
 	"time"
@@ -143,6 +144,22 @@ type Owner struct {
 	FileColumn string
 
 	ID uuid.UUID
+
+	// Forget withdraws whatever is being held of this row, and it exists because
+	// this is the one place rig writes an application's table from outside that
+	// table's generated repository.
+	//
+	// A table that holds its rows between requests is invalidated by the writes
+	// its repository makes, and the statement below is not one of them: attaching
+	// a file changes the row's `<role>_file_id` and every replica holding it would
+	// go on saying there is no file there — which the download endpoint answers as
+	// a 404, for a file that was just uploaded successfully.
+	//
+	// Generated code fills this in for a table that asked to be held, and it is
+	// called inside the transaction that writes the column, so the withdrawal is
+	// atomic with the change and discarded by a rollback. Nil is the ordinary
+	// case and means nothing is held.
+	Forget func(ctx context.Context) error
 }
 
 // Config is everything a [Service] needs that is not a request.

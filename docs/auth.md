@@ -586,6 +586,12 @@ correctness:
 app.CloseWithin("auth", 5*time.Second, front.Close)
 ```
 
+The same block also covers one read per table that asks for it — `cache: true` in
+a table's configuration file holds its `Get`. That one *is* a promise you are
+making, for the reason the next paragraph gives about `Grants`: the writes are
+through rig's repository or they are invisible to it. See
+[tables.md](tables.md#cache).
+
 **Your `Grants` function is not cached, and that is deliberate.** It is the
 expensive read on this path — a join over role tables, per request — but the
 tables are yours and so are the writes, and rig cannot see them. Caching it would

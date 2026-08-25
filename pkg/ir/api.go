@@ -579,6 +579,22 @@ type Resource struct {
 	// should hear about it.
 	Notifiable bool `json:"notifiable,omitempty"`
 
+	// Cached says this resource's Get is held in memory between requests, keyed
+	// by the row and the scope the read was made under, and withdrawn by a
+	// Postgres NOTIFY published on the transaction of every write the generated
+	// repository makes to the row.
+	//
+	// Declared per table rather than derived, because it is a promise about the
+	// application as much as a fact about the schema: rig can only publish the
+	// withdrawal from writes it makes, so a project that writes this table
+	// through Store.Pool or with raw SQL from inside a dbhook is a project where
+	// this serves a stale row until the entry expires. Nothing in the schema says
+	// whether that is true, so nothing but a person can turn this on.
+	//
+	// It needs [API.Cache], which is what owns the channel the withdrawals
+	// travel on.
+	Cached bool `json:"cached,omitempty"`
+
 	// Parents are the resources this one points at, one per foreign key, in the
 	// order the columns appear on the table. Each becomes a pair of hook fields
 	// the service layer may fill in.

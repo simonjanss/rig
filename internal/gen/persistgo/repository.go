@@ -112,6 +112,8 @@ func (e *emitter) repositoryInterface(b *gobuf.Buf, res *ir.Resource) {
 			ctxPkg, uuidPkg, hookPkg, entity, entity, entity)
 	}
 
+	e.forgetCachedSignature(b, res)
+
 	b.L("}")
 	b.NL()
 }
@@ -272,6 +274,7 @@ func (e *emitter) repositoryImpl(b *gobuf.Buf, res *ir.Resource) {
 		e.listSnapshotsMethod(b, res, typeName)
 		e.revertMethod(b, res, typeName)
 	}
+	e.forgetCachedMethod(b, res, typeName)
 }
 
 // scanHelpers emit the select list and the row scanner, so no method spells
@@ -399,10 +402,31 @@ func (e *emitter) getMethod(b *gobuf.Buf, res *ir.Resource, typeName string) {
 		fmtPkg  = b.Import("fmt")
 	)
 
-	b.Comment("Get implements " + res.Name + "Repository.")
-	b.L("func (%s *%s) Get(ctx %s.Context, id %s.UUID, opts ...%s.Option) (*%s, error) {",
-		repo, typeName, ctxPkg, uuidPkg, optPkg, e.entity(b, res))
-	e.methodSpan(b, res, "Get")
+	// A cached table's Get is the cache in front of the read, and the read moves
+	// into a method of its own so that both paths are the same statement. An
+	// uncached table's Get is what it has always been, down to the byte, so that
+	// turning this on for one table does not rewrite the rest of a project.
+	if e.cached(res) {
+		e.getCached(b, res, typeName)
+	}
+
+	name, doc := "Get", "Get implements "+res.Name+"Repository."
+	if e.cached(res) {
+		name, doc = "read"+res.Name, "read"+res.Name+" is the row read itself, with no cache in front of it.\n\n"+
+			"Called by Get on a miss, and called directly by Get whenever the answer "+
+			"must not come from memory — see there for which reads those are."
+	}
+
+	b.Comment(doc)
+	b.L("func (%s *%s) %s(ctx %s.Context, id %s.UUID, opts ...%s.Option) (*%s, error) {",
+		repo, typeName, name, ctxPkg, uuidPkg, optPkg, e.entity(b, res))
+	if e.cached(res) {
+		// Its own span, under Get's, so a trace says whether the row was read or
+		// answered out of memory. A Get with no read under it is a hit.
+		e.methodSpan(b, res, "Get", "read")
+	} else {
+		e.methodSpan(b, res, "Get")
+	}
 	e.readPreamble(b, res, optPkg, tenPkg, "nil, err", e.usesClaims(res), e.usesClaims(res))
 
 	b.L("args := []any{id}")
@@ -1018,6 +1042,9 @@ func (e *emitter) updateMethod(b *gobuf.Buf, res *ir.Resource, typeName string) 
 	b.L("updated, err = scan%s(tx.QueryRow(ctx, sql, values...))", res.Name)
 	b.L("if err != nil { return writeError(err, %s) }", gobuf.Quote(res.Storage.Table))
 	b.NL()
+	e.cacheForget(b, res, "prev", "id",
+		"Every replica forgets this row when this transaction commits, and none of "+
+			"them does if it rolls back.")
 	b.L("if in.Hooks.After != nil {")
 	e.hookCall(b, res, "in.Hooks.After(ctx, claims, updated, prev)", "", "Update", "After")
 	b.L("}")
@@ -1224,6 +1251,8 @@ func (e *emitter) deleteMethod(b *gobuf.Buf, res *ir.Resource, typeName string) 
 		b.L("if _, err := tx.Exec(ctx, \"DELETE FROM %s WHERE id = $1\", in.Input.ID); err != nil {", s.Table)
 		b.L("return writeError(err, %s)", gobuf.Quote(s.Table))
 		b.L("}")
+		e.cacheForget(b, res, "prev", "in.Input.ID",
+			"The row is gone, so the held copy of it has to be.")
 		e.afterDelete(b, res)
 		e.childrenDeleted(b, res)
 		b.L("return nil")
@@ -1254,15 +1283,13 @@ func (e *emitter) deleteMethod(b *gobuf.Buf, res *ir.Resource, typeName string) 
 
 	b.L("if in.Input.Hard {")
 	if s.IsSnapshotable() {
-		b.Comment("The snapshots reference this row, so they go first.")
-		b.L("if _, err := tx.Exec(ctx, \"DELETE FROM %s WHERE %s = $1\", in.Input.ID); err != nil {",
-			s.Table, s.Snapshot.FromID.Name)
-		b.L("return writeError(err, %s)", gobuf.Quote(s.Table))
-		b.L("}")
+		e.deleteSnapshots(b, res)
 	}
 	b.L("if _, err := tx.Exec(ctx, \"DELETE FROM %s WHERE id = $1\", in.Input.ID); err != nil {", s.Table)
 	b.L("return writeError(err, %s)", gobuf.Quote(s.Table))
 	b.L("}")
+	e.cacheForget(b, res, "prev", "in.Input.ID",
+		"The row is gone, so the held copy of it has to be.")
 	e.afterDelete(b, res)
 	e.childrenDeleted(b, res)
 	b.L("return nil")
@@ -1290,6 +1317,9 @@ func (e *emitter) deleteMethod(b *gobuf.Buf, res *ir.Resource, typeName string) 
 	b.L("if _, err := tx.Exec(ctx, sql, values...); err != nil {")
 	b.L("return writeError(err, %s)", gobuf.Quote(s.Table))
 	b.L("}")
+	e.cacheForget(b, res, "prev", "in.Input.ID",
+		"Get returns a row whatever its lifecycle state, so a retirement changes "+
+			"what a held copy says rather than whether there is one.")
 	e.afterDelete(b, res)
 	e.childrenDeleted(b, res)
 	b.L("return nil")
@@ -1513,6 +1543,8 @@ func (e *emitter) restoreMethod(b *gobuf.Buf, res *ir.Resource, typeName string)
 	b.L("restored, err = scan%s(tx.QueryRow(ctx, sql, values...))", res.Name)
 	b.L("if err != nil { return writeError(err, %s) }", gobuf.Quote(s.Table))
 	b.NL()
+	e.cacheForget(b, res, "prev", "id",
+		"The row came back, and a held copy of it still says it was retired.")
 	b.L("if in.Hooks.After != nil {")
 	e.hookCall(b, res, "in.Hooks.After(ctx, claims, restored, prev)", "", "Restore", "After")
 	b.L("}")

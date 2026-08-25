@@ -8,7 +8,7 @@ import (
 	"github.com/simonjanss/rig/pkg/ir"
 )
 
-// Cache is the invalidation channel rig's own per-request reads run over.
+// Cache is the invalidation channel cached reads are withdrawn over.
 //
 // It is the one place rig keeps shared state outside Postgres, and the block
 // exists because that departure needs a decision rather than a default. What it
@@ -19,15 +19,21 @@ import (
 // is the backstop for a notification nobody received.
 //
 // Nothing an application writes reads this block. Every cache it turns on is
-// held, filled and invalidated inside rig/auth, so there is no map to wire, no
-// publish to remember and no way to leave one write path out. See
+// held, filled and invalidated by generated code — inside rig/auth for the
+// authenticated path, and inside the generated repository for a table that asked
+// for `cache: true` — so there is no map to wire and no publish to remember. See
 // `runtime/cache` for the argument, and NEXT.md for why the one read this does
 // *not* cover is the application's own Grants function.
+//
+// A table opting in is the one place that stops being airtight, and it is why
+// opting in is per table rather than implied by this block: rig publishes the
+// withdrawal from the writes it makes, so a write that goes around the generated
+// repository serves a stale row until the entry expires.
 type Cache struct {
-	// Enabled is what turns rig's own caching on. Off by default: a cache is a
-	// second answer to a question the database was already answering correctly,
-	// and switching that on for somebody is not an upgrade.
-	Enabled bool `yaml:"enabled,omitempty" json:"enabled,omitempty" jsonschema_description:"Whether rig caches its own per-request reads — session and API key verification — behind a Postgres NOTIFY channel that invalidates them. Off by default."`
+	// Enabled is what turns the caching on. Off by default: a cache is a second
+	// answer to a question the database was already answering correctly, and
+	// switching that on for somebody is not an upgrade.
+	Enabled bool `yaml:"enabled,omitempty" json:"enabled,omitempty" jsonschema_description:"Whether reads are held in memory between requests — session and API key verification, and the Get of any table setting cache: true — behind a Postgres NOTIFY channel that invalidates them. Off by default."`
 
 	// TTL is how long an answer may be reused when no invalidation arrives, and
 	// the honest statement of what the cache costs.
@@ -98,17 +104,12 @@ func (p *Project) checkCache() diag.List {
 		return diags
 	}
 
-	// The dependency, for the reason monitoring has one on tracing: the two reads
-	// this caches are session verification and API key verification, both of them
-	// inside rig/auth, and `server-go` writes the wiring from the same emitter it
-	// writes the rest of the authentication from. A project with no `auth:` block
-	// gets no emitter and so no cache — numbers somebody set and believed in,
-	// which is the failure the branch above refuses in its other form.
-	if !p.Config.Auth.Enabled {
-		diags.Add(diag.CodeConfigInvalid, p.At("cache", "enabled"),
-			"cache.enabled is true but this project has no `auth:` block, and the only "+
-				"reads rig caches are the ones authentication makes; nothing would read it")
-	}
+	// The dependency this block used to carry — an `auth:` block, because the
+	// only reads it covered were authentication's — now has a second way to be
+	// satisfied: a table that asked for `cache: true`. Both facts are not visible
+	// from here, since table configuration is a separate set of files, so the
+	// check lives in `internal/compile` where the two meet. Everything below is
+	// about this block's own values, which is all this package can see.
 
 	if d := c.TTL.Duration(); d <= 0 {
 		diags.Add(diag.CodeConfigInvalid, p.At("cache", "ttl"),
