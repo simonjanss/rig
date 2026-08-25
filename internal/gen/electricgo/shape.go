@@ -78,12 +78,24 @@ func (e *emitter) shapeFile(res *ir.Resource) (gen.Artifact, error) {
 	e.paramsType(b, res)
 	for _, sh := range e.shapesFor(res) {
 		e.scopeType(b, res, sh)
+		if e.cfg.fallbacks() {
+			e.fallbackType(b, res, sh)
+		}
 		e.handler(b, res, sh)
 		if sh.kind == shapeVersions {
 			e.versionsAdapter(b, res)
 		}
+		if e.cfg.fallbacks() {
+			e.fallbackAdapter(b, res, sh)
+		}
 	}
 	e.columns(b, res)
+	if e.cfg.fallbacks() {
+		e.rowEncoder(b, res)
+		if err := e.schemaConst(b, res); err != nil {
+			return gen.Artifact{}, err
+		}
+	}
 
 	return artifact(naming.Snake(res.Name)+"_shape.gen.go", b, gen.Overwrite)
 }
@@ -292,7 +304,12 @@ func (e *emitter) handler(b *gobuf.Buf, res *ir.Resource, sh shape) {
 	)
 
 	b.Comment("handle" + sh.name + "Shape serves GET " + sh.path + ".")
-	b.L("func handle%sShape(s Server, scope %sScope) %s.HandlerFunc {", sh.name, sh.name, httpPkg)
+	if e.cfg.fallbacks() {
+		b.L("func handle%sShape(s Server, scope %sScope, fallback %sFallback) %s.HandlerFunc {",
+			sh.name, sh.name, sh.name, httpPkg)
+	} else {
+		b.L("func handle%sShape(s Server, scope %sScope) %s.HandlerFunc {", sh.name, sh.name, httpPkg)
+	}
 	b.L("return func(w %s.ResponseWriter, r *%s.Request) {", httpPkg, httpPkg)
 	b.L("claims, where, ok := prepare(s, w, r, %t)", admin)
 	b.L("if !ok { return }")
@@ -367,6 +384,16 @@ func (e *emitter) handler(b *gobuf.Buf, res *ir.Resource, sh shape) {
 		"carries every column it names to every subscriber, and a column that is " +
 		"not in the API has no business in a live stream either.")
 	b.L("Columns: %sShapeColumns,", res.Name)
+	if e.cfg.fallbacks() {
+		b.Comment("What answers this if the sync service cannot be reached. Nil " +
+			"unless the application wired one, and nil is the 502 this route " +
+			"answered before the field existed.")
+		if sh.kind == shapeVersions {
+			b.L("Fallback: %sFallback(fallback, r, claims, id, params),", e.namer.GoUnexported(sh.name))
+		} else {
+			b.L("Fallback: %sFallback(fallback, r, claims, params),", e.namer.GoUnexported(sh.name))
+		}
+	}
 	b.L("})")
 
 	b.L("}")

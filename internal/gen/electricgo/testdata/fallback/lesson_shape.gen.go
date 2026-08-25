@@ -8,30 +8,52 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"rigtest/model"
 
 	"github.com/google/uuid"
-	"github.com/simonjanss/rig/examples/linearlite/internal/model"
 	"github.com/simonjanss/rig/runtime/electric"
 	"github.com/simonjanss/rig/runtime/tenancy"
 )
 
-// TodoShapeParams are the query parameters this shape accepts.
+// LessonShapeParams are the query parameters this shape accepts.
 //
 // They are the application's, not the protocol's: a subscriber uses them to
 // ask for less, and the scoping function turns them into conditions. Nothing
 // here can ask for more.
-type TodoShapeParams struct {
-	// This shape declares none.
+type LessonShapeParams struct {
+	// Restrict the shape to one matchday.
+	Matchday int
+	// HasMatchday reports whether it was given, so a zero value can be told from
+	// an absent one.
+	HasMatchday bool
+
+	// Only lessons in this state.
+	Status string
 }
 
-// parseTodoShapeParams reads the declared parameters.
-func parseTodoShapeParams(r *http.Request) (TodoShapeParams, error) {
-	var p TodoShapeParams
+// parseLessonShapeParams reads the declared parameters.
+func parseLessonShapeParams(r *http.Request) (LessonShapeParams, error) {
+	var p LessonShapeParams
+
+	if raw, ok := optional(r, "matchday"); ok {
+		v, err := parseInt("matchday", raw)
+		if err != nil {
+			return p, err
+		}
+		p.Matchday = v
+		p.HasMatchday = true
+	}
+
+	rawStatus, err := required(r, "status")
+	if err != nil {
+		return p, err
+	}
+	p.Status = rawStatus
 
 	return p, nil
 }
 
-// TodoScope narrows the shape further.
+// LessonScope narrows the shape further.
 //
 // It receives a filter that already carries the tenant and lifecycle
 // conditions, and can only add to it — every condition is joined with AND,
@@ -41,9 +63,9 @@ func parseTodoShapeParams(r *http.Request) (TodoShapeParams, error) {
 // injection point with a streaming response attached.
 //
 // Returning an error refuses the subscription.
-type TodoScope func(ctx context.Context, r *http.Request, claims tenancy.Claims, p TodoShapeParams, w *electric.Where) error
+type LessonScope func(ctx context.Context, r *http.Request, claims tenancy.Claims, p LessonShapeParams, w *electric.Where) error
 
-// TodoFallback answers this shape from the application's own read path when
+// LessonFallback answers this shape from the application's own read path when
 // the sync service cannot be reached.
 //
 // It is called for a subscriber reading the shape from the beginning, and
@@ -68,10 +90,10 @@ type TodoScope func(ctx context.Context, r *http.Request, claims tenancy.Claims,
 //
 // Returning an error answers 502, which is what a shape with no fallback
 // answers anyway.
-type TodoFallback func(ctx context.Context, r *http.Request, claims tenancy.Claims, p TodoShapeParams) ([]*model.Todo, error)
+type LessonFallback func(ctx context.Context, r *http.Request, claims tenancy.Claims, p LessonShapeParams) ([]*model.Lesson, error)
 
-// handleTodoShape serves GET /api/v1/todo/_stream.
-func handleTodoShape(s Server, scope TodoScope, fallback TodoFallback) http.HandlerFunc {
+// handleLessonShape serves GET /api/v1/lesson/_stream.
+func handleLessonShape(s Server, scope LessonScope, fallback LessonFallback) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		claims, where, ok := prepare(s, w, r, false)
 		if !ok {
@@ -89,7 +111,7 @@ func handleTodoShape(s Server, scope TodoScope, fallback TodoFallback) http.Hand
 		// refuses to type a value against one; on a text column the cast is a no-op.
 		where.EqText("version_type", "Original")
 
-		params, err := parseTodoShapeParams(r)
+		params, err := parseLessonShapeParams(r)
 		if err != nil {
 			fail(s, w, r, err)
 			return
@@ -103,22 +125,22 @@ func handleTodoShape(s Server, scope TodoScope, fallback TodoFallback) http.Hand
 		}
 
 		s.Proxy.Serve(w, r, electric.Shape{
-			Table:  "todo",
+			Table:  "lesson",
 			Where:  where.SQL(),
 			Params: where.Params(),
 			// The readable columns, named rather than left to default. A shape carries
 			// every column it names to every subscriber, and a column that is not in the
 			// API has no business in a live stream either.
-			Columns: TodoShapeColumns,
+			Columns: LessonShapeColumns,
 			// What answers this if the sync service cannot be reached. Nil unless the
 			// application wired one, and nil is the 502 this route answered before the
 			// field existed.
-			Fallback: todoFallback(fallback, r, claims, params),
+			Fallback: lessonFallback(fallback, r, claims, params),
 		})
 	}
 }
 
-// todoFallback adapts one of these reads to what the proxy asks for.
+// lessonFallback adapts one of these reads to what the proxy asks for.
 //
 // The claims go onto the context here, and not in the function an application
 // writes, for the reason the tenant condition is built in the handler: a
@@ -128,7 +150,7 @@ func handleTodoShape(s Server, scope TodoScope, fallback TodoFallback) http.Hand
 //
 // Nil stays nil, which is how the proxy knows there is nothing to fall back
 // to.
-func todoFallback(fn TodoFallback, r *http.Request, claims tenancy.Claims, p TodoShapeParams) electric.Fallback {
+func lessonFallback(fn LessonFallback, r *http.Request, claims tenancy.Claims, p LessonShapeParams) electric.Fallback {
 	if fn == nil {
 		return nil
 	}
@@ -145,13 +167,13 @@ func todoFallback(fn TodoFallback, r *http.Request, claims tenancy.Claims, p Tod
 			if m == nil {
 				continue
 			}
-			out = append(out, todoShapeRow(m))
+			out = append(out, lessonShapeRow(m))
 		}
-		return electric.Snapshot{Rows: out, Schema: TodoShapeSchema}, nil
+		return electric.Snapshot{Rows: out, Schema: LessonShapeSchema}, nil
 	}
 }
 
-// TodoDeletedScope narrows the trash shape further.
+// LessonDeletedScope narrows the trash shape further.
 //
 // It receives a filter that already carries the tenant and lifecycle
 // conditions, and can only add to it — every condition is joined with AND,
@@ -161,10 +183,10 @@ func todoFallback(fn TodoFallback, r *http.Request, claims tenancy.Claims, p Tod
 // injection point with a streaming response attached.
 //
 // Returning an error refuses the subscription.
-type TodoDeletedScope func(ctx context.Context, r *http.Request, claims tenancy.Claims, p TodoShapeParams, w *electric.Where) error
+type LessonDeletedScope func(ctx context.Context, r *http.Request, claims tenancy.Claims, p LessonShapeParams, w *electric.Where) error
 
-// TodoDeletedFallback answers this shape from the application's own read path
-// when the sync service cannot be reached.
+// LessonDeletedFallback answers this shape from the application's own read
+// path when the sync service cannot be reached.
 //
 // It is called for a subscriber reading the shape from the beginning, and
 // never for one resuming a subscription — so what it returns is every row
@@ -189,10 +211,10 @@ type TodoDeletedScope func(ctx context.Context, r *http.Request, claims tenancy.
 //
 // Returning an error answers 502, which is what a shape with no fallback
 // answers anyway.
-type TodoDeletedFallback func(ctx context.Context, r *http.Request, claims tenancy.Claims, p TodoShapeParams) ([]*model.Todo, error)
+type LessonDeletedFallback func(ctx context.Context, r *http.Request, claims tenancy.Claims, p LessonShapeParams) ([]*model.Lesson, error)
 
-// handleTodoDeletedShape serves GET /api/v1/todo/_deleted/_stream.
-func handleTodoDeletedShape(s Server, scope TodoDeletedScope, fallback TodoDeletedFallback) http.HandlerFunc {
+// handleLessonDeletedShape serves GET /api/v1/lesson/_deleted/_stream.
+func handleLessonDeletedShape(s Server, scope LessonDeletedScope, fallback LessonDeletedFallback) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		claims, where, ok := prepare(s, w, r, false)
 		if !ok {
@@ -210,7 +232,7 @@ func handleTodoDeletedShape(s Server, scope TodoDeletedScope, fallback TodoDelet
 		// not the history of what was deleted.
 		where.EqText("version_type", "Original")
 
-		params, err := parseTodoShapeParams(r)
+		params, err := parseLessonShapeParams(r)
 		if err != nil {
 			fail(s, w, r, err)
 			return
@@ -224,22 +246,22 @@ func handleTodoDeletedShape(s Server, scope TodoDeletedScope, fallback TodoDelet
 		}
 
 		s.Proxy.Serve(w, r, electric.Shape{
-			Table:  "todo",
+			Table:  "lesson",
 			Where:  where.SQL(),
 			Params: where.Params(),
 			// The readable columns, named rather than left to default. A shape carries
 			// every column it names to every subscriber, and a column that is not in the
 			// API has no business in a live stream either.
-			Columns: TodoShapeColumns,
+			Columns: LessonShapeColumns,
 			// What answers this if the sync service cannot be reached. Nil unless the
 			// application wired one, and nil is the 502 this route answered before the
 			// field existed.
-			Fallback: todoDeletedFallback(fallback, r, claims, params),
+			Fallback: lessonDeletedFallback(fallback, r, claims, params),
 		})
 	}
 }
 
-// todoDeletedFallback adapts one of these reads to what the proxy asks for.
+// lessonDeletedFallback adapts one of these reads to what the proxy asks for.
 //
 // The claims go onto the context here, and not in the function an application
 // writes, for the reason the tenant condition is built in the handler: a
@@ -249,7 +271,7 @@ func handleTodoDeletedShape(s Server, scope TodoDeletedScope, fallback TodoDelet
 //
 // Nil stays nil, which is how the proxy knows there is nothing to fall back
 // to.
-func todoDeletedFallback(fn TodoDeletedFallback, r *http.Request, claims tenancy.Claims, p TodoShapeParams) electric.Fallback {
+func lessonDeletedFallback(fn LessonDeletedFallback, r *http.Request, claims tenancy.Claims, p LessonShapeParams) electric.Fallback {
 	if fn == nil {
 		return nil
 	}
@@ -266,13 +288,13 @@ func todoDeletedFallback(fn TodoDeletedFallback, r *http.Request, claims tenancy
 			if m == nil {
 				continue
 			}
-			out = append(out, todoShapeRow(m))
+			out = append(out, lessonShapeRow(m))
 		}
-		return electric.Snapshot{Rows: out, Schema: TodoShapeSchema}, nil
+		return electric.Snapshot{Rows: out, Schema: LessonShapeSchema}, nil
 	}
 }
 
-// TodoVersionsScope narrows the history shape further.
+// LessonVersionsScope narrows the history shape further.
 //
 // The id is the row whose history this is, parsed before the filter was built
 // because the filter is made of it. A scope that wants to refuse some rows
@@ -286,10 +308,10 @@ func todoDeletedFallback(fn TodoDeletedFallback, r *http.Request, claims tenancy
 // injection point with a streaming response attached.
 //
 // Returning an error refuses the subscription.
-type TodoVersionsScope func(ctx context.Context, r *http.Request, claims tenancy.Claims, id uuid.UUID, p TodoShapeParams, w *electric.Where) error
+type LessonVersionsScope func(ctx context.Context, r *http.Request, claims tenancy.Claims, id uuid.UUID, p LessonShapeParams, w *electric.Where) error
 
-// TodoVersionsFallback answers this shape from the application's own read path
-// when the sync service cannot be reached.
+// LessonVersionsFallback answers this shape from the application's own read
+// path when the sync service cannot be reached.
 //
 // It is called for a subscriber reading the shape from the beginning, and
 // never for one resuming a subscription — so what it returns is every row
@@ -313,10 +335,10 @@ type TodoVersionsScope func(ctx context.Context, r *http.Request, claims tenancy
 //
 // Returning an error answers 502, which is what a shape with no fallback
 // answers anyway.
-type TodoVersionsFallback func(ctx context.Context, r *http.Request, claims tenancy.Claims, id uuid.UUID, p TodoShapeParams) ([]*model.Todo, error)
+type LessonVersionsFallback func(ctx context.Context, r *http.Request, claims tenancy.Claims, id uuid.UUID, p LessonShapeParams) ([]*model.Lesson, error)
 
-// handleTodoVersionsShape serves GET /api/v1/todo/{id}/_versions/_stream.
-func handleTodoVersionsShape(s Server, scope TodoVersionsScope, fallback TodoVersionsFallback) http.HandlerFunc {
+// handleLessonVersionsShape serves GET /api/v1/lesson/{id}/_versions/_stream.
+func handleLessonVersionsShape(s Server, scope LessonVersionsScope, fallback LessonVersionsFallback) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		claims, where, ok := prepare(s, w, r, false)
 		if !ok {
@@ -338,14 +360,14 @@ func handleTodoVersionsShape(s Server, scope TodoVersionsScope, fallback TodoVer
 		// One row's history: the copies taken before each update, and never the row
 		// itself.
 		where.EqText("version_type", "Snapshot")
-		where.Eq("snapshot_from_todo_id", id.String())
+		where.Eq("snapshot_from_lesson_id", id.String())
 		// A snapshot is written with no deletion stamp and the table's check
 		// constraint keeps it that way — but the constraint is one the schema has to
 		// carry, and this filter does not depend on somebody else's migration having
 		// written it.
 		where.IsNull("deleted_at")
 
-		params, err := parseTodoShapeParams(r)
+		params, err := parseLessonShapeParams(r)
 		if err != nil {
 			fail(s, w, r, err)
 			return
@@ -359,35 +381,35 @@ func handleTodoVersionsShape(s Server, scope TodoVersionsScope, fallback TodoVer
 		}
 
 		s.Proxy.Serve(w, r, electric.Shape{
-			Table:  "todo",
+			Table:  "lesson",
 			Where:  where.SQL(),
 			Params: where.Params(),
 			// The readable columns, named rather than left to default. A shape carries
 			// every column it names to every subscriber, and a column that is not in the
 			// API has no business in a live stream either.
-			Columns: TodoShapeColumns,
+			Columns: LessonShapeColumns,
 			// What answers this if the sync service cannot be reached. Nil unless the
 			// application wired one, and nil is the 502 this route answered before the
 			// field existed.
-			Fallback: todoVersionsFallback(fallback, r, claims, id, params),
+			Fallback: lessonVersionsFallback(fallback, r, claims, id, params),
 		})
 	}
 }
 
-// versionsFromLiveTodo is the live scope as a history scope.
+// versionsFromLiveLesson is the live scope as a history scope.
 //
 // Nil stays nil rather than becoming a function that calls one: a scope nobody
 // wrote is not a refusal.
-func versionsFromLiveTodo(live TodoScope) TodoVersionsScope {
+func versionsFromLiveLesson(live LessonScope) LessonVersionsScope {
 	if live == nil {
 		return nil
 	}
-	return func(ctx context.Context, r *http.Request, claims tenancy.Claims, _ uuid.UUID, p TodoShapeParams, w *electric.Where) error {
+	return func(ctx context.Context, r *http.Request, claims tenancy.Claims, _ uuid.UUID, p LessonShapeParams, w *electric.Where) error {
 		return live(ctx, r, claims, p, w)
 	}
 }
 
-// todoVersionsFallback adapts one of these reads to what the proxy asks for.
+// lessonVersionsFallback adapts one of these reads to what the proxy asks for.
 //
 // The claims go onto the context here, and not in the function an application
 // writes, for the reason the tenant condition is built in the handler: a
@@ -397,7 +419,7 @@ func versionsFromLiveTodo(live TodoScope) TodoVersionsScope {
 //
 // Nil stays nil, which is how the proxy knows there is nothing to fall back
 // to.
-func todoVersionsFallback(fn TodoVersionsFallback, r *http.Request, claims tenancy.Claims, id uuid.UUID, p TodoShapeParams) electric.Fallback {
+func lessonVersionsFallback(fn LessonVersionsFallback, r *http.Request, claims tenancy.Claims, id uuid.UUID, p LessonShapeParams) electric.Fallback {
 	if fn == nil {
 		return nil
 	}
@@ -414,25 +436,20 @@ func todoVersionsFallback(fn TodoVersionsFallback, r *http.Request, claims tenan
 			if m == nil {
 				continue
 			}
-			out = append(out, todoShapeRow(m))
+			out = append(out, lessonShapeRow(m))
 		}
-		return electric.Snapshot{Rows: out, Schema: TodoShapeSchema}, nil
+		return electric.Snapshot{Rows: out, Schema: LessonShapeSchema}, nil
 	}
 }
 
-// TodoShapeColumns are the columns this shape carries.
+// LessonShapeColumns are the columns this shape carries.
 //
 // They are the resource's readable fields — the same set a GET returns —
 // so a column excluded from the API is excluded here without anybody having to
 // remember.
-var TodoShapeColumns = []string{
+var LessonShapeColumns = []string{
 	"id",
 	"tenant_id",
-	"title",
-	"description",
-	"status",
-	"priority",
-	"assignee_account_id",
 	"created_at",
 	"created_by_account_id",
 	"updated_at",
@@ -440,40 +457,53 @@ var TodoShapeColumns = []string{
 	"deleted_at",
 	"deleted_by_account_id",
 	"version_type",
-	"snapshot_from_todo_id",
-	"snapshot_from_todo_at",
+	"snapshot_from_lesson_id",
+	"snapshot_from_lesson_at",
+	"title",
+	"notes",
+	"status",
+	"manager_email",
+	"starts_at",
+	"capacity",
+	"price",
+	"tags",
+	"search_vector",
 }
 
-// todoShapeRow renders one row the way the sync service renders it.
+// lessonShapeRow renders one row the way the sync service renders it.
 //
 // Every value is the text Postgres prints for it, or null, because that is
 // what a subscriber's parsers expect — the type each column is read as comes
-// from TodoShapeSchema and not from the JSON.
-func todoShapeRow(m *model.Todo) electric.Row {
+// from LessonShapeSchema and not from the JSON.
+func lessonShapeRow(m *model.Lesson) electric.Row {
 	return electric.Row{
-		Key: electric.RowKey("todo", fmt.Sprint(m.ID)),
+		Key: electric.RowKey("lesson", fmt.Sprint(m.ID)),
 		Value: map[string]any{
-			"id":                    electric.Value(m.ID),
-			"tenant_id":             electric.Value(m.TenantID),
-			"title":                 electric.Value(m.Title),
-			"description":           electric.Value(m.Description),
-			"status":                electric.Value(m.Status),
-			"priority":              electric.Value(m.Priority),
-			"assignee_account_id":   electric.Value(m.AssigneeAccountID),
-			"created_at":            electric.Value(m.CreatedAt),
-			"created_by_account_id": electric.Value(m.CreatedByAccountID),
-			"updated_at":            electric.Value(m.UpdatedAt),
-			"updated_by_account_id": electric.Value(m.UpdatedByAccountID),
-			"deleted_at":            electric.Value(m.DeletedAt),
-			"deleted_by_account_id": electric.Value(m.DeletedByAccountID),
-			"version_type":          electric.Value(m.VersionType),
-			"snapshot_from_todo_id": electric.Value(m.SnapshotFromTodoID),
-			"snapshot_from_todo_at": electric.Value(m.SnapshotFromTodoAt),
+			"id":                      electric.Value(m.ID),
+			"tenant_id":               electric.Value(m.TenantID),
+			"created_at":              electric.Value(m.CreatedAt),
+			"created_by_account_id":   electric.Value(m.CreatedByAccountID),
+			"updated_at":              electric.Value(m.UpdatedAt),
+			"updated_by_account_id":   electric.Value(m.UpdatedByAccountID),
+			"deleted_at":              electric.Value(m.DeletedAt),
+			"deleted_by_account_id":   electric.Value(m.DeletedByAccountID),
+			"version_type":            electric.Value(m.VersionType),
+			"snapshot_from_lesson_id": electric.Value(m.SnapshotFromLessonID),
+			"snapshot_from_lesson_at": electric.Value(m.SnapshotFromLessonAt),
+			"title":                   electric.Value(m.Title),
+			"notes":                   electric.Value(m.Notes),
+			"status":                  electric.Value(m.Status),
+			"manager_email":           electric.Value(m.ManagerEmailAddress),
+			"starts_at":               electric.Value(m.StartsAt),
+			"capacity":                electric.Value(m.Capacity),
+			"price":                   electric.Value(m.Price),
+			"tags":                    electric.Value(m.Tags),
+			"search_vector":           electric.Value(m.SearchVector),
 		},
 	}
 }
 
-// TodoShapeSchema describes the columns this shape carries, in the form the
+// LessonShapeSchema describes the columns this shape carries, in the form the
 // sync service describes them.
 //
 // It is sent with a fallback snapshot and is how a subscriber knows to read a
@@ -481,4 +511,4 @@ func todoShapeRow(m *model.Todo) electric.Row {
 // names — int8, timestamptz, an enum's type name — because those are what
 // the sync service sends and a subscriber has one set of parsers for both
 // paths.
-const TodoShapeSchema = "{\"assignee_account_id\":{\"type\":\"uuid\"},\"created_at\":{\"not_null\":true,\"type\":\"timestamptz\"},\"created_by_account_id\":{\"type\":\"uuid\"},\"deleted_at\":{\"type\":\"timestamptz\"},\"deleted_by_account_id\":{\"type\":\"uuid\"},\"description\":{\"type\":\"text\"},\"id\":{\"not_null\":true,\"pk_index\":0,\"type\":\"uuid\"},\"priority\":{\"not_null\":true,\"type\":\"todo_priority\"},\"snapshot_from_todo_at\":{\"type\":\"timestamptz\"},\"snapshot_from_todo_id\":{\"type\":\"uuid\"},\"status\":{\"not_null\":true,\"type\":\"todo_status\"},\"tenant_id\":{\"not_null\":true,\"type\":\"uuid\"},\"title\":{\"not_null\":true,\"type\":\"text\"},\"updated_at\":{\"type\":\"timestamptz\"},\"updated_by_account_id\":{\"type\":\"uuid\"},\"version_type\":{\"not_null\":true,\"type\":\"todo_version_type\"}}"
+const LessonShapeSchema = "{\"capacity\":{\"type\":\"int4\"},\"created_at\":{\"not_null\":true,\"type\":\"timestamptz\"},\"created_by_account_id\":{\"type\":\"uuid\"},\"deleted_at\":{\"type\":\"timestamptz\"},\"deleted_by_account_id\":{\"type\":\"uuid\"},\"id\":{\"not_null\":true,\"pk_index\":0,\"type\":\"uuid\"},\"manager_email\":{\"not_null\":true,\"type\":\"text\"},\"notes\":{\"type\":\"text\"},\"price\":{\"precision\":10,\"scale\":2,\"type\":\"numeric\"},\"search_vector\":{\"type\":\"text\"},\"snapshot_from_lesson_at\":{\"type\":\"timestamptz\"},\"snapshot_from_lesson_id\":{\"type\":\"uuid\"},\"starts_at\":{\"not_null\":true,\"type\":\"timestamptz\"},\"status\":{\"not_null\":true,\"type\":\"lesson_status\"},\"tags\":{\"dims\":1,\"type\":\"text\"},\"tenant_id\":{\"not_null\":true,\"type\":\"uuid\"},\"title\":{\"not_null\":true,\"type\":\"text\"},\"updated_at\":{\"type\":\"timestamptz\"},\"updated_by_account_id\":{\"type\":\"uuid\"},\"version_type\":{\"not_null\":true,\"type\":\"lesson_version_type\"}}"

@@ -11,9 +11,15 @@
 // forwarded untouched, because that genuinely is the client's business. A
 // parameter that is neither is dropped rather than passed along, since a
 // request that could set `table` could read any table there is.
+//
+// The rest of the package is what happens when the sync service is not there: a
+// [Shape.Fallback] answers from the application's own read in the protocol's own
+// format, and a circuit stops asking a service that has stopped answering so
+// that the requests behind an outage are not each paying to discover it.
 package electric
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -47,6 +53,19 @@ type Shape struct {
 	// subscriber, forever, and a password hash in a live-sync stream is a
 	// password hash on somebody's laptop.
 	Columns []string
+
+	// Fallback answers this shape when the sync service cannot be reached.
+	//
+	// Nil is the older behaviour and still the default: a sync outage is a 502
+	// and a subscriber with no rows. Setting it trades live sync for rows —
+	// what comes back is a snapshot, correct at the moment it was read and not
+	// updated after it, until the sync service is reachable again.
+	//
+	// Whatever narrows Where has to narrow this too. Where is a filter this
+	// package sends and can therefore promise; a Fallback is a read it cannot
+	// see inside, so a shape scoped to less than its table with a fallback that
+	// is not is a subscriber shown rows the subscription would have withheld.
+	Fallback Fallback
 }
 
 // Config builds a proxy.
@@ -69,7 +88,117 @@ type Config struct {
 
 	// Headers are added to every upstream request, for the same reason.
 	Headers http.Header
+
+	// InitialTimeout bounds the wait on the one request that is not a long poll:
+	// a subscriber reading a shape from the beginning.
+	//
+	// It exists so that a sync service which is running and not answering is
+	// treated as unreachable rather than waited on, which is the outage a
+	// [Shape.Fallback] is most useful for and the one a transport error does not
+	// catch. A live poll is deliberately left unbounded — see Client.
+	//
+	// The wait only: once the answer has started arriving it is copied out
+	// whole, however long that takes. A large shape read over a slow connection
+	// is a transfer rather than an outage, and half of one is worse than either.
+	//
+	// Zero is [DefaultInitialTimeout]. A negative value is no timeout, which is
+	// what a project whose sync service legitimately takes a while to begin
+	// answering should set.
+	InitialTimeout time.Duration
+
+	// MaxSnapshotRows bounds a fallback snapshot, and refuses past the bound
+	// rather than sending part of one.
+	//
+	// A snapshot is built whole, in memory, per subscriber — and every subscriber
+	// falls back at once, because what they have in common is the sync service
+	// being gone. Truncating instead would be worse than refusing: a subscriber
+	// cannot tell a short answer from a complete one, so a collection quietly
+	// missing half its rows would look like a table that had lost them.
+	//
+	// Zero is [DefaultMaxSnapshotRows]. A negative value is no bound.
+	MaxSnapshotRows int
+
+	// BreakerThreshold is how many failures in a row stop this proxy asking.
+	//
+	// An outage is one process being unreachable, and every request that goes on
+	// asking it pays [InitialTimeout] to learn what the request before it already
+	// learned — a held goroutine, a held connection, and a subscriber watching a
+	// spinner for ten seconds before it is given the snapshot it could have had
+	// at once. Past this many consecutive failures the proxy stops asking and
+	// answers from here, until [BreakerCooldown] has passed and one request is
+	// let through to find out whether the service is back.
+	//
+	// The trade is a shape whose sync service is fine and whose network is
+	// briefly not: it is answered from a fallback, or refused, for as long as one
+	// cooldown — where before it would have waited and then usually succeeded. In
+	// a row rather than a rate, so a single failure among successes never counts.
+	//
+	// Zero is [DefaultBreakerThreshold]. A negative value never opens the
+	// circuit, which is every request asking however long the outage lasts.
+	BreakerThreshold int
+
+	// BreakerCooldown is how long the proxy goes on not asking before it lets one
+	// request through to test the sync service.
+	//
+	// One request, not all of them: the rest are answered from here while it
+	// finds out. Nothing polls in the background, so a service that comes back is
+	// noticed by the next subscriber through the door rather than a moment
+	// earlier by a goroutine of this package's own.
+	//
+	// Zero is [DefaultBreakerCooldown].
+	BreakerCooldown time.Duration
+
+	// OnError is told about a failure that was answered rather than returned:
+	// the sync service being unreachable, and a Fallback that refused.
+	//
+	// It exists because those are the two failures a shape endpoint hides. The
+	// proxy writes a status and a short line, and without this the cause reaches
+	// nobody — there is no logger in this package, for the reason there is none
+	// anywhere else in runtime.
+	//
+	// A request the circuit refused to make is not one of them: it attempted
+	// nothing, so it learned nothing worth a second line. What is worth a line is
+	// the circuit opening, and that is [OnSyncState].
+	OnError func(context.Context, error)
+
+	// OnSyncState is told when the answer to whether the sync service is there
+	// changes: false when the circuit opens, true when a request through it
+	// succeeds.
+	//
+	// Twice per outage rather than once per request, which is what makes it the
+	// thing to alert on. [Proxy.SyncReachable] is the same answer for a health
+	// endpoint or a banner, asked rather than pushed.
+	OnSyncState func(ctx context.Context, reachable bool)
 }
+
+// DefaultInitialTimeout is how long a shape read from the beginning waits for
+// the sync service when [Config.InitialTimeout] says nothing.
+const DefaultInitialTimeout = 10 * time.Second
+
+// DefaultMaxSnapshotRows is how large a fallback snapshot may be when
+// [Config.MaxSnapshotRows] says nothing.
+const DefaultMaxSnapshotRows = 20_000
+
+// DefaultBreakerThreshold is how many failures in a row stop a proxy asking
+// when [Config.BreakerThreshold] says nothing.
+//
+// Five, because a shape route is not the only thing that fails: one refused
+// connection is a restart or a redeploy, and answering the next subscriber from
+// a fallback because of it would be trading live sync for nothing.
+const DefaultBreakerThreshold = 5
+
+// DefaultBreakerCooldown is how long a proxy goes on not asking when
+// [Config.BreakerCooldown] says nothing.
+//
+// The same five seconds a subscriber holding a snapshot is asked to wait, so a
+// service that comes back is found on the poll that was coming anyway.
+const DefaultBreakerCooldown = retryAfterSeconds * time.Second
+
+// retryAfterSeconds is what a subscriber holding a fallback snapshot is asked to
+// wait before polling again. Short, because what it is waiting for is a service
+// coming back rather than a quota refilling, and the cost of asking early is one
+// refused connection.
+const retryAfterSeconds = 5
 
 // Proxy forwards shape requests.
 type Proxy struct {
@@ -77,6 +206,13 @@ type Proxy struct {
 	client  *http.Client
 	extra   url.Values
 	headers http.Header
+	initial time.Duration
+	maxRows int
+	onError func(context.Context, error)
+	onState func(context.Context, bool)
+	// One breaker for the proxy, because what it watches for is the one sync
+	// service being unreachable rather than anything about a shape.
+	breaker *breaker
 }
 
 // New builds a proxy.
@@ -102,8 +238,46 @@ func New(cfg Config) (*Proxy, error) {
 			},
 		}
 	}
-	return &Proxy{base: base, client: client, extra: cfg.Extra, headers: cfg.Headers}, nil
+	initial := cfg.InitialTimeout
+	if initial == 0 {
+		initial = DefaultInitialTimeout
+	}
+	maxRows := cfg.MaxSnapshotRows
+	if maxRows == 0 {
+		maxRows = DefaultMaxSnapshotRows
+	}
+	threshold := cfg.BreakerThreshold
+	if threshold == 0 {
+		threshold = DefaultBreakerThreshold
+	}
+	cooldown := cfg.BreakerCooldown
+	if cooldown <= 0 {
+		cooldown = DefaultBreakerCooldown
+	}
+
+	return &Proxy{
+		base:    base,
+		client:  client,
+		extra:   cfg.Extra,
+		headers: cfg.Headers,
+		initial: initial,
+		maxRows: maxRows,
+		onError: cfg.OnError,
+		onState: cfg.OnSyncState,
+		breaker: &breaker{threshold: threshold, cooldown: cooldown},
+	}, nil
 }
+
+// SyncReachable reports whether the sync service is answering.
+//
+// It is the circuit's state and not a probe: false once enough requests in a row
+// have failed that this proxy stopped asking, true again as soon as one has
+// succeeded. So it costs nothing to ask, and a health endpoint or a banner can
+// ask it per request.
+//
+// True is also what it says when the circuit has been turned off with a negative
+// [Config.BreakerThreshold], because then nothing is counting.
+func (p *Proxy) SyncReachable() bool { return p.breaker.reachable() }
 
 // hopHeaders are per-connection and must not be forwarded in either direction.
 var hopHeaders = []string{
@@ -115,21 +289,88 @@ var hopHeaders = []string{
 //
 // It writes the response, including on failure. A caller that wants its own
 // error rendering should check the shape before calling.
+//
+// When the sync service cannot be reached and the shape has a [Fallback], a
+// subscriber reading from the beginning is answered from there instead. Nothing
+// about the request says which of the two it got, and nothing has to: the answer
+// is in the same format either way.
 func (p *Proxy) Serve(w http.ResponseWriter, r *http.Request, s Shape) {
-	upstream, err := p.request(r, s)
+	// Before anything is built: while the circuit is open there is nothing to
+	// learn from asking, and the point of not asking is that this request does
+	// not wait for the answer the last one already got.
+	if !p.breaker.allow() {
+		p.answer(w, r, s)
+		return
+	}
+
+	// The request's context, so a client that hangs up cancels the poll it left
+	// running upstream — bounded first for a read from the beginning, which is
+	// the one request that is not supposed to hang.
+	//
+	// A timer rather than a deadline on the context, because what is being
+	// bounded is the wait for an answer and not the sending of one. A deadline
+	// would still be running while the body copied, and a body cut in half goes
+	// out under a 200 already written: a subscriber cannot tell it from a whole
+	// one, and no fallback can rescue it because the status has been sent.
+	ctx := r.Context()
+	answered := func() bool { return true }
+	if p.initial > 0 && initial(r) {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithCancel(ctx)
+		defer cancel()
+		answered = time.AfterFunc(p.initial, cancel).Stop
+	}
+
+	upstream, err := p.request(ctx, r, s)
 	if err != nil {
 		http.Error(w, "cannot reach the sync service", http.StatusBadGateway)
 		return
 	}
 
 	res, err := p.client.Do(upstream)
+	// The wait is over, however it ended: what is left is a transfer. Stopping
+	// the timer here is what leaves the body unbounded, and failing to stop it
+	// is the deadline having fired — either that is why this call failed, or it
+	// landed on an answer now reading from a cancelled context. Both are the
+	// outage the deadline is there to catch.
+	if !answered() {
+		if res != nil {
+			res.Body.Close()
+		}
+		p.note(r, false)
+		p.unavailable(w, r, s, fmt.Errorf("electric: the sync service did not answer within %s", p.initial))
+		return
+	}
 	if err != nil {
-		// A cancelled request is the client hanging up mid-poll, which is the
-		// ordinary end of a subscription rather than a failure to report.
+		// Whatever failed here, the deadline did not: that is the branch above.
+		// So a cancelled request is the client hanging up mid-poll, which is the
+		// ordinary end of a subscription rather than a failure to report — and
+		// not a failure of the sync service either, so the circuit is not told
+		// about it. A page being closed is not an outage.
 		if r.Context().Err() != nil {
 			return
 		}
-		http.Error(w, "the sync service is unavailable", http.StatusBadGateway)
+		p.note(r, false)
+		p.unavailable(w, r, s, err)
+		return
+	}
+
+	// A sync service answering with its own failure is as unreachable as one
+	// that does not answer, and the circuit counts it either way: whether this
+	// shape has something to answer with instead is a fact about the shape, and
+	// what the circuit tracks is the service.
+	p.note(r, res.StatusCode < 500)
+
+	// But only where there is something to answer with instead is it answered
+	// from here. Otherwise it is forwarded untouched, because the status and the
+	// Retry-After the sync service chose say more than a 502 substituted for
+	// them, and a shape with no fallback has nothing to gain from the swap.
+	//
+	// A 4xx is never either: that is a decision about this shape, and answering
+	// it from somewhere else would hide a filter being refused.
+	if res.StatusCode >= 500 && s.Fallback != nil && initial(r) {
+		res.Body.Close()
+		p.unavailable(w, r, s, fmt.Errorf("electric: the sync service answered %d", res.StatusCode))
 		return
 	}
 	defer res.Body.Close()
@@ -159,8 +400,98 @@ func (p *Proxy) Serve(w http.ResponseWriter, r *http.Request, s Shape) {
 	_ = http.NewResponseController(w).Flush()
 }
 
+// initial reports whether this request is a subscriber reading the shape from
+// the beginning, rather than resuming one it already has.
+//
+// It is the only request a snapshot can answer. A resumed one asks for what
+// changed since an offset, and a snapshot in reply to that is not a smaller
+// answer than the client wanted — it is a different question answered, with no
+// way for the client to tell.
+//
+// An absent offset counts, because the protocol's own default is the beginning.
+func initial(r *http.Request) bool {
+	q := r.URL.Query()
+	if q.Get("live") != "" && q.Get("live") != "false" {
+		return false
+	}
+	switch off := q.Get("offset"); off {
+	case "", "-1":
+		return true
+	default:
+		return false
+	}
+}
+
+// note tells the circuit how an attempt on the sync service went, and says so
+// through [Config.OnSyncState] on the one attempt that changes the answer.
+//
+// Only an attempt: a request the circuit refused to make learned nothing, and a
+// client that hung up says nothing about the service either.
+func (p *Proxy) note(r *http.Request, reachable bool) {
+	if p.breaker.record(reachable) && p.onState != nil {
+		p.onState(r.Context(), reachable)
+	}
+}
+
+// unavailable answers a request the sync service could not, and reports why.
+func (p *Proxy) unavailable(w http.ResponseWriter, r *http.Request, s Shape, cause error) {
+	if p.onError != nil {
+		p.onError(r.Context(), cause)
+	}
+	p.answer(w, r, s)
+}
+
+// answer is what goes back when the sync service is not the one answering.
+//
+// Separate from [Proxy.unavailable] because of the request that was never made:
+// with the circuit open there is no attempt and no error, and a line per skipped
+// request would bury the one that said the circuit had opened. What goes back is
+// the same either way — a subscriber cannot tell the two apart and has no reason
+// to.
+func (p *Proxy) answer(w http.ResponseWriter, r *http.Request, s Shape) {
+	if s.Fallback != nil && initial(r) {
+		snap, err := s.Fallback(r.Context())
+		if err != nil {
+			if r.Context().Err() != nil {
+				return
+			}
+			p.refuse(r, w, fmt.Errorf("electric: the fallback for %s refused: %w", s.Table, err))
+			return
+		}
+		if p.maxRows > 0 && len(snap.Rows) > p.maxRows {
+			p.refuse(r, w, fmt.Errorf("electric: the fallback for %s answered with %d rows, past the %d it may send",
+				s.Table, len(snap.Rows), p.maxRows))
+			return
+		}
+		writeSnapshot(w, s, snap)
+		return
+	}
+
+	// A subscriber resuming from a handle this proxy invented already holds the
+	// rows a snapshot would send it, so what it needs is not another one: it is
+	// to be told to keep them and come back. 503 with a Retry-After says that,
+	// where a 502 reads as a failure of the request rather than of the service.
+	if isFallbackHandle(r.URL.Query().Get("handle")) {
+		w.Header().Set("Retry-After", strconv.Itoa(retryAfterSeconds))
+		http.Error(w, "the sync service is unavailable", http.StatusServiceUnavailable)
+		return
+	}
+
+	http.Error(w, "the sync service is unavailable", http.StatusBadGateway)
+}
+
+// refuse answers a fallback that could not be sent, and says why to whoever is
+// listening. The subscriber is told the sync service is unavailable, which is
+// true and is all it can act on.
+func (p *Proxy) refuse(r *http.Request, w http.ResponseWriter, cause error) {
+	if p.onError != nil {
+		p.onError(r.Context(), cause)
+	}
+	http.Error(w, "the sync service is unavailable", http.StatusBadGateway)
+}
+
 // request builds the upstream call.
-func (p *Proxy) request(r *http.Request, s Shape) (*http.Request, error) {
+func (p *Proxy) request(ctx context.Context, r *http.Request, s Shape) (*http.Request, error) {
 	if s.Table == "" {
 		return nil, errors.New("electric: the shape names no table")
 	}
@@ -197,9 +528,7 @@ func (p *Proxy) request(r *http.Request, s Shape) (*http.Request, error) {
 	}
 	target.RawQuery = q.Encode()
 
-	// The request context, so a client that hangs up cancels the poll it left
-	// running upstream.
-	upstream, err := http.NewRequestWithContext(r.Context(), http.MethodGet, target.String(), nil)
+	upstream, err := http.NewRequestWithContext(ctx, http.MethodGet, target.String(), nil)
 	if err != nil {
 		return nil, err
 	}
