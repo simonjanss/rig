@@ -295,6 +295,66 @@ still runs, so nothing is lost; what you lose is the latency the in-process
 dispatcher exists for, silently. The deadline is what turns that into an ordinary
 failed delivery, retried with backoff like any other.
 
+### When a send fails
+
+Returning an error retries. The schedule doubles from `backoff_base` up to
+`backoff_cap`, and stops after `max_attempts`: **one minute, two, four, eight,
+sixteen, thirty-two, then hourly, giving up after about eight hours.** That
+window is the point of the numbers — a provider is down for a morning, not for a
+minute, and a schedule measured in minutes fails everything you were holding for
+it and calls the result `Failed`.
+
+Each wait is spread upward by up to half itself, and that is not decoration. One
+provider refusing one pass of a hundred rows, on every replica at once, means a
+hundred simultaneous retries a minute later — which is the load that turns a bad
+minute into a bad afternoon. The spread only ever lengthens a wait, so
+`backoff_base` stays a floor and the eight hours stays arithmetic rather than an
+average.
+
+Two things are worth saying instead of a bare error, and both are optional — a
+sender that returns plain errors keeps working exactly as before.
+
+```go
+func (s emailSender) Send(ctx context.Context, m notify.Message) error {
+	res, err := s.provider.Send(ctx, render(m))
+	switch {
+	case err != nil:
+		return err                              // network trouble: the ordinary schedule
+	case res.Status == 429:
+		// The provider named the time. Honoured as a floor, never earlier.
+		return notify.RetryAfter(errors.New(res.Body), res.RetryAfter)
+	case res.Status >= 400 && res.Status < 500:
+		// The recipient is wrong, not the request. Eight hours of asking will
+		// not make the address exist.
+		return notify.Permanent(fmt.Errorf("%d: %s", res.Status, res.Body))
+	case res.Status >= 500:
+		return fmt.Errorf("%d: %s", res.Status, res.Body)
+	}
+	return nil
+}
+```
+
+`notify.Permanent` fails the delivery on that attempt with its budget unspent,
+and it is what makes an eight-hour schedule affordable: without a way to say "this
+address does not exist", every dead mailbox would occupy a row for a working day.
+Use it only when the provider's answer is about the *recipient* — a 500, a
+timeout and a 429 are all about the provider, and wrapping one of those turns a
+bad ten minutes into permanently undelivered mail.
+
+`notify.RetryAfter` replaces that attempt's wait and leaves the doubling where it
+was, so a provider asking for ten minutes once does not reset the schedule. It
+does not extend the attempt budget: `max_attempts` is a stop, not a negotiation.
+
+A pass reports both apart from the ordinary retry — `rejected` counts what a
+provider refused outright and `deferred` counts what it asked to be given time —
+because "slow down" and "we are down" are different problems and only one of them
+is fixed by waiting.
+
+Past `max_attempts` the delivery is `Failed` and stops being claimed, with the
+provider's last words in `failed_reason`. Nothing reads that column for you.
+Watching the `failed` count on your dispatcher's log line is the intended way to
+notice, and it is why that line prints every count including the zeros.
+
 ### Settings
 
 Per account, per channel, and optionally per kind. Resolution is three steps:

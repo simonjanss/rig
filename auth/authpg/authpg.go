@@ -23,6 +23,9 @@ type Stores struct {
 	Sessions *SessionStore
 	APIKeys  *APIKeyStore
 	Log      *Log
+	// Outbox is the mail queue. Handing it to account.Config is what turns
+	// queueing on; leaving it out keeps the inline path.
+	Outbox *OutboxStore
 }
 
 // New builds every store over one connection.
@@ -40,6 +43,7 @@ func New(db dbx.Beginner) *Stores {
 		Sessions: &SessionStore{db: conn, tx: db},
 		APIKeys:  &APIKeyStore{db: conn, tx: db},
 		Log:      &Log{db: conn},
+		Outbox:   &OutboxStore{db: conn},
 	}
 }
 

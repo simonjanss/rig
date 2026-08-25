@@ -5,7 +5,7 @@ info:
         The todo HTTP API.
 
         The notification inbox endpoints are served by a hand-written module and are not described here.
-    version: "2026-08-21"
+    version: "2026-08-25"
 servers:
     - url: /
       description: This server. Set openapi.servers to name the deployment instead.

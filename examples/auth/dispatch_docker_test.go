@@ -3,8 +3,10 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -213,6 +215,204 @@ func TestMaxAttemptsStopsAPermanentFailure(t *testing.T) {
 	}
 }
 
+// A provider that refuses the recipient is believed, on the first attempt.
+//
+// The counterpart to TestMaxAttemptsStopsAPermanentFailure above, and the
+// difference between them is the whole point of notify.Permanent: that one takes
+// four passes to give up on an address that does not exist, this one takes a
+// single call. What made raising max_attempts from five to fourteen affordable is
+// exactly this — an eight-hour schedule is only reasonable if a provider that
+// knows the answer can skip it.
+func TestAPermanentRefusalIsBelievedImmediately(t *testing.T) {
+	w := newDeliveryWorld(t)
+	w.owe(t)
+	w.keepOne(t)
+
+	var calls int
+	refuse := w.engineWith(t, 14, notify.SenderFunc(func(context.Context, notify.Message) error {
+		calls++
+		return notify.Permanent(errors.New("no mailbox by that name"))
+	}))
+
+	report, err := refuse.Dispatch(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if calls != 1 {
+		t.Errorf("the sender was called %d times, want 1", calls)
+	}
+	if report.Rejected == 0 {
+		t.Error("a permanent refusal was not counted as rejected")
+	}
+	if report.Retrying != 0 {
+		t.Errorf("%d rows were scheduled for a retry the provider ruled out", report.Retrying)
+	}
+	if got := w.countState(t, "Failed"); got == 0 {
+		t.Error("a permanent refusal did not reach Failed")
+	}
+	if got := w.countState(t, "Pending"); got != 0 {
+		t.Errorf("%d rows are still Pending after a permanent refusal, want 0", got)
+	}
+	// One attempt, not fourteen. The budget is the thing being saved.
+	if got := w.attemptsOf(t, "Failed"); got != 1 {
+		t.Errorf("a permanent refusal spent %d attempts, want 1", got)
+	}
+}
+
+// A bare error still means the ordinary schedule, which is what makes classifying
+// optional rather than a migration every Sender has to do.
+func TestABareErrorStillRetries(t *testing.T) {
+	w := newDeliveryWorld(t)
+	w.owe(t)
+	w.keepOne(t)
+
+	ordinary := w.engineWith(t, 14, notify.SenderFunc(func(context.Context, notify.Message) error {
+		return errors.New("503 from the provider")
+	}))
+
+	report, err := ordinary.Dispatch(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Retrying == 0 {
+		t.Error("a bare error was not scheduled for a retry")
+	}
+	if report.Rejected != 0 {
+		t.Errorf("%d rows were rejected on a bare error", report.Rejected)
+	}
+	if got := w.countState(t, "Pending"); got == 0 {
+		t.Error("nothing is Pending after a retryable failure")
+	}
+}
+
+// A provider that names the time to come back is honoured, and honoured as a
+// floor: the row is never claimable before it asked, and never much later.
+func TestARetryAfterMovesTheRowOut(t *testing.T) {
+	w := newDeliveryWorld(t)
+	w.owe(t)
+	w.keepOne(t)
+
+	const asked = 10 * time.Minute
+	busy := w.engineWith(t, 14, notify.SenderFunc(func(context.Context, notify.Message) error {
+		return notify.RetryAfter(errors.New("429 slow down"), asked)
+	}))
+
+	before := time.Now().UTC()
+	report, err := busy.Dispatch(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Counted apart from Retrying, because "the provider says slow down" and
+	// "the provider is down" are different problems and only one of them is
+	// fixed by waiting.
+	if report.Deferred == 0 {
+		t.Error("a Retry-After was not counted as deferred")
+	}
+	if report.Retrying != 0 {
+		t.Errorf("%d rows were counted as retrying rather than deferred", report.Retrying)
+	}
+
+	got := w.earliestDeliverAt(t)
+	if min := before.Add(asked); got.Before(min) {
+		t.Errorf("deliver_at is %s, which is before the %s the provider asked for",
+			got, asked)
+	}
+	// Spread upward by at most half, so a boundary stays a boundary rather than
+	// becoming a guess.
+	if max := before.Add(asked + asked/2 + time.Minute); got.After(max) {
+		t.Errorf("deliver_at is %s, well past the %s asked for", got, asked)
+	}
+	if w.countDue(t) != 0 {
+		t.Error("a deferred row is still due, so the next pass would ignore the request")
+	}
+}
+
+// The test the whole spread exists for, and the one a unit test cannot make
+// honestly: one provider refusing one pass of many rows must not put them all
+// back at the same instant.
+//
+// Without it, every replica retries every row on the same schedule, so a provider
+// having a bad minute meets the entire backlog again a minute later — which is
+// the load that turns a bad minute into a bad afternoon.
+//
+// The engine's clock is frozen, and that is what makes the assertion mean
+// anything. mark runs once per message, so with a real clock every row picks up
+// its own microsecond of wall time and the timestamps differ whether or not
+// anything spread them — a version of this test that read a real clock passed
+// with the jitter removed. Frozen, an unspread schedule puts every row on one
+// instant exactly, and only a spread can separate them.
+func TestAFailedPassDoesNotRetryInLockstep(t *testing.T) {
+	w := newDeliveryWorld(t)
+	// Enough rows that one shared timestamp would be unmistakable, and few
+	// enough to stay inside a single claim batch.
+	for i := range 24 {
+		w.reader(t, fmt.Sprintf("crowd-%d", i))
+	}
+	w.owe(t)
+
+	// A base big enough that half of it is measurable. engineOf's millisecond is
+	// there so retry tests do not wait; here the wait is never served, only read
+	// off the row.
+	const base = 10 * time.Minute
+	// Ahead of the rows' own deliver_at, so a frozen clock still claims them.
+	frozen := time.Now().Add(time.Minute).UTC()
+
+	refuse := w.engineAt(t, frozen, base,
+		notify.SenderFunc(func(context.Context, notify.Message) error {
+			return errors.New("the provider is having a moment")
+		}))
+
+	report, err := refuse.Dispatch(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Retrying < 20 {
+		t.Fatalf("only %d rows were retried, so this proves nothing", report.Retrying)
+	}
+
+	// Only the rows this pass touched. The seeded tenant is shared and its
+	// accounts accumulate across runs, so a query over every row would pick up
+	// deliveries no dispatcher claimed and digests waiting out their windows —
+	// which is how the first version of this test came to pass without a spread.
+	times := w.retriedDeliverAts(t)
+	if len(times) < 20 {
+		t.Fatalf("only %d retried rows were readable, so this proves nothing", len(times))
+	}
+
+	distinct := map[time.Time]bool{}
+	first, last := times[0], times[0]
+	for _, at := range times {
+		distinct[at] = true
+		if at.Before(first) {
+			first = at
+		}
+		if at.After(last) {
+			last = at
+		}
+	}
+
+	// The failure this catches is one shared timestamp across the batch, which is
+	// exactly what a frozen clock and no spread produce.
+	if len(distinct) < len(times)/2 {
+		t.Errorf("%d rows landed on %d distinct times, so the batch retries in "+
+			"lockstep", len(times), len(distinct))
+	}
+	// And over a real share of the window rather than a rounding artefact. The
+	// spread is up to half the wait, so a fifth of it is a floor a correct
+	// implementation clears comfortably and an absent one cannot reach.
+	if spread := last.Sub(first); spread < base/5 {
+		t.Errorf("the batch is spread over %s of a %s base, which is not a spread",
+			spread, base)
+	}
+	// Never earlier than the schedule said, because the spread only ever adds.
+	if earliest := frozen.Add(base); first.Before(earliest) {
+		t.Errorf("a row came back at %s, before the %s the schedule allows",
+			first, earliest)
+	}
+}
+
 // A channel that never answers must not take the dispatcher with it.
 //
 // This is the failure the send timeout exists for, and it is not the same as a
@@ -240,7 +440,7 @@ func TestAHangingSenderDoesNotWedgeThePass(t *testing.T) {
 	})
 
 	engine := w.engineOf(t,
-		map[notify.Channel]notify.Sender{notify.ChannelEmail: hangs}, 10, 50*time.Millisecond, 0)
+		map[notify.Channel]notify.Sender{notify.ChannelEmail: hangs}, 10, 50*time.Millisecond, 0, 0)
 
 	// Bounded from the outside too. If the deadline does not work, the pass
 	// never returns, and a test that simply called Dispatch would hang the
@@ -314,7 +514,7 @@ func TestAPassHandsBackWhatItCannotSendInsideTheLease(t *testing.T) {
 	})
 
 	engine := w.engineOf(t, map[notify.Channel]notify.Sender{notify.ChannelEmail: slow},
-		5, 56*time.Second, time.Minute)
+		5, 56*time.Second, time.Minute, 0)
 
 	report, err := engine.Dispatch(context.Background())
 	if err != nil {
@@ -366,7 +566,7 @@ func TestAChannelWhoseSenderWentAwayFailsRatherThanPanicking(t *testing.T) {
 		notify.ChannelMobile: notify.SenderFunc(func(context.Context, notify.Message) error {
 			return nil
 		}),
-	}, 1, 0, 0)
+	}, 1, 0, 0, 0)
 
 	if _, err := gone.Dispatch(context.Background()); err != nil {
 		t.Fatal(err)
@@ -537,15 +737,38 @@ func (w *deliveryWorld) engineWith(t *testing.T, maxAttempts int, sender notify.
 	if sender != nil {
 		senders[notify.ChannelEmail] = sender
 	}
-	return w.engineOf(t, senders, maxAttempts, 0, 0)
+	return w.engineOf(t, senders, maxAttempts, 0, 0, 0)
 }
 
-// engineOf is the same builder with the three things a timeout test has an
-// opinion about: which channels have senders at all, how long one call may take,
-// and how long the lease that call has to fit inside is.
+// engineAt is for the one test that reads a wait off a row rather than serving
+// it. It needs two things no other test here does: a base big enough that a
+// share of it is measurable, and a clock that does not move, so that rows which
+// were not spread apart are identical rather than merely close.
+func (w *deliveryWorld) engineAt(
+	t *testing.T, now time.Time, base time.Duration, sender notify.Sender,
+) *notify.Engine {
+	t.Helper()
+	return w.engineFrom(t, map[notify.Channel]notify.Sender{notify.ChannelEmail: sender},
+		14, 0, 0, base, func() time.Time { return now })
+}
+
+// engineOf is the same builder with the four things a timeout or retry test has
+// an opinion about: which channels have senders at all, how long one call may
+// take, how long the lease that call has to fit inside is, and how long the first
+// retry waits. The clock is the real one, which is what all but one test wants.
 func (w *deliveryWorld) engineOf(
 	t *testing.T, senders map[notify.Channel]notify.Sender,
-	maxAttempts int, sendTimeout, claimTTL time.Duration,
+	maxAttempts int, sendTimeout, claimTTL, backoffBase time.Duration,
+) *notify.Engine {
+	t.Helper()
+	return w.engineFrom(t, senders, maxAttempts, sendTimeout, claimTTL, backoffBase, nil)
+}
+
+// engineFrom is engineOf with the clock as well. Nil means time.Now.
+func (w *deliveryWorld) engineFrom(
+	t *testing.T, senders map[notify.Channel]notify.Sender,
+	maxAttempts int, sendTimeout, claimTTL, backoffBase time.Duration,
+	now func() time.Time,
 ) *notify.Engine {
 	t.Helper()
 
@@ -557,17 +780,17 @@ func (w *deliveryWorld) engineOf(
 	reg.Register(api.NewNoteSubject(notes))
 
 	return notify.NewEngine(notify.EngineConfig{
-		Config: notify.Config{DB: w.pool, Registry: reg},
+		Config: notify.Config{DB: w.pool, Registry: reg, Now: now},
 		Links:  api.NotificationLinks(),
 
 		Senders:     senders,
 		MaxAttempts: maxAttempts,
 		SendTimeout: sendTimeout,
 		ClaimTTL:    claimTTL,
-		// A millisecond rather than a minute, so a retry test does not wait one
-		// out. The arithmetic is the same; the number is the only thing a test
-		// has an opinion about.
-		BackoffBase: time.Millisecond,
+		// A millisecond rather than a minute by default, so a retry test does not
+		// wait one out. The arithmetic is the same; the number is the only thing
+		// a test has an opinion about.
+		BackoffBase: cmp.Or(backoffBase, time.Millisecond),
 	})
 }
 
@@ -606,6 +829,82 @@ func (w *deliveryWorld) attemptsOf(t *testing.T, state string) int {
 		t.Fatal(err)
 	}
 	return n
+}
+
+// deliverAts is every pending row's next attempt, which is what a test about the
+// spread has to read: the assertion is about the shape of the set, not about any
+// one row.
+func (w *deliveryWorld) deliverAts(t *testing.T) []time.Time {
+	t.Helper()
+	rows, err := w.pool.Query(context.Background(),
+		`SELECT deliver_at FROM rig_notification_delivery
+		 WHERE tenant_id = $1 AND state = 'Pending'`, w.tenant)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+
+	var out []time.Time
+	for rows.Next() {
+		var at time.Time
+		if err := rows.Scan(&at); err != nil {
+			t.Fatal(err)
+		}
+		out = append(out, at.UTC())
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+
+// retriedDeliverAts is the next attempt of every row a pass actually claimed and
+// failed, which is the only set a spread can be read off.
+//
+// attempts > 0 is what distinguishes them. The seeded tenant is shared and its
+// accounts accumulate across runs, so the table also holds rows no dispatcher
+// reached and digests waiting out a window — and including those is how a spread
+// assertion comes to pass without a spread.
+func (w *deliveryWorld) retriedDeliverAts(t *testing.T) []time.Time {
+	t.Helper()
+	rows, err := w.pool.Query(context.Background(),
+		`SELECT deliver_at FROM rig_notification_delivery
+		 WHERE tenant_id = $1 AND state = 'Pending' AND attempts > 0`, w.tenant)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+
+	var out []time.Time
+	for rows.Next() {
+		var at time.Time
+		if err := rows.Scan(&at); err != nil {
+			t.Fatal(err)
+		}
+		out = append(out, at.UTC())
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+
+// earliestDeliverAt is the soonest any row could be claimed again, which is the
+// only one a floor can be checked against: a Retry-After is honoured if nothing
+// comes back before it.
+func (w *deliveryWorld) earliestDeliverAt(t *testing.T) time.Time {
+	t.Helper()
+	times := w.deliverAts(t)
+	if len(times) == 0 {
+		t.Fatal("no pending rows, so there is no deliver_at to read")
+	}
+	earliest := times[0]
+	for _, at := range times {
+		if at.Before(earliest) {
+			earliest = at
+		}
+	}
+	return earliest
 }
 
 // stampClaim moves every claim to a chosen moment, which is how a test ages a

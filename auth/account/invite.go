@@ -66,6 +66,12 @@ func (s *Service) AcceptInvitation(ctx context.Context, in AcceptInput) (session
 // established by a password. Requiring the emailed link from a caller already
 // signed in as the person invited would add nothing — which is why a listing can
 // safely hand out identifiers and never tokens.
+//
+// With [Config.Outbox] set this accepts an invitation whose mail has not gone out
+// yet, because a queued link has no token and this door does not need one. That
+// is the right answer: the person is signed in as themselves and is looking at
+// the invitation in their own listing, and refusing until a cron job had run
+// would be refusing on a detail they cannot see.
 func (s *Service) AcceptAsMe(ctx context.Context, identityID uuid.UUID, in AcceptInput) (session.Pair, error) {
 	if identityID == uuid.Nil || in.InvitationID == uuid.Nil {
 		return session.Pair{}, rigerr.BadRequest("an identity and an invitation are required")

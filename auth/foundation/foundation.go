@@ -59,6 +59,12 @@ func Set() dbschema.Set {
 				"rig_account_token", "rig_auth_log", "rig_identity_session",
 			}},
 			{Number: 4, Name: "oauth", Tables: []string{"rig_identity_oauth"}},
+			// Only the new table. rig_identity_verification is already claimed by
+			// migration 1, and Set().Tables() must not list it twice — this
+			// migration alters it rather than creating it.
+			{Number: 5, Name: "verification_delivery", Tables: []string{
+				"rig_identity_verification_delivery",
+			}},
 		},
 	}
 }

@@ -6,6 +6,8 @@ package api
 
 import (
 	"context"
+	"fmt"
+	"io"
 	"rigtest/model"
 	"time"
 
@@ -58,8 +60,9 @@ func NewNotificationEngine(db notify.DB, reg *notify.Registry, senders map[notif
 		Senders:       senders,
 		ClaimTTL:      300 * time.Second,
 		SendTimeout:   30 * time.Second,
-		MaxAttempts:   5,
+		MaxAttempts:   14,
 		BackoffBase:   60 * time.Second,
+		BackoffCap:    3600 * time.Second,
 		DefaultDigest: notify.Digest("Immediate"),
 	})
 }
@@ -83,18 +86,34 @@ func NotificationLinks() []notify.Subject {
 // A subcommand rather than a goroutine, so it is a cron job rather than
 // something racing itself in every replica. Register it in serve.Config.Tasks
 // and run `<binary> dispatch-notifications`.
-func NotificationDispatcher(engine *notify.Engine) serve.Task {
+//
+// The writer is where each pass's report goes, and os.Stdout is the answer for
+// a cron job — every count including the zeros, because a pass that sent
+// nothing is the ordinary case and the absence of a line cannot be told from
+// the job not running. A nil writer prints nothing and is for a test.
+func NotificationDispatcher(engine *notify.Engine, log io.Writer) serve.Task {
 	return func(ctx context.Context, _ *pgxpool.Pool) error {
-		if _, err := engine.Resolve(ctx); err != nil {
+		resolved, err := engine.Resolve(ctx)
+		if log != nil {
+			fmt.Fprintln(log, resolved)
+		}
+		if err != nil {
 			return err
 		}
-		if _, err := engine.Dispatch(ctx); err != nil {
+		dispatched, err := engine.Dispatch(ctx)
+		if log != nil {
+			fmt.Fprintln(log, dispatched)
+		}
+		if err != nil {
 			return err
 		}
 		// And the housekeeping, in the same task for the reason the file sweeper's two
 		// rules share one: a schema that grows forever is the state every other table
 		// in rig is already in, and this milestone added three more.
-		_, err := engine.Prune(ctx, 7776000*time.Second)
+		pruned, err := engine.Prune(ctx, 7776000*time.Second)
+		if log != nil {
+			fmt.Fprintf(log, "notify: pruned %d\n", pruned)
+		}
 		return err
 	}
 }
