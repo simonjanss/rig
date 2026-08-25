@@ -445,6 +445,16 @@ func New(cfg Config) (*Auth, error) {
 			Now:        cfg.Now,
 		}),
 
+		// The other half of what an API-key request costs. Without it, turning
+		// the cache on removes one of that request's two reads and leaves the
+		// failure count, which is then the only one left — see
+		// [apikey.FailureCache].
+		FailureCache: apikey.NewFailureCache(bus, apikey.FailureCacheConfig{
+			TTL:        cfg.Cache.cacheTTL(),
+			MaxEntries: cfg.Cache.MaxEntries,
+			Now:        cfg.Now,
+		}),
+
 		// A key id is the public half and turns up in logs and configuration,
 		// so without this the only thing between one and its secret is how fast
 		// somebody can ask.

@@ -259,8 +259,10 @@ func GrantLevel(
 //
 // It runs per request, not at sign-in, so a role taken away stops working on the
 // next call rather than whenever the session happens to refresh. That also puts
-// it on the hot path: a real deployment with an expensive answer should cache it
-// here, keyed on the account, with a short time to live.
+// it on the hot path, and this one is a five-way join. What a real deployment
+// reaches for is auth.NewGrantsCache — not a time to live, which would be a role
+// taken away that goes on working, but a map the writes below withdraw from on
+// the transaction that made them.
 func Grants(pool *pgxpool.Pool) func(context.Context, uuid.UUID, uuid.UUID) ([]string, []string, error) {
 	return func(ctx context.Context, tenantID, accountID uuid.UUID) (roles, permissions []string, err error) {
 		// The account's coarse level and its assigned roles in one read.

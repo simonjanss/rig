@@ -132,3 +132,139 @@ func (k *Key) clone() *Key {
 	out.CIDRAllowList = slices.Clone(k.CIDRAllowList)
 	return &out
 }
+
+// FailureTopic is the name invalidations for the failure count travel under.
+//
+// A second topic rather than a second use of [KeyTopic], though both are keyed
+// by the same public identifier. They are withdrawn by different writes — a
+// rotation changes the key, a wrong secret changes the count — and one topic
+// would mean every failed attempt against a key also threw away the verified row
+// for it, which is a grinder deciding how often the honest caller pays for a
+// lookup.
+const FailureTopic = "apikeyfail"
+
+// FailureCache holds the one answer about a key's failure count worth holding:
+// that there are none.
+//
+// Turning the cache on removes the row read from [Manager.Verify] and leaves
+// this one, which is then the whole cost of an API-key request:
+// [Manager.checkFailureLimit] runs before the lookup on purpose, so a caller
+// grinding secrets stops costing a query long before they stop asking. That
+// ordering is right and stays; what it should not do is charge the same query to
+// the integration that has never once got its key wrong.
+//
+// **Only a zero is remembered, and that is what makes this sound rather than
+// merely cheap.** Inside a window the count only rises, and every row it counts
+// is one rig writes — so a held "no failures" can be wrong only if a failure was
+// recorded, and a failure recorded is a notification published on the way past.
+// A count that is already above zero is never held: that caller is the one the
+// limit exists for, and their next attempt should be counted rather than
+// guessed at.
+//
+// Compare [throttle.Local], which is the same optimisation without the channel
+// and is deliberately not used for these limits. Its error is one-sided in the
+// permissive direction — a replica sees only its own tally — so it allows an
+// interval of traffic per replica past the limit. This has no such window,
+// because the writes that move the answer are the writes that withdraw it, and a
+// replica that has lost the channel stops answering from memory altogether.
+//
+// A nil *FailureCache is usable and caches nothing.
+type FailureCache struct {
+	m     *cache.Map[struct{}]
+	topic *cache.Topic
+}
+
+// FailureCacheConfig is what a [FailureCache] needs beyond its bus.
+type FailureCacheConfig struct {
+	// TTL is how long "no failures" may be reused with no invalidation
+	// arriving. Zero or less caches nothing.
+	TTL time.Duration
+
+	// MaxEntries bounds the map. Zero takes the package default.
+	MaxEntries int
+
+	// Now is the clock, for tests.
+	Now func() time.Time
+}
+
+// NewFailureCache registers a cache on a bus and returns it.
+func NewFailureCache(bus *cache.Bus, cfg FailureCacheConfig) *FailureCache {
+	if bus == nil {
+		return nil
+	}
+	m := cache.NewMap[struct{}](cache.MapConfig{
+		TTL:        cfg.TTL,
+		MaxEntries: cfg.MaxEntries,
+		// So that a process which lost the channel counts rows again rather
+		// than waving through a key somebody is grinding.
+		Live: bus.Live,
+		Now:  cfg.Now,
+	})
+	return &FailureCache{m: m, topic: bus.Serve(FailureTopic, m)}
+}
+
+// errHasFailures is how a non-zero count reaches [cache.Map.Load] without being
+// stored.
+//
+// The map keeps what its loader returns and never keeps a failure, which is the
+// seam this borrows: the answer is produced and handed back, and nothing
+// remembers it. [errNoKey] uses the same one for the same reason.
+var errHasFailures = errors.New("apikey: failures recorded")
+
+// clean reports whether this key has no recorded failures, counting rows only
+// when the answer is not already held.
+//
+// count reports how many the limiter found. It is not called at all on a hit,
+// which is the point of the type.
+func (c *FailureCache) clean(keyID string, count func() (int, error)) (bool, error) {
+	read := func() (struct{}, error) {
+		n, err := count()
+		switch {
+		case err != nil:
+			return struct{}{}, err
+		case n > 0:
+			return struct{}{}, errHasFailures
+		}
+		return struct{}{}, nil
+	}
+	if c == nil {
+		_, err := read()
+		switch {
+		case errors.Is(err, errHasFailures):
+			return false, nil
+		case err != nil:
+			return false, err
+		}
+		return true, nil
+	}
+
+	_, err := c.m.Load(keyID, read)
+	switch {
+	case errors.Is(err, errHasFailures):
+		return false, nil
+	case err != nil:
+		return false, err
+	}
+	return true, nil
+}
+
+// forget publishes an invalidation for a key whose count has just moved.
+//
+// Published *after* the row it describes has been written, never before: a
+// replica that re-read in between would find the same empty window and hold it
+// for a full lifetime, which is the one ordering that turns this from a cache
+// into a hole in the limit.
+func (c *FailureCache) forget(ctx context.Context, db dbx.Conn, keyID string) error {
+	if c == nil {
+		return nil
+	}
+	return c.topic.Forget(ctx, db, keyID)
+}
+
+// drop forgets in this process only, for a store that is not Postgres.
+func (c *FailureCache) drop(keyID string) {
+	if c == nil {
+		return
+	}
+	c.m.Forget(keyID)
+}

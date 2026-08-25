@@ -230,7 +230,9 @@ func (h *Handler) invite(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := json.Unmarshal(out, &made); err == nil && made.ID != uuid.Nil {
 		grants := append(api.PermissionKeys(), authz.AuthKeys()...)
-		if err := authz.GrantLevel(r.Context(), h.pool, s.TenantID, made.ID, made.Role, grants); err != nil {
+		if err := authz.GrantLevel(
+			r.Context(), h.pool, s.TenantID, made.ID, made.Role, grants, h.grantsCache,
+		); err != nil {
 			h.redirect(w, r, "invited, but the role could not be granted: "+err.Error())
 			return
 		}

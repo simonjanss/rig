@@ -400,8 +400,11 @@ func (h *Handler) claimsFor(ctx context.Context, tok *session.Token) (tenancy.Cl
 //
 // It runs when a request arrives rather than at sign-in, which is what makes
 // revoking access take effect on the next call instead of whenever the session
-// happens to refresh. That also means it is on the hot path: cache it if the
-// answer is expensive.
+// happens to refresh. That also puts it on the hot path, and usually makes it the
+// expensive read there — `auth.NewGrantsCache` wraps one of these in a cache a
+// revocation can reach, in exchange for publishing an invalidation wherever roles
+// change. A bare time-to-live over this is a permission somebody took away that
+// goes on working, so rig offers the channel rather than the timer.
 type Grants func(ctx context.Context, tenantID, accountID uuid.UUID) (roles, permissions []string, err error)
 
 // enrich fills in a caller's grants, if the application supplied a way to.
