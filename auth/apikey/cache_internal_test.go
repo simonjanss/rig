@@ -356,3 +356,40 @@ func TestASuccessStillClearsTheWindowWithTheCountCached(t *testing.T) {
 		}
 	}
 }
+
+// A key id nobody minted is the one failure an unauthenticated caller can
+// produce at will, so its withdrawal never leaves the process. What has to stay
+// true is that the limit still bites exactly when it would have with no cache:
+// the local drop is synchronous, so the count is fresh on every attempt.
+//
+// There is no cross-replica assertion to write here, and that is the argument
+// rather than a gap: a replica only ever holds a zero for an identifier
+// presented to it, stored by the limit check and dropped inside the same
+// request, so no other replica is holding an answer a publish could withdraw.
+func TestAnUnknownKeyIDIsLimitedWithoutPublishing(t *testing.T) {
+	t.Parallel()
+
+	c := &fakeClock{at: time.Date(2026, 3, 1, 12, 0, 0, 0, time.UTC)}
+	m, counter := limitedCachedManager(t, c, 3)
+
+	from := netip.MustParseAddr("198.51.100.7")
+	invented := Prefix + strings.Repeat("A", 16) + "_" + strings.Repeat("A", 52)
+
+	for i := range 3 {
+		if _, _, err := m.Verify(context.Background(), invented, from); !rigerr.Is(err, rigerr.CodeUnauthorized) {
+			t.Fatalf("attempt %d answered %v, want 401", i+1, err)
+		}
+	}
+	if _, _, err := m.Verify(context.Background(), invented, from); rigerr.CodeOf(err) != rigerr.CodeRateLimited {
+		t.Fatal("the fourth invented key id was not rate limited; a held zero outlived the failures")
+	}
+
+	// Counted on every attempt, because nothing was left held to answer from —
+	// which is also what keeps invented identifiers from filling the map.
+	if counter.calls != 4 {
+		t.Errorf("four attempts counted rows %d times, want 4", counter.calls)
+	}
+	if n := m.failures.m.Len(); n != 0 {
+		t.Errorf("the map holds %d entries for an identifier nobody minted, want 0", n)
+	}
+}

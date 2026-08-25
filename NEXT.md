@@ -198,13 +198,31 @@ Next:
   rejected for these limits because its error is one-sided in the permissive
   direction.
 
-  Two departures. The invalidation runs in **a transaction of its own** rather
+  Three departures. The invalidation runs in **a transaction of its own** rather
   than the caller's, because the log entry it withdraws is deliberately written
   outside whatever transaction noticed the failure — and it is published *after*
   that write, never before, which is the one ordering that would turn this from a
-  cache into a hole in the limit. And the **success path publishes nothing**: a
-  success moves the `ClearedBy` floor forward, so it can only lower a count, and a
-  held zero stays true.
+  cache into a hole in the limit. `dbx.InTx` *joins* a transaction already on the
+  context, which is right everywhere else and wrong here, so `dbx.WithoutTx` is
+  new: it hides the transaction so the nested `InTx` opens one. Nothing in rig
+  verifies a key inside a transaction today, and the guarantee should not depend
+  on that staying true.
+
+  The **success path publishes nothing**: a success moves the `ClearedBy` floor
+  forward, so it can only lower a count, and a held zero stays true.
+
+  And **a key id nobody minted withdraws locally and publishes nothing**, which is
+  the one place the shape of the read matters more than the shape of the write. A
+  key id is the half a caller supplies and the limit is checked *before* the
+  lookup, so an invented identifier gets an entry stored under it — the same thing
+  `errNoKey` keeps out of the `KeyCache`, arrived at from the other end. Publishing
+  those would let an unauthenticated caller drive a transaction and a channel-wide
+  notification once per request, with no per-key limit to bound it because every
+  invented identifier is a bucket of its own. Dropping locally loses nothing: a
+  replica only ever holds a zero for an identifier presented to *it*, stored by the
+  limit check and dropped inside the same request, so there is no other replica
+  holding an answer a publish could withdraw — and the drop being synchronous means
+  the limit bites a shade earlier than the published path, not later.
 
   **`auth.NewGrantsCache` is the other half, and it is deliberately not a config
   key.** M16 left `Grants` alone for the right reason and then told people to
@@ -236,6 +254,15 @@ Next:
   rows at all — asserted by moving the count behind rig's back with plain SQL, so
   a reader that still lets the key through is one that never queried — and a grant
   invalidation delivered on commit and discarded on rollback.
+
+  The key pair's limit is configured with **no `ClearedBy`**, unlike the real one,
+  and that is what makes them deterministic rather than a race. Waiting for an
+  invalidation to cross means asking the reader repeatedly, and the only way to
+  ask is to verify — so with a clearing event configured, the first ask answered
+  from the held zero succeeds, writes the clearing row, and moves the floor past
+  every failure the test just recorded. The poll would destroy the condition it
+  was waiting for, and no later attempt could see the refusal. What a success does
+  to the window is the internal test's subject; what is here is the channel.
 
 ### Modules
 

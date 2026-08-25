@@ -168,6 +168,12 @@ const FailureTopic = "apikeyfail"
 // because the writes that move the answer are the writes that withdraw it, and a
 // replica that has lost the channel stops answering from memory altogether.
 //
+// The key id is the half a caller supplies and the limit is checked before the
+// lookup, so an entry is stored under whatever was presented — including an
+// identifier nobody minted. Those are withdrawn in this process only and never
+// published; see [Manager.recordUnknownFailure] for why that loses nothing and
+// what it stops an unauthenticated caller from driving.
+//
 // A nil *FailureCache is usable and caches nothing.
 type FailureCache struct {
 	m     *cache.Map[struct{}]
@@ -261,7 +267,11 @@ func (c *FailureCache) forget(ctx context.Context, db dbx.Conn, keyID string) er
 	return c.topic.Forget(ctx, db, keyID)
 }
 
-// drop forgets in this process only, for a store that is not Postgres.
+// drop forgets in this process only.
+//
+// Two callers. A store that is not Postgres has no transaction to publish on and
+// no other replica to tell. And a key id that names no row is one no other
+// replica is holding an answer for — see [Manager.recordUnknownFailure].
 func (c *FailureCache) drop(keyID string) {
 	if c == nil {
 		return

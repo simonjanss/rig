@@ -793,8 +793,8 @@ that stops somebody grinding secrets against a key id. All of them are a row rea
 on every authenticated request, for answers that change when somebody signs out or
 gets their key wrong.
 
-Which is why it needs an [`auth`](#auth) block beside it: those two reads are the
-whole of what this covers, so `cache.enabled` on a project that does not
+Which is why it needs an [`auth`](#auth) block beside it: those three reads are
+the whole of what this covers, so `cache.enabled` on a project that does not
 authenticate its callers is refused when `rig.yaml` is read rather than left as
 four numbers nothing looks at.
 
@@ -823,11 +823,11 @@ cache at all. What stops costing a query is the integration that never gets its
 key wrong.
 
 **There is nothing to wire.** No map to build, no publish to add, no hook to
-register. rig caches these two reads *because* it owns both halves — it makes the
-read and it makes every write that invalidates it — so there is no write path an
-application can forget. The one line this adds to a `main.go` is a shutdown, and
-it is safe to leave out: a listener that is not running reports itself as not
-live, and a cache that is not live reads through.
+register. rig caches these three reads *because* it owns both halves — it makes
+the read and it makes every write that invalidates it — so there is no write
+path an application can forget. The one line this adds to a `main.go` is a
+shutdown, and it is safe to leave out: a listener that is not running reports
+itself as not live, and a cache that is not live reads through.
 
 ```go
 app.CloseWithin("auth", 5*time.Second, front.Close)

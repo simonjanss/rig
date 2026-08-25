@@ -339,3 +339,43 @@ func TestEnterDeleteOutsideATransactionAlwaysProceeds(t *testing.T) {
 		}
 	}
 }
+
+// The exception to reuse. A notification published on the caller's transaction
+// is discarded when that transaction rolls back, so the write that must outlive
+// a rollback needs a transaction that is not the caller's — and asking for one
+// has to actually get one.
+func TestWithoutTxOpensATransactionOfItsOwn(t *testing.T) {
+	t.Parallel()
+
+	db := &fakeDB{}
+	var inner, outer pgx.Tx
+
+	err := dbx.InTx(t.Context(), db, func(ctx context.Context, tx dbx.Conn) error {
+		outer, _ = dbx.Tx(ctx)
+
+		stripped := dbx.WithoutTx(ctx)
+		if _, ok := dbx.Tx(stripped); ok {
+			t.Error("the transaction should not be visible on a stripped context")
+		}
+		return dbx.InTx(stripped, db, func(ctx context.Context, _ dbx.Conn) error {
+			inner, _ = dbx.Tx(ctx)
+			return nil
+		})
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if db.begins != 2 {
+		t.Errorf("began %d transactions, want 2: the inner one should not have joined the outer", db.begins)
+	}
+	if inner == nil || inner == outer {
+		t.Error("the inner work ran on the caller's transaction, which a rollback would discard")
+	}
+
+	// And a context that carries none is handed back untouched, so the helper is
+	// free to sit on a path that is usually already outside one.
+	ctx := t.Context()
+	if dbx.WithoutTx(ctx) != ctx {
+		t.Error("a context with no transaction should be returned as it is")
+	}
+}

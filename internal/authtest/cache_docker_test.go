@@ -295,6 +295,17 @@ func TestAKeyRevocationReachesAnotherReplica(t *testing.T) {
 // The limiter is the Postgres one rather than a fake, because what is under test
 // is the count against that table and the notification that withdraws it — a
 // counter held in memory would prove neither.
+//
+// The limit has no ClearedBy, unlike the real one, and that is what makes these
+// tests deterministic rather than a race. Waiting for an invalidation to cross
+// means asking the reader repeatedly, and the only way to ask is to verify — so
+// with a clearing event configured, the first ask that is answered from the held
+// zero *succeeds*, writes the clearing row, and moves the count's floor past
+// every failure the test just recorded. The poll would then destroy the
+// condition it is waiting for and no later attempt could ever see the refusal.
+// What a success does to the window is the internal test's subject
+// (TestASuccessStillClearsTheWindowWithTheCountCached); what is here is the
+// channel.
 func keyFailureReplicas(t *testing.T, maxN int) (*apikey.Manager, *apikey.Manager) {
 	t.Helper()
 
@@ -310,11 +321,10 @@ func keyFailureReplicas(t *testing.T, maxN int) (*apikey.Manager, *apikey.Manage
 			}),
 			Limiter: throttle.New(throttle.NewPostgres(pool, throttle.PostgresConfig{})),
 			FailureLimit: throttle.Limit{
-				Name:      "apikey.failed",
-				Event:     throttle.EventAPIKeyAuthFailed,
-				ClearedBy: throttle.EventAPIKeyAuthSucceeded,
-				Max:       maxN,
-				Window:    time.Hour,
+				Name:   "apikey.failed",
+				Event:  throttle.EventAPIKeyAuthFailed,
+				Max:    maxN,
+				Window: time.Hour,
 			},
 		})
 		if err != nil {
@@ -364,6 +374,10 @@ func TestKeyFailuresOnOneReplicaLockTheOther(t *testing.T) {
 		_, _, _ = writer.Verify(ctx, wrong, from)
 	}
 
+	// Polling with the correct secret, which is safe to repeat here only because
+	// the limit has no clearing event — see keyFailureReplicas. Every attempt
+	// answered from the held zero leaves the count exactly where the writer put
+	// it, so the loop can ask as often as it likes.
 	settle(t, "a key locked by another replica's failures", func() bool {
 		_, _, err := reader.Verify(ctx, minted.Secret, from)
 		return rigerr.Is(err, rigerr.CodeRateLimited)
