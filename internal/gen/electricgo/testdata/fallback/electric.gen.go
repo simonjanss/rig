@@ -41,7 +41,7 @@ type Server struct {
 
 // DefaultElectricURL is the sync service configured when this was generated. A
 // deployment can point somewhere else by building its own proxy.
-const DefaultElectricURL = "http://localhost:55445"
+const DefaultElectricURL = "http://electric:3000"
 
 // Handlers is one scoping function per shape, plus the shared behavior.
 //
@@ -62,12 +62,9 @@ const DefaultElectricURL = "http://localhost:55445"
 type Handlers struct {
 	Server Server
 
-	RigNotificationRecipient        RigNotificationRecipientScope
-	RigNotificationRecipientDeleted RigNotificationRecipientDeletedScope
-	RigPresence                     RigPresenceScope
-	Todo                            TodoScope
-	TodoDeleted                     TodoDeletedScope
-	TodoVersions                    TodoVersionsScope
+	Lesson         LessonScope
+	LessonDeleted  LessonDeletedScope
+	LessonVersions LessonVersionsScope
 
 	// What answers a shape while the sync service cannot be reached. Nil is a 502
 	// and a subscriber with no rows, which is what every shape did before these
@@ -82,12 +79,9 @@ type Handlers struct {
 	// Whatever the scope above narrows, the fallback has to narrow too. A scope is
 	// a filter the proxy sends and can therefore promise; a fallback is a read it
 	// cannot see inside.
-	RigNotificationRecipientFallback        RigNotificationRecipientFallback
-	RigNotificationRecipientDeletedFallback RigNotificationRecipientDeletedFallback
-	RigPresenceFallback                     RigPresenceFallback
-	TodoFallback                            TodoFallback
-	TodoDeletedFallback                     TodoDeletedFallback
-	TodoVersionsFallback                    TodoVersionsFallback
+	LessonFallback         LessonFallback
+	LessonDeletedFallback  LessonDeletedFallback
+	LessonVersionsFallback LessonVersionsFallback
 }
 
 // Register mounts every shape endpoint.
@@ -107,22 +101,16 @@ func Register(mux *http.ServeMux, h Handlers) {
 
 	// A derived shape falls back to the live shape's scope. Nil stays nil: a table
 	// nobody scoped is scoped by tenant and lifecycle on all three of its routes.
-	if h.RigNotificationRecipientDeleted == nil {
-		h.RigNotificationRecipientDeleted = RigNotificationRecipientDeletedScope(h.RigNotificationRecipient)
+	if h.LessonDeleted == nil {
+		h.LessonDeleted = LessonDeletedScope(h.Lesson)
 	}
-	if h.TodoDeleted == nil {
-		h.TodoDeleted = TodoDeletedScope(h.Todo)
-	}
-	if h.TodoVersions == nil {
-		h.TodoVersions = versionsFromLiveTodo(h.Todo)
+	if h.LessonVersions == nil {
+		h.LessonVersions = versionsFromLiveLesson(h.Lesson)
 	}
 
-	mux.HandleFunc("GET /api/v1/rig_notification_recipient/_stream", handleRigNotificationRecipientShape(h.Server, h.RigNotificationRecipient, h.RigNotificationRecipientFallback))
-	mux.HandleFunc("GET /api/v1/rig_notification_recipient/_deleted/_stream", handleRigNotificationRecipientDeletedShape(h.Server, h.RigNotificationRecipientDeleted, h.RigNotificationRecipientDeletedFallback))
-	mux.HandleFunc("GET /api/v1/rig_presence/_stream", handleRigPresenceShape(h.Server, h.RigPresence, h.RigPresenceFallback))
-	mux.HandleFunc("GET /api/v1/todo/_stream", handleTodoShape(h.Server, h.Todo, h.TodoFallback))
-	mux.HandleFunc("GET /api/v1/todo/_deleted/_stream", handleTodoDeletedShape(h.Server, h.TodoDeleted, h.TodoDeletedFallback))
-	mux.HandleFunc("GET /api/v1/todo/{id}/_versions/_stream", handleTodoVersionsShape(h.Server, h.TodoVersions, h.TodoVersionsFallback))
+	mux.HandleFunc("GET /api/v1/lesson/_stream", handleLessonShape(h.Server, h.Lesson, h.LessonFallback))
+	mux.HandleFunc("GET /api/v1/lesson/_deleted/_stream", handleLessonDeletedShape(h.Server, h.LessonDeleted, h.LessonDeletedFallback))
+	mux.HandleFunc("GET /api/v1/lesson/{id}/_versions/_stream", handleLessonVersionsShape(h.Server, h.LessonVersions, h.LessonVersionsFallback))
 }
 
 // prepare authenticates a subscription and starts its filter.

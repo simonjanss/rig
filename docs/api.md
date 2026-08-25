@@ -210,6 +210,14 @@ the primary form. One handler serves both, and they answer identically. If you
 turned the alias off with `api.search_method: query`, that resource's search is
 absent from the document rather than misdescribed, and its tag says so.
 
+**A shape route's 200 is two answers.** A live-sync route answers with a chunk
+of the shape or, when the sync service could not be reached and the shape has a
+[fallback](electric.md#when-the-sync-service-is-down), with a snapshot in the
+same format. The document describes `X-Rig-Sync-Fallback` because that header is
+the only thing distinguishing them, and a `503` beside the `502` because a
+subscriber already holding a snapshot is asked to wait rather than told the
+request failed.
+
 **The `/auth/*` and `/notifications/*` routes are not in it.** They are the same
 routes in every project, so rig serves them from a hand-written module rather
 than generating them — which means they reach nothing the document is written

@@ -541,8 +541,10 @@ exists.
 ## Verifying without a row read
 
 Every authenticated request resolves a session token or an API key, and that is a
-row read. Turning on [`cache:`](rig-yaml.md#cache) in `rig.yaml` holds the answer
-in memory instead:
+row read. An API-key request makes a second one before it — the failure limit that
+stops somebody grinding secrets against a key id, counted out of the
+authentication log. Turning on [`cache:`](rig-yaml.md#cache) in `rig.yaml` holds
+both answers in memory instead:
 
 ```yaml
 cache:
@@ -565,6 +567,15 @@ revocation commits. `ttl` is only the backstop, for a replica that was not
 listening at that moment — and a replica that knows it has lost the channel stops
 caching altogether rather than serving what it can no longer withdraw.
 
+The failure limit works the same way and for the same reason, with one wrinkle
+worth knowing. Only the *zero* is held — "this key id has no recent failures" —
+because inside a window a count can only rise, and every row it counts is one rig
+writes. A key that somebody is already grinding is counted afresh on every
+attempt, so the limit bites on exactly the attempt it would have without a cache;
+what stops costing a query is the integration that has never once got its key
+wrong. That is the opposite of a process-local tally, which would let each replica
+wave through an interval of traffic it could not see.
+
 Nothing here is yours to wire. There is no map to build and no invalidation to
 publish, because rig caches exactly the reads it owns on both sides — it makes
 the read and it makes every write that withdraws it. The only line it adds to
@@ -579,10 +590,60 @@ app.CloseWithin("auth", 5*time.Second, front.Close)
 expensive read on this path — a join over role tables, per request — but the
 tables are yours and so are the writes, and rig cannot see them. Caching it would
 mean you publishing your own invalidations, and a write path left out there is a
-permission you revoked that goes on working with nothing to say so. If you decide
-to take that on, `Parts().Cache` is the same bus and
-[`rig/runtime/cache`](https://pkg.go.dev/github.com/simonjanss/rig/runtime/cache)
-is the package; serve a topic of your own and publish wherever roles change.
+permission you revoked that goes on working with nothing to say so. rig will not
+make that promise on your behalf, so turning this on is a call rather than a key
+in `rig.yaml`.
+
+If you decide to take it on, `auth.NewGrantsCache` is the map and the obligation
+that comes with it. Three lines, in this order, because the generated wiring needs
+the function before it can hand back the bus:
+
+```go
+grants := auth.NewGrantsCache(auth.GrantsCacheConfig{})
+
+front, err := api.New(pool, api.Hooks{
+	Grants: grants.Wrap(authz.Grants(pool)),
+})
+
+grants.Serve(front.Parts().Cache)
+```
+
+And then the half that is yours: every write that changes what somebody may do
+publishes on the transaction that made it.
+
+```go
+func AttachRole(ctx context.Context, tx pgx.Tx, tenantID, accountID uuid.UUID, ...) error {
+	if _, err := tx.Exec(ctx, `INSERT INTO account_role ...`); err != nil {
+		return err
+	}
+	return grants.Invalidate(ctx, tx, tenantID, accountID)
+}
+```
+
+`Invalidate` withdraws one account's answer in one tenant. `InvalidateAll` is for
+the writes that change what a role *means* rather than who holds it — seeding a
+tenant's roles, editing the grants on one. Both take the transaction that made the
+change, so the invalidation commits with it and is thrown away if it rolls back.
+
+What the helper is doing for you is the six things that are the same for
+everybody and easy to get wrong once: the key is the tenant *and* the account,
+the two slices are copied on the way out, an error is never held, an empty answer
+is, a replica that has lost the channel reads through, and the publish rides your
+transaction. `examples/auth` is wired this way end to end —
+`services/authz/authz.go` is the whole of the obligation, three call sites.
+
+Every part of it is fail-safe: a cache that was never served holds nothing, a bus
+that is not running reports itself as not live, and a map that is not live reads
+through. Leaving out `Serve`, or the `cache:` block, costs latency rather than
+correctness. What is *not* fail-safe is the half rig cannot check — a role write
+you forgot to publish from is a permission that goes on working until `ttl`
+expires. That is the trade, and it is why this is opt-in.
+
+**Watch for the write paths that are not yours.** If your `Grants` reads
+`rig_account.role` — the scaffolded configuration exposes it as `Update` — then a
+`PATCH` on that resource changes the answer without going anywhere near your role
+tables. A `dbhook` `BeforeCommit` on that update is where the `Invalidate` goes,
+inside the transaction rather than after it.
 
 ---
 

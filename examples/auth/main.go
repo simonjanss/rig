@@ -205,6 +205,21 @@ func newAPI(ctx context.Context, pool *pgxpool.Pool, log *slog.Logger) (http.Han
 		notify.ChannelEmail: mail.NotificationSender(),
 	})
 
+	// The one read the `cache:` block in rig.yaml deliberately does not cover.
+	//
+	// rig caches what it owns end to end — it makes the read and it makes every
+	// write that withdraws it — and Grants is over this example's role tables,
+	// written to by this example's code. So rig will not cache it and cannot: it
+	// cannot see those writes. What it offers instead is the map, and the
+	// obligation that comes with it, which is the three `held` arguments threaded
+	// through services/authz. Every write that changes what somebody may do
+	// publishes on the transaction that made it.
+	//
+	// Built before api.New because the wrapped function is an input to it, and
+	// served afterwards because the bus is an output. Until it is served nothing
+	// is held, so the order is safe rather than merely correct.
+	grants := auth.NewGrantsCache(auth.GrantsCacheConfig{})
+
 	// The whole foundation, over the tables `rig setup-project` wrote, wired from
 	// the auth block in rig.yaml.
 	//
@@ -247,7 +262,7 @@ func newAPI(ctx context.Context, pool *pgxpool.Pool, log *slog.Logger) (http.Han
 		// The one thing rig asks an application to decide. It derives the
 		// permission keys from the schema and generates the check; who holds them
 		// is this function, which here reads the example's own role tables.
-		Grants: authz.Grants(pool),
+		Grants: grants.Wrap(authz.Grants(pool)),
 
 		// What a tenant is beyond its row and its first account. rig.yaml says the
 		// endpoint exists; this says what it does. rig writes the tenant, the first
@@ -274,7 +289,7 @@ func newAPI(ctx context.Context, pool *pgxpool.Pool, log *slog.Logger) (http.Han
 			// And what else a new tenant needs, in the transaction that made it:
 			// the three roles and their grants. A tenant whose roles failed to seed
 			// is a tenant whose Owner can do nothing, so it rolls back with it.
-			OnCreated: authz.SeedFor(append(api.PermissionKeys(), authz.AuthKeys()...)),
+			OnCreated: authz.SeedFor(append(api.PermissionKeys(), authz.AuthKeys()...), grants),
 		},
 
 		// OnError is left out on purpose: the wiring is generated into this API's
@@ -285,6 +300,12 @@ func newAPI(ctx context.Context, pool *pgxpool.Pool, log *slog.Logger) (http.Han
 	if err != nil {
 		return nil, nil, nil, err
 	}
+
+	// And now the bus exists, so the cache above can hear the invalidations it
+	// publishes. Leaving this line out is not a correctness bug — an unserved
+	// cache holds nothing and every request reads the role tables, exactly as it
+	// did before — which is the same fail-safe shape as forgetting the shutdown.
+	grants.Serve(front.Parts().Cache)
 
 	// One resource, because the application has one table. The foundation's
 	// eleven are not here and not generated: `rig generate` leaves them out, and
@@ -331,7 +352,7 @@ func newAPI(ctx context.Context, pool *pgxpool.Pool, log *slog.Logger) (http.Han
 	// second way in: every button it has makes an HTTP request to this same mux,
 	// with a real Authorization header — including creating a tenant, which used
 	// to be the one thing it reached past the API for.
-	ui, err := web.New(mux, pool, mail)
+	ui, err := web.New(mux, pool, mail, grants)
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -366,6 +387,9 @@ func dispatchAuthMail(ctx context.Context, pool *pgxpool.Pool) error {
 	// links piling up unsent, which is the failure the subcommand exists to
 	// prevent. On this side it costs nothing while the server queues nothing:
 	// there is simply never a row to claim.
+	//
+	// Grants is unwrapped for pruneAuthLog's reason: a task that runs once and
+	// exits has no second request to answer from memory.
 	front, err := api.New(pool, api.Hooks{
 		Notifier: outbox.New(20),
 		Mail:     auth.MailOptions{Queue: true, Retention: 30 * 24 * time.Hour},
@@ -378,6 +402,9 @@ func dispatchAuthMail(ctx context.Context, pool *pgxpool.Pool) error {
 }
 
 func pruneAuthLog(ctx context.Context, pool *pgxpool.Pool) error {
+	// Unwrapped, and not because it would be wrong: a cache nobody serves holds
+	// nothing. A task that runs once and exits has no second request to answer
+	// from memory, so there is nothing here for one to do.
 	front, err := api.New(pool, api.Hooks{Grants: authz.Grants(pool)})
 	if err != nil {
 		return err

@@ -80,6 +80,26 @@ func (e *emitter) handlersStruct(b *gobuf.Buf, shapes []*ir.Resource) {
 			b.L("%s %sScope", sh.name, sh.name)
 		}
 	}
+	if e.cfg.fallbacks() {
+		b.NL()
+		b.Comment("What answers a shape while the sync service cannot be reached. " +
+			"Nil is a 502 and a subscriber with no rows, which is what every shape " +
+			"did before these fields existed.\n\n" +
+			"These do not inherit the way the scopes above do, and the reason is that " +
+			"there would be nothing to inherit: the three shapes carry three " +
+			"different generations of a row, so they correspond to three different " +
+			"reads — a live list, its trash, one row's history. A trash route quietly " +
+			"answering with live rows is the worst of the available outcomes, so nil " +
+			"stays nil.\n\n" +
+			"Whatever the scope above narrows, the fallback has to narrow too. A scope " +
+			"is a filter the proxy sends and can therefore promise; a fallback is a " +
+			"read it cannot see inside.")
+		for _, res := range shapes {
+			for _, sh := range e.shapesFor(res) {
+				b.L("%sFallback %sFallback", sh.name, sh.name)
+			}
+		}
+	}
 	b.L("}")
 	b.NL()
 }
@@ -106,8 +126,13 @@ func (e *emitter) registerFunc(b *gobuf.Buf, shapes []*ir.Resource) {
 
 	for _, res := range shapes {
 		for _, sh := range e.shapesFor(res) {
-			b.L("mux.HandleFunc(%s, handle%sShape(h.Server, h.%s))",
-				gobuf.Quote("GET "+sh.path), sh.name, sh.name)
+			if e.cfg.fallbacks() {
+				b.L("mux.HandleFunc(%s, handle%sShape(h.Server, h.%s, h.%sFallback))",
+					gobuf.Quote("GET "+sh.path), sh.name, sh.name, sh.name)
+			} else {
+				b.L("mux.HandleFunc(%s, handle%sShape(h.Server, h.%s))",
+					gobuf.Quote("GET "+sh.path), sh.name, sh.name)
+			}
 		}
 	}
 	b.L("}")

@@ -172,6 +172,98 @@ Next:
   carries the hash every verification compares against while a key carries the
   scopes that become a caller's permissions.
 
+- ~~**M16.1** — the two reads M16 left on the path.~~ Shipped: a
+  `apikey.FailureCache` covered by the same `cache:` block, and an
+  `auth.GrantsCache` that is not, because it cannot be.
+
+  **`cache: enabled: true` did not do what its own heading said.**
+  `docs/auth.md` is headed "Verifying without a row read"; for a session request
+  that was true and for an API-key request it was not.
+  `apikey.Manager.checkFailureLimit` runs *before* the cached lookup — on
+  purpose, so a caller grinding secrets stops costing a query long before they
+  stop asking — and it is a `count(*)` over `rig_auth_log` through
+  `throttle.Postgres`, wired unconditionally at a default of 20 per minute. So
+  turning the cache on removed one of an API-key request's two reads and left the
+  other as the dominant cost.
+
+  It fits the M16 rule exactly: `rig_auth_log` is rig's table and both writes that
+  move the answer — `recordFailure` and the success entry — are rig's. **Only the
+  zero is held**, and that is what makes it sound rather than merely cheap: inside
+  a window a count can only rise, so "no failures for this key" can be wrong only
+  if a failure was recorded, and a failure recorded is a notification published on
+  the way past. A count already above zero is never held, so the limit refuses on
+  the same attempt it would have with no cache — the caller it stops helping is
+  precisely the one it exists to stop. `runtime/throttle/local.go` is the
+  counter-example the doc points at: the same optimisation without a channel,
+  rejected for these limits because its error is one-sided in the permissive
+  direction.
+
+  Three departures. The invalidation runs in **a transaction of its own** rather
+  than the caller's, because the log entry it withdraws is deliberately written
+  outside whatever transaction noticed the failure — and it is published *after*
+  that write, never before, which is the one ordering that would turn this from a
+  cache into a hole in the limit. `dbx.InTx` *joins* a transaction already on the
+  context, which is right everywhere else and wrong here, so `dbx.WithoutTx` is
+  new: it hides the transaction so the nested `InTx` opens one. Nothing in rig
+  verifies a key inside a transaction today, and the guarantee should not depend
+  on that staying true.
+
+  The **success path publishes nothing**: a success moves the `ClearedBy` floor
+  forward, so it can only lower a count, and a held zero stays true.
+
+  And **a key id nobody minted withdraws locally and publishes nothing**, which is
+  the one place the shape of the read matters more than the shape of the write. A
+  key id is the half a caller supplies and the limit is checked *before* the
+  lookup, so an invented identifier gets an entry stored under it — the same thing
+  `errNoKey` keeps out of the `KeyCache`, arrived at from the other end. Publishing
+  those would let an unauthenticated caller drive a transaction and a channel-wide
+  notification once per request, with no per-key limit to bound it because every
+  invented identifier is a bucket of its own. Dropping locally loses nothing: a
+  replica only ever holds a zero for an identifier presented to *it*, stored by the
+  limit check and dropped inside the same request, so there is no other replica
+  holding an answer a publish could withdraw — and the drop being synchronous means
+  the limit bites a shade earlier than the published path, not later.
+
+  **`auth.NewGrantsCache` is the other half, and it is deliberately not a config
+  key.** M16 left `Grants` alone for the right reason and then told people to
+  cache it anyway with nothing to do it with — `authhttp.Grants` said "cache it if
+  the answer is expensive" and both examples' `authz.Grants` said "with a short
+  time to live", which is the exact trade the block exists to refuse. So rig now
+  ships the map and the obligation, and still refuses to make the decision: it is
+  three calls in Go, next to the writes somebody is promising to publish from.
+
+  The shape is `NewGrantsCache` / `Wrap` / `Serve` rather than one constructor,
+  because the generated wiring needs the function *before* it can hand back the
+  bus — `api.New(pool, api.Hooks{Grants: ...})` returns the thing that owns the
+  channel. Every step is fail-safe: an unserved cache holds nothing, a bus that is
+  not running is not live, a map that is not live reads through. Forgetting
+  `Serve` costs latency.
+
+  `examples/auth` is wired end to end, and that is what makes the recommendation
+  honest rather than a shape: three `held` arguments threaded through
+  `services/authz`, one per write that changes what somebody may do. Both role
+  tables there are `expose: false`, so there is no generated write path to forget
+  — which is the property that made it a clean demonstration and is called out in
+  `docs/auth.md` as the thing to check in a project where it is not true
+  (`rig_account.role` is `Update` in the scaffolded configuration, and a `PATCH`
+  on it changes the answer without touching anybody's role tables; a `dbhook`
+  `BeforeCommit` is where that `Invalidate` goes).
+
+  Four new Docker tests in `internal/authtest`: failures on one replica lock the
+  key on another that was holding a zero, a clean key answered without counting
+  rows at all — asserted by moving the count behind rig's back with plain SQL, so
+  a reader that still lets the key through is one that never queried — and a grant
+  invalidation delivered on commit and discarded on rollback.
+
+  The key pair's limit is configured with **no `ClearedBy`**, unlike the real one,
+  and that is what makes them deterministic rather than a race. Waiting for an
+  invalidation to cross means asking the reader repeatedly, and the only way to
+  ask is to verify — so with a clearing event configured, the first ask answered
+  from the held zero succeeds, writes the clearing row, and moves the floor past
+  every failure the test just recorded. The poll would destroy the condition it
+  was waiting for, and no later attempt could see the refusal. What a success does
+  to the window is the internal test's subject; what is here is the channel.
+
 ### Modules
 
 ```
@@ -5270,6 +5362,130 @@ stale row as a bug.
 `todo_versions` — four, under the six-connection ceiling HTTP/1.1 imposes and that
 Electric warns about in the console on every load. Fine here; a project that adds
 two more shapes will meet that ceiling before it meets any presence limit.
+
+## M15.2 — a shape answers when the sync service does not (shipped)
+
+**Goal.** A subscriber whose sync service is unreachable gets rows instead of a
+502, from the read the application already has, in the format it already speaks.
+
+**What it is.** `electric.Shape` grew a `Fallback`, and `Proxy.Serve` calls it
+when a subscriber reading from the beginning cannot be answered upstream. What
+goes out is a snapshot in the sync protocol's own format, so nothing on the
+client changes and nothing on the client can tell — `X-Rig-Sync-Fallback:
+snapshot` is the only sign, and it is there for a person reading a network tab.
+The generator emits the seam when `model_import` names the model, because the
+seam is made of the model's types; without it nothing is emitted at all and the
+package is what it was.
+
+### Everything about the protocol was read rather than reasoned about
+
+The design turns on four facts about ElectricSQL 1.6.9, and each of them was
+answered by running a container and looking, not by thinking about it:
+
+- **Every value on the wire is a string or null**, in Postgres's text form, and
+  the column's type comes from the `electric-schema` header. So a snapshot that
+  sent a JSON number would be decoded twice.
+- **A boolean is `true`, not `t`.** Postgres prints `t`; the sync service
+  normalises. pgx's text encoder prints `t`, so the one type where the obvious
+  implementation is wrong is the one where it fails silently — `"t"` decodes as
+  false.
+- **An initial response ends with `snapshot-end`, not `up-to-date`**, and takes a
+  second request to get there, because the sync service has a log to catch up on
+  between the two. A snapshot has no log, so it ends `up-to-date` in one
+  response. Had it copied `snapshot-end`, the collection would have held every
+  row and stayed in its loading state forever — rows on the client and a blank
+  page, which is worse than the 502 it replaced.
+- **A handle the sync service never issued is a `409` and a `must-refetch`**, at
+  any offset, live or not. That is the whole recovery path, and rig arranges none
+  of it: the snapshot's handle is prefixed `rig-fallback-`, the proxy forwards it
+  like any other, and the sync service resets the subscriber onto real sync the
+  moment it is reachable. A recovery mechanism this package invented would have
+  been a second one to get wrong.
+
+The last of those is why there is no code for recovery to be a bug in. It is also
+why the handle has to be a handle rather than nothing: a subscriber needs
+something to send back, and what it sends back is what triggers the reset.
+
+### The encoder is one function, and a container found its bugs
+
+`electric.Value` is reflective rather than generated per column, which is a
+departure from how this repository usually does things — the alternative was a
+generator emitting a conversion per Postgres type, and one tested function beats
+sixteen emitted ones for something whose correctness is entirely about edge
+cases. It is `time.Time` first (because `String` is Go's layout, not Postgres's),
+then `json.RawMessage` before `[]byte` (which it is underneath), then the scalar
+kinds, then `fmt.Stringer` for a uuid, then pgx's own text codec for arrays and
+`pgtype.Numeric`, then JSON.
+
+`internal/electrictest` is what makes that trustworthy: it inserts one row of
+every type and one row of nulls, fetches the shape twice — once through the real
+sync service and once through a proxy pointed at a closed port — and compares
+column by column. It found two bugs on its first run, both the same shape of
+mistake: a null `numeric` and a null `text[]` were rendering as `""`, because an
+invalid `pgtype.Numeric` and a nil slice both encode to the empty string and an
+empty string is a value. `isNull` exists because of that test.
+
+Two columns are equal without being identical, and the test says which and why: a
+`timestamptz` is compared as an instant (the sync service writes a space and a
+two-digit offset; rig writes the RFC 3339 the API sends, which is the form a
+subscriber is already parsing), and a `jsonb` is compared as a document
+(Postgres normalises key order and spacing; Go prints what it was handed).
+
+### What is deliberately not there
+
+- **No stub.** The plan had one, and it came out because a stub cannot reach a
+  repository: it would have to invent a store import and a repository type for the
+  generator to name. So the seam is a type and a field, and the worked example is
+  `examples/linearlite/services/todo/todo_fallback.go` — a constructor taking the
+  repository, wired where `Register` is called, which is where somebody wiring a
+  shape endpoint is already looking.
+- **No inheritance between the derived shapes.** The scopes inherit because the
+  three shapes carry the same table's rows and a narrowing that mattered for one
+  matters for the others. The fallbacks are the opposite: three shapes, three
+  reads, and a trash route quietly answering with live rows is the worst outcome
+  available. Nil stays nil.
+- **No client change.** `@rig/electric` does not surface the header, so nothing
+  renders a "reconnecting" banner. The test that matters is there instead —
+  `ts/packages/electric/src/fallback.test.ts` drives a real `ShapeStream` over
+  the exact bytes the Go side writes, because the envelope is rig's invention and
+  a client that rejected it would make the whole feature a 200 with no effect.
+- **No collapsing of the herd.** Every subscriber falls back at the same moment,
+  because what they have in common is the service being gone, so a shape's
+  fallback is one `List` per subscriber against the database the sync service was
+  shielding. `MaxSnapshotRows` bounds the memory and refuses past the bound
+  rather than truncating — a subscriber cannot tell a short answer from a complete
+  one — and being off until somebody turns it on, per shape, is the rest of the
+  answer. Collapsing identical concurrent snapshots through `runtime/cache`'s
+  `Map`, keyed by shape and tenant and params with a few seconds' TTL, is the
+  obvious next step and is not here.
+
+### Honest gaps
+
+- **Nothing checks that a scope and its fallback narrow the same way.** A scope
+  is a filter the proxy sends and can promise; a fallback is a read it cannot see
+  inside, so a shape scoped to a team with a fallback that lists the tenant shows
+  more than the subscription would — and only while something else is broken. It
+  is the same class of trap as the inherited scope, and it is documented in the
+  same places, and a linter cannot see it.
+- **The trash fallback applies a restore window the trash shape does not.**
+  `ListDeleted` forces `WithOnlyDeleted`, which adds the cutoff; the shape
+  deliberately has none. Narrower is the safe direction and a fourth read path to
+  avoid it is not worth having, so this is written down rather than fixed.
+- **`InitialTimeout` is a guess with a default.** Ten seconds, applied only to a
+  read from the beginning, so a sync service that is running and not answering
+  falls back rather than being waited on. A project whose shapes are large enough
+  that the service legitimately takes longer to build one gets a snapshot when it
+  wanted a stream, and has to say so.
+- **Shape routes are still not throttled**, which the fallback makes more
+  expensive rather than less: a subscriber can now cost a query rather than a
+  proxied request. Named in M15.1's gaps too.
+- **A `date` column over the fallback and the same column over REST still
+  disagree**, because the sync service prints `2026-08-25` and Go marshals a
+  `time.Time` as a full timestamp. `DateOnly` matches the sync service, which is
+  the side a subscriber's parsers are written for, so the fallback is consistent
+  with the stream and the pre-existing REST difference is untouched.
+
+---
 
 ## M16 — delivery that outlasts an outage (shipped)
 

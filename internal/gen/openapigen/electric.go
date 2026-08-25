@@ -158,6 +158,12 @@ func protocolParamSchema(name string) *base.Schema {
 // The failure here is not rig's shared Error body. A proxy that cannot reach
 // the sync service answers with plain text, so pointing at the Error schema
 // would describe a JSON body that never arrives.
+//
+// A 200 is two different answers with one format, which is the point of the
+// format: usually a chunk of the live shape, and sometimes a snapshot served
+// because the sync service could not be reached. X-Rig-Sync-Fallback is how a
+// client tells them apart, and it is described because a client that cares
+// whether its data is live has nothing else to read.
 func (e *emitter) shapeResponses() *v3.Responses {
 	ok := &v3.Response{
 		Description: "A chunk of the shape, in the sync protocol's own format.",
@@ -173,10 +179,23 @@ func (e *emitter) shapeResponses() *v3.Responses {
 	}
 
 	bad := &v3.Response{
-		Description: "The sync service could not be reached.",
-		Content:     orderedmap.New[string, *v3.MediaType](),
+		Description: "The sync service could not be reached, and this shape has " +
+			"nothing to answer with instead.",
+		Content: orderedmap.New[string, *v3.MediaType](),
 	}
 	bad.Content.Set("text/plain", &v3.MediaType{})
+
+	wait := &v3.Response{
+		Description: "The sync service could not be reached, and this subscription " +
+			"already holds a snapshot. Keep it and retry after Retry-After.",
+		Content: orderedmap.New[string, *v3.MediaType](),
+		Headers: orderedmap.New[string, *v3.Header](),
+	}
+	wait.Content.Set("text/plain", &v3.MediaType{})
+	wait.Headers.Set("Retry-After", &v3.Header{
+		Description: "Seconds to wait before polling again.",
+		Schema:      base.CreateSchemaProxy(&base.Schema{Type: []string{"integer"}}),
+	})
 
 	out := &v3.Responses{Codes: orderedmap.New[string, *v3.Response]()}
 	out.Codes.Set("200", ok)
@@ -185,6 +204,7 @@ func (e *emitter) shapeResponses() *v3.Responses {
 	out.Codes.Set("403", &v3.Response{
 		Reference: "#/components/responses/" + e.errorResponseName(403)})
 	out.Codes.Set("502", bad)
+	out.Codes.Set("503", wait)
 
 	if e.usedStatuses == nil {
 		e.usedStatuses = map[int]bool{}
@@ -205,4 +225,8 @@ var electricHeaders = []struct{ name, doc string }{
 	{"electric-schema", "The shape's column types."},
 	{"electric-cursor", "The cursor to echo on the next request."},
 	{"electric-up-to-date", "Present when the client has caught up with the shape."},
+	{"X-Rig-Sync-Fallback", "Present when this response is a snapshot served " +
+		"because the sync service could not be reached, rather than a chunk of a " +
+		"live subscription. The rows are correct as of the moment they were read " +
+		"and are not updated until the subscription resumes."},
 }

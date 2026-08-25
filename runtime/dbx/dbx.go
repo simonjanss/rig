@@ -242,6 +242,29 @@ func Tx(ctx context.Context) (pgx.Tx, bool) {
 	return tx, ok
 }
 
+// WithoutTx hides the transaction on a context, so that [InTx] opens one of its
+// own instead of joining it.
+//
+// The exception to the rule [InTx] exists for. Reuse is what makes nesting safe
+// and is right for every write that belongs to the caller's unit of work — and
+// wrong for the few that deliberately do not. An entry describing a failed
+// authentication attempt is written outside whatever transaction noticed the
+// failure, because it has to survive that transaction rolling back; anything
+// that has to be atomic with *that* write, rather than with the caller's, needs
+// the same treatment. A `pg_notify` is the case that motivated this: published
+// on a transaction that later rolls back it is discarded along with it, which
+// would leave every replica holding an answer the log already contradicts.
+//
+// Only the transaction is hidden. A nested [InTx] under this opens a real one
+// and gets its own after-commit list, so nothing registered inside runs on the
+// outer commit.
+func WithoutTx(ctx context.Context) context.Context {
+	if _, ok := Tx(ctx); !ok {
+		return ctx
+	}
+	return context.WithValue(ctx, txKey{}, nil)
+}
+
 // IsNoRows reports whether an error means the query matched nothing.
 func IsNoRows(err error) bool { return errors.Is(err, pgx.ErrNoRows) }
 

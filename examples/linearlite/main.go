@@ -358,13 +358,35 @@ func newAPI(ctx context.Context, pool *pgxpool.Pool, log *slog.Logger, page *obs
 	// the one place where narrowing is what makes the feature affordable.
 	proxy, err := electric.New(electric.Config{
 		URL: cmp.Or(os.Getenv("ELECTRIC_URL"), genelectric.DefaultElectricURL),
+		// Why the sync service was not the one that answered. There is no logger
+		// inside the proxy, on purpose, so this is the only way the reason for a
+		// 502 on a shape route reaches the log everything else writes to.
+		OnError: func(ctx context.Context, err error) {
+			log.ErrorContext(ctx, "live sync", slog.Any("error", err))
+		},
+		// And whether it is there at all, which is twice per outage rather than
+		// once per request: the line worth alerting on, where the errors above
+		// are one per subscriber and mostly repeat each other.
+		OnSyncState: func(ctx context.Context, reachable bool) {
+			if reachable {
+				log.InfoContext(ctx, "live sync is answering again")
+				return
+			}
+			log.WarnContext(ctx, "live sync is not answering; shapes with a fallback are serving snapshots")
+		},
 	})
 	if err != nil {
 		return nil, nil, err
 	}
+	// TodoFallback is the one shape this example answers without the sync
+	// service: the board is what the demonstration is, and a subscriber that
+	// gets nothing gets a blank page. The other shapes leave it nil and keep
+	// the 502 — presence in particular, where a snapshot of who was here a
+	// moment ago is worth less than nothing.
 	genelectric.Register(mux, genelectric.Handlers{
-		Server:      genelectric.Server{Proxy: proxy, GetClaims: front.Claims},
-		RigPresence: rig_presence.Shape,
+		Server:       genelectric.Server{Proxy: proxy, GetClaims: front.Claims},
+		RigPresence:  rig_presence.Shape,
+		TodoFallback: todo.Fallback(repos.Todos),
 	})
 
 	// The permission table, made to match what the handlers check — including

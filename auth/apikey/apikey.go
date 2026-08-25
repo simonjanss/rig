@@ -177,6 +177,18 @@ type Config struct {
 	// rotation reaches every replica on the transaction that performed it.
 	Cache *KeyCache
 
+	// FailureCache keeps the "no failures for this key" answer in memory.
+	//
+	// Nil, the default, counts rows on every request — including every
+	// successful one, since the limit is checked before the key is looked up. A
+	// cache built by [NewFailureCache] means the integration that never gets its
+	// key wrong stops paying for the caller who does.
+	//
+	// Separate from [Config.Cache] because they answer different questions and
+	// are withdrawn by different writes, not because a deployment would sensibly
+	// want one and not the other: [auth.New] builds both or neither.
+	FailureCache *FailureCache
+
 	Now func() time.Time
 }
 
@@ -194,7 +206,8 @@ type Manager struct {
 	limiter      *throttle.Limiter
 	failureLimit throttle.Limit
 
-	cache *KeyCache
+	cache    *KeyCache
+	failures *FailureCache
 }
 
 // New builds a manager.
@@ -221,6 +234,7 @@ func New(cfg Config) (*Manager, error) {
 		limiter:      cfg.Limiter,
 		failureLimit: cfg.FailureLimit,
 		cache:        cfg.Cache,
+		failures:     cfg.FailureCache,
 	}, nil
 }
 
@@ -373,8 +387,9 @@ func (m *Manager) Mint(ctx context.Context, in MintInput) (Minted, error) {
 func (m *Manager) Verify(ctx context.Context, presented string, from netip.Addr) (tenancy.Claims, *Key, error) {
 	keyID, secret, err := split(presented)
 	if err != nil {
-		// Nothing to count this against: there is no key identifier to name.
-		m.recordFailure(ctx, "", from, "malformed")
+		// Nothing to count this against: there is no key identifier to name,
+		// which is also why there is nothing held to withdraw.
+		m.writeFailure(ctx, "", from, "malformed")
 		return tenancy.Claims{}, nil, ErrInvalidKey
 	}
 
@@ -398,7 +413,10 @@ func (m *Manager) Verify(ctx context.Context, presented string, from netip.Addr)
 	now := m.now()
 	switch {
 	case errors.Is(err, errNoKey):
-		m.recordFailure(ctx, keyID, from, "unknown")
+		// The one failure an unauthenticated caller can produce at will, so it
+		// withdraws locally and publishes nothing: see
+		// [Manager.recordUnknownFailure].
+		m.recordUnknownFailure(ctx, keyID, from, "unknown")
 		return tenancy.Claims{}, nil, ErrInvalidKey
 	case subtle.ConstantTimeCompare(k.SecretHash, hash(secret)) != 1:
 		m.recordFailure(ctx, keyID, from, "wrong secret")
@@ -589,21 +607,74 @@ func (m *Manager) checkFailureLimit(ctx context.Context, keyID string) error {
 		return nil
 	}
 
-	d, err := m.limiter.Allow(ctx, throttle.Check{
-		Limit: m.failureLimit,
-		Key:   throttle.APIKey(keyID),
+	// The decision is captured rather than returned through the cache, because
+	// only one of its two shapes is ever held: a clean key needs no decision to
+	// answer with, and a key with failures against it is counted afresh every
+	// time. See [FailureCache].
+	var d throttle.Decision
+	clean, err := m.failures.clean(keyID, func() (int, error) {
+		var err error
+		d, err = m.limiter.Allow(ctx, throttle.Check{
+			Limit: m.failureLimit,
+			Key:   throttle.APIKey(keyID),
+		})
+		return d.Used, err
 	})
-	if err != nil {
+	switch {
+	case err != nil:
 		return err
+	case clean:
+		return nil
 	}
 	return d.Err()
 }
 
-// recordFailure writes the entry a rate limit counts.
+// recordFailure writes the entry a rate limit counts, for a key id that names a
+// row, and withdraws the held count everywhere.
+func (m *Manager) recordFailure(ctx context.Context, keyID string, from netip.Addr, reason string) {
+	m.writeFailure(ctx, keyID, from, reason)
+
+	// The row above is what the limit counts, so "no failures for this key" is
+	// now wrong on every replica holding it. After the write and never before:
+	// see [FailureCache.forget].
+	m.forgetFailures(ctx, keyID)
+}
+
+// recordUnknownFailure is [Manager.recordFailure] for a key id that names no
+// row: the same entry, and a withdrawal that goes no further than this process.
+//
+// Nothing is published, and the difference matters because this is the only
+// failure an unauthenticated caller can produce at will. A key id is the half a
+// caller supplies, and the limit is checked before the lookup — so a caller
+// cycling invented identifiers would otherwise have rig open a transaction and
+// publish an invalidation to every replica once per request, at whatever rate
+// they can ask. The per-key limit does not bound it: each invented identifier is
+// a bucket of its own.
+//
+// Dropping locally instead loses nothing. A replica only ever holds a zero for
+// an identifier somebody presented to *it* — stored by the limit check and
+// dropped here, inside the one request — so there is no other replica holding an
+// answer this could withdraw, and the drop being synchronous means the limit
+// bites on the same attempt it would have with no cache.
+//
+// What remains is that a caller grinding invented identifiers still stores and
+// drops one entry per attempt, and every drop moves the map's generation on —
+// which is [cache.Map]'s deliberate trade, and costs a legitimate key a read
+// rather than a wrong answer.
+func (m *Manager) recordUnknownFailure(ctx context.Context, keyID string, from netip.Addr, reason string) {
+	m.writeFailure(ctx, keyID, from, reason)
+	m.failures.drop(keyID)
+}
+
+// writeFailure writes the entry, and nothing else.
 //
 // The reason goes in the detail rather than the response: an operator debugging
 // their integration needs it, and an attacker probing keys does not get it.
-func (m *Manager) recordFailure(ctx context.Context, keyID string, from netip.Addr, reason string) {
+//
+// Split out because what follows one differs: see [Manager.recordFailure] and
+// [Manager.recordUnknownFailure]. A malformed key reaches neither — the limit is
+// never consulted for one, so there is nothing held to withdraw.
+func (m *Manager) writeFailure(ctx context.Context, keyID string, from netip.Addr, reason string) {
 	m.log.Write(ctx, authlog.Entry{
 		At:        m.now(),
 		Event:     authlog.EventAPIKeyAuthFailed,
@@ -611,6 +682,36 @@ func (m *Manager) recordFailure(ctx context.Context, keyID string, from netip.Ad
 		APIKeyRef: keyID,
 		IPAddress: addrString(from),
 		Detail:    map[string]any{"reason": reason},
+	})
+}
+
+// forgetFailures withdraws the held count for one key id, everywhere.
+//
+// Best-effort, like the log write it follows and for the same reason. The two
+// are one event — a failure happened — and neither is worth failing a request
+// over, least of all this request, which is being refused anyway. What a
+// notification that did not go out costs is one lifetime of staleness on the
+// other replicas, which is what the lifetime is for.
+//
+// A transaction of its own rather than the caller's, and [dbx.WithoutTx] is what
+// makes that true rather than merely usual: the entry it withdraws is
+// deliberately written outside whatever transaction noticed the failure, and a
+// notification published on a transaction that later rolled back would be
+// discarded along with it — leaving every replica holding a zero the log already
+// contradicts. [dbx.InTx] joins a transaction already on the context, which is
+// right everywhere else and wrong here.
+func (m *Manager) forgetFailures(ctx context.Context, keyID string) {
+	if m.failures == nil || keyID == "" {
+		return
+	}
+	_ = m.store.InTx(dbx.WithoutTx(ctx), func(ctx context.Context) error {
+		if tx, ok := dbx.Tx(ctx); ok {
+			return m.failures.forget(ctx, tx, keyID)
+		}
+		// A store that is not Postgres, which is a [MemoryStore] in a test.
+		// There are no other replicas of one to tell.
+		m.failures.drop(keyID)
+		return nil
 	})
 }
 

@@ -6,9 +6,11 @@ package electric
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 
 	"github.com/google/uuid"
+	"github.com/simonjanss/rig/examples/linearlite/internal/model"
 	"github.com/simonjanss/rig/runtime/electric"
 	"github.com/simonjanss/rig/runtime/tenancy"
 )
@@ -65,8 +67,35 @@ func parseRigPresenceShapeParams(r *http.Request) (RigPresenceShapeParams, error
 // Returning an error refuses the subscription.
 type RigPresenceScope func(ctx context.Context, r *http.Request, claims tenancy.Claims, p RigPresenceShapeParams, w *electric.Where) error
 
+// RigPresenceFallback answers this shape from the application's own read path
+// when the sync service cannot be reached.
+//
+// It is called for a subscriber reading the shape from the beginning, and
+// never for one resuming a subscription — so what it returns is every row
+// the shape holds, not a change to one. The rows go out in the sync protocol's
+// own format, which is why a subscriber needs to know nothing about this and
+// why what it gets is a snapshot rather than a stream: correct when it was
+// read, and not updated until the sync service is back.
+//
+// The context already carries the subscriber's claims, so a generated
+// repository read scopes itself to the right tenant without being asked.
+//
+// The read this corresponds to is List, with the repository's default filters:
+// this tenant, not deleted, not a snapshot.
+//
+// **Whatever the scope narrows, narrow here too.** A scope is a filter the
+// proxy sends to the sync service and can therefore promise; this is a read
+// the proxy cannot see inside. A shape scoped to less than its table, with a
+// fallback that is not, shows a subscriber rows the subscription would have
+// withheld — and only while something else is broken, which is the worst
+// time to find out.
+//
+// Returning an error answers 502, which is what a shape with no fallback
+// answers anyway.
+type RigPresenceFallback func(ctx context.Context, r *http.Request, claims tenancy.Claims, p RigPresenceShapeParams) ([]*model.RigPresence, error)
+
 // handleRigPresenceShape serves GET /api/v1/rig_presence/_stream.
-func handleRigPresenceShape(s Server, scope RigPresenceScope) http.HandlerFunc {
+func handleRigPresenceShape(s Server, scope RigPresenceScope, fallback RigPresenceFallback) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		claims, where, ok := prepare(s, w, r, false)
 		if !ok {
@@ -98,7 +127,44 @@ func handleRigPresenceShape(s Server, scope RigPresenceScope) http.HandlerFunc {
 			// every column it names to every subscriber, and a column that is not in the
 			// API has no business in a live stream either.
 			Columns: RigPresenceShapeColumns,
+			// What answers this if the sync service cannot be reached. Nil unless the
+			// application wired one, and nil is the 502 this route answered before the
+			// field existed.
+			Fallback: rigPresenceFallback(fallback, r, claims, params),
 		})
+	}
+}
+
+// rigPresenceFallback adapts one of these reads to what the proxy asks for.
+//
+// The claims go onto the context here, and not in the function an application
+// writes, for the reason the tenant condition is built in the handler: a
+// generated read takes its claims from the context, and one that reached it
+// without them is a read with no tenant filter. Making that somebody's job to
+// remember is making it somebody's job to forget.
+//
+// Nil stays nil, which is how the proxy knows there is nothing to fall back
+// to.
+func rigPresenceFallback(fn RigPresenceFallback, r *http.Request, claims tenancy.Claims, p RigPresenceShapeParams) electric.Fallback {
+	if fn == nil {
+		return nil
+	}
+	return func(ctx context.Context) (electric.Snapshot, error) {
+		rows, err := fn(tenancy.NewContext(ctx, claims), r, claims, p)
+		if err != nil {
+			return electric.Snapshot{}, err
+		}
+
+		out := make([]electric.Row, 0, len(rows))
+		for _, m := range rows {
+			// A nil in the slice is not a row, and rendering one would send a subscriber a
+			// row of nulls with an empty key.
+			if m == nil {
+				continue
+			}
+			out = append(out, rigPresenceShapeRow(m))
+		}
+		return electric.Snapshot{Rows: out, Schema: RigPresenceShapeSchema}, nil
 	}
 }
 
@@ -120,3 +186,37 @@ var RigPresenceShapeColumns = []string{
 	"target_field",
 	"activity",
 }
+
+// rigPresenceShapeRow renders one row the way the sync service renders it.
+//
+// Every value is the text Postgres prints for it, or null, because that is
+// what a subscriber's parsers expect — the type each column is read as comes
+// from RigPresenceShapeSchema and not from the JSON.
+func rigPresenceShapeRow(m *model.RigPresence) electric.Row {
+	return electric.Row{
+		Key: electric.RowKey("rig_presence", fmt.Sprint(m.ID)),
+		Value: map[string]any{
+			"id":           electric.Value(m.ID),
+			"tenant_id":    electric.Value(m.TenantID),
+			"account_id":   electric.Value(m.AccountID),
+			"session_key":  electric.Value(m.SessionKey),
+			"created_at":   electric.Value(m.CreatedAt),
+			"seen_at":      electric.Value(m.SeenAt),
+			"scope":        electric.Value(m.Scope),
+			"target_table": electric.Value(m.TargetTable),
+			"target_id":    electric.Value(m.TargetID),
+			"target_field": electric.Value(m.TargetField),
+			"activity":     electric.Value(m.Activity),
+		},
+	}
+}
+
+// RigPresenceShapeSchema describes the columns this shape carries, in the form
+// the sync service describes them.
+//
+// It is sent with a fallback snapshot and is how a subscriber knows to read a
+// count as a number and a timestamp as a moment. The types are Postgres's own
+// names — int8, timestamptz, an enum's type name — because those are what
+// the sync service sends and a subscriber has one set of parsers for both
+// paths.
+const RigPresenceShapeSchema = "{\"account_id\":{\"not_null\":true,\"type\":\"uuid\"},\"activity\":{\"not_null\":true,\"type\":\"rig_presence_activity\"},\"created_at\":{\"not_null\":true,\"type\":\"timestamptz\"},\"id\":{\"not_null\":true,\"pk_index\":0,\"type\":\"uuid\"},\"scope\":{\"not_null\":true,\"type\":\"text\"},\"seen_at\":{\"not_null\":true,\"type\":\"timestamptz\"},\"session_key\":{\"not_null\":true,\"type\":\"text\"},\"target_field\":{\"type\":\"text\"},\"target_id\":{\"type\":\"uuid\"},\"target_table\":{\"type\":\"text\"},\"tenant_id\":{\"not_null\":true,\"type\":\"uuid\"}}"
