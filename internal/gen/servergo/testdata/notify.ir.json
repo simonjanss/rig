@@ -4207,8 +4207,7 @@
         "refresh_ttl": "12h",
         "remember_ttl": "30d",
         "rotation_leeway": "30s",
-        "identity_ttl": "30m",
-        "cache_ttl": "0s"
+        "identity_ttl": "30m"
       },
       "password": {
         "min_length": 12,

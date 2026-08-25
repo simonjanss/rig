@@ -14,7 +14,10 @@ import (
 )
 
 // APIKeyStore keeps machine credentials in rig_api_key.
-type APIKeyStore struct{ db dbx.Conn }
+type APIKeyStore struct {
+	db dbx.Conn
+	tx dbx.Beginner
+}
 
 var _ apikey.Store = (*APIKeyStore)(nil)
 
@@ -87,6 +90,11 @@ func (s *APIKeyStore) SetExpiry(ctx context.Context, tenantID, id uuid.UUID, at 
 		return fmt.Errorf("authpg: set api key expiry: %w", err)
 	}
 	return nil
+}
+
+// InTx implements [apikey.Store].
+func (s *APIKeyStore) InTx(ctx context.Context, fn func(ctx context.Context) error) error {
+	return dbx.InTx(ctx, s.tx, func(ctx context.Context, _ dbx.Conn) error { return fn(ctx) })
 }
 
 // List implements [apikey.Store].

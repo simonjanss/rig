@@ -46,9 +46,6 @@ func TestAuthDefaultsAreResolved(t *testing.T) {
 		{"remember_ttl", a.Session.RememberTTL, 30 * 24 * time.Hour},
 		{"rotation_leeway", a.Session.RotationLeeway, 30 * time.Second},
 		{"identity_ttl", a.Session.IdentityTTL, 30 * time.Minute},
-		// Zero is the documented default: the token row is read on every request,
-		// which is what makes revocation immediate.
-		{"cache_ttl", a.Session.CacheTTL, 0},
 	} {
 		if c.got.Duration() != c.want {
 			t.Errorf("session.%s = %s, want %s", c.what, c.got, c.want)
@@ -132,11 +129,6 @@ func TestAuthSessionCombinationsThatCannotBeMeant(t *testing.T) {
 			name:    "a leeway a consumed token never leaves",
 			session: "refresh_ttl: 30s\n    rotation_leeway: 30s",
 			want:    "never stops being usable",
-		},
-		{
-			name:    "a cache longer than the token it caches",
-			session: "access_ttl: 5m\n    cache_ttl: 10m",
-			want:    "longer than access_ttl",
 		},
 	} {
 		t.Run(c.name, func(t *testing.T) {

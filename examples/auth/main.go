@@ -44,6 +44,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/simonjanss/rig/auth"
 	"github.com/simonjanss/rig/auth/account"
 	"github.com/simonjanss/rig/auth/apikey"
 	"github.com/simonjanss/rig/examples/auth/internal/api"
@@ -110,7 +111,7 @@ func main() {
 		},
 		Migrate: migrate.Require(migrations, migrate.Options{}),
 	}, func(ctx context.Context, app *serve.App) (http.Handler, error) {
-		mux, engine, err := newAPI(ctx, app.Pool, app.Logger)
+		mux, front, engine, err := newAPI(ctx, app.Pool, app.Logger)
 		if err != nil {
 			return nil, err
 		}
@@ -125,6 +126,17 @@ func main() {
 		app.Drain("notifications", engine.StopClaiming)
 		app.CloseWithin("notifications", 15*time.Second, engine.Close)
 
+		// The listener behind `cache:` in rig.yaml, which rig started when it
+		// built the foundation and nobody here has to think about again. This is
+		// the whole of the lifecycle an application owns, and it is registered
+		// unconditionally because a project with no cache configured has nothing
+		// to close and this returns at once.
+		//
+		// Forgetting it costs one connection until the process exits. It cannot
+		// cost correctness: a listener that is not running reports itself as not
+		// live, and a cache that is not live reads through and stores nothing.
+		app.CloseWithin("auth", 5*time.Second, front.Close)
+
 		return mux, nil
 	})
 }
@@ -136,7 +148,7 @@ func main() {
 // file has a constructor both callers share instead of building services inside
 // the mount closure.
 func dispatchNotifications(ctx context.Context, pool *pgxpool.Pool) error {
-	_, engine, err := newAPI(ctx, pool, slog.Default())
+	_, _, engine, err := newAPI(ctx, pool, slog.Default())
 	if err != nil {
 		return err
 	}
@@ -152,7 +164,7 @@ func dispatchNotifications(ctx context.Context, pool *pgxpool.Pool) error {
 // the wiring — that the generated handlers and the auth endpoints agree about
 // who the caller is — and a test that assembled its own would be testing
 // something else.
-func newAPI(ctx context.Context, pool *pgxpool.Pool, log *slog.Logger) (http.Handler, *notify.Engine, error) {
+func newAPI(ctx context.Context, pool *pgxpool.Pool, log *slog.Logger) (http.Handler, *auth.Auth, *notify.Engine, error) {
 	repos := store.New(pool, store.Config{})
 
 	// The inbox, and the two halves of it that have to be built in this order.
@@ -240,7 +252,7 @@ func newAPI(ctx context.Context, pool *pgxpool.Pool, log *slog.Logger) (http.Han
 		// like a 401 from anywhere else.
 	})
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	// One resource, because the application has one table. The foundation's
@@ -281,7 +293,7 @@ func newAPI(ctx context.Context, pool *pgxpool.Pool, log *slog.Logger) (http.Han
 	// tables. It is here rather than inside auth.New because construction does no
 	// I/O.
 	if err := authz.SyncPermissions(ctx, pool, api.PermissionKeys()); err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	// And the interface, which is a client of everything above rather than a
@@ -290,7 +302,7 @@ func newAPI(ctx context.Context, pool *pgxpool.Pool, log *slog.Logger) (http.Han
 	// to be the one thing it reached past the API for.
 	ui, err := web.New(mux, pool, mail)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	ui.Mount(mux)
 
@@ -300,7 +312,7 @@ func newAPI(ctx context.Context, pool *pgxpool.Pool, log *slog.Logger) (http.Han
 		http.Redirect(w, r, "/ui", http.StatusFound)
 	})
 
-	return mux, engine, nil
+	return mux, front, engine, nil
 }
 
 // pruneAuthLog deletes authentication log entries past the retention window.

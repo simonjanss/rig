@@ -13,6 +13,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -312,14 +313,34 @@ func newServer(t *testing.T) *server {
 	// The same function main uses, so what the test drives is what runs.
 	srv := httptest.NewUnstartedServer(nil)
 
-	handler, _, err := newAPI(context.Background(), pool, slog.Default())
+	handler, front, _, err := newAPI(context.Background(), pool, slog.Default())
 	if err != nil {
 		t.Fatal(err)
 	}
+	closeAuth(t, front)
 	srv.Config.Handler = handler
 	srv.Start()
 	t.Cleanup(srv.Close)
 	return &server{pool: pool, http: srv}
+}
+
+// closeAuth registers the one shutdown `cache:` in rig.yaml adds, which is the
+// same line main.go hands to app.CloseWithin.
+//
+// Every newAPI in this suite starts the invalidation listener, and the listener
+// opens a connection of its own from the pool's configuration rather than
+// taking one out of the pool — so t.Cleanup(pool.Close) does not reach it, and
+// without this each test would leave a connection and the goroutine holding it
+// open for the life of the test binary.
+func closeAuth(t *testing.T, front *auth.Auth) {
+	t.Helper()
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := front.Close(ctx); err != nil {
+			t.Errorf("closing the auth foundation: %v", err)
+		}
+	})
 }
 
 // seed makes the tenant, account and role the example ships with.

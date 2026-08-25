@@ -97,6 +97,7 @@ func ApplyConfig(api ir.API, schema ir.Schema, set *tableconf.Set, opt ConfigOpt
 		Notifications:      api.Notifications,
 		Presence:           api.Presence,
 		Throttle:           api.Throttle,
+		Cache:              api.Cache,
 		Tracing:            api.Tracing,
 		Monitoring:         api.Monitoring,
 		EmbeddedFoundation: api.EmbeddedFoundation,

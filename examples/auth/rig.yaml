@@ -40,6 +40,26 @@ auth:
   # and not rig's to answer.
   log_retention: 90d
 
+# Verifying a session and verifying an API key are the two reads rig makes on
+# behalf of every caller, and this is what stops them being a row read each.
+#
+# It is not a time-to-live over authentication — that would be a revoked session
+# that keeps working, and rig does not offer it. Every revocation rig performs
+# publishes on the transaction that performed it, over a Postgres channel every
+# replica listens on, so a session ended here stops working everywhere the moment
+# that transaction commits. `ttl` is what remains for a replica that lost the
+# channel, and a replica that has lost it stops caching rather than serving
+# something it can no longer withdraw.
+#
+# There is nothing in main.go to match this. rig makes both of these reads and
+# rig makes every write that invalidates them, which is exactly why they are the
+# ones cached: an application has no publish to remember and no write path it can
+# leave out. The read rig deliberately does not cache is Grants, in
+# services/authz — that one is over this example's own role tables, and rig
+# cannot see those writes.
+cache:
+  enabled: true
+
 # The inbox. `enabled` is what makes server-go write the engine, the dispatcher
 # and the routes under /notifications; a project without this block carries none
 # of it.

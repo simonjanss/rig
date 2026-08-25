@@ -82,7 +82,7 @@ func TestDurationRejectsWhatIsNotOne(t *testing.T) {
 }
 
 // A bare zero is accepted because that is how "off" reads in a configuration
-// file, and cache_ttl is the field that needs it.
+// file, and every optional lifetime is a field that needs it.
 func TestDurationUnmarshalsABareZero(t *testing.T) {
 	t.Parallel()
 

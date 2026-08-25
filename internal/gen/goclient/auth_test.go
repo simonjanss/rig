@@ -41,7 +41,7 @@ func TestTheProfileCarriesTheProjectsOwnLifetimes(t *testing.T) {
 		"RememberTTL: 14 * 24 * time.Hour",
 		"RotationLeeway: 45 * time.Second",
 		"IdentityTTL: 20 * time.Minute",
-		"CacheTTL: 2 * time.Second",
+		"CacheTTL: 45 * time.Second",
 		// The project allows both, so the client knows the routes are there.
 		"HasRegistration: true",
 		"HasTenantCreation: true",

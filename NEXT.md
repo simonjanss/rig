@@ -117,6 +117,60 @@ Next:
   which is the bug this actually fixed: `alreadyApplied` matched a filename, so
   no schema change to rig's tables had ever been able to reach an existing
   project.
+- ~~**M16** — the cache, wired.~~ Shipped: `runtime/cache` landed with a suite, a
+  Postgres-backed `internal/cachetest` and a package doc arguing its own case,
+  and nothing in the repository imported it. It does now, at the two reads rig
+  owns end to end — `session.Manager.Verify` and `apikey.Manager.Verify` — behind
+  a `cache:` block in rig.yaml.
+
+  **What decided the call sites was who owns the writes, not who pays for the
+  reads.** The expensive read on the authenticated path is `Grants`, and it is
+  the one deliberately left alone: the role tables belong to the application and
+  so do the writes to them, so caching that answer means the application
+  publishes its own invalidations — and one forgotten write path there is a
+  permission somebody took away that goes on working, silently, for a full
+  lifetime. rig caches what it can withdraw. `Parts().Cache` is the bus for a
+  project that decides to take that on knowingly, and both `docs/auth.md` and the
+  examples say why it is not the default.
+
+  Three departures worth knowing about. **`server-go` emits no constructor**,
+  unlike every other project-level facility: the bus is built, served and started
+  inside `auth.New`, because a generated `NewCache(pool)` that a `main.go` has to
+  remember to `Start()` is one more thing to forget and forgetting it is
+  invisible. The whole application-visible surface is `app.CloseWithin("auth", …,
+  front.Close)`, and even that is fail-safe — a bus that is not running reports
+  itself as not live, and a map that is not live reads through and stores
+  nothing, so every mistake around the lifecycle costs latency rather than
+  correctness.
+
+  **`auth.session.cache_ttl` is gone**, along with the private map behind it. It
+  had been in rig.yaml, the IR, `auth.Config` and `docs/auth.md` since M4, and
+  every one of those places documented it as a knob not to turn — a bare
+  time-to-live over authentication is a revoked session that keeps working. There
+  is no second path now: one lifetime, in the `cache:` block, and it is the
+  backstop rather than the guarantee. `rigclient.AuthProfile.CacheTTL` survives
+  and reports that number, because a document consumer should still be able to
+  read the worst case. Removing the field moved the revision in three examples,
+  which is the one-time cost of a key that had been in the hash all along
+  without any client being able to observe it. `API.Cache` is cleared in
+  `Document.Hash` so that turning the cache on does not.
+
+  **`Store.RevokeFamily` returns identifiers rather than a count.** The cache is
+  keyed by the access token a request presents and a revoke ends a whole family,
+  so "this session is over" has to be spelled out as the tokens it was made of
+  before anything can be told to forget them — `UPDATE … RETURNING id`, published
+  one per token on the transaction that did the revoking. `RevokeBy` gained a
+  transaction it did not have; `apikey.Store` gained `InTx` for the same reason.
+  The one write that publishes nothing is `TouchLastUsed`: a last-used timestamp
+  authorises nothing, so it is dropped locally instead — which it must be, or a
+  cached copy carrying the old timestamp would turn a write every five minutes
+  into a write every request.
+
+  Both caches clone on the way *out* rather than in the loader, which is the
+  opposite of what the package doc recommends and for a reason the package cannot
+  know: without a cache every caller got its own row from the store, and a token
+  carries the hash every verification compares against while a key carries the
+  scopes that become a caller's permissions.
 
 ### Modules
 
@@ -1026,7 +1080,8 @@ the number the server enforces.
 `docs/auth.md` documented `RotationLeeway`, `CacheTTL` and `OAuth.StateTTL` as
 tunable, and `auth.Config` had no field for any of them: they were reachable only
 by assembling the parts by hand. They are fields now — `RotationLeeway`,
-`SessionCacheTTL`, `OAuth.StateTTL`.
+`SessionCacheTTL`, `OAuth.StateTTL`. (`SessionCacheTTL` was later removed
+outright; see M16.)
 
 `auth.Config.SigningKey` also claimed a random key was generated when it was
 empty. `oauth.New` refuses anything under 32 bytes, and always did. The comment

@@ -450,12 +450,9 @@ func (e *authEmitter) configFunc(b *gobuf.Buf) {
 	b.L("RememberTTL: %s,", genutil.GoDuration(b, a.Session.RememberTTL))
 	b.L("RotationLeeway: %s,", genutil.GoDuration(b, a.Session.RotationLeeway))
 	b.L("IdentitySessionTTL: %s,", genutil.GoDuration(b, a.Session.IdentityTTL))
-	if a.Session.CacheTTL > 0 {
-		b.L("// Verified access tokens are cached, so a revoked session keeps working")
-		b.L("// for up to this long.")
-		b.L("SessionCacheTTL: %s,", genutil.GoDuration(b, a.Session.CacheTTL))
-	}
 	b.NL()
+
+	e.cacheConfig(b)
 
 	b.L("Policy: %s.Policy{MinLength: %d, MaxLength: %d},",
 		pwPkg, a.Password.MinLength, a.Password.MaxLength)
@@ -735,6 +732,45 @@ func (e *authEmitter) hostLookup(b *gobuf.Buf) {
 		b.L("return \"\"")
 	}
 	b.L("}")
+	b.NL()
+}
+
+// cacheConfig emits the `cache:` block, for a project that has one.
+//
+// It is four numbers and a logger rather than anything to wire, because every
+// cache it turns on is held and withdrawn inside rig/auth: rig makes both of
+// these reads and rig makes every write that invalidates them, so there is no
+// map here, no publish, and no write path an application could leave out.
+func (e *authEmitter) cacheConfig(b *gobuf.Buf) {
+	c := e.doc.API.Cache
+	if c == nil || !c.Enabled {
+		return
+	}
+
+	authPkg := b.Import(authModule)
+
+	b.Comment("Verifying a session and verifying an API key are the two reads rig " +
+		"makes on behalf of every caller, and this is what stops them being a row " +
+		"read each.\n\n" +
+		"Not a time-to-live over authentication, which would be a revoked session " +
+		"that keeps working. The lifetime below is the backstop: a revocation " +
+		"publishes on the transaction that performed it, over a Postgres channel " +
+		"every replica listens on, so the ordinary case is that everybody has " +
+		"forgotten by the time that transaction commits. A replica that lost the " +
+		"channel stops caching rather than serving what it cannot withdraw.\n\n" +
+		"Every number came from `cache:` in rig.yaml.")
+	b.L("Cache: %s.CacheOptions{", authPkg)
+	b.L("Enabled: true,")
+	b.L("TTL: %s,", goDurationFloat(b, c.TTLSeconds))
+	b.L("Channel: %s,", gobuf.Quote(c.Channel))
+	if c.MaxEntries > 0 {
+		b.L("MaxEntries: %d,", c.MaxEntries)
+	}
+	b.Comment("The one line anybody reads when this stops working. The fallback " +
+		"— reading the row again — is correct and silent, so nothing else about " +
+		"the server would say so.")
+	b.L("Logger: h.Logger,")
+	b.L("},")
 	b.NL()
 }
 

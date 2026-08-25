@@ -123,9 +123,15 @@ type Store interface {
 	// would keep a thirty-second leeway open indefinitely.
 	MarkRotated(ctx context.Context, id uuid.UUID, at time.Time) error
 
-	// RevokeFamily kills every live token descending from a root and reports
-	// how many it killed.
-	RevokeFamily(ctx context.Context, rootID uuid.UUID, at time.Time) (int, error)
+	// RevokeFamily kills every live token descending from a root and returns
+	// the identifiers of the ones it killed.
+	//
+	// The identifiers rather than a count, because a cache over verification is
+	// keyed by the access token a request presents and not by the session it
+	// belongs to — so "this session is over" has to be spelled out as the
+	// tokens it was made of before anything can be told to forget them. A
+	// caller that only wants the count takes len.
+	RevokeFamily(ctx context.Context, rootID uuid.UUID, at time.Time) ([]uuid.UUID, error)
 
 	// Families lists an account's sessions, newest first.
 	Families(ctx context.Context, tenantID, accountID uuid.UUID) ([]Family, error)

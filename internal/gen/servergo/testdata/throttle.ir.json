@@ -1564,8 +1564,7 @@
         "refresh_ttl": "8h",
         "remember_ttl": "14d",
         "rotation_leeway": "45s",
-        "identity_ttl": "20m",
-        "cache_ttl": "2s"
+        "identity_ttl": "20m"
       },
       "password": {
         "min_length": 14,
@@ -1667,6 +1666,12 @@
       "exempt": [
         "GET /api/v1/lessons"
       ]
+    },
+    "cache": {
+      "enabled": true,
+      "ttl_seconds": 30,
+      "channel": "rig_cache",
+      "max_entries": 50000
     },
     "permissions": [
       {

@@ -143,6 +143,7 @@ the same commit.** The pages are short and the mapping is mechanical:
 | `internal/gen/openapigen` | `docs/api.md`, `docs/generators.md`, `README.md` |
 | `notify/`, `internal/project/notifications.go` | `docs/notifications.md` |
 | `presence/`, `internal/project/presence.go` | `docs/presence.md`, `docs/rig-yaml.md` |
+| `runtime/cache`, `internal/project/cache.go` | `docs/rig-yaml.md`, `docs/auth.md` |
 | `runtime/serve`, `runtime/dbhook` | `docs/services.md` |
 | `runtime/reqlog`, `observe/`, or what a generator emits about logging or spans | `docs/observability.md` |
 | `internal/project/tracing.go` — the `tracing:` block | `docs/observability.md`, `docs/rig-yaml.md` |

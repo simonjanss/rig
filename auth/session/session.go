@@ -16,12 +16,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"sync"
 	"time"
 
 	"github.com/google/uuid"
 
 	"github.com/simonjanss/rig/auth/authlog"
+	"github.com/simonjanss/rig/runtime/dbx"
 	"github.com/simonjanss/rig/runtime/rigerr"
 	"github.com/simonjanss/rig/runtime/throttle"
 )
@@ -80,14 +80,18 @@ type Config struct {
 	Limiter      *throttle.Limiter
 	RefreshLimit throttle.Limit
 
-	// CacheTTL keeps verified access tokens in memory.
+	// Cache keeps verified access tokens in memory, and is told to stop.
 	//
-	// Zero, the default, means every request reads the row, which is what
-	// makes revocation immediate. Setting it trades that for throughput: a
-	// revoked session keeps working for up to CacheTTL. Do not set it to more
-	// than a few seconds, and do not set it at all unless the read is
-	// measurably a problem.
-	CacheTTL time.Duration
+	// Nil, the default, means every request reads the row. A cache built by
+	// [NewTokenCache] means most of them do not, and that a revocation reaches
+	// every replica on the transaction that performed it — so the lifetime in
+	// [TokenCacheConfig] is the backstop rather than the guarantee.
+	//
+	// There is no plain time-to-live here any more, and its absence is the
+	// decision: a cache over authentication with nothing to withdraw an entry
+	// is a revoked session that keeps working, which is not a trade this
+	// package offers.
+	Cache *TokenCache
 
 	// OnRotate replaces a session's payload when it is refreshed.
 	//
@@ -118,7 +122,7 @@ type Manager struct {
 	now      func() time.Time
 	ttl      ttls
 	leeway   time.Duration
-	cache    *cache
+	cache    *TokenCache
 	onRotate func(ctx context.Context, prev *Token) (json.RawMessage, error)
 
 	limiter      *throttle.Limiter
@@ -164,9 +168,7 @@ func New(cfg Config) (*Manager, error) {
 
 		limiter:      cfg.Limiter,
 		refreshLimit: cfg.RefreshLimit,
-	}
-	if cfg.CacheTTL > 0 {
-		m.cache = newCache(cfg.CacheTTL)
+		cache:        cfg.Cache,
 	}
 	return m, nil
 }
@@ -303,23 +305,24 @@ func (m *Manager) Verify(ctx context.Context, presented string) (*Token, error) 
 		return nil, ErrInvalidToken
 	}
 
-	now := m.now()
-	if m.cache != nil {
-		if t, ok := m.cache.get(id, now); ok && matches(t.SecretHash, s) {
-			return t, nil
-		}
-	}
-
-	t, err := m.store.Find(ctx, id)
-	if err != nil {
+	// Every check below runs on the answer whether it came from the cache or
+	// from the row, which is the property that makes the cache safe to reason
+	// about: caching changes where the token was read, and nothing else. The
+	// secret is compared here rather than being part of the key — the key is the
+	// identifier a caller supplied, and a secret is never one.
+	t, err := m.cache.load(id, func() (*Token, error) {
+		return m.store.Find(ctx, id)
+	})
+	switch {
+	case errors.Is(err, errNoToken):
+		return nil, ErrInvalidToken
+	case err != nil:
 		return nil, err
 	}
-	if t == nil || t.Kind != KindAccess || !matches(t.SecretHash, s) || !t.Live(now) {
-		return nil, ErrInvalidToken
-	}
 
-	if m.cache != nil {
-		m.cache.put(t, now)
+	now := m.now()
+	if t.Kind != KindAccess || !matches(t.SecretHash, s) || !t.Live(now) {
+		return nil, ErrInvalidToken
 	}
 	return t, nil
 }
@@ -439,7 +442,18 @@ func (m *Manager) Rotate(ctx context.Context, presented string) (Pair, error) {
 	})
 
 	if reuse != nil {
-		if _, revokeErr := m.store.RevokeFamily(ctx, reuse.RootTokenID, now); revokeErr != nil {
+		// A transaction of its own, because the one above was rolled back on
+		// purpose — see the comment there. The revocation and the invalidation
+		// share it, so no replica is ever told to forget a session that is in
+		// fact still alive.
+		revokeErr := m.store.InTx(ctx, func(ctx context.Context) error {
+			killed, err := m.store.RevokeFamily(ctx, reuse.RootTokenID, now)
+			if err != nil {
+				return err
+			}
+			return m.forget(ctx, killed)
+		})
+		if revokeErr != nil {
 			return Pair{}, revokeErr
 		}
 		m.recordReuse(ctx, now, reuse)
@@ -504,15 +518,28 @@ func (m *Manager) Revoke(ctx context.Context, rootID uuid.UUID) error {
 func (m *Manager) RevokeBy(ctx context.Context, rootID, by uuid.UUID) error {
 	now := m.now()
 
-	// A read on a path that is not hot, in exchange for an entry that can be
-	// found. A session nobody has is still revoked — the statement affects
-	// nothing — and the entry is written with what little is known.
-	root, err := m.store.Find(ctx, rootID)
-	if err != nil {
-		return err
-	}
+	// One transaction over the read, the revocation and the invalidation. The
+	// last of those is why: a notification is delivered when the transaction
+	// issuing it commits and discarded when it rolls back, so publishing here
+	// is what makes "this session is over" and "stop believing this session"
+	// one event rather than two that can disagree.
+	var root *Token
+	if err := m.store.InTx(ctx, func(ctx context.Context) error {
+		// A read on a path that is not hot, in exchange for an entry that can
+		// be found. A session nobody has is still revoked — the statement
+		// affects nothing — and the entry is written with what little is known.
+		found, err := m.store.Find(ctx, rootID)
+		if err != nil {
+			return err
+		}
+		root = found
 
-	if _, err := m.store.RevokeFamily(ctx, rootID, now); err != nil {
+		killed, err := m.store.RevokeFamily(ctx, rootID, now)
+		if err != nil {
+			return err
+		}
+		return m.forget(ctx, killed)
+	}); err != nil {
 		return err
 	}
 
@@ -573,12 +600,38 @@ func (m *Manager) RevokeAll(ctx context.Context, tenantID, accountID uuid.UUID) 
 	now := m.now()
 	return m.store.InTx(ctx, func(ctx context.Context) error {
 		for _, f := range families {
-			if _, err := m.store.RevokeFamily(ctx, f.Root.ID, now); err != nil {
+			killed, err := m.store.RevokeFamily(ctx, f.Root.ID, now)
+			if err != nil {
+				return err
+			}
+			if err := m.forget(ctx, killed); err != nil {
 				return err
 			}
 		}
 		return nil
 	})
+}
+
+// forget tells every replica to stop believing in the tokens just revoked.
+//
+// Always called inside the transaction that revoked them, which is what makes
+// the invalidation atomic with the revocation: Postgres delivers a notification
+// when the issuing transaction commits and throws it away when that transaction
+// rolls back.
+//
+// A store with no transaction on the context is one that is not Postgres — a
+// [MemoryStore] in a test — so there is no channel to publish on and no other
+// replica to reach. Forgetting in this process is the whole of what is
+// available and the whole of what is needed.
+func (m *Manager) forget(ctx context.Context, ids []uuid.UUID) error {
+	if m.cache == nil || len(ids) == 0 {
+		return nil
+	}
+	if tx, ok := dbx.Tx(ctx); ok {
+		return m.cache.forget(ctx, tx, ids...)
+	}
+	m.cache.drop(ids...)
+	return nil
 }
 
 // List returns an account's live sessions, newest first.
@@ -698,51 +751,4 @@ func (m *Manager) recordReuse(ctx context.Context, now time.Time, prev *Token) {
 			"token_id":            prev.ID.String(),
 		},
 	})
-}
-
-// cache holds verified access tokens for a short while.
-type cache struct {
-	ttl time.Duration
-	mu  sync.RWMutex
-	m   map[uuid.UUID]cached
-}
-
-type cached struct {
-	token *Token
-	until time.Time
-}
-
-func newCache(ttl time.Duration) *cache {
-	return &cache{ttl: ttl, m: make(map[uuid.UUID]cached)}
-}
-
-func (c *cache) get(id uuid.UUID, now time.Time) (*Token, bool) {
-	c.mu.RLock()
-	e, ok := c.m[id]
-	c.mu.RUnlock()
-
-	if !ok || !now.Before(e.until) {
-		return nil, false
-	}
-	return e.token, true
-}
-
-func (c *cache) put(t *Token, now time.Time) {
-	until := now.Add(c.ttl)
-	// Never cache past the token's own expiry: the whole point of a short
-	// access lifetime is that it is enforced.
-	if t.ExpiresAt.Before(until) {
-		until = t.ExpiresAt
-	}
-
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	// A cheap bound. The map holds one entry per live access token, and a
-	// process that has seen a hundred thousand of them inside one TTL is
-	// better served by dropping the lot than by growing without limit.
-	if len(c.m) > 100_000 {
-		clear(c.m)
-	}
-	c.m[t.ID] = cached{token: t, until: until}
 }

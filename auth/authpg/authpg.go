@@ -38,7 +38,7 @@ func New(db dbx.Beginner) *Stores {
 	return &Stores{
 		Accounts: &AccountStore{db: conn, tx: db},
 		Sessions: &SessionStore{db: conn, tx: db},
-		APIKeys:  &APIKeyStore{db: conn},
+		APIKeys:  &APIKeyStore{db: conn, tx: db},
 		Log:      &Log{db: conn},
 	}
 }

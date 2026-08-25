@@ -22,7 +22,6 @@ auth:
     remember_ttl: 14d
     rotation_leeway: 45s
     identity_ttl: 20m
-    cache_ttl: 2s
 
   password:
     min_length: 14
@@ -62,3 +61,14 @@ auth:
       - name: github
         client_id_env: GH_APP_ID
         client_secret_env: GH_APP_SECRET
+
+# The reads rig makes on behalf of every caller — verifying a session, verifying
+# an API key — held in memory and withdrawn over a Postgres channel when the
+# transaction that revoked something commits. The lifetime is the backstop and
+# not the guarantee, which is why there is one number here rather than one under
+# `auth:` that meant something weaker.
+cache:
+  enabled: true
+  ttl: 45s
+  channel: rig_cache_authwired
+  max_entries: 25000

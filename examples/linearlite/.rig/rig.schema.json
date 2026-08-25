@@ -320,6 +320,28 @@
       "additionalProperties": false,
       "type": "object"
     },
+    "Cache": {
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Whether rig caches its own per-request reads — session and API key verification — behind a Postgres NOTIFY channel that invalidates them. Off by default."
+        },
+        "ttl": {
+          "$ref": "#/$defs/Duration",
+          "description": "How long a cached answer may be reused when no invalidation arrives. It is the backstop, not the guarantee: a revocation is published on the transaction that made it. Defaults to 30s."
+        },
+        "channel": {
+          "type": "string",
+          "description": "The Postgres NOTIFY channel invalidations travel on. Two deployments sharing one database and not wanting to share invalidations is the reason it is configurable. Defaults to rig_cache."
+        },
+        "max_entries": {
+          "type": "integer",
+          "description": "How many entries one cache may hold before it is dropped whole. Defaults to 50000."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
+    },
     "Database": {
       "properties": {
         "image": {
@@ -696,6 +718,72 @@
         "module"
       ]
     },
+    "Throttle": {
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Whether the generated server limits API calls. The server-go generator writes the wiring only when it is set."
+        },
+        "api_key": {
+          "$ref": "#/$defs/AuthLimit",
+          "description": "Calls per window per API key. Defaults to 5000 per 1m."
+        },
+        "account": {
+          "$ref": "#/$defs/AuthLimit",
+          "description": "Calls per window per signed-in account. Defaults to 1000 per 1m."
+        },
+        "tenant": {
+          "$ref": "#/$defs/AuthLimit",
+          "description": "Calls per window per tenant, across every account and key they have. What stops one customer crowding out the rest. Defaults to 10000 per 1m."
+        },
+        "ip": {
+          "$ref": "#/$defs/AuthLimit",
+          "description": "Calls per window per source address, for callers who are not signed in. Only for those: once a request carries an identity that identity is the better key. Defaults to 300 per 1m."
+        },
+        "interval": {
+          "$ref": "#/$defs/Duration",
+          "description": "How long a replica may count locally before publishing to the database. The limiter can miss up to one interval of traffic per replica, and a shorter one costs writes. Defaults to 1s."
+        },
+        "routes": {
+          "items": {
+            "$ref": "#/$defs/ThrottleRoute"
+          },
+          "type": "array",
+          "description": "Extra limits on particular route patterns, counted against the caller and on top of the per-caller limits."
+        },
+        "exempt": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "description": "Route patterns no limit applies to, for example a long-lived stream. Written as METHOD /path, matching the pattern the router registers."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
+    },
+    "ThrottleRoute": {
+      "properties": {
+        "pattern": {
+          "type": "string",
+          "description": "The route pattern, as the router registers it — for example POST /api/v1/todos. Matched against the pattern net/http reports, not against the path."
+        },
+        "max": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "How many calls are allowed in one window."
+        },
+        "window": {
+          "$ref": "#/$defs/Duration",
+          "description": "How long the window is."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "pattern"
+      ]
+    },
     "Tracing": {
       "properties": {
         "enabled": {
@@ -843,6 +931,14 @@
     "presence": {
       "$ref": "#/$defs/Presence",
       "description": "Who is here, and what they are looking at."
+    },
+    "throttle": {
+      "$ref": "#/$defs/Throttle",
+      "description": "How many API calls one caller may make. Fair-use limiting, counted in the database so replicas cannot disagree."
+    },
+    "cache": {
+      "$ref": "#/$defs/Cache",
+      "description": "Whether rig caches its own per-request reads, behind a Postgres NOTIFY channel that invalidates them when the transaction causing it commits."
     },
     "tracing": {
       "$ref": "#/$defs/Tracing",

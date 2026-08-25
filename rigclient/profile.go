@@ -34,9 +34,18 @@ type AuthProfile struct {
 	// IdentityTTL is the lifetime of the tenant-less credential somebody holds
 	// between signing in and picking a tenant.
 	IdentityTTL time.Duration
-	// CacheTTL is how long the server may keep a verified access token in
-	// memory. A client cannot act on it; it is here because a document consumer
-	// should be able to say how quickly a revocation takes effect.
+	// CacheTTL is how long the server may go on answering out of memory after an
+	// invalidation it never received. Zero means it caches nothing and every
+	// request reads the row.
+	//
+	// It is not how long a revocation takes to take effect, and reading it that
+	// way is the mistake worth naming. The server publishes an invalidation on
+	// the transaction that revokes something, so the ordinary answer is "at
+	// once"; this is the worst case for a replica that had lost the channel at
+	// that moment.
+	//
+	// A client cannot act on either number. It is here so that somebody reading
+	// the generated document can say how stale an answer could possibly be.
 	CacheTTL time.Duration
 
 	// TenantHeader is the header a sign-in names its tenant with, when the
