@@ -52,7 +52,20 @@ type Options struct {
 	// ShapeImport is the import path of this generated package, so a stub in
 	// another directory can refer back to it.
 	ShapeImport string `json:"shape_import"`
+
+	// ModelImport is the import path of the generated model package, and the
+	// switch that turns the fallback seam on.
+	//
+	// Empty writes none of it: no Fallback type, no field on Handlers, no row
+	// encoder, and a sync outage stays the 502 it has always been. It has to be
+	// a switch rather than always-on because the seam is made of the model's
+	// types — an application answers a shape with the rows its own read returns,
+	// and those are *model.Todo and not something this package could invent.
+	ModelImport string `json:"model_import"`
 }
+
+// fallbacks reports whether the fallback seam is being emitted.
+func (o Options) fallbacks() bool { return o.ModelImport != "" }
 
 // Generator emits the shape endpoints.
 type Generator struct{}

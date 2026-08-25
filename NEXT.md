@@ -5363,6 +5363,128 @@ stale row as a bug.
 Electric warns about in the console on every load. Fine here; a project that adds
 two more shapes will meet that ceiling before it meets any presence limit.
 
+## M15.2 — a shape answers when the sync service does not (shipped)
+
+**Goal.** A subscriber whose sync service is unreachable gets rows instead of a
+502, from the read the application already has, in the format it already speaks.
+
+**What it is.** `electric.Shape` grew a `Fallback`, and `Proxy.Serve` calls it
+when a subscriber reading from the beginning cannot be answered upstream. What
+goes out is a snapshot in the sync protocol's own format, so nothing on the
+client changes and nothing on the client can tell — `X-Rig-Sync-Fallback:
+snapshot` is the only sign, and it is there for a person reading a network tab.
+The generator emits the seam when `model_import` names the model, because the
+seam is made of the model's types; without it nothing is emitted at all and the
+package is what it was.
+
+### Everything about the protocol was read rather than reasoned about
+
+The design turns on four facts about ElectricSQL 1.6.9, and each of them was
+answered by running a container and looking, not by thinking about it:
+
+- **Every value on the wire is a string or null**, in Postgres's text form, and
+  the column's type comes from the `electric-schema` header. So a snapshot that
+  sent a JSON number would be decoded twice.
+- **A boolean is `true`, not `t`.** Postgres prints `t`; the sync service
+  normalises. pgx's text encoder prints `t`, so the one type where the obvious
+  implementation is wrong is the one where it fails silently — `"t"` decodes as
+  false.
+- **An initial response ends with `snapshot-end`, not `up-to-date`**, and takes a
+  second request to get there, because the sync service has a log to catch up on
+  between the two. A snapshot has no log, so it ends `up-to-date` in one
+  response. Had it copied `snapshot-end`, the collection would have held every
+  row and stayed in its loading state forever — rows on the client and a blank
+  page, which is worse than the 502 it replaced.
+- **A handle the sync service never issued is a `409` and a `must-refetch`**, at
+  any offset, live or not. That is the whole recovery path, and rig arranges none
+  of it: the snapshot's handle is prefixed `rig-fallback-`, the proxy forwards it
+  like any other, and the sync service resets the subscriber onto real sync the
+  moment it is reachable. A recovery mechanism this package invented would have
+  been a second one to get wrong.
+
+The last of those is why there is no code for recovery to be a bug in. It is also
+why the handle has to be a handle rather than nothing: a subscriber needs
+something to send back, and what it sends back is what triggers the reset.
+
+### The encoder is one function, and a container found its bugs
+
+`electric.Value` is reflective rather than generated per column, which is a
+departure from how this repository usually does things — the alternative was a
+generator emitting a conversion per Postgres type, and one tested function beats
+sixteen emitted ones for something whose correctness is entirely about edge
+cases. It is `time.Time` first (because `String` is Go's layout, not Postgres's),
+then `json.RawMessage` before `[]byte` (which it is underneath), then the scalar
+kinds, then `fmt.Stringer` for a uuid, then pgx's own text codec for arrays and
+`pgtype.Numeric`, then JSON.
+
+`internal/electrictest` is what makes that trustworthy: it inserts one row of
+every type and one row of nulls, fetches the shape twice — once through the real
+sync service and once through a proxy pointed at a closed port — and compares
+column by column. It found two bugs on its first run, both the same shape of
+mistake: a null `numeric` and a null `text[]` were rendering as `""`, because an
+invalid `pgtype.Numeric` and a nil slice both encode to the empty string and an
+empty string is a value. `isNull` exists because of that test.
+
+Two columns are equal without being identical, and the test says which and why: a
+`timestamptz` is compared as an instant (the sync service writes a space and a
+two-digit offset; rig writes the RFC 3339 the API sends, which is the form a
+subscriber is already parsing), and a `jsonb` is compared as a document
+(Postgres normalises key order and spacing; Go prints what it was handed).
+
+### What is deliberately not there
+
+- **No stub.** The plan had one, and it came out because a stub cannot reach a
+  repository: it would have to invent a store import and a repository type for the
+  generator to name. So the seam is a type and a field, and the worked example is
+  `examples/linearlite/services/todo/todo_fallback.go` — a constructor taking the
+  repository, wired where `Register` is called, which is where somebody wiring a
+  shape endpoint is already looking.
+- **No inheritance between the derived shapes.** The scopes inherit because the
+  three shapes carry the same table's rows and a narrowing that mattered for one
+  matters for the others. The fallbacks are the opposite: three shapes, three
+  reads, and a trash route quietly answering with live rows is the worst outcome
+  available. Nil stays nil.
+- **No client change.** `@rig/electric` does not surface the header, so nothing
+  renders a "reconnecting" banner. The test that matters is there instead —
+  `ts/packages/electric/src/fallback.test.ts` drives a real `ShapeStream` over
+  the exact bytes the Go side writes, because the envelope is rig's invention and
+  a client that rejected it would make the whole feature a 200 with no effect.
+- **No collapsing of the herd.** Every subscriber falls back at the same moment,
+  because what they have in common is the service being gone, so a shape's
+  fallback is one `List` per subscriber against the database the sync service was
+  shielding. `MaxSnapshotRows` bounds the memory and refuses past the bound
+  rather than truncating — a subscriber cannot tell a short answer from a complete
+  one — and being off until somebody turns it on, per shape, is the rest of the
+  answer. Collapsing identical concurrent snapshots through `runtime/cache`'s
+  `Map`, keyed by shape and tenant and params with a few seconds' TTL, is the
+  obvious next step and is not here.
+
+### Honest gaps
+
+- **Nothing checks that a scope and its fallback narrow the same way.** A scope
+  is a filter the proxy sends and can promise; a fallback is a read it cannot see
+  inside, so a shape scoped to a team with a fallback that lists the tenant shows
+  more than the subscription would — and only while something else is broken. It
+  is the same class of trap as the inherited scope, and it is documented in the
+  same places, and a linter cannot see it.
+- **The trash fallback applies a restore window the trash shape does not.**
+  `ListDeleted` forces `WithOnlyDeleted`, which adds the cutoff; the shape
+  deliberately has none. Narrower is the safe direction and a fourth read path to
+  avoid it is not worth having, so this is written down rather than fixed.
+- **`InitialTimeout` is a guess with a default.** Ten seconds, applied only to a
+  read from the beginning, so a sync service that is running and not answering
+  falls back rather than being waited on. A project whose shapes are large enough
+  that the service legitimately takes longer to build one gets a snapshot when it
+  wanted a stream, and has to say so.
+- **Shape routes are still not throttled**, which the fallback makes more
+  expensive rather than less: a subscriber can now cost a query rather than a
+  proxied request. Named in M15.1's gaps too.
+- **A `date` column over the fallback and the same column over REST still
+  disagree**, because the sync service prints `2026-08-25` and Go marshals a
+  `time.Time` as a full timestamp. `DateOnly` matches the sync service, which is
+  the side a subscriber's parsers are written for, so the fallback is consistent
+  with the stream and the pre-existing REST difference is untouched.
+
 ## Things I would fix if nobody asked for anything else
 
 - `internal/gen/servicego/servicego.go` still has an `elemType` helper that is

@@ -571,6 +571,10 @@ paths:
                             description: Present when the client has caught up with the shape.
                             schema:
                                 type: string
+                        X-Rig-Sync-Fallback:
+                            description: Present when this response is a snapshot served because the sync service could not be reached, rather than a chunk of a live subscription. The rows are correct as of the moment they were read and are not updated until the subscription resumes.
+                            schema:
+                                type: string
                     content:
                         application/json: {}
                 "401":
@@ -578,7 +582,16 @@ paths:
                 "403":
                     $ref: '#/components/responses/Forbidden'
                 "502":
-                    description: The sync service could not be reached.
+                    description: The sync service could not be reached, and this shape has nothing to answer with instead.
+                    content:
+                        text/plain: {}
+                "503":
+                    description: The sync service could not be reached, and this subscription already holds a snapshot. Keep it and retry after Retry-After.
+                    headers:
+                        Retry-After:
+                            description: Seconds to wait before polling again.
+                            schema:
+                                type: integer
                     content:
                         text/plain: {}
     /api/v1/rig_notification_recipient/_stream:
@@ -653,6 +666,10 @@ paths:
                             description: Present when the client has caught up with the shape.
                             schema:
                                 type: string
+                        X-Rig-Sync-Fallback:
+                            description: Present when this response is a snapshot served because the sync service could not be reached, rather than a chunk of a live subscription. The rows are correct as of the moment they were read and are not updated until the subscription resumes.
+                            schema:
+                                type: string
                     content:
                         application/json: {}
                 "401":
@@ -660,7 +677,16 @@ paths:
                 "403":
                     $ref: '#/components/responses/Forbidden'
                 "502":
-                    description: The sync service could not be reached.
+                    description: The sync service could not be reached, and this shape has nothing to answer with instead.
+                    content:
+                        text/plain: {}
+                "503":
+                    description: The sync service could not be reached, and this subscription already holds a snapshot. Keep it and retry after Retry-After.
+                    headers:
+                        Retry-After:
+                            description: Seconds to wait before polling again.
+                            schema:
+                                type: integer
                     content:
                         text/plain: {}
     /api/v1/rig_presence/_stream:
@@ -748,6 +774,10 @@ paths:
                             description: Present when the client has caught up with the shape.
                             schema:
                                 type: string
+                        X-Rig-Sync-Fallback:
+                            description: Present when this response is a snapshot served because the sync service could not be reached, rather than a chunk of a live subscription. The rows are correct as of the moment they were read and are not updated until the subscription resumes.
+                            schema:
+                                type: string
                     content:
                         application/json: {}
                 "401":
@@ -755,7 +785,16 @@ paths:
                 "403":
                     $ref: '#/components/responses/Forbidden'
                 "502":
-                    description: The sync service could not be reached.
+                    description: The sync service could not be reached, and this shape has nothing to answer with instead.
+                    content:
+                        text/plain: {}
+                "503":
+                    description: The sync service could not be reached, and this subscription already holds a snapshot. Keep it and retry after Retry-After.
+                    headers:
+                        Retry-After:
+                            description: Seconds to wait before polling again.
+                            schema:
+                                type: integer
                     content:
                         text/plain: {}
     /api/v1/todo-attachments:
@@ -1364,6 +1403,10 @@ paths:
                             description: Present when the client has caught up with the shape.
                             schema:
                                 type: string
+                        X-Rig-Sync-Fallback:
+                            description: Present when this response is a snapshot served because the sync service could not be reached, rather than a chunk of a live subscription. The rows are correct as of the moment they were read and are not updated until the subscription resumes.
+                            schema:
+                                type: string
                     content:
                         application/json: {}
                 "401":
@@ -1371,7 +1414,16 @@ paths:
                 "403":
                     $ref: '#/components/responses/Forbidden'
                 "502":
-                    description: The sync service could not be reached.
+                    description: The sync service could not be reached, and this shape has nothing to answer with instead.
+                    content:
+                        text/plain: {}
+                "503":
+                    description: The sync service could not be reached, and this subscription already holds a snapshot. Keep it and retry after Retry-After.
+                    headers:
+                        Retry-After:
+                            description: Seconds to wait before polling again.
+                            schema:
+                                type: integer
                     content:
                         text/plain: {}
     /api/v1/todo/_stream:
@@ -1446,6 +1498,10 @@ paths:
                             description: Present when the client has caught up with the shape.
                             schema:
                                 type: string
+                        X-Rig-Sync-Fallback:
+                            description: Present when this response is a snapshot served because the sync service could not be reached, rather than a chunk of a live subscription. The rows are correct as of the moment they were read and are not updated until the subscription resumes.
+                            schema:
+                                type: string
                     content:
                         application/json: {}
                 "401":
@@ -1453,7 +1509,16 @@ paths:
                 "403":
                     $ref: '#/components/responses/Forbidden'
                 "502":
-                    description: The sync service could not be reached.
+                    description: The sync service could not be reached, and this shape has nothing to answer with instead.
+                    content:
+                        text/plain: {}
+                "503":
+                    description: The sync service could not be reached, and this subscription already holds a snapshot. Keep it and retry after Retry-After.
+                    headers:
+                        Retry-After:
+                            description: Seconds to wait before polling again.
+                            schema:
+                                type: integer
                     content:
                         text/plain: {}
     /api/v1/todo/{id}/_versions/_stream:
@@ -1535,6 +1600,10 @@ paths:
                             description: Present when the client has caught up with the shape.
                             schema:
                                 type: string
+                        X-Rig-Sync-Fallback:
+                            description: Present when this response is a snapshot served because the sync service could not be reached, rather than a chunk of a live subscription. The rows are correct as of the moment they were read and are not updated until the subscription resumes.
+                            schema:
+                                type: string
                     content:
                         application/json: {}
                 "401":
@@ -1542,7 +1611,16 @@ paths:
                 "403":
                     $ref: '#/components/responses/Forbidden'
                 "502":
-                    description: The sync service could not be reached.
+                    description: The sync service could not be reached, and this shape has nothing to answer with instead.
+                    content:
+                        text/plain: {}
+                "503":
+                    description: The sync service could not be reached, and this subscription already holds a snapshot. Keep it and retry after Retry-After.
+                    headers:
+                        Retry-After:
+                            description: Seconds to wait before polling again.
+                            schema:
+                                type: integer
                     content:
                         text/plain: {}
     /api/v1/todos:
