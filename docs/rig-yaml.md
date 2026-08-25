@@ -557,8 +557,9 @@ notifications:
   default_digest: Immediate # what an account with no setting gets
   claim_ttl: 5m             # how long a dispatcher's claim is honoured
   send_timeout: 30s         # how long one call into a channel may take
-  max_attempts: 5
-  backoff_base: 1m          # doubling: 1m, 2m, 4m, 8m, 16m
+  max_attempts: 14
+  backoff_base: 1m          # doubling: 1m, 2m, 4m, 8m, 16m, 32m
+  backoff_cap: 1h           # and hourly after that
   retention: 2160h          # 90 days, and it has to outlive the longest digest
 ```
 
@@ -597,6 +598,33 @@ whole seconds, and `500ms` would arrive as no value at all.
 A dispatch pass takes what it can send inside one lease and hands the rest back,
 so a `send_timeout` that no longer fits the batch shows up as a count in the
 dispatch log — `abandoned` — rather than as messages sent twice.
+
+`max_attempts`, `backoff_base` and `backoff_cap` are one decision, and the thing
+to read off them is the total: the defaults span **about eight hours**, doubling
+from a minute to an hour and then knocking hourly. An outage is measured in hours
+by everyone who has had one, which is why the number to tune is the window rather
+than the count — `max_attempts` on its own cannot express "outlast a bad morning",
+because the elapsed time is exponential in it.
+
+`backoff_cap` is what makes a long count safe: doubling from a minute fourteen
+times is five days, so without a ceiling the late attempts are not retries but a
+row nobody will look at again. rig refuses a `backoff_cap` below `backoff_base`,
+because the cap would then bind before the first doubling and nothing
+`backoff_base` claims would be true — a schedule that reads as exponential and
+behaves as fixed. Equal is allowed: a flat schedule stated outright is a choice,
+not an accident.
+
+Each wait is spread upward by up to half itself, so `backoff_base` is a floor
+rather than an exact delay. Without that, one provider refusing one pass of a
+hundred rows gets a hundred simultaneous retries a minute later, on every replica
+at once. A sender can also say "do not retry this at all" or "come back in ten
+minutes" — see [notifications.md](notifications.md#when-a-send-fails), and note
+that the first of those is what makes eight hours of attempts affordable.
+
+> **These defaults changed.** `max_attempts` was `5` with no cap, which spanned
+> thirty-one minutes. A project that set neither value gets the longer schedule
+> on its next `rig generate`, and a genuinely undeliverable message now occupies a
+> row for about eight hours rather than half an hour.
 
 `retention` prunes read-and-dismissed inbox lines, their copies, and the
 notifications left with nothing pointing at them — in the same task that

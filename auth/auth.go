@@ -137,11 +137,29 @@ type Config struct {
 	// somebody changing their password.
 	BreachChecker password.BreachChecker
 
-	// Notifier sends the mail a flow needs — a reset link, a verification link.
-	// Nil means none is sent, which makes those flows unusable rather than
-	// silently broken: the token is in the response for a test to read, and
-	// nothing reaches a person.
+	// Notifier sends the mail a flow needs — a reset link, a verification link,
+	// an invitation.
+	//
+	// Nil means none is sent, and it means that silently: account.NoNotifier is
+	// substituted and returns success from every method, so in production nobody
+	// can reset a password and nothing anywhere says so. Set one. (The one
+	// combination that is refused is Mail.Queue with no notifier, which would
+	// write rows nothing could ever send.)
 	Notifier account.Notifier
+
+	// Mail is the queue for those links: off by default, and turning it on means
+	// running a job.
+	//
+	// Off, a link is minted in the request that asked for it and handed straight
+	// to the Notifier, so a provider having a bad minute fails that request,
+	// spends the caller's rate-limit budget, and kills a token that was already
+	// minted. On, the link is written to the database in the same transaction and
+	// sent by [Auth.DispatchMail] — which nothing runs on its own. Turning it on
+	// without a cron entry is turning mail off.
+	//
+	// The trade in the other direction is latency: a queued reset mail arrives up
+	// to one dispatch interval late.
+	Mail MailOptions
 
 	// RequireVerifiedEmail refuses a login until the address is verified.
 	RequireVerifiedEmail bool
@@ -298,6 +316,49 @@ type OAuth struct {
 	OnSignIn func(w http.ResponseWriter, r *http.Request, in oauth.SignIn) error
 }
 
+// MailOptions is the mail queue's configuration.
+//
+// Queue is the switch; everything else has a default, and the defaults are
+// notify's, so an operator tuning one dispatcher does not have to learn a second
+// set of arithmetic for the other. See account.MailOptions for what each number
+// does and which pairs are refused.
+type MailOptions struct {
+	// Queue writes links to rig_identity_verification_delivery and sends them
+	// from [Auth.DispatchMail] instead of from the request.
+	Queue bool
+
+	// ClaimTTL is how long one dispatcher's claim is honoured, and SendTimeout
+	// bounds one call into the Notifier. SendTimeout has to be the shorter of
+	// the two, and rig refuses the pair rather than explaining it.
+	ClaimTTL    time.Duration
+	SendTimeout time.Duration
+
+	// MaxAttempts, BackoffBase and BackoffCap are the retry arithmetic. The
+	// defaults span about eight hours.
+	MaxAttempts int
+	BackoffBase time.Duration
+	BackoffCap  time.Duration
+
+	// Retention is how long a sent, failed or skipped delivery is kept before
+	// [Auth.PruneMail] removes it. Zero keeps them forever, which is what every
+	// other table in rig currently does and is not a recommendation.
+	//
+	// The link rows themselves are never pruned by this: they are the record of
+	// who was invited and when.
+	Retention time.Duration
+}
+
+// options is the account package's shape of the same numbers.
+func (m MailOptions) options() account.MailOptions {
+	return account.MailOptions{
+		ClaimTTL:    m.ClaimTTL,
+		SendTimeout: m.SendTimeout,
+		MaxAttempts: m.MaxAttempts,
+		BackoffBase: m.BackoffBase,
+		BackoffCap:  m.BackoffCap,
+	}
+}
+
 // Auth is the assembled foundation.
 type Auth struct {
 	endpoints *authhttp.Handler
@@ -310,6 +371,9 @@ type Auth struct {
 	// back out of a stored Config so there is one copy of each.
 	retention time.Duration
 	clock     func() time.Time
+	// mailRetention is PruneMail's half of the same, and zero for a project that
+	// did not turn the queue on.
+	mailRetention time.Duration
 }
 
 // now is the clock, defaulting to the wall.
@@ -426,6 +490,8 @@ func New(cfg Config) (*Auth, error) {
 		Policy:               policy,
 		Log:                  stores.Log,
 		Notifier:             cfg.Notifier,
+		Outbox:               mailOutbox(cfg, stores),
+		Mail:                 cfg.Mail.options(),
 		Limiter:              limiter,
 		Limits:               cfg.Limits,
 		RequireVerifiedEmail: cfg.RequireVerifiedEmail,
@@ -515,6 +581,9 @@ func New(cfg Config) (*Auth, error) {
 		},
 		retention: cfg.LogRetention,
 		clock:     cfg.Now,
+		// Zero for a project that left the queue off, which is what PruneMail
+		// reads as "nothing to prune".
+		mailRetention: cfg.Mail.Retention,
 	}
 
 	if len(cfg.OAuth.Providers) > 0 {
@@ -640,6 +709,58 @@ func (a *Auth) PruneLog(ctx context.Context) (int, error) {
 		return 0, nil
 	}
 	return a.parts.Stores.Log.Prune(ctx, a.now().Add(-a.retention))
+}
+
+// DispatchMail is one pass of the link queue: claim what is due, send it, mark it.
+//
+// **This is the guarantee behind every link rig mints, and nothing runs it for
+// you.** Register it as a task an operator's cron invokes — a subcommand rather
+// than a goroutine, so it is a cron job rather than something racing itself in
+// every replica. With Mail.Queue set and no such entry, links are queued and never
+// sent.
+//
+// An empty report and no error for a project that did not turn the queue on, so
+// registering the task before deciding costs nothing.
+func (a *Auth) DispatchMail(ctx context.Context) (account.MailReport, error) {
+	return a.parts.Accounts.DispatchMail(ctx)
+}
+
+// PruneMail removes deliveries that are done and older than Mail.Retention, in
+// the same task that dispatches them — the way the file sweeper's two rules share
+// one.
+//
+// Never a pending row, and never a link row: those are the record of who was
+// invited and when.
+func (a *Auth) PruneMail(ctx context.Context) (int, error) {
+	if a.mailRetention <= 0 || a.parts.Stores.Outbox == nil {
+		return 0, nil
+	}
+	return a.parts.Stores.Outbox.Prune(ctx, a.mailRetention, a.now())
+}
+
+// StopClaimingMail stops taking new deliveries while the pass in flight finishes,
+// for the drain half of a shutdown.
+func (a *Auth) StopClaimingMail() { a.parts.Accounts.StopClaimingMail() }
+
+// ReleaseMailClaims gives back every lease this process holds, for the close half.
+//
+// A lease given back is a row the next dispatcher takes immediately, rather than
+// one that waits out the TTL. The attempts are not given back: the sends this
+// process made were made.
+func (a *Auth) ReleaseMailClaims(ctx context.Context) (int, error) {
+	return a.parts.Accounts.ReleaseMailClaims(ctx)
+}
+
+// mailOutbox is the queue's store, or nil for a project that left it off.
+//
+// nil rather than a disabled store, because nil is what account.Config reads as
+// "the inline path" — a store that existed and refused would be a second way to
+// say the same thing.
+func mailOutbox(cfg Config, stores *authpg.Stores) account.Outbox {
+	if !cfg.Mail.Queue {
+		return nil
+	}
+	return stores.Outbox
 }
 
 // resolvedLimits are the limits this configuration will actually enforce.

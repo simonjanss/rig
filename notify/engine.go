@@ -3,6 +3,7 @@ package notify
 import (
 	"context"
 	"fmt"
+	"math/rand/v2"
 	"sync"
 	"time"
 
@@ -44,6 +45,8 @@ type Engine struct {
 	sendTimeout   time.Duration
 	maxAttempts   int
 	backoffBase   time.Duration
+	backoffCap    time.Duration
+	jitter        func(int64) int64
 	defaultDigest Digest
 
 	nudge chan struct{}
@@ -91,10 +94,24 @@ type EngineConfig struct {
 	// never runs again.
 	SendTimeout time.Duration
 
-	// MaxAttempts and BackoffBase are the retry arithmetic. Zero means the
-	// defaults.
+	// MaxAttempts, BackoffBase and BackoffCap are the retry arithmetic, and the
+	// three of them are one decision — see the constants they default to for what
+	// the numbers add up to. Zero means the defaults.
 	MaxAttempts int
 	BackoffBase time.Duration
+	// BackoffCap bounds one wait, so a long schedule's tail is a series of
+	// knocks rather than a sleep nobody will be awake for. Zero means
+	// [DefaultBackoffCap]; under BackoffBase panics.
+	BackoffCap time.Duration
+
+	// Jitter is where the spread on a retry comes from: given n, it returns
+	// something in [0, n).
+	//
+	// It exists to be replaced in a test, and for nothing else. A schedule is
+	// asserted on by fixing this to the floor or the ceiling of its range, which
+	// is not something a test can do to a package-level random source. Nil means
+	// math/rand/v2's, which is per-P and needs no seeding and no lock.
+	Jitter func(int64) int64
 
 	// DefaultDigest is what an account with no setting for a channel gets.
 	// Empty means Immediate.
@@ -157,6 +174,27 @@ func NewEngine(cfg EngineConfig) *Engine {
 	if backoff <= 0 {
 		backoff = DefaultBackoffBase
 	}
+	ceiling := cfg.BackoffCap
+	if ceiling <= 0 {
+		ceiling = DefaultBackoffCap
+	}
+	if ceiling < backoff {
+		// The third of these refusals, and the same argument as the first two: a
+		// pair of numbers that cannot both be true, refused where somebody can
+		// still change one of them. A ceiling below the floor means the doubling
+		// never happens, so every wait is the cap and nothing the documentation
+		// says about backoff_base is true of this engine — a schedule that reads
+		// as exponential and behaves as fixed.
+		panic(fmt.Sprintf(
+			"notify.NewEngine: backoff_cap is %s and backoff_base is %s, so the cap binds "+
+				"before the first doubling and every retry waits the same %s; set "+
+				"backoff_cap above backoff_base",
+			ceiling, backoff, ceiling))
+	}
+	jitter := cfg.Jitter
+	if jitter == nil {
+		jitter = rand.Int64N
+	}
 	digest := cfg.DefaultDigest
 	if digest == "" {
 		digest = DigestImmediate
@@ -175,6 +213,8 @@ func NewEngine(cfg EngineConfig) *Engine {
 		sendTimeout:   timeout,
 		maxAttempts:   attempts,
 		backoffBase:   backoff,
+		backoffCap:    ceiling,
+		jitter:        jitter,
 		defaultDigest: digest,
 
 		nudge:    make(chan struct{}, 1),

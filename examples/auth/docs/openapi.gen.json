@@ -3,7 +3,7 @@
   "info": {
     "title": "auth",
     "description": "The auth HTTP API.\n\nThe authentication endpoints under `/auth` are served by a hand-written module and are not described here.\n\nThe notification inbox endpoints are served by a hand-written module and are not described here.",
-    "version": "2026-08-24"
+    "version": "2026-08-25"
   },
   "servers": [
     {

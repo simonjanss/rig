@@ -127,6 +127,7 @@ func (e *emitter) notifyConstructor(b *gobuf.Buf) {
 	b.L("SendTimeout: %d * %s.Second,", cfg.SendTimeoutSeconds, timePkg)
 	b.L("MaxAttempts: %d,", cfg.MaxAttempts)
 	b.L("BackoffBase: %d * %s.Second,", cfg.BackoffBaseSeconds, timePkg)
+	b.L("BackoffCap: %d * %s.Second,", cfg.BackoffCapSeconds, timePkg)
 	b.L("DefaultDigest: %s.Digest(%s),", notifyPkg, gobuf.Quote(cfg.DefaultDigest))
 	b.L("})")
 	b.L("}")
@@ -192,19 +193,34 @@ func (e *emitter) notifyDispatcher(b *gobuf.Buf) {
 		"answer.\n\n" +
 		"A subcommand rather than a goroutine, so it is a cron job rather than " +
 		"something racing itself in every replica. Register it in " +
-		"serve.Config.Tasks and run `<binary> dispatch-notifications`.")
+		"serve.Config.Tasks and run `<binary> dispatch-notifications`.\n\n" +
+		"The writer is where each pass's report goes, and os.Stdout is the answer " +
+		"for a cron job — every count including the zeros, because a pass that " +
+		"sent nothing is the ordinary case and the absence of a line cannot be " +
+		"told from the job not running. A nil writer prints nothing and is for a " +
+		"test.")
 	timePkg := b.Import("time")
+	ioPkg := b.Import("io")
 	retention := e.doc.API.Notifications.RetentionSeconds
 
-	b.L("func NotificationDispatcher(engine *%s.Engine) %s.Task {", notifyPkg, servePkg)
+	b.L("func NotificationDispatcher(engine *%s.Engine, log %s.Writer) %s.Task {",
+		notifyPkg, ioPkg, servePkg)
 	b.L("return func(ctx %s.Context, _ *%s.Pool) error {", ctxPkg, poolPkg)
-	b.L("if _, err := engine.Resolve(ctx); err != nil { return err }")
-	b.L("if _, err := engine.Dispatch(ctx); err != nil { return err }")
+	b.L("resolved, err := engine.Resolve(ctx)")
+	b.L("if log != nil { %s.Fprintln(log, resolved) }", b.Import("fmt"))
+	b.L("if err != nil { return err }")
+	b.L("dispatched, err := engine.Dispatch(ctx)")
+	b.L("if log != nil { %s.Fprintln(log, dispatched) }", b.Import("fmt"))
+	b.L("if err != nil { return err }")
 	b.Comment("And the housekeeping, in the same task for the reason the file " +
 		"sweeper's two rules share one: a schema that grows forever is the " +
 		"state every other table in rig is already in, and this milestone " +
 		"added three more.")
-	b.L("_, err := engine.Prune(ctx, %d * %s.Second)", retention, timePkg)
+	b.L("pruned, err := engine.Prune(ctx, %d * %s.Second)", retention, timePkg)
+	// Labelled, because this one is an int rather than a report that names its
+	// own counts: an unadorned `0` under the two report lines says nothing about
+	// what was counted.
+	b.L(`if log != nil { %s.Fprintf(log, "notify: pruned %%d\n", pruned) }`, b.Import("fmt"))
 	b.L("return err")
 	b.L("}")
 	b.L("}")

@@ -172,6 +172,14 @@ type Message struct {
 // means the provider accepted it, which is not the same as it arriving, and rig
 // does not pretend to know the difference.
 //
+// A bare error gets the ordinary schedule, which is the right default: "try
+// again" is the safe answer when nobody said otherwise. Two things are worth
+// saying instead of it, and both are optional — [Permanent] for a provider
+// refusing the recipient rather than the request, which fails the delivery on
+// this attempt instead of spending eight hours on an address that does not
+// exist, and [RetryAfter] for a provider that named the time to come back. A
+// Sender written before those existed is a correct Sender.
+//
 // **The context carries a deadline — notifications.send_timeout, thirty seconds
 // by default — and honouring it is this method's job.** rig cannot enforce it,
 // for the same reason it cannot enforce that [Delivery.ID] reaches the provider:

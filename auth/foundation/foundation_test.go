@@ -24,6 +24,7 @@ func TestTheShippedSetHasNotMoved(t *testing.T) {
 		"00002_apikeys.sql",
 		"00003_sessions.sql",
 		"00004_oauth.sql",
+		"00005_verification_delivery.sql",
 	}
 
 	got := Set().Migrations

@@ -44,6 +44,7 @@ func (e *authEmitter) authFile() (gen.Artifact, error) {
 	e.tenantFunc(b)
 	e.limitsFunc(b)
 	e.prunerFunc(b)
+	e.mailDispatcherFunc(b)
 	if e.oauth() != nil {
 		e.signingKeyFunc(b)
 		e.providersFunc(b)
@@ -212,10 +213,22 @@ func (e *authEmitter) hooks(b *gobuf.Buf) {
 	b.NL()
 
 	b.Comment("Notifier sends the mail a flow needs: a reset link, a verification " +
-		"link, an invitation. Nil sends none, which makes those flows unusable rather " +
-		"than silently broken — the token is in the response for a test to read, and " +
-		"nothing reaches a person.")
+		"link, an invitation. Nil sends none, and it does so silently — " +
+		"account.NoNotifier is substituted and answers success from every method, so " +
+		"in production nobody can reset a password and nothing anywhere says so.")
 	b.L("Notifier %s.Notifier", account)
+	b.NL()
+
+	b.Comment("Mail is the queue for those links, and it is off by default.\n\n" +
+		"Off, a link is minted in the request that asked for it and handed straight " +
+		"to the Notifier, so a provider having a bad minute fails that request, " +
+		"spends the caller's rate-limit budget, and kills a token that was already " +
+		"minted. On, the link is written to the database in the same transaction and " +
+		"sent by AuthMailDispatcher — which an operator's cron has to run. Turning it " +
+		"on without that entry is turning mail off.\n\n" +
+		"The trade in the other direction is latency: a queued reset mail arrives up " +
+		"to one dispatch interval late, where inline it went out inside the request.")
+	b.L("Mail %s.MailOptions", b.Import(authModule))
 	b.NL()
 
 	if a.AllowTenantCreation {
@@ -476,6 +489,7 @@ func (e *authEmitter) configFunc(b *gobuf.Buf) {
 
 	b.L("Grants: h.Grants,")
 	b.L("Notifier: h.Notifier,")
+	b.L("Mail: h.Mail,")
 	b.L("OnSessionRefresh: h.OnSessionRefresh,")
 	b.L("OnError: h.OnError,")
 	b.L("Limits: limits(),")
@@ -838,6 +852,51 @@ func (e *authEmitter) prunerFunc(b *gobuf.Buf) {
 	b.L("func AuthLogPruner(front *%s.Auth) %s.Task {", authPkg, servePkg)
 	b.L("return func(ctx %s.Context, _ *%s.Pool) error {", ctxPkg, poolPkg)
 	b.L("_, err := front.PruneLog(ctx)")
+	b.L("return err")
+	b.L("}")
+	b.L("}")
+	b.NL()
+}
+
+// mailDispatcherFunc emits the task that sends the links this foundation mints.
+//
+// Emitted for every project with auth, unlike prunerFunc beside it, and the
+// difference is where the switch lives: retention is a rig.yaml value the
+// generator can read, and whether mail is queued is Hooks.Mail, which it cannot.
+// So the task always exists and answers an empty report for a project that left
+// the queue off — which is the harmless direction, and the one that lets somebody
+// register the subcommand before deciding.
+func (e *authEmitter) mailDispatcherFunc(b *gobuf.Buf) {
+	var (
+		authPkg  = b.Import(authModule)
+		servePkg = b.Import(runtimeModule + "/serve")
+		ctxPkg   = b.Import("context")
+		poolPkg  = b.Import("github.com/jackc/pgx/v5/pgxpool")
+		ioPkg    = b.Import("io")
+		fmtPkg   = b.Import("fmt")
+	)
+
+	b.Comment("AuthMailDispatcher is the guarantee behind every link rig mints: it " +
+		"sends what a request queued, retries what a provider refused, and gives back " +
+		"the claims of a process that died mid-pass. It prunes the deliveries that are " +
+		"done in the same pass, the way the notification dispatcher does.\n\n" +
+		"A subcommand rather than a goroutine, so it is a cron job rather than " +
+		"something racing itself in every replica. Register it in serve.Config.Tasks " +
+		"and run `<binary> dispatch-auth-mail`.\n\n" +
+		"**With Hooks.Mail.Queue set and no cron entry for this, links are queued and " +
+		"never sent.** With the queue off it claims nothing and returns, so registering " +
+		"it either way costs nothing.\n\n" +
+		"The writer is where each pass's report goes, and os.Stdout is the answer for " +
+		"a cron job — every count including the zeros, because a pass that sent nothing " +
+		"is the ordinary case and the absence of a line cannot be told from the job not " +
+		"running. A nil writer prints nothing and is for a test.")
+	b.L("func AuthMailDispatcher(front *%s.Auth, log %s.Writer) %s.Task {",
+		authPkg, ioPkg, servePkg)
+	b.L("return func(ctx %s.Context, _ *%s.Pool) error {", ctxPkg, poolPkg)
+	b.L("report, err := front.DispatchMail(ctx)")
+	b.L("if log != nil { %s.Fprintln(log, report) }", fmtPkg)
+	b.L("if err != nil { return err }")
+	b.L("_, err = front.PruneMail(ctx)")
 	b.L("return err")
 	b.L("}")
 	b.L("}")

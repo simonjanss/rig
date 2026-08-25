@@ -472,7 +472,7 @@ func TestRequirementsComeFirst(t *testing.T) {
 func TestWantedExpandsToPartsInOrder(t *testing.T) {
 	t.Parallel()
 
-	everything := []string{"tenancy", "apikeys", "sessions", "oauth", "notifications", "idempotency", "throttle"}
+	everything := []string{"tenancy", "apikeys", "sessions", "oauth", "verification_delivery", "notifications", "idempotency", "throttle"}
 
 	cases := []struct {
 		name  string
@@ -498,12 +498,12 @@ func TestWantedExpandsToPartsInOrder(t *testing.T) {
 			// a migration in auth's set, and goose reads a directory.
 			"auth without oauth brings oauth anyway",
 			scaffold.Wanted{Auth: true},
-			[]string{"tenancy", "apikeys", "sessions", "oauth", "idempotency", "throttle"},
+			[]string{"tenancy", "apikeys", "sessions", "oauth", "verification_delivery", "idempotency", "throttle"},
 		},
 		{
 			"auth with oauth is the same list",
 			scaffold.Wanted{Auth: true, OAuth: true},
-			[]string{"tenancy", "apikeys", "sessions", "oauth", "idempotency", "throttle"},
+			[]string{"tenancy", "apikeys", "sessions", "oauth", "verification_delivery", "idempotency", "throttle"},
 		},
 		{
 			// The cross-module edge: an inbox line names an account, so auth's set

@@ -141,7 +141,7 @@ the same commit.** The pages are short and the mapping is mechanical:
 | `auth/`, or `internal/project/auth.go` | `docs/auth.md` |
 | `runtime/electric`, `internal/gen/electricgo` | `docs/electric.md` |
 | `internal/gen/openapigen` | `docs/api.md`, `docs/generators.md`, `README.md` |
-| `notify/`, `internal/project/notifications.go` | `docs/notifications.md` |
+| `notify/`, `internal/project/notifications.go` | `docs/notifications.md`, `docs/rig-yaml.md` |
 | `presence/`, `internal/project/presence.go` | `docs/presence.md`, `docs/rig-yaml.md` |
 | `runtime/cache`, `internal/project/cache.go` | `docs/rig-yaml.md`, `docs/auth.md` |
 | `runtime/serve`, `runtime/dbhook` | `docs/services.md` |

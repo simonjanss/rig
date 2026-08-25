@@ -57,12 +57,32 @@ const DefaultClaimTTL = 5 * time.Minute
 // duplicate mail six weeks later.
 const MinClaimTTL = time.Minute
 
-// Defaults for the retry arithmetic. Five attempts at a doubling minute span
-// about half an hour, which outlasts the ordinary provider blip and does not
-// outlast anybody's patience.
+// Defaults for the retry arithmetic, and the three of them are one decision.
+//
+// Fourteen attempts, doubling from a minute and capped at an hour, span about
+// eight hours: 1m, 2m, 4m, 8m, 16m, 32m, and hourly after that. The number that
+// matters is the total, because the thing being outlasted is an outage — and an
+// outage is measured in hours by everyone who has had one. Five attempts at a
+// doubling minute, which is what this package shipped with, span thirty-one
+// minutes. That outlasts a blip and nothing else: a provider down for a morning
+// permanently failed every message rig had for it, and the row said Failed
+// rather than "was never really tried".
+//
+// The cap is what makes more attempts safe to have. Doubling fourteen times from
+// a minute is five days, so without a ceiling the late attempts are not retries,
+// they are a row nobody will look at again. Capped at an hour, the tail is seven
+// hourly knocks, which is the shape somebody watching a provider's status page
+// would choose by hand.
+//
+// The trade is stated because it is a real one, and it is the reverse of the old
+// default's. Eight hours of attempts means a genuinely undeliverable message
+// occupies a queue for eight hours. [Permanent] is the answer to that — a
+// provider that knows the recipient is wrong can say so and skip the whole
+// schedule — and it is why these numbers could be raised at all.
 const (
-	DefaultMaxAttempts = 5
+	DefaultMaxAttempts = 14
 	DefaultBackoffBase = time.Minute
+	DefaultBackoffCap  = time.Hour
 )
 
 // DefaultSendTimeout bounds one call into a channel.
@@ -97,6 +117,23 @@ type DispatchReport struct {
 	Failed  int
 	// Retrying is how many failed this time and will be tried again.
 	Retrying int
+	// Rejected is how many a channel refused permanently, with [Permanent], and
+	// which were failed on this attempt rather than spending the rest of the
+	// schedule.
+	//
+	// It is worth telling apart from Failed because the two mean opposite things
+	// about the provider. A rising Failed is rig giving up after eight hours of
+	// trying; a rising Rejected is the provider answering immediately and
+	// definitively, which usually means a list of addresses has gone stale
+	// rather than that anything is wrong.
+	Rejected int
+	// Deferred is how many were rescheduled at a channel's own request, with
+	// [RetryAfter], rather than on the computed backoff.
+	//
+	// A steady non-zero one is a provider telling this project it is sending too
+	// fast, which is a different problem from a provider being down and is not
+	// visible in Retrying, where it would otherwise be counted.
+	Deferred int
 	// Held is how many were outside somebody's window and moved to its next
 	// opening rather than being sent or dropped.
 	Held int
@@ -120,10 +157,10 @@ type DispatchReport struct {
 // String is the one line a pass is worth in a log: every count, zeros included.
 func (r DispatchReport) String() string {
 	return fmt.Sprintf(
-		"notify: claimed %d, sent %d, failed %d, retrying %d, held %d, digested %d, "+
-			"released %d, abandoned %d",
-		r.Claimed, r.Sent, r.Failed, r.Retrying, r.Held, r.Digested, r.Released,
-		r.Abandoned)
+		"notify: claimed %d, sent %d, failed %d, rejected %d, retrying %d, "+
+			"deferred %d, held %d, digested %d, released %d, abandoned %d",
+		r.Claimed, r.Sent, r.Failed, r.Rejected, r.Retrying, r.Deferred, r.Held,
+		r.Digested, r.Released, r.Abandoned)
 }
 
 // Dispatch is one pass: claim what is due, send it, mark it.
@@ -343,36 +380,108 @@ func (e *Engine) mark(ctx context.Context, m Message, sendErr error, report *Dis
 		return nil
 	}
 
+	const failQ = `UPDATE ` + DeliveryTable + ` SET
+			state = 'Failed', failed_reason = $2, claimed_at = NULL, updated_at = now()
+		WHERE id = ANY($1)`
+
+	// A channel that answered permanently is taken at its word, on this attempt,
+	// with the rest of the schedule unspent. The alternative is spending eight
+	// hours asking a provider a question it has already answered — and the
+	// provider is the only party here that can tell a wrong address from its own
+	// bad afternoon, which is the whole argument for [Permanent] existing.
+	//
+	// Checked before the attempt cap rather than after: the two agree on the
+	// outcome and disagree on the count, and Rejected is the more useful of the
+	// two to see, because it says the provider refused rather than that rig gave
+	// up waiting for it.
+	if IsPermanent(sendErr) {
+		if _, err := e.store.conn(ctx).Exec(ctx, failQ, ids, sendErr.Error()); err != nil {
+			return fmt.Errorf("notify: mark rejected: %w", err)
+		}
+		report.Rejected += len(ids)
+		return nil
+	}
+
 	// Past the cap it is Failed and stops being claimed. Without one, a
 	// permanently broken address consumes a lease and a log line forever.
 	if attempts >= e.maxAttempts {
-		const q = `UPDATE ` + DeliveryTable + ` SET
-				state = 'Failed', failed_reason = $2, claimed_at = NULL, updated_at = now()
-			WHERE id = ANY($1)`
-		if _, err := e.store.conn(ctx).Exec(ctx, q, ids, sendErr.Error()); err != nil {
+		if _, err := e.store.conn(ctx).Exec(ctx, failQ, ids, sendErr.Error()); err != nil {
 			return fmt.Errorf("notify: mark failed: %w", err)
 		}
 		report.Failed += len(ids)
 		return nil
 	}
 
+	// A channel's own answer about when to come back, and whether it gave one.
+	// Counted separately below because a provider saying "slow down" and a
+	// provider being down are different problems, and the second one is the only
+	// one Retrying used to be able to mean.
+	asked, deferred := RetryAfterOf(sendErr)
+
 	const q = `UPDATE ` + DeliveryTable + ` SET
 			deliver_at = $2, failed_reason = $3, claimed_at = NULL, updated_at = now()
 		WHERE id = ANY($1)`
-	if _, err := e.store.conn(ctx).Exec(ctx, q, ids, e.backoff(attempts), sendErr.Error()); err != nil {
+	next := e.nextAttemptAt(attempts, asked)
+	if _, err := e.store.conn(ctx).Exec(ctx, q, ids, next, sendErr.Error()); err != nil {
 		return fmt.Errorf("notify: schedule a retry: %w", err)
 	}
-	report.Retrying += len(ids)
+	if deferred {
+		report.Deferred += len(ids)
+	} else {
+		report.Retrying += len(ids)
+	}
 	return nil
 }
 
-// backoff doubles: one minute, two, four, eight, sixteen.
-func (e *Engine) backoff(attempts int) time.Time {
-	delay := e.backoffBase
-	for range attempts - 1 {
-		delay *= 2
+// nextAttemptAt is when to try again: the doubling, capped, spread.
+//
+// `asked` is what a channel requested with [RetryAfter], and zero when it did
+// not ask. A request replaces the computed wait for this attempt and does not
+// move where the doubling had got to — a provider asking for ten minutes once is
+// not the same as the outage having lasted ten minutes.
+//
+// **The spread is added on top of the wait rather than taken out of it**, which
+// is the reverse of what rigclient does with the same problem. There a caller is
+// blocked on the answer, so a spread that could only lengthen the wait is a cost
+// somebody sits through, and half the window is given up to buy the other half's
+// randomness. Here nobody is waiting: the row is in a table and the next pass is
+// a minute away regardless. So the nominal schedule is a floor, backoff_base
+// keeps meaning what its documentation says, and the arithmetic that turns
+// max_attempts into "about eight hours" stays arithmetic instead of becoming an
+// average.
+//
+// What the spread is for is the case this package had no answer to: one provider
+// refusing one pass of a hundred rows, on every replica at once. Without it all
+// hundred come back at the same instant, on the same schedule, for all fourteen
+// attempts — so a provider having a bad minute meets a hundred simultaneous
+// retries a minute later, which is the load that turns a bad minute into a bad
+// afternoon. Spread over half the wait, those hundred arrive over thirty seconds
+// on the first retry and over half an hour by the last.
+//
+// A Retry-After is spread the same way, and for the same reason rather than in
+// spite of being a boundary a provider named. One call can honour a boundary
+// exactly; a hundred rows carrying one provider's boundary cannot all honour it
+// exactly without rebuilding the herd at the instant it asked everybody back.
+// Adding is what keeps it a boundary — the wait is never shorter than what was
+// asked for, only later.
+func (e *Engine) nextAttemptAt(attempts int, asked time.Duration) time.Time {
+	wait := asked
+	if wait <= 0 {
+		wait = e.backoffBase
+		for range attempts - 1 {
+			// Tested before doubling rather than clamped after, so a long
+			// schedule cannot overflow past the ceiling on its way to being
+			// clamped back under it.
+			if wait >= e.backoffCap {
+				break
+			}
+			wait *= 2
+		}
+		wait = min(wait, e.backoffCap)
 	}
-	return e.cfg.now().Add(delay)
+	// The +1 makes the bound positive for every wait, including one short enough
+	// that half of it truncates to zero.
+	return e.cfg.now().Add(wait + time.Duration(e.jitter(int64(wait/2)+1)))
 }
 
 // ReleaseClaims gives back every lease this process still holds.

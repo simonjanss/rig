@@ -470,9 +470,10 @@ func dispatchNotifications(ctx context.Context, pool *pgxpool.Pool) error {
 	if err != nil {
 		return err
 	}
-	report, err := engine.Resolve(ctx)
-	fmt.Fprintln(os.Stdout, report)
-	return err
+	// The generated task rather than its steps written out again. It resolves,
+	// dispatches and prunes; this function used to do only the first, so the mail
+	// it was resolving was never actually sent from the cron path.
+	return api.NotificationDispatcher(engine, os.Stdout)(ctx, pool)
 }
 
 // accountService builds the account service on its own, for the seed: a

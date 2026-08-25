@@ -3,6 +3,7 @@ package project_test
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/simonjanss/rig/internal/project"
 )
@@ -34,6 +35,74 @@ func TestNotificationDefaults(t *testing.T) {
 	}
 	if n.MaxAttempts != project.DefaultMaxAttempts {
 		t.Errorf("max_attempts = %d, want %d", n.MaxAttempts, project.DefaultMaxAttempts)
+	}
+	if n.BackoffBase.Duration() != project.DefaultBackoffBase {
+		t.Errorf("backoff_base = %s, want %s", n.BackoffBase, project.DefaultBackoffBase)
+	}
+	if n.BackoffCap.Duration() != project.DefaultBackoffCap {
+		t.Errorf("backoff_cap = %s, want %s", n.BackoffCap, project.DefaultBackoffCap)
+	}
+}
+
+// The three retry numbers are one decision, and the thing worth pinning is what
+// they add up to: an outage is measured in hours by everyone who has had one, and
+// the old five-attempt schedule spanned thirty-one minutes. If somebody changes
+// one of the three, this is the test that says what it cost.
+func TestTheDefaultRetryScheduleIsMeasuredInHours(t *testing.T) {
+	t.Parallel()
+
+	base, ceiling := project.DefaultBackoffBase, project.DefaultBackoffCap
+
+	// The same arithmetic notify does, and one wait short of max_attempts because
+	// the last failure is a failure rather than a wait.
+	var total time.Duration
+	for attempt := 1; attempt < project.DefaultMaxAttempts; attempt++ {
+		wait := base
+		for range attempt - 1 {
+			if wait >= ceiling {
+				break
+			}
+			wait *= 2
+		}
+		total += min(wait, ceiling)
+	}
+
+	if want := 8*time.Hour + 3*time.Minute; total != want {
+		t.Errorf("the default schedule spans %s, want %s — the three retry defaults "+
+			"no longer add up to the window the documentation quotes", total, want)
+	}
+}
+
+// A ceiling under the floor is a schedule that reads as exponential and behaves
+// as fixed, so it is refused where somebody can still change one of the two
+// numbers — the third pair in this block that cannot both be true.
+func TestABackoffCapBelowTheBaseIsRefused(t *testing.T) {
+	t.Parallel()
+
+	_, out := parseNotifications(t,
+		"notifications:\n  enabled: true\n  backoff_base: 5m\n  backoff_cap: 1m\n")
+	if out == "" {
+		t.Fatal("a backoff_cap below backoff_base was accepted")
+	}
+	// Both numbers and both keys, because the fix is to change one of them and
+	// the message should not make the reader work out which two disagreed.
+	for _, want := range []string{"backoff_cap", "backoff_base", "5m", "1m"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("the diagnostic does not mention %q:\n%s", want, out)
+		}
+	}
+}
+
+// Equal is allowed, and that is deliberate rather than an oversight: a cap equal
+// to the base is a flat schedule somebody asked for in so many words, which is a
+// different thing from one they arrived at by setting two numbers the wrong way
+// round.
+func TestABackoffCapEqualToTheBaseIsAllowed(t *testing.T) {
+	t.Parallel()
+
+	if _, out := parseNotifications(t,
+		"notifications:\n  enabled: true\n  backoff_base: 1m\n  backoff_cap: 1m\n"); out != "" {
+		t.Errorf("a flat schedule stated outright was refused:\n%s", out)
 	}
 }
 
