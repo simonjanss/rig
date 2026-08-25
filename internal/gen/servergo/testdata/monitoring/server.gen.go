@@ -45,17 +45,6 @@ type Authenticator interface {
 	Mount(*http.ServeMux)
 }
 
-// MonitoringPage serves rig's page over the spans this server wrote.
-//
-// [github.com/simonjanss/rig/observe.Page] satisfies it, and is what
-// [Monitoring] is for. Declared here rather than imported so that the type of
-// this field is not a dependency.
-type MonitoringPage interface {
-	// Mount registers the page's routes on the same mux the resource routes are
-	// on. It registers nothing when there is no password to guard it with.
-	Mount(*http.ServeMux)
-}
-
 // Server is the behavior every handler shares.
 type Server struct {
 	// Auth wires the whole authentication foundation in one field.
@@ -137,16 +126,6 @@ type Server struct {
 	// the path it always took, with no transaction and no extra round trip. See
 	// [github.com/simonjanss/rig/runtime/idempotency].
 	DB dbx.Beginner
-
-	// Monitor serves rig's monitoring page, and nil means it is not served.
-	//
-	//	page, err := tracing.Page(api.Monitoring())
-	//
-	// It is mounted on the mux Register returns, after the resource routes. It is
-	// not itself a traced or logged route — spans and request lines are opened
-	// inside each generated handler, so nothing that is not one appears in either
-	// — which is what keeps looking at the page off the page.
-	Monitor MonitoringPage
 }
 
 // Handlers is every resource's service, plus the shared behavior.
@@ -209,12 +188,6 @@ func Register(h Handlers) *http.ServeMux {
 	// routes are the ones this project owns.
 	if h.Server.Auth != nil {
 		h.Server.Auth.Mount(mux)
-	}
-
-	// Last, for the reason the auth routes are late: a collision here is a panic
-	// naming rig's own page rather than a route this project owns.
-	if h.Server.Monitor != nil {
-		h.Server.Monitor.Mount(mux)
 	}
 
 	return mux

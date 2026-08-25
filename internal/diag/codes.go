@@ -143,6 +143,15 @@ var (
 		"`cache: true` was set on one of rig's own tables.",
 		"Remove the key. Holding a row is a promise that every write to it goes through the generated repository, and rig's own modules write these tables with their own SQL — so a held row could go stale with nothing to withdraw it.")
 
+	CodeMonitoringWithoutAddr = newCode("RIG3009", SeverityError,
+		"`monitoring:` is enabled and names no `addr:`.",
+		"The page listens on its own port, in this same binary, and rig picks no "+
+			"default for it: a default port is one two services on a host would fight "+
+			"over, and a default interface is a decision about who can reach a page "+
+			"that lists every path, request id and error cause this server has seen. "+
+			"Set `monitoring: addr: 127.0.0.1:9090`, and widen it deliberately if "+
+			"something other than this machine has to reach it.")
+
 	CodeUnmentionedColumn = newCode("RIG3100", SeverityWarning,
 		"A column exists in the database but is not mentioned in the table configuration.",
 		"Run `rig sync` to add it, then replace the placeholder comment.")

@@ -11,7 +11,7 @@ Four things, at four prices:
 | **Spans** | an OpenTelemetry dependency | `tracing: {enabled: true}` in rig.yaml |
 | **Exporting them** | a collector, or a file | an environment variable, at run time |
 | **Keeping the log lines** | a bounded file | a sink you tee into your logger, at run time |
-| **The monitoring page** | a route, and a password to guard it | `monitoring: {enabled: true}`, over a span file |
+| **The monitoring page** | a port of its own, and a password to guard it | `monitoring: {enabled: true, addr: …}`, over a span file |
 
 They are separate because they are separately worth it. The line that says why a
 500 happened is worth having in every project, including the one you started
@@ -209,9 +209,9 @@ do not appear on the monitoring page either.
 ## The monitoring page
 
 The last few hundred requests, what each of them spent its time on, and the log
-lines they wrote — on a page this server already serves. It is for the
-deployment too small to be worth a collector and a Grafana in front of it, which
-is most deployments for most of their life.
+lines they wrote — on a page this same binary serves, on a port of its own. It
+is for the deployment too small to be worth a collector and a Grafana in front
+of it, which is most deployments for most of their life.
 
 ```yaml
 tracing:
@@ -219,6 +219,7 @@ tracing:
 
 monitoring:
   enabled: true
+  addr: 127.0.0.1:9090
 ```
 
 It reads the span file above and stores nothing of its own — no table, no
@@ -226,21 +227,107 @@ retention policy, nothing to run beside the server — which is why it cannot be
 turned on without `tracing:`. rig refuses the combination when it reads
 rig.yaml rather than leaving you with a page that is empty forever.
 
-Three lines in your `main`, next to the ones that set tracing up:
+**`addr:` is required and there is no default.** The page listens there, in this
+process, on a listener that is not your API's. See
+[its own port](#its-own-port) for why that is not a route, and
+[restricting it](#restricting-it-to-an-address) for what to put in it.
+
+Four lines next to the ones that set tracing up, and in `main` itself rather
+than in the mount function, because what comes out of them is part of the
+configuration `serve.Main` is called with:
 
 ```go
 page, err := tracing.Page(api.Monitoring())
 if err != nil {
-    return nil, err
-}
-if why := page.Unarmed(); why != "" {
-    app.Logger.Info("monitoring page not mounted", "reason", why)
+    fmt.Fprintln(os.Stderr, "cannot build the monitoring page:", err)
+    os.Exit(1)
 }
 ```
 
-and then `Monitor: page` on the `api.Server` you already build. The page hangs
-off the provider because it reads the file that provider is writing: naming the
-path twice is one place too many to get it wrong.
+and then two fields on the `serve.Config` you already build:
+
+```go
+serve.Config{
+    Monitor:     page.Handler(),
+    MonitorAddr: page.Addr(),
+    // ...
+}
+```
+
+The page hangs off the provider because it reads the file that provider is
+writing: naming the path twice is one place too many to get it wrong. Both of
+those fields are zero when the page is unarmed, so a laptop with no password set
+opens no second port rather than one that refuses.
+
+That it is unarmed is worth saying out loud once, and this half goes in the
+mount function rather than in `main`, because that is where there is a logger
+writing to the file the page would have read:
+
+```go
+if why := page.Unarmed(); why != "" {
+    app.Logger.Info("monitoring page not listening", "reason", why)
+}
+```
+
+`observe.Setup` moves out to `main` along with the page, since the page hangs
+off it. The `app.CloseWithin("traces", …)` that stops the provider stays in the
+mount function, where there is an `App` to register it with — but it is no
+longer the only path out of the process. **A `Tasks:` entry never reaches the
+mount function**: `serve.Main` runs the task and returns, so a provider built in
+`main` is a provider that command never flushes. Defer the flush in `main` as
+well, which the server path then reaches a second time and finds already done:
+
+```go
+defer func() {
+    flushing, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+    defer cancel()
+    _ = tracing.Shutdown(flushing)
+}()
+```
+
+`examples/linearlite/main.go` is the arrangement in full.
+
+### Its own port
+
+The page does not go on your API's mux, and there is no field that would put it
+there. That is a deliberate narrowing, and the reason is one paragraph further
+down: `allow:` is matched against the connection's own address, so **behind a
+load balancer it matches everything or nothing**. A path is something any client
+can ask for. Which interface a socket is bound to is not — `127.0.0.1:9090` is
+reachable from that machine and from nowhere else, in every deployment, behind
+every proxy, without anything being configured correctly for it to hold.
+
+So the boundary is the address, and rig picks neither half of it. A default port
+is one two rig services on a host would fight over. A default interface is a
+decision about who can reach a page that lists every path, request id and error
+cause your server has seen. `rig validate` refuses an enabled block without an
+`addr:` (**RIG3009**) rather than choosing for you.
+
+```
+RIG_MONITOR_ADDR=127.0.0.1:9090
+```
+
+overrides it at run time, for the reason the span destination is an environment
+variable: where something listens is a property of the deployment, and moving a
+port should not need a regenerate.
+
+Three things follow from the page having a listener of its own:
+
+- **Nothing else is on it**, so `base_path` has nothing to collide with. It is
+  kept — `/_rig/monitor` still — because it is the URL projects already have and
+  because a reverse proxy in front of the port needs a prefix to key on.
+- **The probes stay on the API's port.** `/livez` and `/readyz` have to be
+  reachable by whatever restarts and routes to this process, and that is not
+  necessarily on the network you bound the page to.
+- **It is the last thing in the process to close.** The API drains, the
+  `App.Close` hooks run, the pool closes, and the page is still answering — so a
+  shutdown is something you can watch rather than something you read about
+  afterwards.
+
+Anything else that should be reachable on those terms and not on your API's —
+a `pprof` mux, an operator endpoint — goes on `serve.Config.Monitor` too. It is
+an `http.Handler`, not rig's page: `runtime/serve` is imported by every
+generated server, and rig/observe brings OpenTelemetry with it.
 
 ### The password
 
@@ -248,49 +335,64 @@ path twice is one place too many to get it wrong.
 RIG_MONITOR_PASSWORD=…      # twelve characters or more
 ```
 
-**With nothing in it the page is not mounted at all** — no route, not even one
-that answers 401 — and `Unarmed()` says so in the line above. That is the
-default on a laptop and in CI, and it is the right one: the page lists paths,
-request ids, user agents and the cause of every 500, which together are a
-record of what every caller did.
+**With nothing in it the page does not listen at all** — no port, not one that
+answers 401 — and `Unarmed()` says so in the line above. That is the default on
+a laptop and in CI, and it is the right one: the page lists paths, request ids,
+user agents and the cause of every 500, which together are a record of what
+every caller did.
 
 It is HTTP Basic, so a browser asks and nothing has to store a session. The user
 name is not checked; there is one credential here. There is **no lockout and no
 rate limit** behind it — that would mean `rig/observe` depending on
-`rig/runtime` for the throttle. The length minimum, the allowlist below, and
-whatever TLS the rest of your API is behind are what stand in for one.
+`rig/runtime` for the throttle. The length minimum, the bind address, and the
+allowlist below are what stand in for one.
+
+There is no TLS on this listener, and rig terminates none. Bound to loopback
+that does not matter; bound to anything else, put something in front of it that
+does, the same as you did for your API.
 
 ### Restricting it to an address
+
+Three layers, in the order a request meets them: the port decides who can open a
+connection, `allow:` decides which of those are answered, and the password
+decides who gets the page.
 
 ```yaml
 monitoring:
   enabled: true
+  addr: 127.0.0.1:9090
   allow:
     - 10.0.0.0/8
     - 127.0.0.1
 ```
 
-CIDR ranges or single addresses. An address that is not on the list gets **404**
-— the same answer as a page that was never mounted — and its password is never
-compared, so a scan learns nothing and a leaked password is not enough on its
-own.
+`addr:` is the one that holds everywhere — see [its own port](#its-own-port).
+Start there: if the only thing that should reach the page is the machine it runs
+on, `127.0.0.1` is the whole answer and the rest is defence in depth.
 
-It **narrows the password; it does not replace it**, and there is no way to have
-one without the other. The reason is the next paragraph.
+`allow:` takes CIDR ranges or single addresses. An address that is not on the
+list gets **404** — the same answer as a page that is not there — and its
+password is never compared, so a scan learns nothing and a leaked password is
+not enough on its own. It **narrows the password; it does not replace it**, and
+there is no way to have one without the other.
 
 **It reads the connection's own address and never a forwarded header** — no
 `X-Forwarded-For`, no `X-Real-IP` — for the reason
 [`auth.trusted_proxies`](rig-yaml.md#auth) exists: an address read from a header
 a client controls is an address a client chooses. Which means that **behind a
 load balancer this list is not a boundary**: every request arrives from the
-balancer, so the list matches everything or nothing. There, restrict at the
-proxy and let the password be the check here.
+balancer, so it matches everything or nothing.
+
+That is exactly the case `addr:` covers. Bind the page somewhere the balancer is
+not — a private interface, or loopback and reach it with `kubectl port-forward`
+— and the boundary is the kernel's rather than a header's.
 
 ### The rest of the block
 
 ```yaml
 monitoring:
   enabled: true
+  addr: 127.0.0.1:9090  # required; $RIG_MONITOR_ADDR overrides it
   password_env: MY_APP_MONITOR_PASSWORD
   password: ""          # a secret in a checked-in file; rig warns (RIG3006)
   base_path: /_rig/monitor
@@ -314,14 +416,21 @@ if err != nil {
     return err
 }
 
+monitoring := api.Monitoring()
+monitoring.Logs = logs
+page, err := tracing.Page(monitoring)
+if err != nil {
+    return err
+}
+
 serve.Main(serve.Config{
     // Stderr, and the file. Both.
     Logger: slog.New(observe.Tee(slog.Default().Handler(), logs.Handler())),
+    // The page, on its own port. Both zero when it is unarmed.
+    Monitor:     page.Handler(),
+    MonitorAddr: page.Addr(),
     // ...
 }, func(ctx context.Context, app *serve.App) (http.Handler, error) {
-    monitoring := api.Monitoring()
-    monitoring.Logs = logs
-    page, err := tracing.Page(monitoring)
     // ...
 })
 ```
@@ -390,7 +499,8 @@ their request and everything it logged.
 The state is in the URL, so a view is a link: reload it, share it, or use the
 back button. `?` lists the keyboard shortcuts.
 
-`/_rig/monitor/traces.json` and `/_rig/monitor/logs.json` are the same data, and
+`/_rig/monitor/traces.json` and `/_rig/monitor/logs.json` — on the page's own
+port, not your API's — are the same data, and
 `observe.ReadTraces` and `observe.ReadLogs` read the files straight from a script
 if you would rather not have a page in the loop.
 

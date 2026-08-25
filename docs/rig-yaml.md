@@ -1001,12 +1001,13 @@ open a span each, the repositories open one per call and one per hook, and
 ## `monitoring`
 
 rig's own page over those spans: the last few hundred requests, what each of
-them spent its time on, and the log lines they wrote, at `/_rig/monitor`. Off by
-default, and off means the route does not exist.
+them spent its time on, and the log lines they wrote. Off by default, and off
+means there is no listener rather than a port answering 404.
 
 ```yaml
 monitoring:
   enabled: true
+  addr: 127.0.0.1:9090
 ```
 
 It is a reader over the span file `tracing:` writes and stores nothing of its
@@ -1020,31 +1021,42 @@ block decides. See
 
 | Key | Default | |
 |---|---|---|
-| `enabled` | `false` | Mounts the page. Requires `tracing.enabled`. |
-| `base_path` | `/_rig/monitor` | Where it is mounted. It cannot sit under `api.base_path` or `auth.base_path`, where it would take a route this project owns. |
+| `enabled` | `false` | Serves the page. Requires `tracing.enabled`. |
+| `addr` | — | **Required.** Where the page listens, as `host:port`. `$RIG_MONITOR_ADDR` overrides it at run time. |
+| `base_path` | `/_rig/monitor` | Where it is mounted on that listener. Nothing else is on it to collide with; a reverse proxy in front of the port can key on it. |
 | `max_traces` | `200` | How many requests the page lists, newest first. |
 | `max_logs` | `500` | How many log lines the page reads, newest first. Larger than `max_traces` because one request writes several lines. |
 | `password_env` | `RIG_MONITOR_PASSWORD` | The variable the password is read from. |
 | `password` | — | The password itself. It warns (RIG3006): rig.yaml is checked in. |
 | `allow` | — | Addresses that may reach the page, as CIDR ranges or single addresses. Empty allows any. |
 
+**`addr` has no default, and an enabled block without one is refused
+(RIG3009).** The page gets a listener of its own inside the same binary rather
+than a route on your API's mux, because the interface a socket is bound to is
+the only boundary in front of it that a client cannot talk its way around —
+`127.0.0.1:9090` means this machine and nothing else, in every deployment. rig
+picks neither half of that for you: a default port is one two rig services on a
+host would fight over, and a default interface is a decision about who can reach
+a page that lists every path, request id and error cause your server has seen.
+
 `allow` **narrows the password rather than replacing it.** An address that is
 not on the list is answered 404, before the password is compared — but there is
 no way to have the list without the password, because it reads the connection's
 own address and never a forwarded header, and behind a load balancer that means
-it matches everything or nothing. See
+it matches everything or nothing. That is the case `addr` covers, and why the
+two are layers rather than alternatives. See
 [observability.md](observability.md#restricting-it-to-an-address).
 
 **The password is not here by default**, and for the reason the collector
 endpoint is not: it is a property of the deployment. With nothing in the
-variable at run time the page is not mounted at all, which is what you want on a
-laptop and in CI. Writing one into this file is accepted — a throwaway staging
+variable at run time the page does not listen at all, which is what you want on
+a laptop and in CI. Writing one into this file is accepted — a throwaway staging
 box and a production deployment are not the same decision — and warned about
 once, because the page it guards lists every path, request id and error cause
 this server has seen.
 
-Turning it on changes generated code, so `rig generate` has to run: `api.Server`
-grows a `Monitor` field and the API package gains a `Monitoring()` that supplies
-everything above. See
-[observability.md](observability.md#the-monitoring-page) for the three lines of
-`main` that go with it.
+Turning it on changes generated code, so `rig generate` has to run: the API
+package gains a `Monitoring()` that supplies everything above. It does **not**
+add anything to `api.Server` — the page is never on the mux `Register` returns.
+See [observability.md](observability.md#the-monitoring-page) for the `main` that
+goes with it.

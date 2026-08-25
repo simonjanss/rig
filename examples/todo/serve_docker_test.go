@@ -156,6 +156,121 @@ func TestTheServerBootsAndShutsDown(t *testing.T) {
 	}
 }
 
+// Two listeners in one process, and what the second one is for.
+//
+// rig's monitoring page is served on a port of its own rather than a route on
+// the API's mux, because a bind address is a boundary the kernel keeps and a
+// path is not — an allowlist keyed on the connection's address matches
+// everything or nothing behind a load balancer, and the interface a socket is
+// bound to does not. This example turns the page off, so the handler here is a
+// stand-in: what is under test is serve, not observe.
+//
+// The last part is why it is stopped last. A monitoring page that goes away
+// with the API is one you cannot use to watch a drain, which is one of the
+// times you most want it.
+func TestTheMonitorIsASecondListener(t *testing.T) {
+	dsn := os.Getenv("DATABASE_URL")
+	if dsn == "" {
+		dsn = dsnFallback
+	}
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	listening := make(chan net.Addr, 1)
+	monitoring := make(chan net.Addr, 1)
+	stopped := make(chan error, 1)
+
+	go func() {
+		stopped <- serve.Run(ctx, serve.Config{
+			DatabaseURL:   dsn,
+			Addr:          "127.0.0.1:0",
+			LivenessPath:  "/livez",
+			ReadinessPath: "/readyz",
+			DrainDelay:    2 * time.Second,
+			MaxShutdown:   15 * time.Second,
+			Logger:        slog.New(slog.DiscardHandler),
+			Monitor: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(http.StatusTeapot)
+			}),
+			MonitorAddr:     "127.0.0.1:0",
+			OnListen:        func(a net.Addr) { listening <- a },
+			OnMonitorListen: func(a net.Addr) { monitoring <- a },
+		}, func(_ context.Context, app *serve.App) (http.Handler, error) {
+			return newHandler(app.Pool, nil), nil
+		})
+	}()
+
+	var api, monitor net.Addr
+	for range 2 {
+		select {
+		case api = <-listening:
+		case monitor = <-monitoring:
+		case err := <-stopped:
+			t.Fatalf("the server stopped before both listeners were up: %v", err)
+		case <-time.After(15 * time.Second):
+			t.Fatal("one of the two listeners never came up")
+		}
+	}
+	if api.String() == monitor.String() {
+		t.Fatalf("both listeners bound %s; they are supposed to be two ports", api)
+	}
+
+	apiBase, monitorBase := "http://"+api.String(), "http://"+monitor.String()
+
+	t.Run("each port answers only its own", func(t *testing.T) {
+		if got := status(t, monitorBase+"/_rig/monitor/"); got != http.StatusTeapot {
+			t.Errorf("the monitor port answered %d, want the handler's 418", got)
+		}
+		// The whole point: the page's path is nothing on the API's listener.
+		if got := status(t, apiBase+"/_rig/monitor/"); got != http.StatusNotFound {
+			t.Errorf("the API port answered %d for the page's path, want 404", got)
+		}
+		// And the probes stayed where an orchestrator can reach them.
+		if got := status(t, apiBase+"/livez"); got != http.StatusOK {
+			t.Errorf("liveness on the API port = %d, want 200", got)
+		}
+		if got := status(t, monitorBase+"/livez"); got != http.StatusTeapot {
+			t.Errorf("the monitor port answered %d for /livez; the probes are not on it", got)
+		}
+	})
+
+	cancel()
+
+	t.Run("the monitor outlives the drain", func(t *testing.T) {
+		deadline := time.Now().Add(5 * time.Second)
+		for {
+			if status(t, apiBase+"/readyz") == http.StatusServiceUnavailable {
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Fatal("readiness never turned false")
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
+
+		if got := status(t, monitorBase+"/_rig/monitor/"); got != http.StatusTeapot {
+			t.Errorf("the monitor answered %d while the API drained, want it still serving", got)
+		}
+	})
+
+	select {
+	case err := <-stopped:
+		if err != nil {
+			t.Fatalf("a clean shutdown should not be an error: %v", err)
+		}
+	case <-time.After(15 * time.Second):
+		t.Fatal("the server did not stop")
+	}
+
+	// Both ports are closed once Run has returned, the monitor's last of all.
+	for _, url := range []string{apiBase + "/livez", monitorBase + "/_rig/monitor/"} {
+		if _, err := http.Get(url); err == nil {
+			t.Errorf("%s still answered after the server stopped", url)
+		}
+	}
+}
+
 func status(t *testing.T, url string) int {
 	t.Helper()
 
