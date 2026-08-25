@@ -1,6 +1,7 @@
 package compile
 
 import (
+	"slices"
 	"strconv"
 	"strings"
 
@@ -66,6 +67,36 @@ func Validate(doc *ir.Document, set *tableconf.Set, p *project.Project) diag.Lis
 
 	diags.Append(checkEnumConsistency(doc))
 	diags.Append(checkCustomEndpoints(doc, set))
+	diags.Append(checkCacheHasReaders(doc, p))
+
+	return diags
+}
+
+// checkCacheHasReaders refuses a `cache:` block nothing would read.
+//
+// It is the same rule every other block carries — numbers somebody set and
+// believed in, which nothing consults — and it is here rather than in
+// `internal/project` because there are now two ways to satisfy it and that
+// package can only see one of them. The reads rig makes for itself come with the
+// `auth:` block; the reads it makes for a table come with `cache: true` in that
+// table's own file. Either is enough. Neither, and the block is four numbers and
+// a goroutine holding a Postgres connection open for nothing.
+func checkCacheHasReaders(doc *ir.Document, p *project.Project) diag.List {
+	var diags diag.List
+
+	if doc.API.Cache == nil || !doc.API.Cache.Enabled {
+		return diags
+	}
+	if p.Config.Auth.Enabled {
+		return diags
+	}
+	if slices.ContainsFunc(doc.API.Resources, func(r ir.Resource) bool { return r.Cached }) {
+		return diags
+	}
+
+	diags.Add(diag.CodeConfigInvalid, p.At("cache", "enabled"),
+		"cache.enabled is true but nothing reads it: this project has no `auth:` block and no "+
+			"table sets `cache: true`. Add one of those, or remove the block")
 
 	return diags
 }

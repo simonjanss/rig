@@ -43,6 +43,21 @@ files:
 notifications:
   enabled: true
 
+# Rows held between requests, withdrawn over a Postgres channel by the
+# transaction that changes them.
+#
+# The block owns the channel and a table asks to be held — `cache: true` in
+# services/todo/todo.yaml is the other half — and neither implies the other.
+# There is no `auth:` block here, which used to be required and is not: the reads
+# this covers are the repository's, not authentication's, and this example has one
+# and not the other.
+#
+# What a table promises by asking is that its writes go through the generated
+# repository, because that is where the withdrawal is published from. This example
+# keeps that promise; see docs/rig-yaml.md for the two ways to break it.
+cache:
+  enabled: true
+
 # Every table gets a configuration file. `rig sync` creates and updates them.
 layout:
   table_dir: services/{table}

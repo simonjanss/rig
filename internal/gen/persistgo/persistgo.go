@@ -16,6 +16,7 @@ package persistgo
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/simonjanss/rig/internal/gen/genutil"
 	"github.com/simonjanss/rig/internal/gen/gobuf"
@@ -68,6 +69,25 @@ func (g *Generator) Generate(_ context.Context, doc *ir.Document, opts gen.Optio
 	}
 
 	e := &emitter{doc: doc, pkg: cfg.Package, modelImport: cfg.ModelImport}
+
+	// Before anything is emitted, because the answer is about the whole document
+	// and half a package is worse than none.
+	for _, res := range e.cachedResources() {
+		if bad := uncopyableFields(res); len(bad) > 0 {
+			names := make([]string, 0, len(bad))
+			for _, f := range bad {
+				names = append(names, f.Name+" ("+f.GoType+")")
+			}
+			return nil, fmt.Errorf(
+				"%s sets `cache: true` but rig cannot give each caller its own copy of %s: "+
+					"a cached read has to be indistinguishable from a fresh one, and a copy of "+
+					"the row would share whatever is inside that type. Remove `cache: true`, or "+
+					"change the column: a jsonb one read as raw JSON rather than through a "+
+					"`go_type` is copyable, and so is an array of any scalar but numeric, bytea "+
+					"and jsonb",
+				res.Storage.Table, strings.Join(names, ", "))
+		}
+	}
 
 	var artifacts []gen.Artifact
 

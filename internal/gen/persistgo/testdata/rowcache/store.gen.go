@@ -9,16 +9,14 @@ package store
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
+	"rigtest/model"
 	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/simonjanss/rig/examples/todo/internal/model"
 	"github.com/simonjanss/rig/runtime/cache"
 	"github.com/simonjanss/rig/runtime/dbx"
 	"github.com/simonjanss/rig/runtime/query"
@@ -163,17 +161,11 @@ type Config struct {
 
 // Store holds the connection pool and hands out repositories.
 type Store struct {
-	pool      *pgxpool.Pool
-	cacheBus  *cache.Bus
-	todoCache *rowCache[*model.Todo]
+	pool        *pgxpool.Pool
+	cacheBus    *cache.Bus
+	lessonCache *rowCache[*model.Lesson]
 
-	RigNotifications          RigNotificationRepository
-	RigNotificationDeliveries RigNotificationDeliveryRepository
-	RigNotificationDevices    RigNotificationDeviceRepository
-	RigNotificationRecipients RigNotificationRecipientRepository
-	RigNotificationSettings   RigNotificationSettingRepository
-	Todos                     TodoRepository
-	TodoAttachments           TodoAttachmentRepository
+	Lessons LessonRepository
 }
 
 // New builds a store over a connection pool.
@@ -185,27 +177,21 @@ func New(pool *pgxpool.Pool, cfg Config) *Store {
 	// makes the lifetime a backstop rather than a promise about staleness.
 	s.cacheBus = cache.NewBus(cache.BusConfig{
 		Pool:    pool,
-		Channel: "rig_cache",
+		Channel: "rig_cache_rowcache",
 		// The one line anybody reads when this stops working. Losing the channel is
 		// correct and silent — the caches go dead and every read is a query again
 		// — so nothing else about the process would say so.
 		Logger: cfg.Logger,
 	})
 
-	s.todoCache = newRowCache[*model.Todo](30*time.Second, 50000)
-	s.todoCache.serve(s.cacheBus, "todo")
+	s.lessonCache = newRowCache[*model.Lesson](45*time.Second, 25000)
+	s.lessonCache.serve(s.cacheBus, "lesson")
 
 	// After the caches are attached, so nothing can be delivered a notification
 	// for a topic that is not registered yet.
 	s.cacheBus.Start()
 
-	s.RigNotifications = &rigNotificationRepo{db: s}
-	s.RigNotificationDeliveries = &rigNotificationDeliveryRepo{db: s}
-	s.RigNotificationDevices = &rigNotificationDeviceRepo{db: s}
-	s.RigNotificationRecipients = &rigNotificationRecipientRepo{db: s}
-	s.RigNotificationSettings = &rigNotificationSettingRepo{db: s}
-	s.Todos = &todoRepo{db: s}
-	s.TodoAttachments = &todoAttachmentRepo{db: s}
+	s.Lessons = &lessonRepo{db: s}
 	return s
 }
 
@@ -389,39 +375,4 @@ func (c *rowCache[V]) forget(ctx context.Context, key string) error {
 		return nil
 	}
 	return s.topic.Forget(ctx, tx, key)
-}
-
-// visibleTodo reports whether this caller could have read the Todo row named,
-// which is what a write pointing at it has to be able to say.
-//
-// It takes the transaction rather than the pool so the answer and the write
-// that depends on it are the same unit of work.
-//
-// There is no readopt here on purpose. SkipTenantScope and SkipOwnerScope
-// exist so a background job can read past the boundary; a request handler
-// reaching a foreign key through them would be the boundary having an opt-out,
-// which is the thing this closes.
-func visibleTodo(ctx context.Context, tx dbx.Conn, claims tenancy.Claims, id uuid.UUID) (bool, error) {
-	args := []any{id}
-	where := "id = $1"
-
-	args = append(args, claims.TenantID)
-	where += fmt.Sprintf(" AND tenant_id = $%d", len(args))
-	// A row in the trash is not something to point new rows at: the sweeper is
-	// coming for it, and the reference would outlive it.
-	where += " AND deleted_at IS NULL"
-	// A snapshot is a copy of a past state. A key pointing at one names a version
-	// rather than the thing, which is never what a relation means.
-	args = append(args, model.TodoVersionTypeOriginal)
-	where += fmt.Sprintf(" AND version_type = $%d", len(args))
-
-	var one int
-	err := tx.QueryRow(ctx, "SELECT 1 FROM todo WHERE "+where, args...).Scan(&one)
-	if dbx.IsNoRows(err) {
-		return false, nil
-	}
-	if err != nil {
-		return false, rigerr.Internal(err, "check that Todo %s can be referenced", id)
-	}
-	return true, nil
 }

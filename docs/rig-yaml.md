@@ -777,7 +777,7 @@ over their limit — deleting it is free.
 
 ## `cache`
 
-Whether rig holds its own per-request reads in memory. Off by default.
+Whether rig holds reads in memory between requests. Off by default.
 
 ```yaml
 cache:
@@ -787,16 +787,25 @@ cache:
   max_entries: 50000        # per cache, before the whole map is dropped
 ```
 
-The reads are the ones rig makes on behalf of every caller: resolving a session
-token, resolving an API key, and — before that second one — the failure limit
-that stops somebody grinding secrets against a key id. All of them are a row read
-on every authenticated request, for answers that change when somebody signs out or
-gets their key wrong.
+Two kinds of read are covered and they are worth telling apart, because rig owns
+one of them completely and the other one only if you let it.
 
-Which is why it needs an [`auth`](#auth) block beside it: those three reads are
-the whole of what this covers, so `cache.enabled` on a project that does not
-authenticate its callers is refused when `rig.yaml` is read rather than left as
-four numbers nothing looks at.
+**The reads rig makes for itself**, on behalf of every caller: resolving a session
+token, resolving an API key, and — before that second one — the failure limit that
+stops somebody grinding secrets against a key id. All three are a row read on
+every authenticated request, for answers that change when somebody signs out or
+gets their key wrong. They come with an [`auth`](#auth) block and there is nothing
+else to say: rig makes the read and rig makes every write that invalidates it.
+
+**The read rig makes for one of your tables**, which is `cache: true` in that
+table's own configuration file — see [tables.md](tables.md#cache). That covers
+`Get`, the lookup by identifier behind every `GET /resource/{id}`, and it is
+opt-in per table because it is a promise as much as a setting. The promise is
+below.
+
+Either one is enough on its own. A block with neither an `auth:` block nor a
+cached table is refused when the project is compiled rather than left as four
+numbers nothing looks at.
 
 **It is not a time-to-live over authentication.** That would be a revoked session
 that keeps working, and rig does not offer it. Every revocation rig performs
@@ -832,6 +841,81 @@ itself as not live, and a cache that is not live reads through.
 ```go
 app.CloseWithin("auth", 5*time.Second, front.Close)
 ```
+
+### Holding one of your tables: `cache: true`
+
+Beside the three reads above, one read of your own can be held: `Get`, the lookup
+by identifier. One of *your own* is the operative part — `rig_file`, the
+`rig_notification_*` tables and the rest of rig's own are written by the module
+that owns them rather than through a repository, so asking to hold one is refused.
+It is asked for per table, in that table's configuration file:
+
+```yaml
+# services/todo/todo.yaml
+table: todo
+cache: true
+```
+
+That is the whole of it. The generated repository grows a map, a listener and a
+withdrawal on every write it makes to the row, and `store.New` builds and starts
+all of it — so there is nothing to call and no order to get right. One line in a
+`main.go`, and safe to leave out for the reason the auth one is:
+
+```go
+app.CloseWithin("store", 5*time.Second, repos.Close)
+```
+
+**What you are promising by writing it.** rig publishes the withdrawal from the
+writes *it* makes, so every write to this table has to go through the generated
+repository. Two ways to break that, and both are silent:
+
+```go
+repos.Pool().Exec(ctx, "UPDATE todo SET title = $1 WHERE id = $2", ...)  // no
+```
+
+and raw SQL against the `tx` a [`dbhook`](services.md) hands you. Either one
+moves the row without telling anybody, and every replica holding it goes on
+serving the old one until `ttl` expires. A migration, a `psql` session and a
+second deployment writing the same table are the same hole from further away.
+
+This is the [`Grants`](#cache) argument applied to a table you own, and it is why
+this is a key per table rather than something `cache.enabled` turns on for
+everything: rig cannot tell from your schema whether the promise is true, so
+nothing but a person can make it.
+
+**When you have to write around it anyway**, the repository has the withdrawal on
+it, and calling it is the difference between a promise you can keep and one you can
+only break:
+
+```go
+repos.Todos.ForgetCached(ctx, row)   // row as it was, inside the writing transaction
+```
+
+Nothing that goes through the repository needs this. It is here because rig needed
+it first: a [`files`](#files) column is written by the file service, inside the
+transaction that finalizes an upload rather than through `Update`, so attaching a
+cover to a held row would leave every replica saying it has none — and the download
+endpoint answering 404 for something that had just been uploaded. That call is
+generated; yours is the same one.
+
+**Only `Get`.** A list, a search and the trash are a query every time, and that is
+not an omission to fill in later. What a list returns depends on filters, on
+paging and on rows other than the one being asked about, so any write to the table
+could change any list — the invalidation would have to drop everything, on every
+write, and the entry would be gone before a second caller ever hit it. `Get` is
+the one read that is a pure function of a row, which is the property that makes it
+cacheable at all.
+
+**Two kinds of `Get` are never held.** One made inside a transaction, because
+every write begins by reading the row it is about to change — to snapshot the
+previous version, and to judge the change against it — and a held answer there
+would put a version that never existed into the history. And one that widened its
+scope with [`readopt`](services.md), because reading across tenants or across a
+table's owners answers something the key does not describe.
+
+Everything else in this section applies unchanged: the withdrawal is a `NOTIFY`
+on the writing transaction, `ttl` is the backstop for a replica that missed one,
+and a replica that has lost the channel holds nothing at all.
 
 **The read this deliberately does not cover is your `Grants` function.** It is
 the most expensive one on the path — a join over role tables, on every request —

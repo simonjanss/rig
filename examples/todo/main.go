@@ -118,7 +118,17 @@ func main() {
 		app.Drain("notifier", notifier.StopRecording)
 		app.CloseWithin("notifier", 5*time.Second, notifier.Close)
 
-		repos := store.New(app.Pool, store.Config{})
+		// The store owns an invalidation channel of its own, because `todo` set
+		// `cache: true`. It is built, served and started inside New, so there is
+		// nothing to wire and no order to get right — and the shutdown below is the
+		// whole application-facing surface of it.
+		repos := store.New(app.Pool, store.Config{Logger: app.Logger})
+
+		// Safe to leave out, which is the point: a listener that has stopped
+		// reports itself as not live, and a cache that is not live reads through
+		// and holds nothing. Forgetting this costs a Postgres connection held
+		// until the process exits, not a row nobody can withdraw.
+		app.CloseWithin("store", 5*time.Second, repos.Close)
 
 		// Where uploads go. The pool is the repositories' own, and that is not
 		// incidental: the transaction that finalizes a file and writes the row

@@ -280,10 +280,6 @@
         "identity_ttl": {
           "$ref": "#/$defs/Duration",
           "description": "Lifetime of the tenant-less credential held between signing in and picking a tenant. Defaults to 30m."
-        },
-        "cache_ttl": {
-          "$ref": "#/$defs/Duration",
-          "description": "Keep verified access tokens in memory for this long. Zero, the default, reads the row every time, which makes revocation immediate. Anything above a few seconds is a revoked session that keeps working."
         }
       },
       "additionalProperties": false,

@@ -68,6 +68,10 @@ type AttachRequest struct {
 // previous versions still points at the old file from every one of them, and
 // deleting it on replace would corrupt exactly the history the snapshot exists
 // to keep.
+//
+// That last transaction also withdraws whatever is held of the owning row, when
+// the row is one that is held — see [Owner.Forget]. It is the same transaction
+// because it has to be.
 func (s *Service) Attach(ctx context.Context, req AttachRequest) (*File, error) {
 	f, err := s.upload(ctx, req)
 	if err != nil {
@@ -78,12 +82,35 @@ func (s *Service) Attach(ctx context.Context, req AttachRequest) (*File, error) 
 		if err := s.store.finalize(ctx, f.ID, f.URL, f.Size, f.Checksum, f.ContentType, *f.UploadedAt); err != nil {
 			return err
 		}
-		return s.store.attach(ctx, req.Owner, req.TenantID, &f.ID)
+		if err := s.store.attach(ctx, req.Owner, req.TenantID, &f.ID); err != nil {
+			return err
+		}
+		return forget(ctx, req.Owner)
 	})
 	if err != nil {
 		return nil, notFound(err)
 	}
 	return f, nil
+}
+
+// forget withdraws a held copy of the owning row, on the transaction that has
+// just changed it.
+//
+// After the statement and never before: the withdrawal is published inside this
+// transaction, so Postgres delivers it when the transaction commits and discards
+// it if it rolls back. Publishing first would withdraw a row a rollback then put
+// back — harmless, since the entry is only dropped — but a hole in the other
+// direction would not be, and being deliberate about the order is what keeps the
+// two straight.
+//
+// Nil is the ordinary case: an owning table that holds nothing has nothing to
+// withdraw, and asking here rather than at both call sites keeps the condition in
+// one place.
+func forget(ctx context.Context, o Owner) error {
+	if o.Forget == nil {
+		return nil
+	}
+	return o.Forget(ctx)
 }
 
 // Pending is a file whose bytes have landed and whose row is not final: the
@@ -260,6 +287,9 @@ func (s *Service) Detach(ctx context.Context, tenantID uuid.UUID, o Owner, fileI
 
 	err = dbx.InTx(ctx, s.cfg.DB, func(ctx context.Context, _ dbx.Conn) error {
 		if err := s.store.attach(ctx, o, tenantID, nil); err != nil {
+			return err
+		}
+		if err := forget(ctx, o); err != nil {
 			return err
 		}
 		return s.store.softDelete(ctx, tenantID, fileID, at)

@@ -1,0 +1,112 @@
+{
+  "name": "public",
+  "tables": [
+    {
+      "name": "memo",
+      "comment": "A private note one person writes for themselves.",
+      "kind": "Base",
+      "columns": [
+        {
+          "name": "id",
+          "sql_type": "uuid",
+          "udt_name": "uuid",
+          "nullable": false,
+          "ordinal": 1,
+          "is_primary_key": true
+        },
+        {
+          "name": "tenant_id",
+          "sql_type": "uuid",
+          "udt_name": "uuid",
+          "nullable": false,
+          "ordinal": 2
+        },
+        {
+          "name": "created_at",
+          "sql_type": "timestamptz",
+          "udt_name": "timestamptz",
+          "nullable": false,
+          "ordinal": 3
+        },
+        {
+          "name": "created_by_account_id",
+          "sql_type": "uuid",
+          "udt_name": "uuid",
+          "nullable": true,
+          "ordinal": 4
+        },
+        {
+          "name": "updated_at",
+          "sql_type": "timestamptz",
+          "udt_name": "timestamptz",
+          "nullable": true,
+          "ordinal": 5
+        },
+        {
+          "name": "updated_by_account_id",
+          "sql_type": "uuid",
+          "udt_name": "uuid",
+          "nullable": true,
+          "ordinal": 6
+        },
+        {
+          "name": "deleted_at",
+          "sql_type": "timestamptz",
+          "udt_name": "timestamptz",
+          "nullable": true,
+          "ordinal": 7
+        },
+        {
+          "name": "deleted_by_account_id",
+          "sql_type": "uuid",
+          "udt_name": "uuid",
+          "nullable": true,
+          "ordinal": 8
+        },
+        {
+          "name": "body",
+          "sql_type": "text",
+          "udt_name": "text",
+          "nullable": false,
+          "ordinal": 9
+        }
+      ],
+      "primary_key": [
+        "id"
+      ],
+      "indexes": [
+        {
+          "name": "memo_pkey",
+          "columns": [
+            "id"
+          ],
+          "unique": true,
+          "method": "btree"
+        },
+        {
+          "name": "memo_tenant_created_idx",
+          "columns": [
+            "tenant_id",
+            "created_at"
+          ],
+          "method": "btree"
+        },
+        {
+          "name": "memo_created_by_idx",
+          "columns": [
+            "created_by_account_id"
+          ],
+          "method": "btree"
+        },
+        {
+          "name": "memo_deleted_by_idx",
+          "columns": [
+            "deleted_by_account_id"
+          ],
+          "method": "btree"
+        }
+      ]
+    }
+  ],
+  "enums": []
+}

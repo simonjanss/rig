@@ -711,7 +711,7 @@ func (s DefaultTodoService) DeleteCoverFile(ctx context.Context, r Request[TodoD
 		return nil
 	}
 
-	return s.files.Detach(ctx, r.Claims.TenantID, files.Owner{Table: "todo", IDColumn: "id", TenantColumn: "tenant_id", FileColumn: "cover_file_id", ID: row.ID}, *row.CoverFileID)
+	return s.files.Detach(ctx, r.Claims.TenantID, files.Owner{Table: "todo", IDColumn: "id", TenantColumn: "tenant_id", FileColumn: "cover_file_id", ID: row.ID, Forget: func(ctx context.Context) error { return s.repo.ForgetCached(ctx, row) }}, *row.CoverFileID)
 }
 
 // UploadCoverFile implements TodoService.
@@ -727,7 +727,7 @@ func (s DefaultTodoService) UploadCoverFile(ctx context.Context, r Request[TodoU
 	f, err := s.files.Attach(ctx, files.AttachRequest{
 		TenantID: r.Claims.TenantID,
 		Upload:   r.Body,
-		Owner:    files.Owner{Table: "todo", IDColumn: "id", TenantColumn: "tenant_id", FileColumn: "cover_file_id", ID: row.ID},
+		Owner:    files.Owner{Table: "todo", IDColumn: "id", TenantColumn: "tenant_id", FileColumn: "cover_file_id", ID: row.ID, Forget: func(ctx context.Context) error { return s.repo.ForgetCached(ctx, row) }},
 		URL:      func(fileID uuid.UUID, name string) string { return todoCoverFileURL(row.ID, fileID, name) },
 	})
 	if err != nil {

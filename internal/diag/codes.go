@@ -135,6 +135,14 @@ var (
 			"instead. Whether the trade is worth making is the project's call, so "+
 			"this is a warning and not a refusal.")
 
+	CodeTableCacheUnavailable = newCode("RIG3007", SeverityError,
+		"`cache: true` was set on a table in a project with no `cache:` block.",
+		"Add `cache: enabled: true` to rig.yaml, or remove the key: with no channel to publish on, a held row could never be withdrawn.")
+
+	CodeTableCacheNotYours = newCode("RIG3008", SeverityError,
+		"`cache: true` was set on one of rig's own tables.",
+		"Remove the key. Holding a row is a promise that every write to it goes through the generated repository, and rig's own modules write these tables with their own SQL — so a held row could go stale with nothing to withdraw it.")
+
 	CodeUnmentionedColumn = newCode("RIG3100", SeverityWarning,
 		"A column exists in the database but is not mentioned in the table configuration.",
 		"Run `rig sync` to add it, then replace the placeholder comment.")

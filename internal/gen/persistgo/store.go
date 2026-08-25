@@ -161,6 +161,7 @@ func (e *emitter) storeFile() (gen.Artifact, error) {
 
 	e.storeType(b)
 	e.helpers(b)
+	e.cacheHelpers(b)
 	for _, res := range e.referenceTargets() {
 		e.visibilityFunc(b, res)
 	}
@@ -185,12 +186,13 @@ func (e *emitter) storeType(b *gobuf.Buf) {
 
 	e.filterScopeType(b)
 
-	if e.tracing() {
+	if e.tracing() || e.caching() {
 		b.Comment("Config is what a Store needs beyond a connection.\n\n" +
 			"Taken by value, so that giving a store something else to hold is a " +
 			"new field rather than a signature change every caller has to follow.")
 		b.L("type Config struct {")
 		e.storeTracerField(b)
+		e.storeCacheLoggerField(b)
 		b.L("}")
 	} else {
 		b.Comment("Config is what a Store needs beyond a connection.\n\n" +
@@ -205,6 +207,8 @@ func (e *emitter) storeType(b *gobuf.Buf) {
 	b.L("type Store struct {")
 	b.L("pool *%s.Pool", poolPkg)
 	e.storeTracerHeld(b)
+	e.storeCacheHeldBus(b)
+	e.storeCacheHeld(b)
 	b.NL()
 	for _, res := range e.resources() {
 		b.L("%s %sRepository", res.Plural, res.Name)
@@ -213,14 +217,25 @@ func (e *emitter) storeType(b *gobuf.Buf) {
 	b.NL()
 
 	b.Comment("New builds a store over a connection pool.")
-	if e.tracing() {
+	switch {
+	case e.tracing():
 		b.L("func New(pool *%s.Pool, cfg Config) *Store {", poolPkg)
 		e.storeTracerResolved(b)
 		b.L("s := &Store{pool: pool, tracer: cfg.Tracer}")
-	} else {
+	case e.caching():
+		b.L("func New(pool *%s.Pool, cfg Config) *Store {", poolPkg)
+		b.L("s := &Store{pool: pool}")
+	default:
 		b.L("func New(pool *%s.Pool, _ Config) *Store {", poolPkg)
 		b.L("s := &Store{pool: pool}")
 	}
+	if e.caching() {
+		// The bus below is a paragraph of its own, and only a caching store has
+		// one. An unconditional blank line here would move every other project's
+		// generated output.
+		b.NL()
+	}
+	e.storeCacheBus(b)
 	for _, res := range e.resources() {
 		b.L("s.%s = &%s{db: s}", res.Plural, repoTypeName(res))
 	}
@@ -254,6 +269,8 @@ func (e *emitter) storeType(b *gobuf.Buf) {
 		dbxPkg, ctxPkg, dbxPkg)
 	b.L("}")
 	b.NL()
+
+	e.storeCacheClose(b)
 }
 
 // resources are the resources with storage, in document order.

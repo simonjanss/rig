@@ -7,11 +7,13 @@ package store
 import (
 	"context"
 	"fmt"
+	"math/big"
+	"rigtest/model"
+	"slices"
 	"time"
 
 	"github.com/google/uuid"
 	pgx "github.com/jackc/pgx/v5"
-	"github.com/simonjanss/rig/examples/todo/internal/model"
 	"github.com/simonjanss/rig/runtime/dbhook"
 	"github.com/simonjanss/rig/runtime/dbx"
 	"github.com/simonjanss/rig/runtime/patch"
@@ -21,37 +23,37 @@ import (
 	"github.com/simonjanss/rig/runtime/tenancy"
 )
 
-// TodoRepository reads and writes todo rows.
+// LessonRepository reads and writes lesson rows.
 //
 // Every method scopes to the caller's tenant. There is no way to ask it not to
 // from a request handler, which is the point.
-type TodoRepository interface {
+type LessonRepository interface {
 	// Get returns one row by identifier.
 	//
 	// A lookup by primary key deliberately ignores the lifecycle filters: it
 	// returns the row whether it is live, deleted, or a snapshot, because a caller
 	// holding an identifier is usually asking about that exact row.
-	Get(ctx context.Context, id uuid.UUID, opts ...readopt.Option) (*model.Todo, error)
+	Get(ctx context.Context, id uuid.UUID, opts ...readopt.Option) (*model.Lesson, error)
 
 	// List returns matching rows and the total ignoring pagination.
 	//
 	// The filter says which rows and the page says how many of them, in what
 	// order. They are separate arguments because they arrive separately: the
 	// filter is a request body, the page is two query parameters.
-	List(ctx context.Context, f model.TodoFilter, page model.TodoPage, opts ...readopt.Option) ([]*model.Todo, int64, error)
+	List(ctx context.Context, f model.LessonFilter, page model.LessonPage, opts ...readopt.Option) ([]*model.Lesson, int64, error)
 
 	// Create inserts a row, stamping the identifier, tenant and audit columns.
 	//
 	// It takes an envelope rather than the input alone: the rules that check the
 	// input and the callbacks that run around the write belong to the same unit of
 	// work as the write itself.
-	Create(ctx context.Context, in dbhook.Create[model.TodoCreateInput, model.Todo]) (*model.Todo, error)
+	Create(ctx context.Context, in dbhook.Create[model.LessonCreateInput, model.Lesson]) (*model.Lesson, error)
 
 	// Update changes a row, writing a snapshot of the previous version first.
-	Update(ctx context.Context, id uuid.UUID, in dbhook.Update[model.TodoUpdateInput, model.Todo]) (*model.Todo, error)
+	Update(ctx context.Context, id uuid.UUID, in dbhook.Update[model.LessonUpdateInput, model.Lesson]) (*model.Lesson, error)
 
 	// Delete retires a row by stamping its deletion time. It is idempotent.
-	Delete(ctx context.Context, in dbhook.Delete[model.TodoDeleteInput, model.Todo]) error
+	Delete(ctx context.Context, in dbhook.Delete[model.LessonDeleteInput, model.Lesson]) error
 
 	// Restore brings a deleted row back, if it is still inside the window.
 	//
@@ -59,13 +61,13 @@ type TodoRepository interface {
 	// while the row was retired: a unique value can have been taken by something
 	// created since, and the only way back is to bring the row back under a
 	// different one. An empty input restores it as it was.
-	Restore(ctx context.Context, id uuid.UUID, in dbhook.Restore[model.TodoUpdateInput, model.Todo]) (*model.Todo, error)
+	Restore(ctx context.Context, id uuid.UUID, in dbhook.Restore[model.LessonUpdateInput, model.Lesson]) (*model.Lesson, error)
 
 	// ListDeleted returns retired rows still inside the restore window.
-	ListDeleted(ctx context.Context, f model.TodoFilter, page model.TodoPage, opts ...readopt.Option) ([]*model.Todo, int64, error)
+	ListDeleted(ctx context.Context, f model.LessonFilter, page model.LessonPage, opts ...readopt.Option) ([]*model.Lesson, int64, error)
 
 	// ListSnapshots returns a row's previous versions, newest first.
-	ListSnapshots(ctx context.Context, id uuid.UUID) ([]*model.Todo, error)
+	ListSnapshots(ctx context.Context, id uuid.UUID) ([]*model.Lesson, error)
 
 	// Revert replays one of a row's previous versions onto it.
 	//
@@ -74,7 +76,7 @@ type TodoRepository interface {
 	// replaces is snapshotted first and every rule an update runs still runs.
 	// Writing the old values straight over the row would skip both, and a revert
 	// that cannot itself be reverted is not much of a safety net.
-	Revert(ctx context.Context, id, versionID uuid.UUID, hooks dbhook.UpdateHooks[model.TodoUpdateInput, model.Todo]) (*model.Todo, error)
+	Revert(ctx context.Context, id, versionID uuid.UUID, hooks dbhook.UpdateHooks[model.LessonUpdateInput, model.Lesson]) (*model.Lesson, error)
 
 	// ForgetCached withdraws whatever is held of one row, on the transaction that
 	// changed it.
@@ -91,77 +93,17 @@ type TodoRepository interface {
 	// the withdrawal is a notification Postgres delivers on commit and discards on
 	// a rollback. Withdrawing something nothing holds is not an error.
 	//
-	//	if err := repos.Todos.ForgetCached(ctx, row); err != nil { return err }
-	ForgetCached(ctx context.Context, row *model.Todo) error
+	//	if err := repos.Lessons.ForgetCached(ctx, row); err != nil { return err }
+	ForgetCached(ctx context.Context, row *model.Lesson) error
 }
 
-// todoTodoAttachmentsFilter collects the conditions written on a Todo's
-// TodoAttachments.
-//
-// The bool is whether there were any: a relation nobody mentioned is not a
-// condition that everything satisfies, it is no condition at all.
-func todoTodoAttachmentsFilter(f model.TodoFilter) (model.TodoAttachmentFilter, bool) {
-	var (
-		sub   model.TodoAttachmentFilter
-		asked bool
-	)
-
-	if p := f.Equals; p != nil && p.TodoAttachments != nil {
-		sub.Equals, asked = p.TodoAttachments, true
-	}
-	if p := f.NotEquals; p != nil && p.TodoAttachments != nil {
-		sub.NotEquals, asked = p.TodoAttachments, true
-	}
-	if p := f.GreaterThan; p != nil && p.TodoAttachments != nil {
-		sub.GreaterThan, asked = p.TodoAttachments, true
-	}
-	if p := f.SmallerThan; p != nil && p.TodoAttachments != nil {
-		sub.SmallerThan, asked = p.TodoAttachments, true
-	}
-	if p := f.GreaterOrEqual; p != nil && p.TodoAttachments != nil {
-		sub.GreaterOrEqual, asked = p.TodoAttachments, true
-	}
-	if p := f.SmallerOrEqual; p != nil && p.TodoAttachments != nil {
-		sub.SmallerOrEqual, asked = p.TodoAttachments, true
-	}
-	if p := f.Contains; p != nil && p.TodoAttachments != nil {
-		sub.Contains, asked = p.TodoAttachments, true
-	}
-	if p := f.NotContains; p != nil && p.TodoAttachments != nil {
-		sub.NotContains, asked = p.TodoAttachments, true
-	}
-	if p := f.Like; p != nil && p.TodoAttachments != nil {
-		sub.Like, asked = p.TodoAttachments, true
-	}
-	if p := f.NotLike; p != nil && p.TodoAttachments != nil {
-		sub.NotLike, asked = p.TodoAttachments, true
-	}
-	if p := f.Null; p != nil && p.TodoAttachments != nil {
-		sub.Null, asked = p.TodoAttachments, true
-	}
-	if p := f.NotNull; p != nil && p.TodoAttachments != nil {
-		sub.NotNull, asked = p.TodoAttachments, true
-	}
-
-	if !asked {
-		return sub, false
-	}
-
-	// The connective comes down with them, and it has to: under OR the caller
-	// asked for a related row satisfying either condition, and one subquery whose
-	// inside is a disjunction is exactly that. Under AND it is the same row
-	// satisfying both, which is the part a subquery per operator could not say.
-	sub.OrCondition = f.OrCondition
-	return sub, true
-}
-
-// todoGroup turns a filter into the condition tree the runtime renders.
+// lessonGroup turns a filter into the condition tree the runtime renders.
 //
 // The scope carries what a condition needs besides the filter itself: who is
 // asking, which alias this level's columns belong to, and how deep the nesting
 // has gone. It is a value rather than three parameters because every relation
 // passes a changed copy of it down.
-func todoGroup(f model.TodoFilter, sc filterScope) (query.Group, error) {
+func lessonGroup(f model.LessonFilter, sc filterScope) (query.Group, error) {
 	if err := sc.ok(); err != nil {
 		return query.Group{}, err
 	}
@@ -171,21 +113,6 @@ func todoGroup(f model.TodoFilter, sc filterScope) (query.Group, error) {
 	if p := f.Equals; p != nil {
 		if p.ID != nil {
 			g.Add(sc.at(query.Eq("id", *p.ID)))
-		}
-		if p.Title != nil {
-			g.Add(sc.at(query.Eq("title", *p.Title)))
-		}
-		if p.Notes != nil {
-			g.Add(sc.at(query.Eq("notes", p.Notes)))
-		}
-		if p.IsDone != nil {
-			g.Add(sc.at(query.Eq("is_done", *p.IsDone)))
-		}
-		if p.Priority != nil {
-			g.Add(sc.at(query.Eq("priority", *p.Priority)))
-		}
-		if p.DueAt != nil {
-			g.Add(sc.at(query.Eq("due_at", p.DueAt)))
 		}
 		if p.CreatedAt != nil {
 			g.Add(sc.at(query.Eq("created_at", *p.CreatedAt)))
@@ -208,34 +135,43 @@ func todoGroup(f model.TodoFilter, sc filterScope) (query.Group, error) {
 		if p.VersionType != nil {
 			g.Add(sc.at(query.Eq("version_type", *p.VersionType)))
 		}
-		if p.SnapshotFromTodoID != nil {
-			g.Add(sc.at(query.Eq("snapshot_from_todo_id", p.SnapshotFromTodoID)))
+		if p.SnapshotFromLessonID != nil {
+			g.Add(sc.at(query.Eq("snapshot_from_lesson_id", p.SnapshotFromLessonID)))
 		}
-		if p.SnapshotFromTodoAt != nil {
-			g.Add(sc.at(query.Eq("snapshot_from_todo_at", p.SnapshotFromTodoAt)))
+		if p.SnapshotFromLessonAt != nil {
+			g.Add(sc.at(query.Eq("snapshot_from_lesson_at", p.SnapshotFromLessonAt)))
 		}
-		if p.CoverFileID != nil {
-			g.Add(sc.at(query.Eq("cover_file_id", p.CoverFileID)))
+		if p.Title != nil {
+			g.Add(sc.at(query.Eq("title", *p.Title)))
+		}
+		if p.Notes != nil {
+			g.Add(sc.at(query.Eq("notes", p.Notes)))
+		}
+		if p.Status != nil {
+			g.Add(sc.at(query.Eq("status", *p.Status)))
+		}
+		if p.ManagerEmailAddress != nil {
+			g.Add(sc.at(query.Eq("manager_email", *p.ManagerEmailAddress)))
+		}
+		if p.StartsAt != nil {
+			g.Add(sc.at(query.Eq("starts_at", *p.StartsAt)))
+		}
+		if p.Capacity != nil {
+			g.Add(sc.at(query.Eq("capacity", p.Capacity)))
+		}
+		if p.Price != nil {
+			g.Add(sc.at(query.Eq("price", p.Price)))
+		}
+		if p.Tags != nil {
+			g.Add(sc.at(query.Eq("tags", p.Tags)))
+		}
+		if p.SearchVector != nil {
+			g.Add(sc.at(query.Eq("search_vector", p.SearchVector)))
 		}
 	}
 	if p := f.NotEquals; p != nil {
 		if p.ID != nil {
 			g.Add(sc.at(query.Ne("id", *p.ID)))
-		}
-		if p.Title != nil {
-			g.Add(sc.at(query.Ne("title", *p.Title)))
-		}
-		if p.Notes != nil {
-			g.Add(sc.at(query.Ne("notes", p.Notes)))
-		}
-		if p.IsDone != nil {
-			g.Add(sc.at(query.Ne("is_done", *p.IsDone)))
-		}
-		if p.Priority != nil {
-			g.Add(sc.at(query.Ne("priority", *p.Priority)))
-		}
-		if p.DueAt != nil {
-			g.Add(sc.at(query.Ne("due_at", p.DueAt)))
 		}
 		if p.CreatedAt != nil {
 			g.Add(sc.at(query.Ne("created_at", *p.CreatedAt)))
@@ -258,20 +194,41 @@ func todoGroup(f model.TodoFilter, sc filterScope) (query.Group, error) {
 		if p.VersionType != nil {
 			g.Add(sc.at(query.Ne("version_type", *p.VersionType)))
 		}
-		if p.SnapshotFromTodoID != nil {
-			g.Add(sc.at(query.Ne("snapshot_from_todo_id", p.SnapshotFromTodoID)))
+		if p.SnapshotFromLessonID != nil {
+			g.Add(sc.at(query.Ne("snapshot_from_lesson_id", p.SnapshotFromLessonID)))
 		}
-		if p.SnapshotFromTodoAt != nil {
-			g.Add(sc.at(query.Ne("snapshot_from_todo_at", p.SnapshotFromTodoAt)))
+		if p.SnapshotFromLessonAt != nil {
+			g.Add(sc.at(query.Ne("snapshot_from_lesson_at", p.SnapshotFromLessonAt)))
 		}
-		if p.CoverFileID != nil {
-			g.Add(sc.at(query.Ne("cover_file_id", p.CoverFileID)))
+		if p.Title != nil {
+			g.Add(sc.at(query.Ne("title", *p.Title)))
+		}
+		if p.Notes != nil {
+			g.Add(sc.at(query.Ne("notes", p.Notes)))
+		}
+		if p.Status != nil {
+			g.Add(sc.at(query.Ne("status", *p.Status)))
+		}
+		if p.ManagerEmailAddress != nil {
+			g.Add(sc.at(query.Ne("manager_email", *p.ManagerEmailAddress)))
+		}
+		if p.StartsAt != nil {
+			g.Add(sc.at(query.Ne("starts_at", *p.StartsAt)))
+		}
+		if p.Capacity != nil {
+			g.Add(sc.at(query.Ne("capacity", p.Capacity)))
+		}
+		if p.Price != nil {
+			g.Add(sc.at(query.Ne("price", p.Price)))
+		}
+		if p.Tags != nil {
+			g.Add(sc.at(query.Ne("tags", p.Tags)))
+		}
+		if p.SearchVector != nil {
+			g.Add(sc.at(query.Ne("search_vector", p.SearchVector)))
 		}
 	}
 	if p := f.GreaterThan; p != nil {
-		if p.DueAt != nil {
-			g.Add(sc.at(query.Gt("due_at", p.DueAt)))
-		}
 		if p.CreatedAt != nil {
 			g.Add(sc.at(query.Gt("created_at", *p.CreatedAt)))
 		}
@@ -281,14 +238,20 @@ func todoGroup(f model.TodoFilter, sc filterScope) (query.Group, error) {
 		if p.DeletedAt != nil {
 			g.Add(sc.at(query.Gt("deleted_at", p.DeletedAt)))
 		}
-		if p.SnapshotFromTodoAt != nil {
-			g.Add(sc.at(query.Gt("snapshot_from_todo_at", p.SnapshotFromTodoAt)))
+		if p.SnapshotFromLessonAt != nil {
+			g.Add(sc.at(query.Gt("snapshot_from_lesson_at", p.SnapshotFromLessonAt)))
+		}
+		if p.StartsAt != nil {
+			g.Add(sc.at(query.Gt("starts_at", *p.StartsAt)))
+		}
+		if p.Capacity != nil {
+			g.Add(sc.at(query.Gt("capacity", p.Capacity)))
+		}
+		if p.Price != nil {
+			g.Add(sc.at(query.Gt("price", p.Price)))
 		}
 	}
 	if p := f.SmallerThan; p != nil {
-		if p.DueAt != nil {
-			g.Add(sc.at(query.Lt("due_at", p.DueAt)))
-		}
 		if p.CreatedAt != nil {
 			g.Add(sc.at(query.Lt("created_at", *p.CreatedAt)))
 		}
@@ -298,14 +261,20 @@ func todoGroup(f model.TodoFilter, sc filterScope) (query.Group, error) {
 		if p.DeletedAt != nil {
 			g.Add(sc.at(query.Lt("deleted_at", p.DeletedAt)))
 		}
-		if p.SnapshotFromTodoAt != nil {
-			g.Add(sc.at(query.Lt("snapshot_from_todo_at", p.SnapshotFromTodoAt)))
+		if p.SnapshotFromLessonAt != nil {
+			g.Add(sc.at(query.Lt("snapshot_from_lesson_at", p.SnapshotFromLessonAt)))
+		}
+		if p.StartsAt != nil {
+			g.Add(sc.at(query.Lt("starts_at", *p.StartsAt)))
+		}
+		if p.Capacity != nil {
+			g.Add(sc.at(query.Lt("capacity", p.Capacity)))
+		}
+		if p.Price != nil {
+			g.Add(sc.at(query.Lt("price", p.Price)))
 		}
 	}
 	if p := f.GreaterOrEqual; p != nil {
-		if p.DueAt != nil {
-			g.Add(sc.at(query.Gte("due_at", p.DueAt)))
-		}
 		if p.CreatedAt != nil {
 			g.Add(sc.at(query.Gte("created_at", *p.CreatedAt)))
 		}
@@ -315,14 +284,20 @@ func todoGroup(f model.TodoFilter, sc filterScope) (query.Group, error) {
 		if p.DeletedAt != nil {
 			g.Add(sc.at(query.Gte("deleted_at", p.DeletedAt)))
 		}
-		if p.SnapshotFromTodoAt != nil {
-			g.Add(sc.at(query.Gte("snapshot_from_todo_at", p.SnapshotFromTodoAt)))
+		if p.SnapshotFromLessonAt != nil {
+			g.Add(sc.at(query.Gte("snapshot_from_lesson_at", p.SnapshotFromLessonAt)))
+		}
+		if p.StartsAt != nil {
+			g.Add(sc.at(query.Gte("starts_at", *p.StartsAt)))
+		}
+		if p.Capacity != nil {
+			g.Add(sc.at(query.Gte("capacity", p.Capacity)))
+		}
+		if p.Price != nil {
+			g.Add(sc.at(query.Gte("price", p.Price)))
 		}
 	}
 	if p := f.SmallerOrEqual; p != nil {
-		if p.DueAt != nil {
-			g.Add(sc.at(query.Lte("due_at", p.DueAt)))
-		}
 		if p.CreatedAt != nil {
 			g.Add(sc.at(query.Lte("created_at", *p.CreatedAt)))
 		}
@@ -332,28 +307,22 @@ func todoGroup(f model.TodoFilter, sc filterScope) (query.Group, error) {
 		if p.DeletedAt != nil {
 			g.Add(sc.at(query.Lte("deleted_at", p.DeletedAt)))
 		}
-		if p.SnapshotFromTodoAt != nil {
-			g.Add(sc.at(query.Lte("snapshot_from_todo_at", p.SnapshotFromTodoAt)))
+		if p.SnapshotFromLessonAt != nil {
+			g.Add(sc.at(query.Lte("snapshot_from_lesson_at", p.SnapshotFromLessonAt)))
+		}
+		if p.StartsAt != nil {
+			g.Add(sc.at(query.Lte("starts_at", *p.StartsAt)))
+		}
+		if p.Capacity != nil {
+			g.Add(sc.at(query.Lte("capacity", p.Capacity)))
+		}
+		if p.Price != nil {
+			g.Add(sc.at(query.Lte("price", p.Price)))
 		}
 	}
 	if p := f.Contains; p != nil {
 		if len(p.ID) > 0 {
 			g.Add(sc.at(query.In("id", p.ID)))
-		}
-		if len(p.Title) > 0 {
-			g.Add(sc.at(query.In("title", p.Title)))
-		}
-		if len(p.Notes) > 0 {
-			g.Add(sc.at(query.In("notes", p.Notes)))
-		}
-		if len(p.IsDone) > 0 {
-			g.Add(sc.at(query.In("is_done", p.IsDone)))
-		}
-		if len(p.Priority) > 0 {
-			g.Add(sc.at(query.In("priority", p.Priority)))
-		}
-		if len(p.DueAt) > 0 {
-			g.Add(sc.at(query.In("due_at", p.DueAt)))
 		}
 		if len(p.CreatedAt) > 0 {
 			g.Add(sc.at(query.In("created_at", p.CreatedAt)))
@@ -376,34 +345,40 @@ func todoGroup(f model.TodoFilter, sc filterScope) (query.Group, error) {
 		if len(p.VersionType) > 0 {
 			g.Add(sc.at(query.In("version_type", p.VersionType)))
 		}
-		if len(p.SnapshotFromTodoID) > 0 {
-			g.Add(sc.at(query.In("snapshot_from_todo_id", p.SnapshotFromTodoID)))
+		if len(p.SnapshotFromLessonID) > 0 {
+			g.Add(sc.at(query.In("snapshot_from_lesson_id", p.SnapshotFromLessonID)))
 		}
-		if len(p.SnapshotFromTodoAt) > 0 {
-			g.Add(sc.at(query.In("snapshot_from_todo_at", p.SnapshotFromTodoAt)))
+		if len(p.SnapshotFromLessonAt) > 0 {
+			g.Add(sc.at(query.In("snapshot_from_lesson_at", p.SnapshotFromLessonAt)))
 		}
-		if len(p.CoverFileID) > 0 {
-			g.Add(sc.at(query.In("cover_file_id", p.CoverFileID)))
+		if len(p.Title) > 0 {
+			g.Add(sc.at(query.In("title", p.Title)))
+		}
+		if len(p.Notes) > 0 {
+			g.Add(sc.at(query.In("notes", p.Notes)))
+		}
+		if len(p.Status) > 0 {
+			g.Add(sc.at(query.In("status", p.Status)))
+		}
+		if len(p.ManagerEmailAddress) > 0 {
+			g.Add(sc.at(query.In("manager_email", p.ManagerEmailAddress)))
+		}
+		if len(p.StartsAt) > 0 {
+			g.Add(sc.at(query.In("starts_at", p.StartsAt)))
+		}
+		if len(p.Capacity) > 0 {
+			g.Add(sc.at(query.In("capacity", p.Capacity)))
+		}
+		if len(p.Price) > 0 {
+			g.Add(sc.at(query.In("price", p.Price)))
+		}
+		if len(p.SearchVector) > 0 {
+			g.Add(sc.at(query.In("search_vector", p.SearchVector)))
 		}
 	}
 	if p := f.NotContains; p != nil {
 		if len(p.ID) > 0 {
 			g.Add(sc.at(query.NotIn("id", p.ID)))
-		}
-		if len(p.Title) > 0 {
-			g.Add(sc.at(query.NotIn("title", p.Title)))
-		}
-		if len(p.Notes) > 0 {
-			g.Add(sc.at(query.NotIn("notes", p.Notes)))
-		}
-		if len(p.IsDone) > 0 {
-			g.Add(sc.at(query.NotIn("is_done", p.IsDone)))
-		}
-		if len(p.Priority) > 0 {
-			g.Add(sc.at(query.NotIn("priority", p.Priority)))
-		}
-		if len(p.DueAt) > 0 {
-			g.Add(sc.at(query.NotIn("due_at", p.DueAt)))
 		}
 		if len(p.CreatedAt) > 0 {
 			g.Add(sc.at(query.NotIn("created_at", p.CreatedAt)))
@@ -426,14 +401,35 @@ func todoGroup(f model.TodoFilter, sc filterScope) (query.Group, error) {
 		if len(p.VersionType) > 0 {
 			g.Add(sc.at(query.NotIn("version_type", p.VersionType)))
 		}
-		if len(p.SnapshotFromTodoID) > 0 {
-			g.Add(sc.at(query.NotIn("snapshot_from_todo_id", p.SnapshotFromTodoID)))
+		if len(p.SnapshotFromLessonID) > 0 {
+			g.Add(sc.at(query.NotIn("snapshot_from_lesson_id", p.SnapshotFromLessonID)))
 		}
-		if len(p.SnapshotFromTodoAt) > 0 {
-			g.Add(sc.at(query.NotIn("snapshot_from_todo_at", p.SnapshotFromTodoAt)))
+		if len(p.SnapshotFromLessonAt) > 0 {
+			g.Add(sc.at(query.NotIn("snapshot_from_lesson_at", p.SnapshotFromLessonAt)))
 		}
-		if len(p.CoverFileID) > 0 {
-			g.Add(sc.at(query.NotIn("cover_file_id", p.CoverFileID)))
+		if len(p.Title) > 0 {
+			g.Add(sc.at(query.NotIn("title", p.Title)))
+		}
+		if len(p.Notes) > 0 {
+			g.Add(sc.at(query.NotIn("notes", p.Notes)))
+		}
+		if len(p.Status) > 0 {
+			g.Add(sc.at(query.NotIn("status", p.Status)))
+		}
+		if len(p.ManagerEmailAddress) > 0 {
+			g.Add(sc.at(query.NotIn("manager_email", p.ManagerEmailAddress)))
+		}
+		if len(p.StartsAt) > 0 {
+			g.Add(sc.at(query.NotIn("starts_at", p.StartsAt)))
+		}
+		if len(p.Capacity) > 0 {
+			g.Add(sc.at(query.NotIn("capacity", p.Capacity)))
+		}
+		if len(p.Price) > 0 {
+			g.Add(sc.at(query.NotIn("price", p.Price)))
+		}
+		if len(p.SearchVector) > 0 {
+			g.Add(sc.at(query.NotIn("search_vector", p.SearchVector)))
 		}
 	}
 	if p := f.Like; p != nil {
@@ -443,6 +439,12 @@ func todoGroup(f model.TodoFilter, sc filterScope) (query.Group, error) {
 		if p.Notes != nil {
 			g.Add(sc.at(query.Like("notes", *p.Notes)))
 		}
+		if p.ManagerEmailAddress != nil {
+			g.Add(sc.at(query.Like("manager_email", *p.ManagerEmailAddress)))
+		}
+		if p.SearchVector != nil {
+			g.Add(sc.at(query.Like("search_vector", *p.SearchVector)))
+		}
 	}
 	if p := f.NotLike; p != nil {
 		if p.Title != nil {
@@ -451,22 +453,14 @@ func todoGroup(f model.TodoFilter, sc filterScope) (query.Group, error) {
 		if p.Notes != nil {
 			g.Add(sc.at(query.NotLike("notes", *p.Notes)))
 		}
+		if p.ManagerEmailAddress != nil {
+			g.Add(sc.at(query.NotLike("manager_email", *p.ManagerEmailAddress)))
+		}
+		if p.SearchVector != nil {
+			g.Add(sc.at(query.NotLike("search_vector", *p.SearchVector)))
+		}
 	}
 	if p := f.Null; p != nil {
-		if p.Notes != nil {
-			if *p.Notes {
-				g.Add(sc.at(query.IsNull("notes")))
-			} else {
-				g.Add(sc.at(query.NotNull("notes")))
-			}
-		}
-		if p.DueAt != nil {
-			if *p.DueAt {
-				g.Add(sc.at(query.IsNull("due_at")))
-			} else {
-				g.Add(sc.at(query.NotNull("due_at")))
-			}
-		}
 		if p.CreatedByAccountID != nil {
 			if *p.CreatedByAccountID {
 				g.Add(sc.at(query.IsNull("created_by_account_id")))
@@ -502,43 +496,57 @@ func todoGroup(f model.TodoFilter, sc filterScope) (query.Group, error) {
 				g.Add(sc.at(query.NotNull("deleted_by_account_id")))
 			}
 		}
-		if p.SnapshotFromTodoID != nil {
-			if *p.SnapshotFromTodoID {
-				g.Add(sc.at(query.IsNull("snapshot_from_todo_id")))
+		if p.SnapshotFromLessonID != nil {
+			if *p.SnapshotFromLessonID {
+				g.Add(sc.at(query.IsNull("snapshot_from_lesson_id")))
 			} else {
-				g.Add(sc.at(query.NotNull("snapshot_from_todo_id")))
+				g.Add(sc.at(query.NotNull("snapshot_from_lesson_id")))
 			}
 		}
-		if p.SnapshotFromTodoAt != nil {
-			if *p.SnapshotFromTodoAt {
-				g.Add(sc.at(query.IsNull("snapshot_from_todo_at")))
+		if p.SnapshotFromLessonAt != nil {
+			if *p.SnapshotFromLessonAt {
+				g.Add(sc.at(query.IsNull("snapshot_from_lesson_at")))
 			} else {
-				g.Add(sc.at(query.NotNull("snapshot_from_todo_at")))
+				g.Add(sc.at(query.NotNull("snapshot_from_lesson_at")))
 			}
 		}
-		if p.CoverFileID != nil {
-			if *p.CoverFileID {
-				g.Add(sc.at(query.IsNull("cover_file_id")))
+		if p.Notes != nil {
+			if *p.Notes {
+				g.Add(sc.at(query.IsNull("notes")))
 			} else {
-				g.Add(sc.at(query.NotNull("cover_file_id")))
+				g.Add(sc.at(query.NotNull("notes")))
+			}
+		}
+		if p.Capacity != nil {
+			if *p.Capacity {
+				g.Add(sc.at(query.IsNull("capacity")))
+			} else {
+				g.Add(sc.at(query.NotNull("capacity")))
+			}
+		}
+		if p.Price != nil {
+			if *p.Price {
+				g.Add(sc.at(query.IsNull("price")))
+			} else {
+				g.Add(sc.at(query.NotNull("price")))
+			}
+		}
+		if p.Tags != nil {
+			if *p.Tags {
+				g.Add(sc.at(query.IsNull("tags")))
+			} else {
+				g.Add(sc.at(query.NotNull("tags")))
+			}
+		}
+		if p.SearchVector != nil {
+			if *p.SearchVector {
+				g.Add(sc.at(query.IsNull("search_vector")))
+			} else {
+				g.Add(sc.at(query.NotNull("search_vector")))
 			}
 		}
 	}
 	if p := f.NotNull; p != nil {
-		if p.Notes != nil {
-			if *p.Notes {
-				g.Add(sc.at(query.NotNull("notes")))
-			} else {
-				g.Add(sc.at(query.IsNull("notes")))
-			}
-		}
-		if p.DueAt != nil {
-			if *p.DueAt {
-				g.Add(sc.at(query.NotNull("due_at")))
-			} else {
-				g.Add(sc.at(query.IsNull("due_at")))
-			}
-		}
 		if p.CreatedByAccountID != nil {
 			if *p.CreatedByAccountID {
 				g.Add(sc.at(query.NotNull("created_by_account_id")))
@@ -574,61 +582,59 @@ func todoGroup(f model.TodoFilter, sc filterScope) (query.Group, error) {
 				g.Add(sc.at(query.IsNull("deleted_by_account_id")))
 			}
 		}
-		if p.SnapshotFromTodoID != nil {
-			if *p.SnapshotFromTodoID {
-				g.Add(sc.at(query.NotNull("snapshot_from_todo_id")))
+		if p.SnapshotFromLessonID != nil {
+			if *p.SnapshotFromLessonID {
+				g.Add(sc.at(query.NotNull("snapshot_from_lesson_id")))
 			} else {
-				g.Add(sc.at(query.IsNull("snapshot_from_todo_id")))
+				g.Add(sc.at(query.IsNull("snapshot_from_lesson_id")))
 			}
 		}
-		if p.SnapshotFromTodoAt != nil {
-			if *p.SnapshotFromTodoAt {
-				g.Add(sc.at(query.NotNull("snapshot_from_todo_at")))
+		if p.SnapshotFromLessonAt != nil {
+			if *p.SnapshotFromLessonAt {
+				g.Add(sc.at(query.NotNull("snapshot_from_lesson_at")))
 			} else {
-				g.Add(sc.at(query.IsNull("snapshot_from_todo_at")))
+				g.Add(sc.at(query.IsNull("snapshot_from_lesson_at")))
 			}
 		}
-		if p.CoverFileID != nil {
-			if *p.CoverFileID {
-				g.Add(sc.at(query.NotNull("cover_file_id")))
+		if p.Notes != nil {
+			if *p.Notes {
+				g.Add(sc.at(query.NotNull("notes")))
 			} else {
-				g.Add(sc.at(query.IsNull("cover_file_id")))
+				g.Add(sc.at(query.IsNull("notes")))
 			}
 		}
-	}
-
-	if sub, ok := todoTodoAttachmentsFilter(f); ok {
-		inner, from, on := sc.hasMany("todo_attachment", "todo_id", "id")
-		where, err := todoAttachmentGroup(sub, inner)
-		if err != nil {
-			return query.Group{}, err
+		if p.Capacity != nil {
+			if *p.Capacity {
+				g.Add(sc.at(query.NotNull("capacity")))
+			} else {
+				g.Add(sc.at(query.IsNull("capacity")))
+			}
 		}
-
-		// The far side is scoped whatever the read asked for. A read option widens
-		// what this query returns, not what it may look through to decide.
-		where.Add(inner.tenant("tenant_id"))
-		where.Add(inner.live("deleted_at"))
-
-		g.Add(query.Related(query.Exists{From: from, On: on, Where: where}))
-	}
-
-	if p := f.Without; p != nil && p.TodoAttachments != nil {
-		inner, from, on := sc.hasMany("todo_attachment", "todo_id", "id")
-		where, err := todoAttachmentGroup(*p.TodoAttachments, inner)
-		if err != nil {
-			return query.Group{}, err
+		if p.Price != nil {
+			if *p.Price {
+				g.Add(sc.at(query.NotNull("price")))
+			} else {
+				g.Add(sc.at(query.IsNull("price")))
+			}
 		}
-
-		// The far side is scoped whatever the read asked for. A read option widens
-		// what this query returns, not what it may look through to decide.
-		where.Add(inner.tenant("tenant_id"))
-		where.Add(inner.live("deleted_at"))
-
-		g.Add(query.Related(query.Exists{From: from, On: on, Where: where, Not: true}))
+		if p.Tags != nil {
+			if *p.Tags {
+				g.Add(sc.at(query.NotNull("tags")))
+			} else {
+				g.Add(sc.at(query.IsNull("tags")))
+			}
+		}
+		if p.SearchVector != nil {
+			if *p.SearchVector {
+				g.Add(sc.at(query.NotNull("search_vector")))
+			} else {
+				g.Add(sc.at(query.IsNull("search_vector")))
+			}
+		}
 	}
 
 	for _, n := range f.NestedFilters {
-		nested, err := todoGroup(n, sc)
+		nested, err := lessonGroup(n, sc)
 		if err != nil {
 			return query.Group{}, err
 		}
@@ -637,17 +643,17 @@ func todoGroup(f model.TodoFilter, sc filterScope) (query.Group, error) {
 	return g, nil
 }
 
-// todoSortable reports whether a column can be ordered by.
-func todoSortable(column string) bool {
+// lessonSortable reports whether a column can be ordered by.
+func lessonSortable(column string) bool {
 	switch column {
-	case "id", "tenant_id", "title", "notes", "is_done", "priority", "due_at", "created_at", "created_by_account_id", "updated_at", "updated_by_account_id", "deleted_at", "deleted_by_account_id", "version_type", "snapshot_from_todo_id", "snapshot_from_todo_at", "cover_file_id":
+	case "id", "tenant_id", "created_at", "created_by_account_id", "updated_at", "updated_by_account_id", "deleted_at", "deleted_by_account_id", "version_type", "snapshot_from_lesson_id", "snapshot_from_lesson_at", "title", "notes", "status", "manager_email", "starts_at", "capacity", "price", "search_vector":
 		return true
 	}
 	return false
 }
 
-// todoOrder converts the model's ordering terms into the runtime's.
-func todoOrder(terms []model.TodoOrder, sc filterScope) ([]query.Order, []query.Join, error) {
+// lessonOrder converts the model's ordering terms into the runtime's.
+func lessonOrder(terms []model.LessonOrder, sc filterScope) ([]query.Order, []query.Join, error) {
 	if len(terms) == 0 {
 		return nil, nil, nil
 	}
@@ -657,8 +663,8 @@ func todoOrder(terms []model.TodoOrder, sc filterScope) ([]query.Order, []query.
 	for _, t := range terms {
 		// A column this table cannot be ordered by is the caller's mistake, not a
 		// column name to paste into a statement.
-		if !todoSortable(t.Column) {
-			return nil, nil, rigerr.Invalid("a Todo cannot be ordered by %q", t.Column)
+		if !lessonSortable(t.Column) {
+			return nil, nil, rigerr.Invalid("a Lesson cannot be ordered by %q", t.Column)
 		}
 		out = append(out, query.Order{Table: sc.as, Column: t.Column, Desc: t.Desc})
 	}
@@ -666,57 +672,49 @@ func todoOrder(terms []model.TodoOrder, sc filterScope) ([]query.Order, []query.
 	return out, nil, nil
 }
 
-type todoRepo struct {
+type lessonRepo struct {
 	db *Store
 }
 
-var _ TodoRepository = (*todoRepo)(nil)
+var _ LessonRepository = (*lessonRepo)(nil)
 
-const todoRepoSelect = "todo.id, todo.tenant_id, todo.title, todo.notes, todo.is_done, todo.priority, todo.due_at, todo.created_at, todo.created_by_account_id, todo.updated_at, todo.updated_by_account_id, todo.deleted_at, todo.deleted_by_account_id, todo.version_type, todo.snapshot_from_todo_id, todo.snapshot_from_todo_at, todo.cover_file_id"
+const lessonRepoSelect = "lesson.id, lesson.tenant_id, lesson.created_at, lesson.created_by_account_id, lesson.updated_at, lesson.updated_by_account_id, lesson.deleted_at, lesson.deleted_by_account_id, lesson.version_type, lesson.snapshot_from_lesson_id, lesson.snapshot_from_lesson_at, lesson.title, lesson.notes, lesson.status, lesson.manager_email, lesson.starts_at, lesson.capacity, lesson.price, lesson.tags, lesson.row_version, lesson.search_vector"
 
-// scanTodo reads one row in the order todoRepoSelect lists.
-func scanTodo(row pgx.Row) (*model.Todo, error) {
-	var m model.Todo
-	if err := row.Scan(&m.ID, &m.TenantID, &m.Title, &m.Notes, &m.IsDone, &m.Priority, &m.DueAt, &m.CreatedAt, &m.CreatedByAccountID, &m.UpdatedAt, &m.UpdatedByAccountID, &m.DeletedAt, &m.DeletedByAccountID, &m.VersionType, &m.SnapshotFromTodoID, &m.SnapshotFromTodoAt, &m.CoverFileID); err != nil {
+// scanLesson reads one row in the order lessonRepoSelect lists.
+func scanLesson(row pgx.Row) (*model.Lesson, error) {
+	var m model.Lesson
+	if err := row.Scan(&m.ID, &m.TenantID, &m.CreatedAt, &m.CreatedByAccountID, &m.UpdatedAt, &m.UpdatedByAccountID, &m.DeletedAt, &m.DeletedByAccountID, &m.VersionType, &m.SnapshotFromLessonID, &m.SnapshotFromLessonAt, &m.Title, &m.Notes, &m.Status, &m.ManagerEmailAddress, &m.StartsAt, &m.Capacity, &m.Price, &m.Tags, new(any), &m.SearchVector); err != nil {
 		return nil, err
 	}
-	m.DueAt = dbx.UTCPtr(m.DueAt)
 	m.CreatedAt = dbx.UTC(m.CreatedAt)
 	m.UpdatedAt = dbx.UTCPtr(m.UpdatedAt)
 	m.DeletedAt = dbx.UTCPtr(m.DeletedAt)
-	m.SnapshotFromTodoAt = dbx.UTCPtr(m.SnapshotFromTodoAt)
+	m.SnapshotFromLessonAt = dbx.UTCPtr(m.SnapshotFromLessonAt)
+	m.StartsAt = dbx.UTC(m.StartsAt)
 	return &m, nil
 }
 
-// todoCacheKey is what one held row is keyed by.
+// lessonCacheKey is what one held row is keyed by.
 //
 // Every scope the read applied is in it, because a cached answer is only
 // reusable by a caller the same filters would have answered the same way. A
 // read that widened either scope is not held at all — see Get — so there
 // is no wide answer here for a narrow key to collide with.
-func todoCacheKey(tenantID, id uuid.UUID) string {
+func lessonCacheKey(tenantID, id uuid.UUID) string {
 	return tenantID.String() + "/" + id.String()
 }
 
-// cloneTodo is a caller's own copy of a held row.
+// cloneLesson is a caller's own copy of a held row.
 //
 // A cached read hands one of these back rather than the row it holds, so that
 // a caller which writes to what it was given is writing to its own copy. Nil
 // in, nil out: a miss is an error rather than a nil row, but a helper that
 // says so at the top is one less thing for a call site to be careful about.
-func cloneTodo(m *model.Todo) *model.Todo {
+func cloneLesson(m *model.Lesson) *model.Lesson {
 	if m == nil {
 		return nil
 	}
 	cp := *m
-	if m.Notes != nil {
-		v := *m.Notes
-		cp.Notes = &v
-	}
-	if m.DueAt != nil {
-		v := *m.DueAt
-		cp.DueAt = &v
-	}
 	if m.CreatedByAccountID != nil {
 		v := *m.CreatedByAccountID
 		cp.CreatedByAccountID = &v
@@ -737,22 +735,40 @@ func cloneTodo(m *model.Todo) *model.Todo {
 		v := *m.DeletedByAccountID
 		cp.DeletedByAccountID = &v
 	}
-	if m.SnapshotFromTodoID != nil {
-		v := *m.SnapshotFromTodoID
-		cp.SnapshotFromTodoID = &v
+	if m.SnapshotFromLessonID != nil {
+		v := *m.SnapshotFromLessonID
+		cp.SnapshotFromLessonID = &v
 	}
-	if m.SnapshotFromTodoAt != nil {
-		v := *m.SnapshotFromTodoAt
-		cp.SnapshotFromTodoAt = &v
+	if m.SnapshotFromLessonAt != nil {
+		v := *m.SnapshotFromLessonAt
+		cp.SnapshotFromLessonAt = &v
 	}
-	if m.CoverFileID != nil {
-		v := *m.CoverFileID
-		cp.CoverFileID = &v
+	if m.Notes != nil {
+		v := *m.Notes
+		cp.Notes = &v
+	}
+	if m.Capacity != nil {
+		v := *m.Capacity
+		cp.Capacity = &v
+	}
+	if m.Price != nil {
+		v := *m.Price
+		// A Numeric carries a big.Int, which is a pointer. A scan allocated one per
+		// row and so does this.
+		if v.Int != nil {
+			v.Int = new(big.Int).Set(v.Int)
+		}
+		cp.Price = &v
+	}
+	cp.Tags = slices.Clone(m.Tags)
+	if m.SearchVector != nil {
+		v := *m.SearchVector
+		cp.SearchVector = &v
 	}
 	return &cp
 }
 
-// Get implements TodoRepository.
+// Get implements LessonRepository.
 //
 // The row may come from memory: this table set `cache: true`, so a read of it
 // is held until a write to it publishes the withdrawal. Two kinds of read are
@@ -760,7 +776,7 @@ func cloneTodo(m *model.Todo) *model.Todo {
 // and the reasons are worth knowing, so they are on the branch below.
 //
 // What comes back is always this caller's own copy.
-func (r *todoRepo) Get(ctx context.Context, id uuid.UUID, opts ...readopt.Option) (*model.Todo, error) {
+func (r *lessonRepo) Get(ctx context.Context, id uuid.UUID, opts ...readopt.Option) (*model.Lesson, error) {
 	cfg, err := readopt.Apply(opts)
 	if err != nil {
 		return nil, err
@@ -782,7 +798,7 @@ func (r *todoRepo) Get(ctx context.Context, id uuid.UUID, opts ...readopt.Option
 	// from disagreeing about the answer. A hook is covered by it without being
 	// mentioned, because a hook runs inside the write's transaction.
 	if _, inTx := dbx.Tx(ctx); inTx {
-		return r.readTodo(ctx, id, opts...)
+		return r.readLesson(ctx, id, opts...)
 	}
 
 	// A read that widened a scope is not the read the key describes. These are the
@@ -790,26 +806,26 @@ func (r *todoRepo) Get(ctx context.Context, id uuid.UUID, opts ...readopt.Option
 	// and cheaper to answer with a query than to give a second key nothing else
 	// would hit.
 	if cfg.SkipTenantScope {
-		return r.readTodo(ctx, id, opts...)
+		return r.readLesson(ctx, id, opts...)
 	}
 
 	// A miss is an error rather than a nil row, which is what keeps it out of the
 	// map: runtime/cache never stores what a failing loader returned. So nothing
 	// has to withdraw a not-found, and a create has nothing to publish.
-	held, err := r.db.todoCache.load(todoCacheKey(claims.TenantID, id), func() (*model.Todo, error) {
-		return r.readTodo(ctx, id, opts...)
+	held, err := r.db.lessonCache.load(lessonCacheKey(claims.TenantID, id), func() (*model.Lesson, error) {
+		return r.readLesson(ctx, id, opts...)
 	})
 	if err != nil {
 		return nil, err
 	}
-	return cloneTodo(held), nil
+	return cloneLesson(held), nil
 }
 
-// readTodo is the row read itself, with no cache in front of it.
+// readLesson is the row read itself, with no cache in front of it.
 //
 // Called by Get on a miss, and called directly by Get whenever the answer must
 // not come from memory — see there for which reads those are.
-func (r *todoRepo) readTodo(ctx context.Context, id uuid.UUID, opts ...readopt.Option) (*model.Todo, error) {
+func (r *lessonRepo) readLesson(ctx context.Context, id uuid.UUID, opts ...readopt.Option) (*model.Lesson, error) {
 	cfg, err := readopt.Apply(opts)
 	if err != nil {
 		return nil, err
@@ -827,24 +843,24 @@ func (r *todoRepo) readTodo(ctx context.Context, id uuid.UUID, opts ...readopt.O
 		where += " AND tenant_id = $2"
 	}
 
-	sql := fmt.Sprintf("SELECT %s FROM todo WHERE %s", todoRepoSelect, where)
-	m, err := scanTodo(r.db.connFor(ctx).QueryRow(ctx, sql, args...))
+	sql := fmt.Sprintf("SELECT %s FROM lesson WHERE %s", lessonRepoSelect, where)
+	m, err := scanLesson(r.db.connFor(ctx).QueryRow(ctx, sql, args...))
 	if dbx.IsNoRows(err) {
-		return nil, rigerr.NotFound("no Todo with id %s", id)
+		return nil, rigerr.NotFound("no Lesson with id %s", id)
 	}
 	if err != nil {
-		return nil, rigerr.Internal(err, "read todo")
+		return nil, rigerr.Internal(err, "read lesson")
 	}
 	return m, nil
 }
 
-// List implements TodoRepository.
-func (r *todoRepo) List(ctx context.Context, f model.TodoFilter, page model.TodoPage, opts ...readopt.Option) ([]*model.Todo, int64, error) {
+// List implements LessonRepository.
+func (r *lessonRepo) List(ctx context.Context, f model.LessonFilter, page model.LessonPage, opts ...readopt.Option) ([]*model.Lesson, int64, error) {
 	return r.list(ctx, f, page, opts)
 }
 
 // list is the body of every read that takes a filter.
-func (r *todoRepo) list(ctx context.Context, f model.TodoFilter, page model.TodoPage, opts []readopt.Option) ([]*model.Todo, int64, error) {
+func (r *lessonRepo) list(ctx context.Context, f model.LessonFilter, page model.LessonPage, opts []readopt.Option) ([]*model.Lesson, int64, error) {
 	cfg, err := readopt.Apply(opts)
 	if err != nil {
 		return nil, 0, err
@@ -859,7 +875,7 @@ func (r *todoRepo) list(ctx context.Context, f model.TodoFilter, page model.Todo
 	// every column with the table it belongs to. The qualification is not
 	// decoration — an ordering that reaches a related table brings a second
 	// tenant_id into scope, and an unqualified one is then ambiguous.
-	sc := newFilterScope(claims, "todo")
+	sc := newFilterScope(claims, "lesson")
 
 	scope := query.Group{}
 	if !cfg.SkipTenantScope {
@@ -870,15 +886,15 @@ func (r *todoRepo) list(ctx context.Context, f model.TodoFilter, page model.Todo
 		scope.Add(sc.at(query.NotNull("deleted_at")))
 		// A row past the restore window is gone as far as anyone is concerned, so it
 		// does not appear in the trash either.
-		scope.Add(sc.at(query.Gte("deleted_at", TodoRestoreCutoff())))
+		scope.Add(sc.at(query.Gte("deleted_at", LessonRestoreCutoff())))
 	case !cfg.IncludeDeleted:
 		scope.Add(sc.at(query.IsNull("deleted_at")))
 	}
 	if !cfg.IncludeSnapshots {
-		scope.Add(sc.at(query.Eq("version_type", model.TodoVersionTypeOriginal)))
+		scope.Add(sc.at(query.Eq("version_type", model.LessonVersionTypeOriginal)))
 	}
 
-	group, err := todoGroup(f, sc)
+	group, err := lessonGroup(f, sc)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -892,18 +908,18 @@ func (r *todoRepo) list(ctx context.Context, f model.TodoFilter, page model.Todo
 	if countWhere != "" {
 		countWhere = " WHERE " + countWhere
 	}
-	countSQL := fmt.Sprintf("SELECT count(*) FROM todo%s", countWhere)
+	countSQL := fmt.Sprintf("SELECT count(*) FROM lesson%s", countWhere)
 	var total int64
 	if err := r.db.connFor(ctx).QueryRow(ctx, countSQL, countArgs.Values()...).Scan(&total); err != nil {
-		return nil, 0, rigerr.Internal(err, "count todo")
+		return nil, 0, rigerr.Internal(err, "count lesson")
 	}
 
-	order, joins, err := todoOrder(page.OrderBy, sc)
+	order, joins, err := lessonOrder(page.OrderBy, sc)
 	if err != nil {
 		return nil, 0, err
 	}
 	if len(order) == 0 {
-		order = TodoDefaultOrder
+		order = LessonDefaultOrder
 	}
 	window := query.Page{Limit: page.Limit, Offset: page.Offset}.Clamp(DefaultLimit, MaxLimit)
 
@@ -916,35 +932,35 @@ func (r *todoRepo) list(ctx context.Context, f model.TodoFilter, page model.Todo
 		where = " WHERE " + where
 	}
 
-	listSQL := fmt.Sprintf("SELECT %s FROM todo%s%s%s%s", todoRepoSelect, joinSQL, where, query.OrderSQL(order), window.SQL(args))
+	listSQL := fmt.Sprintf("SELECT %s FROM lesson%s%s%s%s", lessonRepoSelect, joinSQL, where, query.OrderSQL(order), window.SQL(args))
 	rows, err := r.db.connFor(ctx).Query(ctx, listSQL, args.Values()...)
 	if err != nil {
-		return nil, 0, rigerr.Internal(err, "list todo")
+		return nil, 0, rigerr.Internal(err, "list lesson")
 	}
 	defer rows.Close()
 
-	out := make([]*model.Todo, 0, window.Limit)
+	out := make([]*model.Lesson, 0, window.Limit)
 	for rows.Next() {
-		m, err := scanTodo(rows)
+		m, err := scanLesson(rows)
 		if err != nil {
-			return nil, 0, rigerr.Internal(err, "read todo")
+			return nil, 0, rigerr.Internal(err, "read lesson")
 		}
 		out = append(out, m)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, 0, rigerr.Internal(err, "list todo")
+		return nil, 0, rigerr.Internal(err, "list lesson")
 	}
 	return out, total, nil
 }
 
-// TodoDefaultOrder is the ordering used when a query asks for none.
+// LessonDefaultOrder is the ordering used when a query asks for none.
 //
 // It always ends with the primary key, so the order is total and a page
 // boundary cannot repeat or skip a row.
-var TodoDefaultOrder = []query.Order{{Table: "todo", Column: "created_at", Desc: true}, {Table: "todo", Column: "id", Desc: false}}
+var LessonDefaultOrder = []query.Order{{Table: "lesson", Column: "starts_at", Desc: true}, {Table: "lesson", Column: "id", Desc: false}}
 
-// Create implements TodoRepository.
-func (r *todoRepo) Create(ctx context.Context, in dbhook.Create[model.TodoCreateInput, model.Todo]) (*model.Todo, error) {
+// Create implements LessonRepository.
+func (r *lessonRepo) Create(ctx context.Context, in dbhook.Create[model.LessonCreateInput, model.Lesson]) (*model.Lesson, error) {
 	// Who is asking, first of all. A write from a request carrying no identity is
 	// refused here — before a rule runs, before a column notices — which is
 	// what lets every hook below take the claims as a value rather than something
@@ -987,14 +1003,14 @@ func (r *todoRepo) Create(ctx context.Context, in dbhook.Create[model.TodoCreate
 	}
 	now := time.Now().UTC()
 	_ = now
-	versionType := model.TodoVersionTypeOriginal
+	versionType := model.LessonVersionTypeOriginal
 
 	// A single INSERT is already atomic, so the transaction is opened only when a
 	// hook needs to be able to undo it. Two round trips is not a price to pay for
 	// nothing.
 	needsTx := in.Hooks.Before != nil || in.Hooks.After != nil
 
-	var m *model.Todo
+	var m *model.Lesson
 	err = dbx.InTxIf(ctx, r.db.pool, r.db.connFor(ctx), needsTx, func(ctx context.Context, tx dbx.Conn) error {
 		if in.Hooks.Before != nil {
 			if err := in.Hooks.Before(ctx, claims, &in.Input); err != nil {
@@ -1002,14 +1018,14 @@ func (r *todoRepo) Create(ctx context.Context, in dbhook.Create[model.TodoCreate
 			}
 		}
 
-		columns := []string{"id", "tenant_id", "created_at", "created_by_account_id", "version_type", "title", "notes", "is_done", "priority", "due_at", "cover_file_id"}
-		values := []any{id, claims.TenantID, now, claims.Actor(), versionType, in.Input.Title, in.Input.Notes, in.Input.IsDone, in.Input.Priority, in.Input.DueAt, in.Input.CoverFileID}
+		columns := []string{"id", "tenant_id", "created_at", "created_by_account_id", "version_type", "title", "notes", "manager_email", "starts_at", "capacity", "price", "tags"}
+		values := []any{id, claims.TenantID, now, claims.Actor(), versionType, in.Input.Title, in.Input.Notes, in.Input.ManagerEmailAddress, in.Input.StartsAt, in.Input.Capacity, in.Input.Price, in.Input.Tags}
 
-		sql := fmt.Sprintf("INSERT INTO todo (%s) VALUES (%s) RETURNING %s", joinColumns(columns), placeholders(len(values)), todoRepoSelect)
+		sql := fmt.Sprintf("INSERT INTO lesson (%s) VALUES (%s) RETURNING %s", joinColumns(columns), placeholders(len(values)), lessonRepoSelect)
 
-		created, err := scanTodo(tx.QueryRow(ctx, sql, values...))
+		created, err := scanLesson(tx.QueryRow(ctx, sql, values...))
 		if err != nil {
-			return writeError(err, "todo")
+			return writeError(err, "lesson")
 		}
 		m = created
 
@@ -1035,8 +1051,8 @@ func (r *todoRepo) Create(ctx context.Context, in dbhook.Create[model.TodoCreate
 	return m, nil
 }
 
-// Update implements TodoRepository.
-func (r *todoRepo) Update(ctx context.Context, id uuid.UUID, in dbhook.Update[model.TodoUpdateInput, model.Todo]) (*model.Todo, error) {
+// Update implements LessonRepository.
+func (r *lessonRepo) Update(ctx context.Context, id uuid.UUID, in dbhook.Update[model.LessonUpdateInput, model.Lesson]) (*model.Lesson, error) {
 	in.Input.Normalize()
 
 	claims, err := tenancy.FromContext(ctx)
@@ -1045,7 +1061,7 @@ func (r *todoRepo) Update(ctx context.Context, id uuid.UUID, in dbhook.Update[mo
 	}
 	_ = claims
 
-	var updated, prev *model.Todo
+	var updated, prev *model.Lesson
 	err = dbx.InTx(ctx, r.db.pool, func(ctx context.Context, tx dbx.Conn) error {
 		prev, err = r.Get(ctx, id)
 		if err != nil {
@@ -1053,12 +1069,12 @@ func (r *todoRepo) Update(ctx context.Context, id uuid.UUID, in dbhook.Update[mo
 		}
 
 		if prev.DeletedAt != nil {
-			return rigerr.Conflict("Todo %s is deleted; restore it first", id)
+			return rigerr.Conflict("Lesson %s is deleted; restore it first", id)
 		}
 		// A snapshot is a record of what was; changing one would make the history a
 		// lie.
-		if prev.VersionType != model.TodoVersionTypeOriginal {
-			return rigerr.Conflict("Todo %s is a snapshot and cannot be changed", id)
+		if prev.VersionType != model.LessonVersionTypeOriginal {
+			return rigerr.Conflict("Lesson %s is a snapshot and cannot be changed", id)
 		}
 
 		// The hook shapes the input, so a field it sets is a field that gets written
@@ -1096,21 +1112,25 @@ func (r *todoRepo) Update(ctx context.Context, id uuid.UUID, in dbhook.Update[mo
 			columns = append(columns, "notes")
 			values = append(values, in.Input.Notes.Ptr())
 		}
-		if v, ok := in.Input.IsDone.Get(); ok {
-			columns = append(columns, "is_done")
+		if v, ok := in.Input.Status.Get(); ok {
+			columns = append(columns, "status")
 			values = append(values, v)
 		}
-		if v, ok := in.Input.Priority.Get(); ok {
-			columns = append(columns, "priority")
+		if v, ok := in.Input.ManagerEmailAddress.Get(); ok {
+			columns = append(columns, "manager_email")
 			values = append(values, v)
 		}
-		if in.Input.DueAt.Touched() {
-			columns = append(columns, "due_at")
-			values = append(values, in.Input.DueAt.Ptr())
+		if in.Input.Capacity.Touched() {
+			columns = append(columns, "capacity")
+			values = append(values, in.Input.Capacity.Ptr())
 		}
-		if in.Input.CoverFileID.Touched() {
-			columns = append(columns, "cover_file_id")
-			values = append(values, in.Input.CoverFileID.Ptr())
+		if in.Input.Price.Touched() {
+			columns = append(columns, "price")
+			values = append(values, in.Input.Price.Ptr())
+		}
+		if in.Input.Tags.Touched() {
+			columns = append(columns, "tags")
+			values = append(values, in.Input.Tags.Ptr())
 		}
 
 		if len(columns) == 0 {
@@ -1132,16 +1152,16 @@ func (r *todoRepo) Update(ctx context.Context, id uuid.UUID, in dbhook.Update[mo
 		values = append(values, claims.Actor())
 
 		values = append(values, id)
-		sql := fmt.Sprintf("UPDATE todo SET %s WHERE id = $%d RETURNING %s", assignments(columns), len(values), todoRepoSelect)
+		sql := fmt.Sprintf("UPDATE lesson SET %s WHERE id = $%d RETURNING %s", assignments(columns), len(values), lessonRepoSelect)
 
-		updated, err = scanTodo(tx.QueryRow(ctx, sql, values...))
+		updated, err = scanLesson(tx.QueryRow(ctx, sql, values...))
 		if err != nil {
-			return writeError(err, "todo")
+			return writeError(err, "lesson")
 		}
 
 		// Every replica forgets this row when this transaction commits, and none of
 		// them does if it rolls back.
-		if err := r.db.todoCache.forget(ctx, todoCacheKey(prev.TenantID, id)); err != nil {
+		if err := r.db.lessonCache.forget(ctx, lessonCacheKey(prev.TenantID, id)); err != nil {
 			return err
 		}
 
@@ -1172,7 +1192,7 @@ func (r *todoRepo) Update(ctx context.Context, id uuid.UUID, in dbhook.Update[mo
 // The copy records the source row's last-updated time rather than the moment
 // of copying: that identifies the version captured, which is what a reader of
 // the history is asking about.
-func (r *todoRepo) writeSnapshot(ctx context.Context, tx dbx.Conn, prev *model.Todo) error {
+func (r *lessonRepo) writeSnapshot(ctx context.Context, tx dbx.Conn, prev *model.Lesson) error {
 	snapshotID, err := uuid.NewV7()
 	if err != nil {
 		return rigerr.Internal(err, "generate an identifier")
@@ -1183,37 +1203,29 @@ func (r *todoRepo) writeSnapshot(ctx context.Context, tx dbx.Conn, prev *model.T
 		sourceVersion = *prev.UpdatedAt
 	}
 
-	columns := []string{"id", "tenant_id", "title", "notes", "is_done", "priority", "due_at", "created_at", "created_by_account_id", "updated_at", "updated_by_account_id", "deleted_at", "deleted_by_account_id", "version_type", "snapshot_from_todo_id", "snapshot_from_todo_at", "cover_file_id"}
-	values := []any{snapshotID, prev.TenantID, prev.Title, prev.Notes, prev.IsDone, prev.Priority, prev.DueAt, prev.CreatedAt, prev.CreatedByAccountID, nil, prev.UpdatedByAccountID, nil, nil, model.TodoVersionTypeSnapshot, prev.ID, sourceVersion, prev.CoverFileID}
+	columns := []string{"id", "tenant_id", "created_at", "created_by_account_id", "updated_at", "updated_by_account_id", "deleted_at", "deleted_by_account_id", "version_type", "snapshot_from_lesson_id", "snapshot_from_lesson_at", "title", "notes", "status", "manager_email", "starts_at", "capacity", "price", "tags"}
+	values := []any{snapshotID, prev.TenantID, prev.CreatedAt, prev.CreatedByAccountID, nil, prev.UpdatedByAccountID, nil, nil, model.LessonVersionTypeSnapshot, prev.ID, sourceVersion, prev.Title, prev.Notes, prev.Status, prev.ManagerEmailAddress, prev.StartsAt, prev.Capacity, prev.Price, prev.Tags}
 
-	sql := fmt.Sprintf("INSERT INTO todo (%s) VALUES (%s)", joinColumns(columns), placeholders(len(values)))
+	sql := fmt.Sprintf("INSERT INTO lesson (%s) VALUES (%s)", joinColumns(columns), placeholders(len(values)))
 	if _, err := tx.Exec(ctx, sql, values...); err != nil {
-		return writeError(err, "todo")
+		return writeError(err, "lesson")
 	}
 	return nil
 }
 
-// Delete implements TodoRepository.
-func (r *todoRepo) Delete(ctx context.Context, in dbhook.Delete[model.TodoDeleteInput, model.Todo]) error {
+// Delete implements LessonRepository.
+func (r *lessonRepo) Delete(ctx context.Context, in dbhook.Delete[model.LessonDeleteInput, model.Lesson]) error {
 	claims, err := tenancy.FromContext(ctx)
 	if err != nil {
 		return err
 	}
 	_ = claims
 
-	var prev *model.Todo
+	var prev *model.Lesson
 	err = dbx.InTx(ctx, r.db.pool, func(ctx context.Context, tx dbx.Conn) error {
 		prev, err = r.Get(ctx, in.Input.ID)
 		if err != nil {
 			return err
-		}
-
-		ctx, more, err := dbx.EnterDelete(ctx, "todo", in.Input.ID.String())
-		if err != nil {
-			return err
-		}
-		if !more {
-			return nil
 		}
 
 		// Deleting an already-deleted row is not an error: the caller asked for it to
@@ -1229,45 +1241,31 @@ func (r *todoRepo) Delete(ctx context.Context, in dbhook.Delete[model.TodoDelete
 			}
 		}
 
-		// Every table that references this one, in the derived order. An error from
-		// any of them unwinds the whole transaction, including whatever the children
-		// before it already did.
-		for _, child := range in.Hooks.Children {
-			if child.Deleting == nil {
-				continue
-			}
-			if err := child.Deleting(ctx, claims, prev, in.Input); err != nil {
-				// Named, because the whole reason this is better than a 23503 is that the
-				// answer can say which relation refused.
-				return fmt.Errorf("%s: %w", child.Child, err)
-			}
-		}
-
 		if in.Input.Hard {
 			// The snapshots reference this row, so they go first.
 			//
 			// RETURNING because each of them is a row of its own — reachable through the
 			// history and through a revert — so each may be held under a key of its own,
 			// and this statement is the only place their identifiers are ever known.
-			gone, err := tx.Query(ctx, "DELETE FROM todo WHERE snapshot_from_todo_id = $1 RETURNING id", in.Input.ID)
+			gone, err := tx.Query(ctx, "DELETE FROM lesson WHERE snapshot_from_lesson_id = $1 RETURNING id", in.Input.ID)
 			if err != nil {
-				return writeError(err, "todo")
+				return writeError(err, "lesson")
 			}
 			versions, err := pgx.CollectRows(gone, pgx.RowTo[uuid.UUID])
 			if err != nil {
-				return writeError(err, "todo")
+				return writeError(err, "lesson")
 			}
 			for _, version := range versions {
-				if err := r.db.todoCache.forget(ctx, todoCacheKey(prev.TenantID, version)); err != nil {
+				if err := r.db.lessonCache.forget(ctx, lessonCacheKey(prev.TenantID, version)); err != nil {
 					return err
 				}
 			}
 
-			if _, err := tx.Exec(ctx, "DELETE FROM todo WHERE id = $1", in.Input.ID); err != nil {
-				return writeError(err, "todo")
+			if _, err := tx.Exec(ctx, "DELETE FROM lesson WHERE id = $1", in.Input.ID); err != nil {
+				return writeError(err, "lesson")
 			}
 			// The row is gone, so the held copy of it has to be.
-			if err := r.db.todoCache.forget(ctx, todoCacheKey(prev.TenantID, in.Input.ID)); err != nil {
+			if err := r.db.lessonCache.forget(ctx, lessonCacheKey(prev.TenantID, in.Input.ID)); err != nil {
 				return err
 			}
 
@@ -1276,14 +1274,6 @@ func (r *todoRepo) Delete(ctx context.Context, in dbhook.Delete[model.TodoDelete
 					return err
 				}
 			}
-			for _, child := range in.Hooks.Children {
-				if child.Deleted == nil {
-					continue
-				}
-				done, row, input := child.Deleted, prev, in.Input
-				dbx.AfterCommit(ctx, func() { done(ctx, claims, row, input) })
-			}
-
 			return nil
 		}
 
@@ -1295,13 +1285,13 @@ func (r *todoRepo) Delete(ctx context.Context, in dbhook.Delete[model.TodoDelete
 
 		// The retirement is written directly rather than through Update, so it neither
 		// bumps updated_at nor takes a snapshot of a row nobody changed.
-		sql := fmt.Sprintf("UPDATE todo SET %s WHERE id = $%d", assignments(columns), len(values))
+		sql := fmt.Sprintf("UPDATE lesson SET %s WHERE id = $%d", assignments(columns), len(values))
 		if _, err := tx.Exec(ctx, sql, values...); err != nil {
-			return writeError(err, "todo")
+			return writeError(err, "lesson")
 		}
 		// Get returns a row whatever its lifecycle state, so a retirement changes what
 		// a held copy says rather than whether there is one.
-		if err := r.db.todoCache.forget(ctx, todoCacheKey(prev.TenantID, in.Input.ID)); err != nil {
+		if err := r.db.lessonCache.forget(ctx, lessonCacheKey(prev.TenantID, in.Input.ID)); err != nil {
 			return err
 		}
 
@@ -1310,14 +1300,6 @@ func (r *todoRepo) Delete(ctx context.Context, in dbhook.Delete[model.TodoDelete
 				return err
 			}
 		}
-		for _, child := range in.Hooks.Children {
-			if child.Deleted == nil {
-				continue
-			}
-			done, row, input := child.Deleted, prev, in.Input
-			dbx.AfterCommit(ctx, func() { done(ctx, claims, row, input) })
-		}
-
 		return nil
 	})
 	if err != nil {
@@ -1335,21 +1317,21 @@ func (r *todoRepo) Delete(ctx context.Context, in dbhook.Delete[model.TodoDelete
 	return nil
 }
 
-// TodoRestoreCutoff is the moment before which a deleted row can no longer be
-// brought back.
-func TodoRestoreCutoff() time.Time {
+// LessonRestoreCutoff is the moment before which a deleted row can no longer
+// be brought back.
+func LessonRestoreCutoff() time.Time {
 	return time.Now().UTC().AddDate(0, 0, -30)
 }
 
-// Restore implements TodoRepository.
-func (r *todoRepo) Restore(ctx context.Context, id uuid.UUID, in dbhook.Restore[model.TodoUpdateInput, model.Todo]) (*model.Todo, error) {
+// Restore implements LessonRepository.
+func (r *lessonRepo) Restore(ctx context.Context, id uuid.UUID, in dbhook.Restore[model.LessonUpdateInput, model.Lesson]) (*model.Lesson, error) {
 	claims, err := tenancy.FromContext(ctx)
 	if err != nil {
 		return nil, err
 	}
 	_ = claims
 
-	var restored, prev *model.Todo
+	var restored, prev *model.Lesson
 	err = dbx.InTx(ctx, r.db.pool, func(ctx context.Context, tx dbx.Conn) error {
 		prev, err = r.Get(ctx, id)
 		if err != nil {
@@ -1363,8 +1345,8 @@ func (r *todoRepo) Restore(ctx context.Context, id uuid.UUID, in dbhook.Restore[
 			return nil
 		}
 
-		if prev.DeletedAt.Before(TodoRestoreCutoff()) {
-			return rigerr.Conflict("Todo %s was deleted more than 30 days ago and can no longer be restored", id)
+		if prev.DeletedAt.Before(LessonRestoreCutoff()) {
+			return rigerr.Conflict("Lesson %s was deleted more than 30 days ago and can no longer be restored", id)
 		}
 
 		// The request carried no fields, so this hook is where they come from. It is
@@ -1403,21 +1385,25 @@ func (r *todoRepo) Restore(ctx context.Context, id uuid.UUID, in dbhook.Restore[
 			columns = append(columns, "notes")
 			values = append(values, in.Input.Notes.Ptr())
 		}
-		if v, ok := in.Input.IsDone.Get(); ok {
-			columns = append(columns, "is_done")
+		if v, ok := in.Input.Status.Get(); ok {
+			columns = append(columns, "status")
 			values = append(values, v)
 		}
-		if v, ok := in.Input.Priority.Get(); ok {
-			columns = append(columns, "priority")
+		if v, ok := in.Input.ManagerEmailAddress.Get(); ok {
+			columns = append(columns, "manager_email")
 			values = append(values, v)
 		}
-		if in.Input.DueAt.Touched() {
-			columns = append(columns, "due_at")
-			values = append(values, in.Input.DueAt.Ptr())
+		if in.Input.Capacity.Touched() {
+			columns = append(columns, "capacity")
+			values = append(values, in.Input.Capacity.Ptr())
 		}
-		if in.Input.CoverFileID.Touched() {
-			columns = append(columns, "cover_file_id")
-			values = append(values, in.Input.CoverFileID.Ptr())
+		if in.Input.Price.Touched() {
+			columns = append(columns, "price")
+			values = append(values, in.Input.Price.Ptr())
+		}
+		if in.Input.Tags.Touched() {
+			columns = append(columns, "tags")
+			values = append(values, in.Input.Tags.Ptr())
 		}
 
 		// The row changed, so it is stamped as changed. A restore that left the update
@@ -1428,14 +1414,14 @@ func (r *todoRepo) Restore(ctx context.Context, id uuid.UUID, in dbhook.Restore[
 		values = append(values, claims.Actor())
 		values = append(values, id)
 
-		sql := fmt.Sprintf("UPDATE todo SET %s WHERE id = $%d RETURNING %s", assignments(columns), len(values), todoRepoSelect)
-		restored, err = scanTodo(tx.QueryRow(ctx, sql, values...))
+		sql := fmt.Sprintf("UPDATE lesson SET %s WHERE id = $%d RETURNING %s", assignments(columns), len(values), lessonRepoSelect)
+		restored, err = scanLesson(tx.QueryRow(ctx, sql, values...))
 		if err != nil {
-			return writeError(err, "todo")
+			return writeError(err, "lesson")
 		}
 
 		// The row came back, and a held copy of it still says it was retired.
-		if err := r.db.todoCache.forget(ctx, todoCacheKey(prev.TenantID, id)); err != nil {
+		if err := r.db.lessonCache.forget(ctx, lessonCacheKey(prev.TenantID, id)); err != nil {
 			return err
 		}
 
@@ -1462,44 +1448,44 @@ func (r *todoRepo) Restore(ctx context.Context, id uuid.UUID, in dbhook.Restore[
 }
 
 // ListDeleted returns retired rows still inside the restore window.
-func (r *todoRepo) ListDeleted(ctx context.Context, f model.TodoFilter, page model.TodoPage, opts ...readopt.Option) ([]*model.Todo, int64, error) {
+func (r *lessonRepo) ListDeleted(ctx context.Context, f model.LessonFilter, page model.LessonPage, opts ...readopt.Option) ([]*model.Lesson, int64, error) {
 	// The lifecycle option is forced and the caller's are kept: which rows the
 	// trash holds is not up for discussion, and how wide a view of it the caller
 	// gets still is.
 	return r.list(ctx, f, page, append([]readopt.Option{readopt.WithOnlyDeleted()}, opts...))
 }
 
-// ListSnapshots implements TodoRepository.
-func (r *todoRepo) ListSnapshots(ctx context.Context, id uuid.UUID) ([]*model.Todo, error) {
+// ListSnapshots implements LessonRepository.
+func (r *lessonRepo) ListSnapshots(ctx context.Context, id uuid.UUID) ([]*model.Lesson, error) {
 	claims, err := tenancy.FromContext(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	sql := fmt.Sprintf("SELECT %s FROM todo WHERE snapshot_from_todo_id = $1 AND tenant_id = $2 ORDER BY snapshot_from_todo_at DESC", todoRepoSelect)
+	sql := fmt.Sprintf("SELECT %s FROM lesson WHERE snapshot_from_lesson_id = $1 AND tenant_id = $2 ORDER BY snapshot_from_lesson_at DESC", lessonRepoSelect)
 	rows, err := r.db.connFor(ctx).Query(ctx, sql, id, claims.TenantID)
 	if err != nil {
-		return nil, rigerr.Internal(err, "list snapshots of todo")
+		return nil, rigerr.Internal(err, "list snapshots of lesson")
 	}
 	defer rows.Close()
 
-	var out []*model.Todo
+	var out []*model.Lesson
 	for rows.Next() {
-		m, err := scanTodo(rows)
+		m, err := scanLesson(rows)
 		if err != nil {
-			return nil, rigerr.Internal(err, "read todo")
+			return nil, rigerr.Internal(err, "read lesson")
 		}
 		out = append(out, m)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, rigerr.Internal(err, "list snapshots of todo")
+		return nil, rigerr.Internal(err, "list snapshots of lesson")
 	}
 	return out, nil
 }
 
-// Revert implements TodoRepository.
-func (r *todoRepo) Revert(ctx context.Context, id, versionID uuid.UUID, hooks dbhook.UpdateHooks[model.TodoUpdateInput, model.Todo]) (*model.Todo, error) {
-	var reverted *model.Todo
+// Revert implements LessonRepository.
+func (r *lessonRepo) Revert(ctx context.Context, id, versionID uuid.UUID, hooks dbhook.UpdateHooks[model.LessonUpdateInput, model.Lesson]) (*model.Lesson, error) {
+	var reverted *model.Lesson
 	err := dbx.InTx(ctx, r.db.pool, func(ctx context.Context, tx dbx.Conn) error {
 		version, err := r.Get(ctx, versionID)
 		if err != nil {
@@ -1510,22 +1496,22 @@ func (r *todoRepo) Revert(ctx context.Context, id, versionID uuid.UUID, hooks db
 		// somebody else's history. Both answer the same way: naming a row that exists
 		// and is not yours should not be distinguishable from naming one that does
 		// not.
-		if version.VersionType != model.TodoVersionTypeSnapshot || version.SnapshotFromTodoID == nil || *version.SnapshotFromTodoID != id {
-			return rigerr.NotFound("Todo %s has no version %s", id, versionID)
+		if version.VersionType != model.LessonVersionTypeSnapshot || version.SnapshotFromLessonID == nil || *version.SnapshotFromLessonID != id {
+			return rigerr.NotFound("Lesson %s has no version %s", id, versionID)
 		}
 
-		in := model.TodoUpdateInput{
-			Title:       patch.NewOptional(version.Title),
-			Notes:       patch.FromPtr(version.Notes),
-			IsDone:      patch.NewOptional(version.IsDone),
-			Priority:    patch.NewOptional(version.Priority),
-			DueAt:       patch.FromPtr(version.DueAt),
-			CoverFileID: patch.FromPtr(version.CoverFileID),
+		in := model.LessonUpdateInput{
+			Title:               patch.NewOptional(version.Title),
+			Status:              patch.NewOptional(version.Status),
+			ManagerEmailAddress: patch.NewOptional(version.ManagerEmailAddress),
+			Capacity:            patch.FromPtr(version.Capacity),
+			Price:               patch.FromPtr(version.Price),
+			Tags:                patch.FromSlice(version.Tags),
 		}
 
 		// Every field the version carried, including the ones that already match: what
 		// is being asked for is that state, not a diff against the current one.
-		reverted, err = r.Update(ctx, id, dbhook.Update[model.TodoUpdateInput, model.Todo]{Input: in, Hooks: hooks})
+		reverted, err = r.Update(ctx, id, dbhook.Update[model.LessonUpdateInput, model.Lesson]{Input: in, Hooks: hooks})
 		return err
 	})
 	if err != nil {
@@ -1550,13 +1536,13 @@ func (r *todoRepo) Revert(ctx context.Context, id, versionID uuid.UUID, hooks db
 // the withdrawal is a notification Postgres delivers on commit and discards on
 // a rollback. Withdrawing something nothing holds is not an error.
 //
-//	if err := repos.Todos.ForgetCached(ctx, row); err != nil { return err }
-func (r *todoRepo) ForgetCached(ctx context.Context, row *model.Todo) error {
+//	if err := repos.Lessons.ForgetCached(ctx, row); err != nil { return err }
+func (r *lessonRepo) ForgetCached(ctx context.Context, row *model.Lesson) error {
 	// Nil is the state the caller asked for: there is no row, so there is no key,
 	// and a helper that says so here is one less thing for a call site to be
 	// careful about.
 	if row == nil {
 		return nil
 	}
-	return r.db.todoCache.forget(ctx, todoCacheKey(row.TenantID, row.ID))
+	return r.db.lessonCache.forget(ctx, lessonCacheKey(row.TenantID, row.ID))
 }

@@ -1,0 +1,13 @@
+project:
+  name: rowcache
+  module: example.com/rowcache
+
+# The block owns the channel; the table below is what asks to be held. Neither
+# implies the other, and a project with this and no reader at all is refused —
+# see compile.checkCacheHasReaders. There is no `auth:` block here on purpose,
+# because that is the half this case exists to show is no longer required.
+cache:
+  enabled: true
+  ttl: 45s
+  channel: rig_cache_rowcache
+  max_entries: 25000

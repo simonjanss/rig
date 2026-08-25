@@ -64,6 +64,14 @@ type File struct {
 	// Access is how wide a read reaches by default.
 	Access *Access `yaml:"access,omitempty" json:"access,omitempty" jsonschema_description:"How wide a read of this table reaches by default."`
 
+	// Cache holds this table's Get in memory, withdrawn on the writes rig makes
+	// to it. It needs the project's `cache:` block, and it is a promise as much
+	// as a setting: every write to this table has to go through the generated
+	// repository, because that is the only place rig can publish the withdrawal
+	// from. A write through Store.Pool, or raw SQL from inside a dbhook, serves a
+	// stale row until the entry expires.
+	Cache *bool `yaml:"cache,omitempty" json:"cache,omitempty" jsonschema_description:"Hold this table's Get in memory. Requires the project cache block, and promises every write goes through the generated repository."`
+
 	// OnDelete states the order this table's children hear about a delete.
 	OnDelete *OnDelete `yaml:"on_delete,omitempty" json:"on_delete,omitempty" jsonschema_description:"The order tables referencing this one are told about a delete."`
 

@@ -57,6 +57,8 @@ expose: true
 
 order_by: [-created_at, id]
 restore_window_days: 30
+
+cache: true                      # hold this table's Get in memory
 ```
 
 | Key | |
@@ -73,6 +75,7 @@ restore_window_days: 30
 | `restore_window_days` | Days a soft-deleted row stays restorable. Required when the table has `deleted_at`. |
 | `access` | How wide a read reaches by default. |
 | `on_delete` | The order the tables referencing this one are told a row is going. |
+| `cache` | Hold this table's `Get` in memory between requests. Needs the project's [`cache:`](rig-yaml.md#cache) block, and promises every write goes through the generated repository. |
 
 ### `operations`
 
@@ -169,6 +172,79 @@ would both refuse.
 `rig ir` prints the resolved order under each resource's `children`.
 
 ---
+
+## `cache`
+
+Holds this table's `Get` — the lookup by identifier behind every
+`GET /resource/{id}` — in memory between requests, withdrawn by a Postgres
+`NOTIFY` published inside the transaction of every write the generated repository
+makes to the row.
+
+```yaml
+cache: true
+```
+
+It needs the project's [`cache:`](rig-yaml.md#cache) block, which owns the channel
+those withdrawals travel on; without one this is refused rather than ignored,
+because a row held with no way to withdraw it is the single failure the mechanism
+exists to prevent.
+
+**It has to be your table.** `rig_file`, the `rig_notification_*` tables and the
+rest of rig's own are written by the module that owns them, in that module's own
+SQL rather than through a repository, so `cache: true` on one is refused too. The
+promise below is about writes you control, and those are not yours to make.
+
+**It is a promise as much as a setting.** rig publishes from the writes it makes,
+so every write to this table has to go through the generated repository. Two ways
+to break that, and both are silent — the row moves and every replica holding it
+goes on serving the old one until the lifetime expires:
+
+```go
+repos.Pool().Exec(ctx, "UPDATE todo SET ...")   // no
+```
+
+and raw SQL against the `tx` a [`dbhook`](services.md) hands you. A migration, a
+`psql` session and a second deployment writing the same table are the same hole
+from further away. Nothing in your schema says whether the promise is true, which
+is why nothing but a person can make it.
+
+**When you have to write around it anyway**, withdraw the row yourself, inside the
+transaction that changed it and passing the row as it was:
+
+```go
+repos.Todos.ForgetCached(ctx, row)
+```
+
+This exists because rig needed it first. A [file column](#columns) is written by
+the file service in the transaction that finalizes an upload, not through `Update`,
+so a held row would go on saying there is no file there — and the download endpoint
+would answer 404 for a file that had just been uploaded. The generated service
+makes that call; yours is the same one.
+
+**Only `Get`.** A list, a search and the trash are a query every time. What a list
+returns depends on filters, on paging and on rows other than the one being asked
+about, so any write to the table could change any list — the invalidation would
+have to drop everything on every write, and an entry would be gone before a second
+caller ever reached it. `Get` is the one read that is a pure function of one row.
+
+**Two kinds of `Get` are never held.** One made inside a transaction, because
+every generated write begins by reading the row it is about to change — to
+snapshot the previous version, and to judge the change against it — and a held
+answer there would record a version that never existed. And one that widened its
+scope with [`readopt`](services.md), because reading across tenants or across a
+table's owners answers something the key does not describe.
+
+The key names every scope the read applied, so an owner-scoped table's rows are
+held per account and one caller's row can never answer another's read.
+
+There is nothing to wire: `store.New` builds the map, attaches it to the channel
+and starts listening. One line in a `main.go`, safe to leave out — a listener that
+is not running reports itself as not live, and a cache that is not live reads
+through:
+
+```go
+app.CloseWithin("store", 5*time.Second, repos.Close)
+```
 
 ## `columns`
 
