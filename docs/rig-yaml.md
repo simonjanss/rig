@@ -787,12 +787,14 @@ cache:
   max_entries: 50000        # per cache, before the whole map is dropped
 ```
 
-The reads are the two rig makes on behalf of every caller: resolving a session
-token, and resolving an API key. Both are a row read on every authenticated
-request, for an answer that changes when somebody signs out.
+The reads are the ones rig makes on behalf of every caller: resolving a session
+token, resolving an API key, and — before that second one — the failure limit
+that stops somebody grinding secrets against a key id. All of them are a row read
+on every authenticated request, for answers that change when somebody signs out or
+gets their key wrong.
 
-Which is why it needs an [`auth`](#auth) block beside it: those two reads are the
-whole of what this covers, so `cache.enabled` on a project that does not
+Which is why it needs an [`auth`](#auth) block beside it: those three reads are
+the whole of what this covers, so `cache.enabled` on a project that does not
 authenticate its callers is refused when `rig.yaml` is read rather than left as
 four numbers nothing looks at.
 
@@ -812,12 +814,20 @@ reads through, because serving permissions nobody can withdraw is worse than
 serving them slowly. That is the opposite of what [`throttle`](#throttle) does,
 and for the opposite reason.
 
+The API-key failure count is held under the same rule with one wrinkle: only the
+*zero* is kept. A count can only rise inside its window and every row it counts is
+one rig writes, so "no failures for this key" is safe to hold and is withdrawn by
+the failure that makes it wrong. A key somebody is already grinding is counted
+afresh every time, and the limit refuses on the same attempt it would have with no
+cache at all. What stops costing a query is the integration that never gets its
+key wrong.
+
 **There is nothing to wire.** No map to build, no publish to add, no hook to
-register. rig caches these two reads *because* it owns both halves — it makes the
-read and it makes every write that invalidates it — so there is no write path an
-application can forget. The one line this adds to a `main.go` is a shutdown, and
-it is safe to leave out: a listener that is not running reports itself as not
-live, and a cache that is not live reads through.
+register. rig caches these three reads *because* it owns both halves — it makes
+the read and it makes every write that invalidates it — so there is no write
+path an application can forget. The one line this adds to a `main.go` is a
+shutdown, and it is safe to leave out: a listener that is not running reports
+itself as not live, and a cache that is not live reads through.
 
 ```go
 app.CloseWithin("auth", 5*time.Second, front.Close)
@@ -828,10 +838,12 @@ the most expensive one on the path — a join over role tables, on every request
 and it is over *your* tables, written to by *your* code. rig cannot see those
 writes, so caching that answer would mean publishing your own invalidations, and
 one forgotten write path there is a permission you took away that goes on
-working. If you want it anyway, `auth.Parts().Cache` is the same bus: serve a
-topic of your own on it and publish wherever roles change. See the
-[`rig/runtime/cache`](https://pkg.go.dev/github.com/simonjanss/rig/runtime/cache)
-package documentation.
+working.
+
+So it is not a key here. It is `auth.NewGrantsCache`, in Go, next to the writes
+you are promising to publish from — three lines of wiring and an `Invalidate` on
+each of them. [`docs/auth.md`](auth.md#verifying-without-a-row-read) has the shape
+and `examples/auth` is wired that way end to end.
 
 `channel` matters when two deployments share one database and must not share
 invalidations. It has to be a plain identifier — letters, digits and

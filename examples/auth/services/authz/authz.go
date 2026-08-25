@@ -26,6 +26,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/simonjanss/rig/auth"
 	"github.com/simonjanss/rig/auth/account"
 	"github.com/simonjanss/rig/auth/authhttp"
 	"github.com/simonjanss/rig/runtime/dbx"
@@ -83,7 +84,14 @@ func Levels(all []string) map[string][]string {
 //
 // Idempotent: joining a tenant that already has them is the common case, and
 // ON CONFLICT is cheaper than asking first.
-func SeedRoles(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, all []string) error {
+//
+// held is withdrawn wholesale rather than per account, because what changes here
+// is what a role *means*: every account holding one is now entitled to something
+// different, and working out which accounts those are is a query for an answer
+// the map refills on the next request anyway. Nil when nothing is cached.
+func SeedRoles(
+	ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, all []string, held *auth.GrantsCache,
+) error {
 	// Every key any level grants, not just the ones passed in. Levels() adds two
 	// of its own — apikey.own is not derived from a table — and a grant pointing at
 	// a permission row nobody inserted is a foreign-key violation at the last
@@ -137,11 +145,25 @@ func SeedRoles(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, all []string)
 			}
 		}
 	}
-	return nil
+
+	// On tx, so that it is delivered when this transaction commits and thrown
+	// away if it rolls back. A tenant whose roles failed to seed must not also
+	// have told every replica to forget what it knew.
+	return held.InvalidateAll(ctx, tx)
 }
 
 // AttachRole gives an account the role matching its level.
-func AttachRole(ctx context.Context, tx pgx.Tx, tenantID, accountID uuid.UUID, level string) error {
+//
+// One account's answer changes, so one entry is withdrawn — on tx, which is what
+// makes the invalidation atomic with the grant rather than a second event that
+// can arrive without it. This is the call that would be easy to leave out, and
+// leaving it out is a role somebody was given that does not work until the
+// lifetime runs out. The reverse — a role taken away that goes on working — is
+// the same call on the same line, which is why the two are not separable.
+func AttachRole(
+	ctx context.Context, tx pgx.Tx, tenantID, accountID uuid.UUID, level string,
+	held *auth.GrantsCache,
+) error {
 	_, err := tx.Exec(ctx, `
 		INSERT INTO account_role (id, account_id, role_id)
 		SELECT $4, $2, role.id FROM role WHERE role.tenant_id = $1 AND role.key = $3
@@ -150,7 +172,7 @@ func AttachRole(ctx context.Context, tx pgx.Tx, tenantID, accountID uuid.UUID, l
 	if err != nil {
 		return fmt.Errorf("tenant: attach %s: %w", level, err)
 	}
-	return nil
+	return held.Invalidate(ctx, tx, tenantID, accountID)
 }
 
 // GrantLevel gives somebody the permissions their level implies.
@@ -163,7 +185,7 @@ func AttachRole(ctx context.Context, tx pgx.Tx, tenantID, accountID uuid.UUID, l
 // package holds no state, it holds a policy.
 func GrantLevel(
 	ctx context.Context, pool *pgxpool.Pool,
-	tenantID, accountID uuid.UUID, level string, all []string,
+	tenantID, accountID uuid.UUID, level string, all []string, held *auth.GrantsCache,
 ) error {
 	tx, err := pool.Begin(ctx)
 	if err != nil {
@@ -171,10 +193,10 @@ func GrantLevel(
 	}
 	defer tx.Rollback(ctx)
 
-	if err := SeedRoles(ctx, tx, tenantID, all); err != nil {
+	if err := SeedRoles(ctx, tx, tenantID, all, held); err != nil {
 		return err
 	}
-	if err := AttachRole(ctx, tx, tenantID, accountID, level); err != nil {
+	if err := AttachRole(ctx, tx, tenantID, accountID, level, held); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)
@@ -197,8 +219,10 @@ func GrantLevel(
 //
 // It runs per request, not at sign-in, so a role taken away stops working on the
 // next call rather than whenever the session happens to refresh. That also puts
-// it on the hot path: a real deployment with an expensive answer should cache it
-// here, keyed on the account, with a short time to live.
+// it on the hot path, and this one is a five-way join. What a real deployment
+// reaches for is auth.NewGrantsCache — not a time to live, which would be a role
+// taken away that goes on working, but a map the writes below withdraw from on
+// the transaction that made them.
 func Grants(pool *pgxpool.Pool) func(context.Context, uuid.UUID, uuid.UUID) ([]string, []string, error) {
 	return func(ctx context.Context, tenantID, accountID uuid.UUID) (roles, permissions []string, err error) {
 		// The account's coarse level and its assigned roles in one read.
@@ -294,7 +318,7 @@ func AuthKeys() []string {
 //
 // The keys come from the derived catalogue, so a new table lands in the roles of
 // every tenant made after it without anybody editing this.
-func SeedFor(keys []string) func(context.Context, account.NewTenant) error {
+func SeedFor(keys []string, held *auth.GrantsCache) func(context.Context, account.NewTenant) error {
 	return func(ctx context.Context, made account.NewTenant) error {
 		tx, ok := dbx.Tx(ctx)
 		if !ok {
@@ -302,9 +326,9 @@ func SeedFor(keys []string) func(context.Context, account.NewTenant) error {
 			// anyway would leave roles behind when the tenant rolled back.
 			return fmt.Errorf("authz: OnCreated expected a transaction")
 		}
-		if err := SeedRoles(ctx, tx, made.TenantID, keys); err != nil {
+		if err := SeedRoles(ctx, tx, made.TenantID, keys, held); err != nil {
 			return err
 		}
-		return AttachRole(ctx, tx, made.TenantID, made.AccountID, string(account.RoleOwner))
+		return AttachRole(ctx, tx, made.TenantID, made.AccountID, string(account.RoleOwner), held)
 	}
 }

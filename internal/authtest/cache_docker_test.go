@@ -26,10 +26,14 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/simonjanss/rig/auth"
 	"github.com/simonjanss/rig/auth/apikey"
+	"github.com/simonjanss/rig/auth/authhttp"
 	"github.com/simonjanss/rig/auth/authpg"
 	"github.com/simonjanss/rig/auth/session"
 	"github.com/simonjanss/rig/runtime/cache"
+	"github.com/simonjanss/rig/runtime/rigerr"
+	"github.com/simonjanss/rig/runtime/throttle"
 )
 
 // errRolledBack fails a transaction on purpose.
@@ -283,4 +287,256 @@ func TestAKeyRevocationReachesAnotherReplica(t *testing.T) {
 		_, _, err := reader.Verify(ctx, minted.Secret, from)
 		return err != nil
 	})
+}
+
+// keyFailureReplicas is a pair of managers with the failure limit cached, over
+// the real rig_auth_log the limit counts.
+//
+// The limiter is the Postgres one rather than a fake, because what is under test
+// is the count against that table and the notification that withdraws it — a
+// counter held in memory would prove neither.
+//
+// The limit has no ClearedBy, unlike the real one, and that is what makes these
+// tests deterministic rather than a race. Waiting for an invalidation to cross
+// means asking the reader repeatedly, and the only way to ask is to verify — so
+// with a clearing event configured, the first ask that is answered from the held
+// zero *succeeds*, writes the clearing row, and moves the count's floor past
+// every failure the test just recorded. The poll would then destroy the
+// condition it is waiting for and no later attempt could ever see the refusal.
+// What a success does to the window is the internal test's subject
+// (TestASuccessStillClearsTheWindowWithTheCountCached); what is here is the
+// channel.
+func keyFailureReplicas(t *testing.T, maxN int) (*apikey.Manager, *apikey.Manager) {
+	t.Helper()
+
+	pool := database(t)
+	return replicas(t, func(bus *cache.Bus, stores *authpg.Stores) *apikey.Manager {
+		m, err := apikey.New(apikey.Config{
+			Store: stores.APIKeys, Log: stores.Log,
+			Cache: apikey.NewKeyCache(bus, apikey.KeyCacheConfig{TTL: time.Hour}),
+			FailureCache: apikey.NewFailureCache(bus, apikey.FailureCacheConfig{
+				// An hour, so that nothing here can pass because a lifetime ran
+				// out. Only the channel can make these assertions hold.
+				TTL: time.Hour,
+			}),
+			Limiter: throttle.New(throttle.NewPostgres(pool, throttle.PostgresConfig{})),
+			FailureLimit: throttle.Limit{
+				Name:   "apikey.failed",
+				Event:  throttle.EventAPIKeyAuthFailed,
+				Max:    maxN,
+				Window: time.Hour,
+			},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return m
+	})
+}
+
+// wrongSecret is a well-formed key that is not the minted one.
+func wrongSecret(minted apikey.Minted) string {
+	return apikey.Prefix + minted.Key.KeyID + "_" + strings.Repeat("A", 52)
+}
+
+// Failures counted on one replica lock the key on the other, even though the
+// other was holding "no failures for this key".
+//
+// This is the assertion that makes the failure cache something other than a hole
+// in the limit. The reader is deliberately warmed first — a successful
+// verification, which is what puts the zero in its map — and the lifetime is an
+// hour, so nothing here can pass by expiring. If the invalidation did not cross,
+// the reader would go on waving the key through for the rest of that hour while
+// somebody ground secrets against it next door.
+func TestKeyFailuresOnOneReplicaLockTheOther(t *testing.T) {
+	t.Parallel()
+
+	h := setup(t)
+	ctx := context.Background()
+	writer, reader := keyFailureReplicas(t, 3)
+
+	minted, err := writer.Mint(ctx, apikey.MintInput{
+		TenantID: h.tenant, AccountID: h.account, Name: "ci", Scopes: []string{"note.read"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	from := netip.MustParseAddr("198.51.100.7")
+	if _, _, err := reader.Verify(ctx, minted.Secret, from); err != nil {
+		t.Fatal(err)
+	}
+
+	// Every one of these is counted on the writer and has to reach the reader,
+	// or the reader's held zero survives all four.
+	wrong := wrongSecret(minted)
+	for range 4 {
+		_, _, _ = writer.Verify(ctx, wrong, from)
+	}
+
+	// Polling with the correct secret, which is safe to repeat here only because
+	// the limit has no clearing event — see keyFailureReplicas. Every attempt
+	// answered from the held zero leaves the count exactly where the writer put
+	// it, so the loop can ask as often as it likes.
+	settle(t, "a key locked by another replica's failures", func() bool {
+		_, _, err := reader.Verify(ctx, minted.Secret, from)
+		return rigerr.Is(err, rigerr.CodeRateLimited)
+	})
+}
+
+// And the honest key is answered from memory rather than by counting rows.
+//
+// Asserted by moving the count behind rig's back: the rows go in with plain SQL,
+// so nothing publishes and nothing is withdrawn. A reader that still lets the key
+// through is one that never went back to the table — and a reader that refuses it
+// was counting on every request, which is the cost this exists to remove.
+//
+// It is also the honest statement of the boundary. A write nobody publishes from
+// is invisible for a lifetime, which is what `ttl` is the backstop for, and why
+// rig caches only the counts whose writes it makes itself.
+func TestACleanKeyIsAnsweredWithoutCountingRows(t *testing.T) {
+	t.Parallel()
+
+	h := setup(t)
+	ctx := context.Background()
+	writer, reader := keyFailureReplicas(t, 3)
+
+	minted, err := writer.Mint(ctx, apikey.MintInput{
+		TenantID: h.tenant, AccountID: h.account, Name: "ci", Scopes: []string{"note.read"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	from := netip.MustParseAddr("198.51.100.7")
+	if _, _, err := reader.Verify(ctx, minted.Secret, from); err != nil {
+		t.Fatal(err)
+	}
+
+	for range 10 {
+		if _, err := h.pool.Exec(ctx, `
+			INSERT INTO rig_auth_log (id, tenant_id, created_at, event, outcome, api_key_ref)
+			VALUES ($1, $2, now(), $3, 'Failed', $4)`,
+			uuid.New(), h.tenant, throttle.EventAPIKeyAuthFailed, minted.Key.KeyID); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if _, _, err := reader.Verify(ctx, minted.Secret, from); err != nil {
+		t.Fatalf("the reader answered %v; it counted rows it should have had held in memory", err)
+	}
+}
+
+// grantsPair is a cache and the function wrapped in it, which these tests need
+// both halves of: one to read through and one to publish on.
+type grantsPair struct {
+	cache  *auth.GrantsCache
+	grants authhttp.Grants
+}
+
+// grantsReplicas builds a pair, each over a bus of its own, answering whatever
+// held says at the moment they are asked.
+//
+// A function rather than a table because what is under test is the channel, not
+// anybody's authorization model — and the model is exactly the part rig has no
+// opinion about.
+func grantsReplicas(t *testing.T, held *string) (*grantsPair, *grantsPair) {
+	t.Helper()
+
+	return replicas(t, func(bus *cache.Bus, _ *authpg.Stores) *grantsPair {
+		// An hour, so that nothing here can pass because a lifetime ran out.
+		c := auth.NewGrantsCache(auth.GrantsCacheConfig{TTL: time.Hour})
+		g := c.Wrap(func(context.Context, uuid.UUID, uuid.UUID) ([]string, []string, error) {
+			return []string{*held}, nil, nil
+		})
+		c.Serve(bus)
+		return &grantsPair{cache: c, grants: g}
+	})
+}
+
+// A role change published on one replica's transaction reaches another replica's
+// cache.
+//
+// This is the half rig cannot do on an application's behalf, proved once here so
+// that nobody has to discover it in their own project. The reader is warmed with
+// the old answer, the writer publishes inside a transaction, and the reader has
+// to have forgotten by the time that transaction commits.
+func TestAGrantInvalidationReachesAnotherReplica(t *testing.T) {
+	t.Parallel()
+
+	pool := database(t)
+	ctx := context.Background()
+	tenant, account := uuid.New(), uuid.New()
+
+	held := "basic"
+	writer, reader := grantsReplicas(t, &held)
+
+	roles, _, err := reader.grants(ctx, tenant, account)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if roles[0] != "basic" {
+		t.Fatalf("warmed with %v, want basic", roles)
+	}
+
+	held = "owner"
+
+	// In a transaction, which is what makes the invalidation atomic with the
+	// change that caused it. The publisher hears its own notification, exactly
+	// like every other topic on this bus.
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.cache.Invalidate(ctx, tx, tenant, account); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	settle(t, "a withdrawn grant", func() bool {
+		roles, _, err := reader.grants(ctx, tenant, account)
+		return err == nil && roles[0] == "owner"
+	})
+}
+
+// And one rolled back is not delivered, so a role change that failed does not
+// leave every replica having thrown away what was still true.
+func TestAGrantInvalidationRolledBackIsNotDelivered(t *testing.T) {
+	t.Parallel()
+
+	pool := database(t)
+	ctx := context.Background()
+	tenant, account := uuid.New(), uuid.New()
+
+	held := "basic"
+	writer, reader := grantsReplicas(t, &held)
+
+	if _, _, err := reader.grants(ctx, tenant, account); err != nil {
+		t.Fatal(err)
+	}
+	held = "owner"
+
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.cache.Invalidate(ctx, tx, tenant, account); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Rollback(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	// Long enough that a notification which was going to arrive would have.
+	time.Sleep(250 * time.Millisecond)
+	roles, _, err := reader.grants(ctx, tenant, account)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if roles[0] != "basic" {
+		t.Error("a rolled-back invalidation was delivered; the reader forgot an answer " +
+			"that was never withdrawn")
+	}
 }

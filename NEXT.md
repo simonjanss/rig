@@ -172,6 +172,98 @@ Next:
   carries the hash every verification compares against while a key carries the
   scopes that become a caller's permissions.
 
+- ~~**M16.1** — the two reads M16 left on the path.~~ Shipped: a
+  `apikey.FailureCache` covered by the same `cache:` block, and an
+  `auth.GrantsCache` that is not, because it cannot be.
+
+  **`cache: enabled: true` did not do what its own heading said.**
+  `docs/auth.md` is headed "Verifying without a row read"; for a session request
+  that was true and for an API-key request it was not.
+  `apikey.Manager.checkFailureLimit` runs *before* the cached lookup — on
+  purpose, so a caller grinding secrets stops costing a query long before they
+  stop asking — and it is a `count(*)` over `rig_auth_log` through
+  `throttle.Postgres`, wired unconditionally at a default of 20 per minute. So
+  turning the cache on removed one of an API-key request's two reads and left the
+  other as the dominant cost.
+
+  It fits the M16 rule exactly: `rig_auth_log` is rig's table and both writes that
+  move the answer — `recordFailure` and the success entry — are rig's. **Only the
+  zero is held**, and that is what makes it sound rather than merely cheap: inside
+  a window a count can only rise, so "no failures for this key" can be wrong only
+  if a failure was recorded, and a failure recorded is a notification published on
+  the way past. A count already above zero is never held, so the limit refuses on
+  the same attempt it would have with no cache — the caller it stops helping is
+  precisely the one it exists to stop. `runtime/throttle/local.go` is the
+  counter-example the doc points at: the same optimisation without a channel,
+  rejected for these limits because its error is one-sided in the permissive
+  direction.
+
+  Three departures. The invalidation runs in **a transaction of its own** rather
+  than the caller's, because the log entry it withdraws is deliberately written
+  outside whatever transaction noticed the failure — and it is published *after*
+  that write, never before, which is the one ordering that would turn this from a
+  cache into a hole in the limit. `dbx.InTx` *joins* a transaction already on the
+  context, which is right everywhere else and wrong here, so `dbx.WithoutTx` is
+  new: it hides the transaction so the nested `InTx` opens one. Nothing in rig
+  verifies a key inside a transaction today, and the guarantee should not depend
+  on that staying true.
+
+  The **success path publishes nothing**: a success moves the `ClearedBy` floor
+  forward, so it can only lower a count, and a held zero stays true.
+
+  And **a key id nobody minted withdraws locally and publishes nothing**, which is
+  the one place the shape of the read matters more than the shape of the write. A
+  key id is the half a caller supplies and the limit is checked *before* the
+  lookup, so an invented identifier gets an entry stored under it — the same thing
+  `errNoKey` keeps out of the `KeyCache`, arrived at from the other end. Publishing
+  those would let an unauthenticated caller drive a transaction and a channel-wide
+  notification once per request, with no per-key limit to bound it because every
+  invented identifier is a bucket of its own. Dropping locally loses nothing: a
+  replica only ever holds a zero for an identifier presented to *it*, stored by the
+  limit check and dropped inside the same request, so there is no other replica
+  holding an answer a publish could withdraw — and the drop being synchronous means
+  the limit bites a shade earlier than the published path, not later.
+
+  **`auth.NewGrantsCache` is the other half, and it is deliberately not a config
+  key.** M16 left `Grants` alone for the right reason and then told people to
+  cache it anyway with nothing to do it with — `authhttp.Grants` said "cache it if
+  the answer is expensive" and both examples' `authz.Grants` said "with a short
+  time to live", which is the exact trade the block exists to refuse. So rig now
+  ships the map and the obligation, and still refuses to make the decision: it is
+  three calls in Go, next to the writes somebody is promising to publish from.
+
+  The shape is `NewGrantsCache` / `Wrap` / `Serve` rather than one constructor,
+  because the generated wiring needs the function *before* it can hand back the
+  bus — `api.New(pool, api.Hooks{Grants: ...})` returns the thing that owns the
+  channel. Every step is fail-safe: an unserved cache holds nothing, a bus that is
+  not running is not live, a map that is not live reads through. Forgetting
+  `Serve` costs latency.
+
+  `examples/auth` is wired end to end, and that is what makes the recommendation
+  honest rather than a shape: three `held` arguments threaded through
+  `services/authz`, one per write that changes what somebody may do. Both role
+  tables there are `expose: false`, so there is no generated write path to forget
+  — which is the property that made it a clean demonstration and is called out in
+  `docs/auth.md` as the thing to check in a project where it is not true
+  (`rig_account.role` is `Update` in the scaffolded configuration, and a `PATCH`
+  on it changes the answer without touching anybody's role tables; a `dbhook`
+  `BeforeCommit` is where that `Invalidate` goes).
+
+  Four new Docker tests in `internal/authtest`: failures on one replica lock the
+  key on another that was holding a zero, a clean key answered without counting
+  rows at all — asserted by moving the count behind rig's back with plain SQL, so
+  a reader that still lets the key through is one that never queried — and a grant
+  invalidation delivered on commit and discarded on rollback.
+
+  The key pair's limit is configured with **no `ClearedBy`**, unlike the real one,
+  and that is what makes them deterministic rather than a race. Waiting for an
+  invalidation to cross means asking the reader repeatedly, and the only way to
+  ask is to verify — so with a clearing event configured, the first ask answered
+  from the held zero succeeds, writes the clearing row, and moves the floor past
+  every failure the test just recorded. The poll would destroy the condition it
+  was waiting for, and no later attempt could see the refusal. What a success does
+  to the window is the internal test's subject; what is here is the channel.
+
 ### Modules
 
 ```

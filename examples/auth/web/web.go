@@ -36,6 +36,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/simonjanss/rig/auth"
 	"github.com/simonjanss/rig/examples/auth/services/outbox"
 )
 
@@ -67,6 +68,12 @@ type Handler struct {
 	mail *outbox.Box
 	tpl  *template.Template
 
+	// grantsCache is the cache over the application's own Grants function, held here
+	// so the one write in this package that changes what somebody may do can
+	// withdraw what every replica is holding. Nil is usable and publishes
+	// nothing, which is a project with no `cache:` block.
+	grantsCache *auth.GrantsCache
+
 	// trace is the request log the curl panel shows.
 	trace *tracer
 	// lastKey holds a freshly minted secret for exactly one render.
@@ -74,13 +81,15 @@ type Handler struct {
 }
 
 // New builds the UI.
-func New(api http.Handler, pool *pgxpool.Pool, mail *outbox.Box) (*Handler, error) {
+func New(
+	api http.Handler, pool *pgxpool.Pool, mail *outbox.Box, grants *auth.GrantsCache,
+) (*Handler, error) {
 	tpl, err := template.New("").Funcs(helpers()).ParseFS(files, "templates/*.gohtml")
 	if err != nil {
 		return nil, err
 	}
 	return &Handler{
-		api: api, pool: pool, mail: mail, tpl: tpl,
+		api: api, pool: pool, mail: mail, tpl: tpl, grantsCache: grants,
 		trace: &tracer{limit: 40},
 	}, nil
 }
