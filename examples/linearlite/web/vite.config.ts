@@ -81,6 +81,12 @@ export default defineConfig({
             // /api entry above does not cover it. Without this line every
             // heartbeat 404s and the room is always empty under `pnpm dev`.
             "/presence": "http://localhost:8084",
+            // The demonstration's own routes, outside api.base_path for the
+            // same reason. Without this line the tour request lands on
+            // index.html, the `.catch` in AppShell swallows the parse error,
+            // and the nav quietly loses the items it decides — which is the
+            // failure this line is here to have already happened once.
+            "/_demo": "http://localhost:8084",
         },
     },
     build: { outDir: "dist" },

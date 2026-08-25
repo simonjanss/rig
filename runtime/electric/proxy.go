@@ -450,17 +450,12 @@ func (p *Proxy) unavailable(w http.ResponseWriter, r *http.Request, s Shape, cau
 // to.
 func (p *Proxy) answer(w http.ResponseWriter, r *http.Request, s Shape) {
 	if s.Fallback != nil && initial(r) {
-		snap, err := s.Fallback(r.Context())
+		snap, err := p.snapshot(r.Context(), s)
 		if err != nil {
 			if r.Context().Err() != nil {
 				return
 			}
-			p.refuse(r, w, fmt.Errorf("electric: the fallback for %s refused: %w", s.Table, err))
-			return
-		}
-		if p.maxRows > 0 && len(snap.Rows) > p.maxRows {
-			p.refuse(r, w, fmt.Errorf("electric: the fallback for %s answered with %d rows, past the %d it may send",
-				s.Table, len(snap.Rows), p.maxRows))
+			p.refuse(r, w, err)
 			return
 		}
 		writeSnapshot(w, s, snap)
@@ -477,7 +472,53 @@ func (p *Proxy) answer(w http.ResponseWriter, r *http.Request, s Shape) {
 		return
 	}
 
+	// A subscriber resuming from a handle the *sync service* issued — the tab
+	// that was already streaming when the outage began. It is asked to start
+	// again, which is the only thing that reaches the snapshot it could
+	// otherwise only get by being reloaded. [writeMustRefetch] has the whole
+	// reasoning, including why this is checked after the branch above rather
+	// than before it.
+	//
+	// The snapshot is taken here and thrown away, because what is being decided
+	// is whether there is one at all. A shape having a fallback is not the same
+	// as that fallback answering: it can refuse, and [Config.MaxSnapshotRows]
+	// can refuse for it. Sending a subscriber to start again and then meeting it
+	// with that refusal would cost it the rows it was holding and hand it the
+	// 502 it would have had anyway — the one outcome this branch exists to
+	// avoid. So a refusal keeps the rows where they are, and the read costs a
+	// tab that was already streaming one more than the tab beside it that
+	// arrived during the outage.
+	if s.Fallback != nil {
+		if _, err := p.snapshot(r.Context(), s); err != nil {
+			if r.Context().Err() != nil {
+				return
+			}
+			p.refuse(r, w, err)
+			return
+		}
+		writeMustRefetch(w)
+		return
+	}
+
 	http.Error(w, "the sync service is unavailable", http.StatusBadGateway)
+}
+
+// snapshot reads a shape's fallback and holds it to [Config.MaxSnapshotRows].
+//
+// Both callers need the same answer to the same question — is there a snapshot,
+// and may it be sent — and one of them then throws the rows away. The error is
+// the sentence [Proxy.refuse] reports, so what a log says about a refusal does
+// not depend on which of the two asked.
+func (p *Proxy) snapshot(ctx context.Context, s Shape) (Snapshot, error) {
+	snap, err := s.Fallback(ctx)
+	if err != nil {
+		return Snapshot{}, fmt.Errorf("electric: the fallback for %s refused: %w", s.Table, err)
+	}
+	if p.maxRows > 0 && len(snap.Rows) > p.maxRows {
+		return Snapshot{}, fmt.Errorf("electric: the fallback for %s answered with %d rows, past the %d it may send",
+			s.Table, len(snap.Rows), p.maxRows)
+	}
+	return snap, nil
 }
 
 // refuse answers a fallback that could not be sent, and says why to whoever is

@@ -168,8 +168,15 @@ func TestAFourHundredIsForwardedRatherThanAnswered(t *testing.T) {
 }
 
 // A live poll asks what changed. A snapshot is not a smaller answer to that
-// question; it is a different question answered, with no way to tell.
-func TestALivePollIsNeverAnsweredWithASnapshot(t *testing.T) {
+// question; it is a different question answered, with no way to tell. So the
+// subscriber is asked to start again instead — a read from the beginning is a
+// question a snapshot does answer, and this is the whole reason a tab that was
+// already streaming when the outage began ends up on one without a reload.
+//
+// Three shapes of the same request, because a resume is not only a live poll: a
+// non-live fetch from an offset is resuming too, and neither can take a
+// snapshot.
+func TestAResumedSubscriptionIsToldToStartAgain(t *testing.T) {
 	t.Parallel()
 
 	p, _ := electric.New(electric.Config{URL: nowhere})
@@ -179,10 +186,81 @@ func TestALivePollIsNeverAnsweredWithASnapshot(t *testing.T) {
 		"offset=0_0&handle=the-handle",
 	} {
 		res := serve(t, p, electric.Shape{Table: "lesson", Fallback: snapshotOf("one")}, query)
-		if res.StatusCode != http.StatusBadGateway {
-			t.Errorf("?%s: status = %d, want 502", query, res.StatusCode)
+		if res.StatusCode != http.StatusConflict {
+			t.Errorf("?%s: status = %d, want the 409 that resets a subscription", query, res.StatusCode)
+		}
+		body, _ := io.ReadAll(res.Body)
+		res.Body.Close()
+		if !strings.Contains(string(body), "must-refetch") {
+			t.Errorf("?%s: no must-refetch in %s", query, body)
+		}
+		// A snapshot's rows must not be in here: the point is that this request
+		// could not be answered with them.
+		if strings.Contains(string(body), `"operation"`) {
+			t.Errorf("?%s: answered with rows after all: %s", query, body)
+		}
+		// A client reads the handle to resume with off this response and warns
+		// when there is none, blaming a proxy that stripped it.
+		if res.Header.Get("electric-handle") == "" {
+			t.Errorf("?%s: no handle to start again with: %v", query, res.Header)
 		}
 	}
+}
+
+// And a shape with no fallback keeps the 502 it always had. Resetting a
+// subscription that has nowhere to reset *to* would cost it the rows it is
+// holding and then refuse the request anyway.
+func TestAResumedSubscriptionWithNoFallbackIsRefused(t *testing.T) {
+	t.Parallel()
+
+	p, _ := electric.New(electric.Config{URL: nowhere})
+	res := serve(t, p, electric.Shape{Table: "lesson"}, "offset=0_inf&handle=the-handle&live=true")
+	if res.StatusCode != http.StatusBadGateway {
+		t.Errorf("status = %d, want 502", res.StatusCode)
+	}
+}
+
+// And so does a shape whose fallback there is, but refuses.
+//
+// Having a fallback is not the same as that fallback answering: it can fail,
+// and the bound can refuse for it. Either way there is nothing to start again
+// *to*, so the subscriber keeps its rows and gets the 502 it would have had —
+// where a must-refetch would have taken the rows first and then refused the
+// read it sent the subscriber to make.
+func TestAResumedSubscriptionIsNotSentToAFallbackThatRefuses(t *testing.T) {
+	t.Parallel()
+
+	resume := "offset=0_inf&handle=the-handle&live=true"
+
+	t.Run("a fallback that fails", func(t *testing.T) {
+		t.Parallel()
+
+		p, _ := electric.New(electric.Config{URL: nowhere})
+		res := serve(t, p, electric.Shape{
+			Table: "lesson",
+			Fallback: func(context.Context) (electric.Snapshot, error) {
+				return electric.Snapshot{}, errors.New("the database is gone too")
+			},
+		}, resume)
+
+		if res.StatusCode != http.StatusBadGateway {
+			t.Errorf("status = %d, want 502", res.StatusCode)
+		}
+	})
+
+	t.Run("a snapshot past the bound", func(t *testing.T) {
+		t.Parallel()
+
+		p, _ := electric.New(electric.Config{URL: nowhere, MaxSnapshotRows: 2})
+		res := serve(t, p, electric.Shape{
+			Table:    "lesson",
+			Fallback: snapshotOf("one", "two", "three"),
+		}, resume)
+
+		if res.StatusCode != http.StatusBadGateway {
+			t.Errorf("status = %d, want 502", res.StatusCode)
+		}
+	})
 }
 
 // A subscriber holding a snapshot already has the rows another one would send.

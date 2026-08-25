@@ -121,6 +121,12 @@ Beyond the todo example's layout, five directories and one file:
 
 - `web/` — the React front end. Its generated client is `web/src/api`
   (`*.gen.ts`, rig's, never edit) and everything else in `web/src` is yours.
+  One thing to know before adding a `/_demo/` call: the routes outside
+  `api.base_path` each need a line in `web/vite.config.ts`'s dev proxy, and a
+  missing one fails quietly — the request lands on `index.html` and the caller's
+  `.catch` swallows the parse error. `/_demo` was missing for as long as it had
+  only one caller, which is why the tour's nav items never appeared under
+  `pnpm dev`.
   `pnpm build` writes `web/dist`, which `main.go` serves from disk; `make
   examples` deliberately never builds it, so the Go suite needs no pnpm. The
   `linearlite-web` make target at the repository root typechecks and builds it,
@@ -137,6 +143,16 @@ Beyond the todo example's layout, five directories and one file:
   dependency lists. `docs/presence.md` says all three in prose.
 - `importer/` + `import/` — the batch job over the generated Go client, split
   so the docker test drives the same loop the command runs.
+- `services/todo/todo_fallback.go` + `services/rig_notification_recipient/rig_notification_recipient_fallback.go`
+  — what answers a shape when the sync service cannot be reached. Four of the
+  five shapes a screen subscribes to have one; presence is the exception and
+  `main.go` says why beside the wiring. The recipient one is the file to read
+  before adding a fifth: **a fallback must narrow exactly as far as its shape
+  does**, that shape narrows on `account_id` as well as the tenant, and nothing
+  checks that the read agrees. It does agree, because `access: {scope: own}`
+  makes the repository narrow the same way from the same claims — derived from
+  one declaration rather than written twice — and that is the sentence to verify
+  rather than assume for any new one.
 - `services/rig_presence/` — one file, the scope stub, and the only filled-in
   scope stub in the repository. Every other shape here leaves the generated
   tenant filter as the whole scope; this one narrows on `scope` and `target_id`,
@@ -153,14 +169,45 @@ Beyond the todo example's layout, five directories and one file:
   `notify.Sender` (the email copy of an inbox line). It records instead of
   sending, which is the thing a real one must never do, and the front end says
   so where it shows them.
-- `demo.go` — the only hand-written HTTP here: `GET /_demo/outbox` and
-  `GET /_demo/tour`. Hand-written because neither is about a table, so there is
-  nothing for rig to generate from. Add a route here rather than inventing a
-  resource for something that lives in memory. Both need a session: where rig's
-  monitoring page listens is not a fact to hand an anonymous caller, since rig
-  opens no port at all rather than one that refuses. `/_demo/tour` hands back
-  the page's absolute URL, because it is on a port of its own and a relative
-  href reaches the API instead.
+- `demo.go` — the only hand-written HTTP here: `GET /_demo/outbox`,
+  `GET /_demo/tour`, and the sync switch (`GET /_demo/sync`,
+  `POST /_demo/sync/stop`, `POST /_demo/sync/start`). Hand-written because none
+  is about a table, so there is nothing for rig to generate from. Add a route
+  here rather than inventing a resource for something that lives in memory. All
+  of them need a session: where rig's monitoring page listens is not a fact to
+  hand an anonymous caller, since rig opens no port at all rather than one that
+  refuses. `/_demo/tour` hands back the page's absolute URL, because it is on a
+  port of its own and a relative href reaches the API instead.
+
+  The switch stops and starts the ElectricSQL container so the board can
+  demonstrate the fallback in `services/todo/todo_fallback.go` — the README's
+  "Take the sync service down" is the script. Two things about it are
+  load-bearing. **It is gated on `$RIG_DEMO_SYNC_CONTAINER` and the gate is not
+  a 403**: a handler that shells out to `docker stop` must not exist in a build
+  nobody told which container to touch, and a route answering 403 still tells a
+  scanner this process can reach a container engine. `make demo` sets the
+  variable; `rig.yaml` is checked in and never will. And **it reports the
+  container's state and `Proxy.SyncReachable()` as two separate fields**,
+  because they come apart in both directions and that gap *is* the circuit
+  breaker — the only way it is visible from a browser. Collapsing them into one
+  "is sync up" boolean is the plausible wrong version.
+
+  It shells out rather than using `internal/dockerdb`, which an example cannot
+  import: `examples/linearlite` is its own module and does not require the root
+  one, and adding that for three subcommands would pull the CLI's dependencies
+  into a module that serves a board.
+
+  **Starting the container again does not work under `RIG_DB_ISOLATE`, and the
+  reason is worth knowing before trying to fix it.** Isolation publishes the
+  sync service on a port the kernel chooses, and Docker chooses a *new* one
+  every time such a container starts — verified: a `--publish 127.0.0.1:55999:3000`
+  container keeps 55999 across a stop, a `--publish 127.0.0.1::3000` one does
+  not. The proxy's URL is fixed by `electric.New` at boot, so the container comes
+  back running, healthy and unreachable from this process. That is why
+  `syncState` carries `upstream`, `published` and `moved`: nothing can be done
+  about it here short of restarting the server, and the failure is
+  indistinguishable from the outage the switch exists to demonstrate. The pill
+  reads "Sync moved" and the strip names both ports.
 - `services/rig_notification_device/` + `services/rig_notification_setting/` —
   the two notification tables a person owns rather than reads, exposed as
   ordinary resources by `notifications: expose: true` plus an `operations:` line

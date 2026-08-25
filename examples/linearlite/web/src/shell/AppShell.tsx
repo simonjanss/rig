@@ -10,6 +10,9 @@ import { useNotificationToasts } from "../notifications/useNotificationToasts.js
 import { readTour } from "../outbox/outboxApi.js";
 import { Here } from "../presence/Here.js";
 import { PresenceProvider } from "../presence/PresenceContext.js";
+import { SyncBanner } from "../sync/SyncBanner.js";
+import { SyncSwitch } from "../sync/SyncSwitch.js";
+import { useSyncSwitch } from "../sync/useSyncSwitch.js";
 import { Toaster } from "../toast/Toaster.js";
 import { TenantSwitcher } from "./TenantSwitcher.js";
 
@@ -35,6 +38,11 @@ export function AppShell() {
             .then(setTour)
             .catch(() => undefined);
     }, []);
+
+    // Asked repeatedly, unlike the tour: this one changes, and changing is the
+    // point of it. One hook for both the pill and the strip below the header,
+    // so the two cannot disagree about whether sync is answering.
+    const sync = useSyncSwitch(tour?.sync ?? false);
 
     return (
         <PresenceProvider>
@@ -63,6 +71,12 @@ export function AppShell() {
                         )}
                     </nav>
                     <div className="shell-side">
+                        <SyncSwitch
+                            state={sync.state}
+                            busy={sync.busy}
+                            onStop={sync.stop}
+                            onStart={sync.start}
+                        />
                         <Here />
                         <NotificationBell />
                         <button className="linkish" onClick={signOut}>
@@ -70,6 +84,12 @@ export function AppShell() {
                         </button>
                     </div>
                 </header>
+                {/* Between the header and the scrolling area rather than
+                    inside it: the board is `height: 100%` of what it is given,
+                    so a strip in there would push it off the bottom. */}
+                {sync.state && (!sync.state.reachable || sync.state.moved) && (
+                    <SyncBanner state={sync.state} />
+                )}
                 <main className="shell-main">
                     <Outlet />
                 </main>

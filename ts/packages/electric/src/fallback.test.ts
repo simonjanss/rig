@@ -168,3 +168,139 @@ it("keeps the snapshot when the poll that follows it is refused", async () => {
         "write it down",
     ]);
 });
+
+/**
+ * The row a real sync service sent before it went away, so the collection starts
+ * out holding something that is not in the snapshot. What must-refetch does is
+ * clear it.
+ */
+const liveBody = JSON.stringify([
+    {
+        key: '"public"."todo"/"3f0f4b1e-0000-4000-8000-000000000009"',
+        value: {
+            due_at: null,
+            id: "3f0f4b1e-0000-4000-8000-000000000009",
+            is_done: "false",
+            priority: "1",
+            title: "from real sync",
+        },
+        headers: { operation: "insert", relation: ["public", "todo"] },
+    },
+    { headers: { control: "up-to-date" } },
+]);
+
+/** A handle shaped like the sync service's own, which is what marks it real. */
+const realHandle = "21872282-1787670276304776";
+
+/**
+ * The proxy again, but for the subscriber that was already streaming when the
+ * outage began — the case a reload used to be the only cure for.
+ *
+ * The branches are in the order `Proxy.answer` has them, and the order is the
+ * load-bearing part: the request that follows a must-refetch carries `offset=-1`
+ * *and* a fallback handle, so a server that checked the handle first would answer
+ * it with the 503 meant for a live poll and the subscription would never reach
+ * the snapshot at all.
+ */
+function recoveringServer(): typeof fetch {
+    let live = true;
+    return async (input) => {
+        const url = String(input);
+        asked.push(url);
+
+        const isLivePoll = url.includes("live=true");
+        const fromTheBeginning = url.includes("offset=-1") && !isLivePoll;
+
+        if (fromTheBeginning) {
+            // The first one is real sync answering. Every one after it is the
+            // outage, and a snapshot.
+            if (live) {
+                live = false;
+                return new Response(liveBody, {
+                    status: 200,
+                    headers: {
+                        "content-type": "application/json; charset=utf-8",
+                        "electric-handle": realHandle,
+                        "electric-offset": "0_0",
+                        "electric-up-to-date": "",
+                        "electric-schema": snapshotSchema,
+                        "electric-has-data": "true",
+                    },
+                });
+            }
+            return new Response(snapshotBody, {
+                status: 200,
+                headers: {
+                    "content-type": "application/json; charset=utf-8",
+                    "electric-handle": "rig-fallback-2",
+                    "electric-offset": "0_inf",
+                    "electric-up-to-date": "",
+                    "electric-schema": snapshotSchema,
+                    "electric-has-data": "true",
+                    "cache-control": "no-store",
+                    "x-rig-sync-fallback": "snapshot",
+                },
+            });
+        }
+
+        if (url.includes("rig-fallback-")) {
+            return new Response("the sync service is unavailable", {
+                status: 503,
+                headers: { "retry-after": "5" },
+            });
+        }
+
+        // Resuming from a handle the sync service issued, which this proxy can
+        // neither extend nor answer with a snapshot. Start again.
+        return new Response('[{"headers":{"control":"must-refetch"}}]', {
+            status: 409,
+            headers: {
+                "content-type": "application/json; charset=utf-8",
+                "electric-handle": "rig-fallback-1",
+                "cache-control": "no-store",
+                "x-rig-sync-fallback": "must-refetch",
+            },
+        });
+    };
+}
+
+it("puts a subscription that was already streaming onto the snapshot", async () => {
+    const todos = createRigCollection<TodoRow>({
+        runtime: {
+            origin,
+            fetch: recoveringServer(),
+            getCredential: () => undefined,
+        } as unknown as Runtime,
+        path: "/api/v1/todo/_stream",
+        getKey: (row) => row.id,
+    });
+
+    // Live sync, one row, a real handle.
+    await todos.preload();
+    expect([...todos.values()].map((r) => r.title)).toEqual(["from real sync"]);
+
+    // The outage. The live poll carries the real handle and comes back 409, and
+    // the client resets itself and reads from the beginning again — which is the
+    // request a snapshot answers. No reload anywhere in that.
+    await vi.waitFor(() =>
+        expect([...todos.values()].map((r) => r.title).sort()).toEqual([
+            "and again",
+            "write it down",
+        ]),
+    );
+
+    // The row from before the outage is gone rather than merged with the
+    // snapshot: must-refetch means what it says, and a collection holding both
+    // would be showing rows the snapshot did not vouch for.
+    expect(todos.size).toBe(2);
+
+    // The 409 was answered to a poll carrying the sync service's own handle, and
+    // the read that followed it was from the beginning.
+    const conflicted = asked.findIndex((u) => u.includes(realHandle));
+    expect(conflicted).toBeGreaterThan(-1);
+    expect(
+        asked
+            .slice(conflicted + 1)
+            .some((u) => u.includes("offset=-1") && !u.includes("live=true")),
+    ).toBe(true);
+});
