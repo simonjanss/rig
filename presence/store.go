@@ -16,12 +16,12 @@ import (
 
 // DB is the pool the presence table lives in.
 //
-// It is the two dbx interfaces together rather than *pgxpool.Pool, so that a
-// test can hand this a transaction and so the module never imports pgxpool.
-type DB interface {
-	dbx.Conn
-	dbx.Beginner
-}
+// [dbx.Conn] and not [dbx.Pool], because nothing here opens a transaction — every
+// statement in this package is a single one, which is the one way presence is
+// simpler than the inbox (see [Config.DB]). Narrowing a parameter type is
+// source-compatible for every implementor: a pool still satisfies it, and so does
+// anything that satisfied the wider interface before.
+type DB = dbx.Conn
 
 // columns is what every read selects, in one place so the scan below cannot
 // drift from it.
@@ -68,7 +68,7 @@ func (s *Service) upsert(
 
 	row := s.cfg.DB.QueryRow(ctx, q,
 		id, claims.TenantID, claims.AccountID, b.SessionKey, b.Scope,
-		nullString(b.Target.Table), nullUUID(b.Target.ID), nullString(b.Target.Field),
+		dbx.Null(b.Target.Table), dbx.Null(b.Target.ID), dbx.Null(b.Target.Field),
 		string(activity), now,
 	)
 
@@ -164,11 +164,8 @@ func (s *Service) sweep(ctx context.Context, before time.Time, limit int) (int, 
 	return int(tag.RowsAffected()), nil
 }
 
-// scanner is what both a single row and a row of a result set satisfy.
-type scanner interface{ Scan(dest ...any) error }
-
 // scan reads one row in the order [columns] names.
-func scan(r scanner) (*Presence, error) {
+func scan(r dbx.Scanner) (*Presence, error) {
 	var (
 		p           Presence
 		targetTable *string
@@ -198,25 +195,4 @@ func scan(r scanner) (*Presence, error) {
 	}
 	p.Activity = Activity(activity)
 	return &p, nil
-}
-
-// nullString writes an empty string as SQL NULL.
-//
-// The three target columns are nullable because the levels of a target genuinely
-// narrow — a null table is somebody in the scope and nowhere in particular — and
-// an empty string would be a second spelling of the same absence that every
-// reader would have to check for as well.
-func nullString(s string) any {
-	if s == "" {
-		return nil
-	}
-	return s
-}
-
-// nullUUID writes the nil UUID as SQL NULL, for the reason above.
-func nullUUID(id uuid.UUID) any {
-	if id == uuid.Nil {
-		return nil
-	}
-	return id
 }

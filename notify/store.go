@@ -11,14 +11,9 @@ import (
 	"github.com/simonjanss/rig/runtime/dbx"
 )
 
-// DB is the pool the notification tables and their subjects live in.
-//
-// It is the two dbx interfaces together rather than *pgxpool.Pool, so that a
-// test can hand this a transaction and so the module never imports pgxpool.
-type DB interface {
-	dbx.Conn
-	dbx.Beginner
-}
+// DB is the pool the notification tables and their subjects live in. See
+// [dbx.Pool] for why it is the two interfaces rather than *pgxpool.Pool.
+type DB = dbx.Pool
 
 // The two managed tables. Spelled once, here, because they are the only names in
 // this package a migration also has to know.
@@ -57,12 +52,7 @@ type store struct{ db DB }
 // Every statement goes through it, which is what lets an announcement be written
 // inside the transaction that caused it — and what makes the delete propagation
 // part of the delete rather than a follow-up.
-func (s store) conn(ctx context.Context) dbx.Conn {
-	if tx, ok := dbx.Tx(ctx); ok {
-		return tx
-	}
-	return s.db
-}
+func (s store) conn(ctx context.Context) dbx.Conn { return dbx.ConnFor(ctx, s.db) }
 
 // insert writes the notification and its link row.
 //
@@ -285,7 +275,7 @@ func (s store) reschedule(ctx context.Context, ids []uuid.UUID, at time.Time) er
 	return nil
 }
 
-func scanNotification(row interface{ Scan(...any) error }) (*Notification, error) {
+func scanNotification(row dbx.Scanner) (*Notification, error) {
 	var (
 		n     Notification
 		state string

@@ -26,7 +26,7 @@ const keyColumns = `id, tenant_id, account_id, kind, name, key_id, secret_hash, 
 
 // Insert implements [apikey.Store].
 func (s *APIKeyStore) Insert(ctx context.Context, k *apikey.Key) error {
-	_, err := conn(ctx, s.db).Exec(ctx, `
+	_, err := dbx.ConnFor(ctx, s.db).Exec(ctx, `
 		INSERT INTO rig_api_key (`+keyColumns+`)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
 		k.ID, k.TenantID, k.AccountID, k.Kind, k.Name, k.KeyID, k.SecretHash,
@@ -50,7 +50,7 @@ func (s *APIKeyStore) Find(ctx context.Context, tenantID, id uuid.UUID) (*apikey
 }
 
 func (s *APIKeyStore) one(ctx context.Context, sql string, args ...any) (*apikey.Key, error) {
-	rows, err := conn(ctx, s.db).Query(ctx, sql, args...)
+	rows, err := dbx.ConnFor(ctx, s.db).Query(ctx, sql, args...)
 	if err != nil {
 		return nil, fmt.Errorf("authpg: read api key: %w", err)
 	}
@@ -64,7 +64,7 @@ func (s *APIKeyStore) one(ctx context.Context, sql string, args ...any) (*apikey
 
 // TouchLastUsed implements [apikey.Store].
 func (s *APIKeyStore) TouchLastUsed(ctx context.Context, id uuid.UUID, at time.Time) error {
-	_, err := conn(ctx, s.db).Exec(ctx, `UPDATE rig_api_key SET last_used_at = $2 WHERE id = $1`, id, at)
+	_, err := dbx.ConnFor(ctx, s.db).Exec(ctx, `UPDATE rig_api_key SET last_used_at = $2 WHERE id = $1`, id, at)
 	if err != nil {
 		return fmt.Errorf("authpg: touch api key: %w", err)
 	}
@@ -73,7 +73,7 @@ func (s *APIKeyStore) TouchLastUsed(ctx context.Context, id uuid.UUID, at time.T
 
 // Revoke implements [apikey.Store].
 func (s *APIKeyStore) Revoke(ctx context.Context, tenantID, id uuid.UUID, at time.Time) error {
-	_, err := conn(ctx, s.db).Exec(ctx, `
+	_, err := dbx.ConnFor(ctx, s.db).Exec(ctx, `
 		UPDATE rig_api_key SET revoked_at = $3
 		WHERE tenant_id = $1 AND id = $2 AND revoked_at IS NULL`, tenantID, id, at)
 	if err != nil {
@@ -84,7 +84,7 @@ func (s *APIKeyStore) Revoke(ctx context.Context, tenantID, id uuid.UUID, at tim
 
 // SetExpiry implements [apikey.Store].
 func (s *APIKeyStore) SetExpiry(ctx context.Context, tenantID, id uuid.UUID, at time.Time) error {
-	_, err := conn(ctx, s.db).Exec(ctx, `
+	_, err := dbx.ConnFor(ctx, s.db).Exec(ctx, `
 		UPDATE rig_api_key SET expires_at = $3 WHERE tenant_id = $1 AND id = $2`, tenantID, id, at)
 	if err != nil {
 		return fmt.Errorf("authpg: set api key expiry: %w", err)
@@ -99,7 +99,7 @@ func (s *APIKeyStore) InTx(ctx context.Context, fn func(ctx context.Context) err
 
 // List implements [apikey.Store].
 func (s *APIKeyStore) List(ctx context.Context, tenantID uuid.UUID) ([]*apikey.Key, error) {
-	rows, err := conn(ctx, s.db).Query(ctx,
+	rows, err := dbx.ConnFor(ctx, s.db).Query(ctx,
 		`SELECT `+keyColumns+` FROM rig_api_key WHERE tenant_id = $1 ORDER BY created_at DESC`, tenantID)
 	if err != nil {
 		return nil, fmt.Errorf("authpg: list api keys: %w", err)
@@ -117,7 +117,7 @@ func (s *APIKeyStore) List(ctx context.Context, tenantID uuid.UUID) ([]*apikey.K
 	return out, rows.Err()
 }
 
-func scanKey(row scanner) (*apikey.Key, error) {
+func scanKey(row dbx.Scanner) (*apikey.Key, error) {
 	var (
 		k     apikey.Key
 		allow []netip.Prefix
@@ -137,16 +137,6 @@ func scanKey(row scanner) (*apikey.Key, error) {
 	k.LastUsedAt = dbx.UTCPtr(k.LastUsedAt)
 	k.RevokedAt = dbx.UTCPtr(k.RevokedAt)
 	return &k, nil
-}
-
-// nullable turns an empty string into a NULL, so an unknown value is stored as
-// unknown rather than as the empty string — which is a different thing and
-// sorts differently.
-func nullable(s string) *string {
-	if s == "" {
-		return nil
-	}
-	return &s
 }
 
 // emptyStrings keeps a nil slice out of a NOT NULL array column.

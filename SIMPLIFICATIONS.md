@@ -289,22 +289,69 @@ run against `MemoryStore` in `make test` and against the `authpg` stores under
 smaller change than either half of what B4 proposed. Not scheduled here;
 recorded so the next reader has somewhere to go.
 
-### B5. Shared Postgres plumbing in `runtime/dbx` `[ ]`
+### B5. Shared Postgres plumbing in `runtime/dbx` `[x]`
 
-Re-declared per module:
+Five additions to `runtime/dbx`, and the copies deleted:
 
-- `type DB interface { dbx.Conn; dbx.Beginner }` with the identical doc
-  comment — `notify/store.go:18`, `presence/store.go:21`, `files/store.go:18`.
-- `conn(ctx)` tx-or-pool helper ×5 — `notify/store.go:60`, `files/store.go:47`,
-  `auth/authpg/authpg.go:55`, `auth/apikey/apikey.go:583,708`,
-  `auth/session/session.go:630`.
-- `scanner` interface ×3, `nullString`/`nullable`/`deref` ×5.
+```go
+type Pool interface { Conn; Beginner }
+type Scanner interface{ Scan(dest ...any) error }
+func ConnFor(ctx context.Context, fallback Conn) Conn
+func Null[T comparable](v T) *T   // nil at T's zero value
+func Deref[T any](p *T) T
+```
 
-- **Fix:** add `dbx.Pool` (Conn+Beginner), `dbx.ConnFor(ctx, fallback)`,
-  `dbx.Scanner`, `dbx.NullString` to `runtime/dbx`; alias or delete the copies.
-- **Also:** `presence` never calls `Begin` — `presence.DB` should be plain
-  `dbx.Conn` (this also simplifies `presence/stub_test.go`).
-- **Size:** ~80 lines, plus the "which copy did I fix" question. **Risk:** low.
+- **`DB` stayed as a type alias in each module** — `type DB = dbx.Pool` in
+  `notify` and `files`, `type DB = dbx.Conn` in `presence`. All three generators
+  emit `<pkg>.DB`, so an alias means zero generator, golden or example churn. The
+  triplicated two-sentence doc comment now lives once, on `dbx.Pool`.
+- **`presence.DB` narrowed to `dbx.Conn`.** Nothing in presence opens a
+  transaction — every statement goes straight through `s.cfg.DB`, and
+  `presence/service.go` already said so in prose. Narrowing a parameter-position
+  interface is source-compatible for every implementor, so this breaks nobody: a
+  pool still satisfies it. Two test stubs lost a `Begin` they only had to satisfy
+  the wider interface.
+- **`auth/authpg.conn` was deleted outright**, not wrapped: it already had
+  `dbx.ConnFor`'s exact signature, so its 50 call sites just point at the shared
+  one. `notify` and `files` kept their `conn(ctx)` *methods* as one-liners over
+  it, because there are 36 call sites in `notify` alone and seven of them are in
+  `dispatch.go` — B1's file. The wrapper was the collision boundary that let the
+  two land in one branch.
+- **The `any` vs `*string` split in the null helpers was not real.** All seven
+  call sites feed a pgx variadic `...any`, so both spellings erase to `any` at the
+  call. One generic pair on the `*T` shape, which is the form that already ran
+  against real Postgres in `internal/authtest`.
+- **The one real risk, and its proof.** `dbx.Null(b.Target.ID)` puts a
+  `*uuid.UUID` on the wire where an untyped nil went before.
+  `internal/presencetest`'s `TestTheTargetNarrows` is a table over `Target{}`,
+  `{Table}`, `{Table,ID}` and `{Table,ID,Field}` that round-trips each one; all
+  five sub-cases pass, so pgx handles the pointer transparently. `internal/authtest`
+  covers the `authpg` side over `user_agent`, `time_zone`, `email_address` and
+  `api_key_ref`.
+- **Two counts in the entry as filed were wrong.** `conn(ctx)` was ×3, not ×5 —
+  the three sites at `auth/apikey/apikey.go:582,703` and
+  `auth/session/session.go:626` are not tx-or-pool at all. They never produce a
+  connection to query on; they choose between publishing an invalidation on the
+  ambient transaction and dropping it from a local map, which is inseparable from
+  the cache it is about. They belong to **B3**, as `Keyed.ForgetOrDrop`. And there
+  were five `scanner` sites, not three: two of them were inline anonymous
+  interfaces in `notify/store.go` and `notify/inbox.go`.
+- **`Scanner` was kept rather than naming `pgx.Row`**, which is literally the same
+  interface. `pgx` is `// indirect` in both `files/go.mod` and `notify/go.mod`, and
+  naming it makes it direct — one four-line declaration holds pgx out of two
+  modules' direct requirements. Honest sizing: this sub-item saves about four
+  lines and is the weakest part of B5.
+- **A sixth copy exists and was deliberately left alone.**
+  `internal/gen/persistgo/store.go:246-260` emits `(*Store).connFor` into every
+  generated project. Changing it drags goldens and `make update-examples` into a
+  branch that touches neither — which is the property that made all of section B
+  fit in one branch. Folded into A6.
+- **Coverage gap worth knowing:** there is no `internal/filestest`, though
+  `internal/dockerdb/ports.go:47-49` reserves a port and describes the suite. So
+  `files/store.go` has no Postgres coverage at all. Mitigated here by the fact
+  that files' two helpers were already `*string`, making this a pure rename — but
+  nothing else should go into that file until the suite exists.
+- **Size:** ~90 lines removed, plus the "which copy did I fix" question.
 
 ### B6. `migrate`: singular API as one-liners over the plural `[x]`
 

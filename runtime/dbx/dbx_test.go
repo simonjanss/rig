@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 
@@ -379,3 +380,88 @@ func TestWithoutTxOpensATransactionOfItsOwn(t *testing.T) {
 		t.Error("a context with no transaction should be returned as it is")
 	}
 }
+
+// Null and Deref are the two halves of a nullable column whose Go type is not a
+// pointer. The interesting case is the zero value, because that is the one a
+// hand-written branch gets wrong: writing `”` where the column means "nothing"
+// produces a row that compares unequal to NULL in every query looking for one.
+func TestNullIsNilAtTheZeroValue(t *testing.T) {
+	t.Parallel()
+
+	if got := dbx.Null(""); got != nil {
+		t.Errorf("Null(\"\") = %v, want nil", *got)
+	}
+	if got := dbx.Null("a"); got == nil || *got != "a" {
+		t.Errorf("Null(%q) = %v", "a", got)
+	}
+
+	if got := dbx.Null(uuid.Nil); got != nil {
+		t.Errorf("Null(uuid.Nil) = %v, want nil", *got)
+	}
+	id := uuid.New()
+	if got := dbx.Null(id); got == nil || *got != id {
+		t.Errorf("Null(%v) = %v", id, got)
+	}
+
+	// A non-string, non-uuid zero, because the constraint is comparable rather
+	// than a fixed list of types.
+	if got := dbx.Null(0); got != nil {
+		t.Errorf("Null(0) = %v, want nil", *got)
+	}
+}
+
+func TestDerefIsTheZeroValueForNil(t *testing.T) {
+	t.Parallel()
+
+	if got := dbx.Deref[string](nil); got != "" {
+		t.Errorf("Deref[string](nil) = %q", got)
+	}
+	s := "a"
+	if got := dbx.Deref(&s); got != "a" {
+		t.Errorf("Deref(&%q) = %q", s, got)
+	}
+	if got := dbx.Deref[uuid.UUID](nil); got != uuid.Nil {
+		t.Errorf("Deref[uuid.UUID](nil) = %v", got)
+	}
+}
+
+// Round-tripping is the property the call sites rely on: what Null wrote, Deref
+// reads back, including for the value that became NULL on the way out.
+func TestNullAndDerefRoundTrip(t *testing.T) {
+	t.Parallel()
+
+	for _, v := range []string{"", "a", "a longer one"} {
+		if got := dbx.Deref(dbx.Null(v)); got != v {
+			t.Errorf("Deref(Null(%q)) = %q", v, got)
+		}
+	}
+	for _, v := range []uuid.UUID{uuid.Nil, uuid.New()} {
+		if got := dbx.Deref(dbx.Null(v)); got != v {
+			t.Errorf("Deref(Null(%v)) = %v", v, got)
+		}
+	}
+}
+
+// ConnFor is the transaction on the context, or the fallback. With no
+// transaction it is the fallback, which is the ordinary case.
+func TestConnForFallsBackToThePool(t *testing.T) {
+	t.Parallel()
+
+	var pool dbx.Conn = fallbackConn{}
+	if got := dbx.ConnFor(context.Background(), pool); got != pool {
+		t.Errorf("ConnFor with no transaction on the context = %v, want the fallback", got)
+	}
+}
+
+// fallbackConn stands in for a pool. Nothing runs a statement on it.
+type fallbackConn struct{}
+
+func (fallbackConn) Query(context.Context, string, ...any) (pgx.Rows, error) {
+	return nil, errNotUsed
+}
+func (fallbackConn) QueryRow(context.Context, string, ...any) pgx.Row { return nil }
+func (fallbackConn) Exec(context.Context, string, ...any) (pgconn.CommandTag, error) {
+	return pgconn.CommandTag{}, errNotUsed
+}
+
+var errNotUsed = errors.New("dbx_test: the fallback was asked for something")

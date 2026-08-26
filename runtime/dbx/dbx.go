@@ -66,6 +66,35 @@ func UTCSlice(ts []time.Time) []time.Time {
 	return ts
 }
 
+// Null is a pointer to v, or nil when v is T's zero value.
+//
+// For a nullable column whose Go type is not a pointer: an empty string and an
+// absent value are the same thing to the caller and different things to Postgres.
+// Without this, every optional column is a three-line branch at the call site,
+// and the branch that gets it wrong writes `”` where the column means "nothing"
+// — which then compares unequal to NULL in every query looking for one.
+//
+// Constrained to comparable so that only a type with a meaningful zero reaches
+// it. A json.RawMessage, where an empty document and no document are genuinely
+// different things, is excluded on purpose.
+func Null[T comparable](v T) *T {
+	var zero T
+	if v == zero {
+		return nil
+	}
+	return &v
+}
+
+// Deref is what p points at, or T's zero value when p is nil. The other half of
+// [Null], for reading a nullable column back.
+func Deref[T any](p *T) T {
+	if p == nil {
+		var zero T
+		return zero
+	}
+	return *p
+}
+
 // Conn is what a repository needs from a database. A pool, a connection, and a
 // transaction all satisfy it.
 //
@@ -83,6 +112,28 @@ type Conn interface {
 // too, through savepoints.
 type Beginner interface {
 	Begin(ctx context.Context) (pgx.Tx, error)
+}
+
+// Pool is [Conn] and [Beginner] together: something a statement can run on, and
+// something a transaction can be opened from.
+//
+// The two interfaces rather than *pgxpool.Pool, so that a test can hand this a
+// transaction and so a module taking one never imports pgxpool. `notify.DB` and
+// `files.DB` are aliases for it; `presence.DB` is plain [Conn], because nothing
+// in presence opens a transaction.
+type Pool interface {
+	Conn
+	Beginner
+}
+
+// Scanner is what both a single row and a row of a result set satisfy, so one
+// scan function serves a lookup and a listing.
+//
+// The same shape as [github.com/jackc/pgx/v5.Row], and named here rather than
+// used from there so that a module scanning rows does not take pgx as a direct
+// dependency for the sake of one interface.
+type Scanner interface {
+	Scan(dest ...any) error
 }
 
 type txKey struct{}
@@ -240,6 +291,20 @@ func InTxIf(ctx context.Context, db Beginner, conn Conn, need bool, fn func(ctx 
 func Tx(ctx context.Context) (pgx.Tx, bool) {
 	tx, ok := ctx.Value(txKey{}).(pgx.Tx)
 	return tx, ok
+}
+
+// ConnFor is the transaction on the context, or the fallback.
+//
+// It is what a store runs every statement through, and that is what lets a write
+// join the caller's unit of work without the caller passing anything: a
+// notification written inside the transaction that caused it, a file finalized
+// alongside the row that owns it. With no transaction on the context it is the
+// pool, which is the ordinary case.
+func ConnFor(ctx context.Context, fallback Conn) Conn {
+	if tx, ok := Tx(ctx); ok {
+		return tx
+	}
+	return fallback
 }
 
 // WithoutTx hides the transaction on a context, so that [InTx] opens one of its

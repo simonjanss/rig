@@ -179,10 +179,6 @@ func (unreachableDB) Exec(context.Context, string, ...any) (pgconn.CommandTag, e
 	return pgconn.CommandTag{}, errUnreachable
 }
 
-// Begin is here only because presence.DB is still Conn+Beginner. Nothing in
-// presence calls it — see SIMPLIFICATIONS B5, which narrows the interface.
-func (unreachableDB) Begin(context.Context) (pgx.Tx, error) { return nil, errUnreachable }
-
 type unreachableRow struct{}
 
 func (unreachableRow) Scan(...any) error { return errUnreachable }

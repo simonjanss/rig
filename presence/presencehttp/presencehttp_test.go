@@ -339,7 +339,6 @@ func (stubDB) QueryRow(context.Context, string, ...any) pgx.Row        { return 
 func (stubDB) Exec(context.Context, string, ...any) (pgconn.CommandTag, error) {
 	return pgconn.CommandTag{}, errStub
 }
-func (stubDB) Begin(context.Context) (pgx.Tx, error) { return nil, errStub }
 
 type stubRow struct{}
 

@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/simonjanss/rig/runtime/dbx"
 	"github.com/simonjanss/rig/runtime/rigerr"
 	"github.com/simonjanss/rig/runtime/tenancy"
 )
@@ -75,7 +76,7 @@ func (s *Service) Inbox(ctx context.Context, q InboxQuery) ([]*Recipient, error)
 		LIMIT $6`
 
 	rows, err := s.store.conn(ctx).Query(ctx, sql,
-		claims.TenantID, claims.AccountID, q.UnreadOnly, nullable(q.Kind), q.Before, q.limit())
+		claims.TenantID, claims.AccountID, q.UnreadOnly, dbx.Null(q.Kind), q.Before, q.limit())
 	if err != nil {
 		return nil, fmt.Errorf("notify: read inbox: %w", err)
 	}
@@ -148,7 +149,7 @@ func (s *Service) MarkAllRead(ctx context.Context, q InboxQuery) (int, error) {
 		  AND ($3::text IS NULL OR kind = $3)`
 
 	tag, err := s.store.conn(ctx).Exec(ctx, sql,
-		claims.TenantID, claims.AccountID, nullable(q.Kind), s.cfg.now())
+		claims.TenantID, claims.AccountID, dbx.Null(q.Kind), s.cfg.now())
 	if err != nil {
 		return 0, fmt.Errorf("notify: mark all read: %w", err)
 	}
@@ -200,14 +201,7 @@ func (s *Service) reader(ctx context.Context) (tenancy.Claims, error) {
 	return claims, nil
 }
 
-func nullable(s string) any {
-	if s == "" {
-		return nil
-	}
-	return s
-}
-
-func scanRecipient(row interface{ Scan(...any) error }) (*Recipient, error) {
+func scanRecipient(row dbx.Scanner) (*Recipient, error) {
 	var r Recipient
 	err := row.Scan(&r.ID, &r.TenantID, &r.NotificationID, &r.AccountID, &r.Kind,
 		&r.GroupKey, &r.EventCount, &r.ReadAt, &r.CreatedAt, &r.DeletedAt)

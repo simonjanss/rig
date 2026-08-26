@@ -11,7 +11,6 @@
 package authpg
 
 import (
-	"context"
 	"net/netip"
 
 	"github.com/simonjanss/rig/runtime/dbx"
@@ -45,18 +44,6 @@ func New(db dbx.Beginner) *Stores {
 		Log:      &Log{db: conn},
 		Outbox:   &OutboxStore{db: conn},
 	}
-}
-
-// conn returns the transaction on the context when there is one.
-//
-// Every read and write in this package goes through it, which is what lets a
-// password reset write a credential and consume a link in one transaction
-// without either method knowing it is in one.
-func conn(ctx context.Context, fallback dbx.Conn) dbx.Conn {
-	if tx, ok := dbx.Tx(ctx); ok {
-		return tx
-	}
-	return fallback
 }
 
 // addr converts a stored address for a caller that wants a string.
