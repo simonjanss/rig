@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -553,5 +554,83 @@ func TestWithNothingToFallBackToTheSyncServicesOwnFailureIsForwarded(t *testing.
 
 	if got := serve(t, p, electric.Shape{Table: "lesson"}, "").StatusCode; got != http.StatusServiceUnavailable {
 		t.Errorf("status = %d, want the 503 forwarded", got)
+	}
+}
+
+// statusWriter records whether anything was ever written to the response.
+type statusWriter struct {
+	http.ResponseWriter
+	code int
+}
+
+func (w *statusWriter) WriteHeader(code int) {
+	w.code = code
+	w.ResponseWriter.WriteHeader(code)
+}
+
+// A subscriber who closed the tab while the fallback was being read is not a
+// refusal: nothing was decided about the shape, somebody just left. So it gets
+// no status and no line in OnError — which during an outage would otherwise fill
+// with one line per closed tab, burying the error that caused the outage.
+func TestAClientThatHangsUpDuringTheFallbackIsNotRefused(t *testing.T) {
+	t.Parallel()
+
+	var mu sync.Mutex
+	var seen []string
+	p, _ := electric.New(electric.Config{
+		URL: nowhere,
+		OnError: func(_ context.Context, err error) {
+			mu.Lock()
+			defer mu.Unlock()
+			seen = append(seen, err.Error())
+		},
+	})
+
+	reading := make(chan struct{})
+	shape := electric.Shape{
+		Table: "lesson",
+		Fallback: func(ctx context.Context) (electric.Snapshot, error) {
+			close(reading)
+			<-ctx.Done()
+			return electric.Snapshot{}, ctx.Err()
+		},
+	}
+
+	served := make(chan *statusWriter, 1)
+	mux := http.NewServeMux()
+	mux.HandleFunc("/shape", func(w http.ResponseWriter, r *http.Request) {
+		sw := &statusWriter{ResponseWriter: w}
+		p.Serve(sw, r, shape)
+		served <- sw
+	})
+	front := httptest.NewServer(mux)
+	t.Cleanup(front.Close)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, front.URL+"/shape", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	go func() {
+		<-reading
+		cancel()
+	}()
+	if res, err := http.DefaultClient.Do(req); err == nil {
+		res.Body.Close()
+		t.Fatal("the request completed; the client was supposed to have hung up")
+	}
+
+	sw := <-served
+	if sw.code != 0 {
+		t.Errorf("status = %d, want none written for a subscriber who left", sw.code)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(seen) != 1 {
+		t.Fatalf("got %d errors, want only the outage: %v", len(seen), seen)
+	}
+	if !strings.Contains(seen[0], "connection refused") {
+		t.Errorf("the one error is %q, want the outage that sent this to the fallback", seen[0])
 	}
 }

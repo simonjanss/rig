@@ -825,3 +825,36 @@ func (declining) Apply(_ context.Context, r *http.Request) error {
 }
 
 func (declining) Reauthorize(context.Context) (bool, error) { return false, nil }
+
+// A 401 for a credential that is not a Reauthorizer never enters the
+// reauthorization arm at all: it falls through with its body untouched and is
+// read as an ordinary refusal below. The distinction matters because the arm it
+// falls past is the one that reads the body — so anything that answered on its
+// behalf would hand back a 401 with nothing on it, and IsUnauthorized would say
+// no about a 401.
+func TestA401ForACredentialThatCannotRefreshIsStillReadInFull(t *testing.T) {
+	var seen atomic.Int32
+	rt := newClient(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		seen.Add(1)
+		w.WriteHeader(http.StatusUnauthorized)
+		w.Write([]byte(`{"code":"Unauthorized","message":"expired","requestId":"req-9"}`))
+	}), rigclient.Config{Retry: quick, Credential: rigclient.StaticToken("rig_at_stale")})
+
+	_, err := rigclient.Do[todo](t.Context(), rt, rigclient.Op{
+		Method: http.MethodGet, Path: "/todos",
+	})
+
+	if !rigclient.IsUnauthorized(err) {
+		t.Fatalf("err = %v, want a refusal that answers IsUnauthorized", err)
+	}
+	var e *rigclient.Error
+	if !errors.As(err, &e) {
+		t.Fatalf("err = %v, want a typed refusal", err)
+	}
+	if e.RequestID != "req-9" {
+		t.Errorf("requestId = %q, want the envelope to have been read", e.RequestID)
+	}
+	if n := seen.Load(); n != 1 {
+		t.Errorf("the server saw %d requests, want 1: a 401 nobody can answer is not retried", n)
+	}
+}

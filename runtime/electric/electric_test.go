@@ -350,3 +350,47 @@ func TestAURLIsRequired(t *testing.T) {
 		t.Error("a proxy with nowhere to forward to should refuse to exist")
 	}
 }
+
+// Per-connection headers are the sync service's business with this proxy, not
+// this proxy's business with the subscriber, so they stop here. The cursor
+// headers do not: dropping electric-handle or electric-offset would end the
+// subscription after one response.
+//
+// TE is the case worth having. Go canonicalizes it to "Te" in the header map, so
+// a set keyed by the spelling in the RFC would let it through and nothing else
+// would notice.
+func TestHopHeadersAreNotForwardedAndTheCursorIs(t *testing.T) {
+	t.Parallel()
+
+	hop := []string{
+		"Connection", "Proxy-Connection", "Keep-Alive", "TE",
+		"Upgrade", "Proxy-Authenticate", "Proxy-Authorization",
+	}
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		for _, h := range hop {
+			w.Header().Set(h, "per-connection")
+		}
+		w.Header().Set("electric-handle", "the-handle")
+		w.Header().Set("electric-offset", "0_0")
+		w.Write([]byte(`[]`))
+	}))
+	t.Cleanup(up.Close)
+
+	p, err := electric.New(electric.Config{URL: up.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	res := serve(t, p, electric.Shape{Table: "lesson"}, "")
+
+	for _, h := range hop {
+		if got := res.Header.Get(h); got != "" {
+			t.Errorf("%s = %q, want it dropped: it is per-connection", h, got)
+		}
+	}
+	if got := res.Header.Get("electric-handle"); got != "the-handle" {
+		t.Errorf("electric-handle = %q, want it forwarded", got)
+	}
+	if got := res.Header.Get("electric-offset"); got != "0_0" {
+		t.Errorf("electric-offset = %q, want it forwarded", got)
+	}
+}

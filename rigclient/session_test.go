@@ -274,3 +274,204 @@ func TestTheTenantIsNamedOnASignIn(t *testing.T) {
 		t.Errorf("X-Tenant-Id = %q, want %q", got, tenant)
 	}
 }
+
+// Signing in again is somebody else arriving at the same client, so it installs
+// a fresh session rather than handing new tokens to the old one. An answer that
+// carries an access token alone must not inherit the refresh token the person
+// before it left behind — a client that then refreshed would come back as them.
+//
+// This is the whole of the difference between installing and adopting, and the
+// reason the two are separate.
+func TestASecondSignInDoesNotInheritTheFirstsRefreshToken(t *testing.T) {
+	var signins int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		signins++
+		pair := authwire.TokenPair{AccessToken: "rig_at_1", RefreshToken: "rig_rt_1"}
+		if signins > 1 {
+			// The second person's session, issued without a refresh token.
+			pair = authwire.TokenPair{AccessToken: "rig_at_2"}
+		}
+		json.NewEncoder(w).Encode(authwire.SignInResponse{TokenPair: pair})
+	}))
+	t.Cleanup(srv.Close)
+
+	rt, err := rigclient.New(rigclient.Config{BaseURL: srv.URL},
+		rigclient.API{BasePath: "/api/v1", Auth: &profile})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	auth := rt.Auth()
+	for range 2 {
+		if _, err := auth.SignIn(t.Context(), authwire.LoginRequest{}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	s, ok := rt.Session()
+	if !ok {
+		t.Fatal("no session was installed")
+	}
+	if got := s.Tokens().AccessToken; got != "rig_at_2" {
+		t.Errorf("AccessToken = %q, want the second sign-in's", got)
+	}
+	if got := s.Tokens().RefreshToken; got != "" {
+		t.Errorf("RefreshToken = %q, want none: the second sign-in inherited the first's", got)
+	}
+}
+
+// The converse, and why adopting is not installing either. A tenant switch is
+// the same person, re-tokened, and the endpoint answers with an access token
+// alone — so dropping the refresh token in hand would end the session at the
+// next expiry.
+func TestATenantSwitchKeepsTheRefreshTokenItWasNotGivenAgain(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /auth/login", func(w http.ResponseWriter, _ *http.Request) {
+		json.NewEncoder(w).Encode(authwire.SignInResponse{TokenPair: authwire.TokenPair{
+			AccessToken: "rig_at_1", RefreshToken: "rig_rt_1",
+		}})
+	})
+	mux.HandleFunc("POST /auth/tenants/{id}/switch", func(w http.ResponseWriter, _ *http.Request) {
+		json.NewEncoder(w).Encode(authwire.TokenPair{AccessToken: "rig_at_2"})
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	rt, err := rigclient.New(rigclient.Config{BaseURL: srv.URL},
+		rigclient.API{BasePath: "/api/v1", Auth: &profile})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	auth := rt.Auth()
+	if _, err := auth.SignIn(t.Context(), authwire.LoginRequest{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := auth.SwitchTenant(t.Context(), uuid.New()); err != nil {
+		t.Fatal(err)
+	}
+
+	s, ok := rt.Session()
+	if !ok {
+		t.Fatal("no session was installed")
+	}
+	if got := s.Tokens().AccessToken; got != "rig_at_2" {
+		t.Errorf("AccessToken = %q, want the switch's", got)
+	}
+	if got := s.Tokens().RefreshToken; got != "rig_rt_1" {
+		t.Errorf("RefreshToken = %q, want the one already in hand", got)
+	}
+}
+
+// The three key routes are refused on a project that mounts none, and each names
+// its own route. One sentence explains where keys come from; the route is what
+// tells the caller which of their calls this was.
+func TestTheAPIKeyRoutesAreRefusedLocally(t *testing.T) {
+	narrow := profile
+	narrow.HasAPIKeys = false
+
+	rt, err := rigclient.New(rigclient.Config{BaseURL: "http://example.invalid"},
+		rigclient.API{BasePath: "/api/v1", Auth: &narrow})
+	if err != nil {
+		t.Fatal(err)
+	}
+	auth := rt.Auth()
+
+	for _, tc := range []struct {
+		name  string
+		call  func() error
+		route string
+	}{
+		{"APIKeys", func() error { _, err := auth.APIKeys(t.Context()); return err },
+			"GET /auth/api-keys"},
+		{"CreateAPIKey", func() error {
+			_, err := auth.CreateAPIKey(t.Context(), authwire.CreateKeyRequest{Name: "ci"})
+			return err
+		}, "POST /auth/api-keys"},
+		{"RevokeAPIKey", func() error { return auth.RevokeAPIKey(t.Context(), uuid.New()) },
+			"DELETE /auth/api-keys/{id}"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := tc.call()
+			if err == nil {
+				t.Fatal("the call was allowed on a project that mounts no keys")
+			}
+			if got := err.Error(); !strings.Contains(got, tc.route) {
+				t.Errorf("err = %q, want it to name %q", got, tc.route)
+			}
+			if got := err.Error(); !strings.Contains(got, "apikey manager") {
+				t.Errorf("err = %q, want it to say where keys come from", got)
+			}
+		})
+	}
+}
+
+// The picker routes are refused on a project with no identity sessions, which is
+// most of them: a project where everybody belongs to one tenant has no picker.
+func TestThePickerRoutesAreRefusedLocally(t *testing.T) {
+	narrow := profile
+	narrow.HasIdentitySessions = false
+
+	rt, err := rigclient.New(rigclient.Config{BaseURL: "http://example.invalid"},
+		rigclient.API{BasePath: "/api/v1", Auth: &narrow})
+	if err != nil {
+		t.Fatal(err)
+	}
+	auth := rt.Auth()
+
+	for _, tc := range []struct {
+		name string
+		call func() error
+	}{
+		{"MyTenants", func() error { _, err := auth.MyTenants(t.Context(), "rig_it_1"); return err }},
+		{"MyInvitations", func() error { _, err := auth.MyInvitations(t.Context(), "rig_it_1"); return err }},
+		{"AcceptMyInvitation", func() error {
+			_, err := auth.AcceptMyInvitation(t.Context(), "rig_it_1", uuid.New(), "web")
+			return err
+		}},
+		{"EndIdentitySession", func() error { return auth.EndIdentitySession(t.Context(), "rig_it_1") }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := tc.call()
+			if err == nil {
+				t.Fatal("the call was allowed on a project with no identity sessions")
+			}
+			if got := err.Error(); !strings.Contains(got, "identity sessions") {
+				t.Errorf("err = %q, want it to say what mounts these routes", got)
+			}
+		})
+	}
+}
+
+// The identity token is prepended, not appended, so a caller who set the header
+// themselves means it. Reverse the order and the library would overwrite what it
+// was handed.
+func TestACallersOwnHeaderBeatsTheIdentityToken(t *testing.T) {
+	var presented string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		presented = r.Header.Get("Authorization")
+		json.NewEncoder(w).Encode(authwire.List[authwire.TenantView]{})
+	}))
+	t.Cleanup(srv.Close)
+
+	rt, err := rigclient.New(rigclient.Config{BaseURL: srv.URL},
+		rigclient.API{BasePath: "/api/v1", Auth: &profile})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := rt.Auth().MyTenants(t.Context(), "rig_it_1"); err != nil {
+		t.Fatal(err)
+	}
+	if presented != "Bearer rig_it_1" {
+		t.Fatalf("Authorization = %q, want the identity token", presented)
+	}
+
+	if _, err := rt.Auth().MyTenants(t.Context(), "rig_it_1",
+		rigclient.WithHeader("Authorization", "Bearer mine")); err != nil {
+		t.Fatal(err)
+	}
+	if presented != "Bearer mine" {
+		t.Errorf("Authorization = %q, want the caller's own header to win", presented)
+	}
+}

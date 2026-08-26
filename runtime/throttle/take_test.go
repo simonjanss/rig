@@ -234,8 +234,12 @@ func TestAllowWithoutACounterIsAnError(t *testing.T) {
 	t.Parallel()
 
 	limiter := throttle.NewRecording(newTally())
-	if _, err := limiter.Allow(context.Background(), throttle.Check{Limit: perAccount, Key: throttle.Account("a")}); err == nil {
+	d, err := limiter.Allow(context.Background(), throttle.Check{Limit: perAccount, Key: throttle.Account("a")})
+	if err == nil {
 		t.Fatal("a limiter with no counter answered Allow")
+	}
+	if d.Allowed {
+		t.Fatal("the failed decision was allowed, which is the permissive default this must not have")
 	}
 }
 
@@ -249,5 +253,36 @@ func TestTakePropagatesTheRecorderError(t *testing.T) {
 	limiter := throttle.NewRecording(rec)
 	if _, err := limiter.Take(context.Background(), throttle.Check{Limit: perAccount, Key: throttle.Account("a")}); !errors.Is(err, boom) {
 		t.Fatalf("the recorder's error did not reach the caller: %v", err)
+	}
+}
+
+// One clock reading for the whole call, however many checks it carries. Two
+// limits read a microsecond apart would measure their windows from different
+// instants, and the tightest of them would hand out a Retry-After derived from a
+// now that the decision beside it never saw.
+func TestOneClockReadingPerCall(t *testing.T) {
+	t.Parallel()
+
+	c := newClock()
+	var readings int
+	limiter := throttle.NewRecording(newTally()).WithClock(func() time.Time {
+		readings++
+		return c.now()
+	})
+
+	checks := []throttle.Check{
+		{Limit: perAccount, Key: throttle.Account("acct-1")},
+		{Limit: throttle.Limit{Name: "api.tenant", Max: 100, Window: time.Minute},
+			Key: throttle.Account("acct-1")},
+		{Limit: throttle.Limit{Name: "api.ip", Max: 50, Window: time.Hour},
+			Key: throttle.Account("acct-1")},
+	}
+	if _, err := limiter.Take(context.Background(), checks...); err != nil {
+		t.Fatal(err)
+	}
+
+	if readings != 1 {
+		t.Errorf("the clock was read %d times for %d checks, want once for the call",
+			readings, len(checks))
 	}
 }
