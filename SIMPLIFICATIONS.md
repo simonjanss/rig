@@ -209,19 +209,57 @@ generated server emitted a **flat** `{code,message}`. All three now write
   it flips from `Unauthorized` to `RateLimited` and the test fails, having proved
   nothing about the property it names. Randomize the address or reset the counter.
 
-### B3. `cache.Keyed[V]`: four near-identical cache wrappers in `auth` `[ ]`
+### B3. `cache.Keyed[V]`: four near-identical cache wrappers in `auth` `[x]`
 
-`session.TokenCache` (`auth/session/cache.go:34-160`), `apikey.KeyCache` and
-`apikey.FailureCache` (`auth/apikey/cache.go`), and `GrantsCache`
-(`auth/grantscache.go:66-256`) all wrap `cache.Map` + `cache.Topic` the same
-way: nil-for-nil-bus constructor, miss sentinel to avoid caching negatives,
-clone-on-way-out, `forget` via `topic.Forget`, nil-safe `drop`.
+`session.TokenCache`, `apikey.KeyCache`, `apikey.FailureCache` and
+`auth.GrantsCache` all wrapped `cache.Map` + `cache.Topic` the same way. They are
+now four thin wrappers over `cache.Keyed[V]` (`runtime/cache/keyed.go`).
 
-- **Fix:** `cache.Keyed[V]` in `runtime/cache` with
-  `{Bus, Topic, TTL, MaxEntries, Now, Clone}` and
-  `Load/Forget/Clear/Drop` + nil-receiver safety; the four become thin aliases.
-- **Files:** the four cache files + `runtime/cache/`.
-- **Size:** ~350 lines. **Risk:** low-medium (concurrent, but well-tested shape).
+- **Four decisions, spelled once instead of four times.** Nil-receiver safety
+  (`Load` calls through, everything else is a no-op, so no call site withdrawing a
+  value needs a condition); never hold a failure (the seam a miss borrows — the
+  sentinel stays caller-side, because only the caller knows what to translate it
+  back into); clone on the way out (deliberately contradicting `Map.Load`'s own
+  recommendation, for the reason `session` already wrote down); and hold nothing
+  when the cache cannot withdraw. That last one is where four copies would have
+  drifted, and it is the one whose failure mode is silent.
+- **`Keyed` took `GrantsCache`'s deferred `Serve`, not the other three's
+  nil-for-nil-bus.** The three-state "not attached yet / attached to a dropped
+  channel / live" was never a grants quirk — it is the general answer, and
+  nil-for-nil-bus is the special case. `NewKeyed` serves immediately when given a
+  bus and stays unattached otherwise. `GrantsCache` lost `servedOn`, `live()` and
+  its `atomic.Pointer` entirely.
+- **`ServeLocally` earns its place.** `auth/grantscache_internal_test.go` used to
+  reach into the unexported `served` field to get a cache attached to no channel —
+  testing an invariant by writing the field the invariant is about. The state is
+  real (one process, no replicas, staleness is your problem) so it now has a name,
+  and all three internal test helpers use it.
+- **The line count went the other way, and the entry's "~350 lines" was wrong in
+  both magnitude and sign.** `auth` lost 62 lines; `runtime/cache/keyed.go` is 241,
+  most of it the prose that explains the four decisions. Call it **+179 lines of
+  production code**, plus 289 lines of tests where the shared shape had none. The
+  four wrappers were 704 lines and the majority was always prose about the
+  specific value being cached — why a `Token` is cloned and a `struct{}` is not,
+  why only a zero failure count is held — and none of that dedups. What was
+  actually bought is that the concurrency decisions are in one place with tests
+  against them, and that `golangci-lint` then found four methods
+  (`TokenCache.forget`, `TokenCache.drop`, `KeyCache.forget`,
+  `FailureCache.forget`) that `ForgetOrDrop` had made dead.
+- **Three sites moved here from B5**, where the backlog filed them as `conn(ctx)`
+  helpers: `auth/apikey/apikey.go:582,703` and `auth/session/session.go:626`. They
+  never produce a connection to query on — they choose between publishing an
+  invalidation on the ambient transaction and dropping it from a local map, which
+  is inseparable from the cache it is about. `dbx.ConnFor` could not absorb them;
+  `Keyed.ForgetOrDrop` did. The `apikey.go:703` site keeps its
+  `store.InTx(dbx.WithoutTx(ctx), …)` wrapper, which is the whole point of the
+  comment above it: a *fresh* transaction, not the caller's.
+- **No breaking change.** `TokenCache`, `KeyCache` and `FailureCache` have only
+  unexported methods, so the type and its constructor were the whole surface.
+  `GrantsCache` keeps all five exported methods and gains `ServeLocally`.
+- **Acceptance criterion met:** all eight of `internal/authtest/cache_docker_test.go`
+  pass unchanged, which is the only thing that proves a revocation still issues its
+  `NOTIFY` on the transaction that revoked and still reaches a second replica. No
+  in-memory test can ask that.
 
 ### B4. The in-memory auth stores stay `[-]`
 

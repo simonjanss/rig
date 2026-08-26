@@ -19,9 +19,11 @@ import (
 func testGrants(t *testing.T, g authhttp.Grants) (authhttp.Grants, *GrantsCache) {
 	t.Helper()
 	c := NewGrantsCache(GrantsCacheConfig{TTL: time.Hour})
-	// Served on no bus, which is live with nothing to publish on: a nil
-	// *cache.Topic is a working no-op, so every path but the publish runs.
-	c.served.Store(&servedOn{})
+	// Served locally: attached to no channel, so it holds and forgets in this
+	// process alone and every path but the publish runs. This used to reach into
+	// an unexported field to reach the same state, which is a poor way to test the
+	// invariant being refactored — [cache.Keyed.ServeLocally] names the posture.
+	c.ServeLocally()
 	return c.Wrap(g), c
 }
 

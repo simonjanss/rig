@@ -3,7 +3,6 @@ package auth
 import (
 	"context"
 	"slices"
-	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -64,14 +63,16 @@ const GrantsTopic = "grants"
 // leaving the `cache:` block out of rig.yaml entirely, costs latency rather than
 // correctness.
 func NewGrantsCache(cfg GrantsCacheConfig) *GrantsCache {
-	c := &GrantsCache{}
-	c.m = cache.NewMap[grants](cache.MapConfig{
+	// No Bus: this one is served later, by [GrantsCache.Serve], because the bus is
+	// built after the grants function that wraps it. [cache.Keyed] holds nothing
+	// until then, which is the fail-safe half of what this doc comment promises.
+	return &GrantsCache{k: cache.NewKeyed(cache.KeyedConfig[grants]{
+		Topic:      GrantsTopic,
 		TTL:        cfg.ttl(),
 		MaxEntries: cfg.MaxEntries,
-		Live:       c.live,
 		Now:        cfg.Now,
-	})
-	return c
+		Clone:      grants.clone,
+	})}
 }
 
 // Serve attaches the cache to the invalidation channel, which is [Parts.Cache].
@@ -83,10 +84,24 @@ func NewGrantsCache(cfg GrantsCacheConfig) *GrantsCache {
 // It panics if the bus already serves [GrantsTopic], which is the wiring mistake
 // of attaching two caches to one bus.
 func (c *GrantsCache) Serve(bus *cache.Bus) {
-	if c == nil || bus == nil {
+	if c == nil {
 		return
 	}
-	c.served.Store(&servedOn{bus: bus, topic: bus.Serve(GrantsTopic, c.m)})
+	c.k.Serve(bus)
+}
+
+// ServeLocally attaches the cache to nothing, so it holds answers and forgets
+// them in this process alone.
+//
+// One process, no replicas, and staleness is the caller's problem — which is a
+// real posture for a single-instance deployment, and the state a test wants
+// without a database behind it. [GrantsCache.Serve] is what a deployment with
+// replicas uses.
+func (c *GrantsCache) ServeLocally() {
+	if c == nil {
+		return
+	}
+	c.k.ServeLocally()
 }
 
 // Wrap returns the function to hand to [Config.Grants].
@@ -98,7 +113,7 @@ func (c *GrantsCache) Wrap(g authhttp.Grants) authhttp.Grants {
 		return g
 	}
 	return func(ctx context.Context, tenantID, accountID uuid.UUID) ([]string, []string, error) {
-		held, err := c.m.Load(grantsKey(tenantID, accountID), func() (grants, error) {
+		held, err := c.k.Load(grantsKey(tenantID, accountID), func() (grants, error) {
 			roles, permissions, err := g(ctx, tenantID, accountID)
 			if err != nil {
 				// Never held: see [NewGrantsCache]. The map does not keep what a
@@ -110,27 +125,9 @@ func (c *GrantsCache) Wrap(g authhttp.Grants) authhttp.Grants {
 		if err != nil {
 			return nil, nil, err
 		}
-		return slices.Clone(held.roles), slices.Clone(held.permissions), nil
+		// Already copied on the way out of Load — see [cache.KeyedConfig.Clone].
+		return held.roles, held.permissions, nil
 	}
-}
-
-// live reports whether an entry could be withdrawn if one were held.
-//
-// Three states rather than two, because "not attached yet" and "attached to a
-// channel that has dropped" are the same answer for different reasons and both
-// have to give it.
-func (c *GrantsCache) live() bool {
-	s := c.served.Load()
-	switch {
-	case s == nil:
-		// Never served. There is no channel, so nothing could withdraw an entry
-		// and nothing may be kept.
-		return false
-	case s.bus == nil:
-		// Served on no bus at all, which only a test does.
-		return true
-	}
-	return s.bus.Live()
 }
 
 // GrantsCacheConfig tunes a [GrantsCache].
@@ -168,19 +165,7 @@ func (c GrantsCacheConfig) ttl() time.Duration {
 // served. Both mean a project that decided against this, or has no `cache:`
 // block, and neither needs a condition at the call sites that withdraw grants —
 // the writes look the same either way.
-type GrantsCache struct {
-	m      *cache.Map[grants]
-	served atomic.Pointer[servedOn]
-}
-
-// servedOn is the bus this cache was attached to and the publisher it got back.
-//
-// One pointer swapped at once rather than two fields, so that [GrantsCache.live]
-// and [GrantsCache.Invalidate] can never see a cache half-attached.
-type servedOn struct {
-	bus   *cache.Bus
-	topic *cache.Topic
-}
+type GrantsCache struct{ k *cache.Keyed[grants] }
 
 // grants is one account's answer, as it is held.
 //
@@ -190,6 +175,12 @@ type servedOn struct {
 type grants struct {
 	roles       []string
 	permissions []string
+}
+
+// clone copies the pair on the way out, so one caller appending to what it was
+// handed cannot widen what every other request in the window may do.
+func (g grants) clone() grants {
+	return grants{roles: slices.Clone(g.roles), permissions: slices.Clone(g.permissions)}
 }
 
 // grantsKey is what one answer is held under.
@@ -217,12 +208,7 @@ func (c *GrantsCache) Invalidate(
 	if c == nil {
 		return nil
 	}
-	s := c.served.Load()
-	if s == nil {
-		// Never served, so nothing anywhere is holding an answer to withdraw.
-		return nil
-	}
-	return s.topic.Forget(ctx, db, grantsKey(tenantID, accountID))
+	return c.k.Forget(ctx, db, grantsKey(tenantID, accountID))
 }
 
 // InvalidateAll withdraws every held answer, everywhere.
@@ -236,11 +222,7 @@ func (c *GrantsCache) InvalidateAll(ctx context.Context, db dbx.Conn) error {
 	if c == nil {
 		return nil
 	}
-	s := c.served.Load()
-	if s == nil {
-		return nil
-	}
-	return s.topic.Clear(ctx, db)
+	return c.k.Clear(ctx, db)
 }
 
 // Forget withdraws one answer in this process only.
@@ -252,5 +234,5 @@ func (c *GrantsCache) Forget(tenantID, accountID uuid.UUID) {
 	if c == nil {
 		return
 	}
-	c.m.Forget(grantsKey(tenantID, accountID))
+	c.k.Drop(grantsKey(tenantID, accountID))
 }

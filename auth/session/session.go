@@ -21,7 +21,6 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/simonjanss/rig/auth/authlog"
-	"github.com/simonjanss/rig/runtime/dbx"
 	"github.com/simonjanss/rig/runtime/rigerr"
 	"github.com/simonjanss/rig/runtime/throttle"
 )
@@ -624,14 +623,10 @@ func (m *Manager) RevokeAll(ctx context.Context, tenantID, accountID uuid.UUID) 
 // replica to reach. Forgetting in this process is the whole of what is
 // available and the whole of what is needed.
 func (m *Manager) forget(ctx context.Context, ids []uuid.UUID) error {
-	if m.cache == nil || len(ids) == 0 {
+	if len(ids) == 0 {
 		return nil
 	}
-	if tx, ok := dbx.Tx(ctx); ok {
-		return m.cache.forget(ctx, tx, ids...)
-	}
-	m.cache.drop(ids...)
-	return nil
+	return m.cache.forgetOrDrop(ctx, ids...)
 }
 
 // List returns an account's live sessions, newest first.

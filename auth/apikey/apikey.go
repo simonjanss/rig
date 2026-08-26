@@ -580,11 +580,7 @@ func (m *Manager) write(ctx context.Context, keyID string, fn func(ctx context.C
 // [MemoryStore] in a test — so there is no channel to publish on and no other
 // replica to reach.
 func (m *Manager) forget(ctx context.Context, keyID string) error {
-	if tx, ok := dbx.Tx(ctx); ok {
-		return m.cache.forget(ctx, tx, keyID)
-	}
-	m.cache.drop(keyID)
-	return nil
+	return m.cache.forgetOrDrop(ctx, keyID)
 }
 
 // List returns a tenant's keys. The secrets are not in them; there is nothing
@@ -705,13 +701,7 @@ func (m *Manager) forgetFailures(ctx context.Context, keyID string) {
 		return
 	}
 	_ = m.store.InTx(dbx.WithoutTx(ctx), func(ctx context.Context) error {
-		if tx, ok := dbx.Tx(ctx); ok {
-			return m.failures.forget(ctx, tx, keyID)
-		}
-		// A store that is not Postgres, which is a [MemoryStore] in a test.
-		// There are no other replicas of one to tell.
-		m.failures.drop(keyID)
-		return nil
+		return m.failures.forgetOrDrop(ctx, keyID)
 	})
 }
 
