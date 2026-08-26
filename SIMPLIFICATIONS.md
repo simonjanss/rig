@@ -278,6 +278,17 @@ now four thin wrappers over `cache.Keyed[V]` (`runtime/cache/keyed.go`).
   testing an invariant by writing the field the invariant is about. The state is
   real (one process, no replicas, staleness is your problem) so it now has a name,
   and all three internal test helpers use it.
+- **Naming that state found a bug in it.** A locally-served cache is *live*, so it
+  holds — but its `Topic` is nil, and `Topic.Forget` on a nil receiver is a working
+  no-op. So `Forget`, `Clear` and `ForgetOrDrop`-with-a-transaction published
+  nowhere *and* dropped nothing: the one arrangement where a withdrawal silently
+  does not happen. Harmless while the state was test-only, not harmless once
+  `GrantsCache.ServeLocally` is exported and documented as a single-instance
+  posture, where it would have left a revoked role in the map for a full TTL. Both
+  now fall back to the local map when there is no bus, and
+  `TestForgetOnALocalCacheDropsLocally` asserts the drop rather than only the
+  absence of a panic — which is what the first version of that test did, and why it
+  passed.
 - **The line count went the other way, and the entry's "~350 lines" was wrong in
   both magnitude and sign.** `auth` lost 62 lines; `runtime/cache/keyed.go` is 241,
   most of it the prose that explains the four decisions. Call it **+179 lines of

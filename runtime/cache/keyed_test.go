@@ -226,12 +226,56 @@ func TestForgetOrDropWithNoTransactionDropsLocally(t *testing.T) {
 	}
 }
 
-// A cache served on no channel has nothing to publish on, so Forget and Clear are
-// no-ops rather than a nil dereference.
-func TestForgetOnALocalCacheIsANoOp(t *testing.T) {
+// A cache served on no channel has nothing to publish on, so Forget and Clear
+// drop what they hold directly rather than doing nothing.
+//
+// Publishing nowhere *and* keeping the value is the one arrangement where a
+// withdrawal silently does not happen — and it is the arrangement a
+// single-instance deployment is in, which is what [cache.Keyed.ServeLocally]
+// names. A cache that holds has to be a cache that can forget.
+func TestForgetOnALocalCacheDropsLocally(t *testing.T) {
 	t.Parallel()
 
 	k := served(cache.KeyedConfig[string]{Topic: "t", TTL: time.Hour})
+	calls := 0
+	load := func(key string) {
+		_, _ = k.Load(key, func() (string, error) { calls++; return "v", nil })
+	}
+
+	load("a")
+	load("a")
+	if calls != 1 {
+		t.Fatalf("calls = %d, want 1", calls)
+	}
+
+	// The db is nil on purpose: there is no channel here, so nothing may reach
+	// for one.
+	if err := k.Forget(context.Background(), nil, "a"); err != nil {
+		t.Fatalf("Forget: %v", err)
+	}
+	load("a")
+	if calls != 2 {
+		t.Errorf("after Forget the next load asked the store %d times, want 2", calls)
+	}
+
+	load("b")
+	if n := k.Len(); n != 2 {
+		t.Fatalf("holds %d, want 2", n)
+	}
+	if err := k.Clear(context.Background(), nil); err != nil {
+		t.Fatalf("Clear: %v", err)
+	}
+	if n := k.Len(); n != 0 {
+		t.Errorf("holds %d after Clear, want 0", n)
+	}
+}
+
+// And a cache that was never served has nothing to drop either way, so both are
+// no-ops rather than a nil dereference.
+func TestForgetOnAnUnservedCacheIsANoOp(t *testing.T) {
+	t.Parallel()
+
+	k := cache.NewKeyed(cache.KeyedConfig[string]{Topic: "t", TTL: time.Hour})
 	if err := k.Forget(context.Background(), nil, "a"); err != nil {
 		t.Errorf("Forget: %v", err)
 	}

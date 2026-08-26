@@ -166,6 +166,11 @@ func (k *Keyed[V]) Load(key string, fn func() (V, error)) (V, error) {
 // discards it when that transaction rolls back, so an invalidation published on
 // the transaction that caused it is atomic with the change. The publisher hears
 // its own notification, which is why nothing is dropped locally as well.
+//
+// A cache served on no channel has no notification to hear, so there it drops
+// what it holds directly — see [Keyed.ServeLocally]. Publishing nowhere *and*
+// keeping the value would be the one arrangement where a withdrawal silently
+// does not happen, and it is the arrangement a single-instance deployment is in.
 func (k *Keyed[V]) Forget(ctx context.Context, db dbx.Conn, keys ...string) error {
 	if k == nil {
 		return nil
@@ -173,6 +178,10 @@ func (k *Keyed[V]) Forget(ctx context.Context, db dbx.Conn, keys ...string) erro
 	s := k.served.Load()
 	if s == nil {
 		// Never served, so nothing anywhere is holding an answer to withdraw.
+		return nil
+	}
+	if s.bus == nil {
+		k.Drop(keys...)
 		return nil
 	}
 	for _, key := range keys {
@@ -220,12 +229,19 @@ func (k *Keyed[V]) ForgetOrDrop(ctx context.Context, keys ...string) error {
 // For a write that changes what an answer *means* rather than which one is
 // wrong. Working out which keys those reach is a query, and "clear it" is the
 // cheaper answer for a map that refills itself on the next request.
+//
+// On a cache served on no channel this empties the map directly, for the reason
+// [Keyed.Forget] gives.
 func (k *Keyed[V]) Clear(ctx context.Context, db dbx.Conn) error {
 	if k == nil {
 		return nil
 	}
 	s := k.served.Load()
 	if s == nil {
+		return nil
+	}
+	if s.bus == nil {
+		k.m.Clear()
 		return nil
 	}
 	return s.topic.Clear(ctx, db)
