@@ -17,6 +17,7 @@ import (
 	"github.com/simonjanss/rig/auth/oauth"
 	"github.com/simonjanss/rig/auth/session"
 	"github.com/simonjanss/rig/runtime/authwire"
+	"github.com/simonjanss/rig/runtime/httpx"
 	"github.com/simonjanss/rig/runtime/query"
 	"github.com/simonjanss/rig/runtime/rigerr"
 	"github.com/simonjanss/rig/runtime/tenancy"
@@ -48,7 +49,7 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, signInOf(res))
+	httpx.WriteJSON(w, http.StatusOK, signInOf(res))
 }
 
 // logout ends the session the request is authenticated with.
@@ -82,7 +83,7 @@ func (h *Handler) refresh(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, pairOf(pair))
+	httpx.WriteJSON(w, http.StatusOK, pairOf(pair))
 }
 
 // requestReset always answers 202.
@@ -152,7 +153,7 @@ func (h *Handler) changePassword(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, pairOf(pair))
+	httpx.WriteJSON(w, http.StatusOK, pairOf(pair))
 }
 
 func (h *Handler) verifyEmail(w http.ResponseWriter, r *http.Request) {
@@ -200,7 +201,7 @@ func (h *Handler) SignIn(w http.ResponseWriter, r *http.Request, in oauth.SignIn
 	if err != nil {
 		return err
 	}
-	writeJSON(w, http.StatusOK, pairOf(pair))
+	httpx.WriteJSON(w, http.StatusOK, pairOf(pair))
 	return nil
 }
 
@@ -242,7 +243,7 @@ func (h *Handler) listSessions(w http.ResponseWriter, r *http.Request) {
 			Current:    f.Root.ID == tok.RootTokenID,
 		})
 	}
-	writeJSON(w, http.StatusOK, authwire.List[authwire.SessionView]{Data: out})
+	httpx.WriteJSON(w, http.StatusOK, authwire.List[authwire.SessionView]{Data: out})
 }
 
 func (h *Handler) revokeSession(w http.ResponseWriter, r *http.Request) {
@@ -407,7 +408,7 @@ func (h *Handler) audit(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	writeJSON(w, http.StatusOK, authwire.Page[authwire.AuthLogEntryView]{
+	httpx.WriteJSON(w, http.StatusOK, authwire.Page[authwire.AuthLogEntryView]{
 		Data: out,
 		Pagination: authwire.Pagination{
 			Offset: q.Offset, Limit: q.Limit, Total: total,
@@ -558,7 +559,7 @@ func (h *Handler) impersonate(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, pairOf(pair))
+	httpx.WriteJSON(w, http.StatusCreated, pairOf(pair))
 }
 
 func (h *Handler) endImpersonation(w http.ResponseWriter, r *http.Request) {
@@ -683,7 +684,7 @@ func (h *Handler) createAPIKey(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated,
+	httpx.WriteJSON(w, http.StatusCreated,
 		authwire.CreateKeyResponse{Key: viewOf(minted.Key), Secret: minted.Secret})
 }
 
@@ -718,7 +719,7 @@ func (h *Handler) listAPIKeys(w http.ResponseWriter, r *http.Request) {
 		}
 		out = append(out, viewOf(k))
 	}
-	writeJSON(w, http.StatusOK, authwire.List[authwire.APIKeyView]{Data: out})
+	httpx.WriteJSON(w, http.StatusOK, authwire.List[authwire.APIKeyView]{Data: out})
 }
 
 // revokeAPIKey kills one, if it is the caller's or the caller administers keys.

@@ -37,7 +37,7 @@ const linkColumns = `id, identity_id, provider, subject, email_address`
 
 // FindLink implements [oauth.Store].
 func (s *OAuthStore) FindLink(ctx context.Context, provider, subject string) (*oauth.Link, error) {
-	rows, err := conn(ctx, s.db).Query(ctx, `
+	rows, err := dbx.ConnFor(ctx, s.db).Query(ctx, `
 		SELECT `+linkColumns+` FROM rig_identity_oauth
 		WHERE provider = $1 AND subject = $2`, provider, subject)
 	if err != nil {
@@ -59,7 +59,7 @@ func (s *OAuthStore) FindLink(ctx context.Context, provider, subject string) (*o
 
 // FindIdentityByEmail implements [oauth.Store].
 func (s *OAuthStore) FindIdentityByEmail(ctx context.Context, lowercased string) (uuid.UUID, error) {
-	rows, err := conn(ctx, s.db).Query(ctx, `
+	rows, err := dbx.ConnFor(ctx, s.db).Query(ctx, `
 		SELECT id FROM rig_identity
 		WHERE lower(email_address) = $1 AND deleted_at IS NULL`, lowercased)
 	if err != nil {
@@ -91,7 +91,7 @@ func (s *OAuthStore) LinkIdentity(ctx context.Context, in oauth.LinkInput) (*oau
 
 	now := s.now()
 	var out oauth.Link
-	err = conn(ctx, s.db).QueryRow(ctx, `
+	err = dbx.ConnFor(ctx, s.db).QueryRow(ctx, `
 		INSERT INTO rig_identity_oauth
 			(id, identity_id, provider, subject, email_address, created_at)
 		VALUES ($1, $2, $3, $4, $5, $6)
@@ -156,7 +156,7 @@ func (s *OAuthStore) ProvisionIdentity(ctx context.Context, in oauth.ProvisionIn
 
 // FindAccount implements [oauth.Store].
 func (s *OAuthStore) FindAccount(ctx context.Context, tenantID, identityID uuid.UUID) (uuid.UUID, error) {
-	rows, err := conn(ctx, s.db).Query(ctx, `
+	rows, err := dbx.ConnFor(ctx, s.db).Query(ctx, `
 		SELECT id FROM rig_account
 		WHERE tenant_id = $1 AND identity_id = $2 AND deleted_at IS NULL`,
 		tenantID, identityID)
@@ -197,7 +197,7 @@ func (s *OAuthStore) JoinTenant(ctx context.Context, in oauth.JoinInput) (uuid.U
 		return uuid.Nil, fmt.Errorf("authpg: generate account id: %w", err)
 	}
 
-	if _, err := conn(ctx, s.db).Exec(ctx, `
+	if _, err := dbx.ConnFor(ctx, s.db).Exec(ctx, `
 		INSERT INTO rig_account
 			(id, tenant_id, identity_id, created_at, email_address, display_name)
 		VALUES ($1, $2, $3, $4, $5, $6)`,

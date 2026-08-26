@@ -299,6 +299,12 @@ func TestResponseStatusComesFromTheDocument(t *testing.T) {
 
 // An internal failure's detail is exactly the kind of thing that leaks a table
 // name or a connection string.
+//
+// The redaction itself is `httpx.AnswerFor`'s now, and is asserted there against
+// behaviour rather than against text — `runtime/httpx.TestAnInternalFailureIsRedacted`.
+// What is left to assert here is that the generated mapper still reaches for it:
+// a second copy of the classification is how the two spellings drift, and this
+// one is the copy every real project runs.
 func TestInternalErrorsAreNotDetailed(t *testing.T) {
 	t.Parallel()
 
@@ -309,7 +315,12 @@ func TestInternalErrorsAreNotDetailed(t *testing.T) {
 	if !ok {
 		t.Fatal("no DefaultErrorMapper")
 	}
-	if !strings.Contains(mapper, "rigerr.CodeInternal") || !strings.Contains(mapper, `"something went wrong"`) {
+	if !strings.Contains(mapper, "httpx.AnswerFor(w, err)") {
+		t.Errorf("the mapper should classify through httpx rather than with a copy of it:\n%s", mapper)
+	}
+	// The message reaching the client is `answer.Message`, which is already
+	// redacted. Assembling one from the error here is what this used to do.
+	if strings.Contains(mapper, "err.Error()") {
 		t.Errorf("an internal failure should not describe itself to the client:\n%s", mapper)
 	}
 	if !strings.Contains(mapper, "rc.RequestID") {

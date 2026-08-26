@@ -6,6 +6,7 @@ import (
 	"testing"
 	"testing/fstest"
 
+	"github.com/jackc/pgx/v5/pgxpool"
 	_ "github.com/jackc/pgx/v5/stdlib"
 
 	"github.com/simonjanss/rig/migrate"
@@ -50,10 +51,6 @@ func TestAnEmptyDirectoryIsNothingToDo(t *testing.T) {
 		pending, err := migrate.Pending(t.Context(), db, files, migrate.Options{})
 		if err != nil || len(pending) != 0 {
 			t.Errorf("%v: pending = %v, %v", keys(files), pending, err)
-		}
-
-		if version, err := migrate.Version(t.Context(), db, files, migrate.Options{}); err != nil || version != 0 {
-			t.Errorf("%v: version = %d, %v", keys(files), version, err)
 		}
 	}
 }
@@ -187,6 +184,33 @@ func TestASourceReadsItsOwnDir(t *testing.T) {
 	}
 	if len(pending) != 0 {
 		t.Errorf("pending = %v, want nothing", pending)
+	}
+}
+
+// [migrate.Apply] and [migrate.Require] are the plural forms with the list
+// written out, so the empty case has to survive the extra layer: a project that
+// has not written a migration yet still starts.
+//
+// Checked the way [TestASourceReadsItsOwnDir] is — a set with nothing in its
+// directory returns before a provider is built, so nothing connects and the pool
+// below is never dialled. What a set with a file in it reports is a question for
+// the Docker suite, because that is where the message can be read.
+func TestTheSingularFormsAreThePluralOnes(t *testing.T) {
+	t.Parallel()
+
+	pool, err := pgxpool.New(t.Context(), "postgres://nowhere:5432/nothing")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+
+	empty := fstest.MapFS{"elsewhere/00001.sql": &fstest.MapFile{}}
+
+	if err := migrate.Apply(empty, migrate.Options{})(t.Context(), pool); err != nil {
+		t.Errorf("Apply over an empty set: %v", err)
+	}
+	if err := migrate.Require(empty, migrate.Options{})(t.Context(), pool); err != nil {
+		t.Errorf("Require over an empty set: %v", err)
 	}
 }
 

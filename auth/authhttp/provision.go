@@ -6,6 +6,7 @@ import (
 
 	"github.com/simonjanss/rig/auth/account"
 	"github.com/simonjanss/rig/runtime/authwire"
+	"github.com/simonjanss/rig/runtime/httpx"
 	"github.com/simonjanss/rig/runtime/tenancy"
 )
 
@@ -56,7 +57,7 @@ func (h *Handler) provision(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusCreated, authwire.AccountView{
+	httpx.WriteJSON(w, http.StatusCreated, authwire.AccountView{
 		ID:           acct.ID,
 		TenantID:     acct.TenantID,
 		EmailAddress: acct.EmailAddress,

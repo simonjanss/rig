@@ -50,7 +50,7 @@ func (s *AccountStore) FindIdentityByID(ctx context.Context, id uuid.UUID) (*acc
 }
 
 func (s *AccountStore) oneIdentity(ctx context.Context, sql string, args ...any) (*account.Identity, error) {
-	rows, err := conn(ctx, s.db).Query(ctx, sql, args...)
+	rows, err := dbx.ConnFor(ctx, s.db).Query(ctx, sql, args...)
 	if err != nil {
 		return nil, fmt.Errorf("authpg: read identity: %w", err)
 	}
@@ -71,7 +71,7 @@ func (s *AccountStore) oneIdentity(ctx context.Context, sql string, args ...any)
 
 // InsertIdentity implements [account.Store].
 func (s *AccountStore) InsertIdentity(ctx context.Context, i *account.Identity) error {
-	_, err := conn(ctx, s.db).Exec(ctx, `
+	_, err := dbx.ConnFor(ctx, s.db).Exec(ctx, `
 		INSERT INTO rig_identity (id, created_at, created_by_account_id, created_by_api_key_id,
 		                      email_address, display_name, is_active)
 		VALUES ($1, now(), $2, $3, $4, $5, $6)`,
@@ -84,7 +84,7 @@ func (s *AccountStore) InsertIdentity(ctx context.Context, i *account.Identity) 
 
 // MarkIdentityVerified implements [account.Store].
 func (s *AccountStore) MarkIdentityVerified(ctx context.Context, identityID uuid.UUID, at time.Time) error {
-	_, err := conn(ctx, s.db).Exec(ctx, `
+	_, err := dbx.ConnFor(ctx, s.db).Exec(ctx, `
 		UPDATE rig_identity SET email_verified_at = $2, updated_at = $2 WHERE id = $1`,
 		identityID, at)
 	if err != nil {
@@ -99,13 +99,13 @@ func (s *AccountStore) MarkIdentityVerified(ctx context.Context, identityID uuid
 // the caller knows who asked and this does not: a provisioning request through
 // an API key has both an account and a key to record, and a seed has neither.
 func (s *AccountStore) Insert(ctx context.Context, a *account.Account) error {
-	_, err := conn(ctx, s.db).Exec(ctx, `
+	_, err := dbx.ConnFor(ctx, s.db).Exec(ctx, `
 		INSERT INTO rig_account (id, tenant_id, identity_id, created_at, created_by_account_id,
 		                     created_by_api_key_id, kind, role, email_address,
 		                     display_name, time_zone, is_active)
 		VALUES ($1, $2, $3, now(), $4, $5, $6, $7, $8, $9, $10, $11)`,
 		a.ID, a.TenantID, a.IdentityID, a.CreatedBy, a.CreatedByKey, a.Kind, a.Role,
-		a.EmailAddress, a.DisplayName, nullable(a.TimeZone), a.IsActive)
+		a.EmailAddress, a.DisplayName, dbx.Null(a.TimeZone), a.IsActive)
 	if err != nil {
 		return fmt.Errorf("authpg: insert account: %w", err)
 	}
@@ -115,7 +115,7 @@ func (s *AccountStore) Insert(ctx context.Context, a *account.Account) error {
 // TenantDomains implements [account.Store].
 func (s *AccountStore) TenantDomains(ctx context.Context, tenantID uuid.UUID) ([]string, error) {
 	var domains []string
-	err := conn(ctx, s.db).QueryRow(ctx,
+	err := dbx.ConnFor(ctx, s.db).QueryRow(ctx,
 		`SELECT allowed_email_domains FROM rig_tenant WHERE id = $1 AND deleted_at IS NULL`,
 		tenantID).Scan(&domains)
 	switch {
@@ -152,7 +152,7 @@ func (s *AccountStore) AccountForIdentity(ctx context.Context, tenantID, identit
 // business — nothing here is returned over HTTP — and what it feeds is revoking
 // every session a person has.
 func (s *AccountStore) AccountsForIdentity(ctx context.Context, identityID uuid.UUID) ([]*account.Account, error) {
-	rows, err := conn(ctx, s.db).Query(ctx, `
+	rows, err := dbx.ConnFor(ctx, s.db).Query(ctx, `
 		SELECT `+accountColumns+` FROM rig_account
 		WHERE identity_id = $1 AND deleted_at IS NULL
 		ORDER BY created_at`, identityID)
@@ -179,7 +179,7 @@ func (s *AccountStore) AccountsForIdentity(ctx context.Context, identityID uuid.
 // person belongs to — and a deleted tenant is left out, because being a member of
 // something that no longer exists is not somewhere anybody can go.
 func (s *AccountStore) TenantsForIdentity(ctx context.Context, identityID uuid.UUID) ([]account.Membership, error) {
-	rows, err := conn(ctx, s.db).Query(ctx, `
+	rows, err := dbx.ConnFor(ctx, s.db).Query(ctx, `
 		SELECT rig_tenant.id, rig_tenant.name, rig_tenant.slug,
 		       rig_account.id, rig_account.role, rig_account.is_active
 		  FROM rig_account
@@ -207,7 +207,7 @@ func (s *AccountStore) TenantsForIdentity(ctx context.Context, identityID uuid.U
 }
 
 func (s *AccountStore) oneAccount(ctx context.Context, sql string, args ...any) (*account.Account, error) {
-	rows, err := conn(ctx, s.db).Query(ctx, sql, args...)
+	rows, err := dbx.ConnFor(ctx, s.db).Query(ctx, sql, args...)
 	if err != nil {
 		return nil, fmt.Errorf("authpg: read account: %w", err)
 	}
@@ -236,7 +236,7 @@ func scanAccount(rows pgx.Rows) (*account.Account, error) {
 
 // Credential implements [account.Store].
 func (s *AccountStore) Credential(ctx context.Context, identityID uuid.UUID) (*account.Credential, error) {
-	rows, err := conn(ctx, s.db).Query(ctx, `
+	rows, err := dbx.ConnFor(ctx, s.db).Query(ctx, `
 		SELECT id, identity_id, password_hash, algorithm, params, created_at, updated_at
 		FROM rig_identity_credential WHERE identity_id = $1`, identityID)
 	if err != nil {
@@ -277,7 +277,7 @@ func (s *AccountStore) SaveCredential(ctx context.Context, c *account.Credential
 		return fmt.Errorf("authpg: encode credential parameters: %w", err)
 	}
 
-	_, err = conn(ctx, s.db).Exec(ctx, `
+	_, err = dbx.ConnFor(ctx, s.db).Exec(ctx, `
 		INSERT INTO rig_identity_credential
 			(id, identity_id, password_hash, algorithm, params, created_at)
 		VALUES ($1, $2, $3, $4, $5, $6)
@@ -295,7 +295,7 @@ func (s *AccountStore) SaveCredential(ctx context.Context, c *account.Credential
 
 // CreateVerification implements [account.Store].
 func (s *AccountStore) CreateVerification(ctx context.Context, v *account.Verification) error {
-	_, err := conn(ctx, s.db).Exec(ctx, `
+	_, err := dbx.ConnFor(ctx, s.db).Exec(ctx, `
 		INSERT INTO rig_identity_verification
 			(id, identity_id, invited_to_tenant_id, kind, token_hash, created_at, expires_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7)`,
@@ -313,7 +313,7 @@ func (s *AccountStore) CreateVerification(ctx context.Context, v *account.Verifi
 // and for an account that is still there. The join is what makes it useful — an
 // interface listing invitations wants to say who, not which token hash.
 func (s *AccountStore) PendingInvitations(ctx context.Context, tenantID uuid.UUID) ([]account.Invitation, error) {
-	rows, err := conn(ctx, s.db).Query(ctx, `
+	rows, err := dbx.ConnFor(ctx, s.db).Query(ctx, `
 		SELECT v.id, v.identity_id, rig_account.id, v.invited_to_tenant_id, rig_tenant.name,
 		       rig_identity.email_address, rig_identity.display_name, rig_account.role,
 		       v.created_at, v.expires_at
@@ -355,7 +355,7 @@ func (s *AccountStore) PendingInvitations(ctx context.Context, tenantID uuid.UUI
 // accepting an invitation at the same moment sets consumed_at, and exactly one of
 // the two statements affects a row.
 func (s *AccountStore) RevokeVerification(ctx context.Context, id uuid.UUID, at time.Time) (bool, error) {
-	tag, err := conn(ctx, s.db).Exec(ctx, `
+	tag, err := dbx.ConnFor(ctx, s.db).Exec(ctx, `
 		UPDATE rig_identity_verification SET revoked_at = $2
 		WHERE id = $1 AND consumed_at IS NULL AND revoked_at IS NULL`, id, at)
 	if err != nil {
@@ -370,7 +370,7 @@ func (s *AccountStore) RevokeVerification(ctx context.Context, id uuid.UUID, at 
 // a restore window, so a withdrawal that turns out to be a mistake is one update
 // away from being undone.
 func (s *AccountStore) SoftDeleteAccount(ctx context.Context, in account.DeleteAccountInput) error {
-	_, err := conn(ctx, s.db).Exec(ctx, `
+	_, err := dbx.ConnFor(ctx, s.db).Exec(ctx, `
 		UPDATE rig_account
 		   SET deleted_at = $3, deleted_by_account_id = $4, deleted_by_api_key_id = $5
 		 WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL`,
@@ -392,7 +392,7 @@ func (s *AccountStore) VerificationByID(ctx context.Context, id uuid.UUID) (*acc
 }
 
 func (s *AccountStore) verification(ctx context.Context, where string, arg any) (*account.Verification, error) {
-	rows, err := conn(ctx, s.db).Query(ctx, `
+	rows, err := dbx.ConnFor(ctx, s.db).Query(ctx, `
 		SELECT id, identity_id, invited_to_tenant_id, kind, token_hash,
 		       created_at, expires_at, consumed_at, revoked_at
 		FROM rig_identity_verification WHERE `+where, arg)
@@ -427,7 +427,7 @@ func (s *AccountStore) verification(ctx context.Context, where string, arg any) 
 // concurrency: two requests racing to redeem one link both run the UPDATE, and
 // exactly one of them affects a row.
 func (s *AccountStore) ConsumeVerification(ctx context.Context, id uuid.UUID, at time.Time) (bool, error) {
-	tag, err := conn(ctx, s.db).Exec(ctx, `
+	tag, err := dbx.ConnFor(ctx, s.db).Exec(ctx, `
 		UPDATE rig_identity_verification SET consumed_at = $2
 		WHERE id = $1 AND consumed_at IS NULL`, id, at)
 	if err != nil {
@@ -448,7 +448,7 @@ func (s *AccountStore) InTx(ctx context.Context, fn func(ctx context.Context) er
 // which ones have asked for them. Scoping it by tenant would be scoping it to a
 // tenant they are not in yet.
 func (s *AccountStore) InvitationsForIdentity(ctx context.Context, identityID uuid.UUID) ([]account.Invitation, error) {
-	rows, err := conn(ctx, s.db).Query(ctx, `
+	rows, err := dbx.ConnFor(ctx, s.db).Query(ctx, `
 		SELECT v.id, v.identity_id, rig_account.id, v.invited_to_tenant_id, rig_tenant.name,
 		       rig_identity.email_address, rig_identity.display_name, rig_account.role,
 		       v.created_at, v.expires_at
@@ -494,7 +494,7 @@ func (s *AccountStore) InsertTenant(ctx context.Context, t *account.Tenant) erro
 		domains = []string{}
 	}
 
-	_, err := conn(ctx, s.db).Exec(ctx, `
+	_, err := dbx.ConnFor(ctx, s.db).Exec(ctx, `
 		INSERT INTO rig_tenant (id, created_at, name, slug, is_active, allowed_email_domains)
 		VALUES ($1, now(), $2, $3, $4, $5)`,
 		t.ID, t.Name, t.Slug, t.IsActive, domains)

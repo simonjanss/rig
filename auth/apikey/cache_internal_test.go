@@ -18,10 +18,16 @@ import (
 // An internal test, for the reason auth/session's is: a [KeyCache] is built from
 // a [cache.Bus] and a bus needs a pool, but what is worth checking here is that
 // verification behaves the same whether the key came from the map or the row.
-// The map is assembled directly, with no topic to publish on — a nil
-// *cache.Topic is a working no-op, so the invalidation path still runs.
+//
+// Assembled with no bus and then [cache.Keyed.ServeLocally], which is the posture
+// of a cache attached to no channel: it holds values and forgets them in this
+// process alone, so the invalidation path still runs with nothing to publish on.
 func testCache(ttl time.Duration, now func() time.Time) *KeyCache {
-	return &KeyCache{m: cache.NewMap[*Key](cache.MapConfig{TTL: ttl, Now: now})}
+	k := cache.NewKeyed(cache.KeyedConfig[*Key]{
+		Topic: KeyTopic, TTL: ttl, Now: now, Clone: (*Key).clone,
+	})
+	k.ServeLocally()
+	return &KeyCache{k: k}
 }
 
 type fakeClock struct{ at time.Time }
@@ -149,7 +155,7 @@ func TestAMissIsNotCached(t *testing.T) {
 			t.Fatal("a key that does not exist should not verify")
 		}
 	}
-	if n := m.cache.m.Len(); n != 0 {
+	if n := m.cache.k.Len(); n != 0 {
 		t.Errorf("the map holds %d entries after three misses; a miss must not be stored", n)
 	}
 }
@@ -184,11 +190,12 @@ func TestTheCachedKeyIsACopy(t *testing.T) {
 	}
 }
 
-// testFailureCache is the failure count's half of [testCache], assembled the
-// same way and for the same reason: no bus, and a nil *cache.Topic that
-// publishes nowhere, so the invalidation path still runs.
+// testFailureCache is the failure count's half of [testCache], assembled the same
+// way and for the same reason: served locally, so it holds without a channel.
 func testFailureCache(ttl time.Duration, now func() time.Time) *FailureCache {
-	return &FailureCache{m: cache.NewMap[struct{}](cache.MapConfig{TTL: ttl, Now: now})}
+	k := cache.NewKeyed(cache.KeyedConfig[struct{}]{Topic: FailureTopic, TTL: ttl, Now: now})
+	k.ServeLocally()
+	return &FailureCache{k: k}
 }
 
 // countingCounter is a [throttle.Counter] that says how often it was asked.
@@ -289,7 +296,7 @@ func TestAKeyWithFailuresIsNotHeld(t *testing.T) {
 	if _, _, err := m.Verify(context.Background(), wrong, from); err == nil {
 		t.Fatal("a wrong secret should not verify")
 	}
-	if n := m.failures.m.Len(); n != 0 {
+	if n := m.failures.k.Len(); n != 0 {
 		t.Errorf("the map holds %d entries for a key with failures against it, want 0", n)
 	}
 }
@@ -389,7 +396,7 @@ func TestAnUnknownKeyIDIsLimitedWithoutPublishing(t *testing.T) {
 	if counter.calls != 4 {
 		t.Errorf("four attempts counted rows %d times, want 4", counter.calls)
 	}
-	if n := m.failures.m.Len(); n != 0 {
+	if n := m.failures.k.Len(); n != 0 {
 		t.Errorf("the map holds %d entries for an identifier nobody minted, want 0", n)
 	}
 }

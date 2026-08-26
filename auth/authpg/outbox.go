@@ -42,7 +42,7 @@ func (s *OutboxStore) Enqueue(ctx context.Context, d *account.Delivery) error {
 	const q = `INSERT INTO ` + deliveryTable + `
 			(id, verification_id, kind, state, deliver_at)
 		VALUES ($1, $2, $3, $4, $5)`
-	_, err := conn(ctx, s.db).Exec(ctx, q,
+	_, err := dbx.ConnFor(ctx, s.db).Exec(ctx, q,
 		d.ID, d.VerificationID, string(d.Kind), string(account.DeliveryPending), d.DeliverAt)
 	if err != nil {
 		return fmt.Errorf("authpg: enqueue a link: %w", err)
@@ -73,7 +73,7 @@ func (s *OutboxStore) Claim(ctx context.Context, by uuid.UUID, now time.Time, tt
 		)
 		RETURNING id, verification_id, kind, state, deliver_at, attempts`
 
-	rows, err := conn(ctx, s.db).Query(ctx, q, now, by, now.Add(-ttl), limit)
+	rows, err := dbx.ConnFor(ctx, s.db).Query(ctx, q, now, by, now.Add(-ttl), limit)
 	if err != nil {
 		return nil, fmt.Errorf("authpg: claim links: %w", err)
 	}
@@ -107,7 +107,7 @@ func (s *OutboxStore) RotateToken(ctx context.Context, verificationID uuid.UUID,
 		RETURNING id`
 
 	var id uuid.UUID
-	err := conn(ctx, s.db).QueryRow(ctx, q, verificationID, hash, expiresAt).Scan(&id)
+	err := dbx.ConnFor(ctx, s.db).QueryRow(ctx, q, verificationID, hash, expiresAt).Scan(&id)
 	if err != nil {
 		if dbx.IsNoRows(err) {
 			// Consumed or withdrawn between being queued and being sent, which is
@@ -124,7 +124,7 @@ func (s *OutboxStore) MarkSent(ctx context.Context, id uuid.UUID, at time.Time) 
 	const q = `UPDATE ` + deliveryTable + ` SET
 			state = 'Sent', sent_at = $2, claimed_at = NULL, updated_at = now()
 		WHERE id = $1`
-	if _, err := conn(ctx, s.db).Exec(ctx, q, id, at); err != nil {
+	if _, err := dbx.ConnFor(ctx, s.db).Exec(ctx, q, id, at); err != nil {
 		return fmt.Errorf("authpg: mark a link sent: %w", err)
 	}
 	return nil
@@ -135,7 +135,7 @@ func (s *OutboxStore) MarkFailed(ctx context.Context, id uuid.UUID, reason strin
 	const q = `UPDATE ` + deliveryTable + ` SET
 			state = 'Failed', failed_reason = $2, claimed_at = NULL, updated_at = now()
 		WHERE id = $1`
-	if _, err := conn(ctx, s.db).Exec(ctx, q, id, reason); err != nil {
+	if _, err := dbx.ConnFor(ctx, s.db).Exec(ctx, q, id, reason); err != nil {
 		return fmt.Errorf("authpg: mark a link failed: %w", err)
 	}
 	return nil
@@ -146,7 +146,7 @@ func (s *OutboxStore) MarkSkipped(ctx context.Context, id uuid.UUID, reason stri
 	const q = `UPDATE ` + deliveryTable + ` SET
 			state = 'Skipped', failed_reason = $2, claimed_at = NULL, updated_at = now()
 		WHERE id = $1`
-	if _, err := conn(ctx, s.db).Exec(ctx, q, id, reason); err != nil {
+	if _, err := dbx.ConnFor(ctx, s.db).Exec(ctx, q, id, reason); err != nil {
 		return fmt.Errorf("authpg: mark a link skipped: %w", err)
 	}
 	return nil
@@ -157,7 +157,7 @@ func (s *OutboxStore) Retry(ctx context.Context, id uuid.UUID, at time.Time, rea
 	const q = `UPDATE ` + deliveryTable + ` SET
 			deliver_at = $2, failed_reason = $3, claimed_at = NULL, updated_at = now()
 		WHERE id = $1`
-	if _, err := conn(ctx, s.db).Exec(ctx, q, id, at, reason); err != nil {
+	if _, err := dbx.ConnFor(ctx, s.db).Exec(ctx, q, id, at, reason); err != nil {
 		return fmt.Errorf("authpg: schedule a retry: %w", err)
 	}
 	return nil
@@ -181,7 +181,7 @@ func (s *OutboxStore) Abandon(ctx context.Context, ids []uuid.UUID, by uuid.UUID
 	const q = `UPDATE ` + deliveryTable + ` SET
 			attempts = greatest(attempts - 1, 0), claimed_at = NULL, updated_at = now()
 		WHERE id = ANY($1) AND claimed_by = $2 AND state = 'Pending'`
-	if _, err := conn(ctx, s.db).Exec(ctx, q, ids, by); err != nil {
+	if _, err := dbx.ConnFor(ctx, s.db).Exec(ctx, q, ids, by); err != nil {
 		return fmt.Errorf("authpg: abandon links: %w", err)
 	}
 	return nil
@@ -194,7 +194,7 @@ func (s *OutboxStore) Abandon(ctx context.Context, ids []uuid.UUID, by uuid.UUID
 func (s *OutboxStore) ReleaseClaims(ctx context.Context, by uuid.UUID, _ time.Time) (int, error) {
 	const q = `UPDATE ` + deliveryTable + ` SET claimed_at = NULL, updated_at = now()
 		WHERE claimed_by = $1 AND claimed_at IS NOT NULL AND state = 'Pending'`
-	tag, err := conn(ctx, s.db).Exec(ctx, q, by)
+	tag, err := dbx.ConnFor(ctx, s.db).Exec(ctx, q, by)
 	if err != nil {
 		return 0, fmt.Errorf("authpg: release link claims: %w", err)
 	}
@@ -215,7 +215,7 @@ func (s *OutboxStore) Prune(ctx context.Context, olderThan time.Duration, now ti
 	}
 	const q = `DELETE FROM ` + deliveryTable + `
 		WHERE state <> 'Pending' AND coalesce(updated_at, created_at) < $1`
-	tag, err := conn(ctx, s.db).Exec(ctx, q, now.Add(-olderThan))
+	tag, err := dbx.ConnFor(ctx, s.db).Exec(ctx, q, now.Add(-olderThan))
 	if err != nil {
 		return 0, fmt.Errorf("authpg: prune links: %w", err)
 	}

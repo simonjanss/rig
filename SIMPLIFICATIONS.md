@@ -7,7 +7,7 @@ same files should not run in parallel. Verification for anything under
 `internal/gen/` is mechanical: golden tests plus `make examples` prove the
 generated output did not change.
 
-Status: `[ ]` open · `[x]` done
+Status: `[ ]` open · `[x]` done · `[-]` decided against — the entry says why
 
 ---
 
@@ -98,8 +98,10 @@ down to the wording of the 400 message: `servergo/server.go:607-678` and
 `electricgo/base.go:237-297`. `electricgo`'s `fail` (`base.go:219-232`) also
 re-emits error mapping `servergo` emits elsewhere.
 
-- **Fix:** a small `runtime/httparg` (or additions to `runtime/serve`) with
-  `PathUUID/PathInt/QueryBool/QueryTime/...`; generators emit call sites.
+- **Fix:** additions to the `runtime/httpx` that B2 created (its package doc
+  already says it is the wire shape of the routes rig owns) with
+  `PathUUID/PathInt/QueryBool/QueryTime/...`; generators emit call sites. Not a
+  new `runtime/httparg` — that would be two packages for one job.
 - **Files:** `internal/gen/servergo/server.go`, `internal/gen/electricgo/base.go`,
   new runtime package, goldens, examples.
 - **Size:** ~130 emit lines + ~140 lines per generated project. **Risk:** low-medium.
@@ -137,125 +139,435 @@ re-emits error mapping `servergo` emits elsewhere.
 
 ## B. Service modules (`auth`, `notify`, `presence`, `files`, `observe`, `migrate`)
 
-### B1. Extract the outbox: `auth/account` mail vs `notify` delivery `[ ]`
+### B1. Extract the outbox: `auth/account` mail vs `notify` delivery `[x]`
 
-`auth/account/{outbox,dispatch}.go` is a line-by-line twin of `notify`'s
-delivery machinery — states, error classification
-(`PermanentMailError`/`RetryMailAfter` vs `Permanent`/`RetryAfter`), lease
-bookkeeping, backoff identical down to the comments, which say so themselves:
-"This is notify.Permanent's twin" (`outbox.go:263`), "notify's nextAttemptAt,
-to the line" (`dispatch.go:261`).
+`auth/account/{outbox,dispatch}.go` was a line-by-line twin of notify's delivery
+machinery, and both files said so — "this is notify.Permanent's twin", "notify's
+nextAttemptAt, to the line". Those comments are now a compiler-checked fact:
+`runtime/outbox`.
 
-- **Fix:** a `runtime/outbox` package holding retry classification, lease
-  bookkeeping (`hold`/`forget`/`release`/`ReleaseClaims`), `nextAttemptAt`,
-  `budgetFor`, and the claim→send→mark pass behind small `Store`/`Sender`
-  interfaces. Callers keep their SQL and their per-row "what to send".
-- **Files:** `auth/account/outbox.go`, `auth/account/dispatch.go`,
-  `notify/{failure,channel,dispatch,engine}.go`, new `runtime/outbox`.
-- **Size:** 400-500 lines. **Risk:** highest on this list — concurrency
-  semantics, and it adds a runtime dependency both modules must share. The
-  twin-ness may be deliberate module independence; decide that first.
+**Narrowed on the way in, and the narrowing is the whole design.** Only the
+DB-free part moved — error classification, the backoff ladder, the pass budget,
+and the lease map. Roughly 120 lines, and every one of them had no room to differ
+and did not differ.
 
-### B2. One HTTP scaffold; fix the error-envelope drift `[ ]`
+The claim→send→mark pass **stayed duplicated on purpose**. notify groups a digest
+and marks N deliveries per message; auth reads three stores and rotates a token
+per row; and their release statements are scoped differently — notify releases the
+ids it tracked, auth releases everything the process ever claimed. A shared pass
+would be one shape with two bodies and a parameter list longer than either.
 
-`notifyhttp` and `presencehttp` are copy-paste (`Handler`, `Options`, `New`,
-`with()` claims middleware, `writeJSON`, `writeError`, `decode`). Worse, their
-fallback error writer emits a **nested** `{"error":{code,message}}` envelope
-(`notifyhttp.go:264`, `presencehttp.go:339`) while `authhttp.go:495` and the
-generated server's `DefaultErrorMapper` emit a **flat** `{code,message}` —
-a client-visible inconsistency. `authhttp.fail` also re-implements
-`DefaultErrorMapper` verbatim, redaction and Retry-After included.
-Content-Type differs too (`application/json` vs `; charset=utf-8`).
+- **The entry's risk statement was wrong.** "It adds a runtime dependency both
+  modules must share" — both already require `rig/runtime` with a `replace`, so
+  there is no new edge. What is genuinely new is *type identity across modules*:
+  the two queues now speak one vocabulary, so `notify.IsPermanent` answers true
+  for an error `account.PermanentMailError` wrapped, and the reverse. Both used to
+  answer false. Nothing depends on either answer and true is arguably the more
+  correct one, but it is a semantic change to two published modules and it is
+  documented in both.
+- **The constants and the three config refusals were deliberately not extracted.**
+  The names are published API on both modules, so nothing would be deleted —
+  extracting only changes what the right-hand side reads. And the messages differ
+  for a reason: notify names the rig.yaml keys (`claim_ttl`, `backoff_cap`), auth
+  names the Go fields (`Mail.ClaimTTL`), because one is read by somebody editing
+  yaml and the other by somebody editing Go. `notify.NewEngine` panics where
+  `account.resolveMail` returns, also on purpose. What the extraction was really
+  trying to buy is now `internal/outboxtest`, in the root module because it is the
+  only one that can import both: it asserts the six defaults are the same numbers
+  and that both schedules span eight hours and three minutes.
+- **A real bug fixed on the way, in notify only.** Both `ReleaseClaims`
+  implementations did read-ids → `Exec` → clear-the-map. notify's statement is
+  scoped by id (`WHERE id = ANY($1)`), so clearing wiped a concurrent pass's
+  claims without releasing them — and two passes genuinely can run at once, since
+  the in-process goroutine and the cron `serve.Task` both call `Dispatch`. Those
+  leases were then left until a TTL meant for crashes ran out. It is now
+  `Leases.Drop(held...)`. auth's statement is scoped by claimant, so it really did
+  release everything and `Clear` is correct there — the backlog's claim that both
+  were affected was wrong. Both are commented so the asymmetry reads as deliberate.
+- **`var _ = dbx.IsNoRows` went too** (`notify/dispatch.go`), along with the `dbx`
+  import it was papering over. Struck from section F.
+- **Bonus dedup:** `abandon` built the same `[]uuid.UUID` the lease map needs, so
+  it is `idsOf(abandoned)` now. `mark`'s loop stays, because it also accumulates
+  the attempt count.
+- **Size:** ~120 lines shared, not the 400-500 estimated, and net roughly zero —
+  the doc comments moved with the code and gained a paragraph each. The win is not
+  the line count; it is that the two implementations cannot drift, and that
+  `runtime/outbox` has tests where the twinned copies had a comment.
+- **Verification:** all 16 tests in `examples/auth/{dispatch,mail}_docker_test.go`
+  pass with no skips — including `TestACleanShutdownGivesTheWorkBack` and
+  `TestAPassHandsBackWhatItCannotSendInsideTheLease`, which are what the lease
+  change touches. **Gap worth naming:** nothing exercises two concurrent passes
+  end to end, which is precisely the case the `Drop` fix is about. The mechanism is
+  covered by `runtime/outbox`'s `Leases` tests; the integration is not.
 
-- **Fix:** `WriteJSON`, `WriteError` (one envelope, flat), `Decode`
-  (DisallowUnknownFields + limit reader), `ClaimsMiddleware` in a shared
-  runtime package (`runtime/rigerr` or a new `runtime/httpx`); delete the
-  copies. Decide the canonical envelope first — flat is what the generated
-  server ships.
-- **Files:** `notify/notifyhttp/`, `presence/presencehttp/`,
-  `auth/authhttp/authhttp.go`, `observe/page.go:702-706`, runtime package.
-- **Size:** ~200 lines. **Risk:** medium — the envelope change is
-  client-visible for anyone parsing the nested shape.
+### B2. One HTTP scaffold; fix the error-envelope drift `[x]`
 
-### B3. `cache.Keyed[V]`: four near-identical cache wrappers in `auth` `[ ]`
+`notifyhttp` and `presencehttp` were copy-paste, and their fallback error writer
+emitted a **nested** `{"error":{code,message}}` while `authhttp` and the
+generated server emitted a **flat** `{code,message}`. All three now write
+`httpx.Error` from the new `runtime/httpx`.
 
-`session.TokenCache` (`auth/session/cache.go:34-160`), `apikey.KeyCache` and
-`apikey.FailureCache` (`auth/apikey/cache.go`), and `GrantsCache`
-(`auth/grantscache.go:66-256`) all wrap `cache.Map` + `cache.Topic` the same
-way: nil-for-nil-bus constructor, miss sentinel to avoid caching negatives,
-clone-on-way-out, `forget` via `topic.Forget`, nil-safe `drop`.
+- **The canonical envelope is flat, camelCase, `application/json; charset=utf-8`.**
+  Nothing read the nested shape: `rigclient/error.go` and
+  `ts/packages/client/src/errors.ts` both decode a flat struct, against which a
+  nested body comes out all-zero — so every error predicate answered false and
+  the caller saw a status and nothing else.
+- **`runtime/httpx` had to be a new package, not additions to `runtime/rigerr`.**
+  The error writer needs `throttle.RefusalOf` for the Retry-After, and
+  `runtime/throttle` already imports `rigerr` (`go list -deps ./throttle`). In
+  `rigerr` it would be a cycle. Said so in the package doc so nobody folds it
+  back.
+- **The generated `DefaultErrorMapper` keeps its own envelope and shares the
+  classification.** Its field names go through the project's `api.json_case`, so a
+  `json_case: snake` project answers `request_id`; `httpx.Error` is fixed
+  camelCase, because these routes are identical in every project and the browser
+  packages are compiled against them once. One struct cannot be both, so the
+  *encoding* stays two implementations — but the emitted mapper is now four lines
+  over `httpx.AnswerFor` rather than a second copy of `CodeOf`, the `errors.As`
+  redaction, `throttle.RefusalOf` and `FieldsOf`. That copy was the one every real
+  application actually runs, so leaving it emitted would have meant the drift this
+  section is about surviving in the one place it matters most. `errors` and
+  `throttle` drop out of the generated imports with it.
+  `servergo.TestInternalErrorsAreNotDetailed` now asserts the delegation; the
+  redaction itself is asserted against behaviour in `runtime/httpx`.
 
-- **Fix:** `cache.Keyed[V]` in `runtime/cache` with
-  `{Bus, Topic, TTL, MaxEntries, Now, Clone}` and
-  `Load/Forget/Clear/Drop` + nil-receiver safety; the four become thin aliases.
-- **Files:** the four cache files + `runtime/cache/`.
-- **Size:** ~350 lines. **Risk:** low-medium (concurrent, but well-tested shape).
+**Three bugs fixed, each demonstrated before the fix:**
 
-### B4. Decide the fate of the in-memory auth stores (~1,140 lines) `[ ]`
+1. **`notify.ErrNotFound` answered 500 in every real application.** It was a bare
+   `errors.New`, so `rigerr.CodeOf` read `CodeInternal`; the 404 lived only in
+   `notifyhttp`'s fallback writer, which every generated project replaces by
+   supplying `Fail`. So `POST /notifications/{id}/_read` and `DELETE
+   /notifications/{id}` on a missing or foreign row answered
+   `500 something went wrong`. It is now `rigerr.NotFound`, so it carries its own
+   status wherever it surfaces and there is no mapping left for a caller to be
+   missing. (`files` solved the same problem differently, with a `notFound()`
+   translator at the service edge — `files/service.go:347`. Either works; the
+   sentinel carrying the code is the one that cannot be bypassed.)
+2. **`presencehttp.decode` had no limit reader** — the only route in rig that
+   would read an unbounded request body. Now `httpx.Decode(r, 1<<16, …)`.
+3. **`authhttp.fail` dropped `fields`.** It wrote a `map[string]string`, so
+   per-field validation detail had nowhere to go. Latent rather than live —
+   nothing in `auth` produces a field-carrying error today — but it is the kind of
+   gap only somebody's client finds. Pinned by `runtime/httpx`'s own tests.
 
-`account.Store` is a 30-method interface with one production implementation
-(`auth/authpg/account.go`) and a 663-line hand-written fake
-(`auth/account/memory.go`) whose only callers are tests. Same pattern smaller
-in `auth/session/memory.go` (224), `auth/apikey/memory.go` (116),
-`auth/authlog/memory.go` (137). Sibling modules (`notify`, `presence`,
-`files`) have no store interface at all and test against real Postgres via the
-docker harness.
+- **`observe/page.go` was dropped from scope.** `observe/go.mod` has no rig
+  dependency by design, and its `writeJSON` is already the correct form with no
+  error writer at all. A new module edge for a five-line function is a worse trade
+  than the duplicate.
+- **`authhttp` took `WriteJSON`/`Decode`/`WriteError` only, not `Caller`.** Twelve
+  handlers call `h.Claims(r)` inline and it has no middleware to replace;
+  retrofitting one is a separate change. `presencehttp` kept its
+  `(w, r, claims)` handler signature — `presence.Service` takes claims
+  explicitly — but now reads them back through `tenancy.FromContext`, which
+  *validates*: claims that are well-formed with no tenant are refused here rather
+  than written into a row.
+- **The test that stops this coming back is `internal/httpxtest`.** It is in the
+  root module because that is the only one that can import `rig/auth`,
+  `rig/notify` and `rig/presence` at once — there was nowhere a test could stand
+  and see all three, which is most of why they drifted. It mounts all three,
+  provokes an unestablished caller, and asserts one status, one Content-Type, one
+  key set and one code.
+- **Files:** new `runtime/httpx/` (+ tests), new `internal/httpxtest/`,
+  `notify/notify.go`, `notify/notifyhttp/` (+ its first test file),
+  `presence/presencehttp/`, `auth/authhttp/{authhttp,handlers,invite,identity,provision}.go`.
+- **Follow-up found, unrelated to this change:**
+  `examples/auth/auth_docker_test.go`'s `TestAServiceAccountCannotSignIn` logs in
+  as the fixed address `nobody-at-all@example.com`, so the failed-attempt counter
+  accumulates in the database across runs. After enough runs against one database
+  it flips from `Unauthorized` to `RateLimited` and the test fails, having proved
+  nothing about the property it names. Randomize the address or reset the counter.
 
-- **Fix:** move the flow tests onto the docker harness (`internal/authtest`
-  already exists) and delete the fakes; optionally collapse the interface to
-  the concrete `authpg` stores like the siblings.
-- **Files:** `auth/account/`, `auth/session/`, `auth/apikey/`, `auth/authlog/`,
-  `auth/authhttp/authhttp_test.go`, `internal/authtest/`.
-- **Size:** 1,100+ lines deleted. **Risk:** it's a test-strategy decision —
-  docker tests are slower than in-memory ones; decide deliberately.
+### B3. `cache.Keyed[V]`: four near-identical cache wrappers in `auth` `[x]`
 
-### B5. Shared Postgres plumbing in `runtime/dbx` `[ ]`
+`session.TokenCache`, `apikey.KeyCache`, `apikey.FailureCache` and
+`auth.GrantsCache` all wrapped `cache.Map` + `cache.Topic` the same way. They are
+now four thin wrappers over `cache.Keyed[V]` (`runtime/cache/keyed.go`).
 
-Re-declared per module:
+- **Four decisions, spelled once instead of four times.** Nil-receiver safety
+  (`Load` calls through, everything else is a no-op, so no call site withdrawing a
+  value needs a condition); never hold a failure (the seam a miss borrows — the
+  sentinel stays caller-side, because only the caller knows what to translate it
+  back into); clone on the way out (deliberately contradicting `Map.Load`'s own
+  recommendation, for the reason `session` already wrote down); and hold nothing
+  when the cache cannot withdraw. That last one is where four copies would have
+  drifted, and it is the one whose failure mode is silent.
+- **`Keyed` took `GrantsCache`'s deferred `Serve`, not the other three's
+  nil-for-nil-bus.** The three-state "not attached yet / attached to a dropped
+  channel / live" was never a grants quirk — it is the general answer, and
+  nil-for-nil-bus is the special case. `NewKeyed` serves immediately when given a
+  bus and stays unattached otherwise. `GrantsCache` lost `servedOn`, `live()` and
+  its `atomic.Pointer` entirely.
+- **`ServeLocally` earns its place.** `auth/grantscache_internal_test.go` used to
+  reach into the unexported `served` field to get a cache attached to no channel —
+  testing an invariant by writing the field the invariant is about. The state is
+  real (one process, no replicas, staleness is your problem) so it now has a name,
+  and all three internal test helpers use it.
+- **Naming that state found a bug in it.** A locally-served cache is *live*, so it
+  holds — but its `Topic` is nil, and `Topic.Forget` on a nil receiver is a working
+  no-op. So `Forget`, `Clear` and `ForgetOrDrop`-with-a-transaction published
+  nowhere *and* dropped nothing: the one arrangement where a withdrawal silently
+  does not happen. Harmless while the state was test-only, not harmless once
+  `GrantsCache.ServeLocally` is exported and documented as a single-instance
+  posture, where it would have left a revoked role in the map for a full TTL. Both
+  now fall back to the local map when there is no bus, and
+  `TestForgetOnALocalCacheDropsLocally` asserts the drop rather than only the
+  absence of a panic — which is what the first version of that test did, and why it
+  passed.
+- **The line count went the other way, and the entry's "~350 lines" was wrong in
+  both magnitude and sign.** `auth` lost 62 lines; `runtime/cache/keyed.go` is 241,
+  most of it the prose that explains the four decisions. Call it **+179 lines of
+  production code**, plus 289 lines of tests where the shared shape had none. The
+  four wrappers were 704 lines and the majority was always prose about the
+  specific value being cached — why a `Token` is cloned and a `struct{}` is not,
+  why only a zero failure count is held — and none of that dedups. What was
+  actually bought is that the concurrency decisions are in one place with tests
+  against them, and that `golangci-lint` then found four methods
+  (`TokenCache.forget`, `TokenCache.drop`, `KeyCache.forget`,
+  `FailureCache.forget`) that `ForgetOrDrop` had made dead.
+- **Three sites moved here from B5**, where the backlog filed them as `conn(ctx)`
+  helpers: `auth/apikey/apikey.go:582,703` and `auth/session/session.go:626`. They
+  never produce a connection to query on — they choose between publishing an
+  invalidation on the ambient transaction and dropping it from a local map, which
+  is inseparable from the cache it is about. `dbx.ConnFor` could not absorb them;
+  `Keyed.ForgetOrDrop` did. The `apikey.go:703` site keeps its
+  `store.InTx(dbx.WithoutTx(ctx), …)` wrapper, which is the whole point of the
+  comment above it: a *fresh* transaction, not the caller's.
+- **No breaking change.** `TokenCache`, `KeyCache` and `FailureCache` have only
+  unexported methods, so the type and its constructor were the whole surface.
+  `GrantsCache` keeps all five exported methods and gains `ServeLocally`.
+- **Acceptance criterion met:** all eight of `internal/authtest/cache_docker_test.go`
+  pass unchanged, which is the only thing that proves a revocation still issues its
+  `NOTIFY` on the transaction that revoked and still reaches a second replica. No
+  in-memory test can ask that.
 
-- `type DB interface { dbx.Conn; dbx.Beginner }` with the identical doc
-  comment — `notify/store.go:18`, `presence/store.go:21`, `files/store.go:18`.
-- `conn(ctx)` tx-or-pool helper ×5 — `notify/store.go:60`, `files/store.go:47`,
-  `auth/authpg/authpg.go:55`, `auth/apikey/apikey.go:583,708`,
-  `auth/session/session.go:630`.
-- `scanner` interface ×3, `nullString`/`nullable`/`deref` ×5.
+### B4. The in-memory auth stores stay `[-]`
 
-- **Fix:** add `dbx.Pool` (Conn+Beginner), `dbx.ConnFor(ctx, fallback)`,
-  `dbx.Scanner`, `dbx.NullString` to `runtime/dbx`; alias or delete the copies.
-- **Also:** `presence` never calls `Begin` — `presence.DB` should be plain
-  `dbx.Conn` (this also simplifies `presence/stub_test.go`).
-- **Size:** ~80 lines, plus the "which copy did I fix" question. **Risk:** low.
+Decided, not deferred. The reasoning is here so nobody reopens it on the line
+count alone.
 
-### B6. `migrate`: singular API as one-liners over the plural `[ ]`
+**What was proposed.** Delete `auth/account/memory.go` (663 lines),
+`auth/session/memory.go` (224), `auth/apikey/memory.go` (116) and
+`auth/authlog/memory.go` (137) — 1,140 exactly — move the tests they back onto
+the Docker harness at `internal/authtest`, and optionally collapse
+`account.Store` to the concrete `authpg` stores the way `notify`, `presence` and
+`files` have no store interface at all.
 
-`Apply` (`migrate/migrate.go:378-406`) and `ApplyAll` (`:211-227`) have the
+**Two corrections to the entry as filed.** `account.Store` is **22** methods,
+not 30. And the claim that the fakes' "only callers are tests" is true but
+undersells one thing and oversells another: nothing outside a `_test.go` file
+references any of the four, and no document mentions them — so the "it is
+published API somebody depends on" argument is weaker than it looks. They are
+exported and doc-commented, and `make godoc-check` covers `./auth`, so they are
+surface a project *may* build on; nothing here proves one does.
+
+**The argument that actually holds: what deleting them costs.** The `auth`
+module has **237 tests, not one of them behind a build tag, and the whole suite
+finishes in under three seconds**. That is what the doubles buy, and it is the
+thing a Docker harness cannot give back. `internal/authtest` does not skip when
+Docker is absent — it fails, which is the right shape for a suite whose whole
+job is the database — so moving 237 tests behind it makes a daemon a
+precondition for running the auth tests at all.
+
+**And the division of labour is already written down, correctly.**
+`auth/account/dispatch_test.go:15-17`: *"What is proved here is the rules; that
+two dispatchers racing over one row behave is a question for a database, and the
+Docker suite asks it."* Both halves exist and both are used. The proposal
+collapses a split that is doing its job.
+
+**The interface is not the fakes' fault.** 22 methods because the flows are 22
+reads and writes, in a vocabulary deliberately not SQL's — `Store.InTx`, and the
+`(bool, error)` returns on `RevokeVerification` (`auth/account/store.go:338`)
+and `ConsumeVerification` (`:354`), exist so the service can express "a no-op on
+a link already used, and say so" without knowing there is a database.
+Collapsing to the concrete stores gives `auth/account` a pgx dependency it does
+not have. The siblings are not a precedent: `notify`, `presence` and `files` are
+each one table and a handful of statements, and none of them has a flow with a
+redemption race in it.
+
+**And the Docker half can pass by not running.** Every example suite carries the
+same `t.Skipf("no database at %s: %v — run \`rig db up\` first")` pair, and
+`make examples` still exits 0 when they all skip. A net that can be absent
+without saying so is weaker than one that cannot be.
+
+**The cost of keeping them, honestly.** Two implementations of a 22-method
+contract with no conformance harness: nothing runs one suite against both, so
+`MemoryStore` can disagree with `authpg.AccountStore` and only `internal/authtest`
+would notice, and only on the paths it happens to cover. That has already
+happened once — the `accountOrder` slice at `auth/account/memory.go:18-29` exists
+because ranging a map made "the tenant they joined first" a coin flip, and its
+comment says the quiet part: *"A double that disagrees with the real store about
+the property under test is worse than no double."* The 1,140 lines are also
+1,140 lines that move whenever `Store` grows a method, with the compiler as the
+only thing that says so.
+
+**What would be worth doing instead.** A conformance suite: one table of cases
+run against `MemoryStore` in `make test` and against the `authpg` stores under
+`-tags docker`. It closes the drift without deleting anything, and it is a
+smaller change than either half of what B4 proposed. Not scheduled here;
+recorded so the next reader has somewhere to go.
+
+### B5. Shared Postgres plumbing in `runtime/dbx` `[x]`
+
+Five additions to `runtime/dbx`, and the copies deleted:
+
+```go
+type Pool interface { Conn; Beginner }
+type Scanner interface{ Scan(dest ...any) error }
+func ConnFor(ctx context.Context, fallback Conn) Conn
+func Null[T comparable](v T) *T   // nil at T's zero value
+func Deref[T any](p *T) T
+```
+
+- **`DB` stayed as a type alias in each module** — `type DB = dbx.Pool` in
+  `notify` and `files`, `type DB = dbx.Conn` in `presence`. All three generators
+  emit `<pkg>.DB`, so an alias means zero generator, golden or example churn. The
+  triplicated two-sentence doc comment now lives once, on `dbx.Pool`.
+- **`presence.DB` narrowed to `dbx.Conn`.** Nothing in presence opens a
+  transaction — every statement goes straight through `s.cfg.DB`, and
+  `presence/service.go` already said so in prose. Narrowing a parameter-position
+  interface is source-compatible for every implementor, so this breaks nobody: a
+  pool still satisfies it. Two test stubs lost a `Begin` they only had to satisfy
+  the wider interface.
+- **`auth/authpg.conn` was deleted outright**, not wrapped: it already had
+  `dbx.ConnFor`'s exact signature, so its 50 call sites just point at the shared
+  one. `notify` and `files` kept their `conn(ctx)` *methods* as one-liners over
+  it, because there are 36 call sites in `notify` alone and seven of them are in
+  `dispatch.go` — B1's file. The wrapper was the collision boundary that let the
+  two land in one branch.
+- **The `any` vs `*string` split in the null helpers was not real.** All seven
+  call sites feed a pgx variadic `...any`, so both spellings erase to `any` at the
+  call. One generic pair on the `*T` shape, which is the form that already ran
+  against real Postgres in `internal/authtest`.
+- **The one real risk, and its proof.** `dbx.Null(b.Target.ID)` puts a
+  `*uuid.UUID` on the wire where an untyped nil went before.
+  `internal/presencetest`'s `TestTheTargetNarrows` is a table over `Target{}`,
+  `{Table}`, `{Table,ID}` and `{Table,ID,Field}` that round-trips each one; all
+  five sub-cases pass, so pgx handles the pointer transparently. `internal/authtest`
+  covers the `authpg` side over `user_agent`, `time_zone`, `email_address` and
+  `api_key_ref`.
+- **Two counts in the entry as filed were wrong.** `conn(ctx)` was ×3, not ×5 —
+  the three sites at `auth/apikey/apikey.go:582,703` and
+  `auth/session/session.go:626` are not tx-or-pool at all. They never produce a
+  connection to query on; they choose between publishing an invalidation on the
+  ambient transaction and dropping it from a local map, which is inseparable from
+  the cache it is about. They belong to **B3**, as `Keyed.ForgetOrDrop`. And there
+  were five `scanner` sites, not three: two of them were inline anonymous
+  interfaces in `notify/store.go` and `notify/inbox.go`.
+- **`Scanner` was kept rather than naming `pgx.Row`**, which is literally the same
+  interface. `pgx` is `// indirect` in both `files/go.mod` and `notify/go.mod`, and
+  naming it makes it direct — one four-line declaration holds pgx out of two
+  modules' direct requirements. Honest sizing: this sub-item saves about four
+  lines and is the weakest part of B5.
+- **A sixth copy exists and was deliberately left alone.**
+  `internal/gen/persistgo/store.go:246-260` emits `(*Store).connFor` into every
+  generated project. Changing it drags goldens and `make update-examples` into a
+  branch that touches neither — which is the property that made all of section B
+  fit in one branch. Folded into A6.
+- **Coverage gap worth knowing:** there is no `internal/filestest`, though
+  `internal/dockerdb/ports.go:47-49` reserves a port and describes the suite. So
+  `files/store.go` has no Postgres coverage at all. Mitigated here by the fact
+  that files' two helpers were already `*string`, making this a pure rename — but
+  nothing else should go into that file until the suite exists.
+- **Size:** ~90 lines removed, plus the "which copy did I fix" question.
+
+### B6. `migrate`: singular API as one-liners over the plural `[x]`
+
+`Apply` (`migrate/migrate.go:378-406`) and `ApplyAll` (`:211-227`) had the
 same body modulo `Up` vs `UpAll`; `Require`/`RequireAll` likewise, identical
-error string included. Both halves have callers, so keep both — but the
-singular forms should delegate:
+error string included. Both halves have callers, so both stayed — the singular
+forms now delegate:
 `Apply(fsys, opt) → ApplyAll([]Source{{FS: fsys, Dir: opt.Dir, Table: opt.Table}}, opt)`.
 
-- **Also:** `migrate.Version` (`:358-376`) has zero callers anywhere — delete.
-- **Size:** ~90 lines. **Risk:** low.
+- **The message changed, deliberately.** `PendingAll` runs every path through
+  `label` (`:270-279`), which prefixes it with `Source.who()` — the literal word
+  `migrations` for a set with no name. So `Require`'s refusal now reads
+  `...starting with migrations 00001_create.sql` and `Apply`'s failure gains a
+  `migrations: ` wrapper. Accepted rather than worked around: it is the plural
+  form's behaviour arriving in the singular, and contorting `label` to drop the
+  prefix would leak into `UpAll`/`PendingAll` for every unnamed source. Pinned by
+  `migrate/migrate_docker_test.go`'s `TestRequireRefusesUntilApplied`.
+- **Correction:** `migrate.Version` did **not** have zero callers — it had two,
+  both tests (`migrate/options_test.go:55`, `migrate/migrate_docker_test.go:71`).
+  Deleted with them. `make test` would not have caught it, since the second is
+  behind `//go:build docker`; `make lint` would, because `.golangci.yml` sets
+  `build-tags: [docker]`.
+- **Also worth knowing:** `make test-docker` skips this module entirely.
+  `migrate/migrate_docker_test.go` starts no container of its own — it reads
+  `DATABASE_URL` and falls back to port 55440, which under `RIG_DB_ISOLATE` is
+  not this checkout's todo database. The suite must be run by hand with a
+  `DATABASE_URL` from this checkout's own `rig db url`, and a green
+  `make test-docker` says nothing about it.
+- **Size:** ~40 lines, not the 90 estimated; `Version` was 13 of them.
 
-### B7. One safe ticker lifecycle for `presence.Sweeper` / `notify.Engine` `[ ]`
+### B7. One safe ticker lifecycle for `presence.Sweeper` / `notify.Engine` `[x]`
 
-Two hand-rolled ticker-goroutine lifecycles with divergent safety:
-`presence/sweep.go:55-180` is idempotent and close-safe; `notify/engine.go`'s
-`Start` spawns a second goroutine if called twice, and `Close` hangs until ctx
-expiry if `Start` was never called.
+Two hand-rolled ticker-goroutine lifecycles with divergent safety.
+`presence.Sweeper` was idempotent and close-safe; `notify.Engine` was neither.
+Both are now `tick.Ticker` (`runtime/tick/tick.go`), where the four
+properties are asserted once.
 
-- **Fix:** `serve.Ticker{Interval, Nudge, Pass}` with safe
-  `Start`/`Nudge`/`Close(ctx)` in `runtime/serve`, used by both.
-- **Size:** ~120 → ~50 lines, and the `notify.Engine` hazards go away.
-- **Risk:** low-medium.
+- **Three hazards in `notify.Engine`, all demonstrated before they were fixed.**
+  Two Starts panicked with `close of closed channel` — both goroutines
+  `defer close(e.done)`, so `Close` woke both and the second one to return took
+  the process down from a shutdown path. `Close` with no prior `Start` waited on
+  `e.done` until the context expired, which with the documented
+  `app.CloseWithin("notifications", 15*time.Second, …)` is a fifteen-second stall
+  and a reported shutdown failure on every deploy for anyone who left dispatching
+  to the cron task. And `Close`'s `select`/`default`/`close(e.stop)` was an
+  unlocked check-then-act, so two concurrent Closes both took the branch. All
+  three are now `notify/engine_lifecycle_test.go`, a file that did not exist —
+  `notify` had no lifecycle tests at all.
+- **`PassTimeout` defaults to unbounded, and that is the load-bearing decision.**
+  Presence bounds its pass by the interval, which reads as simply better and is
+  not: `Engine.Dispatch` bounds its own pass by `claimTTL`, five minutes against
+  a one-minute interval, so an interval-bounded pass context would cancel every
+  dispatch at sixty seconds — cutting sends mid-flight and cutting the
+  `ReleaseClaims` after them. Presence passes `PassTimeout: interval` explicitly;
+  notify leaves it zero. `TestAZeroPassTimeoutIsUnbounded` is the guard.
+- **The `claiming` gate stayed in notify**, not in the Ticker: `StopClaiming` is a
+  separate `serve.Drain` step, and a ticker that knew about readiness would be a
+  ticker with an opinion about what it is ticking.
+- **Follow-up found, not fixed:** the two modules disagree about a non-positive
+  `Interval`. `presence` reads a negative as "the cron job owns this" and starts
+  nothing; `notify` resolves zero *and* negative to `DefaultInterval`
+  (`engine.go:135`), so an operator who turned notify's goroutine off by writing
+  `-1` got a dispatcher running every minute. `tick.Ticker` supports "never", so
+  the setting is one line away — but adding it would turn a working configuration
+  into a silent no-op for anyone relying on the current answer. Left as it is and
+  pinned by `TestANonPositiveIntervalIsTheDefaultAndNotNever`, so the asymmetry
+  is at least written down.
+- **`presence.Sweeper`'s three lifecycle tests pass unchanged**, which was the
+  acceptance criterion; they are also ported onto `tick.Ticker` so the
+  properties are asserted at the source as well as through the wrapper.
+- **Files:** new `runtime/tick/tick.go` + `tick_test.go`, `presence/sweep.go`,
+  `notify/engine.go`, new `notify/engine_lifecycle_test.go`.
+- **It is a leaf package, and that was not optional.** The first version of this
+  was `runtime/serve/ticker.go`, which put `pgxpool` and `puddle` into `notify`'s
+  and `presence`'s module graphs — `serve` builds the pool, so it imports
+  pgxpool — for the sake of sixty lines of `time.Ticker`. Both go.mod files gained
+  `puddle/v2` and `golang.org/x/sync` as indirects, and `dbx.Pool`'s promise that a
+  module taking one "never imports pgxpool" stopped being true for exactly the two
+  modules it names. `runtime/tick` is a leaf over `context`, `sync` and `time`, the
+  same argument `runtime/outbox` makes for itself, and both go.mod files are back
+  to what they were. No alias was left behind in `serve`: it would have had no
+  caller, and an export with no caller is what this document is for.
 
-### B8. `observe` small items `[ ]`
+### B8. `observe` small items `[x]`
 
-- `ReadLogs` (`observe/logread.go:24-45`) and `ReadSpans`
-  (`observe/spanread.go:58-73`) are the same tail-decode loop; a generic
-  `decodeLines[T](path, max)` removes one.
-- **Doc bug:** `observe/logfile.go:219` says "oldest first" but the function
-  delegates to `ReadLogs`, which is newest-first. Fix the comment.
+- **Doc bug, and the valuable half.** `observe/logfile.go:218` — not `:219` —
+  said `Logs.Read` was "oldest first"; it delegates to `ReadLogs`, which ends in
+  `slices.Reverse` and whose own doc says newest first. Every other comment in
+  the package agreed with newest-first, so this was the single outlier. The
+  behaviour was already pinned sideways by two tests that index `recs[1]` for the
+  line written first, but neither was *named* for it — so `Logs.Read` now has
+  `TestLogsReadIsNewestFirst`, which is what makes the next reader who notices
+  the disagreement fix the comment rather than the code.
+- `ReadLogs` and `ReadSpans` were the same tail-decode loop.
+  `decodeLines[T](path, max)` now lives beside `tailLines` in
+  `observe/spanread.go`; `ReadSpans` is a one-liner and `ReadLogs` is the
+  generic plus its TraceID backfill and the reverse. `observe` stays
+  dependency-free — nothing here needed a rig import.
+- **Size:** ~10 lines. The generic is the smaller half.
 
 ---
 
@@ -422,7 +734,7 @@ Zero references found in code, tests, docs, or generated templates:
 
 | Symbol | Location | Note |
 |---|---|---|
-| `migrate.Version` | `migrate/migrate.go:358` | |
+| ~~`migrate.Version`~~ | `migrate/migrate.go:358` | Done under B6 — and it had two test callers, not zero. |
 | `ir.Resource.IsPublic` | `pkg/ir/api.go:660` | or make generators use it |
 | `electric.Where.NotEq` | `runtime/electric/where.go:26` | |
 | `password.AtLeast` | `auth/password/password.go` | |
@@ -431,19 +743,30 @@ Zero references found in code, tests, docs, or generated templates:
 | `(*files.File).Uploaded` | `files/files.go:102` | |
 | `(*blob.Memory).SetClock` | `files/blob/memory.go:43` | |
 | `(*apikey.Key).Allows` | `auth/apikey/apikey.go:98` | ⚠ CIDR check — may be a **missing call**, not dead code. Decide, don't just delete. |
-| `var _ = dbx.IsNoRows` | `notify/dispatch.go:524` | plus the now-unused import |
+| ~~`var _ = dbx.IsNoRows`~~ | `notify/dispatch.go:513` | Done under B1 — the `dbx` import went with it, which is what the blank was papering over. |
 
 ---
 
 ## Suggested parallel batches
 
-Tasks in one batch touch disjoint files and can run as separate workspaces:
+**All of section B landed on one branch**, in this order: B6, B8, B4, the auth
+test net, B7, B2, B5, B3, B1. Two things made that possible and are worth keeping
+if the same is attempted for another section. Nothing in B reached a generator, so
+`make examples` reported the generated code unchanged throughout — the moment that
+stops being true, goldens and examples enter the branch and it stops being one
+branch. And where two items wanted the same file, one of them kept a one-line
+wrapper as the boundary: `notify`'s `store.conn(ctx)` over `dbx.ConnFor` is why B5
+never touched `dispatch.go`, which is B1's.
+
+What follows describes the rest.
 
 1. **A1+A2+A3** (SDK generator unification — one workspace, they overlap)
-2. **B2** (HTTP scaffold + envelope) · **B3** (cache.Keyed) · **B6** (migrate) · **C1** (throttle) · **D1-D5** (all of ts/) · **E1+E2**
+2. **C1** (throttle) · **D1-D5** (all of ts/) · **E1+E2**
 3. **A4** and **A5** each touch goldens + examples broadly — run them after
-   batch 1 lands, not alongside.
-4. **B1** (outbox) and **B4** (memory stores) are decisions before they are
-   refactors — do them last, one at a time.
-5. **F** (dead code) conflicts with almost everything by nature of touching
-   many modules lightly — do it first or last, not in the middle.
+   batch 1 lands, not alongside. A5's HTTP parameter parsers should go into the
+   `runtime/httpx` that B2 created rather than a new `runtime/httparg`; one
+   package for one job.
+4. **F** (dead code) conflicts with almost everything by nature of touching
+   many modules lightly — do it first or last, not in the middle. Two of its rows
+   are already struck: `migrate.Version` under B6 and the `dbx.IsNoRows` blank
+   under B1.

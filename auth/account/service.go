@@ -29,6 +29,8 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/simonjanss/rig/runtime/outbox"
+
 	"github.com/simonjanss/rig/auth/authlog"
 	"github.com/simonjanss/rig/auth/password"
 	"github.com/simonjanss/rig/auth/session"
@@ -157,9 +159,11 @@ type Service struct {
 
 	mailMu       sync.Mutex
 	mailClaiming bool
-	// mailHeld are the leases this process currently owns, so a clean shutdown
-	// can give them back rather than leaving them to expire.
-	mailHeld map[uuid.UUID]bool
+	// mailLeases are the claims this process currently owns, so a clean shutdown
+	// can give them back rather than leaving them to expire. Its own lock, not
+	// mailMu: whether this service is still claiming and what it is holding are
+	// never read together.
+	mailLeases outbox.Leases
 }
 
 // New builds a service.
@@ -219,7 +223,6 @@ func New(cfg Config) (*Service, error) {
 		mail:          mail,
 		mailClaimedBy: uuid.New(),
 		mailClaiming:  true,
-		mailHeld:      make(map[uuid.UUID]bool),
 	}
 	if s.sleep == nil {
 		s.sleep = sleepUntil

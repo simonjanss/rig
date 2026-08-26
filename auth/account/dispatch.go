@@ -6,6 +6,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
+	"github.com/simonjanss/rig/runtime/outbox"
 )
 
 // The sending half, and it is four short transactions rather than notify's three.
@@ -265,23 +267,11 @@ func (s *Service) skipMail(ctx context.Context, d Delivery, why error, report *M
 // pass of a hundred rows and meeting all hundred again at the same instant, on
 // every replica at once.
 func (s *Service) nextMailAttemptAt(attempts int, asked time.Duration) time.Time {
-	wait := asked
-	if wait <= 0 {
-		wait = s.mail.BackoffBase
-		for range attempts - 1 {
-			// Tested before doubling rather than clamped after, so a long
-			// schedule cannot overflow past the ceiling on its way to being
-			// clamped back under it.
-			if wait >= s.mail.BackoffCap {
-				break
-			}
-			wait *= 2
-		}
-		wait = min(wait, s.mail.BackoffCap)
-	}
-	// The +1 makes the bound positive for every wait, including one short enough
-	// that half of it truncates to zero.
-	return s.now().Add(wait + time.Duration(s.mail.Jitter(int64(wait/2)+1)))
+	return outbox.Backoff{
+		Base:   s.mail.BackoffBase,
+		Cap:    s.mail.BackoffCap,
+		Jitter: s.mail.Jitter,
+	}.Next(s.now(), attempts, asked)
 }
 
 // mailBudgetFor reports whether the pass has room for one whole send.
@@ -292,11 +282,7 @@ func (s *Service) nextMailAttemptAt(attempts int, asked time.Duration) time.Time
 // the case [New] refuses a configuration over. So a pass ends with the send
 // timeout unspent, and that is the point.
 func (s *Service) mailBudgetFor(pass context.Context) bool {
-	if pass.Err() != nil {
-		return false
-	}
-	deadline, ok := pass.Deadline()
-	return !ok || time.Until(deadline) >= s.mail.SendTimeout
+	return outbox.RoomFor(pass, s.mail.SendTimeout)
 }
 
 // StopClaimingMail stops this service taking new deliveries, for a shutdown that
@@ -331,35 +317,34 @@ func (s *Service) ReleaseMailClaims(ctx context.Context) (int, error) {
 	if err != nil {
 		return 0, fmt.Errorf("account: release mail claims: %w", err)
 	}
-	s.mailMu.Lock()
-	clear(s.mailHeld)
-	s.mailMu.Unlock()
+	// Clear rather than dropping the ids a pass tracked, because the statement
+	// above is scoped by claimant: it released every row this process holds,
+	// including any a concurrent pass claimed. So nothing is held afterwards and
+	// there is nothing for another pass to lose. notify's is scoped by id, and
+	// there Clear would be wrong.
+	s.mailLeases.Clear()
 	return n, nil
 }
 
 // The lease bookkeeping a clean shutdown reads.
 
-func (s *Service) holdMail(ds []Delivery) {
-	s.mailMu.Lock()
-	defer s.mailMu.Unlock()
-	for _, d := range ds {
-		s.mailHeld[d.ID] = true
+func (s *Service) holdMail(ds []Delivery) { s.mailLeases.Hold(idsOfDeliveries(ds)...) }
+
+// idsOfDeliveries is the identifiers a pass claimed, for the lease map.
+func idsOfDeliveries(ds []Delivery) []uuid.UUID {
+	out := make([]uuid.UUID, len(ds))
+	for i, d := range ds {
+		out[i] = d.ID
 	}
+	return out
 }
 
-func (s *Service) forgetMail(id uuid.UUID) {
-	s.mailMu.Lock()
-	defer s.mailMu.Unlock()
-	delete(s.mailHeld, id)
-}
+func (s *Service) forgetMail(id uuid.UUID) { s.mailLeases.Drop(id) }
 
 // releaseMail hands back whatever a pass still holds on its way out, so a lease
 // is given back late rather than left to expire.
 func (s *Service) releaseMail(ctx context.Context, report *MailReport) {
-	s.mailMu.Lock()
-	held := len(s.mailHeld)
-	s.mailMu.Unlock()
-	if held == 0 {
+	if s.mailLeases.Len() == 0 {
 		return
 	}
 

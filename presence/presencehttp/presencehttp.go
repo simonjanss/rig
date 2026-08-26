@@ -28,13 +28,13 @@
 package presencehttp
 
 import (
-	"encoding/json"
 	"net/http"
 	"time"
 
 	"github.com/google/uuid"
 
 	"github.com/simonjanss/rig/presence"
+	"github.com/simonjanss/rig/runtime/httpx"
 	"github.com/simonjanss/rig/runtime/rigerr"
 	"github.com/simonjanss/rig/runtime/tenancy"
 )
@@ -51,7 +51,7 @@ const DefaultBasePath = "/presence"
 type Handler struct {
 	svc      *presence.Service
 	basePath string
-	claims   func(*http.Request) (tenancy.Claims, error)
+	caller   httpx.Caller
 	fail     func(http.ResponseWriter, *http.Request, error)
 }
 
@@ -69,9 +69,11 @@ type Options struct {
 	// answer to the one question a tenant boundary rests on.
 	Claims func(*http.Request) (tenancy.Claims, error)
 
-	// Fail writes an error response. Taken rather than assumed so that a
-	// presence route's refusal looks like every other route's in the same
-	// application.
+	// Fail writes an error response. Nil means [httpx.Fail].
+	//
+	// Taken rather than assumed so that a presence route's refusal carries the
+	// request id and lands in the same log line as every other route's. The shape
+	// is the same either way now: both write [httpx.Error].
 	Fail func(http.ResponseWriter, *http.Request, error)
 }
 
@@ -87,13 +89,14 @@ func New(svc *presence.Service, opt Options) *Handler {
 		// misconfiguration it is.
 		panic("presencehttp.New: Claims is required")
 	}
-	h := &Handler{svc: svc, basePath: opt.BasePath, claims: opt.Claims, fail: opt.Fail}
+	h := &Handler{svc: svc, basePath: opt.BasePath, fail: opt.Fail}
 	if h.basePath == "" {
 		h.basePath = DefaultBasePath
 	}
 	if h.fail == nil {
-		h.fail = writeError
+		h.fail = httpx.Fail
 	}
+	h.caller = httpx.Caller{Of: opt.Claims, Fail: h.fail}
 	return h
 }
 
@@ -111,16 +114,24 @@ func (h *Handler) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("GET "+h.basePath, h.with(h.here))
 }
 
-// with establishes the caller and hands the request on.
+// with establishes the caller and hands the request on, claims and all.
+//
+// The claims arrive as an argument as well as on the context because
+// [presence.Service] takes them explicitly — it never reads a context for
+// authority, which is the one way presence is stricter than the generated
+// repositories. Read back with [tenancy.FromContext] rather than passed straight
+// through, so there is one source and it is the validated one: a project's Claims
+// function returning a well-formed struct with no tenant in it is refused here
+// rather than written into a row.
 func (h *Handler) with(next func(http.ResponseWriter, *http.Request, tenancy.Claims)) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		claims, err := h.claims(r)
+	return h.caller.Wrap(func(w http.ResponseWriter, r *http.Request) {
+		claims, err := tenancy.FromContext(r.Context())
 		if err != nil {
 			h.fail(w, r, err)
 			return
 		}
-		next(w, r.WithContext(tenancy.NewContext(r.Context(), claims)), claims)
-	}
+		next(w, r, claims)
+	})
 }
 
 // Beat is what a browser sends on every heartbeat.
@@ -189,7 +200,7 @@ type Person struct {
 
 func (h *Handler) beat(w http.ResponseWriter, r *http.Request, claims tenancy.Claims) {
 	var body Beat
-	if err := decode(r, &body); err != nil {
+	if err := httpx.Decode(r, maxBodyBytes, &body); err != nil {
 		h.fail(w, r, err)
 		return
 	}
@@ -215,7 +226,7 @@ func (h *Handler) beat(w http.ResponseWriter, r *http.Request, claims tenancy.Cl
 		return
 	}
 
-	writeJSON(w, http.StatusOK, Beaten{
+	httpx.WriteJSON(w, http.StatusOK, Beaten{
 		ID:               p.ID,
 		SeenAt:           p.SeenAt,
 		TTLSeconds:       int(h.svc.TTL().Seconds()),
@@ -234,7 +245,7 @@ type leaveBody struct {
 
 func (h *Handler) leave(w http.ResponseWriter, r *http.Request, claims tenancy.Claims) {
 	var body leaveBody
-	if err := decode(r, &body); err != nil {
+	if err := httpx.Decode(r, maxBodyBytes, &body); err != nil {
 		h.fail(w, r, err)
 		return
 	}
@@ -274,7 +285,7 @@ func (h *Handler) here(w http.ResponseWriter, r *http.Request, claims tenancy.Cl
 	for _, p := range rows {
 		people = append(people, personOf(p))
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{
 		"data":             people,
 		"ttlSeconds":       int(h.svc.TTL().Seconds()),
 		"heartbeatSeconds": int(h.svc.Heartbeat().Seconds()),
@@ -296,20 +307,14 @@ func personOf(p *presence.Presence) Person {
 	}
 }
 
-// decode reads a JSON body, refusing a field nothing here declares.
+// maxBodyBytes bounds a heartbeat body.
 //
-// DisallowUnknownFields for the reason the generated decoder uses it: a client
-// that sent `accountId` believing it meant something should be told, not
-// silently ignored — the field it was reaching for is the one this package
-// exists to make unreachable.
-func decode(r *http.Request, into any) error {
-	dec := json.NewDecoder(r.Body)
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(into); err != nil {
-		return rigerr.BadRequest("the request body is not the shape this route takes: %s", err)
-	}
-	return nil
-}
+// Small, because these two bodies are a session key and five short strings, and
+// because until this was [httpx.Decode] there was no limit here at all — the only
+// route in rig that would read an unbounded body. Authenticated, so it was never
+// an anonymous hole, but a signed-in client streaming forever into a heartbeat is
+// not a threat model worth having.
+const maxBodyBytes = 1 << 16
 
 func derefUUID(p *uuid.UUID) uuid.UUID {
 	if p == nil {
@@ -323,22 +328,4 @@ func nilUUID(id uuid.UUID) *uuid.UUID {
 		return nil
 	}
 	return &id
-}
-
-func writeJSON(w http.ResponseWriter, status int, body any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(body)
-}
-
-// writeError is the fallback for a project that did not supply one.
-//
-// Deliberately plain. A project with a generated server passes that server's
-// error writer instead, so a presence route's failure looks like every other
-// route's; this exists so the handler is usable on its own.
-func writeError(w http.ResponseWriter, _ *http.Request, err error) {
-	writeJSON(w, rigerr.StatusOf(err), map[string]any{"error": map[string]any{
-		"code":    string(rigerr.CodeOf(err)),
-		"message": err.Error(),
-	}})
 }

@@ -1,8 +1,9 @@
 package notify
 
 import (
-	"errors"
 	"time"
+
+	"github.com/simonjanss/rig/runtime/outbox"
 )
 
 // What a Sender can say about a failure beyond the fact of it.
@@ -42,12 +43,7 @@ import (
 // a non-nil wrapper from a nil error would mark every successful send as a
 // permanent failure. Any helper here that can be handed a nil has to say what it
 // does with one.
-func Permanent(err error) error {
-	if err == nil {
-		return nil
-	}
-	return &permanentError{err: err}
-}
+func Permanent(err error) error { return outbox.Permanent(err) }
 
 // RetryAfter wraps an error with the earliest a retry is worth making, which is
 // most often a 429 or a 503 carrying a Retry-After header.
@@ -65,24 +61,13 @@ func Permanent(err error) error {
 // RetryAfter(nil, d) is nil, for the reason [Permanent] gives. A d of zero or
 // less is a plain wrap, so the ordinary backoff applies — a provider that sent a
 // Retry-After of 0 is saying "now", and "now" for a queue is "next pass".
-func RetryAfter(err error, d time.Duration) error {
-	if err == nil {
-		return nil
-	}
-	if d <= 0 {
-		return err
-	}
-	return &retryAfterError{err: err, after: d}
-}
+func RetryAfter(err error, d time.Duration) error { return outbox.RetryAfter(err, d) }
 
 // IsPermanent reports whether err asks not to be retried.
 //
 // It reads through wrapping, so an error a [Sender] passed [Permanent] and then
 // annotated with fmt.Errorf still answers true.
-func IsPermanent(err error) bool {
-	var p *permanentError
-	return errors.As(err, &p)
-}
+func IsPermanent(err error) bool { return outbox.IsPermanent(err) }
 
 // RetryAfterOf is the interval err asks to be retried after, and whether it
 // asked at all.
@@ -92,31 +77,17 @@ func IsPermanent(err error) bool {
 // both be honoured, and refusing to retry is the stronger of the two. Reading
 // them in the other order would let a Sender that wrapped both keep a delivery
 // alive that it had already said was hopeless.
-func RetryAfterOf(err error) (time.Duration, bool) {
-	if IsPermanent(err) {
-		return 0, false
-	}
-	var r *retryAfterError
-	if errors.As(err, &r) {
-		return r.after, true
-	}
-	return 0, false
-}
+func RetryAfterOf(err error) (time.Duration, bool) { return outbox.RetryAfterOf(err) }
 
-// The two wrappers are unexported, and there is nothing to read off them that
-// the four functions above do not answer. Both carry Unwrap, so errors.Is and
-// errors.As reach the provider's own error through them: a Sender that wraps a
-// sentinel loses nothing by classifying it.
-
-type permanentError struct{ err error }
-
-func (e *permanentError) Error() string { return e.err.Error() }
-func (e *permanentError) Unwrap() error { return e.err }
-
-type retryAfterError struct {
-	err   error
-	after time.Duration
-}
-
-func (e *retryAfterError) Error() string { return e.err.Error() }
-func (e *retryAfterError) Unwrap() error { return e.err }
+// The wrappers themselves live in [runtime/outbox], shared with auth's mail
+// outbox, and there is nothing to read off them that the four functions above do
+// not answer. Both carry Unwrap, so errors.Is and errors.As reach the provider's
+// own error through them: a Sender that wraps a sentinel loses nothing by
+// classifying it.
+//
+// One consequence of sharing them, worth stating rather than discovering: the two
+// queues now speak one vocabulary, so `notify.IsPermanent` answers true for an
+// error `account.PermanentMailError` wrapped, and the reverse. It used to answer
+// false both ways. Nothing depends on either answer, and true is arguably the
+// more correct one — a sender that reached for *a* permanent-refusal helper meant
+// permanent refusal.

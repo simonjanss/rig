@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/simonjanss/rig/runtime/cache"
-	"github.com/simonjanss/rig/runtime/dbx"
 )
 
 // KeyTopic is the name this package's invalidations travel under.
@@ -26,10 +25,7 @@ const KeyTopic = "apikey"
 // lifetime to run out.
 //
 // A nil *KeyCache is usable and caches nothing.
-type KeyCache struct {
-	m     *cache.Map[*Key]
-	topic *cache.Topic
-}
+type KeyCache struct{ k *cache.Keyed[*Key] }
 
 // KeyCacheConfig is what a [KeyCache] needs beyond its bus.
 type KeyCacheConfig struct {
@@ -49,13 +45,14 @@ func NewKeyCache(bus *cache.Bus, cfg KeyCacheConfig) *KeyCache {
 	if bus == nil {
 		return nil
 	}
-	m := cache.NewMap[*Key](cache.MapConfig{
+	return &KeyCache{k: cache.NewKeyed(cache.KeyedConfig[*Key]{
+		Bus:        bus,
+		Topic:      KeyTopic,
 		TTL:        cfg.TTL,
 		MaxEntries: cfg.MaxEntries,
-		Live:       bus.Live,
 		Now:        cfg.Now,
-	})
-	return &KeyCache{m: m, topic: bus.Serve(KeyTopic, m)}
+		Clone:      (*Key).clone,
+	})}
 }
 
 // errNoKey is how a miss reaches [cache.Map.Load] without being stored.
@@ -79,7 +76,7 @@ var errNoKey = errors.New("apikey: no such key")
 func (c *KeyCache) load(keyID string, fn func() (*Key, error)) (*Key, error) {
 	// [errNoKey] rather than a nil key on both paths, so that a caller has one
 	// shape to handle and a nil cache is not a second contract.
-	read := func() (*Key, error) {
+	return c.keyed().Load(keyID, func() (*Key, error) {
 		k, err := fn()
 		switch {
 		case err != nil:
@@ -88,23 +85,22 @@ func (c *KeyCache) load(keyID string, fn func() (*Key, error)) (*Key, error) {
 			return nil, errNoKey
 		}
 		return k, nil
-	}
-	if c == nil {
-		return read()
-	}
-	k, err := c.m.Load(keyID, read)
-	if err != nil {
-		return nil, err
-	}
-	return k.clone(), nil
+	})
 }
 
-// forget publishes an invalidation on the transaction that changed the key.
-func (c *KeyCache) forget(ctx context.Context, db dbx.Conn, keyID string) error {
+// keyed is the cache, or nil for a manager built without one.
+func (c *KeyCache) keyed() *cache.Keyed[*Key] {
 	if c == nil {
 		return nil
 	}
-	return c.topic.Forget(ctx, db, keyID)
+	return c.k
+}
+
+// forgetOrDrop publishes on the transaction already on ctx, or drops locally when
+// there is none — a store that is not Postgres has no channel to publish on and
+// no other replica to reach.
+func (c *KeyCache) forgetOrDrop(ctx context.Context, keyID string) error {
+	return c.keyed().ForgetOrDrop(ctx, keyID)
 }
 
 // drop forgets in this process only.
@@ -112,12 +108,7 @@ func (c *KeyCache) forget(ctx context.Context, db dbx.Conn, keyID string) error 
 // Two callers. A store that is not Postgres has no transaction to publish on
 // and no other replica to tell. And a last-used timestamp that was just written
 // is a change no other replica needs to hear about — see [Manager.Verify].
-func (c *KeyCache) drop(keyID string) {
-	if c == nil {
-		return
-	}
-	c.m.Forget(keyID)
-}
+func (c *KeyCache) drop(keyID string) { c.keyed().Drop(keyID) }
 
 // clone copies a key deeply enough to hand to one caller.
 //
@@ -175,10 +166,7 @@ const FailureTopic = "apikeyfail"
 // what it stops an unauthenticated caller from driving.
 //
 // A nil *FailureCache is usable and caches nothing.
-type FailureCache struct {
-	m     *cache.Map[struct{}]
-	topic *cache.Topic
-}
+type FailureCache struct{ k *cache.Keyed[struct{}] }
 
 // FailureCacheConfig is what a [FailureCache] needs beyond its bus.
 type FailureCacheConfig struct {
@@ -198,15 +186,16 @@ func NewFailureCache(bus *cache.Bus, cfg FailureCacheConfig) *FailureCache {
 	if bus == nil {
 		return nil
 	}
-	m := cache.NewMap[struct{}](cache.MapConfig{
+	// A process that lost the channel counts rows again rather than waving
+	// through a key somebody is grinding — see [cache.Keyed]. No Clone: there is
+	// nothing in a struct{} a caller could write through.
+	return &FailureCache{k: cache.NewKeyed(cache.KeyedConfig[struct{}]{
+		Bus:        bus,
+		Topic:      FailureTopic,
 		TTL:        cfg.TTL,
 		MaxEntries: cfg.MaxEntries,
-		// So that a process which lost the channel counts rows again rather
-		// than waving through a key somebody is grinding.
-		Live: bus.Live,
-		Now:  cfg.Now,
-	})
-	return &FailureCache{m: m, topic: bus.Serve(FailureTopic, m)}
+		Now:        cfg.Now,
+	})}
 }
 
 // errHasFailures is how a non-zero count reaches [cache.Map.Load] without being
@@ -223,7 +212,9 @@ var errHasFailures = errors.New("apikey: failures recorded")
 // count reports how many the limiter found. It is not called at all on a hit,
 // which is the point of the type.
 func (c *FailureCache) clean(keyID string, count func() (int, error)) (bool, error) {
-	read := func() (struct{}, error) {
+	// One path rather than two: [cache.Keyed.Load] calls through on a nil
+	// receiver, so the sentinel is translated once instead of once per branch.
+	_, err := c.keyed().Load(keyID, func() (struct{}, error) {
 		n, err := count()
 		switch {
 		case err != nil:
@@ -232,19 +223,7 @@ func (c *FailureCache) clean(keyID string, count func() (int, error)) (bool, err
 			return struct{}{}, errHasFailures
 		}
 		return struct{}{}, nil
-	}
-	if c == nil {
-		_, err := read()
-		switch {
-		case errors.Is(err, errHasFailures):
-			return false, nil
-		case err != nil:
-			return false, err
-		}
-		return true, nil
-	}
-
-	_, err := c.m.Load(keyID, read)
+	})
 	switch {
 	case errors.Is(err, errHasFailures):
 		return false, nil
@@ -254,17 +233,18 @@ func (c *FailureCache) clean(keyID string, count func() (int, error)) (bool, err
 	return true, nil
 }
 
-// forget publishes an invalidation for a key whose count has just moved.
-//
-// Published *after* the row it describes has been written, never before: a
-// replica that re-read in between would find the same empty window and hold it
-// for a full lifetime, which is the one ordering that turns this from a cache
-// into a hole in the limit.
-func (c *FailureCache) forget(ctx context.Context, db dbx.Conn, keyID string) error {
+// keyed is the cache, or nil for a manager built without one.
+func (c *FailureCache) keyed() *cache.Keyed[struct{}] {
 	if c == nil {
 		return nil
 	}
-	return c.topic.Forget(ctx, db, keyID)
+	return c.k
+}
+
+// forgetOrDrop publishes on the transaction already on ctx, or drops locally when
+// there is none.
+func (c *FailureCache) forgetOrDrop(ctx context.Context, keyID string) error {
+	return c.keyed().ForgetOrDrop(ctx, keyID)
 }
 
 // drop forgets in this process only.
@@ -272,9 +252,4 @@ func (c *FailureCache) forget(ctx context.Context, db dbx.Conn, keyID string) er
 // Two callers. A store that is not Postgres has no transaction to publish on and
 // no other replica to tell. And a key id that names no row is one no other
 // replica is holding an answer for — see [Manager.recordUnknownFailure].
-func (c *FailureCache) drop(keyID string) {
-	if c == nil {
-		return
-	}
-	c.m.Forget(keyID)
-}
+func (c *FailureCache) drop(keyID string) { c.keyed().Drop(keyID) }

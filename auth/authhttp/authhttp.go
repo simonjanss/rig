@@ -13,9 +13,7 @@ package authhttp
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
-	"io"
 	"net/http"
 	"net/netip"
 	"strings"
@@ -28,9 +26,9 @@ import (
 	"github.com/simonjanss/rig/auth/session"
 	"github.com/simonjanss/rig/runtime/authwire"
 	"github.com/simonjanss/rig/runtime/clientip"
+	"github.com/simonjanss/rig/runtime/httpx"
 	"github.com/simonjanss/rig/runtime/rigerr"
 	"github.com/simonjanss/rig/runtime/tenancy"
-	"github.com/simonjanss/rig/runtime/throttle"
 )
 
 // Permissions the endpoints check.
@@ -478,56 +476,30 @@ func (h *Handler) addrString(r *http.Request) string {
 	return clientip.String(r, h.cfg.TrustedProxies)
 }
 
-// decode reads a JSON body.
+// decode reads a JSON body, bounded by [maxBodyBytes] rather than by
+// [httpx.MaxBodyBytes]: login is unauthenticated, and there the limit is the only
+// thing between a stranger and the server's memory.
 func decode(r *http.Request, into any) error {
-	dec := json.NewDecoder(io.LimitReader(r.Body, maxBodyBytes))
-	dec.DisallowUnknownFields()
-
-	if err := dec.Decode(into); err != nil {
-		if errors.Is(err, io.EOF) {
-			return rigerr.BadRequest("the request body is empty")
-		}
-		return rigerr.BadRequest("cannot read the request body: %v", err)
-	}
-	return nil
+	return httpx.Decode(r, maxBodyBytes, into)
 }
 
+// fail writes the refusal, in the one envelope every rig route answers with.
+//
+// This was a hand-written copy of the generated server's DefaultErrorMapper —
+// redaction, Retry-After and all — and it had drifted: it wrote a
+// `map[string]string`, so it dropped the per-field detail a validation failure
+// carries. A client could not highlight the field somebody got wrong on
+// /auth/register; it got prose and had to guess. [httpx.WriteError] carries it.
+//
+// The request id is absent rather than empty here, because these handlers have no
+// request context to read one from. A project with a generated server supplies
+// OnError and gets both.
 func (h *Handler) fail(w http.ResponseWriter, r *http.Request, err error) {
 	if h.cfg.OnError != nil {
 		h.cfg.OnError(w, r, err)
 		return
 	}
-
-	code := rigerr.CodeOf(err)
-	message := err.Error()
-
-	var typed *rigerr.Error
-	if errors.As(err, &typed) {
-		message = typed.Message
-	}
-	if code == rigerr.CodeInternal {
-		// An internal failure's detail is exactly what leaks a table name.
-		message = "something went wrong"
-	}
-
-	// A 429 with no Retry-After leaves a client with nothing to do but guess,
-	// and clients that guess retry immediately.
-	if refusal, ok := throttle.RefusalOf(err); ok {
-		refusal.Decision().SetHeaders(w.Header())
-	}
-
-	writeJSON(w, code.HTTPStatus(), map[string]string{
-		"code": string(code), "message": message,
-	})
-}
-
-func writeJSON(w http.ResponseWriter, status int, body any) {
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	w.WriteHeader(status)
-	if body == nil {
-		return
-	}
-	_ = json.NewEncoder(w).Encode(body)
+	httpx.WriteError(w, "", err)
 }
 
 // clientOf reads the client kind a caller declared.

@@ -59,8 +59,8 @@ func (l *Log) Write(ctx context.Context, e authlog.Entry) {
 			 email_address, api_key_ref, ip_address, user_agent, token_root_id, detail)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
 		id, e.TenantID, e.At, e.Event, string(e.Outcome), e.AccountID, e.APIKeyID,
-		nullable(e.EmailAddress), nullable(e.APIKeyRef), addrValue(e.IPAddress),
-		nullable(e.UserAgent), e.TokenRootID, e.Detail)
+		dbx.Null(e.EmailAddress), dbx.Null(e.APIKeyRef), addrValue(e.IPAddress),
+		dbx.Null(e.UserAgent), e.TokenRootID, e.Detail)
 }
 
 // Read implements [authlog.Reader].
@@ -78,7 +78,7 @@ func (l *Log) Write(ctx context.Context, e authlog.Entry) {
 // so it is not there. Add it when a real log argues for it.
 func (l *Log) Read(ctx context.Context, q authlog.Query) ([]authlog.Record, int64, error) {
 	where, args := logFilters(q)
-	db := conn(ctx, l.db)
+	db := dbx.ConnFor(ctx, l.db)
 
 	var total int64
 	if err := db.QueryRow(ctx,
@@ -122,10 +122,10 @@ func (l *Log) Read(ctx context.Context, q authlog.Query) ([]authlog.Record, int6
 		}
 
 		r.Outcome = authlog.Outcome(outcome)
-		r.EmailAddress = derefString(email)
-		r.APIKeyRef = derefString(keyRef)
+		r.EmailAddress = dbx.Deref(email)
+		r.APIKeyRef = dbx.Deref(keyRef)
 		r.IPAddress = addrString(ip)
-		r.UserAgent = derefString(userAgent)
+		r.UserAgent = dbx.Deref(userAgent)
 		// UTC out of the database, the same rule every other instant follows —
 		// and this one is rendered into JSON, so a process in another zone would
 		// otherwise report the whole trail shifted.
@@ -183,7 +183,7 @@ const pruneBatch = 5000
 func (l *Log) Prune(ctx context.Context, olderThan time.Time) (int, error) {
 	total := 0
 	for {
-		tag, err := conn(ctx, l.db).Exec(ctx, `
+		tag, err := dbx.ConnFor(ctx, l.db).Exec(ctx, `
 			DELETE FROM rig_auth_log
 			 WHERE id IN (
 			       SELECT id FROM rig_auth_log
@@ -206,12 +206,4 @@ func (l *Log) Prune(ctx context.Context, olderThan time.Time) (int, error) {
 			return total, err
 		}
 	}
-}
-
-// derefString reads back a column that is NULL when the value was unknown.
-func derefString(s *string) string {
-	if s == nil {
-		return ""
-	}
-	return *s
 }

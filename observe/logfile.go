@@ -215,7 +215,7 @@ func (l *Logs) Handler() slog.Handler {
 	return &logHandler{f: l.f, level: l.cfg.Level}
 }
 
-// Read is the last max lines of this sink's file, oldest first. It is what the
+// Read is the last max lines of this sink's file, newest first. It is what the
 // monitoring page calls, and it is [ReadLogs] over the path this sink is
 // writing.
 func (l *Logs) Read(max int) ([]LogRecord, error) {

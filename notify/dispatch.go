@@ -8,7 +8,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/simonjanss/rig/runtime/dbx"
+	"github.com/simonjanss/rig/runtime/outbox"
 )
 
 // The delivery half, and most of it is about concurrency rather than about mail.
@@ -267,11 +267,7 @@ func (e *Engine) Dispatch(ctx context.Context) (DispatchReport, error) {
 // the case [NewEngine] refuses a configuration over. So a pass ends with the
 // send timeout unspent, and that is the point.
 func (e *Engine) budgetFor(pass context.Context) bool {
-	if pass.Err() != nil {
-		return false
-	}
-	deadline, ok := pass.Deadline()
-	return !ok || time.Until(deadline) >= e.sendTimeout
+	return outbox.RoomFor(pass, e.sendTimeout)
 }
 
 // abandon gives back a row the pass never reached: the claim and the attempt
@@ -292,10 +288,7 @@ func (e *Engine) abandon(ctx context.Context, abandoned []Delivery, report *Disp
 		return nil
 	}
 
-	ids := make([]uuid.UUID, 0, len(abandoned))
-	for _, d := range abandoned {
-		ids = append(ids, d.ID)
-	}
+	ids := idsOf(abandoned)
 
 	const q = `UPDATE ` + DeliveryTable + ` SET
 			attempts = greatest(attempts - 1, 0), claimed_at = NULL, updated_at = now()
@@ -465,23 +458,11 @@ func (e *Engine) mark(ctx context.Context, m Message, sendErr error, report *Dis
 // Adding is what keeps it a boundary — the wait is never shorter than what was
 // asked for, only later.
 func (e *Engine) nextAttemptAt(attempts int, asked time.Duration) time.Time {
-	wait := asked
-	if wait <= 0 {
-		wait = e.backoffBase
-		for range attempts - 1 {
-			// Tested before doubling rather than clamped after, so a long
-			// schedule cannot overflow past the ceiling on its way to being
-			// clamped back under it.
-			if wait >= e.backoffCap {
-				break
-			}
-			wait *= 2
-		}
-		wait = min(wait, e.backoffCap)
-	}
-	// The +1 makes the bound positive for every wait, including one short enough
-	// that half of it truncates to zero.
-	return e.cfg.now().Add(wait + time.Duration(e.jitter(int64(wait/2)+1)))
+	return outbox.Backoff{
+		Base:   e.backoffBase,
+		Cap:    e.backoffCap,
+		Jitter: e.jitter,
+	}.Next(e.cfg.now(), attempts, asked)
 }
 
 // ReleaseClaims gives back every lease this process still holds.
@@ -496,7 +477,7 @@ func (e *Engine) nextAttemptAt(attempts int, asked time.Duration) time.Time {
 // retry after it is the at-least-once case again, which is the same case and not
 // a new one.
 func (e *Engine) ReleaseClaims(ctx context.Context) (int, error) {
-	held := e.heldIDs()
+	held := e.leases.IDs()
 	if len(held) == 0 {
 		return 0, nil
 	}
@@ -507,7 +488,14 @@ func (e *Engine) ReleaseClaims(ctx context.Context) (int, error) {
 	if err != nil {
 		return 0, fmt.Errorf("notify: release claims: %w", err)
 	}
-	e.forgetAll()
+	// Drop what this call released rather than clearing everything, because the
+	// statement above is scoped by id: it released the snapshot taken at the top
+	// and nothing else. Two passes can run at once — the in-process goroutine and
+	// the cron task both call Dispatch — and clearing here would forget the other
+	// one's claims without releasing them, leaving rows held until a TTL meant for
+	// crashes ran out. auth's release is scoped by claimant, so there Clear is
+	// right.
+	e.leases.Drop(held...)
 	return int(tag.RowsAffected()), nil
 }
 
@@ -520,5 +508,3 @@ func (e *Engine) release(ctx context.Context, report *DispatchReport) {
 
 // ErrNoSender is what a channel with nothing registered answers with.
 var ErrNoSender = errors.New("notify: no sender for this channel")
-
-var _ = dbx.IsNoRows

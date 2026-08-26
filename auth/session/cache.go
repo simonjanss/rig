@@ -9,7 +9,6 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/simonjanss/rig/runtime/cache"
-	"github.com/simonjanss/rig/runtime/dbx"
 )
 
 // TokenTopic is the name this package's invalidations travel under.
@@ -31,10 +30,7 @@ const TokenTopic = "session"
 // halves of one agreement. [NewTokenCache] registers the map and returns the
 // publisher for the same registration, so the name is typed once and there is no
 // second place for it to drift.
-type TokenCache struct {
-	m     *cache.Map[*Token]
-	topic *cache.Topic
-}
+type TokenCache struct{ k *cache.Keyed[*Token] }
 
 // TokenCacheConfig is what a [TokenCache] needs beyond its bus.
 type TokenCacheConfig struct {
@@ -67,15 +63,16 @@ func NewTokenCache(bus *cache.Bus, cfg TokenCacheConfig) *TokenCache {
 		// building something that looks like a cache and forgets nothing.
 		return nil
 	}
-	m := cache.NewMap[*Token](cache.MapConfig{
+	// A process that lost the channel reads through rather than serving sessions
+	// nobody can revoke — see [cache.Keyed], where that is spelled once.
+	return &TokenCache{k: cache.NewKeyed(cache.KeyedConfig[*Token]{
+		Bus:        bus,
+		Topic:      TokenTopic,
 		TTL:        cfg.TTL,
 		MaxEntries: cfg.MaxEntries,
-		// So that a process which lost the channel reads through rather than
-		// serving sessions nobody can revoke.
-		Live: bus.Live,
-		Now:  cfg.Now,
-	})
-	return &TokenCache{m: m, topic: bus.Serve(TokenTopic, m)}
+		Now:        cfg.Now,
+		Clone:      (*Token).clone,
+	})}
 }
 
 // errNoToken is how a miss reaches [cache.Map.Load] without being stored.
@@ -101,7 +98,7 @@ var errNoToken = errors.New("session: no such token")
 func (c *TokenCache) load(id uuid.UUID, fn func() (*Token, error)) (*Token, error) {
 	// [errNoToken] rather than a nil token on both paths, so that a caller has
 	// one shape to handle and a nil cache is not a second contract.
-	read := func() (*Token, error) {
+	return c.keyed().Load(id.String(), func() (*Token, error) {
 		t, err := fn()
 		switch {
 		case err != nil:
@@ -110,48 +107,32 @@ func (c *TokenCache) load(id uuid.UUID, fn func() (*Token, error)) (*Token, erro
 			return nil, errNoToken
 		}
 		return t, nil
-	}
-	if c == nil {
-		return read()
-	}
-	t, err := c.m.Load(id.String(), read)
-	if err != nil {
-		return nil, err
-	}
-	return t.clone(), nil
+	})
 }
 
-// forget publishes an invalidation for each identifier, on the transaction that
-// revoked them.
-//
-// Postgres delivers a notification when the transaction issuing it commits and
-// discards it when that transaction rolls back, so an invalidation published
-// here is atomic with the revocation causing it. The publisher hears its own
-// notification, which is why nothing is dropped locally as well.
-func (c *TokenCache) forget(ctx context.Context, db dbx.Conn, ids ...uuid.UUID) error {
+// keyed is the cache, or nil for a manager built without one. Every method below
+// is safe on a nil [cache.Keyed], which is what makes the nil *TokenCache
+// contract cost nothing here.
+func (c *TokenCache) keyed() *cache.Keyed[*Token] {
 	if c == nil {
 		return nil
 	}
-	for _, id := range ids {
-		if err := c.topic.Forget(ctx, db, id.String()); err != nil {
-			return err
-		}
-	}
-	return nil
+	return c.k
 }
 
-// drop forgets in this process only.
-//
-// For the one caller that has no transaction to publish on: a store that is not
-// Postgres, which in practice is [MemoryStore] in a test. There are no other
-// replicas of a memory store to tell.
-func (c *TokenCache) drop(ids ...uuid.UUID) {
-	if c == nil {
-		return
+// forgetOrDrop publishes on the transaction already on ctx, or drops locally when
+// there is none — a Postgres store always has one, a [MemoryStore] never does.
+func (c *TokenCache) forgetOrDrop(ctx context.Context, ids ...uuid.UUID) error {
+	return c.keyed().ForgetOrDrop(ctx, keysOf(ids)...)
+}
+
+// keysOf is what a set of identifiers is held under.
+func keysOf(ids []uuid.UUID) []string {
+	out := make([]string, len(ids))
+	for i, id := range ids {
+		out[i] = id.String()
 	}
-	for _, id := range ids {
-		c.m.Forget(id.String())
-	}
+	return out
 }
 
 // clone copies a token deeply enough to hand to one caller.

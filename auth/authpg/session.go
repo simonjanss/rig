@@ -33,12 +33,12 @@ const tokenColumns = `id, tenant_id, account_id, kind, root_token_id, parent_tok
 
 // Insert implements [session.Store].
 func (s *SessionStore) Insert(ctx context.Context, t *session.Token) error {
-	_, err := conn(ctx, s.db).Exec(ctx, `
+	_, err := dbx.ConnFor(ctx, s.db).Exec(ctx, `
 		INSERT INTO rig_account_token (`+tokenColumns+`)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)`,
 		t.ID, t.TenantID, t.AccountID, string(t.Kind), t.RootTokenID, t.ParentTokenID,
 		t.SecretHash, t.CreatedAt, t.ExpiresAt, t.RotatedAt, t.RevokedAt,
-		addrValue(t.IPAddress), nullable(t.UserAgent), string(t.Client),
+		addrValue(t.IPAddress), dbx.Null(t.UserAgent), string(t.Client),
 		t.ImpersonatedByAccountID, t.APIKeyID, payloadValue(t.Payload))
 	if err != nil {
 		return fmt.Errorf("authpg: insert token: %w", err)
@@ -61,7 +61,7 @@ func (s *SessionStore) Lock(ctx context.Context, id uuid.UUID) (*session.Token, 
 }
 
 func (s *SessionStore) one(ctx context.Context, sql string, args ...any) (*session.Token, error) {
-	rows, err := conn(ctx, s.db).Query(ctx, sql, args...)
+	rows, err := dbx.ConnFor(ctx, s.db).Query(ctx, sql, args...)
 	if err != nil {
 		return nil, fmt.Errorf("authpg: read token: %w", err)
 	}
@@ -84,7 +84,7 @@ func (s *SessionStore) one(ctx context.Context, sql string, args ...any) (*sessi
 // a replay would push the timestamp forward, and somebody replaying every
 // twenty seconds would hold a thirty-second window open indefinitely.
 func (s *SessionStore) MarkRotated(ctx context.Context, id uuid.UUID, at time.Time) error {
-	_, err := conn(ctx, s.db).Exec(ctx,
+	_, err := dbx.ConnFor(ctx, s.db).Exec(ctx,
 		`UPDATE rig_account_token SET rotated_at = $2 WHERE id = $1 AND rotated_at IS NULL`, id, at)
 	if err != nil {
 		return fmt.Errorf("authpg: mark rotated: %w", err)
@@ -99,7 +99,7 @@ func (s *SessionStore) MarkRotated(ctx context.Context, id uuid.UUID, at time.Ti
 // them and says which is one statement fewer than a count plus a second read,
 // with no window in between for a token to be missed.
 func (s *SessionStore) RevokeFamily(ctx context.Context, rootID uuid.UUID, at time.Time) ([]uuid.UUID, error) {
-	rows, err := conn(ctx, s.db).Query(ctx,
+	rows, err := dbx.ConnFor(ctx, s.db).Query(ctx,
 		`UPDATE rig_account_token SET revoked_at = $2
 		 WHERE root_token_id = $1 AND revoked_at IS NULL
 		 RETURNING id`,
@@ -133,7 +133,7 @@ func (s *SessionStore) TenantFamilies(ctx context.Context, tenantID uuid.UUID) (
 // of the sessions being returned and nothing else — filtering after the group
 // would count them and then hide them.
 func (s *SessionStore) families(ctx context.Context, where string, args ...any) ([]session.Family, error) {
-	rows, err := conn(ctx, s.db).Query(ctx, `
+	rows, err := dbx.ConnFor(ctx, s.db).Query(ctx, `
 		SELECT `+prefixed("root.", tokenColumns)+`,
 		       family.last_used_at,
 		       family.token_count
@@ -171,8 +171,6 @@ func (s *SessionStore) InTx(ctx context.Context, fn func(ctx context.Context) er
 	return dbx.InTx(ctx, s.tx, func(ctx context.Context, _ dbx.Conn) error { return fn(ctx) })
 }
 
-type scanner interface{ Scan(dest ...any) error }
-
 // payloadValue keeps an absent payload out of the column.
 //
 // A nil json.RawMessage would otherwise reach Postgres as the empty string,
@@ -185,7 +183,7 @@ func payloadValue(p json.RawMessage) any {
 	return []byte(p)
 }
 
-func scanToken(row scanner) (*session.Token, error) {
+func scanToken(row dbx.Scanner) (*session.Token, error) {
 	var t session.Token
 	if err := scanTokenInto(row, &t, nil, nil); err != nil {
 		return nil, err
@@ -195,7 +193,7 @@ func scanToken(row scanner) (*session.Token, error) {
 
 // scanTokenInto reads a token row, optionally with the two aggregate columns
 // [SessionStore.Families] adds.
-func scanTokenInto(row scanner, t *session.Token, lastUsedAt *time.Time, count *int64) error {
+func scanTokenInto(row dbx.Scanner, t *session.Token, lastUsedAt *time.Time, count *int64) error {
 	var (
 		kind      string
 		client    string
@@ -242,11 +240,11 @@ const identitySessionColumns = `id, identity_id, secret_hash, created_at,
 
 // InsertIdentitySession implements [session.IdentityStore].
 func (s *SessionStore) InsertIdentitySession(ctx context.Context, in *session.Identity) error {
-	_, err := conn(ctx, s.db).Exec(ctx, `
+	_, err := dbx.ConnFor(ctx, s.db).Exec(ctx, `
 		INSERT INTO rig_identity_session (`+identitySessionColumns+`)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
 		in.ID, in.IdentityID, in.SecretHash, in.CreatedAt,
-		in.ExpiresAt, in.RevokedAt, addrValue(in.IPAddress), nullable(in.UserAgent))
+		in.ExpiresAt, in.RevokedAt, addrValue(in.IPAddress), dbx.Null(in.UserAgent))
 	if err != nil {
 		return fmt.Errorf("authpg: insert identity session: %w", err)
 	}
@@ -255,7 +253,7 @@ func (s *SessionStore) InsertIdentitySession(ctx context.Context, in *session.Id
 
 // FindIdentitySession implements [session.IdentityStore].
 func (s *SessionStore) FindIdentitySession(ctx context.Context, id uuid.UUID) (*session.Identity, error) {
-	rows, err := conn(ctx, s.db).Query(ctx,
+	rows, err := dbx.ConnFor(ctx, s.db).Query(ctx,
 		`SELECT `+identitySessionColumns+` FROM rig_identity_session WHERE id = $1`, id)
 	if err != nil {
 		return nil, fmt.Errorf("authpg: read identity session: %w", err)
@@ -299,7 +297,7 @@ func (s *SessionStore) FindIdentitySession(ctx context.Context, id uuid.UUID) (*
 // `revoked_at IS NULL` keeps the first revocation's timestamp, which is the one
 // that says when the session actually ended.
 func (s *SessionStore) RevokeIdentitySession(ctx context.Context, id uuid.UUID, at time.Time) error {
-	_, err := conn(ctx, s.db).Exec(ctx,
+	_, err := dbx.ConnFor(ctx, s.db).Exec(ctx,
 		`UPDATE rig_identity_session SET revoked_at = $2 WHERE id = $1 AND revoked_at IS NULL`, id, at)
 	if err != nil {
 		return fmt.Errorf("authpg: revoke identity session: %w", err)
@@ -309,7 +307,7 @@ func (s *SessionStore) RevokeIdentitySession(ctx context.Context, id uuid.UUID, 
 
 // RevokeIdentitySessionsFor implements [session.IdentityStore].
 func (s *SessionStore) RevokeIdentitySessionsFor(ctx context.Context, identityID uuid.UUID, at time.Time) (int, error) {
-	tag, err := conn(ctx, s.db).Exec(ctx,
+	tag, err := dbx.ConnFor(ctx, s.db).Exec(ctx,
 		`UPDATE rig_identity_session SET revoked_at = $2
 		  WHERE identity_id = $1 AND revoked_at IS NULL`, identityID, at)
 	if err != nil {

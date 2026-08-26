@@ -51,10 +51,11 @@ package notify
 
 import (
 	"encoding/json"
-	"errors"
 	"time"
 
 	"github.com/google/uuid"
+
+	"github.com/simonjanss/rig/runtime/rigerr"
 )
 
 // State is where a notification is in its life.
@@ -87,7 +88,20 @@ const (
 // One error for all three, deliberately. Distinguishing them would tell a caller
 // that a row exists and is not theirs, which is exactly what the narrowing is
 // for.
-var ErrNotFound = errors.New("notify: no such notification")
+//
+// A [rigerr.Error] rather than a bare sentinel, so it carries its own status
+// wherever it surfaces. As a bare sentinel it read as CodeInternal to anything
+// that classified it, and the 404 existed only in this package's own fallback
+// error writer — which every generated project replaces. So dismissing a
+// notification that was not there answered 500 in every real application.
+// Carrying the code is what makes that unable to happen again: there is no
+// mapping left for a caller to be missing.
+//
+// [errors.Is] against it still works, and the message a client sees is unchanged.
+// What changed is [error.Error], which now reads `NotFound: no such
+// notification` — the code is in front because [rigerr.Error] puts it there for
+// the log.
+var ErrNotFound = rigerr.NotFound("no such notification")
 
 // Announcement is a service saying that something happened.
 //

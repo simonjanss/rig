@@ -11,14 +11,9 @@ import (
 	"github.com/simonjanss/rig/runtime/dbx"
 )
 
-// DB is the pool the file rows and their owners live in.
-//
-// It is the two dbx interfaces together rather than *pgxpool.Pool, so that a
-// test can hand this a transaction and so the module never imports pgxpool.
-type DB interface {
-	dbx.Conn
-	dbx.Beginner
-}
+// DB is the pool the file rows and their owners live in. See [dbx.Pool] for why
+// it is the two interfaces rather than *pgxpool.Pool.
+type DB = dbx.Pool
 
 // Table is the managed table every uploaded file has a row in. Spelled once,
 // here, because it is the only name in this package a migration also has to
@@ -44,12 +39,7 @@ type store struct{ db DB }
 //
 // Every statement goes through it, which is what lets [Service.Attach] finalize
 // a file and write its owner in one transaction opened somewhere above.
-func (s store) conn(ctx context.Context) dbx.Conn {
-	if tx, ok := dbx.Tx(ctx); ok {
-		return tx
-	}
-	return s.db
-}
+func (s store) conn(ctx context.Context) dbx.Conn { return dbx.ConnFor(ctx, s.db) }
 
 // begin inserts a file row with no bytes behind it yet and commits it alone.
 //
@@ -63,7 +53,7 @@ func (s store) begin(ctx context.Context, f *File) error {
 		VALUES ($1, $2, $3, $4, $5, $6, 0, $7, $8, $9)`
 
 	_, err := s.conn(ctx).Exec(ctx, q,
-		f.ID, f.TenantID, f.StorageKey, f.Name, f.ContentType, nullString(f.DeclaredType),
+		f.ID, f.TenantID, f.StorageKey, f.Name, f.ContentType, dbx.Null(f.DeclaredType),
 		f.CreatedAt, nil, nil)
 	if err != nil {
 		return fmt.Errorf("files: begin upload: %w", err)
@@ -224,11 +214,7 @@ func (s store) list(ctx context.Context, q string, at time.Time, limit int) ([]*
 	return out, rows.Err()
 }
 
-// scanner is what both QueryRow and Rows offer, so one scan serves the single
-// read and the listing.
-type scanner interface{ Scan(dest ...any) error }
-
-func scanFile(row scanner) (*File, error) {
+func scanFile(row dbx.Scanner) (*File, error) {
 	var (
 		f        File
 		url      *string
@@ -246,24 +232,10 @@ func scanFile(row scanner) (*File, error) {
 		return nil, fmt.Errorf("files: read file: %w", err)
 	}
 
-	f.URL = deref(url)
-	f.DeclaredType = deref(declared)
-	f.Checksum = deref(checksum)
+	f.URL = dbx.Deref(url)
+	f.DeclaredType = dbx.Deref(declared)
+	f.Checksum = dbx.Deref(checksum)
 	return &f, nil
-}
-
-func deref(s *string) string {
-	if s == nil {
-		return ""
-	}
-	return *s
-}
-
-func nullString(s string) *string {
-	if s == "" {
-		return nil
-	}
-	return &s
 }
 
 // quoteIdent renders a table or column name for a statement.

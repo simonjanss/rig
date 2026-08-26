@@ -354,20 +354,6 @@ func Pending(ctx context.Context, db *sql.DB, fsys fs.FS, opt Options) ([]string
 	return out, nil
 }
 
-// Version is the newest migration the database has applied, or zero for none.
-func Version(ctx context.Context, db *sql.DB, fsys fs.FS, opt Options) (int64, error) {
-	provider, err := newProvider(db, fsys, opt)
-	if err != nil || provider == nil {
-		return 0, err
-	}
-
-	v, err := provider.GetDBVersion(ctx)
-	if err != nil {
-		return 0, fmt.Errorf("read the applied version: %w", err)
-	}
-	return v, nil
-}
-
 // Apply is Up as a one-argument function, for wiring straight into a server.
 //
 //	Tasks: map[string]serve.Task{"migrate": migrate.Apply(migrations, migrate.Options{Log: os.Stdout})},
@@ -375,23 +361,13 @@ func Version(ctx context.Context, db *sql.DB, fsys fs.FS, opt Options) (int64, e
 // It borrows the pool, applies what is pending, and hands the borrowed handle
 // back. That is three lines every project would otherwise write the same way,
 // including the deferred close that is easy to leave out.
+//
+// One set is a list of one, so this is [ApplyAll] with the list written out. The
+// set has no name, which is what a failure names it by: a migration that will
+// not apply is reported under the word "migrations" rather than under a name
+// nobody supplied.
 func Apply(fsys fs.FS, opt Options) func(ctx context.Context, pool *pgxpool.Pool) error {
-	return func(ctx context.Context, pool *pgxpool.Pool) error {
-		db := FromPool(pool)
-		defer db.Close()
-
-		applied, err := Up(ctx, db, fsys, opt)
-		if err != nil {
-			return err
-		}
-
-		// Up says what it applied. Silence when there was nothing is
-		// indistinguishable from silence because it never ran.
-		if opt.Log != nil && len(applied) == 0 {
-			fmt.Fprintln(opt.Log, "no migrations to apply")
-		}
-		return nil
-	}
+	return ApplyAll([]Source{{FS: fsys, Dir: opt.Dir, Table: opt.Table}}, opt)
 }
 
 // Require is Apply's careful sibling: it refuses to start when the database is
@@ -405,21 +381,12 @@ func Apply(fsys fs.FS, opt Options) func(ctx context.Context, pool *pgxpool.Pool
 // does not expect and failing one query at a time. And the application's
 // database user never needs the rights to change a schema, which is worth more
 // than the convenience of applying it here.
+//
+// One set is a list of one, so this is [RequireAll] with the list written out,
+// and the message names the set the way that one does — for a set with no name,
+// by the word "migrations".
 func Require(fsys fs.FS, opt Options) func(ctx context.Context, pool *pgxpool.Pool) error {
-	return func(ctx context.Context, pool *pgxpool.Pool) error {
-		db := FromPool(pool)
-		defer db.Close()
-
-		pending, err := Pending(ctx, db, fsys, opt)
-		if err != nil {
-			return err
-		}
-		if len(pending) > 0 {
-			return fmt.Errorf("the database is behind this binary: %d migration(s) not applied, starting with %s",
-				len(pending), pending[0])
-		}
-		return nil
-	}
+	return RequireAll([]Source{{FS: fsys, Dir: opt.Dir, Table: opt.Table}}, opt)
 }
 
 // FromPool borrows a pool for migrations.

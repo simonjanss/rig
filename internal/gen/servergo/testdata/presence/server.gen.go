@@ -7,7 +7,6 @@ package api
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -20,12 +19,12 @@ import (
 	"github.com/simonjanss/rig/presence/presencehttp"
 	"github.com/simonjanss/rig/runtime/apirev"
 	"github.com/simonjanss/rig/runtime/dbx"
+	"github.com/simonjanss/rig/runtime/httpx"
 	"github.com/simonjanss/rig/runtime/idempotency"
 	"github.com/simonjanss/rig/runtime/reqlog"
 	"github.com/simonjanss/rig/runtime/rigerr"
 	"github.com/simonjanss/rig/runtime/serve"
 	"github.com/simonjanss/rig/runtime/tenancy"
-	"github.com/simonjanss/rig/runtime/throttle"
 )
 
 // Authenticator identifies a caller and serves its own routes.
@@ -442,38 +441,25 @@ func (s Server) logger() *slog.Logger {
 
 // DefaultErrorMapper turns an error into a response.
 //
-// An internal failure's detail never reaches the client: it is exactly the
-// kind of thing that leaks a table name or a connection string. The request
-// identifier goes out instead, so the detail can be found in the logs.
+// The decision is [github.com/simonjanss/rig/runtime/httpx.AnswerFor]'s,
+// shared with the routes rig mounts itself, so a failure from /auth/login and
+// a failure from a generated route are classified once: the same code, the
+// same status, an internal failure's detail redacted — it is exactly the
+// kind of thing that leaks a table name or a connection string, and the
+// request identifier goes out instead so the detail can be found in the logs
+// — and a 429 leaving with its Retry-After.
+//
+// What is not shared is the envelope. This one's field names go through the
+// project's `api.json_case` and rig's own routes always answer camelCase, so
+// one struct cannot be both. The classification is one implementation, the
+// encoding is two.
 func DefaultErrorMapper(w http.ResponseWriter, _ *http.Request, rc RequestContext, err error) {
-	code := rigerr.CodeOf(err)
-
-	message := err.Error()
-	var typed *rigerr.Error
-	if errors.As(err, &typed) {
-		message = typed.Message
-	}
-	if code == rigerr.CodeInternal {
-		message = "something went wrong"
-	}
-
-	// A 429 with no Retry-After leaves a client with nothing to do but guess, and
-	// clients that guess retry immediately.
-	if refusal, ok := throttle.RefusalOf(err); ok {
-		refusal.Decision().SetHeaders(w.Header())
-	}
-
-	// A validation failure carries its own shape — one member per field of the
-	// input — and answering with that instead of only a sentence is the
-	// difference between a client highlighting the field and a client parsing
-	// prose to find out which one.
-	fields, _ := rigerr.FieldsOf(err)
-
-	writeJSON(w, code.HTTPStatus(), Error{
-		Code:      code,
-		Message:   message,
+	answer := httpx.AnswerFor(w, err)
+	writeJSON(w, answer.Status, Error{
+		Code:      answer.Code,
+		Message:   answer.Message,
 		RequestID: rc.RequestID,
-		Fields:    fields,
+		Fields:    answer.Fields,
 	})
 }
 

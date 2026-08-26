@@ -21,7 +21,13 @@ import (
 // and no topic to publish on. A nil *cache.Topic is a working no-op, so the
 // invalidation path still runs and still drops what it is told to.
 func testCache(ttl time.Duration, now func() time.Time) *TokenCache {
-	return &TokenCache{m: cache.NewMap[*Token](cache.MapConfig{TTL: ttl, Now: now})}
+	k := cache.NewKeyed(cache.KeyedConfig[*Token]{
+		Topic: TokenTopic, TTL: ttl, Now: now, Clone: (*Token).clone,
+	})
+	// Served locally: attached to no channel, so it holds and forgets in this
+	// process alone and the invalidation path still runs.
+	k.ServeLocally()
+	return &TokenCache{k: k}
 }
 
 type fakeClock struct{ at time.Time }
@@ -139,7 +145,7 @@ func TestAMissIsNotCached(t *testing.T) {
 			t.Fatal("a token that does not exist should not verify")
 		}
 	}
-	if n := m.cache.m.Len(); n != 0 {
+	if n := m.cache.k.Len(); n != 0 {
 		t.Errorf("the map holds %d entries after three misses; a miss must not be stored", n)
 	}
 }

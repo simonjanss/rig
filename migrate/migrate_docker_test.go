@@ -67,14 +67,6 @@ func TestUpAppliesOnceAndIsIdempotent(t *testing.T) {
 	if len(again) != 0 {
 		t.Errorf("a second run applied %v, want nothing", again)
 	}
-
-	version, err := migrate.Version(t.Context(), db, files, opt)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if version != 1 {
-		t.Errorf("version = %d, want 1", version)
-	}
 }
 
 // Replicas start together. The advisory lock is what keeps that from being a
@@ -179,8 +171,11 @@ func TestRequireRefusesUntilApplied(t *testing.T) {
 	if !strings.Contains(err.Error(), "behind this binary") {
 		t.Errorf("the refusal should say what is wrong: %v", err)
 	}
-	if !strings.Contains(err.Error(), "00001_create.sql") {
-		t.Errorf("it should name the missing migration: %v", err)
+	// Named by the set it came from, which for a set with no name is the word
+	// `migrations`. Require is RequireAll over a list of one, and this is the
+	// plural form's message arriving in the singular.
+	if !strings.Contains(err.Error(), "migrations 00001_create.sql") {
+		t.Errorf("it should name the missing migration and whose it is: %v", err)
 	}
 
 	if _, err := migrate.Up(t.Context(), db, files, opt); err != nil {

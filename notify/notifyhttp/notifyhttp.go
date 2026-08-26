@@ -17,8 +17,6 @@
 package notifyhttp
 
 import (
-	"encoding/json"
-	"errors"
 	"net/http"
 	"strconv"
 	"time"
@@ -26,6 +24,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/simonjanss/rig/notify"
+	"github.com/simonjanss/rig/runtime/httpx"
 	"github.com/simonjanss/rig/runtime/rigerr"
 	"github.com/simonjanss/rig/runtime/tenancy"
 )
@@ -38,7 +37,7 @@ const DefaultBasePath = "/notifications"
 type Handler struct {
 	svc      *notify.Service
 	basePath string
-	claims   func(*http.Request) (tenancy.Claims, error)
+	caller   httpx.Caller
 	fail     func(http.ResponseWriter, *http.Request, error)
 }
 
@@ -57,10 +56,12 @@ type Options struct {
 	// generated mount passes the server's own.
 	Claims func(*http.Request) (tenancy.Claims, error)
 
-	// Fail writes an error response. It is taken rather than assumed so that an
-	// inbox route's 404 looks like every other route's 404 in the same
-	// application — the generated server has one error shape, and a second one
-	// here would be a second thing a client has to understand.
+	// Fail writes an error response. Nil means [httpx.Fail].
+	//
+	// It is taken rather than assumed so that an inbox route's 404 carries the
+	// request id and lands in the same log line as every other route's — that is
+	// what the generated server's writer adds. The shape is the same either way
+	// now: both write [httpx.Error].
 	Fail func(http.ResponseWriter, *http.Request, error)
 }
 
@@ -73,32 +74,22 @@ func New(svc *notify.Service, opt Options) *Handler {
 		// than as the misconfiguration it is.
 		panic("notifyhttp.New: Claims is required")
 	}
-	h := &Handler{svc: svc, basePath: opt.BasePath, claims: opt.Claims, fail: opt.Fail}
+	h := &Handler{svc: svc, basePath: opt.BasePath, fail: opt.Fail}
 	if h.basePath == "" {
 		h.basePath = DefaultBasePath
 	}
 	if h.fail == nil {
-		h.fail = writeError
+		h.fail = httpx.Fail
 	}
+	h.caller = httpx.Caller{Of: opt.Claims, Fail: h.fail}
 	return h
 }
 
-// with establishes the caller and hands the request on.
-//
-// Every route goes through it, which is what makes "narrows to the caller"
-// structural rather than something five handlers each remember.
-func (h *Handler) with(next func(http.ResponseWriter, *http.Request)) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		claims, err := h.claims(r)
-		if err != nil {
-			h.fail(w, r, err)
-			return
-		}
-		next(w, r.WithContext(tenancy.NewContext(r.Context(), claims)))
-	}
-}
-
 // Mount registers the five routes on a mux.
+//
+// Every one of them goes through [httpx.Caller.Wrap], which is what makes
+// "narrows to the caller" structural rather than something five handlers each
+// remember to do.
 //
 //	GET    /notifications                 the caller's inbox, newest first
 //	GET    /notifications/_unread-count   the badge, one number
@@ -106,11 +97,11 @@ func (h *Handler) with(next func(http.ResponseWriter, *http.Request)) http.Handl
 //	POST   /notifications/_read-all       mark the page's worth read
 //	DELETE /notifications/{id}            remove one from the inbox
 func (h *Handler) Mount(mux *http.ServeMux) {
-	mux.HandleFunc("GET "+h.basePath, h.with(h.list))
-	mux.HandleFunc("GET "+h.basePath+"/_unread-count", h.with(h.unreadCount))
-	mux.HandleFunc("POST "+h.basePath+"/_read-all", h.with(h.readAll))
-	mux.HandleFunc("POST "+h.basePath+"/{id}/_read", h.with(h.read))
-	mux.HandleFunc("DELETE "+h.basePath+"/{id}", h.with(h.dismiss))
+	mux.HandleFunc("GET "+h.basePath, h.caller.Wrap(h.list))
+	mux.HandleFunc("GET "+h.basePath+"/_unread-count", h.caller.Wrap(h.unreadCount))
+	mux.HandleFunc("POST "+h.basePath+"/_read-all", h.caller.Wrap(h.readAll))
+	mux.HandleFunc("POST "+h.basePath+"/{id}/_read", h.caller.Wrap(h.read))
+	mux.HandleFunc("DELETE "+h.basePath+"/{id}", h.caller.Wrap(h.dismiss))
 }
 
 // Line is one inbox row on the wire.
@@ -160,7 +151,7 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 	for _, row := range rows {
 		lines = append(lines, lineOf(row))
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": lines})
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"data": lines})
 }
 
 func (h *Handler) unreadCount(w http.ResponseWriter, r *http.Request) {
@@ -169,7 +160,7 @@ func (h *Handler) unreadCount(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"unread": n})
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"unread": n})
 }
 
 func (h *Handler) read(w http.ResponseWriter, r *http.Request) {
@@ -202,7 +193,7 @@ func (h *Handler) readAll(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"read": n})
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"read": n})
 }
 
 func (h *Handler) dismiss(w http.ResponseWriter, r *http.Request) {
@@ -248,26 +239,4 @@ func pathID(r *http.Request) (uuid.UUID, error) {
 		return uuid.Nil, rigerr.BadRequest("the identifier in the path is not a valid one")
 	}
 	return id, nil
-}
-
-func writeJSON(w http.ResponseWriter, status int, body any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(body)
-}
-
-// writeError is the fallback for a project that did not supply one.
-//
-// It is deliberately plain. A project that has a generated server passes that
-// server's error writer instead, so an inbox route's failure looks like every
-// other route's; this exists so the handler is usable on its own.
-func writeError(w http.ResponseWriter, _ *http.Request, err error) {
-	status := rigerr.StatusOf(err)
-	if errors.Is(err, notify.ErrNotFound) {
-		status = http.StatusNotFound
-	}
-	writeJSON(w, status, map[string]any{"error": map[string]any{
-		"code":    string(rigerr.CodeOf(err)),
-		"message": err.Error(),
-	}})
 }

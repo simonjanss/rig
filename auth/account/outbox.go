@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
+	"github.com/simonjanss/rig/runtime/outbox"
 )
 
 // The mail queue, and most of it is about not storing a secret.
@@ -239,10 +241,18 @@ func (r MailReport) String() string {
 
 // What a Notifier can say about a failure beyond the fact of it.
 //
-// The same four helpers notify ships, declared again because rig/auth cannot
-// import rig/notify. Two copies of four small functions is the price of that
-// boundary, and it is cheaper than the alternative, which is a queue package in
-// runtime/ that every rig application imports.
+// The same four helpers notify ships, and now the same implementation:
+// [runtime/outbox], which both modules already reach through rig/runtime. The
+// names stay separate because they are published API on two modules, and because
+// `PermanentMailError` reads correctly at a call site where `Permanent` alone
+// would not.
+//
+// This used to say two copies of four small functions was the price of the module
+// boundary, and cheaper than a queue package in runtime/ that every application
+// imports. The narrower version of that package — the classification, the
+// arithmetic and the lease map, and none of the SQL — turned out to cost nothing:
+// both modules depend on rig/runtime already, so there is no new edge, and what
+// was two comments claiming to be twins is now one implementation.
 
 // PermanentMailError wraps an error a retry cannot fix, so the delivery stops on
 // this attempt rather than spending the rest of its budget.
@@ -261,12 +271,7 @@ func (r MailReport) String() string {
 // succeeded by testing the error against nil, so a helper that manufactured a
 // non-nil wrapper from a nil error would record every delivered mail as a
 // permanent failure. This is notify.Permanent's twin.
-func PermanentMailError(err error) error {
-	if err == nil {
-		return nil
-	}
-	return &permanentMailError{err: err}
-}
+func PermanentMailError(err error) error { return outbox.Permanent(err) }
 
 // RetryMailAfter wraps an error with the earliest a retry is worth making, which
 // is most often a 429 carrying a Retry-After header.
@@ -279,22 +284,11 @@ func PermanentMailError(err error) error {
 //
 // RetryMailAfter(nil, d) is nil, and a non-positive d is a plain wrap. This is
 // notify.RetryAfter's twin.
-func RetryMailAfter(err error, d time.Duration) error {
-	if err == nil {
-		return nil
-	}
-	if d <= 0 {
-		return err
-	}
-	return &retryMailAfterError{err: err, after: d}
-}
+func RetryMailAfter(err error, d time.Duration) error { return outbox.RetryAfter(err, d) }
 
 // IsPermanentMailError reports whether err asks not to be retried. It reads
 // through wrapping.
-func IsPermanentMailError(err error) bool {
-	var p *permanentMailError
-	return errors.As(err, &p)
-}
+func IsPermanentMailError(err error) bool { return outbox.IsPermanent(err) }
 
 // MailRetryAfterOf is the interval err asks to be retried after, and whether it
 // asked at all.
@@ -303,29 +297,7 @@ func IsPermanentMailError(err error) bool {
 // "do not retry" and "retry then" cannot both be honoured, and refusing is the
 // stronger of the two. Reading them the other way round would let a notifier that
 // wrapped both keep alive a delivery it had already called hopeless.
-func MailRetryAfterOf(err error) (time.Duration, bool) {
-	if IsPermanentMailError(err) {
-		return 0, false
-	}
-	var r *retryMailAfterError
-	if errors.As(err, &r) {
-		return r.after, true
-	}
-	return 0, false
-}
-
-type permanentMailError struct{ err error }
-
-func (e *permanentMailError) Error() string { return e.err.Error() }
-func (e *permanentMailError) Unwrap() error { return e.err }
-
-type retryMailAfterError struct {
-	err   error
-	after time.Duration
-}
-
-func (e *retryMailAfterError) Error() string { return e.err.Error() }
-func (e *retryMailAfterError) Unwrap() error { return e.err }
+func MailRetryAfterOf(err error) (time.Duration, bool) { return outbox.RetryAfterOf(err) }
 
 // errMailSkipped is why a delivery was skipped, recorded in failed_reason so a
 // Skipped row says which of the several reasons it was.
