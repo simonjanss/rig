@@ -32,7 +32,8 @@ type Server struct {
 	// unconfigured.
 	IsAdmin func(tenancy.Claims) bool
 
-	// OnError renders a refusal. Nil writes the status and a short line.
+	// OnError renders a refusal. Nil answers the same flat JSON envelope every
+	// other rig-owned route does, without the request identifier.
 	OnError func(w http.ResponseWriter, r *http.Request, err error)
 }
 

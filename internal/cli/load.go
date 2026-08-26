@@ -160,7 +160,7 @@ func foundationTables(p *project.Project) (ignore, foundation []string, err erro
 		//
 		// `auth.expose` deliberately does not reach it. It would happen to work
 		// and would leave `files.expose` — which the rest of rig reads, and which
-		// checkFilesFoundation guards — saying the opposite.
+		// checkFoundationBlock guards — saying the opposite.
 		if table == compile.FileTable {
 			if p.Config.Files.Enabled && p.Config.Files.Expose {
 				continue

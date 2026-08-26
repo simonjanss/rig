@@ -44,7 +44,8 @@ func (e *emitter) serverType(b *gobuf.Buf) {
 		"leave it unconfigured.")
 	b.L("IsAdmin func(%s.Claims) bool", tenPkg)
 	b.NL()
-	b.Comment("OnError renders a refusal. Nil writes the status and a short line.")
+	b.Comment("OnError renders a refusal. Nil answers the same flat JSON envelope " +
+		"every other rig-owned route does, without the request identifier.")
 	b.L("OnError func(w %s.ResponseWriter, r *%s.Request, err error)", httpPkg, httpPkg)
 	b.L("}")
 	b.NL()

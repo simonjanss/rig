@@ -182,16 +182,16 @@ async function call(
 
     const headers = new Headers(opts.headers);
 
-    // A write becomes repeatable by being named, so that the server can tell a
-    // second send of one write from two writes. The name is generated here when
-    // the caller did not supply one, and only when there is a retry to name it
-    // for: a client configured not to retry should not be making the server keep
-    // a record against the possibility.
     const attempts = attemptsOf(retry);
 
     // Everything the ladder below needs that does not change between sends.
     const ladder: Ladder = { rt, opts, retry, budget, attempts };
 
+    // A write becomes repeatable by being named, so that the server can tell a
+    // second send of one write from two writes. The name is generated here when
+    // the caller did not supply one, and only when there is a retry to name it
+    // for: a client configured not to retry should not be making the server keep
+    // a record against the possibility.
     if (!repeatable && writes(op) && attempts > 1) {
         const key =
             opts.idempotencyKey ??

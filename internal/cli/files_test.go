@@ -180,7 +180,7 @@ func TestFileRestoreWindowComesFromTheProject(t *testing.T) {
 	}
 }
 
-// The flow checkFilesFoundation prescribes, run end to end.
+// The flow checkFoundationBlock prescribes for files, run end to end.
 //
 // The hand-written configuration above stands in for the scaffolded one
 // everywhere else in this file, and a stand-in cannot catch the scaffolded file

@@ -242,7 +242,7 @@ func (p *Project) checkNotifications() diag.List {
 	// notification is addressed to an account, and an application whose claims
 	// come from a header has accounts like any other. Whether those tables are
 	// there is a question about migrations rather than about configuration, and
-	// it is asked where the migrations are — see checkNotificationsFoundation.
+	// it is asked where the migrations are — see checkFoundationBlock.
 
 	return diags
 }

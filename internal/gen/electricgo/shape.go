@@ -178,7 +178,6 @@ func (e *emitter) paramType(b *gobuf.Buf, p ir.ElectricParam) string {
 	}
 }
 
-// parse names the helper that reads one parameter's type.
 // parseCall names the [runtime/httpx] parser a declared parameter goes through,
 // or "" for one that arrives as text and needs none.
 func parseCall(b *gobuf.Buf, p ir.ElectricParam) string {
