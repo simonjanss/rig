@@ -18,6 +18,7 @@
 package rigclient
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"math/rand/v2"
@@ -230,13 +231,23 @@ func New(cfg Config, api API) (*Runtime, error) {
 		http:      cfg.HTTPClient,
 		api:       api,
 		header:    cfg.Header.Clone(),
-		userAgent: cfg.UserAgent,
+		userAgent: cmp.Or(cfg.UserAgent, DefaultUserAgent),
 		requestID: cfg.RequestID,
-		revision:  cfg.Revision,
-		now:       cfg.Now,
-		trace:     cfg.Trace,
-		cred:      cfg.Credential,
-		retry:     cfg.Retry,
+
+		requestIDHeader: cmp.Or(cfg.RequestIDHeader, DefaultRequestIDHeader),
+
+		// The document's answer unless the caller insisted on their own. A
+		// generated client always has one; a hand-built one may have neither,
+		// and then it simply does not say what it was built against, which is a
+		// normal thing for a caller to be — so this one has no default to fall
+		// to and the header it would go in does.
+		revision:       cmp.Or(cfg.Revision, api.Revision),
+		revisionHeader: cmp.Or(cfg.RevisionHeader, api.RevisionHeader, DefaultRevisionHeader),
+
+		now:   cfg.Now,
+		trace: cfg.Trace,
+		cred:  cfg.Credential,
+		retry: cfg.Retry,
 
 		onRateLimit: cfg.OnRateLimit,
 		// math/rand/v2 rather than math/rand: its source is per-P and lock-free
@@ -245,38 +256,18 @@ func New(cfg Config, api API) (*Runtime, error) {
 		// moment that contention would show up.
 		jitter: rand.Int64N,
 	}
+
+	// The three that cannot be a cmp.Or: two of these fallbacks are values to
+	// build rather than constants to fall back to, and a func type is not
+	// comparable, so it would not compile.
 	if rt.http == nil {
 		rt.http = &http.Client{Timeout: DefaultTimeout}
 	}
 	if rt.header == nil {
 		rt.header = http.Header{}
 	}
-	if rt.userAgent == "" {
-		rt.userAgent = DefaultUserAgent
-	}
 	if rt.now == nil {
 		rt.now = time.Now
-	}
-	if cfg.RequestIDHeader != "" {
-		rt.requestIDHeader = cfg.RequestIDHeader
-	} else {
-		rt.requestIDHeader = DefaultRequestIDHeader
-	}
-
-	// The document's answer unless the caller insisted on their own. A generated
-	// client always has one; a hand-built one may have neither, and then it
-	// simply does not say what it was built against, which is a normal thing for
-	// a caller to be.
-	if rt.revision == "" {
-		rt.revision = api.Revision
-	}
-	switch {
-	case cfg.RevisionHeader != "":
-		rt.revisionHeader = cfg.RevisionHeader
-	case api.RevisionHeader != "":
-		rt.revisionHeader = api.RevisionHeader
-	default:
-		rt.revisionHeader = DefaultRevisionHeader
 	}
 
 	if s, ok := rt.cred.(*Session); ok {

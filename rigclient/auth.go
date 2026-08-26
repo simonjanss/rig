@@ -72,9 +72,7 @@ func (a *Auth) SignIn(
 	if err != nil {
 		return nil, err
 	}
-	if res.AccessToken != "" {
-		a.rt.Use(NewSession(res.TokenPair))
-	}
+	a.signedIn(res)
 	return res, nil
 }
 
@@ -84,7 +82,7 @@ func (a *Auth) Login(
 ) (*authwire.SignInResponse, error) {
 	// Anonymous deliberately: presenting an expired token to the endpoint that
 	// would have replaced it is how a client gets stuck refusing to sign in.
-	opts = append([]CallOption{Anonymous()}, opts...)
+	opts = anon(opts)
 	return Do[authwire.SignInResponse](ctx, a.rt, Op{
 		Name:   "authLogin",
 		Method: http.MethodPost, Root: true, Path: a.path("/login"), Body: in,
@@ -111,7 +109,7 @@ func (a *Auth) Logout(ctx context.Context, opts ...CallOption) error {
 func (a *Auth) Refresh(
 	ctx context.Context, refreshToken string, opts ...CallOption,
 ) (*authwire.TokenPair, error) {
-	opts = append([]CallOption{Anonymous()}, opts...)
+	opts = anon(opts)
 	return Do[authwire.TokenPair](ctx, a.rt, Op{
 		Name:   "authRefresh",
 		Method: http.MethodPost, Root: true, Path: a.path("/refresh"),
@@ -129,7 +127,7 @@ func (a *Auth) Register(
 			"set auth.allow_registration in rig.yaml to open it")
 	}
 
-	opts = append([]CallOption{Anonymous()}, opts...)
+	opts = anon(opts)
 	res, err := Do[authwire.SignInResponse](ctx, a.rt, Op{
 		Name:   "authRegister",
 		Method: http.MethodPost, Root: true, Path: a.path("/register"), Body: in,
@@ -137,9 +135,7 @@ func (a *Auth) Register(
 	if err != nil {
 		return nil, err
 	}
-	if res.AccessToken != "" {
-		a.rt.Use(NewSession(res.TokenPair))
-	}
+	a.signedIn(res)
 	return res, nil
 }
 
@@ -160,7 +156,7 @@ func (a *Auth) Provision(
 func (a *Auth) RequestPasswordReset(
 	ctx context.Context, emailAddress string, opts ...CallOption,
 ) error {
-	opts = append([]CallOption{Anonymous()}, opts...)
+	opts = anon(opts)
 	return DoNoContent(ctx, a.rt, Op{
 		Name:   "authRequestPasswordReset",
 		Method: http.MethodPost, Root: true, Path: a.path("/password/reset"),
@@ -172,7 +168,7 @@ func (a *Auth) RequestPasswordReset(
 func (a *Auth) ConfirmPasswordReset(
 	ctx context.Context, token, newPassword string, opts ...CallOption,
 ) error {
-	opts = append([]CallOption{Anonymous()}, opts...)
+	opts = anon(opts)
 	return DoNoContent(ctx, a.rt, Op{
 		Name:   "authConfirmPasswordReset",
 		Method: http.MethodPost, Root: true, Path: a.path("/password/reset/confirm"),
@@ -198,7 +194,7 @@ func (a *Auth) ChangePassword(
 
 // VerifyEmail confirms an address with the token from the mail.
 func (a *Auth) VerifyEmail(ctx context.Context, token string, opts ...CallOption) error {
-	opts = append([]CallOption{Anonymous()}, opts...)
+	opts = anon(opts)
 	return DoNoContent(ctx, a.rt, Op{
 		Name:   "authVerifyEmail",
 		Method: http.MethodPost, Root: true, Path: a.path("/email/verify"),
@@ -245,7 +241,7 @@ func (a *Auth) CreateTenant(
 			"set auth.allow_tenant_creation in rig.yaml to open it")
 	}
 
-	opts = append([]CallOption{withBearer(identityToken)}, opts...)
+	opts = asIdentity(identityToken, opts)
 	res, err := Do[authwire.SignInResponse](ctx, a.rt, Op{
 		Name:   "authCreateTenant",
 		Method: http.MethodPost, Root: true, Path: a.path("/tenants"), Body: in,
@@ -253,9 +249,7 @@ func (a *Auth) CreateTenant(
 	if err != nil {
 		return nil, err
 	}
-	if res.AccessToken != "" {
-		a.rt.Use(NewSession(res.TokenPair))
-	}
+	a.signedIn(res)
 	return res, nil
 }
 
@@ -267,7 +261,7 @@ func (a *Auth) MyTenants(
 	if err := a.needsIdentity(); err != nil {
 		return nil, err
 	}
-	opts = append([]CallOption{withBearer(identityToken)}, opts...)
+	opts = asIdentity(identityToken, opts)
 	return list[authwire.TenantView](ctx, a.rt, "authMyTenants", a.path("/me/tenants"), opts)
 }
 
@@ -279,7 +273,7 @@ func (a *Auth) MyInvitations(
 	if err := a.needsIdentity(); err != nil {
 		return nil, err
 	}
-	opts = append([]CallOption{withBearer(identityToken)}, opts...)
+	opts = asIdentity(identityToken, opts)
 	return list[authwire.InvitationToMeView](ctx, a.rt, "authMyInvitations", a.path("/me/invitations"), opts)
 }
 
@@ -293,7 +287,7 @@ func (a *Auth) AcceptMyInvitation(
 		return nil, err
 	}
 
-	opts = append([]CallOption{withBearer(identityToken)}, opts...)
+	opts = asIdentity(identityToken, opts)
 	res, err := Do[authwire.SignInResponse](ctx, a.rt, Op{
 		Name:   "authAcceptMyInvitation",
 		Method: http.MethodPost, Root: true, Path: a.path("/me/invitations/accept"),
@@ -302,9 +296,7 @@ func (a *Auth) AcceptMyInvitation(
 	if err != nil {
 		return nil, err
 	}
-	if res.AccessToken != "" {
-		a.rt.Use(NewSession(res.TokenPair))
-	}
+	a.signedIn(res)
 	return res, nil
 }
 
@@ -315,7 +307,7 @@ func (a *Auth) EndIdentitySession(
 	if err := a.needsIdentity(); err != nil {
 		return err
 	}
-	opts = append([]CallOption{withBearer(identityToken)}, opts...)
+	opts = asIdentity(identityToken, opts)
 	return DoNoContent(ctx, a.rt, Op{
 		Name:   "authEndIdentitySession",
 		Method: http.MethodDelete, Root: true, Path: a.path("/me/session"),
@@ -329,7 +321,7 @@ func (a *Auth) EndIdentitySession(
 func (a *Auth) AcceptInvitation(
 	ctx context.Context, in authwire.AcceptRequest, opts ...CallOption,
 ) (*authwire.TokenPair, error) {
-	opts = append([]CallOption{Anonymous()}, opts...)
+	opts = anon(opts)
 	pair, err := Do[authwire.TokenPair](ctx, a.rt, Op{
 		Name:   "authAcceptInvitation",
 		Method: http.MethodPost, Root: true, Path: a.path("/invitations/accept"), Body: in,
@@ -337,9 +329,7 @@ func (a *Auth) AcceptInvitation(
 	if err != nil {
 		return nil, err
 	}
-	if pair.AccessToken != "" {
-		a.rt.Use(NewSession(*pair))
-	}
+	a.install(pair)
 	return pair, nil
 }
 
@@ -499,9 +489,8 @@ func (a *Auth) EndImpersonation(ctx context.Context, opts ...CallOption) error {
 // APIKeys lists the keys the caller may see: their own, or the tenant's when
 // they administer keys.
 func (a *Auth) APIKeys(ctx context.Context, opts ...CallOption) ([]authwire.APIKeyView, error) {
-	if !a.profile.HasAPIKeys {
-		return nil, notMounted("GET "+a.path("/api-keys"),
-			"API keys are configured in main.go, by giving the handler an apikey manager")
+	if err := a.needsAPIKeys("GET " + a.path("/api-keys")); err != nil {
+		return nil, err
 	}
 	return list[authwire.APIKeyView](ctx, a.rt, "authAPIKeys", a.path("/api-keys"), opts)
 }
@@ -511,9 +500,8 @@ func (a *Auth) APIKeys(ctx context.Context, opts ...CallOption) ([]authwire.APIK
 func (a *Auth) CreateAPIKey(
 	ctx context.Context, in authwire.CreateKeyRequest, opts ...CallOption,
 ) (*authwire.CreateKeyResponse, error) {
-	if !a.profile.HasAPIKeys {
-		return nil, notMounted("POST "+a.path("/api-keys"),
-			"API keys are configured in main.go, by giving the handler an apikey manager")
+	if err := a.needsAPIKeys("POST " + a.path("/api-keys")); err != nil {
+		return nil, err
 	}
 	return Do[authwire.CreateKeyResponse](ctx, a.rt, Op{
 		Name:   "authCreateAPIKey",
@@ -523,9 +511,8 @@ func (a *Auth) CreateAPIKey(
 
 // RevokeAPIKey kills one.
 func (a *Auth) RevokeAPIKey(ctx context.Context, id uuid.UUID, opts ...CallOption) error {
-	if !a.profile.HasAPIKeys {
-		return notMounted("DELETE "+a.path("/api-keys/{id}"),
-			"API keys are configured in main.go, by giving the handler an apikey manager")
+	if err := a.needsAPIKeys("DELETE " + a.path("/api-keys/{id}")); err != nil {
+		return err
 	}
 	return DoNoContent(ctx, a.rt, Op{
 		Name:   "authRevokeAPIKey",
@@ -537,6 +524,11 @@ func (a *Auth) RevokeAPIKey(ctx context.Context, id uuid.UUID, opts ...CallOptio
 // there is none. A tenant switch, an impersonation and a password change all end
 // with the client holding a different session than it started with, and a caller
 // having to notice that themselves is a bug waiting to happen.
+//
+// The counterpart to [Auth.install], and not interchangeable with it. These are
+// the calls where it is still the same person, so the pair is handed to the
+// session in hand — which is what keeps a refresh token the answer did not carry.
+// A sign-in is somebody else arriving, and that one installs.
 func (a *Auth) adopt(pair *authwire.TokenPair) {
 	if pair == nil || pair.AccessToken == "" {
 		return
@@ -556,6 +548,55 @@ func (a *Auth) needsIdentity() error {
 	return notMounted("the "+a.profile.BasePath+"/me routes",
 		"they exist where identity sessions are configured, which is what the tenant "+
 			"picker runs on")
+}
+
+// install replaces whatever credential the client was holding with a session for
+// this pair, and does nothing when there is no pair to install: an answer with
+// no access token is the tenant picker, and a 204 is no answer at all.
+//
+// Deliberately not [Auth.adopt]. This is the moment the client becomes somebody
+// else, so it is a fresh [Session] rather than new tokens handed to the old one.
+// A pair that arrives without a refresh token must not inherit the previous
+// person's, or the client would refresh back into them.
+func (a *Auth) install(pair *authwire.TokenPair) {
+	if pair == nil || pair.AccessToken == "" {
+		return
+	}
+	a.rt.Use(NewSession(*pair))
+}
+
+// signedIn is [Auth.install] for the endpoints that answer with a whole sign-in
+// rather than a pair on its own.
+func (a *Auth) signedIn(res *authwire.SignInResponse) {
+	if res == nil {
+		return
+	}
+	a.install(&res.TokenPair)
+}
+
+// anon prepends [Anonymous] to a caller's own options.
+//
+// Prepended rather than appended, like [asIdentity] and for the same reason: an
+// option the caller passed is the last word about their own call.
+func anon(opts []CallOption) []CallOption {
+	return append([]CallOption{Anonymous()}, opts...)
+}
+
+// asIdentity presents the token somebody holds between signing in and picking a
+// tenant, instead of the client's own credential. See [withBearer] for why that
+// also means anonymous.
+func asIdentity(token string, opts []CallOption) []CallOption {
+	return append([]CallOption{withBearer(token)}, opts...)
+}
+
+// needsAPIKeys refuses the key endpoints on a project that mounts none. The
+// route is passed in because the three of them differ and the sentence does not.
+func (a *Auth) needsAPIKeys(route string) error {
+	if a.profile.HasAPIKeys {
+		return nil
+	}
+	return notMounted(route,
+		"API keys are configured in main.go, by giving the handler an apikey manager")
 }
 
 // list reads one of the collection endpoints, which all answer with the same

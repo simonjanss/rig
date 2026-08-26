@@ -458,3 +458,59 @@ func TestPaginateStopsAtTheFirstFailure(t *testing.T) {
 		t.Errorf("seen = %d, failed = %d, want 1 and 1", seen, failed)
 	}
 }
+
+// Three rungs, in this order: what the caller insisted on, what the document
+// says, and the default. Only the middle one has ever been exercised implicitly,
+// through a generated client that also supplied the revision — so it gets a case
+// of its own, because the precedence is the whole of what the code says here.
+func TestRevisionHeaderPrefersTheCallersThenTheDocuments(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		caller string
+		api    rigclient.API
+		header string
+	}{
+		{
+			name:   "the caller's own",
+			caller: "X-Caller-Revision",
+			api:    rigclient.API{RevisionHeader: "X-Demo-Revision"},
+			header: "X-Caller-Revision",
+		},
+		{
+			name:   "the document's",
+			api:    rigclient.API{RevisionHeader: "X-Demo-Revision"},
+			header: "X-Demo-Revision",
+		},
+		{
+			name:   "the default",
+			header: rigclient.DefaultRevisionHeader,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var got http.Header
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				got = r.Header.Clone()
+				w.WriteHeader(http.StatusNoContent)
+			}))
+			t.Cleanup(srv.Close)
+
+			api := tc.api
+			api.BasePath, api.Revision = "/api/v1", "2026-08-01"
+			rt, err := rigclient.New(rigclient.Config{
+				BaseURL: srv.URL, RevisionHeader: tc.caller,
+			}, api)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			if err := rigclient.DoNoContent(t.Context(), rt, rigclient.Op{
+				Method: http.MethodGet, Path: "/todos",
+			}); err != nil {
+				t.Fatal(err)
+			}
+			if v := got.Get(tc.header); v != "2026-08-01" {
+				t.Errorf("%s = %q, want the revision", tc.header, v)
+			}
+		})
+	}
+}

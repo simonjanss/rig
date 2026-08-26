@@ -573,21 +573,44 @@ properties are asserted once.
 
 ## C. Runtime & Go client (`runtime`, `rigclient`)
 
-### C1. `throttle.Limiter`: `Allow` and `Take` are one function `[ ]`
+All of C landed on one branch, in this order: the pins, `ir.Resource.IsPublic`,
+C1, C4 with C5's electric half, C6's remainder, C2, C3's two helpers, C5's
+rigclient half. Nothing in it reached a generator, so `make examples` reported the
+generated code unchanged throughout — the same thing that made B one branch.
+`tenancy.RequireScope` keeps its signature for exactly that reason.
+
+Four bullets below are struck rather than done, and one is corrected. The
+paragraph under each says why. A review is not a specification, and four of these
+were wrong about the code.
+
+### C1. `throttle.Limiter`: `Allow` and `Take` are one function `[x]`
 
 The fold loop is byte-identical apart from calling `evaluate` vs `spend`
 (`runtime/throttle/throttle.go:137-164` vs `:208-236`); `evaluate`/`spend`
 themselves are near-twins.
 
 - **Fix:** unexported `fold(ctx, checks, per func(...) (Decision, error))`;
-  `Allow`/`Take` become nil-guard + one call. Optionally merge
-  `evaluate`/`spend` behind an `(n, resetAt, allowed)` builder.
+  `Allow`/`Take` become nil-guard + one call. ~~Optionally merge
+  `evaluate`/`spend` behind an `(n, resetAt, allowed)` builder.~~
 - **Size:** ~40 lines. **Risk:** low.
 
-### C2. `rigclient/auth.go`: twelve inlined copies of four helpers `[ ]`
+**The optional half is struck.** The builder's parameters are exactly the
+decisions the current code comments on — `n < Max` against `n <= Max`, counting a
+window against incrementing one, a reset derived against one reported — and they
+would become positional arguments where a swapped bool is a silent off-by-one in
+a rate limiter. The differing nil guards stay above the shared call, because they
+are the only thing the two verbs disagree about before the loop.
+
+### C2. `rigclient/auth.go`: twelve inlined copies of four helpers `[x]`
 
 - "call, then install the session" ×4 (`:68-79`, `:124-144`, `:240-260`,
-  `:288-309`) — `adopt` (`:540-549`) already does the pair version.
+  `:288-309`) — ~~`adopt` (`:540-549`) already does the pair version.~~ **It does
+  not.** `adopt` goes through `Session.replace`, which keeps the refresh token in
+  hand when the incoming pair carries none. That is right for a tenant switch;
+  for a sign-in it would hand B's session A's refresh token. They are `install`
+  and `adopt`, two functions, each doc naming the other. There is a fifth site
+  this entry missed: `AcceptInvitation` (`:329-344`), the same shape over a bare
+  `TokenPair`.
 - `append([]CallOption{Anonymous()}, opts...)` ×7 and
   `append([]CallOption{withBearer(...)}, opts...)` ×5.
 - API-key mount guard ×3 (`:502-529`) with the same hint sentence.
@@ -595,51 +618,138 @@ themselves are near-twins.
   `needsAPIKeys(route)` (mirroring the existing `needsIdentity`).
 - **Size:** ~60 lines. **Risk:** low.
 
-### C3. `rigclient/transport.go` call loop: extract the retry tail `[ ]`
+**It also fixed a panic.** `Do` returns nil on a 204, which `adopt` and `list`
+both honour and the five install sites did not — so a login or register answered
+204 dereferenced nil inside the SDK.
+
+### C3. `rigclient/transport.go` call loop: extract the retry tail `[x]`
 
 Two verbatim five-statement retry tails (`:209-216`, `:297-304`);
 `op.Multipart.rewind(marks)` ×4, `readError(res, rt.Now())` ×4, inside a
 150-line loop that is the hardest function in the module to review.
 
-- **Fix:** extract `backoff(ctx, op, marks, wait, cause) error` and hoist the
-  status branches (`fallback`, `reauthorize`, `refusal`) into methods.
-- **Size:** loop body ~150 → ~40 lines. **Risk:** medium — this is the retry
-  engine; the mirror change in TS is D1.
+- **Fix:** extract `backoff(ctx, op, marks, wait, cause) error` and ~~hoist the
+  status branches (`fallback`, `reauthorize`, `refusal`) into methods~~ hoist
+  `reauthorize` into `rt.refresh`.
+- **Size:** loop body ~~~150 → ~40~~ **107 → 84** lines. **Risk:** medium — this
+  is the retry engine; ~~the mirror change in TS is D1~~ D1 is not a mirror of
+  this, see below.
 
-### C4. `electric.Proxy` cleanups `[ ]`
+**Two of the three branches stay inline.** Extracting the fallback needs `(Op,
+error)` back plus a `fellBack` the caller sets anyway — more total code than the
+eleven lines it replaces, and the read-before-drain ordering stops sitting beside
+the identical ordering below it. Extracting the refusal arm needs seven
+parameters, five of them loop state, and shrinking that means a parameter object
+holding the attempt accounting, which is what the loop is written not to bury.
+The type assertion on `Reauthorizer` also stays in the loop: a 401 for a
+credential that cannot refresh has to fall through to the refusal arm with its
+body untouched, and that is only obvious while nothing sits between the `ok` test
+and the `continue`.
+
+**D1 is not this change on the other side.** Both helpers here exist for a
+response body that is closed, drained or handed on by hand and for a form that
+has to be seeked back to where it started; TypeScript has neither problem, and
+mirroring would produce two functions whose doc comments describe machinery that
+is not there. The divergence is recorded on `Runtime.call` so the next person
+diffing the two files knows it was decided. D1 stays open on its own terms — the
+duplicated ladder there is real — but it is not this.
+
+### C4. `electric.Proxy` cleanups `[x]`
 
 - `answer` (`runtime/electric/proxy.go:451-504`) repeats the
   snapshot-refusal arm twice; extract `trySnapshot(w, r, s) (Snapshot, bool)`.
-- `Serve` (`:297-401`) does four jobs; split the "ask upstream under the
-  initial deadline" half so the `answered()`/`Stop()` trick is legible.
-- `isHopHeader` (`:595-602`) → `slices.ContainsFunc` or a canonical-key map.
-- `splitTable` written twice in `fallback.go` (`:71-74`, `:122-125`).
+- ~~`Serve` (`:297-401`) does four jobs; split the "ask upstream under the
+  initial deadline" half so the `answered()`/`Stop()` trick is legible.~~
+- `isHopHeader` (`:595-602`) → ~~`slices.ContainsFunc` or~~ a canonical-key map.
+- `splitTable` written twice in `fallback.go` (`:65-69`, `:127-131` — the
+  anchors here were stale).
 - **Size:** ~60 lines. **Risk:** low-medium.
 
-### C5. Zero-default boilerplate `[ ]`
+**The `Serve` split is struck, and it would have been a bug.** `defer cancel()`
+holds the context `p.client.Do` used, and `res.Body` is copied a hundred lines
+later; an extracted "ask upstream" function fires that defer on return and
+cancels a body somebody is still reading. Making `cancel` escape puts the timer's
+creation in one function and its `Stop` in another, which is the opposite of the
+stated goal — the trick is legible precisely because `answered()` and `io.Copy`
+are visible in the same function.
 
-`if x == 0 { x = Default }` runs ×4 in `electric/proxy.go:241-256`, ×3 in
-`throttle/local.go:120-129`, ×2 each in `cache/cache.go` + `cache/bus.go`, ×9
-in `rigclient/client.go:242-283` (plus a 3-arm switch that is "first non-empty
-of three").
+**`slices.ContainsFunc` is struck too**: it allocates a closure per header per
+response and still scans. The map is keyed the way `net/http` canonicalizes, so
+note `"Te"` — the RFC's `"TE"` would match nothing, silently, on every response.
 
-- **Fix:** `Or[T comparable](v, fallback T)` and `First[T comparable](vs ...T)`
-  in a tiny shared spot; keep `serve.orDefault` (real negative-means-zero
-  semantics) as the special case.
-- **Size:** ~50 lines. **Risk:** minimal.
+**What `trySnapshot` was actually worth** was not the seven duplicated lines but
+the `if r.Context().Err() != nil { return }` that appeared twice with no comment
+at either site. It has a reason and now says it.
 
-### C6. Dead runtime surface `[ ]`
+### C5. Zero-default boilerplate `[x]`
 
-- `ir.Resource.IsPublic` (`pkg/ir/api.go:660`) — no non-test caller; delete or
-  make the generators use it.
-- `electric.Where.NotEq` (`runtime/electric/where.go:26-29`) — exported, doc'd,
-  never emitted by `electricgo`, never called.
+~~`Or[T comparable](v, fallback T)` and `First[T comparable](vs ...T)` in a tiny
+shared spot.~~ **They are `cmp.Or`**, standard library since 1.22, which this
+repository's own `servergo` already emits into generated code. A hand-rolled pair
+would have to be exported from `runtime`, doc-gated by `make godoc-check`, and
+compiled by every generated application forever — and reaching it from
+`rigclient` would have meant a new module edge for a two-line function.
+
+Most of the sites this entry names are not that shape, which is the other half of
+why it shrank to two files:
+
+- `electric/proxy.go:241-256` — three of the four are `== 0` because a negative
+  value is documented and read back (`no timeout`, `no bound`, `never opens the
+  circuit`). Those three are `cmp.Or` now; the fourth keeps its `<= 0` and a
+  comment saying why it is the odd one out. **Done.**
+- `rigclient/client.go:242-283` — four of the eight guards fit, plus the 3-arm
+  switch, which is `cmp.Or(a, b, Default)`. The other three cannot: two fall back
+  to a value to build rather than a constant, and `now` is a func type, which is
+  not comparable. **Done.**
+- `throttle/local.go:102-110` (not `:120-129`) — all three are `<= 0`. `cmp.Or`
+  would let a negative through and reconcile on every request. **Left.**
+- `cache/cache.go` — `MaxEntries` is `<= 0`; `Now` is a func type. **Left.**
+- `cache/bus.go` — only `Channel` fits: one conversion in a four-guard block,
+  plus an import for it. **Left.**
+- `serve.orDefault` — the backlog is right, and its `v < 0 → 0` arm is something
+  `cmp.Or` cannot express. **Left.**
+
+No `atLeast[T cmp.Ordered]` for the `<= 0` sites. It would differ from `cmp.Or`
+only in whether a negative survives, which is the distinction that is load-bearing
+three inches away in `electric.New` — two helpers whose difference is invisible at
+the call site is how that confusion gets institutionalised rather than fixed.
+
+### C6. Dead runtime surface `[x]`
+
+- `ir.Resource.IsPublic` (`pkg/ir/api.go:660`) — no non-test caller (**no caller
+  at all**); ~~delete or make the generators use it~~ **deleted**. The
+  alternative is struck: `Resource.Public` is the pre-expansion declaration and
+  `Endpoint.Public` is the union, because `applyconfig` sets the endpoint flag
+  straight from a custom endpoint's own `public:` without touching the resource
+  slice. A generator taught to use `IsPublic` would emit an auth check on a route
+  the project declared open.
+- ~~`electric.Where.NotEq` (`runtime/electric/where.go:26-29`) — exported,
+  doc'd, never emitted by `electricgo`, never called.~~ **Kept.** `electricgo`
+  emits only `Eq`, `EqText`, `IsNull` and `NotNull`, so "never emitted by the
+  generator" condemns `Gt`, `Gte`, `Lt`, `Lte` and `In` equally. `Where` is the
+  builder a hand-written scoping stub fills in; deleting the one negation while
+  `Gt` keeps `Lte` is an asymmetry that comes back as a surface change. What is
+  actually missing there is coverage — `NotEq`, `Gt`, `Lt` and `Lte` have no
+  test — and that is a smaller, better item than a deletion.
 - `tenancy.RequireScope` (`runtime/tenancy/scope.go:73-81`) — keep the doc,
-  collapse the body to `if s != ScopeAll { return nil }; return Require(c, wide)`.
-- `query.qualified()` written twice (`runtime/query/query.go:107-112`,
-  `:317-322`) — one package-level `qualify(table, column)`.
-- `serve.bounded` (`serve.go:601-614`) vs `App.run` (`app.go:163-180`) — same
-  select-on-ctx pattern; one `await(ctx, f)` helper.
+  collapse the body. **Done**, signature untouched: `servergo` emits this call
+  into every scoped handler, so a shape change would move three examples'
+  generated output.
+- `query.qualified()` written twice (`runtime/query/query.go:106-112`,
+  `:292-298` — the second anchor was a call site, not the definition) — one
+  package-level `qualify(table, column)`. **Done.** The hazard was not the six
+  duplicated lines but the two identical doc comments, which can drift with
+  nothing to catch it. The two methods stay as forwarders; rewriting the five
+  call sites would make each longer and net zero.
+- ~~`serve.bounded` (`serve.go:601-614`) vs `App.run` (`app.go:163-180`) — same
+  select-on-ctx pattern; one `await(ctx, f)` helper.~~ **Struck.** (`App.run` is
+  in `serve/app.go`, same package, so it was possible.) A correct `await` has to
+  report which select arm fired or `bounded` mislabels a phase that legitimately
+  returned `ctx.Err()`. That is eight lines to take two callers from 14+16 to
+  9+11: **30 lines become 28**. Everything interesting stays outside it — the
+  per-step `WithTimeout`, the two error shapes, the two timeout sentences (both
+  asserted on) — and the two doc comments explain *why* the wait is bounded
+  differently and correctly, so a third restatement would go on `await`.
 
 ---
 
@@ -650,7 +760,12 @@ of three").
 The transport-throw path (`:219-237`) and bad-status path (`:276-306`) run the
 identical check-repeatable → check-attempts → delay → budget → wait → increment
 ladder. Extract `backoffOrThrow(...)` returning the next attempt or throwing;
-hoist `attemptsOf(retry)` out of the loop. Mirror of C3.
+hoist `attemptsOf(retry)` out of the loop. ~~Mirror of C3.~~
+
+~~Mirror of C3~~ — C3 landed and this is not the other half of it. Its two
+helpers are about a response body closed by hand and a form seeked back to where
+it started, and TypeScript has neither. The ladder duplicated here is real and
+still worth extracting; it is just its own item now. See the note under C3.
 
 - **Size:** ~25 lines. **Risk:** low-medium (retry engine).
 
@@ -730,13 +845,16 @@ message differ.
 
 ## F. Dead code sweep (verify each before deleting) `[ ]`
 
-Zero references found in code, tests, docs, or generated templates:
+Zero references found in code, tests, docs, or generated templates. Two of the
+rows below are struck by B and two by C, and in three of those four cases the
+"zero references" claim or the suggested fix turned out to be wrong on
+inspection — which is the reason for this section's parenthesis:
 
 | Symbol | Location | Note |
 |---|---|---|
 | ~~`migrate.Version`~~ | `migrate/migrate.go:358` | Done under B6 — and it had two test callers, not zero. |
-| `ir.Resource.IsPublic` | `pkg/ir/api.go:660` | or make generators use it |
-| `electric.Where.NotEq` | `runtime/electric/where.go:26` | |
+| ~~`ir.Resource.IsPublic`~~ | `pkg/ir/api.go:660` | Done under C6. The "or make generators use it" half was wrong: it answers half the question `Endpoint.Public` answers. |
+| ~~`electric.Where.NotEq`~~ | `runtime/electric/where.go:26` | Kept under C6 — `electricgo` emits no comparison but `Eq`, so this argument condemns `Gt`/`Gte`/`Lt`/`Lte`/`In` too. It wants a test, not a deletion. |
 | `password.AtLeast` | `auth/password/password.go` | |
 | `account.DefaultSlug` | `auth/account/tenant.go:264` | |
 | `(*account.Service).HasPassword` | `auth/account/service.go:885` | |
@@ -761,7 +879,9 @@ never touched `dispatch.go`, which is B1's.
 What follows describes the rest.
 
 1. **A1+A2+A3** (SDK generator unification — one workspace, they overlap)
-2. **C1** (throttle) · **D1-D5** (all of ts/) · **E1+E2**
+2. ~~**C1** (throttle) ·~~ **D1-D5** (all of ts/) · **E1+E2** — all of C went on
+   one branch instead; see the note at the top of that section. D1 is no longer
+   coupled to C3.
 3. **A4** and **A5** each touch goldens + examples broadly — run them after
    batch 1 lands, not alongside. A5's HTTP parameter parsers should go into the
    `runtime/httpx` that B2 created rather than a new `runtime/httparg`; one

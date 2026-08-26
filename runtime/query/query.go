@@ -103,13 +103,20 @@ func (e Exists) SQL(args *Args) string {
 // Related builds a condition on rows of another table.
 func Related(e Exists) Cond { return Cond{Exists: &e} }
 
-// qualified is the column with its table, when it has one.
-func (c Cond) qualified() string {
-	if c.Table == "" {
-		return c.Column
+// qualify is a column with its table, when it has one.
+//
+// A statement that joins has to qualify: two tables with a created_at make an
+// unqualified column ambiguous, and Postgres is right to refuse it. Which is why
+// both [Cond] and [Order] carry a Table, and why this is written once for the
+// two of them.
+func qualify(table, column string) string {
+	if table == "" {
+		return column
 	}
-	return c.Table + "." + c.Column
+	return table + "." + column
 }
+
+func (c Cond) qualified() string { return qualify(c.Table, c.Column) }
 
 // Eq builds an equality condition.
 func Eq(column string, v any) Cond { return Cond{Column: column, Op: OpEq, Value: v} }
@@ -289,13 +296,7 @@ type Order struct {
 	Desc   bool
 }
 
-// qualified is the column with its table, when it has one.
-func (o Order) qualified() string {
-	if o.Table == "" {
-		return o.Column
-	}
-	return o.Table + "." + o.Column
-}
+func (o Order) qualified() string { return qualify(o.Table, o.Column) }
 
 // OrderSQL renders an ordering, returning empty when there is none.
 //

@@ -600,3 +600,44 @@ func TestAnUploadRoundTrips(t *testing.T) {
 		t.Errorf("got %+v, want the name and size the server read back", got)
 	}
 }
+
+// A search is idempotent whatever it carries, so a QUERY with a form in it is
+// repeatable — and the retry has to put the body back where it started before
+// waiting, not after. This is the rewind on the ordinary retry path; the other
+// tests here take the one on the reauthorization path.
+func TestARepeatableFormIsRewoundBeforeTheRetry(t *testing.T) {
+	var bodies []string
+	var seen int
+	rt := newClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seen++
+		parts := readParts(t, r)
+		if len(parts) == 1 {
+			bodies = append(bodies, parts[0].body)
+		}
+		if seen == 1 {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			w.Write([]byte(`{"code":"Internal","message":"not now"}`))
+			return
+		}
+		w.Write([]byte(`{"id":"1","title":"x"}`))
+	}), rigclient.Config{Retry: rigclient.Retry{Base: time.Millisecond, Cap: time.Millisecond}})
+
+	if _, err := rigclient.Do[todo](t.Context(), rt, rigclient.Op{
+		Method: rigclient.MethodQuery, Path: "/todos",
+		Multipart: &rigclient.Multipart{Files: []rigclient.Upload{
+			rigclient.Part("filter", rigclient.UploadBytes("filter.json", "application/json",
+				[]byte(`{"title":"x"}`))),
+		}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if len(bodies) != 2 {
+		t.Fatalf("the server read %d bodies, want the first and the retry", len(bodies))
+	}
+	for i, got := range bodies {
+		if got != `{"title":"x"}` {
+			t.Errorf("body %d = %q, want the form rewound to where it started", i, got)
+		}
+	}
+}
