@@ -475,3 +475,95 @@ func TestACallersOwnHeaderBeatsTheIdentityToken(t *testing.T) {
 		t.Errorf("Authorization = %q, want the caller's own header to win", presented)
 	}
 }
+
+// A 204 is no answer at all, and the install sites used to read straight through
+// it. Do returns nil for one, which every other consumer of a response in this
+// package already honours.
+func TestASignInWithNoBodyInstallsNothing(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	t.Cleanup(srv.Close)
+
+	rt, err := rigclient.New(rigclient.Config{BaseURL: srv.URL},
+		rigclient.API{BasePath: "/api/v1", Auth: &profile})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := rt.Auth().SignIn(t.Context(), authwire.LoginRequest{})
+	if err != nil {
+		t.Fatalf("a sign-in with no body failed: %v", err)
+	}
+	if res != nil {
+		t.Errorf("res = %+v, want nil for a 204", res)
+	}
+	if _, ok := rt.Session(); ok {
+		t.Error("a session was installed from a response that was not there")
+	}
+}
+
+// The same hole in the shape that answers with a pair rather than a whole
+// sign-in.
+func TestAcceptingAnInvitationWithNoBodyInstallsNothing(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	t.Cleanup(srv.Close)
+
+	rt, err := rigclient.New(rigclient.Config{BaseURL: srv.URL},
+		rigclient.API{BasePath: "/api/v1", Auth: &profile})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	pair, err := rt.Auth().AcceptInvitation(t.Context(), authwire.AcceptRequest{})
+	if err != nil {
+		t.Fatalf("accepting with no body failed: %v", err)
+	}
+	if pair != nil {
+		t.Errorf("pair = %+v, want nil for a 204", pair)
+	}
+	if _, ok := rt.Session(); ok {
+		t.Error("a session was installed from a response that was not there")
+	}
+}
+
+// The other half of the guard, which must not go the other way: an answer with
+// an identity token and no session is the tenant picker, and it leaves whatever
+// the client was already holding alone.
+func TestAnAnswerWithNoSessionLeavesTheClientAsItWas(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /auth/login", func(w http.ResponseWriter, _ *http.Request) {
+		json.NewEncoder(w).Encode(authwire.SignInResponse{TokenPair: authwire.TokenPair{
+			AccessToken: "rig_at_1", RefreshToken: "rig_rt_1",
+		}})
+	})
+	mux.HandleFunc("POST /auth/register", func(w http.ResponseWriter, _ *http.Request) {
+		json.NewEncoder(w).Encode(authwire.SignInResponse{IdentityToken: "rig_it_1"})
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	rt, err := rigclient.New(rigclient.Config{BaseURL: srv.URL},
+		rigclient.API{BasePath: "/api/v1", Auth: &profile})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	auth := rt.Auth()
+	if _, err := auth.SignIn(t.Context(), authwire.LoginRequest{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := auth.Register(t.Context(), authwire.RegisterRequest{}); err != nil {
+		t.Fatal(err)
+	}
+
+	s, ok := rt.Session()
+	if !ok {
+		t.Fatal("the session was thrown away by an answer that carried none")
+	}
+	if got := s.Tokens().AccessToken; got != "rig_at_1" {
+		t.Errorf("AccessToken = %q, want the one already in hand", got)
+	}
+}
