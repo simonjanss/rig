@@ -295,3 +295,85 @@ func TestSetupProjectVendorsByDefault(t *testing.T) {
 		t.Error("the default should write the migrations")
 	}
 }
+
+// Both halves of every block that owns rig tables, driven off the same
+// description the checks are.
+//
+// This was three copies of one control flow, one per block, and the two halves
+// are not equally important. A missing migration is reported for tidiness — the
+// project fails on its first request either way. An exposed table with no
+// configuration is the one that matters: it is what turns a table rig wrote
+// into a resource with a generated write path over it, and in three
+// hand-written copies it is also the half a fourth block would be most likely
+// to leave out. A block with no expose reason cannot pass here.
+func TestEveryFoundationBlockReportsBothHalves(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		block string
+		table string
+		// reason is the clause that says what the generated write path would
+		// be a way to do. It is per-block because the danger is.
+		reason string
+	}{
+		{"files", "rig_file", "full CRUD over its storage key"},
+		{"notifications", "rig_notification", "a generated write path over what somebody was told"},
+		{"presence", "rig_presence", "a generated Create"},
+	} {
+		t.Run(tc.block, func(t *testing.T) {
+			t.Parallel()
+
+			// Enabled with nothing scaffolded: the first half.
+			bare := newProject(t)
+			write(t, filepath.Join(bare, "rig.yaml"), `project:
+  name: demo
+  module: example.com/demo
+validate:
+  missing_comment: "off"
+`+tc.block+`:
+  enabled: true
+`)
+			_, stderr, code := runWithSchema(t, bare, "validate", "-C", bare)
+			if code == 0 {
+				t.Errorf("%s.enabled with no migration should be refused", tc.block)
+			}
+			if !strings.Contains(stderr, tc.block+".enabled is set but this project has no ") ||
+				!strings.Contains(stderr, "run `rig setup-project`") {
+				t.Errorf("the missing migration does not name the block and the remedy:\n%s", stderr)
+			}
+
+			// Scaffolded and exposed, with no table configuration: the second.
+			root := newProject(t)
+			write(t, filepath.Join(root, "rig.yaml"), `project:
+  name: demo
+  module: example.com/demo
+validate:
+  missing_comment: "off"
+`+tc.block+`:
+  enabled: true
+  expose: true
+`)
+			if _, stderr, code := run(t, "setup-project", "-C", root); code != 0 {
+				t.Fatalf("setup-project failed:\n%s", stderr)
+			}
+			// What `--expose` would have written, and deliberately not written.
+			if err := os.RemoveAll(filepath.Join(root, "services")); err != nil {
+				t.Fatal(err)
+			}
+
+			_, stderr, code = runWithSchema(t, root, "validate", "-C", root)
+			if code == 0 {
+				t.Errorf("%s.expose with no table configuration should be refused", tc.block)
+			}
+			if !strings.Contains(stderr, tc.block+".expose projects "+tc.table) {
+				t.Errorf("the expose refusal does not name the block and the table:\n%s", stderr)
+			}
+			if !strings.Contains(stderr, tc.reason) {
+				t.Errorf("the expose refusal does not say what it would let somebody do:\n%s", stderr)
+			}
+			if !strings.Contains(stderr, "run `rig setup-project --expose "+tc.table+"`") {
+				t.Errorf("the expose refusal does not name the remedy:\n%s", stderr)
+			}
+		})
+	}
+}

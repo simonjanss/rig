@@ -904,35 +904,83 @@ back off itself — and `beat` returns `{ answer, authorization }`.
 
 ## E. CLI & project config (`internal/cli`, `internal/project`)
 
-### E1. Foundation checks: three copies of one control flow `[ ]`
+### E1. Foundation checks: three copies of one control flow `[x]`
 
-`checkFilesFoundation` / `checkNotificationsFoundation` /
-`checkPresenceFoundation` (`internal/cli/load.go:280-395`, plus the
-`checkFoundationPresent` variant at `:407-427`) share the whole
-enabled → managed-tables → expose-warnings flow; only the anchor path and one
-message differ.
+`checkFilesFoundation`, `checkNotificationsFoundation` and
+`checkPresenceFoundation` are one `checkFoundationBlock(p, set, block)`, driven
+off a `foundationBlocks(p)` slice of `{name, enabled, expose, tables,
+exposeReason}`.
 
-- **Fix:** one `checkFoundationBlock(p, set, spec)` driven by a slice of
-  `{enabled, expose, anchor, tables, exposeReason}` specs. Makes it impossible
-  for a fourth foundation block to forget the expose half.
-- **Size:** ~60 lines. **Risk:** low.
+- **The two messages turned out to be one message each.** Both differ only in
+  the block name and the table, and the expose one in a single clause naming
+  what the generated write path would be a way to do — full CRUD over a storage
+  key, a write path over what somebody was told, a Create with a body in it.
+  That clause is `exposeReason`, and it is the only per-block prose left.
+- **`checkFoundationPresent` stays as it is, and the entry was wrong to file it
+  as a variant of the same flow.** It answers a different question — not "is
+  this block's table missing" but "is there any foundation at all" — so it tests
+  `len(managed) == 0` rather than membership, its message names no table because
+  none is missing in particular, its guard is `!Enabled || Own` rather than
+  `!Enabled`, and it has no expose half because `auth.expose` is a list of
+  tables rather than a switch. Folding it in would mean three flags to express
+  one twelve-line function, and the flags would be read on every other block's
+  behalf.
+- **The test that makes the point is new**, because there was none:
+  `TestEveryFoundationBlockReportsBothHalves` runs both halves against all three
+  blocks and asserts each names its own block, its own table, its own remedy and
+  its own reason. Before this, no test read any of the six messages — the only
+  coverage was `files_test.go` following the advice one of them gives, which
+  cannot notice a block that gives none.
+- **Which is what the item was actually about.** The two halves are not equally
+  important: a missing migration fails on the first request either way, while an
+  exposed table with no configuration turns a table rig wrote into a resource
+  with a generated write path over it. In three hand-written copies that second
+  half is the one a fourth block would leave out. It is now impossible to add a
+  block without it — there is nowhere to put the entry that does not carry it.
+- **Size:** 118 lines become 112, so effectively nothing. The doc comments
+  moved rather than merged, which is right: each block's danger is its own and
+  none of that prose deduplicates. What was bought is the control flow and the
+  test.
 
-### E2. Small CLI/config dedups `[ ]`
+### E2. Small CLI/config dedups `[x]`
 
-- `Configured()` is `!reflect.DeepEqual(x, bare)` in six `internal/project`
-  blocks — one generic `configured[T](v, bare T)`.
-- `mustProject()` + `!p.UsesContainer()` + the "database.url is set, so rig
-  does not manage this database" refusal repeats at
-  `internal/cli/db.go:39,95,129,185`.
+- **`configured[T any](v, bare T)` in `internal/project/config.go`**, and the
+  six blocks call it. `reflect` went from six files to one, and the paragraph
+  explaining what the question actually is — everything except the fields that
+  say whether the thing exists and how its tables are generated — is written
+  once instead of implied six times. Each site still names its own `bare`,
+  because only the block knows which of its fields are not configuration.
+- **The `db.go` count was four and the truth is two.** `db down` and `db reset`
+  are identical: `mustProject`, `!UsesContainer`, and the same one-sentence
+  refusal. They are `e.managedProject()` now. The other two are not the same
+  check. **`db up` does not refuse at all** — pointed at a database rig does not
+  manage, applying the migrations is the useful thing to do, and its refusal is
+  about `database.electric`, a sync service rig would have to run itself, with
+  its own three-clause message. **`db url` is `!dockerdb.Isolated() ||
+  !p.UsesContainer()`**, a different condition, and it answers rather than
+  refusing. Folding either in would have changed behaviour under cover of a
+  dedup.
+- **Size:** ~20 lines, and the point is not the lines. One refusal sentence in
+  one place is a sentence that cannot come to be worded two ways, which is what
+  two copies of it were on their way to.
 
 ---
 
-## F. Dead code sweep (verify each before deleting) `[ ]`
+## F. Dead code sweep (verify each before deleting) `[x]`
 
-Zero references found in code, tests, docs, or generated templates. Two of the
-rows below are struck by B and two by C, and in three of those four cases the
-"zero references" claim or the suggested fix turned out to be wrong on
-inspection — which is the reason for this section's parenthesis:
+"Zero references found in code, tests, docs, or generated templates."
+**Re-checked, row by row, and the claim held for three of the ten.** Two rows
+were struck by B and two by C; of the six that were still open, three have
+callers — `password.AtLeast` at `auth/password/password.go:169`,
+`account.DefaultSlug` at `auth/account/tenant.go:191`, and
+`apikey.Key.Allows` at `auth/apikey/apikey.go:427`, which also settles the ⚠:
+it is not a missing call. Two were deleted under D and one is struck below.
+
+That is a hit rate of three in ten for a table whose whole content is a claim
+about references, and it is the reason for the parenthesis in this heading.
+A `grep` that misses a call is not a rare accident here — the names are short,
+some of them are ordinary English words, and one of the consumers writes Go and
+TypeScript out of string literals.
 
 | Symbol | Location | Note |
 |---|---|---|
@@ -941,11 +989,23 @@ inspection — which is the reason for this section's parenthesis:
 | ~~`electric.Where.NotEq`~~ | `runtime/electric/where.go:26` | Kept under C6 — `electricgo` emits no comparison but `Eq`, so this argument condemns `Gt`/`Gte`/`Lt`/`Lte`/`In` too. It wants a test, not a deletion. |
 | `password.AtLeast` | `auth/password/password.go` | |
 | `account.DefaultSlug` | `auth/account/tenant.go:264` | |
-| `(*account.Service).HasPassword` | `auth/account/service.go:885` | |
+| ~~`(*account.Service).HasPassword`~~ | `auth/account/service.go:885` | **Kept.** Genuinely uncalled, and deleted anyway would have been the wrong call — see below. |
 | ~~`(*files.File).Uploaded`~~ | `files/files.go:102` | Done under D — confirmed unreferenced anywhere, deleted. |
 | ~~`(*blob.Memory).SetClock`~~ | `files/blob/memory.go:43` | Done under D, and it took more with it than the row says — see below. |
 | `(*apikey.Key).Allows` | `auth/apikey/apikey.go:98` | ⚠ CIDR check — may be a **missing call**, not dead code. Decide, don't just delete. |
 | ~~`var _ = dbx.IsNoRows`~~ | `notify/dispatch.go:513` | Done under B1 — the `dbx` import went with it, which is what the blank was papering over. |
+
+**`HasPassword` has no caller and stays.** It is the only one of `account.Service`'s
+twelve exported methods with no route in `authhttp`, no test and no caller, and
+that pattern is what made it look dead. It is also the only one whose doc
+comment names the flow it is for and argues against the alternative: an
+application deciding between "set a password" and "change your password" would
+otherwise fetch the credential to look, and be an application holding a hash it
+has no use for. `auth/account` is a published module and its `Service` is what
+an application embeds; that rig itself has no route for a question a UI asks is
+not evidence the question is not asked. This is B4's argument at one-hundredth
+the size, and it comes out the same way. What it wants is a test, which it does
+not have.
 
 **`SetClock` was a seam that did not do what its comment said.** The field it
 wrote — `Memory.now` — was read in one place, `Put`'s `ModTime`. The doc comment

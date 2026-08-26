@@ -1,7 +1,6 @@
 package project
 
 import (
-	"reflect"
 	"slices"
 	"time"
 
@@ -145,8 +144,7 @@ const LongestDigestWindow = 7 * 24 * time.Hour
 // whether there is an inbox and how its tables are treated, the same way
 // [Files.Configured] does.
 func (n Notifications) Configured() bool {
-	bare := Notifications{Enabled: n.Enabled, Expose: n.Expose}
-	return !reflect.DeepEqual(n, bare)
+	return configured(n, Notifications{Enabled: n.Enabled, Expose: n.Expose})
 }
 
 // checkNotifications validates what the JSON Schema cannot: values that only

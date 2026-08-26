@@ -88,12 +88,9 @@ func newDBCmd(e *env) *cobra.Command {
 			Short: "Stop the database without deleting it",
 			Args:  cobra.NoArgs,
 			RunE: func(cmd *cobra.Command, _ []string) error {
-				p, err := e.mustProject()
+				p, err := e.managedProject()
 				if err != nil {
 					return err
-				}
-				if !p.UsesContainer() {
-					return fmt.Errorf("database.url is set, so rig does not manage this database")
 				}
 				if p.Config.Database.Electric.Enabled {
 					el, err := dockerdb.AttachElectric(cmd.Context(), attachElectricConfig(p))
@@ -122,12 +119,9 @@ func newDBCmd(e *env) *cobra.Command {
 				"from scratch is the only way to be sure the schema matches the files.",
 			Args: cobra.NoArgs,
 			RunE: func(cmd *cobra.Command, _ []string) error {
-				p, err := e.mustProject()
+				p, err := e.managedProject()
 				if err != nil {
 					return err
-				}
-				if !p.UsesContainer() {
-					return fmt.Errorf("database.url is set, so rig does not manage this database")
 				}
 
 				// The sync service goes first: its replication slot lives in the

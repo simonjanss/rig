@@ -97,7 +97,6 @@ type File struct {
 	DeletedAt  *time.Time
 }
 
-
 // Upload is a file on its way in.
 //
 // Body is read once, streamed straight to the store, and never buffered: an
