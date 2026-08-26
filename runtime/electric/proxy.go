@@ -55,18 +55,55 @@ type Shape struct {
 	// password hash on somebody's laptop.
 	Columns []string
 
-	// Fallback answers this shape when the sync service cannot be reached.
+	// Key are the table's primary key columns, in the order the table declares
+	// them.
 	//
-	// Nil is the older behaviour and still the default: a sync outage is a 502
-	// and a subscriber with no rows. Setting it trades live sync for rows —
-	// what comes back is a snapshot, correct at the moment it was read and not
-	// updated after it, until the sync service is reachable again.
+	// They identify a row within the shape — see [RowKey] — and are what
+	// [Config.DB] needs to answer this shape without being told anything else
+	// about it. A key column outside Columns is still read, and still left out
+	// of the row: the projection is the promise on that path too.
+	//
+	// Required for that read, and refused rather than defaulted where it is
+	// missing: a snapshot whose rows are all named after the table is one row as
+	// far as a subscriber is concerned. A generated shape always carries it.
+	Key []string
+
+	// Schema is the electric-schema document for Columns: a JSON object mapping
+	// each column to its Postgres type. See [Snapshot.Schema], which is where it
+	// ends up.
+	//
+	// It describes Columns, so a shape that narrows the projection and does not
+	// narrow this describes a different set than it sends.
+	Schema string
+
+	// NoFallback answers a sync outage with a 502 even where this proxy could
+	// have answered from the database.
+	//
+	// It is for a shape whose value is its freshness rather than its rows. A
+	// snapshot of who is looking at this page, that then stops updating, is
+	// worth less than an empty list — so presence sets this, and it is a
+	// decision rather than an omission.
+	NoFallback bool
+
+	// Fallback answers this shape from somewhere other than the database this
+	// package would otherwise read.
+	//
+	// It is the escape hatch, and it wins: a default that overrode it would not
+	// be one. Setting it is for a shape that is not a single table's rows — one
+	// answered from a materialised view, a cache, or a second database.
 	//
 	// Whatever narrows Where has to narrow this too. Where is a filter this
 	// package sends and can therefore promise; a Fallback is a read it cannot
 	// see inside, so a shape scoped to less than its table with a fallback that
 	// is not is a subscriber shown rows the subscription would have withheld.
+	// The read built from Where has no such gap, which is why it is the default.
 	Fallback Fallback
+
+	// probe answers whether this shape has a snapshot to start again to, without
+	// building one. Set for the read this package builds, where the question is
+	// one row rather than every row; nil for a [Fallback], which can only be
+	// asked by calling it. See [Proxy.answer].
+	probe func(context.Context) error
 }
 
 // Config builds a proxy.
@@ -89,6 +126,41 @@ type Config struct {
 
 	// Headers are added to every upstream request, for the same reason.
 	Headers http.Header
+
+	// DB answers a shape when the sync service cannot be reached, by running the
+	// shape's own filter against the database the sync service reads.
+	//
+	// Setting it gives every shape a fallback. Nil is the older behaviour: a
+	// sync outage is a 502 and a subscriber with no rows.
+	//
+	// A [Shape] is a SELECT — a table, a projection, and a parameterized filter
+	// — so there is nothing to write per shape and nothing to keep in step. That
+	// is the point. A hand-written fallback is a read this package cannot see
+	// inside, so a shape scoped to less than its table with a fallback that is
+	// not shows a subscriber rows the subscription would have withheld; the read
+	// built from [Shape.Where] is the same predicate the sync service was sent,
+	// so it cannot diverge from it.
+	//
+	// Three things it is worth knowing:
+	//
+	// The cost lands all at once. Every subscriber falls back at the same
+	// moment, because what they have in common is the sync service being gone —
+	// so an outage is a read per subscriber per shape against the database the
+	// sync service was shielding. [Config.MaxSnapshotRows] bounds each one and
+	// [Config.SnapshotTimeout] bounds how long it may take.
+	//
+	// [Where.Raw] now reaches this database. It was always the one place in this
+	// package where the caller is responsible for what it writes; until now what
+	// it wrote was parsed by the sync service in a grammar of its own, and from
+	// here it is concatenated into a statement sent to Postgres.
+	//
+	// Postgres accepts filters the sync service refuses, which inverts the usual
+	// reassurance that a fallback is the narrower of the two. [Where.In] on a
+	// column whose type is a Postgres enum is a 400 from the sync service — see
+	// [Where.EqText], which exists for that reason — and runs here without
+	// complaint. So a scope with that mistake in it fails loudly while the sync
+	// service is up and answers with rows while it is down.
+	DB DB
 
 	// InitialTimeout bounds the wait on the one request that is not a long poll:
 	// a subscriber reading a shape from the beginning.
@@ -118,6 +190,18 @@ type Config struct {
 	//
 	// Zero is [DefaultMaxSnapshotRows]. A negative value is no bound.
 	MaxSnapshotRows int
+
+	// SnapshotTimeout bounds one read of [Config.DB].
+	//
+	// It exists for the reason [Config.InitialTimeout] does, one layer down.
+	// Every subscriber falls back at the same moment, so an outage is every one
+	// of them queueing on the same pool — and without this, a database that has
+	// become slow because of that queue is a request that waits rather than one
+	// that gives up and lets the next through.
+	//
+	// Zero is [DefaultSnapshotTimeout]. A negative value is no timeout, and the
+	// request's own context is then the only bound.
+	SnapshotTimeout time.Duration
 
 	// BreakerThreshold is how many failures in a row stop this proxy asking.
 	//
@@ -180,6 +264,14 @@ const DefaultInitialTimeout = 10 * time.Second
 // [Config.MaxSnapshotRows] says nothing.
 const DefaultMaxSnapshotRows = 20_000
 
+// DefaultSnapshotTimeout is how long one read of [Config.DB] may take when
+// [Config.SnapshotTimeout] says nothing.
+//
+// Shorter than [DefaultInitialTimeout], because by the time it applies the
+// subscriber has already spent that waiting for the sync service: the two are
+// consecutive on the same request, not alternatives.
+const DefaultSnapshotTimeout = 5 * time.Second
+
 // DefaultBreakerThreshold is how many failures in a row stop a proxy asking
 // when [Config.BreakerThreshold] says nothing.
 //
@@ -209,6 +301,8 @@ type Proxy struct {
 	headers http.Header
 	initial time.Duration
 	maxRows int
+	db      DB
+	snapTTL time.Duration
 	onError func(context.Context, error)
 	onState func(context.Context, bool)
 	// One breaker for the proxy, because what it watches for is the one sync
@@ -246,6 +340,7 @@ func New(cfg Config) (*Proxy, error) {
 	// means, and the guards that read them back.
 	initial := cmp.Or(cfg.InitialTimeout, DefaultInitialTimeout)
 	maxRows := cmp.Or(cfg.MaxSnapshotRows, DefaultMaxSnapshotRows)
+	snapTTL := cmp.Or(cfg.SnapshotTimeout, DefaultSnapshotTimeout)
 	threshold := cmp.Or(cfg.BreakerThreshold, DefaultBreakerThreshold)
 
 	// Not cmp.Or, and this is the one place the difference shows: a cooldown
@@ -263,6 +358,8 @@ func New(cfg Config) (*Proxy, error) {
 		headers: cfg.Headers,
 		initial: initial,
 		maxRows: maxRows,
+		db:      cfg.DB,
+		snapTTL: snapTTL,
 		onError: cfg.OnError,
 		onState: cfg.OnSyncState,
 		breaker: &breaker{threshold: threshold, cooldown: cooldown},
@@ -304,6 +401,11 @@ var hopHeaders = map[string]bool{
 // about the request says which of the two it got, and nothing has to: the answer
 // is in the same format either way.
 func (p *Proxy) Serve(w http.ResponseWriter, r *http.Request, s Shape) {
+	// First, so that everything below reads one field rather than deciding for
+	// itself where a fallback comes from. s is a value, so this is local to the
+	// request and the caller's shape is untouched.
+	s = p.resolve(s)
+
 	// Before anything is built: while the circuit is open there is nothing to
 	// learn from asking, and the point of not asking is that this request does
 	// not wait for the answer the last one already got.
@@ -484,17 +586,21 @@ func (p *Proxy) answer(w http.ResponseWriter, r *http.Request, s Shape) {
 	// reasoning, including why this is checked after the branch above rather
 	// than before it.
 	//
-	// The snapshot is taken here and thrown away, because what is being decided
-	// is whether there is one at all. A shape having a fallback is not the same
-	// as that fallback answering: it can refuse, and [Config.MaxSnapshotRows]
-	// can refuse for it. Sending a subscriber to start again and then meeting it
-	// with that refusal would cost it the rows it was holding and hand it the
-	// 502 it would have had anyway — the one outcome this branch exists to
-	// avoid. So a refusal keeps the rows where they are, and the read costs a
-	// tab that was already streaming one more than the tab beside it that
-	// arrived during the outage.
+	// What is being decided here is whether there is a snapshot at all, and not
+	// what is in it. A shape having a fallback is not the same as that fallback
+	// answering: it can refuse, and [Config.MaxSnapshotRows] can refuse for it.
+	// Sending a subscriber to start again and then meeting it with that refusal
+	// would cost it the rows it was holding and hand it the 502 it would have
+	// had anyway — the one outcome this branch exists to avoid. So a refusal
+	// keeps the rows where they are.
+	//
+	// [Shape.probe] is why that costs a row rather than a table for the read
+	// this package builds. A [Fallback] has no such shortcut: the only way to
+	// ask it anything is to call it, so its answer is read and thrown away, and
+	// a tab that was already streaming costs one read more than the tab beside
+	// it that arrived during the outage.
 	if s.Fallback != nil {
-		if _, ok := p.trySnapshot(w, r, s); !ok {
+		if !p.tryProbe(w, r, s) {
 			return
 		}
 		writeMustRefetch(w)
@@ -518,14 +624,43 @@ func (p *Proxy) answer(w http.ResponseWriter, r *http.Request, s Shape) {
 // bury the error that caused the outage.
 func (p *Proxy) trySnapshot(w http.ResponseWriter, r *http.Request, s Shape) (Snapshot, bool) {
 	snap, err := p.snapshot(r.Context(), s)
-	if err != nil {
-		if r.Context().Err() != nil {
-			return Snapshot{}, false
-		}
-		p.refuse(r, w, err)
-		return Snapshot{}, false
+	return snap, p.sendable(w, r, err)
+}
+
+// tryProbe establishes that this shape has a snapshot to start again to, without
+// building one where it does not have to.
+//
+// False means the same as it does for [Proxy.trySnapshot], for the same two
+// reasons: the shape refused and a 502 has been sent, or the subscriber hung up
+// while it was being asked.
+func (p *Proxy) tryProbe(w http.ResponseWriter, r *http.Request, s Shape) bool {
+	if s.probe == nil {
+		_, ok := p.trySnapshot(w, r, s)
+		return ok
 	}
-	return snap, true
+	err := s.probe(r.Context())
+	if err != nil {
+		err = fmt.Errorf("electric: the fallback for %s refused: %w", s.Table, err)
+	}
+	return p.sendable(w, r, err)
+}
+
+// sendable reports whether a fallback answered, and answers the request itself
+// where it did not.
+//
+// The hangup arm is not a refusal. Nothing was decided about the shape —
+// somebody closed a tab — so it gets no status and no line in [Config.OnError],
+// which during an outage would otherwise fill with one line per closed tab and
+// bury the error that caused the outage.
+func (p *Proxy) sendable(w http.ResponseWriter, r *http.Request, err error) bool {
+	if err == nil {
+		return true
+	}
+	if r.Context().Err() != nil {
+		return false
+	}
+	p.refuse(r, w, err)
+	return false
 }
 
 // snapshot reads a shape's fallback and holds it to [Config.MaxSnapshotRows].
@@ -534,6 +669,12 @@ func (p *Proxy) trySnapshot(w http.ResponseWriter, r *http.Request, s Shape) (Sn
 // sent, which is what both of [Proxy.trySnapshot]'s callers need — one of them
 // then throws the rows away. The error is the sentence [Proxy.refuse] reports,
 // so what a log says about a refusal does not depend on which of them asked.
+//
+// The bound is checked after the fact here, which is the only way to check a
+// [Fallback]: it returns the rows it read, so they have been built by the time
+// there is a count to compare. The read this package builds applies it as a
+// LIMIT instead and never materializes the row past the bound — same refusal,
+// paid for differently.
 func (p *Proxy) snapshot(ctx context.Context, s Shape) (Snapshot, error) {
 	snap, err := s.Fallback(ctx)
 	if err != nil {

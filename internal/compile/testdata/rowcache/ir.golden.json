@@ -2872,7 +2872,8 @@
               "type": "String",
               "description": "Only lessons in this state."
             }
-          ]
+          ],
+          "fallback": true
         }
       }
     ],

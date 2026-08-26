@@ -104,6 +104,13 @@ func handleLessonShape(s Server, scope LessonScope) http.HandlerFunc {
 			// every column it names to every subscriber, and a column that is not in the
 			// API has no business in a live stream either.
 			Columns: LessonShapeColumns,
+			// What the proxy needs to answer this shape itself while the sync service
+			// cannot be reached: the columns that name a row, and the types a subscriber
+			// reads them with. The filter above is the rest of it, which is the whole
+			// point — the read is this shape's own predicate, so there is nothing to
+			// write per shape and nothing that could narrow differently.
+			Key:    LessonShapeKey,
+			Schema: LessonShapeSchema,
 		})
 	}
 }
@@ -160,6 +167,13 @@ func handleLessonDeletedShape(s Server, scope LessonDeletedScope) http.HandlerFu
 			// every column it names to every subscriber, and a column that is not in the
 			// API has no business in a live stream either.
 			Columns: LessonShapeColumns,
+			// What the proxy needs to answer this shape itself while the sync service
+			// cannot be reached: the columns that name a row, and the types a subscriber
+			// reads them with. The filter above is the rest of it, which is the whole
+			// point — the read is this shape's own predicate, so there is nothing to
+			// write per shape and nothing that could narrow differently.
+			Key:    LessonShapeKey,
+			Schema: LessonShapeSchema,
 		})
 	}
 }
@@ -231,6 +245,13 @@ func handleLessonVersionsShape(s Server, scope LessonVersionsScope) http.Handler
 			// every column it names to every subscriber, and a column that is not in the
 			// API has no business in a live stream either.
 			Columns: LessonShapeColumns,
+			// What the proxy needs to answer this shape itself while the sync service
+			// cannot be reached: the columns that name a row, and the types a subscriber
+			// reads them with. The filter above is the rest of it, which is the whole
+			// point — the read is this shape's own predicate, so there is nothing to
+			// write per shape and nothing that could narrow differently.
+			Key:    LessonShapeKey,
+			Schema: LessonShapeSchema,
 		})
 	}
 }
@@ -275,3 +296,21 @@ var LessonShapeColumns = []string{
 	"tags",
 	"search_vector",
 }
+
+// LessonShapeKey are the columns that identify a row of this shape.
+//
+// The table's primary key, in the order the table declares it. A snapshot
+// names each row by it, the way the sync service does.
+var LessonShapeKey = []string{
+	"id",
+}
+
+// LessonShapeSchema describes the columns this shape carries, in the form the
+// sync service describes them.
+//
+// It is sent with a fallback snapshot and is how a subscriber knows to read a
+// count as a number and a timestamp as a moment. The types are Postgres's own
+// names — int8, timestamptz, an enum's type name — because those are what
+// the sync service sends and a subscriber has one set of parsers for both
+// paths.
+const LessonShapeSchema = "{\"capacity\":{\"type\":\"int4\"},\"created_at\":{\"not_null\":true,\"type\":\"timestamptz\"},\"created_by_account_id\":{\"type\":\"uuid\"},\"deleted_at\":{\"type\":\"timestamptz\"},\"deleted_by_account_id\":{\"type\":\"uuid\"},\"id\":{\"not_null\":true,\"pk_index\":0,\"type\":\"uuid\"},\"manager_email\":{\"not_null\":true,\"type\":\"text\"},\"notes\":{\"type\":\"text\"},\"price\":{\"precision\":10,\"scale\":2,\"type\":\"numeric\"},\"search_vector\":{\"type\":\"text\"},\"snapshot_from_lesson_at\":{\"type\":\"timestamptz\"},\"snapshot_from_lesson_id\":{\"type\":\"uuid\"},\"starts_at\":{\"not_null\":true,\"type\":\"timestamptz\"},\"status\":{\"not_null\":true,\"type\":\"lesson_status\"},\"tags\":{\"dims\":1,\"type\":\"text\"},\"tenant_id\":{\"not_null\":true,\"type\":\"uuid\"},\"title\":{\"not_null\":true,\"type\":\"text\"},\"updated_at\":{\"type\":\"timestamptz\"},\"updated_by_account_id\":{\"type\":\"uuid\"},\"version_type\":{\"not_null\":true,\"type\":\"lesson_version_type\"}}"

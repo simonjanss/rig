@@ -5573,16 +5573,20 @@ subscriber is already parsing), and a `jsonb` is compared as a document
 
 ### Honest gaps
 
-- **Nothing checks that a scope and its fallback narrow the same way.** A scope
-  is a filter the proxy sends and can promise; a fallback is a read it cannot see
-  inside, so a shape scoped to a team with a fallback that lists the tenant shows
-  more than the subscription would — and only while something else is broken. It
-  is the same class of trap as the inherited scope, and it is documented in the
-  same places, and a linter cannot see it.
-- **The trash fallback applies a restore window the trash shape does not.**
+- ~~**Nothing checks that a scope and its fallback narrow the same way.**~~ A
+  scope is a filter the proxy sends and can promise; a fallback is a read it
+  cannot see inside, so a shape scoped to a team with a fallback that lists the
+  tenant shows more than the subscription would — and only while something else
+  is broken. It is the same class of trap as the inherited scope, and it is
+  documented in the same places, and a linter cannot see it. **Closed by M15.3**,
+  which does not check it: the read *is* the scope's own `WHERE` clause, so there
+  is no second description to diverge from the first.
+- ~~**The trash fallback applies a restore window the trash shape does not.**~~
   `ListDeleted` forces `WithOnlyDeleted`, which adds the cutoff; the shape
   deliberately has none. Narrower is the safe direction and a fourth read path to
   avoid it is not worth having, so this is written down rather than fixed.
+  **Closed by M15.3** for the same reason: the read is the shape, so there is no
+  repository default to differ over.
 - **`InitialTimeout` is a guess with a default.** Ten seconds, applied only to a
   read from the beginning, so a sync service that is running and not answering
   falls back rather than being waited on. A project whose shapes are large enough
@@ -5596,6 +5600,110 @@ subscriber is already parsing), and a `jsonb` is compared as a document
   `time.Time` as a full timestamp. `DateOnly` matches the sync service, which is
   the side a subscriber's parsers are written for, so the fallback is consistent
   with the stream and the pre-existing REST difference is untouched.
+
+---
+
+## M15.3 — the fallback stops being something you write (shipped)
+
+**M15.2 shipped a seam and left three things to do per table**: name the model in
+`rig.yaml`, write a constructor per shape that reaches for the typed repository
+and paginates carefully around `store.MaxLimit`, and wire each one into
+`Handlers`. Three files for a read that was already fully described somewhere
+else — and the description that mattered was not the one being written.
+
+`electric.Shape` carries `Table`, `Where`, `Params` and `Columns`. That is a
+`SELECT`. The proxy had it in hand the whole time: it built that filter from the
+tenant, the owner, the lifecycle columns and whatever the application's scope
+added, and sent it upstream. So `Config.DB` is the whole feature — one field
+where the proxy is built, and every shape answers a sync outage from the same
+predicate the sync service was given.
+
+Which closes the gap above rather than mitigating it. The reason a scope and a
+fallback could disagree was that they were two descriptions of the same rows;
+now there is one.
+
+**What came out.** `Options.ModelImport` and the four emitters behind it
+(`fallbackType`, `fallbackAdapter`, `rowEncoder`, `keyArgs`/`valueCall`), the
+per-shape `Fallback` fields on `Handlers`, the `fallback` parameter on every
+generated handler, `testdata/fallback/` as a paired golden, and linearlite's two
+hand-written fallback files. The generated shape package no longer imports the
+model at all. Net across the examples: about 330 lines of generated code less.
+
+**What went in.** `runtime/electric/read.go`, and three fields on `Shape` the
+proxy cannot derive from a filter — `Key`, `Schema`, `NoFallback`.
+
+**The rendering is where the thinking went.** A shape response carries the text
+Postgres prints for each value, so a text-format result *is* the answer for a
+uuid, a numeric, a jsonb document, an array, a bytea and an enum — byte for byte
+what the sync service sends, and better than the model path for jsonb (Postgres's
+normalised form rather than a re-marshal) and for numeric (its own scale rather
+than a `pgtype.Numeric` round trip). `rows.Values()` would have been the wrong
+tool: pgx hands back `[16]byte` for a uuid and `[]any` for an array, so every
+primary key would have rendered as a list of integers.
+
+Four columns are read in binary instead. A date and a timestamp are printed
+according to the session's `DateStyle`, and an instant according to its
+`TimeZone` as well — so a text-format read would have been the one read in rig
+whose output depends on the host, which is the argument `dbx.UTC` already makes.
+Boolean is there for a different reason: Postgres prints `t` and `f` where the
+sync service sends `true` and `false`. Those four go through `Value` and
+`DateOnly`, which is also what retires the generator's per-column choice between
+them — a date and an instant are the same Go type by the time a renderer sees
+one, and a column's own type is not.
+
+**Parameters go through as Go strings**, which is what lets one filter compare
+against a column of any type without per-column casting: pgx picks the text
+format for a `string` argument before it consults the parameter's OID and then
+sends the characters unchanged, so Postgres's own `uuid_in` or `int4in` parses
+them. Exactly what the sync service does with the same values, which is why one
+filter can be sent to both.
+
+**Two costs the change creates, both handled rather than noted.**
+`MaxSnapshotRows` is now a `LIMIT` of one past the bound, so a shape too large to
+send is known to be too large without the rows past it being read — where a
+hand-written fallback had to compare `total` against `len(rows)` after building
+everything. And the must-refetch probe, which reads a snapshot and throws it away
+to decide whether a resuming subscriber has somewhere to start again *to*, asks
+`SELECT 1 … OFFSET maxRows LIMIT 1` instead. That probe was opt-in per shape
+before and is now every project's, so a second full scan per already-streaming
+tab was not an acceptable default. `Config.SnapshotTimeout` bounds the read for
+the reason `InitialTimeout` bounds the one above it.
+
+**Presence opts out, and rig decides that.** `applyPresenceTable` sets
+`Fallback: false` alongside the three other things it settles about rig's own
+table, so no project writes that line and none can forget it: a snapshot of who
+was here a moment ago, that then stops updating, is worth less than the empty
+room presence already shows. `electric: {fallback: false}` says the same for a
+table of your own, and one key covers all three of its shapes — the reason
+`Handlers` gave the three separate fields was that they corresponded to three
+different repository reads, and a filter built from the shape cannot answer a
+trash route with live rows.
+
+`Shape.Fallback` stays, and an explicit one wins. It is the escape hatch for a
+shape that is not one table's rows, and it is what keeps the 30-odd in-process
+tests in `fallback_test.go` and `breaker_test.go` out of the `docker` tag.
+
+### Honest gaps
+
+- **`Where.Raw` now reaches the application's own database.** It was always the
+  one place in that package where the caller is responsible for what they write;
+  until now what they wrote was parsed by the sync service in a grammar of its
+  own. The extended protocol refuses multiple commands in one parse, so nothing
+  chains — but the sentence in its godoc is load-bearing in a way it was not.
+- **Postgres accepts filters the sync service refuses**, which inverts the usual
+  reassurance that a fallback is the narrower of the two. `Where.In` on a column
+  whose type is a Postgres enum is a 400 upstream — that is why `EqText` exists —
+  and runs here without complaint. So a scope with that mistake in it fails
+  loudly while the sync service is up and answers with rows while it is down.
+- **The read is not throttled**, which was M15.2's gap and is now every
+  project's rather than the shapes somebody opted in. Named again.
+- **`DateStyle` is assumed to be ISO for anything but those four columns.** It
+  affects `interval` too, which no generated model maps, and nothing else that
+  reaches a shape. Asking for binary on the temporal columns is what makes the
+  rest of it moot.
+- **Collapsing identical concurrent snapshots** through `runtime/cache`'s `Map`
+  is still the obvious next step, and is now more pressing rather than less:
+  every project pays the outage cost, not the ones that opted in.
 
 ---
 

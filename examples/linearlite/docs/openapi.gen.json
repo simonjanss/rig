@@ -3,7 +3,7 @@
   "info": {
     "title": "linearlite",
     "description": "The linearlite HTTP API.\n\nThe authentication endpoints under `/auth` are served by a hand-written module and are not described here.\n\nThe notification inbox endpoints are served by a hand-written module and are not described here.",
-    "version": "2026-08-25"
+    "version": "2026-08-26"
   },
   "servers": [
     {
@@ -827,7 +827,7 @@
             "$ref": "#/components/responses/Forbidden"
           },
           "502": {
-            "description": "The sync service could not be reached, and this shape has nothing to answer with instead.",
+            "description": "The sync service could not be reached, and this shape had nothing to answer with instead: no database was configured, this shape asked not to be answered from one, or the read failed or was larger than a snapshot may be.",
             "content": {
               "text/plain": {}
             }
@@ -959,7 +959,7 @@
             "$ref": "#/components/responses/Forbidden"
           },
           "502": {
-            "description": "The sync service could not be reached, and this shape has nothing to answer with instead.",
+            "description": "The sync service could not be reached, and this shape had nothing to answer with instead: no database was configured, this shape asked not to be answered from one, or the read failed or was larger than a snapshot may be.",
             "content": {
               "text/plain": {}
             }
@@ -1110,7 +1110,7 @@
             "$ref": "#/components/responses/Forbidden"
           },
           "502": {
-            "description": "The sync service could not be reached, and this shape has nothing to answer with instead.",
+            "description": "The sync service could not be reached, and this shape had nothing to answer with instead: no database was configured, this shape asked not to be answered from one, or the read failed or was larger than a snapshot may be.",
             "content": {
               "text/plain": {}
             }
@@ -2010,7 +2010,7 @@
             "$ref": "#/components/responses/Forbidden"
           },
           "502": {
-            "description": "The sync service could not be reached, and this shape has nothing to answer with instead.",
+            "description": "The sync service could not be reached, and this shape had nothing to answer with instead: no database was configured, this shape asked not to be answered from one, or the read failed or was larger than a snapshot may be.",
             "content": {
               "text/plain": {}
             }
@@ -2142,7 +2142,7 @@
             "$ref": "#/components/responses/Forbidden"
           },
           "502": {
-            "description": "The sync service could not be reached, and this shape has nothing to answer with instead.",
+            "description": "The sync service could not be reached, and this shape had nothing to answer with instead: no database was configured, this shape asked not to be answered from one, or the read failed or was larger than a snapshot may be.",
             "content": {
               "text/plain": {}
             }
@@ -2284,7 +2284,7 @@
             "$ref": "#/components/responses/Forbidden"
           },
           "502": {
-            "description": "The sync service could not be reached, and this shape has nothing to answer with instead.",
+            "description": "The sync service could not be reached, and this shape had nothing to answer with instead: no database was configured, this shape asked not to be answered from one, or the read failed or was larger than a snapshot may be.",
             "content": {
               "text/plain": {}
             }

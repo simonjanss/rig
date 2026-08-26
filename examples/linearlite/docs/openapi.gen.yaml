@@ -7,7 +7,7 @@ info:
         The authentication endpoints under `/auth` are served by a hand-written module and are not described here.
 
         The notification inbox endpoints are served by a hand-written module and are not described here.
-    version: "2026-08-25"
+    version: "2026-08-26"
 servers:
     - url: /
       description: This server. Set openapi.servers to name the deployment instead.
@@ -582,7 +582,7 @@ paths:
                 "403":
                     $ref: '#/components/responses/Forbidden'
                 "502":
-                    description: The sync service could not be reached, and this shape has nothing to answer with instead.
+                    description: 'The sync service could not be reached, and this shape had nothing to answer with instead: no database was configured, this shape asked not to be answered from one, or the read failed or was larger than a snapshot may be.'
                     content:
                         text/plain: {}
                 "503":
@@ -677,7 +677,7 @@ paths:
                 "403":
                     $ref: '#/components/responses/Forbidden'
                 "502":
-                    description: The sync service could not be reached, and this shape has nothing to answer with instead.
+                    description: 'The sync service could not be reached, and this shape had nothing to answer with instead: no database was configured, this shape asked not to be answered from one, or the read failed or was larger than a snapshot may be.'
                     content:
                         text/plain: {}
                 "503":
@@ -785,7 +785,7 @@ paths:
                 "403":
                     $ref: '#/components/responses/Forbidden'
                 "502":
-                    description: The sync service could not be reached, and this shape has nothing to answer with instead.
+                    description: 'The sync service could not be reached, and this shape had nothing to answer with instead: no database was configured, this shape asked not to be answered from one, or the read failed or was larger than a snapshot may be.'
                     content:
                         text/plain: {}
                 "503":
@@ -1414,7 +1414,7 @@ paths:
                 "403":
                     $ref: '#/components/responses/Forbidden'
                 "502":
-                    description: The sync service could not be reached, and this shape has nothing to answer with instead.
+                    description: 'The sync service could not be reached, and this shape had nothing to answer with instead: no database was configured, this shape asked not to be answered from one, or the read failed or was larger than a snapshot may be.'
                     content:
                         text/plain: {}
                 "503":
@@ -1509,7 +1509,7 @@ paths:
                 "403":
                     $ref: '#/components/responses/Forbidden'
                 "502":
-                    description: The sync service could not be reached, and this shape has nothing to answer with instead.
+                    description: 'The sync service could not be reached, and this shape had nothing to answer with instead: no database was configured, this shape asked not to be answered from one, or the read failed or was larger than a snapshot may be.'
                     content:
                         text/plain: {}
                 "503":
@@ -1611,7 +1611,7 @@ paths:
                 "403":
                     $ref: '#/components/responses/Forbidden'
                 "502":
-                    description: The sync service could not be reached, and this shape has nothing to answer with instead.
+                    description: 'The sync service could not be reached, and this shape had nothing to answer with instead: no database was configured, this shape asked not to be answered from one, or the read failed or was larger than a snapshot may be.'
                     content:
                         text/plain: {}
                 "503":

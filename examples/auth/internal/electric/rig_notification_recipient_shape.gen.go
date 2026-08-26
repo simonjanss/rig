@@ -94,6 +94,13 @@ func handleRigNotificationRecipientShape(s Server, scope RigNotificationRecipien
 			// every column it names to every subscriber, and a column that is not in the
 			// API has no business in a live stream either.
 			Columns: RigNotificationRecipientShapeColumns,
+			// What the proxy needs to answer this shape itself while the sync service
+			// cannot be reached: the columns that name a row, and the types a subscriber
+			// reads them with. The filter above is the rest of it, which is the whole
+			// point — the read is this shape's own predicate, so there is nothing to
+			// write per shape and nothing that could narrow differently.
+			Key:    RigNotificationRecipientShapeKey,
+			Schema: RigNotificationRecipientShapeSchema,
 		})
 	}
 }
@@ -162,6 +169,13 @@ func handleRigNotificationRecipientDeletedShape(s Server, scope RigNotificationR
 			// every column it names to every subscriber, and a column that is not in the
 			// API has no business in a live stream either.
 			Columns: RigNotificationRecipientShapeColumns,
+			// What the proxy needs to answer this shape itself while the sync service
+			// cannot be reached: the columns that name a row, and the types a subscriber
+			// reads them with. The filter above is the rest of it, which is the whole
+			// point — the read is this shape's own predicate, so there is nothing to
+			// write per shape and nothing that could narrow differently.
+			Key:    RigNotificationRecipientShapeKey,
+			Schema: RigNotificationRecipientShapeSchema,
 		})
 	}
 }
@@ -185,3 +199,22 @@ var RigNotificationRecipientShapeColumns = []string{
 	"event_count",
 	"read_at",
 }
+
+// RigNotificationRecipientShapeKey are the columns that identify a row of this
+// shape.
+//
+// The table's primary key, in the order the table declares it. A snapshot
+// names each row by it, the way the sync service does.
+var RigNotificationRecipientShapeKey = []string{
+	"id",
+}
+
+// RigNotificationRecipientShapeSchema describes the columns this shape
+// carries, in the form the sync service describes them.
+//
+// It is sent with a fallback snapshot and is how a subscriber knows to read a
+// count as a number and a timestamp as a moment. The types are Postgres's own
+// names — int8, timestamptz, an enum's type name — because those are what
+// the sync service sends and a subscriber has one set of parsers for both
+// paths.
+const RigNotificationRecipientShapeSchema = "{\"account_id\":{\"not_null\":true,\"type\":\"uuid\"},\"created_at\":{\"not_null\":true,\"type\":\"timestamptz\"},\"deleted_at\":{\"type\":\"timestamptz\"},\"deleted_by_account_id\":{\"type\":\"uuid\"},\"event_count\":{\"not_null\":true,\"precision\":32,\"scale\":0,\"type\":\"int4\"},\"group_key\":{\"type\":\"text\"},\"id\":{\"not_null\":true,\"pk_index\":0,\"type\":\"uuid\"},\"kind\":{\"not_null\":true,\"type\":\"text\"},\"notification_id\":{\"not_null\":true,\"type\":\"uuid\"},\"read_at\":{\"type\":\"timestamptz\"},\"tenant_id\":{\"not_null\":true,\"type\":\"uuid\"},\"updated_at\":{\"type\":\"timestamptz\"}}"

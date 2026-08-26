@@ -179,8 +179,10 @@ func (e *emitter) shapeResponses() *v3.Responses {
 	}
 
 	bad := &v3.Response{
-		Description: "The sync service could not be reached, and this shape has " +
-			"nothing to answer with instead.",
+		Description: "The sync service could not be reached, and this shape had " +
+			"nothing to answer with instead: no database was configured, this " +
+			"shape asked not to be answered from one, or the read failed or was " +
+			"larger than a snapshot may be.",
 		Content: orderedmap.New[string, *v3.MediaType](),
 	}
 	bad.Content.Set("text/plain", &v3.MediaType{})

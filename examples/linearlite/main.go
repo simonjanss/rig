@@ -59,7 +59,6 @@ import (
 	"github.com/simonjanss/rig/examples/linearlite/services/outbox"
 	"github.com/simonjanss/rig/examples/linearlite/services/rig_account"
 	"github.com/simonjanss/rig/examples/linearlite/services/rig_notification_device"
-	"github.com/simonjanss/rig/examples/linearlite/services/rig_notification_recipient"
 	"github.com/simonjanss/rig/examples/linearlite/services/rig_notification_setting"
 	"github.com/simonjanss/rig/examples/linearlite/services/rig_presence"
 	"github.com/simonjanss/rig/examples/linearlite/services/todo"
@@ -398,6 +397,24 @@ func newAPI(ctx context.Context, pool *pgxpool.Pool, log *slog.Logger, page *obs
 	upstream := cmp.Or(os.Getenv("ELECTRIC_URL"), genelectric.DefaultElectricURL)
 	proxy, err := electric.New(electric.Config{
 		URL: upstream,
+		// And what answers a shape when that sync service cannot be reached.
+		// One field, and every shape survives an outage on a snapshot of its
+		// own rows — the board, the trash, one row's history and the bell, each
+		// of which renders nothing without them.
+		//
+		// It is the same pool everything else here reads from, and it works
+		// because a shape is a SELECT: the filter the proxy sent upstream is
+		// the filter it runs here, so there is nothing to keep in step and no
+		// way for a scope to narrow the stream and not the snapshot. Presence
+		// is the one shape that stays a 502, and rig decided that rather than
+		// this file — a snapshot of who was here a moment ago that then stops
+		// updating is worth less than the empty room it already shows.
+		//
+		// The cost is in one place: every subscriber falls back at the same
+		// moment, so an outage is one read per shape per subscriber against the
+		// database the sync service was shielding. MaxSnapshotRows bounds each
+		// one and SnapshotTimeout bounds how long it may take.
+		DB: pool,
 		// Why the sync service was not the one that answered. There is no logger
 		// inside the proxy, on purpose, so this is the only way the reason for a
 		// 502 on a shape route reaches the log everything else writes to.
@@ -418,36 +435,12 @@ func newAPI(ctx context.Context, pool *pgxpool.Pool, log *slog.Logger, page *obs
 	if err != nil {
 		return nil, nil, err
 	}
-	// Every shape a screen here subscribes to answers without the sync service,
-	// except one. The board, the trash, one row's history and the bell all have
-	// a fallback, because each is a screen that renders nothing without its
-	// rows — and a subscriber that gets nothing gets a blank page.
-	//
-	// Presence is the exception and it is a decision rather than an omission. A
-	// snapshot of who was here a moment ago, that then stops updating, is worth
-	// less than an empty list, because the feature *is* the freshness. It is
-	// also the one that would come out right anyway: the heartbeat is a REST
-	// call that an outage does not touch, so it keeps supplying a fresh reading
-	// of the server's clock while the streamed rows sit still, and
-	// @rig/presence ages them out at the TTL. A fallback there would buy a
-	// minute of ghosts and then the empty room it already shows.
-	//
-	// RigNotificationRecipientDeleted is left nil too, for the plainer reason:
-	// nothing subscribes to it.
-	//
-	// The cost of all of this is in one place — every subscriber falls back at
-	// the same moment, so an outage is one read per shape per subscriber against
-	// the database the sync service was shielding. That is the trade, and it is
-	// why each of these is a line somebody wrote rather than a default.
+	// One scope, and nothing else. Surviving a sync outage is the proxy's DB
+	// field above rather than a line per shape here, which is most of what this
+	// registration used to be.
 	genelectric.Register(mux, genelectric.Handlers{
 		Server:      genelectric.Server{Proxy: proxy, GetClaims: front.Claims},
 		RigPresence: rig_presence.Shape,
-
-		TodoFallback:         todo.Fallback(repos.Todos),
-		TodoDeletedFallback:  todo.DeletedFallback(repos.Todos),
-		TodoVersionsFallback: todo.VersionsFallback(repos.Todos),
-
-		RigNotificationRecipientFallback: rig_notification_recipient.Fallback(repos.RigNotificationRecipients),
 	})
 
 	// The permission table, made to match what the handlers check — including

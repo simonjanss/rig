@@ -172,57 +172,38 @@ A shape endpoint is a filter in front of the sync service, so by default a sync
 service that cannot be reached is a **502** and a subscriber with no rows. On a
 page whose list *is* a shape, that is a blank page.
 
-A shape can answer from your own read path instead:
-
-```yaml
-- name: electric
-  options:
-    package: electric
-    model_import: github.com/you/app/internal/model   # turns the seam on
-```
-
-Naming the model gives every shape a `Fallback` field on `Handlers` beside its
-scope, and you wire the ones worth wiring:
+Give the proxy a database and it answers every shape from the shape's own
+filter:
 
 ```go
-genelectric.Register(mux, genelectric.Handlers{
-    Server:       genelectric.Server{Proxy: proxy, GetClaims: front.Claims},
-    TodoFallback: todo.Fallback(repos.Todos),
+proxy, err := electric.New(electric.Config{
+    URL: os.Getenv("ELECTRIC_URL"),
+    DB:  pool,   // the whole of it
 })
 ```
 
-```go
-func Fallback(repo store.TodoRepository) genelectric.TodoFallback {
-    return func(ctx context.Context, _ *http.Request, _ tenancy.Claims, _ genelectric.TodoShapeParams) ([]*model.Todo, error) {
-        rows, total, err := repo.List(ctx, model.TodoFilter{}, model.TodoPage{Limit: store.MaxLimit})
-        if err != nil {
-            return nil, err
-        }
-        if total > int64(len(rows)) {
-            return nil, fmt.Errorf("%d rows, past the %d a snapshot may send", total, store.MaxLimit)
-        }
-        return rows, nil
-    }
-}
-```
+That is the whole of it — one field, and there is nothing to write per shape and
+nothing to keep in step. **A shape is a `SELECT`**: rig already built the filter
+that decides which rows it holds, sent it to the sync service, and has it in
+hand. Answering from the database is running that same predicate somewhere else.
 
-That is the whole of it. Note the count: a read is paginated and a shape is not,
-and a repository clamps a larger `Limit` to `MaxLimit` without saying so — so the
-total is the only thing that can tell a complete answer from the first page of
-one, and refusing is the right answer for the same reason `MaxSnapshotRows`
-refuses. The rows go out in the sync protocol's own format, so
+Which is also why there is nothing here that can go quietly wrong. Whatever your
+[scope](#scoping-them) narrowed, the snapshot narrows, because it is the same
+`WHERE` clause — not a second description of the shape that somebody has to
+remember to change twice. The rows go out in the sync protocol's own format, so
 **a subscriber needs no change and cannot tell** — `X-Rig-Sync-Fallback` on the
 response is the only sign, and it is there so a browser's network tab and your
 logs have one. `snapshot` on the rows themselves, and `must-refetch` on the 409
 that sends a resuming subscriber to fetch them, which is what tells that 409
 apart from the sync service's own.
 
-Two settings on the proxy, both with defaults:
-`electric.Config.InitialTimeout` (10s) is how long a first read waits for the
-sync service to *begin* answering before it counts as unreachable — the answer
-itself is then copied out however long it takes — and `MaxSnapshotRows` (20,000)
-is how large a snapshot may be. `OnError` is worth setting too — it is the only way the reason
-for a 502 on a shape route reaches your log.
+Settings on the proxy, all with defaults. `electric.Config.InitialTimeout` (10s)
+is how long a first read waits for the sync service to *begin* answering before it
+counts as unreachable — the answer itself is then copied out however long it
+takes. `MaxSnapshotRows` (20,000) is how large a snapshot may be, applied as a
+`LIMIT` so the rows past the bound are never read, and `SnapshotTimeout` (5s) is
+how long one read may take. `OnError` is worth setting too — it is the only way
+the reason for a 502 on a shape route reaches your log.
 
 **A refused shape route answers the same error envelope as every other route** —
 flat JSON with `code` and `message`, which is what `@rig/client`'s error
@@ -302,18 +283,19 @@ stands, since resetting one that does not would cost it the rows it is holding
 and then refuse the request anyway.
 
 "Somewhere to start again to" is checked rather than assumed, and it is a
-stronger condition than the shape having a fallback: the snapshot is read on the
-resuming request too and thrown away, so that a fallback which fails — or one
+stronger condition than the shape having a fallback: a read that fails — or one
 past `MaxSnapshotRows` — leaves the rows where they are instead of taking them
-and then refusing the read it sent the subscriber to make.
+and then refusing the read it sent the subscriber to make. Asked as one row
+rather than by building the snapshot and discarding it, since the question is
+whether there is one and not what is in it.
 
 A subscription therefore survives an outage in both directions without a reload,
 and rig arranges only the first half of that: the recovery 409 is the sync
 service's own.
 
 **A snapshot is read per request, not once per outage.** Every read from the
-beginning runs the fallback again, so what comes back is the table as it is at
-that moment. The sync service was the thing that was down, not the API, so a
+beginning reads the table again, so what comes back is the table as it is at that
+moment. The sync service was the thing that was down, not the API, so a
 write during an outage commits — and the next read from the beginning has it.
 What is frozen is not the data; it is one subscription's copy of it. A tab that
 reloads, a tab that opens, and a tab that was just told to start again all see
@@ -332,52 +314,47 @@ after a reload than the tab that was watching. `examples/linearlite`'s
 it looks like. A page with optimistic writes has more reason to ask
 `Proxy.SyncReachable` than a read-only one does.
 
-Which reads correspond to which shape:
+It is not a repository read, and that is deliberate: it goes to the table with
+the shape's own projection and the shape's own `WHERE`. So each of the three
+shapes answers with its own generation of the row without anything being said
+about it, and the trash no longer differs from its stream over
+`restore_window_days` — a repository applies that window and
+[a shape does not](#three-shapes-decided-by-your-columns), and this is the shape.
 
-| Shape | The read |
-|---|---|
-| `/todo/_stream` | `List` with the repository's defaults |
-| `/todo/_deleted/_stream` | `ListDeleted` |
-| `/todo/{id}/_versions/_stream` | `ListSnapshots` on that id |
-
-`_deleted` differs on one point: the repository applies `restore_window_days` and
-[the shape does not](#three-shapes-decided-by-your-columns), so the degraded
-trash is **narrower** than the stream. Narrower is the safe direction, and a
-fourth read path to avoid it is not worth having.
-
-### Three things to get right
-
-**Whatever your scope narrows, your fallback must narrow too.** A scope is a
-filter rig sends to the sync service and can therefore promise; a fallback is a
-read rig cannot see inside. A shape scoped to a team, with a fallback that lists
-the tenant, shows a subscriber rows the subscription would have withheld — and
-only while something else is broken, which is the worst time to find out. Nothing
-checks this. It is the same class of trap as [the inherited
-scope](#scoping-them), and the reason a fallback is a field you set rather than
-something rig wires for you.
-
-The tenant is not on that list: the context a fallback receives already carries
-the subscriber's claims, so a generated repository read scopes itself.
+### Two things to get right
 
 **A sync outage becomes database load.** Every subscriber falls back at the same
-moment, because what they have in common is the service being gone — so a shape's
-fallback is one `List` per subscriber against the database the sync service was
-shielding. Every subscriber, not only the ones arriving: a tab that was already
-streaming is told to start again and reads too, which is the price of it not
-needing a reload. Twice, in fact — once to establish that there is a snapshot to
-send it to, and once to get it — so an outage costs one `List` per tab that
-arrives during it and two per tab that was already there. A network that is
-briefly not there costs that where without a fallback it would have cost some
-retries. That is why this is
-off until you turn it on, per shape, and why `MaxSnapshotRows` refuses rather
-than truncates: a subscriber cannot tell a short answer from a complete one. Turn
-it on for the shapes a page cannot render without, and leave it off for the rest.
+moment, because what they have in common is the service being gone — so an
+outage is one read per shape per subscriber against the database the sync
+service was shielding. Every subscriber, not only the ones arriving: a tab that
+was already streaming is told to start again and reads too, which is the price of
+it not needing a reload.
 
-**Some shapes should not have one.** [Presence](presence.md) is the clearest: a
-snapshot of who was here a moment ago, that then stops updating, is worth less
-than an empty list, because the feature *is* the freshness. `examples/linearlite`
-wires one on every shape a screen subscribes to — the board, the trash, one row's
-history and the inbox — and leaves presence without one for that reason.
+Two settings bound it, and one shape of query keeps it from being worse.
+`MaxSnapshotRows` refuses rather than truncates, because a subscriber cannot tell
+a short answer from a complete one — as a `LIMIT`, so the rows past the bound are
+never read. `SnapshotTimeout` (5s) is how long one read may take before it gives
+up and lets the next request through. And the read that decides whether a
+resuming tab has a snapshot to start again *to* asks for one row rather than all
+of them, so a tab that was already streaming costs a little more than the tab
+beside it rather than twice as much.
+
+Leaving `Config.DB` nil is still available, and is what a deployment that would
+rather answer 502 than take that load should do.
+
+**Some shapes should not have one, and rig knows about the main one.**
+[Presence](presence.md) is the clearest case: a snapshot of who was here a moment
+ago, that then stops updating, is worth less than an empty list, because the
+feature *is* the freshness. rig gives its own presence shape no fallback, so
+that is not a line you write. For one of your own, say so on the table:
+
+```yaml
+electric:
+  enabled: true
+  fallback: false
+```
+
+One key covers all three of the table's shapes.
 
 ## Subscribing to one
 

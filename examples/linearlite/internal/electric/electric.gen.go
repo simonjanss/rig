@@ -66,26 +66,6 @@ type Handlers struct {
 	Todo                            TodoScope
 	TodoDeleted                     TodoDeletedScope
 	TodoVersions                    TodoVersionsScope
-
-	// What answers a shape while the sync service cannot be reached. Nil is a 502
-	// and a subscriber with no rows, which is what every shape did before these
-	// fields existed.
-	//
-	// These do not inherit the way the scopes above do, and the reason is that
-	// there would be nothing to inherit: the three shapes carry three different
-	// generations of a row, so they correspond to three different reads — a live
-	// list, its trash, one row's history. A trash route quietly answering with
-	// live rows is the worst of the available outcomes, so nil stays nil.
-	//
-	// Whatever the scope above narrows, the fallback has to narrow too. A scope is
-	// a filter the proxy sends and can therefore promise; a fallback is a read it
-	// cannot see inside.
-	RigNotificationRecipientFallback        RigNotificationRecipientFallback
-	RigNotificationRecipientDeletedFallback RigNotificationRecipientDeletedFallback
-	RigPresenceFallback                     RigPresenceFallback
-	TodoFallback                            TodoFallback
-	TodoDeletedFallback                     TodoDeletedFallback
-	TodoVersionsFallback                    TodoVersionsFallback
 }
 
 // Register mounts every shape endpoint.
@@ -115,12 +95,12 @@ func Register(mux *http.ServeMux, h Handlers) {
 		h.TodoVersions = versionsFromLiveTodo(h.Todo)
 	}
 
-	mux.HandleFunc("GET /api/v1/rig_notification_recipient/_stream", handleRigNotificationRecipientShape(h.Server, h.RigNotificationRecipient, h.RigNotificationRecipientFallback))
-	mux.HandleFunc("GET /api/v1/rig_notification_recipient/_deleted/_stream", handleRigNotificationRecipientDeletedShape(h.Server, h.RigNotificationRecipientDeleted, h.RigNotificationRecipientDeletedFallback))
-	mux.HandleFunc("GET /api/v1/rig_presence/_stream", handleRigPresenceShape(h.Server, h.RigPresence, h.RigPresenceFallback))
-	mux.HandleFunc("GET /api/v1/todo/_stream", handleTodoShape(h.Server, h.Todo, h.TodoFallback))
-	mux.HandleFunc("GET /api/v1/todo/_deleted/_stream", handleTodoDeletedShape(h.Server, h.TodoDeleted, h.TodoDeletedFallback))
-	mux.HandleFunc("GET /api/v1/todo/{id}/_versions/_stream", handleTodoVersionsShape(h.Server, h.TodoVersions, h.TodoVersionsFallback))
+	mux.HandleFunc("GET /api/v1/rig_notification_recipient/_stream", handleRigNotificationRecipientShape(h.Server, h.RigNotificationRecipient))
+	mux.HandleFunc("GET /api/v1/rig_notification_recipient/_deleted/_stream", handleRigNotificationRecipientDeletedShape(h.Server, h.RigNotificationRecipientDeleted))
+	mux.HandleFunc("GET /api/v1/rig_presence/_stream", handleRigPresenceShape(h.Server, h.RigPresence))
+	mux.HandleFunc("GET /api/v1/todo/_stream", handleTodoShape(h.Server, h.Todo))
+	mux.HandleFunc("GET /api/v1/todo/_deleted/_stream", handleTodoDeletedShape(h.Server, h.TodoDeleted))
+	mux.HandleFunc("GET /api/v1/todo/{id}/_versions/_stream", handleTodoVersionsShape(h.Server, h.TodoVersions))
 }
 
 // prepare authenticates a subscription and starts its filter.

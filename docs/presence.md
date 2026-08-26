@@ -176,6 +176,21 @@ navigation or a tab going to the background sends one, so the TTL only has to
 cover a crashed tab and a dead network. That is what makes twenty seconds a
 sensible heartbeat rather than five.
 
+**And a sync outage empties the room rather than freezing it.** Every other shape
+answers from the database while the sync service is unreachable — see
+[electric.md](electric.md#when-the-sync-service-is-down) — and this one
+deliberately does not, because a snapshot of who was here a moment ago that then
+stops updating is worth less than an empty list: the feature *is* the freshness.
+It is also the one that would come out right anyway. The heartbeat is a REST call
+an outage does not touch, so it goes on supplying a fresh reading of the server's
+clock while the streamed rows sit still, and `@rig/presence` ages them out at the
+TTL. A fallback here would buy a minute of ghosts and then the empty room it
+already shows.
+
+rig decides this for its own presence table, so it is not a line you write and
+not one you can forget. For a table of your own,
+[`electric: {fallback: false}`](tables.md#electric) says the same thing.
+
 ## From the browser
 
 In full in [clients.md](clients.md#presence). The shape of it:

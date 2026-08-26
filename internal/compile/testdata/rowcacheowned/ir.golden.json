@@ -1608,7 +1608,8 @@
         },
         "electric": {
           "auth": "tenant",
-          "path": "/api/v1/memo/_stream"
+          "path": "/api/v1/memo/_stream",
+          "fallback": true
         }
       }
     ],

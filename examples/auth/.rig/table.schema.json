@@ -104,6 +104,10 @@
           },
           "type": "object",
           "description": "Extra query parameters, keyed by query-string key."
+        },
+        "fallback": {
+          "type": "boolean",
+          "description": "Answer this shape from the database while the sync service is unreachable. On by default."
         }
       },
       "additionalProperties": false,

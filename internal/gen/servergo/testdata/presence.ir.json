@@ -2400,7 +2400,8 @@
               "optional": true,
               "description": "Only presence on this row."
             }
-          ]
+          ],
+          "fallback": false
         }
       },
       {

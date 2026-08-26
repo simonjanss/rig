@@ -82,6 +82,13 @@ func handleTodoShape(s Server, scope TodoScope) http.HandlerFunc {
 			// every column it names to every subscriber, and a column that is not in the
 			// API has no business in a live stream either.
 			Columns: TodoShapeColumns,
+			// What the proxy needs to answer this shape itself while the sync service
+			// cannot be reached: the columns that name a row, and the types a subscriber
+			// reads them with. The filter above is the rest of it, which is the whole
+			// point — the read is this shape's own predicate, so there is nothing to
+			// write per shape and nothing that could narrow differently.
+			Key:    TodoShapeKey,
+			Schema: TodoShapeSchema,
 		})
 	}
 }
@@ -138,6 +145,13 @@ func handleTodoDeletedShape(s Server, scope TodoDeletedScope) http.HandlerFunc {
 			// every column it names to every subscriber, and a column that is not in the
 			// API has no business in a live stream either.
 			Columns: TodoShapeColumns,
+			// What the proxy needs to answer this shape itself while the sync service
+			// cannot be reached: the columns that name a row, and the types a subscriber
+			// reads them with. The filter above is the rest of it, which is the whole
+			// point — the read is this shape's own predicate, so there is nothing to
+			// write per shape and nothing that could narrow differently.
+			Key:    TodoShapeKey,
+			Schema: TodoShapeSchema,
 		})
 	}
 }
@@ -209,6 +223,13 @@ func handleTodoVersionsShape(s Server, scope TodoVersionsScope) http.HandlerFunc
 			// every column it names to every subscriber, and a column that is not in the
 			// API has no business in a live stream either.
 			Columns: TodoShapeColumns,
+			// What the proxy needs to answer this shape itself while the sync service
+			// cannot be reached: the columns that name a row, and the types a subscriber
+			// reads them with. The filter above is the rest of it, which is the whole
+			// point — the read is this shape's own predicate, so there is nothing to
+			// write per shape and nothing that could narrow differently.
+			Key:    TodoShapeKey,
+			Schema: TodoShapeSchema,
 		})
 	}
 }
@@ -250,3 +271,21 @@ var TodoShapeColumns = []string{
 	"snapshot_from_todo_at",
 	"cover_file_id",
 }
+
+// TodoShapeKey are the columns that identify a row of this shape.
+//
+// The table's primary key, in the order the table declares it. A snapshot
+// names each row by it, the way the sync service does.
+var TodoShapeKey = []string{
+	"id",
+}
+
+// TodoShapeSchema describes the columns this shape carries, in the form the
+// sync service describes them.
+//
+// It is sent with a fallback snapshot and is how a subscriber knows to read a
+// count as a number and a timestamp as a moment. The types are Postgres's own
+// names — int8, timestamptz, an enum's type name — because those are what
+// the sync service sends and a subscriber has one set of parsers for both
+// paths.
+const TodoShapeSchema = "{\"cover_file_id\":{\"type\":\"uuid\"},\"created_at\":{\"not_null\":true,\"type\":\"timestamptz\"},\"created_by_account_id\":{\"type\":\"uuid\"},\"deleted_at\":{\"type\":\"timestamptz\"},\"deleted_by_account_id\":{\"type\":\"uuid\"},\"due_at\":{\"type\":\"timestamptz\"},\"id\":{\"not_null\":true,\"pk_index\":0,\"type\":\"uuid\"},\"is_done\":{\"not_null\":true,\"type\":\"bool\"},\"notes\":{\"type\":\"text\"},\"priority\":{\"not_null\":true,\"type\":\"todo_priority\"},\"snapshot_from_todo_at\":{\"type\":\"timestamptz\"},\"snapshot_from_todo_id\":{\"type\":\"uuid\"},\"tenant_id\":{\"not_null\":true,\"type\":\"uuid\"},\"title\":{\"not_null\":true,\"type\":\"text\"},\"updated_at\":{\"type\":\"timestamptz\"},\"updated_by_account_id\":{\"type\":\"uuid\"},\"version_type\":{\"not_null\":true,\"type\":\"todo_version_type\"}}"

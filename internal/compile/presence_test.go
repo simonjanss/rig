@@ -1,10 +1,14 @@
 package compile_test
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 
+	"github.com/simonjanss/rig/internal/compile"
 	"github.com/simonjanss/rig/internal/diag"
+	"github.com/simonjanss/rig/internal/project"
+	"github.com/simonjanss/rig/internal/tableconf"
 	"github.com/simonjanss/rig/pkg/ir"
 )
 
@@ -102,6 +106,50 @@ func TestTheShapeCanBeNarrowedToAScreen(t *testing.T) {
 			t.Errorf("param %q has no Go identifier, so the generated struct field "+
 				"would be unnamed", p.Name)
 		}
+	}
+}
+
+// TestThePresenceShapeCannotBeConfiguredAFallback. rig decides that presence
+// answers a sync outage with nothing rather than with ghosts, and the decision
+// has to survive a project having an opinion about this table's shape at all:
+// applyElectricConfig replaces the endpoint rather than merging into it, so a
+// configuration asking for anything else would otherwise carry the default in
+// with it. It fails as a room full of people who left, which is exactly the
+// failure nobody reports.
+func TestThePresenceShapeCannotBeConfiguredAFallback(t *testing.T) {
+	t.Parallel()
+
+	dir := filepath.Join("testdata", "presence")
+	src, err := os.ReadFile(filepath.Join(dir, "rig.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, pdiags := project.Parse(filepath.Join(dir, "rig.yaml"), src)
+	if pdiags.HasErrors() {
+		t.Fatalf("the presence fixture's project does not parse:\n%s", pdiags.String())
+	}
+
+	path := filepath.Join(t.TempDir(), "rig_presence.yaml")
+	if err := os.WriteFile(path, []byte("table: rig_presence\nelectric:\n  enabled: true\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	set, tdiags := tableconf.LoadDir([]string{path})
+	if tdiags.HasErrors() {
+		t.Fatalf("the table configuration does not load:\n%s", tdiags.String())
+	}
+
+	doc, _ := compile.Compile(readSchema(t, filepath.Join(dir, "schema.json")), set, compile.Options{
+		Project:    p,
+		Tool:       "rig (test)",
+		Foundation: readFoundation(t, dir),
+	})
+	res := doc.ResourceForTable("rig_presence")
+	if res == nil || res.Electric == nil {
+		t.Fatal("rig_presence has no live shape")
+	}
+	if res.Electric.Fallback {
+		t.Error("a table configuration turned the presence fallback on: a sync outage " +
+			"would freeze the room rather than empty it")
 	}
 }
 

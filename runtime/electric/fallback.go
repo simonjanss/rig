@@ -1,6 +1,7 @@
 package electric
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"net/http"
@@ -24,8 +25,14 @@ import (
 // optimistically and waits for the stream to confirm it is waiting for something
 // that cannot arrive until the sync service is back.
 //
-// A shape with no Fallback answers a sync outage the way this package always
-// did: 502, and a subscriber with no rows.
+// It is the escape hatch rather than the usual way. [Config.DB] answers a shape
+// from the shape's own filter, which is the same predicate the sync service was
+// sent and therefore cannot narrow differently; this is for a shape that is not
+// one table's rows — one answered from a materialized view, a cache, or a second
+// database — and it wins where both are set.
+//
+// A shape with neither answers a sync outage the way this package always did:
+// 502, and a subscriber with no rows.
 type Fallback func(ctx context.Context) (Snapshot, error)
 
 // Snapshot is a shape's rows at one moment, and enough type information for a
@@ -158,8 +165,12 @@ func writeSnapshot(w http.ResponseWriter, s Shape, snap Snapshot) {
 
 	h := w.Header()
 	h.Set("Content-Type", "application/json; charset=utf-8")
-	if snap.Schema != "" {
-		h.Set("electric-schema", snap.Schema)
+	// The snapshot's own document first, then the shape's. A [Fallback] that
+	// projects differently from the shape describes its own rows better than the
+	// shape can; one that says nothing gets the shape's rather than none, because
+	// none is every value left as the string it arrived as.
+	if doc := cmp.Or(snap.Schema, s.Schema); doc != "" {
+		h.Set("electric-schema", doc)
 	}
 	h.Set("electric-handle", nextFallbackHandle())
 	// The offset a subscriber holds when it is caught up. It is sent back on the

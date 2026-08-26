@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -14,7 +15,6 @@ import (
 
 	"github.com/simonjanss/rig/internal/gen/electricgo"
 	"github.com/simonjanss/rig/internal/gen/gentest"
-	"github.com/simonjanss/rig/internal/gen/modelgo"
 	"github.com/simonjanss/rig/pkg/gen"
 	"github.com/simonjanss/rig/pkg/ir"
 )
@@ -33,15 +33,6 @@ func opts() gen.Options {
 	}
 }
 
-// fallbackOpts turn the fallback seam on. It is a separate golden because the
-// seam is off by default and the pair is what proves it: one document, two
-// outputs, and the difference is one option.
-func fallbackOpts() gen.Options {
-	o := opts()
-	o.Raw["model_import"] = "rigtest/model"
-	return o
-}
-
 func TestGolden(t *testing.T) {
 	t.Parallel()
 
@@ -49,15 +40,6 @@ func TestGolden(t *testing.T) {
 	artifacts := gentest.Run(t, electricgo.New(), doc, opts())
 
 	gentest.Golden(t, filepath.Join("testdata", "lifecycle"), artifacts, *update)
-}
-
-func TestGoldenWithAFallback(t *testing.T) {
-	t.Parallel()
-
-	doc := gentest.LoadDocument(t, filepath.Join("testdata", fixture))
-	artifacts := gentest.Run(t, electricgo.New(), doc, fallbackOpts())
-
-	gentest.Golden(t, filepath.Join("testdata", "fallback"), artifacts, *update)
 }
 
 func TestDeterministic(t *testing.T) {
@@ -99,104 +81,92 @@ func TestGeneratedCodeCompiles(t *testing.T) {
 	)
 }
 
-// The fallback seam is made of the model's types and the runtime's, and a golden
-// file cannot notice that either of them moved. This compiles the two generators
-// together, which is the only thing that can.
-func TestTheFallbackSeamCompilesAgainstTheModel(t *testing.T) {
+// A shape is answered from the database with what is on the Shape literal, so
+// the three of those that describe the rows have to agree with each other: the
+// columns streamed, the key each row is named by, and the type a subscriber
+// reads each column as. Nothing at runtime can check it — by then they are three
+// constants that were emitted separately.
+func TestWhatDescribesAShapesRowsAgreesWithItself(t *testing.T) {
 	t.Parallel()
 
 	doc := gentest.LoadDocument(t, filepath.Join("testdata", fixture))
-
-	gentest.MustCompileAll(t,
-		gentest.Package{
-			Dir: "model",
-			Artifacts: gentest.Run(t, modelgo.New(), doc,
-				gen.Options{Raw: map[string]any{"package": "model"}}),
-		},
-		gentest.Package{
-			Dir:       "electric",
-			Artifacts: gentest.Run(t, electricgo.New(), doc, fallbackOpts()),
-		},
-	)
-}
-
-// Off by default, and off means absent rather than present and nil. A project
-// that has not said where its model is gets the package it got before this
-// existed.
-func TestWithoutAModelImportThereIsNoFallbackAtAll(t *testing.T) {
-	t.Parallel()
-
-	doc := gentest.LoadDocument(t, filepath.Join("testdata", fixture))
-	for _, a := range gentest.Run(t, electricgo.New(), doc, opts()) {
-		if strings.Contains(string(a.Content), "Fallback") {
-			t.Errorf("%s names a fallback, and nothing asked for one", a.Path)
-		}
-	}
-}
-
-// The claims have to be on the context by the time an application's read runs,
-// because that is where a generated repository looks for them — and a read that
-// did not find them is a read with no tenant filter.
-func TestTheFallbackIsHandedTheClaimsOnTheContext(t *testing.T) {
-	t.Parallel()
-
-	doc := gentest.LoadDocument(t, filepath.Join("testdata", fixture))
-	src := find(t, gentest.Run(t, electricgo.New(), doc, fallbackOpts()), "lesson_shape.gen.go")
-
-	body, ok := between(src, "func lessonFallback(", "\n}")
-	if !ok {
-		t.Fatal("no adapter")
-	}
-	if !strings.Contains(collapse(body), collapse("fn(tenancy.NewContext(ctx, claims), r, claims, p)")) {
-		t.Errorf("the read is not given the claims:\n%s", body)
-	}
-
-	// And a shape nobody wired one to has nothing to call.
-	if !strings.Contains(collapse(body), collapse("if fn == nil { return nil }")) {
-		t.Errorf("a nil fallback should stay nil:\n%s", body)
-	}
-}
-
-// A snapshot carries the shape's columns and no others. The projection is a
-// promise the streaming path makes with Columns, and this path has to make it
-// the same way — a column kept out of the API has no business here either.
-func TestTheSnapshotRendersExactlyTheShapesColumns(t *testing.T) {
-	t.Parallel()
-
-	doc := gentest.LoadDocument(t, filepath.Join("testdata", fixture))
-	src := find(t, gentest.Run(t, electricgo.New(), doc, fallbackOpts()), "lesson_shape.gen.go")
+	src := find(t, gentest.Run(t, electricgo.New(), doc, opts()), "lesson_shape.gen.go")
 
 	columns, ok := between(src, "var LessonShapeColumns = []string{", "\n}")
 	if !ok {
 		t.Fatal("no column list")
 	}
-	row, ok := between(src, "func lessonShapeRow(", "\n}")
+	key, ok := between(src, "var LessonShapeKey = []string{", "\n}")
 	if !ok {
-		t.Fatal("no row encoder")
+		t.Fatal("no key list")
 	}
 	schema, ok := between(src, "const LessonShapeSchema = ", "\n")
 	if !ok {
 		t.Fatal("no schema")
 	}
 
-	want := regexp.MustCompile(`"([a-z_]+)"`).FindAllStringSubmatch(columns, -1)
+	names := regexp.MustCompile(`"([a-z_]+)"`)
+
+	// Every streamed column has a type. Without one a subscriber leaves the value
+	// as the string it arrived as, which decodes differently from the same column
+	// read over the API.
+	want := names.FindAllStringSubmatch(columns, -1)
 	if len(want) == 0 {
 		t.Fatal("no columns to check")
 	}
 	for _, m := range want {
-		if !strings.Contains(row, `"`+m[1]+`":`) {
-			t.Errorf("%s is streamed but not rendered in a snapshot", m[1])
-		}
 		if !strings.Contains(schema, `\"`+m[1]+`\":`) {
 			t.Errorf("%s is streamed but has no type in the schema", m[1])
 		}
 	}
 
-	// The other direction: nothing rendered that is not streamed.
-	for _, m := range regexp.MustCompile(`"([a-z_]+)":\s+electric\.`).FindAllStringSubmatch(row, -1) {
+	// The other direction: nothing typed that is not streamed. A column excluded
+	// from the API is excluded here, and describing it would be describing a
+	// column the shape does not carry.
+	// Followed by an opening brace: a column's entry is an object, and the keys
+	// inside one describe the column rather than being one.
+	for _, m := range regexp.MustCompile(`\\"([a-z_]+)\\":\{`).FindAllStringSubmatch(schema, -1) {
 		if !strings.Contains(columns, `"`+m[1]+`"`) {
-			t.Errorf("%s is rendered in a snapshot and not streamed", m[1])
+			t.Errorf("%s has a type in the schema and is not streamed", m[1])
 		}
+	}
+
+	// And the key is the primary key the schema names by pk_index, in that order.
+	// Two answers to what identifies a row would be one too many.
+	for i, m := range names.FindAllStringSubmatch(key, -1) {
+		if !strings.Contains(schema, `\"`+m[1]+`\":{`) {
+			t.Errorf("%s keys a row and is not in the schema", m[1])
+		}
+		if !strings.Contains(schema, `\"pk_index\":`+strconv.Itoa(i)) {
+			t.Errorf("%s is key column %d and the schema does not say so", m[1], i)
+		}
+	}
+	if len(names.FindAllStringSubmatch(key, -1)) == 0 {
+		t.Error("a shape with no key is a shape whose rows cannot be named")
+	}
+}
+
+// Every shape is answered from the database unless the table said otherwise, and
+// off has to be written on the shape rather than left to a deployment: a project
+// that sets Config.DB should not have to know which of its shapes wanted it.
+func TestOnlyAShapeThatOptedOutSaysSo(t *testing.T) {
+	t.Parallel()
+
+	doc := gentest.LoadDocument(t, filepath.Join("testdata", fixture))
+	src := find(t, gentest.Run(t, electricgo.New(), doc, opts()), "lesson_shape.gen.go")
+
+	if strings.Contains(src, "NoFallback") {
+		t.Error("a shape nobody opted out of refuses to answer a sync outage")
+	}
+
+	// And with the key off, every one of the table's shapes says so — the live
+	// one, its trash and its history all carry the same decision.
+	off := gentest.LoadDocument(t, filepath.Join("testdata", fixture))
+	off.Resource("Lesson").Electric.Fallback = false
+
+	src = find(t, gentest.Run(t, electricgo.New(), off, opts()), "lesson_shape.gen.go")
+	if got := strings.Count(src, "NoFallback: true"); got != 3 {
+		t.Errorf("%d of the table's three shapes opted out, want all of them", got)
 	}
 }
 
