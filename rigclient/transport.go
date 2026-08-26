@@ -154,6 +154,14 @@ func (op Op) spanName() string {
 // spends the attempt budget. Counting them together would leave a search behind
 // a refusing proxy with one retry fewer than the read beside it, for a reason
 // nobody looking at either could see.
+//
+// The TypeScript client's transport is this function's counterpart and reads
+// almost line for line with it, so a divergence is worth knowing about rather
+// than diffing for: [Runtime.refresh] and backoff have no equivalent there.
+// Both of them exist for a response body that is closed, drained or handed on by
+// hand and for a form that has to be seeked back to where it started, and
+// TypeScript has neither problem. What is shared is the shape of the loop and
+// the reasoning above, which is why that half is kept identical.
 func (rt *Runtime) call(ctx context.Context, op Op, opts []CallOption) (*http.Response, error) {
 	call := newCall(opts)
 
@@ -232,31 +240,14 @@ func (rt *Runtime) call(ctx context.Context, op Op, opts []CallOption) (*http.Re
 		// about it. A blind retry on 401 is a way to lock an account out with a
 		// wrong password.
 		if res.StatusCode == http.StatusUnauthorized && !call.reauthorized {
+			// The type test stays here, and so does falling out of it. A 401 for
+			// a credential that cannot refresh has to reach the arm below with
+			// its body untouched, and that is only obvious while the one thing
+			// between this test and the continue is a call that always ends in a
+			// return or a continue.
 			if re, ok := rt.Credential().(Reauthorizer); ok {
-				// Before the refresh, not after: an upload the client cannot
-				// send again is a call that has to come back to the caller, and
-				// doing it here means it comes back before a token was spent on
-				// it. The 401 travels with it, so the failure still answers
-				// IsUnauthorized.
-				if rewound := op.Multipart.rewind(marks); rewound != nil {
-					refusal := readError(res, rt.Now())
-					res.Body.Close()
-					return nil, errors.Join(refusal, rewound)
-				}
-
-				// Read before the drain, because a Reauthorizer that answers
-				// false leaves this 401 as the answer — and a body already
-				// discarded is a refusal with no code on it, which would make
-				// IsUnauthorized say no about a 401.
-				refusal := readError(res, rt.Now())
-				drain(res)
-
-				done, err := re.Reauthorize(ctx)
-				if err != nil {
-					return nil, err
-				}
-				if !done {
-					return nil, refusal
+				if over := rt.refresh(ctx, re, res, op, marks); over != nil {
+					return nil, over
 				}
 				call.reauthorized = true
 				continue
@@ -299,6 +290,45 @@ func (rt *Runtime) call(ctx context.Context, op Op, opts []CallOption) (*http.Re
 		}
 		return res, nil
 	}
+}
+
+// refresh answers a 401 by refreshing the credential that produced it, and
+// reports whether the call may be sent again.
+//
+// nil means it may. Anything else is what the call returns instead: the
+// credential's own error when the refresh failed, the server's 401 when the
+// credential decides there is nothing it can do, or [ErrCannotRetry] joined to
+// that 401 when the body is an upload that cannot be produced twice.
+//
+// The rewind is before the refresh, not after. An upload the client cannot send
+// again is a call that has to come back to the caller, and doing it here means
+// it comes back before a token was spent on it. The 401 travels with it, so the
+// failure still answers [IsUnauthorized].
+//
+// The refusal is read before the drain, because a Reauthorizer that answers
+// false leaves this 401 as the answer — and a body already discarded is a
+// refusal with no code on it, which would make IsUnauthorized say no about a
+// 401.
+func (rt *Runtime) refresh(
+	ctx context.Context, re Reauthorizer, res *http.Response, op Op, marks []int64,
+) error {
+	if rewound := op.Multipart.rewind(marks); rewound != nil {
+		refusal := readError(res, rt.Now())
+		res.Body.Close()
+		return errors.Join(refusal, rewound)
+	}
+
+	refusal := readError(res, rt.Now())
+	drain(res)
+
+	done, err := re.Reauthorize(ctx)
+	if err != nil {
+		return err
+	}
+	if !done {
+		return refusal
+	}
+	return nil
 }
 
 // send performs one attempt, inside a span of its own when the caller traces.
