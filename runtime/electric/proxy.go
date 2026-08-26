@@ -19,6 +19,7 @@
 package electric
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -238,18 +239,18 @@ func New(cfg Config) (*Proxy, error) {
 			},
 		}
 	}
-	initial := cfg.InitialTimeout
-	if initial == 0 {
-		initial = DefaultInitialTimeout
-	}
-	maxRows := cfg.MaxSnapshotRows
-	if maxRows == 0 {
-		maxRows = DefaultMaxSnapshotRows
-	}
-	threshold := cfg.BreakerThreshold
-	if threshold == 0 {
-		threshold = DefaultBreakerThreshold
-	}
+	// Zero is "say nothing" and takes the default. A negative value is a
+	// deliberate answer and is carried through untouched — see
+	// [Config.InitialTimeout], [Config.MaxSnapshotRows] and
+	// [Config.BreakerThreshold], each of which documents what its negative
+	// means, and the guards that read them back.
+	initial := cmp.Or(cfg.InitialTimeout, DefaultInitialTimeout)
+	maxRows := cmp.Or(cfg.MaxSnapshotRows, DefaultMaxSnapshotRows)
+	threshold := cmp.Or(cfg.BreakerThreshold, DefaultBreakerThreshold)
+
+	// Not cmp.Or, and this is the one place the difference shows: a cooldown
+	// below zero has no meaning to carry through, so it is a mistake to correct
+	// rather than a setting to honour.
 	cooldown := cfg.BreakerCooldown
 	if cooldown <= 0 {
 		cooldown = DefaultBreakerCooldown
@@ -280,9 +281,17 @@ func New(cfg Config) (*Proxy, error) {
 func (p *Proxy) SyncReachable() bool { return p.breaker.reachable() }
 
 // hopHeaders are per-connection and must not be forwarded in either direction.
-var hopHeaders = []string{
-	"Connection", "Proxy-Connection", "Keep-Alive", "Transfer-Encoding",
-	"TE", "Trailer", "Upgrade", "Proxy-Authenticate", "Proxy-Authorization",
+//
+// A set rather than a list, keyed the way net/http canonicalizes rather than the
+// way the RFC spells them, because that is how they arrive in a header map:
+// forwarding a response is then one lookup per header instead of a nine-way
+// case-insensitive scan, and the response being forwarded here is every
+// response. Note "Te" — [http.CanonicalHeaderKey] lowercases everything after
+// the first letter, so the RFC's "TE" would never match.
+var hopHeaders = map[string]bool{
+	"Connection": true, "Proxy-Connection": true, "Keep-Alive": true,
+	"Transfer-Encoding": true, "Te": true, "Trailer": true, "Upgrade": true,
+	"Proxy-Authenticate": true, "Proxy-Authorization": true,
 }
 
 // Serve forwards one shape request and streams the answer back.
@@ -450,12 +459,8 @@ func (p *Proxy) unavailable(w http.ResponseWriter, r *http.Request, s Shape, cau
 // to.
 func (p *Proxy) answer(w http.ResponseWriter, r *http.Request, s Shape) {
 	if s.Fallback != nil && initial(r) {
-		snap, err := p.snapshot(r.Context(), s)
-		if err != nil {
-			if r.Context().Err() != nil {
-				return
-			}
-			p.refuse(r, w, err)
+		snap, ok := p.trySnapshot(w, r, s)
+		if !ok {
 			return
 		}
 		writeSnapshot(w, s, snap)
@@ -489,11 +494,7 @@ func (p *Proxy) answer(w http.ResponseWriter, r *http.Request, s Shape) {
 	// tab that was already streaming one more than the tab beside it that
 	// arrived during the outage.
 	if s.Fallback != nil {
-		if _, err := p.snapshot(r.Context(), s); err != nil {
-			if r.Context().Err() != nil {
-				return
-			}
-			p.refuse(r, w, err)
+		if _, ok := p.trySnapshot(w, r, s); !ok {
 			return
 		}
 		writeMustRefetch(w)
@@ -503,12 +504,36 @@ func (p *Proxy) answer(w http.ResponseWriter, r *http.Request, s Shape) {
 	http.Error(w, "the sync service is unavailable", http.StatusBadGateway)
 }
 
+// trySnapshot reads the fallback, and answers the request itself when it cannot
+// be sent.
+//
+// False means this request is finished and there is nothing left for the caller
+// to do. Its two arms mean different things, which is why the caller is told
+// only that much: either the fallback refused and the subscriber has been sent a
+// 502, or the subscriber hung up while the fallback was being read.
+//
+// The second of those is not a refusal. Nothing was decided about the shape —
+// somebody closed a tab — so it gets no status and no line in [Config.OnError],
+// which during an outage would otherwise fill with one line per closed tab and
+// bury the error that caused the outage.
+func (p *Proxy) trySnapshot(w http.ResponseWriter, r *http.Request, s Shape) (Snapshot, bool) {
+	snap, err := p.snapshot(r.Context(), s)
+	if err != nil {
+		if r.Context().Err() != nil {
+			return Snapshot{}, false
+		}
+		p.refuse(r, w, err)
+		return Snapshot{}, false
+	}
+	return snap, true
+}
+
 // snapshot reads a shape's fallback and holds it to [Config.MaxSnapshotRows].
 //
-// Both callers need the same answer to the same question — is there a snapshot,
-// and may it be sent — and one of them then throws the rows away. The error is
-// the sentence [Proxy.refuse] reports, so what a log says about a refusal does
-// not depend on which of the two asked.
+// The question it answers is whether there is a snapshot and whether it may be
+// sent, which is what both of [Proxy.trySnapshot]'s callers need — one of them
+// then throws the rows away. The error is the sentence [Proxy.refuse] reports,
+// so what a log says about a refusal does not depend on which of them asked.
 func (p *Proxy) snapshot(ctx context.Context, s Shape) (Snapshot, error) {
 	snap, err := s.Fallback(ctx)
 	if err != nil {
@@ -592,11 +617,4 @@ func (p *Proxy) request(ctx context.Context, r *http.Request, s Shape) (*http.Re
 	return upstream, nil
 }
 
-func isHopHeader(name string) bool {
-	for _, h := range hopHeaders {
-		if strings.EqualFold(name, h) {
-			return true
-		}
-	}
-	return false
-}
+func isHopHeader(name string) bool { return hopHeaders[http.CanonicalHeaderKey(name)] }

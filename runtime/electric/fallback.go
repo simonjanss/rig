@@ -55,6 +55,15 @@ type Row struct {
 	Value map[string]any
 }
 
+// splitTable separates a possibly-qualified table name. An unqualified one is
+// public, which is what the sync service resolves it to.
+func splitTable(table string) (schema, name string) {
+	if i := strings.IndexByte(table, '.'); i >= 0 {
+		return table[:i], table[i+1:]
+	}
+	return "public", table
+}
+
 // RowKey builds the key the sync service gives a row: the schema-qualified
 // table, then the primary key, each part quoted.
 //
@@ -63,10 +72,7 @@ type Row struct {
 // More than one key part is a composite primary key, in the order the table
 // declares them.
 func RowKey(table string, key ...string) string {
-	schema, name := "public", table
-	if i := strings.IndexByte(table, '.'); i >= 0 {
-		schema, name = table[:i], table[i+1:]
-	}
+	schema, name := splitTable(table)
 
 	var b strings.Builder
 	b.WriteString(quote(schema))
@@ -125,10 +131,7 @@ type message struct {
 // there is nothing to catch up on and a second round trip would only answer the
 // same thing again.
 func writeSnapshot(w http.ResponseWriter, s Shape, snap Snapshot) {
-	schema, table := "public", s.Table
-	if i := strings.IndexByte(s.Table, '.'); i >= 0 {
-		schema, table = s.Table[:i], s.Table[i+1:]
-	}
+	schema, table := splitTable(s.Table)
 	relation := []any{schema, table}
 
 	out := make([]message, 0, len(snap.Rows)+1)
