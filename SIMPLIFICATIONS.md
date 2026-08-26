@@ -83,8 +83,10 @@ down to the wording of the 400 message: `servergo/server.go:607-678` and
 `electricgo/base.go:237-297`. `electricgo`'s `fail` (`base.go:219-232`) also
 re-emits error mapping `servergo` emits elsewhere.
 
-- **Fix:** a small `runtime/httparg` (or additions to `runtime/serve`) with
-  `PathUUID/PathInt/QueryBool/QueryTime/...`; generators emit call sites.
+- **Fix:** additions to the `runtime/httpx` that B2 created (its package doc
+  already says it is the wire shape of the routes rig owns) with
+  `PathUUID/PathInt/QueryBool/QueryTime/...`; generators emit call sites. Not a
+  new `runtime/httparg` — that would be two packages for one job.
 - **Files:** `internal/gen/servergo/server.go`, `internal/gen/electricgo/base.go`,
   new runtime package, goldens, examples.
 - **Size:** ~130 emit lines + ~140 lines per generated project. **Risk:** low-medium.
@@ -119,24 +121,66 @@ re-emits error mapping `servergo` emits elsewhere.
 
 ## B. Service modules (`auth`, `notify`, `presence`, `files`, `observe`, `migrate`)
 
-### B1. Extract the outbox: `auth/account` mail vs `notify` delivery `[ ]`
+### B1. Extract the outbox: `auth/account` mail vs `notify` delivery `[x]`
 
-`auth/account/{outbox,dispatch}.go` is a line-by-line twin of `notify`'s
-delivery machinery — states, error classification
-(`PermanentMailError`/`RetryMailAfter` vs `Permanent`/`RetryAfter`), lease
-bookkeeping, backoff identical down to the comments, which say so themselves:
-"This is notify.Permanent's twin" (`outbox.go:263`), "notify's nextAttemptAt,
-to the line" (`dispatch.go:261`).
+`auth/account/{outbox,dispatch}.go` was a line-by-line twin of notify's delivery
+machinery, and both files said so — "this is notify.Permanent's twin", "notify's
+nextAttemptAt, to the line". Those comments are now a compiler-checked fact:
+`runtime/outbox`.
 
-- **Fix:** a `runtime/outbox` package holding retry classification, lease
-  bookkeeping (`hold`/`forget`/`release`/`ReleaseClaims`), `nextAttemptAt`,
-  `budgetFor`, and the claim→send→mark pass behind small `Store`/`Sender`
-  interfaces. Callers keep their SQL and their per-row "what to send".
-- **Files:** `auth/account/outbox.go`, `auth/account/dispatch.go`,
-  `notify/{failure,channel,dispatch,engine}.go`, new `runtime/outbox`.
-- **Size:** 400-500 lines. **Risk:** highest on this list — concurrency
-  semantics, and it adds a runtime dependency both modules must share. The
-  twin-ness may be deliberate module independence; decide that first.
+**Narrowed on the way in, and the narrowing is the whole design.** Only the
+DB-free part moved — error classification, the backoff ladder, the pass budget,
+and the lease map. Roughly 120 lines, and every one of them had no room to differ
+and did not differ.
+
+The claim→send→mark pass **stayed duplicated on purpose**. notify groups a digest
+and marks N deliveries per message; auth reads three stores and rotates a token
+per row; and their release statements are scoped differently — notify releases the
+ids it tracked, auth releases everything the process ever claimed. A shared pass
+would be one shape with two bodies and a parameter list longer than either.
+
+- **The entry's risk statement was wrong.** "It adds a runtime dependency both
+  modules must share" — both already require `rig/runtime` with a `replace`, so
+  there is no new edge. What is genuinely new is *type identity across modules*:
+  the two queues now speak one vocabulary, so `notify.IsPermanent` answers true
+  for an error `account.PermanentMailError` wrapped, and the reverse. Both used to
+  answer false. Nothing depends on either answer and true is arguably the more
+  correct one, but it is a semantic change to two published modules and it is
+  documented in both.
+- **The constants and the three config refusals were deliberately not extracted.**
+  The names are published API on both modules, so nothing would be deleted —
+  extracting only changes what the right-hand side reads. And the messages differ
+  for a reason: notify names the rig.yaml keys (`claim_ttl`, `backoff_cap`), auth
+  names the Go fields (`Mail.ClaimTTL`), because one is read by somebody editing
+  yaml and the other by somebody editing Go. `notify.NewEngine` panics where
+  `account.resolveMail` returns, also on purpose. What the extraction was really
+  trying to buy is now `internal/outboxtest`, in the root module because it is the
+  only one that can import both: it asserts the six defaults are the same numbers
+  and that both schedules span eight hours and three minutes.
+- **A real bug fixed on the way, in notify only.** Both `ReleaseClaims`
+  implementations did read-ids → `Exec` → clear-the-map. notify's statement is
+  scoped by id (`WHERE id = ANY($1)`), so clearing wiped a concurrent pass's
+  claims without releasing them — and two passes genuinely can run at once, since
+  the in-process goroutine and the cron `serve.Task` both call `Dispatch`. Those
+  leases were then left until a TTL meant for crashes ran out. It is now
+  `Leases.Drop(held...)`. auth's statement is scoped by claimant, so it really did
+  release everything and `Clear` is correct there — the backlog's claim that both
+  were affected was wrong. Both are commented so the asymmetry reads as deliberate.
+- **`var _ = dbx.IsNoRows` went too** (`notify/dispatch.go`), along with the `dbx`
+  import it was papering over. Struck from section F.
+- **Bonus dedup:** `abandon` built the same `[]uuid.UUID` the lease map needs, so
+  it is `idsOf(abandoned)` now. `mark`'s loop stays, because it also accumulates
+  the attempt count.
+- **Size:** ~120 lines shared, not the 400-500 estimated, and net roughly zero —
+  the doc comments moved with the code and gained a paragraph each. The win is not
+  the line count; it is that the two implementations cannot drift, and that
+  `runtime/outbox` has tests where the twinned copies had a comment.
+- **Verification:** all 16 tests in `examples/auth/{dispatch,mail}_docker_test.go`
+  pass with no skips — including `TestACleanShutdownGivesTheWorkBack` and
+  `TestAPassHandsBackWhatItCannotSendInsideTheLease`, which are what the lease
+  change touches. **Gap worth naming:** nothing exercises two concurrent passes
+  end to end, which is precisely the case the `Drop` fix is about. The mechanism is
+  covered by `runtime/outbox`'s `Leases` tests; the integration is not.
 
 ### B2. One HTTP scaffold; fix the error-envelope drift `[x]`
 
@@ -660,19 +704,30 @@ Zero references found in code, tests, docs, or generated templates:
 | `(*files.File).Uploaded` | `files/files.go:102` | |
 | `(*blob.Memory).SetClock` | `files/blob/memory.go:43` | |
 | `(*apikey.Key).Allows` | `auth/apikey/apikey.go:98` | ⚠ CIDR check — may be a **missing call**, not dead code. Decide, don't just delete. |
-| `var _ = dbx.IsNoRows` | `notify/dispatch.go:524` | plus the now-unused import |
+| ~~`var _ = dbx.IsNoRows`~~ | `notify/dispatch.go:513` | Done under B1 — the `dbx` import went with it, which is what the blank was papering over. |
 
 ---
 
 ## Suggested parallel batches
 
-Tasks in one batch touch disjoint files and can run as separate workspaces:
+**All of section B landed on one branch**, in this order: B6, B8, B4, the auth
+test net, B7, B2, B5, B3, B1. Two things made that possible and are worth keeping
+if the same is attempted for another section. Nothing in B reached a generator, so
+`make examples` reported the generated code unchanged throughout — the moment that
+stops being true, goldens and examples enter the branch and it stops being one
+branch. And where two items wanted the same file, one of them kept a one-line
+wrapper as the boundary: `notify`'s `store.conn(ctx)` over `dbx.ConnFor` is why B5
+never touched `dispatch.go`, which is B1's.
+
+What follows describes the rest.
 
 1. **A1+A2+A3** (SDK generator unification — one workspace, they overlap)
-2. **B2** (HTTP scaffold + envelope) · **B3** (cache.Keyed) · **B6** (migrate) · **C1** (throttle) · **D1-D5** (all of ts/) · **E1+E2**
+2. **C1** (throttle) · **D1-D5** (all of ts/) · **E1+E2**
 3. **A4** and **A5** each touch goldens + examples broadly — run them after
-   batch 1 lands, not alongside.
-4. **B1** (outbox) and **B4** (memory stores) are decisions before they are
-   refactors — do them last, one at a time.
-5. **F** (dead code) conflicts with almost everything by nature of touching
-   many modules lightly — do it first or last, not in the middle.
+   batch 1 lands, not alongside. A5's HTTP parameter parsers should go into the
+   `runtime/httpx` that B2 created rather than a new `runtime/httparg`; one
+   package for one job.
+4. **F** (dead code) conflicts with almost everything by nature of touching
+   many modules lightly — do it first or last, not in the middle. Two of its rows
+   are already struck: `migrate.Version` under B6 and the `dbx.IsNoRows` blank
+   under B1.

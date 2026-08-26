@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/simonjanss/rig/runtime/dbx"
+	"github.com/simonjanss/rig/runtime/outbox"
 	"github.com/simonjanss/rig/runtime/serve"
 	"github.com/simonjanss/rig/runtime/tenancy"
 )
@@ -60,9 +61,11 @@ type Engine struct {
 
 	mu       sync.Mutex
 	claiming bool
-	// held are the leases this process currently owns, so a clean shutdown can
-	// give them back rather than leaving them to expire.
-	held map[uuid.UUID]bool
+	// leases are the claims this process currently owns, so a clean shutdown can
+	// give them back rather than leaving them to expire. Its own lock, not mu:
+	// whether this engine is still claiming and what it is holding are never read
+	// together.
+	leases outbox.Leases
 }
 
 // EngineConfig is what an engine needs beyond [Config].
@@ -222,7 +225,6 @@ func NewEngine(cfg EngineConfig) *Engine {
 		defaultDigest: digest,
 
 		claiming: true,
-		held:     make(map[uuid.UUID]bool),
 	}
 	e.ticker = serve.NewTicker(serve.TickerConfig{
 		Interval: interval,
@@ -241,32 +243,15 @@ func NewEngine(cfg EngineConfig) *Engine {
 func (e *Engine) ClaimedBy() uuid.UUID { return e.claimedBy }
 
 // The lease bookkeeping a clean shutdown reads.
-func (e *Engine) hold(ds []Delivery) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	for _, d := range ds {
-		e.held[d.ID] = true
-	}
-}
+func (e *Engine) hold(ds []Delivery) { e.leases.Hold(idsOf(ds)...) }
 
-func (e *Engine) forget(id uuid.UUID) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	delete(e.held, id)
-}
+func (e *Engine) forget(id uuid.UUID) { e.leases.Drop(id) }
 
-func (e *Engine) forgetAll() {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	clear(e.held)
-}
-
-func (e *Engine) heldIDs() []uuid.UUID {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	out := make([]uuid.UUID, 0, len(e.held))
-	for id := range e.held {
-		out = append(out, id)
+// idsOf is the identifiers a pass claimed, for the lease map.
+func idsOf(ds []Delivery) []uuid.UUID {
+	out := make([]uuid.UUID, len(ds))
+	for i, d := range ds {
+		out[i] = d.ID
 	}
 	return out
 }
