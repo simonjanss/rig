@@ -812,7 +812,7 @@ func (r *lessonRepo) Get(ctx context.Context, id uuid.UUID, opts ...readopt.Opti
 	// A miss is an error rather than a nil row, which is what keeps it out of the
 	// map: runtime/cache never stores what a failing loader returned. So nothing
 	// has to withdraw a not-found, and a create has nothing to publish.
-	held, err := r.db.lessonCache.load(lessonCacheKey(claims.TenantID, id), func() (*model.Lesson, error) {
+	held, err := r.db.lessonCache.Load(lessonCacheKey(claims.TenantID, id), func() (*model.Lesson, error) {
 		return r.readLesson(ctx, id, opts...)
 	})
 	if err != nil {
@@ -1161,7 +1161,7 @@ func (r *lessonRepo) Update(ctx context.Context, id uuid.UUID, in dbhook.Update[
 
 		// Every replica forgets this row when this transaction commits, and none of
 		// them does if it rolls back.
-		if err := r.db.lessonCache.forget(ctx, lessonCacheKey(prev.TenantID, id)); err != nil {
+		if err := r.db.lessonCache.Forget(ctx, lessonCacheKey(prev.TenantID, id)); err != nil {
 			return err
 		}
 
@@ -1256,7 +1256,7 @@ func (r *lessonRepo) Delete(ctx context.Context, in dbhook.Delete[model.LessonDe
 				return writeError(err, "lesson")
 			}
 			for _, version := range versions {
-				if err := r.db.lessonCache.forget(ctx, lessonCacheKey(prev.TenantID, version)); err != nil {
+				if err := r.db.lessonCache.Forget(ctx, lessonCacheKey(prev.TenantID, version)); err != nil {
 					return err
 				}
 			}
@@ -1265,7 +1265,7 @@ func (r *lessonRepo) Delete(ctx context.Context, in dbhook.Delete[model.LessonDe
 				return writeError(err, "lesson")
 			}
 			// The row is gone, so the held copy of it has to be.
-			if err := r.db.lessonCache.forget(ctx, lessonCacheKey(prev.TenantID, in.Input.ID)); err != nil {
+			if err := r.db.lessonCache.Forget(ctx, lessonCacheKey(prev.TenantID, in.Input.ID)); err != nil {
 				return err
 			}
 
@@ -1291,7 +1291,7 @@ func (r *lessonRepo) Delete(ctx context.Context, in dbhook.Delete[model.LessonDe
 		}
 		// Get returns a row whatever its lifecycle state, so a retirement changes what
 		// a held copy says rather than whether there is one.
-		if err := r.db.lessonCache.forget(ctx, lessonCacheKey(prev.TenantID, in.Input.ID)); err != nil {
+		if err := r.db.lessonCache.Forget(ctx, lessonCacheKey(prev.TenantID, in.Input.ID)); err != nil {
 			return err
 		}
 
@@ -1421,7 +1421,7 @@ func (r *lessonRepo) Restore(ctx context.Context, id uuid.UUID, in dbhook.Restor
 		}
 
 		// The row came back, and a held copy of it still says it was retired.
-		if err := r.db.lessonCache.forget(ctx, lessonCacheKey(prev.TenantID, id)); err != nil {
+		if err := r.db.lessonCache.Forget(ctx, lessonCacheKey(prev.TenantID, id)); err != nil {
 			return err
 		}
 
@@ -1544,5 +1544,5 @@ func (r *lessonRepo) ForgetCached(ctx context.Context, row *model.Lesson) error 
 	if row == nil {
 		return nil
 	}
-	return r.db.lessonCache.forget(ctx, lessonCacheKey(row.TenantID, row.ID))
+	return r.db.lessonCache.Forget(ctx, lessonCacheKey(row.TenantID, row.ID))
 }

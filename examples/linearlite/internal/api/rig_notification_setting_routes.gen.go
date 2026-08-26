@@ -10,6 +10,7 @@ import (
 
 	"github.com/simonjanss/rig/examples/linearlite/internal/model"
 	"github.com/simonjanss/rig/observe"
+	"github.com/simonjanss/rig/runtime/httpx"
 	"github.com/simonjanss/rig/runtime/idempotency"
 	"github.com/simonjanss/rig/runtime/reqlog"
 	"github.com/simonjanss/rig/runtime/tenancy"
@@ -47,19 +48,19 @@ func handleListRigNotificationSettings(s Server, svc RigNotificationSettingServi
 		}
 
 		var query RigNotificationSettingListQuery
-		limitParam, err := queryInt(r, "limit", 50)
+		limitParam, err := httpx.QueryInt(r, "limit", 50)
 		if err != nil {
 			fail(s, w, r, rc, err)
 			return
 		}
 		query.Limit = limitParam
-		offsetParam, err := queryInt(r, "offset", 0)
+		offsetParam, err := httpx.QueryInt(r, "offset", 0)
 		if err != nil {
 			fail(s, w, r, rc, err)
 			return
 		}
 		query.Offset = offsetParam
-		scopeParam, err := tenancy.ParseScope(queryString(r, "scope", "own"))
+		scopeParam, err := tenancy.ParseScope(httpx.QueryString(r, "scope", "own"))
 		if err != nil {
 			fail(s, w, r, rc, err)
 			return
@@ -157,7 +158,7 @@ func handleDeleteRigNotificationSetting(s Server, svc RigNotificationSettingServ
 		}
 
 		var path RigNotificationSettingDeletePath
-		idParam, err := pathUUID(r, "id")
+		idParam, err := httpx.PathUUID(r, "id")
 		if err != nil {
 			fail(s, w, r, rc, err)
 			return
@@ -201,7 +202,7 @@ func handleUpdateRigNotificationSetting(s Server, svc RigNotificationSettingServ
 		}
 
 		var path RigNotificationSettingUpdatePath
-		idParam, err := pathUUID(r, "id")
+		idParam, err := httpx.PathUUID(r, "id")
 		if err != nil {
 			fail(s, w, r, rc, err)
 			return

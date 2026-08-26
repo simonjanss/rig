@@ -9,6 +9,7 @@ import (
 	"net/http"
 
 	"github.com/simonjanss/rig/examples/auth_oauth/internal/model"
+	"github.com/simonjanss/rig/runtime/httpx"
 	"github.com/simonjanss/rig/runtime/idempotency"
 	"github.com/simonjanss/rig/runtime/reqlog"
 )
@@ -39,13 +40,13 @@ func handleListBookmarks(s Server, svc BookmarkService) http.HandlerFunc {
 		}
 
 		var query BookmarkListQuery
-		limitParam, err := queryInt(r, "limit", 50)
+		limitParam, err := httpx.QueryInt(r, "limit", 50)
 		if err != nil {
 			fail(s, w, r, rc, err)
 			return
 		}
 		query.Limit = limitParam
-		offsetParam, err := queryInt(r, "offset", 0)
+		offsetParam, err := httpx.QueryInt(r, "offset", 0)
 		if err != nil {
 			fail(s, w, r, rc, err)
 			return
@@ -121,13 +122,13 @@ func handleSearchBookmarks(s Server, svc BookmarkService) http.HandlerFunc {
 		}
 
 		var query BookmarkSearchQuery
-		limitParam, err := queryInt(r, "limit", 50)
+		limitParam, err := httpx.QueryInt(r, "limit", 50)
 		if err != nil {
 			fail(s, w, r, rc, err)
 			return
 		}
 		query.Limit = limitParam
-		offsetParam, err := queryInt(r, "offset", 0)
+		offsetParam, err := httpx.QueryInt(r, "offset", 0)
 		if err != nil {
 			fail(s, w, r, rc, err)
 			return
@@ -166,7 +167,7 @@ func handleDeleteBookmark(s Server, svc BookmarkService) http.HandlerFunc {
 		}
 
 		var path BookmarkDeletePath
-		idParam, err := pathUUID(r, "id")
+		idParam, err := httpx.PathUUID(r, "id")
 		if err != nil {
 			fail(s, w, r, rc, err)
 			return
@@ -198,7 +199,7 @@ func handleGetBookmark(s Server, svc BookmarkService) http.HandlerFunc {
 		}
 
 		var path BookmarkGetPath
-		idParam, err := pathUUID(r, "id")
+		idParam, err := httpx.PathUUID(r, "id")
 		if err != nil {
 			fail(s, w, r, rc, err)
 			return
@@ -234,7 +235,7 @@ func handleUpdateBookmark(s Server, svc BookmarkService) http.HandlerFunc {
 		}
 
 		var path BookmarkUpdatePath
-		idParam, err := pathUUID(r, "id")
+		idParam, err := httpx.PathUUID(r, "id")
 		if err != nil {
 			fail(s, w, r, rc, err)
 			return

@@ -139,16 +139,18 @@ func (e *emitter) decodePath(b *gobuf.Buf, res *ir.Resource, ep *ir.Endpoint) {
 		return
 	}
 
+	httpxPkg := b.Import(runtimeModule + "/httpx")
+
 	b.L("var path %s", pathTypeName(res, ep))
 	for _, f := range params {
 		wildcard := pathWildcard(ep, f)
 		switch f.Type {
 		case ir.TypeUUID:
-			b.L("%s, err := pathUUID(r, %s)", e.localName(f), gobuf.Quote(wildcard))
+			b.L("%s, err := %s.PathUUID(r, %s)", e.localName(f), httpxPkg, gobuf.Quote(wildcard))
 		case ir.TypeInt, ir.TypeInt64:
-			b.L("%s, err := pathInt(r, %s)", e.localName(f), gobuf.Quote(wildcard))
+			b.L("%s, err := %s.PathInt(r, %s)", e.localName(f), httpxPkg, gobuf.Quote(wildcard))
 		default:
-			b.L("%s, err := pathString(r, %s)", e.localName(f), gobuf.Quote(wildcard))
+			b.L("%s, err := %s.PathString(r, %s)", e.localName(f), httpxPkg, gobuf.Quote(wildcard))
 		}
 		b.L("if err != nil { fail(s, w, r, rc, err); return }")
 
@@ -189,8 +191,8 @@ func (e *emitter) decodeQuery(b *gobuf.Buf, res *ir.Resource, ep *ir.Endpoint) {
 func (e *emitter) decodeScopeParam(b *gobuf.Buf, ep *ir.Endpoint, f ir.Field) {
 	tenPkg := b.Import(runtimeModule + "/tenancy")
 
-	b.L("scopeParam, err := %s.ParseScope(queryString(r, %s, %s))",
-		tenPkg, gobuf.Quote(f.Wire), gobuf.Quote(f.Default))
+	b.L("scopeParam, err := %s.ParseScope(%s.QueryString(r, %s, %s))",
+		tenPkg, b.Import(runtimeModule+"/httpx"), gobuf.Quote(f.Wire), gobuf.Quote(f.Default))
 	b.L("if err != nil { fail(s, w, r, rc, err); return }")
 	b.L("if err := %s.RequireScope(claims, scopeParam, %s); err != nil {",
 		tenPkg, gobuf.Quote(ep.WidePermission))
@@ -202,8 +204,9 @@ func (e *emitter) decodeScopeParam(b *gobuf.Buf, ep *ir.Endpoint, f ir.Field) {
 
 func (e *emitter) decodeQueryParam(b *gobuf.Buf, f ir.Field) {
 	var (
-		key   = gobuf.Quote(f.Wire)
-		local = e.localName(f)
+		key      = gobuf.Quote(f.Wire)
+		local    = e.localName(f)
+		httpxPkg = b.Import(runtimeModule + "/httpx")
 	)
 
 	// An optional parameter keeps its zero value when the client omits it, and
@@ -219,7 +222,7 @@ func (e *emitter) decodeQueryParam(b *gobuf.Buf, f ir.Field) {
 
 	switch f.Type {
 	case ir.TypeInt, ir.TypeInt64:
-		b.L("%s, err := queryInt(r, %s, %s)", local, key, intDefault(f))
+		b.L("%s, err := %s.QueryInt(r, %s, %s)", local, httpxPkg, key, intDefault(f))
 		b.L("if err != nil { fail(s, w, r, rc, err); return }")
 		if f.Type == ir.TypeInt64 {
 			assign("int64(" + local + ")")
@@ -227,22 +230,22 @@ func (e *emitter) decodeQueryParam(b *gobuf.Buf, f ir.Field) {
 		}
 		assign(local)
 	case ir.TypeBool:
-		b.L("%s, err := queryBool(r, %s, %s)", local, key, boolDefault(f))
+		b.L("%s, err := %s.QueryBool(r, %s, %s)", local, httpxPkg, key, boolDefault(f))
 		b.L("if err != nil { fail(s, w, r, rc, err); return }")
 		assign(local)
 	case ir.TypeUUID:
-		b.L("%s, err := queryUUID(r, %s)", local, key)
+		b.L("%s, err := %s.QueryUUID(r, %s)", local, httpxPkg, key)
 		b.L("if err != nil { fail(s, w, r, rc, err); return }")
 		assign(local)
 	case ir.TypeTimestamp, ir.TypeTime, ir.TypeDate:
-		b.L("%s, err := queryTime(r, %s)", local, key)
+		b.L("%s, err := %s.QueryTime(r, %s)", local, httpxPkg, key)
 		b.L("if err != nil { fail(s, w, r, rc, err); return }")
 		assign(local)
 	default:
 		// Everything else arrives as text. An enum is the common case, and its
 		// underlying type is a string, so the conversion is a cast the service
 		// then validates.
-		expr := "queryString(r, " + key + ", " + gobuf.Quote(f.Default) + ")"
+		expr := httpxPkg + ".QueryString(r, " + key + ", " + gobuf.Quote(f.Default) + ")"
 		if goType := strings.TrimPrefix(f.GoType, "*"); goType != "string" && goType != "" {
 			expr = goType + "(" + expr + ")"
 		}

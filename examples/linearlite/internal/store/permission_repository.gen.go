@@ -633,7 +633,3 @@ func (r *permissionRepo) Delete(ctx context.Context, in dbhook.Delete[model.Perm
 
 	return nil
 }
-
-var _ = time.Now
-var _ = fmt.Sprintf
-var _ = rigerr.NotFound

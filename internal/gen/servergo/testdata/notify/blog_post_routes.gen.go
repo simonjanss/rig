@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"rigtest/model"
 
+	"github.com/simonjanss/rig/runtime/httpx"
 	"github.com/simonjanss/rig/runtime/idempotency"
 	"github.com/simonjanss/rig/runtime/reqlog"
 	"github.com/simonjanss/rig/runtime/tenancy"
@@ -47,13 +48,13 @@ func handleListBlogPosts(s Server, svc BlogPostService) http.HandlerFunc {
 		}
 
 		var query BlogPostListQuery
-		limitParam, err := queryInt(r, "limit", 50)
+		limitParam, err := httpx.QueryInt(r, "limit", 50)
 		if err != nil {
 			fail(s, w, r, rc, err)
 			return
 		}
 		query.Limit = limitParam
-		offsetParam, err := queryInt(r, "offset", 0)
+		offsetParam, err := httpx.QueryInt(r, "offset", 0)
 		if err != nil {
 			fail(s, w, r, rc, err)
 			return
@@ -139,13 +140,13 @@ func handleSearchBlogPosts(s Server, svc BlogPostService) http.HandlerFunc {
 		}
 
 		var query BlogPostSearchQuery
-		limitParam, err := queryInt(r, "limit", 50)
+		limitParam, err := httpx.QueryInt(r, "limit", 50)
 		if err != nil {
 			fail(s, w, r, rc, err)
 			return
 		}
 		query.Limit = limitParam
-		offsetParam, err := queryInt(r, "offset", 0)
+		offsetParam, err := httpx.QueryInt(r, "offset", 0)
 		if err != nil {
 			fail(s, w, r, rc, err)
 			return
@@ -194,13 +195,13 @@ func handleListDeletedBlogPosts(s Server, svc BlogPostService) http.HandlerFunc 
 		}
 
 		var query BlogPostListDeletedQuery
-		limitParam, err := queryInt(r, "limit", 50)
+		limitParam, err := httpx.QueryInt(r, "limit", 50)
 		if err != nil {
 			fail(s, w, r, rc, err)
 			return
 		}
 		query.Limit = limitParam
-		offsetParam, err := queryInt(r, "offset", 0)
+		offsetParam, err := httpx.QueryInt(r, "offset", 0)
 		if err != nil {
 			fail(s, w, r, rc, err)
 			return
@@ -241,7 +242,7 @@ func handleDeleteBlogPost(s Server, svc BlogPostService) http.HandlerFunc {
 		}
 
 		var path BlogPostDeletePath
-		idParam, err := pathUUID(r, "id")
+		idParam, err := httpx.PathUUID(r, "id")
 		if err != nil {
 			fail(s, w, r, rc, err)
 			return
@@ -278,7 +279,7 @@ func handleGetBlogPost(s Server, svc BlogPostService) http.HandlerFunc {
 		}
 
 		var path BlogPostGetPath
-		idParam, err := pathUUID(r, "id")
+		idParam, err := httpx.PathUUID(r, "id")
 		if err != nil {
 			fail(s, w, r, rc, err)
 			return
@@ -319,7 +320,7 @@ func handleUpdateBlogPost(s Server, svc BlogPostService) http.HandlerFunc {
 		}
 
 		var path BlogPostUpdatePath
-		idParam, err := pathUUID(r, "id")
+		idParam, err := httpx.PathUUID(r, "id")
 		if err != nil {
 			fail(s, w, r, rc, err)
 			return
@@ -392,7 +393,7 @@ func handleRestoreBlogPost(s Server, svc BlogPostService) http.HandlerFunc {
 		}
 
 		var path BlogPostRestorePath
-		idParam, err := pathUUID(r, "id")
+		idParam, err := httpx.PathUUID(r, "id")
 		if err != nil {
 			fail(s, w, r, rc, err)
 			return

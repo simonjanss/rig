@@ -63,133 +63,11 @@ func cacheField(res *ir.Resource) string {
 // own invalidations. It may not hold a colon, which a table name cannot.
 func cacheTopic(res *ir.Resource) string { return res.Storage.Table }
 
-// cacheHelpers emits the one type every cached resource shares.
-//
-// Generic, and generated rather than living in runtime/cache, because what it
-// adds is not about caching: it is the deferred attachment. A [cache.Map] wants
-// its Live function at construction and the bus does not exist yet — the store
-// is built from a pool, and the bus is built inside the server that is handed
-// the store — so something has to stand between them and report "no channel
-// yet" until there is one. rig/auth has the same shape in auth.GrantsCache, for
-// the same reason and with the same three states.
-func (e *emitter) cacheHelpers(b *gobuf.Buf) {
-	if !e.caching() {
-		return
-	}
-
-	var (
-		cachePkg = b.Import(runtimeModule + "/cache")
-		dbxPkg   = b.Import(runtimeModule + "/dbx")
-		ctxPkg   = b.Import("context")
-		atomPkg  = b.Import("sync/atomic")
-		timePkg  = b.Import("time")
-	)
-
-	b.Comment("rowCacheServed is the channel a rowCache was attached to, or nil " +
-		"for one that never was.")
-	b.L("type rowCacheServed struct {")
-	b.L("bus   *%s.Bus", cachePkg)
-	b.L("topic *%s.Topic", cachePkg)
-	b.L("}")
-	b.NL()
-
-	b.Comment("rowCache holds one table's rows between requests.\n\n" +
-		"Every entry in it is withdrawn by a Postgres NOTIFY published inside the " +
-		"transaction of the write that made it wrong, so the lifetime is the " +
-		"backstop rather than the guarantee. Nothing here is shared between " +
-		"replicas except the word \"forget\".")
-	b.L("type rowCache[V any] struct {")
-	b.L("m      *%s.Map[V]", cachePkg)
-	b.Comment("An atomic pointer rather than a field, because serve happens after " +
-		"New and on a different goroutine than the reads.")
-	b.L("served %s.Pointer[rowCacheServed]", atomPkg)
-	b.L("}")
-	b.NL()
-
-	b.Comment("newRowCache builds a cache that holds nothing until it is served.")
-	b.L("func newRowCache[V any](ttl %s.Duration, maxEntries int) *rowCache[V] {", timePkg)
-	b.L("c := &rowCache[V]{}")
-	b.L("c.m = %s.NewMap[V](%s.MapConfig{TTL: ttl, MaxEntries: maxEntries, Live: c.live})",
-		cachePkg, cachePkg)
-	b.L("return c")
-	b.L("}")
-	b.NL()
-
-	b.Comment("live reports whether an entry could be withdrawn if one were held.\n\n" +
-		"Two ways to answer no, and both have to: never attached to a channel, and " +
-		"attached to one that has dropped. Every mistake around the lifecycle lands " +
-		"on one of them, which is what makes those mistakes cost latency rather " +
-		"than correctness — a cache that is not live reads through and stores " +
-		"nothing.")
-	b.L("func (c *rowCache[V]) live() bool {")
-	b.L("s := c.served.Load()")
-	b.L("switch {")
-	b.L("case s == nil:")
-	b.Comment("Never served. There is no channel, so nothing could withdraw an " +
-		"entry and nothing may be kept.")
-	b.L("return false")
-	b.L("}")
-	b.L("return s.bus.Live()")
-	b.L("}")
-	b.NL()
-
-	b.Comment("serve attaches this cache to a bus, so its entries can be " +
-		"withdrawn.\n\n" +
-		"A nil bus leaves it unserved, and therefore dead: a cache with no channel " +
-		"is a plain time-to-live over the application's own rows, which is the " +
-		"trade this whole mechanism exists to refuse. Reading through costs " +
-		"queries; holding a row nothing can withdraw costs correctness, and only " +
-		"one of those is worth defaulting to.")
-	b.L("func (c *rowCache[V]) serve(bus *%s.Bus, topic string) {", cachePkg)
-	b.L("if bus == nil { return }")
-	b.L("c.served.Store(&rowCacheServed{bus: bus, topic: bus.Serve(topic, c.m)})")
-	b.L("}")
-	b.NL()
-
-	b.Comment("load answers from the cache, or reads through it.")
-	b.L("func (c *rowCache[V]) load(key string, fn func() (V, error)) (V, error) {")
-	b.L("return c.m.Load(key, fn)")
-	b.L("}")
-	b.NL()
-
-	b.Comment("forget withdraws one row: here once the change lands, and " +
-		"everywhere else on the transaction that made it.\n\n" +
-		"Both, and each covers what the other cannot.\n\n" +
-		"The notification is what reaches the other replicas, and it is published " +
-		"inside the writing transaction because that is the whole mechanism: " +
-		"Postgres delivers it when that transaction commits and throws it away if " +
-		"it rolls back, so the invalidation is atomic with the write and nobody " +
-		"forgets a row a rollback put back.\n\n" +
-		"What it cannot do is reach *this* replica in time. It travels out through " +
-		"Postgres and back in on the listener's own connection, which takes some " +
-		"moments — and those moments belong to the caller who just wrote, who " +
-		"would spend them reading the row as it was. Somebody who saves a change " +
-		"and is shown the old value has been told their write did not happen. So " +
-		"the local drop is registered on the commit instead, where it runs before " +
-		"the write returns to whoever asked for it.\n\n" +
-		"Dropping an entry that a rollback made valid again costs one query, and " +
-		"AfterCommit does not run on a rollback anyway. With no transaction at all " +
-		"it runs immediately, which is the whole of what is available and the " +
-		"whole of what is needed.")
-	b.L("func (c *rowCache[V]) forget(ctx %s.Context, key string) error {", ctxPkg)
-	b.L("%s.AfterCommit(ctx, func() { c.m.Forget(key) })", dbxPkg)
-	b.NL()
-	b.L("s := c.served.Load()")
-	b.L("tx, ok := %s.Tx(ctx)", dbxPkg)
-	b.L("if !ok || s == nil || s.topic == nil {")
-	b.Comment("No channel, or no transaction to publish on. The drop above is " +
-		"all there is, and there is no other replica it could have reached.")
-	b.L("return nil")
-	b.L("}")
-	b.L("return s.topic.Forget(ctx, tx, key)")
-	b.L("}")
-	b.NL()
-}
-
 // storeCacheHeld emits the store's cache fields, one per cached resource.
 func (e *emitter) storeCacheHeld(b *gobuf.Buf) {
 	for _, res := range e.cachedResources() {
-		b.L("%s *rowCache[*%s]", cacheField(res), e.entity(b, res))
+		b.L("%s *%s.RowCache[*%s]", cacheField(res),
+			b.Import(runtimeModule+"/cache"), e.entity(b, res))
 	}
 }
 
@@ -231,9 +109,13 @@ func (e *emitter) storeCacheBus(b *gobuf.Buf) {
 	b.NL()
 
 	for _, res := range cached {
-		b.L("s.%s = newRowCache[*%s](%s, %d)",
-			cacheField(res), e.entity(b, res), goDurationSeconds(b, c.TTLSeconds), c.MaxEntries)
-		b.L("s.%s.serve(s.cacheBus, %s)", cacheField(res), gobuf.Quote(cacheTopic(res)))
+		b.L("s.%s = %s.NewRowCache[*%s](%s.RowCacheConfig{",
+			cacheField(res), cachePkg, e.entity(b, res), cachePkg)
+		b.L("Topic: %s,", gobuf.Quote(cacheTopic(res)))
+		b.L("TTL: %s,", goDurationSeconds(b, c.TTLSeconds))
+		b.L("MaxEntries: %d,", c.MaxEntries)
+		b.L("})")
+		b.L("s.%s.Serve(s.cacheBus)", cacheField(res))
 	}
 	b.NL()
 
@@ -727,7 +609,7 @@ func (e *emitter) getCached(b *gobuf.Buf, res *ir.Resource, typeName string) {
 		"out of the map: runtime/cache never stores what a failing loader " +
 		"returned. So nothing has to withdraw a not-found, and a create has " +
 		"nothing to publish.")
-	b.L("held, err := %s.db.%s.load(%s, func() (*%s, error) {", repo, cacheField(res), key, e.entity(b, res))
+	b.L("held, err := %s.db.%s.Load(%s, func() (*%s, error) {", repo, cacheField(res), key, e.entity(b, res))
 	b.L("return %s.read%s(ctx, id, opts...)", repo, res.Name)
 	b.L("})")
 	b.L("if err != nil { return nil, err }")
@@ -796,7 +678,7 @@ func (e *emitter) forgetCachedMethod(b *gobuf.Buf, res *ir.Resource, typeName st
 		"is no key, and a helper that says so here is one less thing for a call " +
 		"site to be careful about.")
 	b.L("if row == nil { return nil }")
-	b.L("return %s.db.%s.forget(ctx, %s)",
+	b.L("return %s.db.%s.Forget(ctx, %s)",
 		repo, cacheField(res), e.cacheKeyForRow(res, "row", "row.ID"))
 	b.L("}")
 	b.NL()
@@ -821,7 +703,7 @@ func (e *emitter) cacheForget(b *gobuf.Buf, res *ir.Resource, row, id, why strin
 	}
 
 	b.Comment(why)
-	b.L("if err := %s.db.%s.forget(ctx, %s); err != nil { return err }",
+	b.L("if err := %s.db.%s.Forget(ctx, %s); err != nil { return err }",
 		repo, cacheField(res), e.cacheKeyForRow(res, row, id))
 	b.NL()
 }
@@ -889,7 +771,7 @@ func (e *emitter) deleteSnapshots(b *gobuf.Buf, res *ir.Resource) {
 		b.L("versions, err := %s.CollectRows(gone, %s.RowTo[%s.UUID])", pgxPkg, pgxPkg, uuidPkg)
 		b.L("if err != nil { return writeError(err, %s) }", fail)
 		b.L("for _, version := range versions {")
-		b.L("if err := %s.db.%s.forget(ctx, %s); err != nil { return err }",
+		b.L("if err := %s.db.%s.Forget(ctx, %s); err != nil { return err }",
 			repo, cacheField(res), e.cacheKeyForRow(res, "prev", "version"))
 		b.L("}")
 		b.NL()
@@ -921,7 +803,7 @@ func (e *emitter) deleteSnapshots(b *gobuf.Buf, res *ir.Resource) {
 	b.L("})")
 	b.L("if err != nil { return writeError(err, %s) }", fail)
 	b.L("for _, key := range keys {")
-	b.L("if err := %s.db.%s.forget(ctx, key); err != nil { return err }", repo, cacheField(res))
+	b.L("if err := %s.db.%s.Forget(ctx, key); err != nil { return err }", repo, cacheField(res))
 	b.L("}")
 	b.NL()
 }

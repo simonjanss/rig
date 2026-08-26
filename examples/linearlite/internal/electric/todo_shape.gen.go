@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/simonjanss/rig/examples/linearlite/internal/model"
 	"github.com/simonjanss/rig/runtime/electric"
+	"github.com/simonjanss/rig/runtime/httpx"
 	"github.com/simonjanss/rig/runtime/tenancy"
 )
 
@@ -326,7 +327,7 @@ func handleTodoVersionsShape(s Server, scope TodoVersionsScope, fallback TodoVer
 		// Before the filter rather than after, because this one is part of it: a
 		// history shape with no row to be the history of would be every version of
 		// everything.
-		id, err := parseUUID("id", r.PathValue("id"))
+		id, err := httpx.PathUUID(r, "id")
 		if err != nil {
 			fail(s, w, r, err)
 			return

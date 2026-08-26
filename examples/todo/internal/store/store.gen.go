@@ -13,7 +13,6 @@ import (
 	"log/slog"
 	"strconv"
 	"strings"
-	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -165,7 +164,7 @@ type Config struct {
 type Store struct {
 	pool      *pgxpool.Pool
 	cacheBus  *cache.Bus
-	todoCache *rowCache[*model.Todo]
+	todoCache *cache.RowCache[*model.Todo]
 
 	RigNotifications          RigNotificationRepository
 	RigNotificationDeliveries RigNotificationDeliveryRepository
@@ -192,8 +191,12 @@ func New(pool *pgxpool.Pool, cfg Config) *Store {
 		Logger: cfg.Logger,
 	})
 
-	s.todoCache = newRowCache[*model.Todo](30*time.Second, 50000)
-	s.todoCache.serve(s.cacheBus, "todo")
+	s.todoCache = cache.NewRowCache[*model.Todo](cache.RowCacheConfig{
+		Topic:      "todo",
+		TTL:        30 * time.Second,
+		MaxEntries: 50000,
+	})
+	s.todoCache.Serve(s.cacheBus)
 
 	// After the caches are attached, so nothing can be delivered a notification
 	// for a topic that is not registered yet.
@@ -290,105 +293,6 @@ func writeError(err error, table string) error {
 	default:
 		return rigerr.Internal(err, "write %s", table)
 	}
-}
-
-// rowCacheServed is the channel a rowCache was attached to, or nil for one
-// that never was.
-type rowCacheServed struct {
-	bus   *cache.Bus
-	topic *cache.Topic
-}
-
-// rowCache holds one table's rows between requests.
-//
-// Every entry in it is withdrawn by a Postgres NOTIFY published inside the
-// transaction of the write that made it wrong, so the lifetime is the backstop
-// rather than the guarantee. Nothing here is shared between replicas except
-// the word "forget".
-type rowCache[V any] struct {
-	m *cache.Map[V]
-	// An atomic pointer rather than a field, because serve happens after New and
-	// on a different goroutine than the reads.
-	served atomic.Pointer[rowCacheServed]
-}
-
-// newRowCache builds a cache that holds nothing until it is served.
-func newRowCache[V any](ttl time.Duration, maxEntries int) *rowCache[V] {
-	c := &rowCache[V]{}
-	c.m = cache.NewMap[V](cache.MapConfig{TTL: ttl, MaxEntries: maxEntries, Live: c.live})
-	return c
-}
-
-// live reports whether an entry could be withdrawn if one were held.
-//
-// Two ways to answer no, and both have to: never attached to a channel, and
-// attached to one that has dropped. Every mistake around the lifecycle lands
-// on one of them, which is what makes those mistakes cost latency rather than
-// correctness — a cache that is not live reads through and stores nothing.
-func (c *rowCache[V]) live() bool {
-	s := c.served.Load()
-	switch {
-	case s == nil:
-		// Never served. There is no channel, so nothing could withdraw an entry and
-		// nothing may be kept.
-		return false
-	}
-	return s.bus.Live()
-}
-
-// serve attaches this cache to a bus, so its entries can be withdrawn.
-//
-// A nil bus leaves it unserved, and therefore dead: a cache with no channel is
-// a plain time-to-live over the application's own rows, which is the trade
-// this whole mechanism exists to refuse. Reading through costs queries;
-// holding a row nothing can withdraw costs correctness, and only one of those
-// is worth defaulting to.
-func (c *rowCache[V]) serve(bus *cache.Bus, topic string) {
-	if bus == nil {
-		return
-	}
-	c.served.Store(&rowCacheServed{bus: bus, topic: bus.Serve(topic, c.m)})
-}
-
-// load answers from the cache, or reads through it.
-func (c *rowCache[V]) load(key string, fn func() (V, error)) (V, error) {
-	return c.m.Load(key, fn)
-}
-
-// forget withdraws one row: here once the change lands, and everywhere else on
-// the transaction that made it.
-//
-// Both, and each covers what the other cannot.
-//
-// The notification is what reaches the other replicas, and it is published
-// inside the writing transaction because that is the whole mechanism: Postgres
-// delivers it when that transaction commits and throws it away if it rolls
-// back, so the invalidation is atomic with the write and nobody forgets a row
-// a rollback put back.
-//
-// What it cannot do is reach *this* replica in time. It travels out through
-// Postgres and back in on the listener's own connection, which takes some
-// moments — and those moments belong to the caller who just wrote, who would
-// spend them reading the row as it was. Somebody who saves a change and is
-// shown the old value has been told their write did not happen. So the local
-// drop is registered on the commit instead, where it runs before the write
-// returns to whoever asked for it.
-//
-// Dropping an entry that a rollback made valid again costs one query, and
-// AfterCommit does not run on a rollback anyway. With no transaction at all it
-// runs immediately, which is the whole of what is available and the whole of
-// what is needed.
-func (c *rowCache[V]) forget(ctx context.Context, key string) error {
-	dbx.AfterCommit(ctx, func() { c.m.Forget(key) })
-
-	s := c.served.Load()
-	tx, ok := dbx.Tx(ctx)
-	if !ok || s == nil || s.topic == nil {
-		// No channel, or no transaction to publish on. The drop above is all there is,
-		// and there is no other replica it could have reached.
-		return nil
-	}
-	return s.topic.Forget(ctx, tx, key)
 }
 
 // visibleTodo reports whether this caller could have read the Todo row named,

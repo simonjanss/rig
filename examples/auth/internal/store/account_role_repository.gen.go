@@ -506,7 +506,3 @@ func (r *accountRoleRepo) Delete(ctx context.Context, in dbhook.Delete[model.Acc
 
 	return nil
 }
-
-var _ = time.Now
-var _ = fmt.Sprintf
-var _ = rigerr.NotFound

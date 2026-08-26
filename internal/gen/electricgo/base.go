@@ -182,13 +182,10 @@ func (e *emitter) inherit(b *gobuf.Buf, shapes []*ir.Resource) {
 // helpers emit the shared request plumbing.
 func (e *emitter) helpers(b *gobuf.Buf) {
 	var (
-		httpPkg = b.Import("net/http")
-		errPkg  = b.Import(runtimeModule + "/rigerr")
-		tenPkg  = b.Import(runtimeModule + "/tenancy")
-		errsPkg = b.Import("errors")
-		strPkg  = b.Import("strconv")
-		timePkg = b.Import("time")
-		uuidPkg = b.Import("github.com/google/uuid")
+		httpPkg  = b.Import("net/http")
+		errPkg   = b.Import(runtimeModule + "/rigerr")
+		tenPkg   = b.Import(runtimeModule + "/tenancy")
+		httpxPkg = b.Import(runtimeModule + "/httpx")
 	)
 
 	b.Comment("prepare authenticates a subscription and starts its filter.\n\n" +
@@ -216,83 +213,24 @@ func (e *emitter) helpers(b *gobuf.Buf) {
 	b.L("}")
 	b.NL()
 
+	b.Comment("fail writes a refusal.\n\n" +
+		"Without OnError it is httpx.Fail, which is the same flat JSON envelope " +
+		"the generated server and every rig-owned route answers with. It used to " +
+		"be net/http's Error — a second copy of the classification, writing " +
+		"text/plain — and a project that mounted these routes without an error " +
+		"writer therefore had one family of routes answering a shape its own " +
+		"generated client cannot read: the client decodes a flat JSON body, " +
+		"against which text is an empty code, and every error predicate answers " +
+		"false about a refusal that plainly happened.\n\n" +
+		"A project that supplies OnError still gets the request identifier on the " +
+		"body and the failure in the same log line as the rest, which is why " +
+		"passing the generated server's writer is what the wiring does.")
 	b.L("func fail(s Server, w %s.ResponseWriter, r *%s.Request, err error) {", httpPkg, httpPkg)
 	b.L("if s.OnError != nil {")
 	b.L("s.OnError(w, r, err)")
 	b.L("return")
 	b.L("}")
-	b.NL()
-	b.L("code := %s.CodeOf(err)", errPkg)
-	b.L("message := err.Error()")
-	b.L("var typed *%s.Error", errPkg)
-	b.L("if %s.As(err, &typed) { message = typed.Message }", errsPkg)
-	b.L("if code == %s.CodeInternal { message = \"something went wrong\" }", errPkg)
-	b.L("%s.Error(w, message, code.HTTPStatus())", httpPkg)
-	b.L("}")
-	b.NL()
-
-	e.paramHelpers(b, httpPkg, errPkg, strPkg, timePkg, uuidPkg)
-}
-
-// paramHelpers read the declared parameters off the query string.
-func (e *emitter) paramHelpers(b *gobuf.Buf, httpPkg, errPkg, strPkg, timePkg, uuidPkg string) {
-	b.Comment("required reads a parameter that must be present. A shape whose " +
-		"scoping depends on a value is a shape that must not stream without it.")
-	b.L("func required(r *%s.Request, name string) (string, error) {", httpPkg)
-	b.L("v := r.URL.Query().Get(name)")
-	b.L("if v == \"\" { return \"\", %s.BadRequest(\"%%s is required\", name) }", errPkg)
-	b.L("return v, nil")
-	b.L("}")
-	b.NL()
-
-	b.L("func optional(r *%s.Request, name string) (string, bool) {", httpPkg)
-	b.L("v := r.URL.Query().Get(name)")
-	b.L("return v, v != \"\"")
-	b.L("}")
-	b.NL()
-
-	b.L("func parseInt(name, raw string) (int, error) {")
-	b.L("v, err := %s.Atoi(raw)", strPkg)
-	b.L("if err != nil { return 0, %s.BadRequest(\"%%s must be a whole number\", name) }", errPkg)
-	b.L("return v, nil")
-	b.L("}")
-	b.NL()
-
-	b.L("func parseInt64(name, raw string) (int64, error) {")
-	b.L("v, err := %s.ParseInt(raw, 10, 64)", strPkg)
-	b.L("if err != nil { return 0, %s.BadRequest(\"%%s must be a whole number\", name) }", errPkg)
-	b.L("return v, nil")
-	b.L("}")
-	b.NL()
-
-	b.L("func parseFloat(name, raw string) (float64, error) {")
-	b.L("v, err := %s.ParseFloat(raw, 64)", strPkg)
-	b.L("if err != nil { return 0, %s.BadRequest(\"%%s must be a number\", name) }", errPkg)
-	b.L("return v, nil")
-	b.L("}")
-	b.NL()
-
-	b.L("func parseBool(name, raw string) (bool, error) {")
-	b.L("v, err := %s.ParseBool(raw)", strPkg)
-	b.L("if err != nil { return false, %s.BadRequest(\"%%s must be true or false\", name) }", errPkg)
-	b.L("return v, nil")
-	b.L("}")
-	b.NL()
-
-	b.L("func parseUUID(name, raw string) (%s.UUID, error) {", uuidPkg)
-	b.L("v, err := %s.Parse(raw)", uuidPkg)
-	b.L("if err != nil { return %s.Nil, %s.BadRequest(\"%%s is not a valid identifier\", name) }",
-		uuidPkg, errPkg)
-	b.L("return v, nil")
-	b.L("}")
-	b.NL()
-
-	b.L("func parseTime(name, raw string) (%s.Time, error) {", timePkg)
-	b.L("v, err := %s.Parse(%s.RFC3339, raw)", timePkg, timePkg)
-	b.L("if err != nil {")
-	b.L("return %s.Time{}, %s.BadRequest(\"%%s must be an RFC 3339 timestamp\", name)", timePkg, errPkg)
-	b.L("}")
-	b.L("return v, nil")
+	b.L("%s.Fail(w, r, err)", httpxPkg)
 	b.L("}")
 	b.NL()
 }

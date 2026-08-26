@@ -160,14 +160,14 @@ func TestEveryWriteWithdrawsTheRowItChanged(t *testing.T) {
 
 	// Update, Restore, and both halves of Delete — the soft stamp and the hard
 	// removal. Four, plus one per snapshot inside the hard branch.
-	if got := strings.Count(src, "r.db.lessonCache.forget(ctx,"); got < 5 {
+	if got := strings.Count(src, "r.db.lessonCache.Forget(ctx,"); got < 5 {
 		t.Errorf("only %d withdrawals were published; every write to a held row needs one", got)
 	}
 
 	for _, method := range []string{"func (r *lessonRepo) Update(", "func (r *lessonRepo) Delete(",
 		"func (r *lessonRepo) Restore("} {
 		body := methodBody(t, src, method)
-		if !strings.Contains(body, "lessonCache.forget(ctx,") {
+		if !strings.Contains(body, "lessonCache.Forget(ctx,") {
 			t.Errorf("%s writes the row and withdraws nothing", method)
 		}
 	}
@@ -283,7 +283,7 @@ func TestAnUncachedTableIsUntouched(t *testing.T) {
 
 	src := cachedRepository(t, "lifecycle.ir.json")
 
-	for _, unwanted := range []string{"runtime/cache", "rowCache", "lessonCache", "readLesson", "cloneLesson"} {
+	for _, unwanted := range []string{"runtime/cache", "RowCache", "lessonCache", "readLesson", "cloneLesson"} {
 		if strings.Contains(src, unwanted) {
 			t.Errorf("a project that caches nothing emitted %q", unwanted)
 		}

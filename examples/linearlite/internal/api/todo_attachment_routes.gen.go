@@ -14,6 +14,7 @@ import (
 	"github.com/simonjanss/rig/files"
 	"github.com/simonjanss/rig/files/filehttp"
 	"github.com/simonjanss/rig/observe"
+	"github.com/simonjanss/rig/runtime/httpx"
 	"github.com/simonjanss/rig/runtime/idempotency"
 	"github.com/simonjanss/rig/runtime/reqlog"
 	"github.com/simonjanss/rig/runtime/tenancy"
@@ -57,13 +58,13 @@ func handleListTodoAttachments(s Server, svc TodoAttachmentService) http.Handler
 		}
 
 		var query TodoAttachmentListQuery
-		limitParam, err := queryInt(r, "limit", 50)
+		limitParam, err := httpx.QueryInt(r, "limit", 50)
 		if err != nil {
 			fail(s, w, r, rc, err)
 			return
 		}
 		query.Limit = limitParam
-		offsetParam, err := queryInt(r, "offset", 0)
+		offsetParam, err := httpx.QueryInt(r, "offset", 0)
 		if err != nil {
 			fail(s, w, r, rc, err)
 			return
@@ -206,13 +207,13 @@ func handleSearchTodoAttachments(s Server, svc TodoAttachmentService) http.Handl
 		}
 
 		var query TodoAttachmentSearchQuery
-		limitParam, err := queryInt(r, "limit", 50)
+		limitParam, err := httpx.QueryInt(r, "limit", 50)
 		if err != nil {
 			fail(s, w, r, rc, err)
 			return
 		}
 		query.Limit = limitParam
-		offsetParam, err := queryInt(r, "offset", 0)
+		offsetParam, err := httpx.QueryInt(r, "offset", 0)
 		if err != nil {
 			fail(s, w, r, rc, err)
 			return
@@ -265,13 +266,13 @@ func handleListDeletedTodoAttachments(s Server, svc TodoAttachmentService) http.
 		}
 
 		var query TodoAttachmentListDeletedQuery
-		limitParam, err := queryInt(r, "limit", 50)
+		limitParam, err := httpx.QueryInt(r, "limit", 50)
 		if err != nil {
 			fail(s, w, r, rc, err)
 			return
 		}
 		query.Limit = limitParam
-		offsetParam, err := queryInt(r, "offset", 0)
+		offsetParam, err := httpx.QueryInt(r, "offset", 0)
 		if err != nil {
 			fail(s, w, r, rc, err)
 			return
@@ -315,7 +316,7 @@ func handleDeleteTodoAttachment(s Server, svc TodoAttachmentService) http.Handle
 		}
 
 		var path TodoAttachmentDeletePath
-		idParam, err := pathUUID(r, "id")
+		idParam, err := httpx.PathUUID(r, "id")
 		if err != nil {
 			fail(s, w, r, rc, err)
 			return
@@ -355,7 +356,7 @@ func handleGetTodoAttachment(s Server, svc TodoAttachmentService) http.HandlerFu
 		}
 
 		var path TodoAttachmentGetPath
-		idParam, err := pathUUID(r, "id")
+		idParam, err := httpx.PathUUID(r, "id")
 		if err != nil {
 			fail(s, w, r, rc, err)
 			return
@@ -399,7 +400,7 @@ func handleUpdateTodoAttachment(s Server, svc TodoAttachmentService) http.Handle
 		}
 
 		var path TodoAttachmentUpdatePath
-		idParam, err := pathUUID(r, "id")
+		idParam, err := httpx.PathUUID(r, "id")
 		if err != nil {
 			fail(s, w, r, rc, err)
 			return
@@ -476,7 +477,7 @@ func handleRestoreTodoAttachment(s Server, svc TodoAttachmentService) http.Handl
 		}
 
 		var path TodoAttachmentRestorePath
-		idParam, err := pathUUID(r, "id")
+		idParam, err := httpx.PathUUID(r, "id")
 		if err != nil {
 			fail(s, w, r, rc, err)
 			return
@@ -539,7 +540,7 @@ func handleUploadTodoAttachmentAttachmentFile(s Server, svc TodoAttachmentServic
 		}
 
 		var path TodoAttachmentUploadAttachmentFilePath
-		idParam, err := pathUUID(r, "id")
+		idParam, err := httpx.PathUUID(r, "id")
 		if err != nil {
 			fail(s, w, r, rc, err)
 			return
@@ -590,19 +591,19 @@ func handleDownloadTodoAttachmentAttachmentFile(s Server, svc TodoAttachmentServ
 		}
 
 		var path TodoAttachmentDownloadAttachmentFilePath
-		idParam, err := pathUUID(r, "id")
+		idParam, err := httpx.PathUUID(r, "id")
 		if err != nil {
 			fail(s, w, r, rc, err)
 			return
 		}
 		path.ID = idParam
-		fileIDParam, err := pathUUID(r, "fileId")
+		fileIDParam, err := httpx.PathUUID(r, "fileId")
 		if err != nil {
 			fail(s, w, r, rc, err)
 			return
 		}
 		path.FileID = fileIDParam
-		filenameParam, err := pathString(r, "filename")
+		filenameParam, err := httpx.PathString(r, "filename")
 		if err != nil {
 			fail(s, w, r, rc, err)
 			return

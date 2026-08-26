@@ -1001,7 +1001,3 @@ func (r *rigNotificationRepo) Delete(ctx context.Context, in dbhook.Delete[model
 
 	return nil
 }
-
-var _ = time.Now
-var _ = fmt.Sprintf
-var _ = rigerr.NotFound

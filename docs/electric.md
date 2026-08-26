@@ -224,6 +224,13 @@ itself is then copied out however long it takes — and `MaxSnapshotRows` (20,00
 is how large a snapshot may be. `OnError` is worth setting too — it is the only way the reason
 for a 502 on a shape route reaches your log.
 
+**A refused shape route answers the same error envelope as every other route** —
+flat JSON with `code` and `message`, which is what `@rig/client`'s error
+predicates read. Setting `OnError` on the generated `Server` to your API
+server's error writer adds the request identifier and puts the failure in the
+same log line as the rest; leaving it nil still answers the envelope, without
+the identifier.
+
 ### Rig stops asking
 
 A sync service that is down is down for every shape and every subscriber, so

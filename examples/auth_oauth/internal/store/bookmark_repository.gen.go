@@ -666,7 +666,3 @@ func (r *bookmarkRepo) Delete(ctx context.Context, in dbhook.Delete[model.Bookma
 
 	return nil
 }
-
-var _ = time.Now
-var _ = fmt.Sprintf
-var _ = rigerr.NotFound

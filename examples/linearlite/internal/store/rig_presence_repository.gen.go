@@ -789,7 +789,3 @@ func (r *rigPresenceRepo) Delete(ctx context.Context, in dbhook.Delete[model.Rig
 
 	return nil
 }
-
-var _ = time.Now
-var _ = fmt.Sprintf
-var _ = rigerr.NotFound

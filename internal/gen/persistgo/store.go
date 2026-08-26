@@ -161,7 +161,6 @@ func (e *emitter) storeFile() (gen.Artifact, error) {
 
 	e.storeType(b)
 	e.helpers(b)
-	e.cacheHelpers(b)
 	for _, res := range e.referenceTargets() {
 		e.visibilityFunc(b, res)
 	}

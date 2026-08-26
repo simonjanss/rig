@@ -75,48 +75,118 @@ scan. `pkg/ir/document.go:135-148` already provides index-backed
 - **Done.** `openapigen`'s `object` turned out to have no caller left once A2
   landed and is deleted rather than delegated.
 
-### A4. Stop emitting the static row cache; move it to `runtime/cache` `[ ]`
+### A4. Stop emitting the static row cache; move it to `runtime/cache` `[x]`
 
-`persistgo.cacheHelpers` (`internal/gen/persistgo/cache.go:75-187`) is ~112
-lines of `b.L` calls that emit a fixed generic `rowCache[V]` — zero dependence
-on the document — into every generated store (~98 lines each, see
-`testdata/rowcache/store.gen.go:281-378`). `runtime/cache` already exports
-`Bus`, `Topic`, `Map[V]`, `Forgetter`; the missing type belongs beside them.
+`persistgo.cacheHelpers` emitted a fixed generic `rowCache[V]` with zero
+dependence on the document into every generated store. It is
+`cache.RowCache[V]` now, and the generator emits two call sites.
 
-- **Fix:** add `cache.RowCache[V]` to `runtime/cache`; the generator emits
-  `*cache.RowCache[*model.Lesson]` / `cache.NewRowCache[...]` call sites only.
-- **Files:** `internal/gen/persistgo/cache.go`, `runtime/cache/`, regenerated
-  goldens + `make update-examples`.
-- **Size:** ~112 generator lines + ~98 lines per generated project.
-- **Risk:** medium — it's the trickiest concurrency code in rig, but the move
-  makes it unit-testable as ordinary Go instead of golden-file-only.
+- **The reason it was emitted had already been removed, by B3.**
+  `cacheHelpers`'s own doc comment said it could not live in `runtime/cache`
+  because "what it adds is not about caching: it is the deferred attachment. A
+  `cache.Map` wants its Live function at construction and the bus does not exist
+  yet… rig/auth has the same shape in `auth.GrantsCache`, for the same reason and
+  with the same three states." B3 took exactly that three-state deferred
+  attachment out of `GrantsCache` and made it `cache.Keyed`'s — so the argument
+  had been true when it was written and was not true any more, and nothing said
+  so. That is the case for reading these comments as claims rather than as
+  settled facts.
+- **`RowCache` is a `Keyed` and the two places it departs from one, each written
+  against Keyed's opposite choice.** They are not incidental:
+  - **A write is dropped locally as well as published.** `Keyed.Forget` publishes
+    and drops nothing, "because the publisher hears its own notification". The
+    row cache does both, because a notification travels out through Postgres and
+    back in on the listener's connection, and those moments belong to the caller
+    who just wrote — somebody shown the old value after saving has been told
+    their write did not happen. The two types are now the only place in rig
+    where that trade is made both ways, and each says why.
+  - **There is no serving it locally.** `Keyed.ServeLocally` is "attached to no
+    channel and holding anyway", which is a real posture for a session cache. It
+    is not one for the application's own rows, so `RowCache.Serve(nil)` leaves it
+    dead. Reaching that state for a test needs `ServeLocallyForTest`, which is in
+    an internal test file, is a function rather than a method, and says why.
+- **Six tests where there were none.** The old ones were golden comparisons —
+  they prove the text did not move and say nothing about what it does. The
+  properties now asserted: an unserved cache holds nothing, a nil bus is the same
+  as unserved, a nil receiver reads through and forgets nothing, `Forget` with no
+  transaction still drops locally, forgetting an unheld key is fine, a zero TTL
+  holds nothing. What still cannot be asserted in `make test` is the publication
+  and its atomicity with the writing transaction; that is `internal/authtest`'s,
+  through `Keyed`.
+- **`cache_test.go`'s `TestAnUncachedTableIsUntouched` was re-aimed, not
+  deleted.** It asserts `"runtime/cache"` is absent from a project that caches
+  nothing, and that assertion is now more load-bearing than before: the import
+  is the whole of what a cached project adds.
+- **Size:** 123 generator lines and 102 per generated store, against 114 lines
+  of `runtime/cache/rowcache.go` — most of it the prose above — and 130 of test.
+  **Risk:** medium, as filed, and the risk was concurrency code. What removes it
+  is that the concurrency is `Keyed`'s, which B3 already tested.
 
-### A5. Shared HTTP parameter parsers for `servergo` / `electricgo` `[ ]`
+### A5. Shared HTTP parameter parsers for `servergo` / `electricgo` `[x]`
 
-Both generators emit the same static parsers (bool/int/UUID/RFC-3339 time),
-down to the wording of the 400 message: `servergo/server.go:607-678` and
-`electricgo/base.go:237-297`. `electricgo`'s `fail` (`base.go:219-232`) also
-re-emits error mapping `servergo` emits elsewhere.
+`runtime/httpx/param.go`, and both generators emit call sites. Additions to the
+package B2 created rather than a new `runtime/httparg`, as filed.
 
-- **Fix:** additions to the `runtime/httpx` that B2 created (its package doc
-  already says it is the wire shape of the routes rig owns) with
-  `PathUUID/PathInt/QueryBool/QueryTime/...`; generators emit call sites. Not a
-  new `runtime/httparg` — that would be two packages for one job.
-- **Files:** `internal/gen/servergo/server.go`, `internal/gen/electricgo/base.go`,
-  new runtime package, goldens, examples.
-- **Size:** ~130 emit lines + ~140 lines per generated project. **Risk:** low-medium.
+- **What the two generators actually shared, and it was not the functions.**
+  `servergo` emitted eight readers that take a `*http.Request`;
+  `electricgo` emitted two readers and six parsers that take `(name, raw)`. Only
+  four bodies were textually identical. What *was* shared, entirely, is the
+  conversion and the sentence the 400 carries — and that sentence is a wire
+  contract: it is what a client reads when it sends `limit=soon`. Two copies of a
+  promise is one promise that can come to be made two ways. So the split in
+  `httpx` follows that: `ParseInt`/`ParseBool`/`ParseUUID`/… take `(name, raw)`
+  because the two generators disagree about where `raw` comes from, and the
+  `Path*`/`Query*` readers on top are the shapes they need.
+- **A reader only one generator needs is still shared**, because the refusal it
+  writes is the same refusal.
+- **`electricgo`'s `fail` was a third bug of B2's kind, in the place B2 did not
+  look.** It re-emitted the classification *and* wrote it with `http.Error` —
+  **`text/plain`** — while every other route in the same binary answers the flat
+  JSON envelope. Live rather than latent: the fallback runs whenever `OnError` is
+  nil, and `examples/linearlite/main.go:443` constructs
+  `genelectric.Server{Proxy, GetClaims}` with no `OnError`, which is the only
+  real application in the repository. `@rig/client`'s `readError` decodes a flat
+  JSON body, against which text is an empty code — so `isUnauthorized()` answered
+  false about a 401 from a stream route, which is exactly the failure B2 found in
+  the nested envelope. It is `httpx.Fail` now, and `docs/electric.md` says so.
+- **One eager-import trap on the way in, of A6's kind.** The first version took
+  `b.Import(".../httpx")` at the top of `parseParams`, which put the import into
+  every shape file — including the ones with no declared parameters, where
+  nothing used it. `gobuf.Import` registers the moment it is called; the import
+  moved inside the loop.
+- **Size:** 72 emit lines out of `servergo`, 76 out of `electricgo`, ~190 lines
+  per generated project. `runtime/httpx/param.go` is 178 including its prose, and
+  it has 150 lines of test where the emitted copies had a golden file.
 
-### A6. `persistgo` repository emit cleanups `[ ]`
+### A6. `persistgo` repository emit cleanups `[x]`
 
-- The `writableFields → columns/values` loop is emitted verbatim in
-  `updateMethod` and `restoreMethod` (`repository.go:984-1004` vs `1508-1519`).
-- `deleteMethod` emits the hard-delete chain twice (`1247-1263` and
-  `1285-1300`).
-- `repository.go:1264-1268` emits `var _ = time.Now` etc. to paper over
-  eagerly-registered imports; `gobuf.Import` is lazy by design — move the
-  `b.Import` calls into the branches that use them and delete the blanks.
-- **Files:** `internal/gen/persistgo/repository.go`, goldens, examples.
-- **Size:** ~40 lines + 3 lines of noise per generated repository. **Risk:** low.
+- The `writableFields → columns/values` loop is `writableAssignments`, called by
+  `updateMethod` and `restoreMethod`. What differs between them — the restore
+  also clears the soft-delete columns and re-stamps the audit ones — stays at the
+  call sites. There is a third `writableFields(res, ir.FieldOpUpdate)` loop at
+  `repository.go:1654` and it is **not** this shape: it builds an `UpdateInput`
+  out of a snapshot row, with `snapshot_ignore` and array handling that have no
+  counterpart here.
+- **The duplicated hard-delete chain was hiding a bug.** It is `hardDelete` now,
+  and only one of the two copies removed the snapshots first. Nothing joins the
+  two flags — `ResourceStorage.IsSnapshotable` and `IsSoftDeletable` are
+  independent in the IR and the compiler has no rule pairing them, which
+  `pkg/ir/accessors_test.go:149` builds a case for — so a table with versions and
+  no `deleted_at` emitted a bare `DELETE` against a row its snapshot rows still
+  reference, and answered whatever a foreign-key violation reads as. No fixture
+  has that shape, which is why no golden moved and why nothing had noticed.
+- **The three `var _ =` blanks are gone**, with the eager imports that made them
+  necessary. `deleteMethod` named seven packages in one block; only the
+  soft-delete path uses `time` and `fmt`, and **nothing at all used `rigerr`** —
+  it was imported to be blanked. The generated diff is exactly those three lines
+  per hard-delete-only repository, which is what the entry predicted.
+- **B5's deferred sixth copy of `conn(ctx)` was not folded in after all.**
+  `persistgo/store.go`'s emitted `(*Store).connFor` is a method on the generated
+  `Store` over its own pool, not a free function over `dbx.Conn`; replacing it
+  with `dbx.ConnFor` at ~200 call sites is a rename with no shared body to
+  remove, and it is the wrong company for a branch that also moves the row cache.
+  Left open, and this is the record of why.
+- **Size:** 40 generator lines and 3 per hard-delete repository, as filed.
 
 ### A7. Small generator dedups `[x]`
 
@@ -824,7 +894,7 @@ surface, not the package's internals.
   is a removal from a published package's entry point, so it is a breaking
   change for anybody who had reached for one. Nothing in this repository had.
 
-### D3. `electric/src/params.ts`: latent cache-key collision `[ ]`
+### D3. `electric/src/params.ts`: latent cache-key collision `[x]`
 
 `paramsCacheKey` hand-rolled `join("&")`, so `{a: "b&c=d"}` and
 `{a: "b", c: "d"}` produced the same key. It is `serializeParams` +
@@ -847,7 +917,7 @@ just cleanup.**
 - **Size:** 12 → 12 lines of code, and 12 of comment saying why. **Risk:** low
   (cache keys change shape once).
 
-### D4. Presence applies the credential twice per heartbeat `[ ]`
+### D4. Presence applies the credential twice per heartbeat `[x]`
 
 `send()` awaited `credential.apply(headers)`; `presence.ts` then called
 `authorizationOf(runtime)`, which built a second `Headers` and awaited `apply`
@@ -1035,11 +1105,18 @@ What follows describes the rest.
 2. ~~**C1** (throttle) ·~~ **D1-D5** (all of ts/) · **E1+E2** — all of C went on
    one branch instead; see the note at the top of that section. D1 is no longer
    coupled to C3.
-3. **A4** and **A5** each touch goldens + examples broadly — run them after
-   batch 1 lands, not alongside. A5's HTTP parameter parsers should go into the
-   `runtime/httpx` that B2 created rather than a new `runtime/httparg`; one
-   package for one job.
-4. **F** (dead code) conflicts with almost everything by nature of touching
-   many modules lightly — do it first or last, not in the middle. Two of its rows
-   are already struck: `migrate.Version` under B6 and the `dbx.IsNoRows` blank
-   under B1.
+3. **A4, A5 and A6 went on one branch**, after D and E, and grouping them was
+   the point: each one moves generated output, so each would otherwise drag
+   `make update-golden` and `make update-examples` through a merge of its own.
+   Done in that order — A6 first because it is the smallest and its diff is three
+   lines per file, then A5, then A4 — with the goldens regenerated and read after
+   each, so that every moved line had one item to belong to.
+4. **F** (dead code) was done across D and E rather than on its own. Three of its
+   six open rows turned out to have callers, two were deleted, one is struck with
+   its reasoning. Doing it inside the branches that already touched those modules
+   cost nothing; doing it alone would have been a branch touching six modules to
+   delete three methods.
+
+**Everything in this document is now closed.** The one item left open on purpose
+is named in A6: the emitted `(*Store).connFor`, which B5 deferred and A6 declined,
+with the reason in both places.

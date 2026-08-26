@@ -13,6 +13,7 @@ import (
 	"github.com/simonjanss/rig/examples/todo/internal/model"
 	"github.com/simonjanss/rig/files"
 	"github.com/simonjanss/rig/files/filehttp"
+	"github.com/simonjanss/rig/runtime/httpx"
 	"github.com/simonjanss/rig/runtime/idempotency"
 	"github.com/simonjanss/rig/runtime/reqlog"
 )
@@ -51,13 +52,13 @@ func handleListTodos(s Server, svc TodoService) http.HandlerFunc {
 		}
 
 		var query TodoListQuery
-		limitParam, err := queryInt(r, "limit", 50)
+		limitParam, err := httpx.QueryInt(r, "limit", 50)
 		if err != nil {
 			fail(s, w, r, rc, err)
 			return
 		}
 		query.Limit = limitParam
-		offsetParam, err := queryInt(r, "offset", 0)
+		offsetParam, err := httpx.QueryInt(r, "offset", 0)
 		if err != nil {
 			fail(s, w, r, rc, err)
 			return
@@ -180,13 +181,13 @@ func handleSearchTodos(s Server, svc TodoService) http.HandlerFunc {
 		}
 
 		var query TodoSearchQuery
-		limitParam, err := queryInt(r, "limit", 50)
+		limitParam, err := httpx.QueryInt(r, "limit", 50)
 		if err != nil {
 			fail(s, w, r, rc, err)
 			return
 		}
 		query.Limit = limitParam
-		offsetParam, err := queryInt(r, "offset", 0)
+		offsetParam, err := httpx.QueryInt(r, "offset", 0)
 		if err != nil {
 			fail(s, w, r, rc, err)
 			return
@@ -230,13 +231,13 @@ func handleListDeletedTodos(s Server, svc TodoService) http.HandlerFunc {
 		}
 
 		var query TodoListDeletedQuery
-		limitParam, err := queryInt(r, "limit", 50)
+		limitParam, err := httpx.QueryInt(r, "limit", 50)
 		if err != nil {
 			fail(s, w, r, rc, err)
 			return
 		}
 		query.Limit = limitParam
-		offsetParam, err := queryInt(r, "offset", 0)
+		offsetParam, err := httpx.QueryInt(r, "offset", 0)
 		if err != nil {
 			fail(s, w, r, rc, err)
 			return
@@ -272,7 +273,7 @@ func handleDeleteTodo(s Server, svc TodoService) http.HandlerFunc {
 		}
 
 		var path TodoDeletePath
-		idParam, err := pathUUID(r, "id")
+		idParam, err := httpx.PathUUID(r, "id")
 		if err != nil {
 			fail(s, w, r, rc, err)
 			return
@@ -304,7 +305,7 @@ func handleGetTodo(s Server, svc TodoService) http.HandlerFunc {
 		}
 
 		var path TodoGetPath
-		idParam, err := pathUUID(r, "id")
+		idParam, err := httpx.PathUUID(r, "id")
 		if err != nil {
 			fail(s, w, r, rc, err)
 			return
@@ -340,7 +341,7 @@ func handleUpdateTodo(s Server, svc TodoService) http.HandlerFunc {
 		}
 
 		var path TodoUpdatePath
-		idParam, err := pathUUID(r, "id")
+		idParam, err := httpx.PathUUID(r, "id")
 		if err != nil {
 			fail(s, w, r, rc, err)
 			return
@@ -395,7 +396,7 @@ func handleCompleteTodo(s Server, svc TodoService) http.HandlerFunc {
 		}
 
 		var path TodoCompletePath
-		idParam, err := pathUUID(r, "id")
+		idParam, err := httpx.PathUUID(r, "id")
 		if err != nil {
 			fail(s, w, r, rc, err)
 			return
@@ -463,7 +464,7 @@ func handleRestoreTodo(s Server, svc TodoService) http.HandlerFunc {
 		}
 
 		var path TodoRestorePath
-		idParam, err := pathUUID(r, "id")
+		idParam, err := httpx.PathUUID(r, "id")
 		if err != nil {
 			fail(s, w, r, rc, err)
 			return
@@ -513,7 +514,7 @@ func handleRevertTodo(s Server, svc TodoService) http.HandlerFunc {
 		}
 
 		var path TodoRevertPath
-		idParam, err := pathUUID(r, "id")
+		idParam, err := httpx.PathUUID(r, "id")
 		if err != nil {
 			fail(s, w, r, rc, err)
 			return
@@ -571,7 +572,7 @@ func handleVersionsOfTodo(s Server, svc TodoService) http.HandlerFunc {
 		}
 
 		var path TodoVersionsPath
-		idParam, err := pathUUID(r, "id")
+		idParam, err := httpx.PathUUID(r, "id")
 		if err != nil {
 			fail(s, w, r, rc, err)
 			return
@@ -608,7 +609,7 @@ func handleDeleteTodoCoverFile(s Server, svc TodoService) http.HandlerFunc {
 		}
 
 		var path TodoDeleteCoverFilePath
-		idParam, err := pathUUID(r, "id")
+		idParam, err := httpx.PathUUID(r, "id")
 		if err != nil {
 			fail(s, w, r, rc, err)
 			return
@@ -648,7 +649,7 @@ func handleUploadTodoCoverFile(s Server, svc TodoService) http.HandlerFunc {
 		}
 
 		var path TodoUploadCoverFilePath
-		idParam, err := pathUUID(r, "id")
+		idParam, err := httpx.PathUUID(r, "id")
 		if err != nil {
 			fail(s, w, r, rc, err)
 			return
@@ -691,19 +692,19 @@ func handleDownloadTodoCoverFile(s Server, svc TodoService) http.HandlerFunc {
 		}
 
 		var path TodoDownloadCoverFilePath
-		idParam, err := pathUUID(r, "id")
+		idParam, err := httpx.PathUUID(r, "id")
 		if err != nil {
 			fail(s, w, r, rc, err)
 			return
 		}
 		path.ID = idParam
-		fileIDParam, err := pathUUID(r, "fileId")
+		fileIDParam, err := httpx.PathUUID(r, "fileId")
 		if err != nil {
 			fail(s, w, r, rc, err)
 			return
 		}
 		path.FileID = fileIDParam
-		filenameParam, err := pathString(r, "filename")
+		filenameParam, err := httpx.PathString(r, "filename")
 		if err != nil {
 			fail(s, w, r, rc, err)
 			return

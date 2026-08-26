@@ -12,6 +12,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/simonjanss/rig/runtime/electric"
+	"github.com/simonjanss/rig/runtime/httpx"
 	"github.com/simonjanss/rig/runtime/tenancy"
 )
 
@@ -35,8 +36,8 @@ type LessonShapeParams struct {
 func parseLessonShapeParams(r *http.Request) (LessonShapeParams, error) {
 	var p LessonShapeParams
 
-	if raw, ok := optional(r, "matchday"); ok {
-		v, err := parseInt("matchday", raw)
+	if raw, ok := httpx.QueryOptional(r, "matchday"); ok {
+		v, err := httpx.ParseInt("matchday", raw)
 		if err != nil {
 			return p, err
 		}
@@ -44,7 +45,7 @@ func parseLessonShapeParams(r *http.Request) (LessonShapeParams, error) {
 		p.HasMatchday = true
 	}
 
-	rawStatus, err := required(r, "status")
+	rawStatus, err := httpx.QueryRequired(r, "status")
 	if err != nil {
 		return p, err
 	}
@@ -348,7 +349,7 @@ func handleLessonVersionsShape(s Server, scope LessonVersionsScope, fallback Les
 		// Before the filter rather than after, because this one is part of it: a
 		// history shape with no row to be the history of would be every version of
 		// everything.
-		id, err := parseUUID("id", r.PathValue("id"))
+		id, err := httpx.PathUUID(r, "id")
 		if err != nil {
 			fail(s, w, r, err)
 			return
