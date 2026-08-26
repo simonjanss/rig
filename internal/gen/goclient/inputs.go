@@ -31,7 +31,7 @@ func (e *emitter) inputFile(res *ir.Resource) (gen.Artifact, error) {
 		// says it in one place rather than once per operation that happens to
 		// have one — a create covered and a custom endpoint not is the gap this
 		// closes.
-		if name := fieldsTypeName(res, ep); name != "" {
+		if name := genutil.FieldsTypeName(res, ep); name != "" {
 			e.fieldErrors(b, name, ep.Request.BodyParams)
 			e.callError(b, res, ep)
 		}
@@ -109,7 +109,7 @@ func (e *emitter) bodyStruct(b *gobuf.Buf, res *ir.Resource, ep *ir.Endpoint) {
 // absent, so a client that helpfully sent limit=0 would be asking for an empty
 // page rather than for the default one.
 func (e *emitter) queryStruct(b *gobuf.Buf, res *ir.Resource, ep *ir.Endpoint) {
-	name := queryTypeName(res, ep)
+	name := genutil.QueryTypeName(res, ep)
 
 	b.Comment(name + " is the query for " + res.Name + "." + ep.Name + ".\n\n" +
 		"A nil member is left out of the request, and the server applies its own " +
@@ -119,7 +119,7 @@ func (e *emitter) queryStruct(b *gobuf.Buf, res *ir.Resource, ep *ir.Endpoint) {
 		if doc := queryDoc(f); doc != "" {
 			b.Comment(doc)
 		}
-		b.L("%s %s `json:%s`", f.Name, pointerTo(e.goType(b, f)), gobuf.Quote(f.Wire))
+		b.L("%s %s `json:%s`", f.Name, genutil.PointerTo(e.goType(b, f)), gobuf.Quote(f.Wire))
 	}
 	b.L("}")
 	b.NL()
@@ -136,15 +136,6 @@ func queryDoc(f ir.Field) string {
 		doc += "."
 	}
 	return strings.TrimSpace(doc + " Left out, the server uses " + f.Default + ".")
-}
-
-// pointerTo makes a type optional, unless it already is: a slice and a pointer
-// both have a nil to mean absent, and a pointer to either would be a second one.
-func pointerTo(t string) string {
-	if strings.HasPrefix(t, "*") || strings.HasPrefix(t, "[]") {
-		return t
-	}
-	return "*" + t
 }
 
 // fieldErrors emits the shape a 422 for this body arrives in.
@@ -185,7 +176,7 @@ func (e *emitter) fieldErrors(b *gobuf.Buf, name string, fields []ir.Field) {
 func (e *emitter) callError(b *gobuf.Buf, res *ir.Resource, ep *ir.Endpoint) {
 	var (
 		name   = errorFuncName(res, ep)
-		fields = fieldsTypeName(res, ep)
+		fields = genutil.FieldsTypeName(res, ep)
 		rig    = e.client(b)
 		call   = res.Plural + "." + ep.Impl.ServiceMethod
 	)

@@ -19,10 +19,12 @@ package tsbuf
 import (
 	"bytes"
 	"fmt"
-	"sort"
+	"maps"
+	"slices"
 	"strconv"
 	"strings"
 
+	"github.com/simonjanss/rig/internal/gen/gobuf"
 	"github.com/simonjanss/rig/pkg/gen"
 )
 
@@ -156,30 +158,9 @@ func (b *Buf) commentLines(text string) []string {
 			out = append(out, strings.Split(strings.Trim(para, "\n"), "\n")...)
 			continue
 		}
-		out = append(out, wrap(strings.Join(strings.Fields(para), " "), width)...)
+		out = append(out, gobuf.Wrap(strings.Join(strings.Fields(para), " "), width)...)
 	}
 	return out
-}
-
-func wrap(text string, width int) []string {
-	words := strings.Fields(text)
-	if len(words) == 0 {
-		return nil
-	}
-
-	var (
-		lines []string
-		line  = words[0]
-	)
-	for _, w := range words[1:] {
-		if len(line)+1+len(w) > width {
-			lines = append(lines, line)
-			line = w
-			continue
-		}
-		line += " " + w
-	}
-	return append(lines, line)
 }
 
 // Quote renders a string as a TypeScript literal.
@@ -244,8 +225,9 @@ func (b *Buf) Bytes() ([]byte, error) {
 		{"import type ", b.types},
 		{"import ", b.values},
 	} {
-		for _, module := range sortedKeys(group.modules) {
-			out.WriteString(importLine(group.kind, sortedKeys(group.modules[module]), module))
+		for _, module := range slices.Sorted(maps.Keys(group.modules)) {
+			names := slices.Sorted(maps.Keys(group.modules[module]))
+			out.WriteString(importLine(group.kind, names, module))
 		}
 		if len(group.modules) > 0 {
 			out.WriteString("\n")
@@ -280,13 +262,4 @@ func importLine(kind string, names []string, module string) string {
 	b.WriteString(Quote(module))
 	b.WriteString(";\n")
 	return b.String()
-}
-
-func sortedKeys[V any](m map[string]V) []string {
-	out := make([]string, 0, len(m))
-	for k := range m {
-		out = append(out, k)
-	}
-	sort.Strings(out)
-	return out
 }

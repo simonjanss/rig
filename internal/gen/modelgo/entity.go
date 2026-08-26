@@ -118,13 +118,7 @@ func jsonTag(f ir.ResourceField) string {
 		return gobuf.Quote("-")
 	}
 
-	tag := f.Wire
-	// A nullable or empty field is omitted rather than sent as a wall of nulls;
-	// a required one is always present so a client can rely on the key.
-	if f.IsNullable() || f.IsArray() {
-		tag += ",omitempty"
-	}
-	return gobuf.Quote(tag)
+	return genutil.JSONTag(f.Field)
 }
 
 // columnConstants name every column once, so nothing downstream writes a column

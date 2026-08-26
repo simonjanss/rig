@@ -41,7 +41,7 @@ type route struct {
 func routesOf(ep *ir.Endpoint) []route {
 	var out []route
 	if ep.Method != methodQuery {
-		out = append(out, route{method: ep.Method, path: routePath(ep.Pattern)})
+		out = append(out, route{method: ep.Method, path: genutil.RoutePath(ep.Pattern)})
 	}
 	for _, a := range ep.AliasPatterns {
 		method, path, ok := strings.Cut(a, " ")
@@ -55,12 +55,6 @@ func routesOf(ep *ir.Endpoint) []route {
 
 // methodQuery is the read-with-a-body method rig serves a search on.
 const methodQuery = "QUERY"
-
-// routePath is the path half of a net/http pattern.
-func routePath(pattern string) string {
-	_, path, _ := strings.Cut(pattern, " ")
-	return path
-}
 
 // operationID names a route.
 //
@@ -209,7 +203,7 @@ func (e *emitter) operationDescription(ep *ir.Endpoint, r route) string {
 
 	if r.alias && ep.Method == methodQuery {
 		parts = append(parts, "The primary form of this operation is `"+
-			methodQuery+" "+routePath(ep.Pattern)+"` — a read that carries a body, and so "+
+			methodQuery+" "+genutil.RoutePath(ep.Pattern)+"` — a read that carries a body, and so "+
 			"safe and idempotent in a way POST is not. OpenAPI 3.1 cannot describe an "+
 			"operation on the QUERY method, so it is documented here as the POST alias that "+
 			"exists for intermediaries which reject unfamiliar methods. One handler serves "+

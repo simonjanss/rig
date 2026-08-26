@@ -189,7 +189,7 @@ func (e *emitter) inputFile(res *ir.Resource) (gen.Artifact, error) {
 		// Every endpoint that sends a body says how that body can be wrong, and
 		// says it in one place rather than once per operation that happens to
 		// have one.
-		if name := fieldsTypeName(res, ep); name != "" {
+		if name := genutil.FieldsTypeName(res, ep); name != "" {
 			e.fieldErrors(b, name, ep.Request.BodyParams)
 		}
 
@@ -295,7 +295,7 @@ func (e *emitter) fieldErrors(b *tsbuf.Buf, name string, fields []ir.Field) {
 // a client that helpfully sent `limit: 0` would get an empty page instead of the
 // default one.
 func (e *emitter) queryType(b *tsbuf.Buf, res *ir.Resource, ep *ir.Endpoint) {
-	name := queryTypeName(res, ep)
+	name := genutil.QueryTypeName(res, ep)
 
 	b.Comment(name + " is the query string " + ep.OperationID + " takes.\n\n" +
 		"Every member is optional. The server applies a parameter's default when " +
@@ -350,56 +350,22 @@ func (e *emitter) listResponse(res *ir.Resource) *ir.Object {
 }
 
 // filterObjects are the search shapes belonging to a resource.
-//
-// A filter is reached from the search body rather than from the entity, so a
-// resource with no Search endpoint has filter shapes in the document and no use
-// for them here.
 func (e *emitter) filterObjects(res *ir.Resource) []*ir.Object {
-	var out []*ir.Object
-	for i := range e.doc.API.Objects {
-		obj := &e.doc.API.Objects[i]
-		if obj.Origin != ir.OriginFilter || !e.reachable[obj.Name] {
-			continue
-		}
-		if strings.HasPrefix(obj.Name, res.Name+"Filter") {
-			out = append(out, obj)
-		}
-	}
-	return out
+	return genutil.FilterObjects(e.doc, e.reachable, res)
 }
 
 // unclaimedObjects are the objects no other file emits.
 //
 // A resource's own shapes are its files'. What is left is the page envelope and
-// whatever a project declared for itself, and both have to land somewhere.
+// whatever a project declared for itself, and both have to land somewhere —
+// which is why Pagination is not claimed here the way the Go client claims it.
 //
 // Error is the exception and is emitted nowhere. Its decoded form is
 // `RigError` in the runtime, which is what a caller actually holds — and a
 // second type named `Error`, exported from a barrel, would shadow the global one
 // in every file that imported it.
 func (e *emitter) unclaimedObjects() []*ir.Object {
-	claimed := map[string]bool{"Error": true}
-	for _, res := range e.exposed() {
-		claimed[res.Name] = true
-		claimed[res.Name+"ListResponse"] = true
-		for _, obj := range e.filterObjects(res) {
-			claimed[obj.Name] = true
-		}
-	}
-
-	var out []*ir.Object
-	for i := range e.doc.API.Objects {
-		obj := &e.doc.API.Objects[i]
-		if !claimed[obj.Name] && e.reachable[obj.Name] {
-			out = append(out, obj)
-		}
-	}
-	return out
-}
-
-// queryTypeName is the shape an endpoint's query parameters arrive in.
-func queryTypeName(res *ir.Resource, ep *ir.Endpoint) string {
-	return res.Name + ep.Name + "Query"
+	return genutil.UnclaimedObjects(e.doc, e.reachable, map[string]bool{"Error": true})
 }
 
 // bodyTypeName is the shape an endpoint's body is built from, for the endpoints
@@ -408,33 +374,13 @@ func bodyTypeName(res *ir.Resource, ep *ir.Endpoint) string {
 	return res.Name + ep.Name + "Body"
 }
 
-// fieldsTypeName is the shape a validation failure on this endpoint's body
-// arrives in, and is empty when there is no body to be wrong about.
-//
-// The same two exclusions the Go client makes, for the same reasons. A body that
-// is a named object is shared between endpoints, so its failure shape would have
-// to be too, and nothing on the server emits one to fill in. And a generated
-// endpoint whose body is its own — a search, a revert — is refused in some other
-// shape than that body's: a search's filter is a question nothing validates, and
-// a revert replays the version through the update path, so what comes back is
-// the update's field errors and not one about a version identifier.
-func fieldsTypeName(res *ir.Resource, ep *ir.Endpoint) string {
-	if ep.Request.BodyObject != "" || len(ep.Request.BodyParams) == 0 {
-		return ""
-	}
-	if ep.Impl.Kind == ir.EndpointGenerated && !genutil.UsesModelInput(ep) {
-		return ""
-	}
-	return res.Name + ep.Name + "Fields"
-}
-
 // guardName reads back what a refused call said.
 //
 // Named for the call rather than for the input, which is the difference between
 // the two halves: by the time a caller holds the error the input is gone, and
 // what they are asking about is the method they called.
 func guardName(res *ir.Resource, ep *ir.Endpoint) string {
-	if fieldsTypeName(res, ep) == "" {
+	if genutil.FieldsTypeName(res, ep) == "" {
 		return ""
 	}
 	return "is" + res.Name + ep.Name + "Error"

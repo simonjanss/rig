@@ -95,7 +95,7 @@ func (e *emitter) signature(b *gobuf.Buf, res *ir.Resource, ep *ir.Endpoint, rig
 
 	switch {
 	case ep.Name == ir.OpSearch:
-		if filter, ok := searchFilterField(ep); ok {
+		if filter, ok := genutil.SearchFilterField(ep); ok {
 			params = append(params, "filter "+e.goType(b, filter))
 			sig.body = genutil.BodyShapeName(res, ep) + "{" + filter.Name + ": filter}"
 		}
@@ -112,7 +112,7 @@ func (e *emitter) signature(b *gobuf.Buf, res *ir.Resource, ep *ir.Endpoint, rig
 
 	if len(ep.Request.QueryParams) > 0 {
 		sig.query = "q"
-		params = append(params, "q "+queryTypeName(res, ep))
+		params = append(params, "q "+genutil.QueryTypeName(res, ep))
 	}
 	params = append(params, "opts ..."+rig+".CallOption")
 
@@ -146,7 +146,7 @@ func (e *emitter) successType(ep *ir.Endpoint) string {
 // anything at all, and a slash in one would otherwise address a different route
 // entirely.
 func (e *emitter) pathExpr(b *gobuf.Buf, ep *ir.Endpoint) string {
-	path := routePath(ep.Pattern)
+	path := genutil.RoutePath(ep.Pattern)
 	path = strings.TrimPrefix(path, e.doc.API.BasePath)
 
 	if len(ep.Request.PathParams) == 0 {
@@ -320,7 +320,7 @@ func (e *emitter) allMethod(b *gobuf.Buf, res *ir.Resource, ep *ir.Endpoint, rig
 		return
 	}
 
-	query := queryTypeName(res, ep)
+	query := genutil.QueryTypeName(res, ep)
 
 	b.Comment("All reads every " + res.Name + " the query matches, a page at a " +
 		"time.\n\n" +
@@ -371,15 +371,6 @@ func listItemType(page *ir.Object) string {
 		}
 	}
 	return ""
-}
-
-// routePath is the path half of a net/http pattern.
-func routePath(pattern string) string {
-	_, path, found := strings.Cut(pattern, " ")
-	if !found {
-		return pattern
-	}
-	return path
 }
 
 // argName is what a path parameter is called in a Go signature: the field's own

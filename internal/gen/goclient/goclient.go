@@ -24,7 +24,6 @@ package goclient
 
 import (
 	"context"
-	"strings"
 
 	"github.com/simonjanss/rig/internal/gen/genutil"
 	"github.com/simonjanss/rig/internal/gen/gobuf"
@@ -169,63 +168,29 @@ type emitter struct {
 	reachable map[string]bool
 }
 
-// reach walks out from the endpoints and returns every type they can carry.
+// reach names every type a caller can send or receive: what the client's own
+// methods mention, and what those mention in turn.
 //
-// It exists because a document describes more than an API exposes. The
-// authentication foundation's own tables have models, repositories and filter
-// shapes — and no endpoints, deliberately — so emitting every object in the
-// document would put a filter for the session table in the SDK of an
-// application that cannot search sessions. What a client should declare is what
-// its own methods mention, and what those mention in turn.
+// The walk is [genutil.Walk]; what is here is the seeding, which is the half
+// that differs between the outputs. A client's is the plainest of the three —
+// every exposed resource, and every endpoint on it.
 func (e *emitter) reach() map[string]bool {
-	seen := make(map[string]bool)
-
-	var follow func(name string)
-	visit := func(fields []ir.Field) {
-		for _, f := range fields {
-			switch f.TypeKind {
-			case ir.TypeKindEnum, ir.TypeKindObject, ir.TypeKindResource:
-				follow(f.Type)
-			}
-		}
-	}
-	follow = func(name string) {
-		if name == "" || seen[name] {
-			return
-		}
-		seen[name] = true
-
-		if obj := e.object(name); obj != nil {
-			visit(obj.Fields)
-		}
-	}
+	w := genutil.NewWalk(e.doc)
 
 	// Error and Pagination are in every response, and the base file declares
 	// them whether or not a field happens to mention one.
-	follow("Error")
-	follow("Pagination")
+	w.Follow("Error")
+	w.Follow("Pagination")
 
 	for _, res := range e.exposed() {
-		follow(res.Name)
-		follow(res.Name + "ListResponse")
+		w.Follow(res.Name)
+		w.Follow(res.Name + "ListResponse")
 
 		for i := range res.Endpoints {
-			ep := &res.Endpoints[i]
-
-			follow(ep.Request.BodyObject)
-			visit(ep.Request.PathParams)
-			visit(ep.Request.QueryParams)
-			visit(ep.Request.BodyParams)
-			visit(ep.Request.Headers)
-
-			for _, r := range ep.Responses {
-				follow(r.BodyObject)
-				visit(r.BodyFields)
-				visit(r.Headers)
-			}
+			w.Endpoint(&res.Endpoints[i])
 		}
 	}
-	return seen
+	return w.Seen()
 }
 
 // client imports the SDK runtime and returns the name to qualify with.
@@ -241,14 +206,7 @@ func (e *emitter) artifact(path string, b *gobuf.Buf) (gen.Artifact, error) {
 }
 
 // object returns a named object, or nil.
-func (e *emitter) object(name string) *ir.Object {
-	for i := range e.doc.API.Objects {
-		if e.doc.API.Objects[i].Name == name {
-			return &e.doc.API.Objects[i]
-		}
-	}
-	return nil
-}
+func (e *emitter) object(name string) *ir.Object { return e.doc.Object(name) }
 
 // listResponse is the paged shape a resource's reads answer with, or nil.
 func (e *emitter) listResponse(res *ir.Resource) *ir.Object {
@@ -256,69 +214,23 @@ func (e *emitter) listResponse(res *ir.Resource) *ir.Object {
 }
 
 // filterObjects are the search shapes belonging to a resource.
-//
-// A filter is reached from the search body rather than from the entity, so a
-// resource with no Search endpoint has filter shapes in the document and no use
-// for them here.
 func (e *emitter) filterObjects(res *ir.Resource) []*ir.Object {
-	var out []*ir.Object
-	for i := range e.doc.API.Objects {
-		obj := &e.doc.API.Objects[i]
-		if obj.Origin != ir.OriginFilter || !e.reachable[obj.Name] {
-			continue
-		}
-		if strings.HasPrefix(obj.Name, res.Name+"Filter") {
-			out = append(out, obj)
-		}
-	}
-	return out
+	return genutil.FilterObjects(e.doc, e.reachable, res)
 }
 
 // unclaimedObjects are the objects no other file emits.
 //
-// Error and Pagination are the base file's; a resource's own shapes are its
-// files'. What is left is whatever a project declared for itself, and it has to
-// land somewhere.
+// Error and Pagination are the base file's, which is what this generator claims
+// beyond a resource's own shapes. What is left is whatever a project declared
+// for itself, and it has to land somewhere.
 func (e *emitter) unclaimedObjects() []*ir.Object {
-	claimed := map[string]bool{"Error": true, "Pagination": true}
-	for i := range e.doc.API.Resources {
-		res := &e.doc.API.Resources[i]
-		if res.Unexposed || len(res.Endpoints) == 0 {
-			continue
-		}
-		claimed[res.Name] = true
-		claimed[res.Name+"ListResponse"] = true
-		for _, obj := range e.filterObjects(res) {
-			claimed[obj.Name] = true
-		}
-	}
-
-	var out []*ir.Object
-	for i := range e.doc.API.Objects {
-		obj := &e.doc.API.Objects[i]
-		if !claimed[obj.Name] && e.reachable[obj.Name] {
-			out = append(out, obj)
-		}
-	}
-	return out
+	return genutil.UnclaimedObjects(e.doc, e.reachable,
+		map[string]bool{"Error": true, "Pagination": true})
 }
 
 // fileName is the file a resource's own artifacts go in.
 func fileName(res *ir.Resource, suffix string) string {
 	return naming.Snake(res.Name) + suffix + ".gen.go"
-}
-
-// jsonTag renders a field's tag.
-//
-// A nullable or empty field is omitted rather than sent as a wall of nulls, and
-// a required one is always present so the server can rely on the key. It is the
-// same rule the model layer follows, for the same reason.
-func jsonTag(f ir.Field) string {
-	tag := f.Wire
-	if f.IsNullable() || f.IsArray() {
-		tag += ",omitempty"
-	}
-	return gobuf.Quote(tag)
 }
 
 // structFields writes one member per field, descriptions and all.
@@ -327,7 +239,7 @@ func (e *emitter) structFields(b *gobuf.Buf, fields []ir.Field) {
 		if f.Description != "" {
 			b.Comment(f.Description)
 		}
-		b.L("%s %s `json:%s`", f.Name, e.goType(b, f), jsonTag(f))
+		b.L("%s %s `json:%s`", f.Name, e.goType(b, f), genutil.JSONTag(f))
 	}
 }
 

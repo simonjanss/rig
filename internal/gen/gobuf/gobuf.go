@@ -165,7 +165,7 @@ func (b *Buf) Comment(text string) {
 func (b *Buf) paragraph(para string) {
 	var flow []string
 	flush := func() {
-		for _, line := range wrap(strings.Join(flow, " "), 76) {
+		for _, line := range Wrap(strings.Join(flow, " "), 76) {
 			b.L("// %s", line)
 		}
 		flow = nil
@@ -182,8 +182,13 @@ func (b *Buf) paragraph(para string) {
 	flush()
 }
 
-// wrap breaks text into lines no longer than width, without splitting words.
-func wrap(text string, width int) []string {
+// Wrap breaks text into lines no longer than width, without splitting words.
+//
+// Exported for tsbuf, which lays out comments the same way and is otherwise
+// unrelated to this package. Two copies of a word-wrapper would be two comment
+// layouts sooner or later, and the generated Go and the generated TypeScript sit
+// in the same review.
+func Wrap(text string, width int) []string {
 	words := strings.Fields(text)
 	if len(words) == 0 {
 		return nil
@@ -222,7 +227,7 @@ func (b *Buf) Bytes() ([]byte, error) {
 	}
 
 	if b.doc != "" {
-		for _, line := range wrap(b.doc, 76) {
+		for _, line := range Wrap(b.doc, 76) {
 			out.WriteString("// " + line + "\n")
 		}
 	}

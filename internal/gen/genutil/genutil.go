@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/simonjanss/rig/internal/gen/gobuf"
+	"github.com/simonjanss/rig/internal/naming"
 	"github.com/simonjanss/rig/pkg/gen"
 	"github.com/simonjanss/rig/pkg/ir"
 )
@@ -209,4 +210,53 @@ func Artifact(path string, b *gobuf.Buf, mode gen.WriteMode) (gen.Artifact, erro
 		return gen.Artifact{}, fmt.Errorf("%s: %w", path, err)
 	}
 	return gen.Artifact{Path: path, Content: content, Mode: mode}, nil
+}
+
+// JSONTag renders a field's struct tag.
+//
+// A nullable or empty field is omitted rather than sent as a wall of nulls, and
+// a required one is always present so the receiver can rely on the key.
+//
+// It is here because the model layer, the service layer and the Go client all
+// tag the same field, and a field the client omits and the server requires is a
+// request refused for a reason neither end can see. It is deliberately not the
+// rule [BodyRequired] applies, which ignores Default: the two answer different
+// questions — may I leave this out of the JSON I send, versus must the server
+// have received it.
+func JSONTag(f ir.Field) string {
+	tag := f.Wire
+	if f.IsNullable() || f.IsArray() {
+		tag += ",omitempty"
+	}
+	return gobuf.Quote(tag)
+}
+
+// PointerTo makes a rendered Go type optional, unless it already is: a slice and
+// a pointer both have a nil to mean absent, and a pointer to either would be a
+// second one.
+//
+// Note that internal/compile keeps a copy of this rule. That is not an oversight
+// waiting to be tidied: the compiler must not import a generator package, and
+// its copy also maps the empty type to the empty string, which is a contract for
+// a field the IR has not typed yet rather than one this ever sees.
+func PointerTo(t string) string {
+	if strings.HasPrefix(t, "*") || strings.HasPrefix(t, "[]") {
+		return t
+	}
+	return "*" + t
+}
+
+// ExpandLayout fills the placeholders in a stub directory template — {table},
+// {Table}, {tables} — from the resource a stub is being written for.
+//
+// The service generator and the electric generator both write stubs into a
+// project's own tree, from the same `layout` settings, so the path one of them
+// computes has to be the path the other would.
+func ExpandLayout(namer *naming.Namer, res *ir.Resource, tmpl string) string {
+	table := res.Storage.Table
+	return strings.NewReplacer(
+		"{table}", table,
+		"{Table}", namer.Go(table),
+		"{tables}", naming.Snake(namer.Plural(table)),
+	).Replace(tmpl)
 }

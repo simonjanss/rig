@@ -1,8 +1,6 @@
 package goclient
 
 import (
-	"strings"
-
 	"github.com/simonjanss/rig/internal/gen/genutil"
 	"github.com/simonjanss/rig/internal/gen/gobuf"
 	"github.com/simonjanss/rig/internal/naming"
@@ -113,38 +111,6 @@ func (e *emitter) objectFile(objects []*ir.Object) (gen.Artifact, error) {
 	return e.artifact("objects.gen.go", b)
 }
 
-// queryTypeName is the struct an endpoint's query parameters arrive in.
-func queryTypeName(res *ir.Resource, ep *ir.Endpoint) string {
-	return res.Name + ep.Name + "Query"
-}
-
-// fieldsTypeName is the shape a validation failure on this endpoint's body
-// arrives in, and is empty when there is no body to be wrong about.
-//
-// Two kinds of body are left out. A body that is a named object is shared
-// between endpoints, so its failure shape would have to be too, and nothing on
-// the server emits one to fill in. And a generated endpoint whose body is its
-// own — a search, a revert — is refused in some other shape than that body's: a
-// search's filter is a question nothing validates, and a revert replays the
-// version through the update path, so what comes back is the update's field
-// errors and not one about a version identifier. A shape per call there would be
-// the wrong shape, which decodes to an empty one rather than failing. Both fail
-// as a plain rigclient.Error, which is what everything did before any of this
-// existed.
-//
-// A create and an update are generated too and are not left out: their bodies
-// are the model's inputs, and the validator that refuses one is generated beside
-// them.
-func fieldsTypeName(res *ir.Resource, ep *ir.Endpoint) string {
-	if ep.Request.BodyObject != "" || len(ep.Request.BodyParams) == 0 {
-		return ""
-	}
-	if ep.Impl.Kind == ir.EndpointGenerated && !genutil.UsesModelInput(ep) {
-		return ""
-	}
-	return res.Name + ep.Name + "Fields"
-}
-
 // errorFuncName reads back what a refused call said.
 //
 // Named for the call rather than for the input, which is the difference between
@@ -152,22 +118,8 @@ func fieldsTypeName(res *ir.Resource, ep *ir.Endpoint) string {
 // what they are asking about is the method they called. The server names the
 // same JSON after the value that failed, because a validator is holding one.
 func errorFuncName(res *ir.Resource, ep *ir.Endpoint) string {
-	if fieldsTypeName(res, ep) == "" {
+	if genutil.FieldsTypeName(res, ep) == "" {
 		return ""
 	}
 	return res.Name + ep.Name + "Error"
-}
-
-// searchFilterField is the member of a search body that carries the conditions.
-//
-// Found rather than assumed: the body is one object field, and taking it from
-// the document means a rename in the compiler does not silently produce a client
-// that sends the wrong key.
-func searchFilterField(ep *ir.Endpoint) (ir.Field, bool) {
-	for _, f := range ep.Request.BodyParams {
-		if f.TypeKind == ir.TypeKindObject && strings.HasSuffix(f.Type, "Filter") {
-			return f, true
-		}
-	}
-	return ir.Field{}, false
 }

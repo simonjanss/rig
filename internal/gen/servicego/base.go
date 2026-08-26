@@ -351,10 +351,4 @@ func (e *emitter) paginationShape(b *gobuf.Buf) {
 // A nullable field is omitted when empty so that a response does not carry a
 // wall of nulls, while a required one is always present so a client can rely on
 // the key existing.
-func jsonTag(f ir.Field) string {
-	tag := f.Wire
-	if f.IsNullable() || f.IsArray() {
-		tag += ",omitempty"
-	}
-	return gobuf.Quote(tag)
-}
+func jsonTag(f ir.Field) string { return genutil.JSONTag(f) }

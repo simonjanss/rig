@@ -2,8 +2,8 @@ package electricgo
 
 import (
 	"path/filepath"
-	"strings"
 
+	"github.com/simonjanss/rig/internal/gen/genutil"
 	"github.com/simonjanss/rig/internal/gen/gobuf"
 	"github.com/simonjanss/rig/internal/naming"
 	"github.com/simonjanss/rig/pkg/gen"
@@ -133,10 +133,5 @@ func (e *emitter) stubFile(res *ir.Resource, sh shape) (gen.Artifact, error) {
 
 // expand fills the layout placeholders in a stub directory template.
 func (e *emitter) expand(tmpl string, res *ir.Resource) string {
-	table := res.Storage.Table
-	return strings.NewReplacer(
-		"{table}", table,
-		"{Table}", e.namer.Go(table),
-		"{tables}", naming.Snake(e.namer.Plural(table)),
-	).Replace(tmpl)
+	return genutil.ExpandLayout(e.namer, res, tmpl)
 }
