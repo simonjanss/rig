@@ -51,7 +51,7 @@ Open [localhost:8084](http://localhost:8084) and sign in as
 `demo@linearlite.dev` / `correct horse battery staple` — or register a fresh
 account and watch requirement two happen: the picker you land in already lists
 an invitation to the demo workspace, left there by the `OnRegistered` hook in
-`main.go` inside the very transaction that created you.
+`internal/app` inside the very transaction that created you.
 
 For the full effect, open a second browser (or a private window) as
 `alex@linearlite.dev` and put the two side by side: each window's header shows
@@ -64,9 +64,9 @@ twice.
 
 | What you see | What it is |
 |---|---|
-| The board updates without a reload | `electric: {enabled: true}` in `services/todo/todo.yaml`; the generated shape routes on the API's own mux (`internal/electric/`, wired in `main.go` — the proxy authenticates every subscriber and builds the tenant filter); `createTodoStream` + `useLiveQuery` in `web/src/board/` |
-| Who else is here, on which card, in which field | `presence: {enabled: true}` in rig.yaml and three lines in `main.go`; `services/rig_presence/rig_presence_shape.go` narrows the shape to a scope, which is the one thing that makes the fan-out affordable; `web/src/presence/` is the browser half — one loop for the whole app, built in an effect because StrictMode would otherwise orphan it, and a `useSpot` that ends where the panel does |
-| Register → invited to the demo tenant | `auth.allow_registration` in rig.yaml, and `autoInvite()` in `main.go`: the `OnRegistered` hook provisions the newcomer with an invitation and attaches the member role, all in the registration transaction |
+| The board updates without a reload | `electric: {enabled: true}` in `services/todo/todo.yaml`; the generated shape routes on the API's own mux (`internal/electric/`, wired in `internal/app` — the proxy authenticates every subscriber and builds the tenant filter); `createTodoStream` + `useLiveQuery` in `web/src/board/` |
+| Who else is here, on which card, in which field | `presence: {enabled: true}` in rig.yaml and three lines across `internal/app` and `main.go`; `services/rig_presence/rig_presence_shape.go` narrows the shape to a scope, which is the one thing that makes the fan-out affordable; `web/src/presence/` is the browser half — one loop for the whole app, built in an effect because StrictMode would otherwise orphan it, and a `useSpot` that ends where the panel does |
+| Register → invited to the demo tenant | `auth.allow_registration` in rig.yaml, and `autoInvite()` in `internal/app`: the `OnRegistered` hook provisions the newcomer with an invitation and attaches the member role, all in the registration transaction |
 | Create your own workspace | `auth.allow_tenant_creation`, with `authz.SeedFor` as `TenantOptions.OnCreated` — a new tenant gets its roles in the transaction that made it |
 | The item panel's History, and Revert | the snapshot triple in `migrations/00009` — every update keeps the version it replaced, and `/todo/{id}/_versions/_stream` makes the panel grow while you edit |
 | The Trash, and Restore | `deleted_at` + `restore_window_days: 30`; the trash is a live shape too, so a delete visibly moves a card between windows |
@@ -193,7 +193,7 @@ connections while nobody looks.
 ## Take the sync service down
 
 The pill in the header is the whole point of `DB: pool` on `electric.Config` in
-`main.go`, and it is the one thing in this example you cannot see by reading it.
+`internal/app`, and it is the one thing in this example you cannot see by reading it.
 With both windows open:
 
 1. The pill reads **Live sync**. Press **Stop**. The container goes down
@@ -271,10 +271,10 @@ With both windows open:
    when it went and when it came back, where `OnError` is one per subscriber.
    **Monitor ↗** has the same two.
 
-The switch itself is three routes in `demo.go` shelling out to `docker`, and it
-exists only when `$RIG_DEMO_SYNC_CONTAINER` names a container. Not a route that
-answers 403 — no route at all, which is what keeps a scan from learning this
-process can reach a container engine.
+The switch itself is three routes in `internal/app/demo.go` shelling out to
+`docker`, and it exists only when `$RIG_DEMO_SYNC_CONTAINER` names a container.
+Not a route that answers 403 — no route at all, which is what keeps a scan from
+learning this process can reach a container engine.
 
 **Inside a checkout of rig, step 4 does not work, and the pill says so.** rig's
 own Makefile sets `RIG_DB_ISOLATE` so two clones cannot adopt each other's
@@ -293,7 +293,11 @@ make demo DEMO_SYNC_CONTAINER=linearlite-electric-1a2b3c4d
 
 ## The tests
 
-The docker suite drives the same `newAPI` the binary serves, over a real
+They are all in `integration/`, a package of their own rather than files beside
+`main.go`: the suite builds the server through `internal/app`, and no test can
+import a `main`. The example root is the application.
+
+The docker suite drives the same `app.New` the binary serves, over a real
 database: the register → invitation → accept → board flow, a fresh tenant
 whose Owner can write immediately, one item's whole life (create, refuse,
 version, revert, trash, restore, assign), the multipart attachment round trip,
@@ -315,9 +319,11 @@ loading from a snapshot with `$ELECTRIC_URL` aimed at a closed port, the `503`
 the poll after it gets, the `502` presence keeps because it has no fallback, and
 the switch answering `404` when no container is named — which is the security
 property, so it is the one asserted rather than assumed.
-`make examples` runs it all; the
-shape-route test runs its live half — the todo shapes and the presence one — only
-when `$ELECTRIC_URL` points at the sync service `rig db up` started.
+`make examples` runs it all — `go test -tags docker ./...` reaches
+`integration/` like any other package; the shape-route test runs its live half —
+the todo shapes and the presence one — only when `$ELECTRIC_URL` points at the
+sync service `rig db up` started. `monitor_test.go` carries no build tag, so
+`go test ./...` runs it and nothing else there.
 
 The browser half is not in `make examples`, which has Go and Docker and
 deliberately not pnpm. It is in `make linearlite-web` at the repository root,

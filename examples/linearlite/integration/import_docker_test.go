@@ -1,6 +1,6 @@
 //go:build docker
 
-package main
+package integration
 
 import (
 	"context"
@@ -11,6 +11,7 @@ import (
 
 	"github.com/simonjanss/rig/examples/linearlite/client"
 	"github.com/simonjanss/rig/examples/linearlite/importer"
+	"github.com/simonjanss/rig/examples/linearlite/internal/app"
 	"github.com/simonjanss/rig/rigclient"
 )
 
@@ -20,7 +21,7 @@ import (
 func TestTheImportJob(t *testing.T) {
 	api := newServer(t)
 	api.seed(t)
-	token := api.login(t, SeedEmail2)
+	token := api.login(t, app.SeedEmail2)
 
 	minted := api.do(t, request{
 		method: http.MethodPost, path: "/auth/api-keys", token: token,

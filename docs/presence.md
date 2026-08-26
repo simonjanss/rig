@@ -247,8 +247,9 @@ closure, and `sweep-presence` in `Tasks`.
 api.Register(mux, api.Handlers{ /* ... */ Presence: api.NewPresence(pool)})
 ```
 
-[`examples/linearlite`](../examples/linearlite) is the worked one: three lines in
-`main.go`, a filled-in scope stub in `services/rig_presence`, and
+[`examples/linearlite`](../examples/linearlite) is the worked one: three lines
+across `internal/app` and `main.go`, a filled-in scope stub in
+`services/rig_presence`, and
 `web/src/presence` — which is where the parts a package cannot own for you live,
 and [the section above](#three-things-the-package-deliberately-does-not-do-for-you)
 is about those.

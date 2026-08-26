@@ -1,4 +1,4 @@
-package main
+package app
 
 import (
 	"context"
@@ -77,7 +77,7 @@ func registerDemo(mux *http.ServeMux, mail *outbox.Box, page *observe.Page,
 			}
 		}
 		writeJSON(w, http.StatusOK, map[string]any{
-			"monitor": monitorURL(page),
+			"monitor": MonitorURL(page),
 			"outbox":  mail != nil,
 			// Whether this build can take the sync service down. The pill that
 			// reads this is a button, and a button that answers 404 is worse
@@ -139,7 +139,7 @@ type syncSwitch struct {
 	proxy     *electric.Proxy
 	// upstream is the host port this process forwards shapes to, taken from the
 	// same URL the proxy was built with. Kept so the state can notice the
-	// container coming back somewhere else — see syncState.Moved.
+	// container coming back somewhere else — see SyncState.Moved.
 	upstream string
 }
 
@@ -165,7 +165,7 @@ func newSyncSwitch(proxy *electric.Proxy, upstream string) *syncSwitch {
 
 // portOf is the port in a URL, and "" for one that does not parse — which is
 // not worth refusing to start over, since the only thing it costs is the
-// warning in syncState.Moved.
+// warning in SyncState.Moved.
 func portOf(raw string) string {
 	u, err := url.Parse(raw)
 	if err != nil {
@@ -177,7 +177,7 @@ func portOf(raw string) string {
 	return ""
 }
 
-// syncState is what the pill in the header renders, and it reports several
+// SyncState is what the pill in the header renders, and it reports several
 // separate facts rather than one "is sync up" boolean on purpose.
 //
 // Container is the truth about the process. Reachable is what this proxy's
@@ -187,7 +187,10 @@ func portOf(raw string) string {
 // Reachable false until the cooldown lets one request through to find out.
 // Showing them side by side is the only way that mechanism is visible from a
 // browser.
-type syncState struct {
+//
+// Exported because integration/'s electric suite decodes /_demo/sync into it.
+// Nothing outside this example builds one.
+type SyncState struct {
 	// Container is "running", "stopped", or "missing" for one that was never
 	// created — which is what `make examples` sees, since it brings up a
 	// database and no sync service.
@@ -264,8 +267,8 @@ func registerSyncSwitch(mux *http.ServeMux, sw *syncSwitch, getClaims func(*http
 const inspectFormat = `{{.State.Running}} {{with index .NetworkSettings.Ports "3000/tcp"}}{{with index . 0}}{{.HostPort}}{{end}}{{end}}`
 
 // state asks the engine about the container and the proxy about itself.
-func (s *syncSwitch) state(ctx context.Context) syncState {
-	st := syncState{Container: "missing", Reachable: s.proxy.SyncReachable(), Upstream: s.upstream}
+func (s *syncSwitch) state(ctx context.Context) SyncState {
+	st := SyncState{Container: "missing", Reachable: s.proxy.SyncReachable(), Upstream: s.upstream}
 	// A container that does not exist is an error here, not a false — which is
 	// the answer `make examples` gets, and not a failure.
 	out, err := s.run(ctx, "inspect", "--format", inspectFormat, s.container)
@@ -298,7 +301,7 @@ func (s *syncSwitch) run(ctx context.Context, args ...string) (string, error) {
 	return string(out), err
 }
 
-// monitorURL is where a browser reaches the monitoring page, and empty when
+// MonitorURL is where a browser reaches the monitoring page, and empty when
 // there is none to reach.
 //
 // It has to be absolute: the page listens on a port of its own, so it is a
@@ -311,7 +314,10 @@ func (s *syncSwitch) run(ctx context.Context, args ...string) (string, error) {
 // A wildcard bind is rewritten to localhost. ":9084" is a valid thing to listen
 // on and not a valid thing to put in an href, and the browser asking is on this
 // machine by construction — it is reading a page this process served.
-func monitorURL(page *observe.Page) string {
+//
+// Exported for the same reason SyncState is: integration/'s monitor test
+// asserts on the URL this builds, and that test needs no database.
+func MonitorURL(page *observe.Page) string {
 	addr := page.Addr()
 	if addr == "" {
 		return ""

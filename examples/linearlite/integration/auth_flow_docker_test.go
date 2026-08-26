@@ -1,12 +1,14 @@
 //go:build docker
 
-package main
+package integration
 
 import (
 	"net/http"
 	"testing"
 
 	"github.com/google/uuid"
+
+	"github.com/simonjanss/rig/examples/linearlite/internal/app"
 )
 
 // The flagship flow, end to end over real SQL: a stranger registers, finds the
@@ -20,7 +22,7 @@ func TestRegisteringLandsOnTheBoard(t *testing.T) {
 
 	res := api.do(t, request{
 		method: http.MethodPost, path: "/auth/register",
-		body: map[string]any{"emailAddress": address, "displayName": "Newcomer", "password": SeedPassword},
+		body: map[string]any{"emailAddress": address, "displayName": "Newcomer", "password": app.SeedPassword},
 	})
 	if res.status != http.StatusCreated {
 		t.Fatalf("register: %d %s", res.status, res.body)
@@ -43,7 +45,7 @@ func TestRegisteringLandsOnTheBoard(t *testing.T) {
 		} `json:"data"`
 	}
 	listed.decode(t, &page)
-	if len(page.Data) != 1 || page.Data[0].TenantID != uuid.MustParse(SeedTenantID) {
+	if len(page.Data) != 1 || page.Data[0].TenantID != uuid.MustParse(app.SeedTenantID) {
 		t.Fatalf("expected the auto-invitation into the seeded tenant, got %s", listed.body)
 	}
 	if page.Data[0].TenantName != "LinearLite" {
@@ -96,7 +98,7 @@ func TestCreatingYourOwnTenant(t *testing.T) {
 	address := "founder-" + uuid.New().String()[:8] + "@example.org"
 	res := api.do(t, request{
 		method: http.MethodPost, path: "/auth/register",
-		body: map[string]any{"emailAddress": address, "displayName": "Founder", "password": SeedPassword},
+		body: map[string]any{"emailAddress": address, "displayName": "Founder", "password": app.SeedPassword},
 	})
 	if res.status != http.StatusCreated {
 		t.Fatalf("register: %d %s", res.status, res.body)
@@ -151,7 +153,7 @@ func TestCreatingYourOwnTenant(t *testing.T) {
 func TestMembersAreListableAndReadOnly(t *testing.T) {
 	api := newServer(t)
 	api.seed(t)
-	token := api.login(t, SeedEmail)
+	token := api.login(t, app.SeedEmail)
 
 	res := api.do(t, request{method: http.MethodGet, path: "/api/v1/accounts", token: token})
 	if res.status != http.StatusOK {

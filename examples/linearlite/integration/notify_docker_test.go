@@ -1,6 +1,6 @@
 //go:build docker
 
-package main
+package integration
 
 import (
 	"context"
@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/simonjanss/rig/examples/linearlite/internal/app"
 	"github.com/simonjanss/rig/examples/linearlite/services/todo"
 )
 
@@ -20,10 +21,10 @@ func TestAChangeNotifiesTheStakeholders(t *testing.T) {
 	api := newServer(t)
 	tenant := api.seed(t)
 
-	demoToken := api.login(t, SeedEmail)
-	alexToken := api.login(t, SeedEmail2)
-	demo := api.accountID(t, tenant, SeedEmail)
-	alex := api.accountID(t, tenant, SeedEmail2)
+	demoToken := api.login(t, app.SeedEmail)
+	alexToken := api.login(t, app.SeedEmail2)
+	demo := api.accountID(t, tenant, app.SeedEmail)
+	alex := api.accountID(t, tenant, app.SeedEmail2)
 
 	// An item demo creates and holds, so alex's change has exactly one
 	// stakeholder to reach.
@@ -47,7 +48,7 @@ func TestAChangeNotifiesTheStakeholders(t *testing.T) {
 	}
 
 	// The guarantee path, exactly as cron would run it.
-	if err := dispatchNotifications(context.Background(), api.pool); err != nil {
+	if err := app.DispatchNotifications(context.Background(), api.pool); err != nil {
 		t.Fatal(err)
 	}
 
@@ -84,7 +85,7 @@ func TestAChangeNotifiesTheStakeholders(t *testing.T) {
 	}); res.status != http.StatusOK {
 		t.Fatalf("alex's edit: %d %s", res.status, res.body)
 	}
-	if err := dispatchNotifications(context.Background(), api.pool); err != nil {
+	if err := app.DispatchNotifications(context.Background(), api.pool); err != nil {
 		t.Fatal(err)
 	}
 
@@ -123,9 +124,9 @@ func TestAStealNotifiesThePreviousHolder(t *testing.T) {
 	api := newServer(t)
 	tenant := api.seed(t)
 
-	demoToken := api.login(t, SeedEmail)
-	demo := api.accountID(t, tenant, SeedEmail)
-	alex := api.accountID(t, tenant, SeedEmail2)
+	demoToken := api.login(t, app.SeedEmail)
+	demo := api.accountID(t, tenant, app.SeedEmail)
+	alex := api.accountID(t, tenant, app.SeedEmail2)
 
 	// Created by demo and held by alex, which is the shape two of the seeded
 	// items have and the one that matters: once demo takes it, the creator and
@@ -150,7 +151,7 @@ func TestAStealNotifiesThePreviousHolder(t *testing.T) {
 		t.Fatalf("steal: %d %s", res.status, res.body)
 	}
 
-	if err := dispatchNotifications(context.Background(), api.pool); err != nil {
+	if err := app.DispatchNotifications(context.Background(), api.pool); err != nil {
 		t.Fatal(err)
 	}
 

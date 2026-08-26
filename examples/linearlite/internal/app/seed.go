@@ -1,4 +1,4 @@
-package main
+package app
 
 import (
 	"context"
@@ -34,7 +34,7 @@ const (
 // Two people rather than one, because the notification story needs them: a
 // notification goes to an item's stakeholders minus whoever made the change,
 // so with one account there is never anybody to tell.
-func seed(ctx context.Context, pool *pgxpool.Pool) error {
+func Seed(ctx context.Context, pool *pgxpool.Pool) error {
 	tenantID := uuid.MustParse(SeedTenantID)
 
 	tx, err := pool.Begin(ctx)

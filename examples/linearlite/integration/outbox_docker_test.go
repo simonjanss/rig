@@ -1,6 +1,6 @@
 //go:build docker
 
-package main
+package integration
 
 import (
 	"context"
@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/simonjanss/rig/examples/linearlite/internal/app"
 	"github.com/simonjanss/rig/examples/linearlite/services/outbox"
 )
 
@@ -29,13 +30,13 @@ func TestAPasswordResetThroughTheOutbox(t *testing.T) {
 	// it is for — an address can belong to accounts in several — so reading the
 	// box needs a session even though the message that comes back has no tenant
 	// on it.
-	reader := api.login(t, SeedEmail2)
+	reader := api.login(t, app.SeedEmail2)
 
 	const nobody = "nobody@linearlite.dev"
 
 	// Always 202, and the endpoint answers the same for an address nobody has:
 	// anything else would tell a stranger which addresses have accounts.
-	for _, address := range []string{SeedEmail, nobody} {
+	for _, address := range []string{app.SeedEmail, nobody} {
 		res := api.do(t, request{
 			method: http.MethodPost, path: "/auth/password/reset",
 			body: map[string]any{"emailAddress": address},
@@ -51,7 +52,7 @@ func TestAPasswordResetThroughTheOutbox(t *testing.T) {
 	var token string
 	for _, m := range api.outbox(t, reader) {
 		switch {
-		case m.Kind == outbox.KindReset && m.To == SeedEmail:
+		case m.Kind == outbox.KindReset && m.To == app.SeedEmail:
 			token = m.Token
 		case m.To == nobody:
 			t.Error("an address with no account must not produce mail")
@@ -81,13 +82,13 @@ func TestAPasswordResetThroughTheOutbox(t *testing.T) {
 
 	if res := api.do(t, request{
 		method: http.MethodPost, path: "/auth/login",
-		body: map[string]any{"emailAddress": SeedEmail, "password": newPassword},
+		body: map[string]any{"emailAddress": app.SeedEmail, "password": newPassword},
 	}); res.status != http.StatusOK {
 		t.Fatalf("sign in with the new password: %d %s", res.status, res.body)
 	}
 	if res := api.do(t, request{
 		method: http.MethodPost, path: "/auth/login",
-		body: map[string]any{"emailAddress": SeedEmail, "password": SeedPassword},
+		body: map[string]any{"emailAddress": app.SeedEmail, "password": app.SeedPassword},
 	}); res.status == http.StatusOK {
 		t.Error("the old password should no longer work")
 	}
@@ -98,7 +99,7 @@ func TestAnInvitationLandsInTheOutbox(t *testing.T) {
 	api := newServer(t)
 	api.seed(t)
 
-	owner := api.login(t, SeedEmail)
+	owner := api.login(t, app.SeedEmail)
 	// A fresh address per run: this database is throwaway but not reset between
 	// runs, and inviting somebody who already has an account here is a 409 —
 	// correctly, which is another test's subject and not this one's.
@@ -127,7 +128,7 @@ func TestAnInvitationLandsInTheOutbox(t *testing.T) {
 
 	// The permission model, not a special case: provisioning is administrative,
 	// and the Basic role the seed gives alex does not hold it.
-	member := api.login(t, SeedEmail2)
+	member := api.login(t, app.SeedEmail2)
 	if res := api.do(t, request{
 		method: http.MethodPost, path: "/auth/accounts", token: member,
 		body: map[string]any{
@@ -145,9 +146,9 @@ func TestANotificationReachesTheEmailChannel(t *testing.T) {
 	api := newServer(t)
 	tenant := api.seed(t)
 
-	demoToken := api.login(t, SeedEmail)
-	alexToken := api.login(t, SeedEmail2)
-	demo := api.accountID(t, tenant, SeedEmail)
+	demoToken := api.login(t, app.SeedEmail)
+	alexToken := api.login(t, app.SeedEmail2)
+	demo := api.accountID(t, tenant, app.SeedEmail)
 
 	created := api.do(t, request{
 		method: http.MethodPost, path: "/api/v1/todos", token: demoToken,
@@ -176,7 +177,7 @@ func TestANotificationReachesTheEmailChannel(t *testing.T) {
 
 	var sent int
 	for _, m := range api.outbox(t, demoToken) {
-		if m.Kind != outbox.KindNotification || m.To != SeedEmail {
+		if m.Kind != outbox.KindNotification || m.To != app.SeedEmail {
 			continue
 		}
 		sent++

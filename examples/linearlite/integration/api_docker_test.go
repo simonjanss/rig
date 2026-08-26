@@ -1,6 +1,6 @@
 //go:build docker
 
-package main
+package integration
 
 import (
 	"bytes"
@@ -12,6 +12,8 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+
+	"github.com/simonjanss/rig/examples/linearlite/internal/app"
 )
 
 // One item's whole life over the wire: created, refused, edited, its history
@@ -20,7 +22,7 @@ import (
 func TestAnItemsWholeLife(t *testing.T) {
 	api := newServer(t)
 	api.seed(t)
-	token := api.login(t, SeedEmail)
+	token := api.login(t, app.SeedEmail)
 
 	var item struct {
 		ID     uuid.UUID `json:"id"`
@@ -147,7 +149,7 @@ func TestAnItemsWholeLife(t *testing.T) {
 	})
 
 	t.Run("assign yourself", func(t *testing.T) {
-		me := api.accountID(t, uuid.MustParse(SeedTenantID), SeedEmail)
+		me := api.accountID(t, uuid.MustParse(app.SeedTenantID), app.SeedEmail)
 		res := api.do(t, request{
 			method: http.MethodPatch, path: "/api/v1/todos/" + item.ID.String(), token: token,
 			body: map[string]any{"assigneeAccountId": me},
@@ -170,7 +172,7 @@ func TestAnItemsWholeLife(t *testing.T) {
 func TestAttachments(t *testing.T) {
 	api := newServer(t)
 	api.seed(t)
-	token := api.login(t, SeedEmail)
+	token := api.login(t, app.SeedEmail)
 
 	created := api.do(t, request{
 		method: http.MethodPost, path: "/api/v1/todos", token: token,
@@ -237,9 +239,9 @@ func TestClaimingAnItem(t *testing.T) {
 	api := newServer(t)
 	tenant := api.seed(t)
 
-	demo := api.login(t, SeedEmail)
-	alex := api.login(t, SeedEmail2)
-	demoID := api.accountID(t, tenant, SeedEmail)
+	demo := api.login(t, app.SeedEmail)
+	alex := api.login(t, app.SeedEmail2)
+	demoID := api.accountID(t, tenant, app.SeedEmail)
 
 	var item struct {
 		ID                uuid.UUID  `json:"id"`
@@ -295,7 +297,7 @@ func TestClaimingAnItem(t *testing.T) {
 			t.Fatalf("steal: %d %s", res.status, res.body)
 		}
 		res.decode(t, &item)
-		alexID := api.accountID(t, tenant, SeedEmail2)
+		alexID := api.accountID(t, tenant, app.SeedEmail2)
 		if item.AssigneeAccountID == nil || *item.AssigneeAccountID != alexID {
 			t.Fatalf("the thief should hold it: %s", res.body)
 		}
@@ -315,8 +317,8 @@ func TestTwoPeopleClaimingAtOnce(t *testing.T) {
 	api := newServer(t)
 	api.seed(t)
 
-	demo := api.login(t, SeedEmail)
-	alex := api.login(t, SeedEmail2)
+	demo := api.login(t, app.SeedEmail)
+	alex := api.login(t, app.SeedEmail2)
 
 	res := api.do(t, request{
 		method: http.MethodPost, path: "/api/v1/todos", token: demo,
