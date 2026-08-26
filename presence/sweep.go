@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/simonjanss/rig/runtime/serve"
+	"github.com/simonjanss/rig/runtime/tick"
 )
 
 // sweepBatch bounds one pass, so a table that had a bad week does not become a
@@ -57,10 +57,10 @@ type Sweeper struct {
 	svc   *Service
 	grace time.Duration
 
-	// The lifecycle is [serve.Ticker]'s, which is where the four properties a
+	// The lifecycle is [tick.Ticker]'s, which is where the four properties a
 	// hand-rolled one keeps getting wrong are asserted once. What is left here is
 	// the pass.
-	ticker *serve.Ticker
+	ticker *tick.Ticker
 }
 
 // SweeperConfig is what a sweeper needs beyond a [Service].
@@ -98,7 +98,7 @@ func NewSweeper(cfg SweeperConfig) *Sweeper {
 		grace = DefaultGrace
 	}
 	sw := &Sweeper{svc: cfg.Service, grace: grace}
-	sw.ticker = serve.NewTicker(serve.TickerConfig{
+	sw.ticker = tick.New(tick.Config{
 		Interval: interval,
 		Pass:     func(ctx context.Context) { _, _ = sw.Sweep(ctx) },
 		// The pass gets its own bounded context rather than one that lives as
@@ -115,7 +115,7 @@ func NewSweeper(cfg SweeperConfig) *Sweeper {
 // error: it is how an operator says the cron job owns this.
 //
 // Idempotent, and safe on a sweeper that has already been closed — see
-// [serve.Ticker], which is where those two properties are asserted.
+// [tick.Ticker], which is where those two properties are asserted.
 //
 // No Nudge is exposed, and its absence mirrors notify: a nudge exists there so a
 // notification that has just been committed is dispatched in milliseconds rather

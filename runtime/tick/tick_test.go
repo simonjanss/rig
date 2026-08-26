@@ -1,4 +1,4 @@
-package serve_test
+package tick_test
 
 import (
 	"context"
@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/simonjanss/rig/runtime/serve"
+	"github.com/simonjanss/rig/runtime/tick"
 )
 
 // The four safety properties, one test each, because each of them is a bug
@@ -16,8 +16,8 @@ import (
 // point of the type existing, and `presence` keeps them as well, asserting the
 // same properties through the wrapper.
 
-func ticker(pass func(context.Context)) *serve.Ticker {
-	return serve.NewTicker(serve.TickerConfig{Interval: time.Hour, Pass: pass})
+func ticker(pass func(context.Context)) *tick.Ticker {
+	return tick.New(tick.Config{Interval: time.Hour, Pass: pass})
 }
 
 func nothing(context.Context) {}
@@ -105,7 +105,7 @@ func TestANonPositiveIntervalStartsNothing(t *testing.T) {
 
 	for _, interval := range []time.Duration{0, -time.Second} {
 		var passes atomic.Int64
-		tk := serve.NewTicker(serve.TickerConfig{
+		tk := tick.New(tick.Config{
 			Interval: interval,
 			Pass:     func(context.Context) { passes.Add(1) },
 		})
@@ -127,7 +127,7 @@ func TestANonPositiveIntervalStartsNothing(t *testing.T) {
 func TestANilPassStartsNothing(t *testing.T) {
 	t.Parallel()
 
-	tk := serve.NewTicker(serve.TickerConfig{Interval: time.Hour})
+	tk := tick.New(tick.Config{Interval: time.Hour})
 	tk.Start()
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
@@ -185,7 +185,7 @@ func TestAPassGetsItsOwnTimeoutWhenOneIsSet(t *testing.T) {
 	t.Parallel()
 
 	deadlines := make(chan time.Duration, 1)
-	tk := serve.NewTicker(serve.TickerConfig{
+	tk := tick.New(tick.Config{
 		Interval:    time.Hour,
 		PassTimeout: 42 * time.Second,
 		Pass: func(ctx context.Context) {

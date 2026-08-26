@@ -10,7 +10,7 @@ import (
 )
 
 // The goroutine's lifecycle, which had no tests at all. Every one of these was a
-// live hazard before the engine's ticker became [serve.Ticker]'s, and the first
+// live hazard before the engine's ticker became [tick.Ticker]'s, and the first
 // two are hazards `presence.Sweeper` has guarded against since it was written —
 // so this file is the pair of them finally agreeing.
 //
@@ -131,7 +131,7 @@ func TestCloseHonoursItsContext(t *testing.T) {
 // this" and starts nothing. `EngineConfig.Interval` has no such setting: zero and
 // negative both mean [DefaultInterval], which is what its own doc says. An
 // operator who wanted notify's goroutine off by writing `-1` got a dispatcher
-// running every minute. [serve.Ticker] does support "never", so the setting is
+// running every minute. [tick.Ticker] does support "never", so the setting is
 // one line away — but adding it would turn a working configuration into a silent
 // no-op for anyone who wrote a negative expecting the current answer, so it stays
 // as it is and is asserted rather than left to be discovered.
@@ -160,7 +160,7 @@ func TestANonPositiveIntervalIsTheDefaultAndNotNever(t *testing.T) {
 // Deliberately not nudged while the goroutine is running, which is the one thing
 // this cannot ask without a database: the nudged pass reaches Resolve, and an
 // engine constructed with no DB dereferences a nil store there. That a nudge runs
-// a pass promptly is asserted in runtime/serve's own ticker tests, against a pass
+// a pass promptly is asserted in runtime/tick's own tests, against a pass
 // that does nothing; that the pass does the right thing is what the examples'
 // Docker suites are for.
 func TestNudgingIsAlwaysSafe(t *testing.T) {

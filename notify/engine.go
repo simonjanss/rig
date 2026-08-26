@@ -11,8 +11,8 @@ import (
 
 	"github.com/simonjanss/rig/runtime/dbx"
 	"github.com/simonjanss/rig/runtime/outbox"
-	"github.com/simonjanss/rig/runtime/serve"
 	"github.com/simonjanss/rig/runtime/tenancy"
+	"github.com/simonjanss/rig/runtime/tick"
 )
 
 // dueBatch bounds how many notifications one pass resolves.
@@ -51,13 +51,13 @@ type Engine struct {
 	jitter        func(int64) int64
 	defaultDigest Digest
 
-	// The lifecycle is [serve.Ticker]'s. It was three channels and a hand-rolled
+	// The lifecycle is [tick.Ticker]'s. It was three channels and a hand-rolled
 	// loop here, and it had two hazards a shutdown path could not afford: a
 	// second Start spawned a second goroutine, and both of them closed `done` on
 	// the way out; and a Close with no prior Start waited on a goroutine that did
 	// not exist, for the whole registered timeout, on every deploy an operator
 	// left the dispatching to the cron task.
-	ticker *serve.Ticker
+	ticker *tick.Ticker
 
 	mu       sync.Mutex
 	claiming bool
@@ -226,7 +226,7 @@ func NewEngine(cfg EngineConfig) *Engine {
 
 		claiming: true,
 	}
-	e.ticker = serve.NewTicker(serve.TickerConfig{
+	e.ticker = tick.New(tick.Config{
 		Interval: interval,
 		Pass:     e.pass,
 		// No PassTimeout, which is the default and is deliberate here: Dispatch
@@ -305,7 +305,7 @@ func (e *Engine) Close(ctx context.Context) error {
 
 // pass is one run of the goroutine's work.
 //
-// The claiming gate stays here rather than becoming something [serve.Ticker]
+// The claiming gate stays here rather than becoming something [tick.Ticker]
 // knows about: StopClaiming is a separate `serve.Drain` step with its own reason
 // to exist, and a ticker that knew about readiness would be a ticker with an
 // opinion about what it is ticking.

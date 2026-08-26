@@ -1,4 +1,18 @@
-package serve
+// Package tick is one safe ticker lifecycle, and nothing else.
+//
+// A package of its own rather than a file in `runtime/serve`, which is the other
+// obvious home and where this started. `serve` is the process's lifecycle — it
+// builds the pool, so it imports pgxpool — and the two modules that reach for a
+// ticker, `notify` and `presence`, have no other reason to depend on the server
+// framework. Putting sixty lines of `time.Ticker` there put `pgxpool` and
+// `puddle` in both of their module graphs, and made `dbx.Pool`'s promise that a
+// module taking one "never imports pgxpool" untrue for exactly the two modules it
+// names.
+//
+// So: a leaf over `context`, `sync` and `time`, which anything may depend on. It
+// is the same argument [github.com/simonjanss/rig/runtime/outbox] makes for
+// itself, and the reason both of these can exist at all.
+package tick
 
 import (
 	"context"
@@ -31,12 +45,12 @@ import (
 // What it does not do is decide anything about the work. There is no error
 // return from a pass, no backoff between passes, and no lease: a pass that fails
 // is a pass, and the next one is coming. Anything that needs to be told apart
-// from that belongs in [TickerConfig.Pass], where the thing being done knows
-// what it means.
+// from that belongs in [Config.Pass], where the thing being done knows what it
+// means.
 //
 // Safe for concurrent use.
 type Ticker struct {
-	cfg TickerConfig
+	cfg Config
 
 	nudge chan struct{}
 
@@ -47,8 +61,8 @@ type Ticker struct {
 	closed  bool
 }
 
-// TickerConfig is what a [Ticker] needs.
-type TickerConfig struct {
+// Config is what a [Ticker] needs.
+type Config struct {
 	// Interval is how often Pass runs.
 	//
 	// Zero or negative starts nothing, and is not an error: it is how an operator
@@ -79,8 +93,8 @@ type TickerConfig struct {
 	PassTimeout time.Duration
 }
 
-// NewTicker builds one. It does nothing until [Ticker.Start].
-func NewTicker(cfg TickerConfig) *Ticker {
+// New builds one. It does nothing until [Ticker.Start].
+func New(cfg Config) *Ticker {
 	return &Ticker{
 		cfg:   cfg,
 		nudge: make(chan struct{}, 1),

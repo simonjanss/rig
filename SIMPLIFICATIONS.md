@@ -507,22 +507,26 @@ properties are asserted once.
   `Interval`. `presence` reads a negative as "the cron job owns this" and starts
   nothing; `notify` resolves zero *and* negative to `DefaultInterval`
   (`engine.go:135`), so an operator who turned notify's goroutine off by writing
-  `-1` got a dispatcher running every minute. `serve.Ticker` supports "never", so
+  `-1` got a dispatcher running every minute. `tick.Ticker` supports "never", so
   the setting is one line away — but adding it would turn a working configuration
   into a silent no-op for anyone relying on the current answer. Left as it is and
   pinned by `TestANonPositiveIntervalIsTheDefaultAndNotNever`, so the asymmetry
   is at least written down.
 - **`presence.Sweeper`'s three lifecycle tests pass unchanged**, which was the
-  acceptance criterion; they are also ported onto `serve.Ticker` so the
+  acceptance criterion; they are also ported onto `tick.Ticker` so the
   properties are asserted at the source as well as through the wrapper.
-- **Files:** new `runtime/serve/ticker.go` + `ticker_test.go`,
-  `presence/sweep.go`, `notify/engine.go`, new
-  `notify/engine_lifecycle_test.go`.
-- **Cost worth naming:** `notify` and `presence` now depend on `runtime/serve`,
-  which imports `pgxpool`, so both gained `puddle/v2` and `golang.org/x/sync` as
-  indirects. Two service modules depending on the server-framework package for a
-  sixty-line ticker. If that ever bites, the fix is a leaf `runtime/tick` plus
-  `type Ticker = tick.Ticker` in `serve` — a zero-cost alias that keeps the name.
+- **Files:** new `runtime/tick/tick.go` + `tick_test.go`, `presence/sweep.go`,
+  `notify/engine.go`, new `notify/engine_lifecycle_test.go`.
+- **It is a leaf package, and that was not optional.** The first version of this
+  was `runtime/serve/ticker.go`, which put `pgxpool` and `puddle` into `notify`'s
+  and `presence`'s module graphs — `serve` builds the pool, so it imports
+  pgxpool — for the sake of sixty lines of `time.Ticker`. Both go.mod files gained
+  `puddle/v2` and `golang.org/x/sync` as indirects, and `dbx.Pool`'s promise that a
+  module taking one "never imports pgxpool" stopped being true for exactly the two
+  modules it names. `runtime/tick` is a leaf over `context`, `sync` and `time`, the
+  same argument `runtime/outbox` makes for itself, and both go.mod files are back
+  to what they were. No alias was left behind in `serve`: it would have had no
+  caller, and an export with no caller is what this document is for.
 
 ### B8. `observe` small items `[x]`
 
