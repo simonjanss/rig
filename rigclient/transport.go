@@ -206,11 +206,8 @@ func (rt *Runtime) call(ctx context.Context, op Op, opts []CallOption) (*http.Re
 			if !budget.allows(wait) {
 				return nil, err
 			}
-			if rewound := op.Multipart.rewind(marks); rewound != nil {
-				return nil, errors.Join(err, rewound)
-			}
-			if stopped := waitFor(ctx, wait, err); stopped != nil {
-				return nil, stopped
+			if over := backoff(ctx, op, marks, wait, err); over != nil {
+				return nil, over
 			}
 			attempt, leash = attempt+1, budget.leash()
 			continue
@@ -294,11 +291,8 @@ func (rt *Runtime) call(ctx context.Context, op Op, opts []CallOption) (*http.Re
 			// Drained rather than closed: the next attempt would rather have the
 			// connection back than a fresh handshake.
 			drain(res)
-			if rewound := op.Multipart.rewind(marks); rewound != nil {
-				return nil, errors.Join(refusal, rewound)
-			}
-			if stopped := waitFor(ctx, wait, refusal); stopped != nil {
-				return nil, stopped
+			if over := backoff(ctx, op, marks, wait, refusal); over != nil {
+				return nil, over
 			}
 			attempt, leash = attempt+1, budget.leash()
 			continue

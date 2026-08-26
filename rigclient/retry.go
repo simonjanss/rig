@@ -311,6 +311,28 @@ func (rt *Runtime) budgetFor(c *call) budget {
 	return b
 }
 
+// backoff puts a form body back where it started and then waits out the interval
+// before the next attempt.
+//
+// A nil answer means go round again. Anything else is what the call returns
+// instead of retrying, and it carries cause either way: a body that cannot be
+// produced a second time comes back as [ErrCannotRetry] joined to whatever
+// prompted the retry, and a caller who stopped waiting gets both the refusal and
+// their own cancellation. Neither fact is the whole story on its own.
+//
+// The rewind is before the wait so that a call which was never going to be
+// retriable comes back now rather than a backoff window later.
+//
+// It does not touch the attempt counter. Which of the three re-sends spends one
+// is the thing [Runtime.call] is careful to keep visible, and burying the
+// increment in here would be the opposite of that.
+func backoff(ctx context.Context, op Op, marks []int64, wait time.Duration, cause error) error {
+	if rewound := op.Multipart.rewind(marks); rewound != nil {
+		return errors.Join(cause, rewound)
+	}
+	return waitFor(ctx, wait, cause)
+}
+
 // waitFor sleeps, or gives up early because the caller stopped caring.
 //
 // The context is checked before the timer is armed rather than only inside the
