@@ -7,7 +7,7 @@ same files should not run in parallel. Verification for anything under
 `internal/gen/` is mechanical: golden tests plus `make examples` prove the
 generated output did not change.
 
-Status: `[ ]` open · `[x]` done
+Status: `[ ]` open · `[x]` done · `[-]` decided against — the entry says why
 
 ---
 
@@ -173,23 +173,71 @@ clone-on-way-out, `forget` via `topic.Forget`, nil-safe `drop`.
 - **Files:** the four cache files + `runtime/cache/`.
 - **Size:** ~350 lines. **Risk:** low-medium (concurrent, but well-tested shape).
 
-### B4. Decide the fate of the in-memory auth stores (~1,140 lines) `[ ]`
+### B4. The in-memory auth stores stay `[-]`
 
-`account.Store` is a 30-method interface with one production implementation
-(`auth/authpg/account.go`) and a 663-line hand-written fake
-(`auth/account/memory.go`) whose only callers are tests. Same pattern smaller
-in `auth/session/memory.go` (224), `auth/apikey/memory.go` (116),
-`auth/authlog/memory.go` (137). Sibling modules (`notify`, `presence`,
-`files`) have no store interface at all and test against real Postgres via the
-docker harness.
+Decided, not deferred. The reasoning is here so nobody reopens it on the line
+count alone.
 
-- **Fix:** move the flow tests onto the docker harness (`internal/authtest`
-  already exists) and delete the fakes; optionally collapse the interface to
-  the concrete `authpg` stores like the siblings.
-- **Files:** `auth/account/`, `auth/session/`, `auth/apikey/`, `auth/authlog/`,
-  `auth/authhttp/authhttp_test.go`, `internal/authtest/`.
-- **Size:** 1,100+ lines deleted. **Risk:** it's a test-strategy decision —
-  docker tests are slower than in-memory ones; decide deliberately.
+**What was proposed.** Delete `auth/account/memory.go` (663 lines),
+`auth/session/memory.go` (224), `auth/apikey/memory.go` (116) and
+`auth/authlog/memory.go` (137) — 1,140 exactly — move the tests they back onto
+the Docker harness at `internal/authtest`, and optionally collapse
+`account.Store` to the concrete `authpg` stores the way `notify`, `presence` and
+`files` have no store interface at all.
+
+**Two corrections to the entry as filed.** `account.Store` is **22** methods,
+not 30. And the claim that the fakes' "only callers are tests" is true but
+undersells one thing and oversells another: nothing outside a `_test.go` file
+references any of the four, and no document mentions them — so the "it is
+published API somebody depends on" argument is weaker than it looks. They are
+exported and doc-commented, and `make godoc-check` covers `./auth`, so they are
+surface a project *may* build on; nothing here proves one does.
+
+**The argument that actually holds: what deleting them costs.** The `auth`
+module has **237 tests, not one of them behind a build tag, and the whole suite
+finishes in under three seconds**. That is what the doubles buy, and it is the
+thing a Docker harness cannot give back. `internal/authtest` does not skip when
+Docker is absent — it fails, which is the right shape for a suite whose whole
+job is the database — so moving 237 tests behind it makes a daemon a
+precondition for running the auth tests at all.
+
+**And the division of labour is already written down, correctly.**
+`auth/account/dispatch_test.go:15-17`: *"What is proved here is the rules; that
+two dispatchers racing over one row behave is a question for a database, and the
+Docker suite asks it."* Both halves exist and both are used. The proposal
+collapses a split that is doing its job.
+
+**The interface is not the fakes' fault.** 22 methods because the flows are 22
+reads and writes, in a vocabulary deliberately not SQL's — `Store.InTx`, and the
+`(bool, error)` returns on `RevokeVerification` (`auth/account/store.go:338`)
+and `ConsumeVerification` (`:354`), exist so the service can express "a no-op on
+a link already used, and say so" without knowing there is a database.
+Collapsing to the concrete stores gives `auth/account` a pgx dependency it does
+not have. The siblings are not a precedent: `notify`, `presence` and `files` are
+each one table and a handful of statements, and none of them has a flow with a
+redemption race in it.
+
+**And the Docker half can pass by not running.** Every example suite carries the
+same `t.Skipf("no database at %s: %v — run \`rig db up\` first")` pair, and
+`make examples` still exits 0 when they all skip. A net that can be absent
+without saying so is weaker than one that cannot be.
+
+**The cost of keeping them, honestly.** Two implementations of a 22-method
+contract with no conformance harness: nothing runs one suite against both, so
+`MemoryStore` can disagree with `authpg.AccountStore` and only `internal/authtest`
+would notice, and only on the paths it happens to cover. That has already
+happened once — the `accountOrder` slice at `auth/account/memory.go:18-29` exists
+because ranging a map made "the tenant they joined first" a coin flip, and its
+comment says the quiet part: *"A double that disagrees with the real store about
+the property under test is worse than no double."* The 1,140 lines are also
+1,140 lines that move whenever `Store` grows a method, with the compiler as the
+only thing that says so.
+
+**What would be worth doing instead.** A conformance suite: one table of cases
+run against `MemoryStore` in `make test` and against the `authpg` stores under
+`-tags docker`. It closes the drift without deleting anything, and it is a
+smaller change than either half of what B4 proposed. Not scheduled here;
+recorded so the next reader has somewhere to go.
 
 ### B5. Shared Postgres plumbing in `runtime/dbx` `[ ]`
 
