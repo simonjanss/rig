@@ -62,17 +62,7 @@ func (e *emitter) clientFile() (gen.Artifact, error) {
 }
 
 // exposed are the resources with endpoints to call.
-func (e *emitter) exposed() []*ir.Resource {
-	var out []*ir.Resource
-	for i := range e.doc.API.Resources {
-		res := &e.doc.API.Resources[i]
-		if res.Unexposed || len(res.Endpoints) == 0 {
-			continue
-		}
-		out = append(out, res)
-	}
-	return out
-}
+func (e *emitter) exposed() []*ir.Resource { return genutil.Exposed(e.doc) }
 
 // clientStruct emits the client and its constructor.
 func (e *emitter) clientStruct(b *gobuf.Buf, rig string) {
@@ -165,11 +155,4 @@ func (e *emitter) errorVocabulary(b *gobuf.Buf, rig string) {
 
 // errorCodeEnum is the closed set of failure reasons, or nil for a document that
 // somehow has none.
-func (e *emitter) errorCodeEnum() *ir.Enum {
-	for i := range e.doc.API.Enums {
-		if e.doc.API.Enums[i].Name == "ErrorCode" {
-			return &e.doc.API.Enums[i]
-		}
-	}
-	return nil
-}
+func (e *emitter) errorCodeEnum() *ir.Enum { return e.doc.Enum("ErrorCode") }

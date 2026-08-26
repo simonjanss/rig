@@ -274,11 +274,11 @@ func (e *emitter) placements() map[string]string {
 			case len(ep.Request.BodyParams) > 0 && ep.Request.BodyObject == "":
 				home[bodyTypeName(res, ep)] = input
 			}
-			if name := fieldsTypeName(res, ep); name != "" {
+			if name := genutil.FieldsTypeName(res, ep); name != "" {
 				home[name] = input
 			}
 			if len(ep.Request.QueryParams) > 0 {
-				home[queryTypeName(res, ep)] = input
+				home[genutil.QueryTypeName(res, ep)] = input
 			}
 		}
 	}
@@ -311,53 +311,23 @@ func moduleFor(stem string) string { return "./" + stem + ".js" }
 // snake is the file-name form of a type name.
 func snake(name string) string { return naming.Snake(name) }
 
-// reach walks out from the endpoints and returns every type they can carry.
+// reach names every type a front end can send or receive: what the client's own
+// methods mention, what a stream's rows carry, and what those mention in turn.
 //
-// It exists because a document describes more than an API exposes. The
-// authentication foundation's own tables have models, repositories and filter
-// shapes — and no endpoints, deliberately — so emitting every object in the
-// document would put a filter for the session table in the front end of an
-// application that cannot search sessions.
+// The walk is [genutil.Walk]; what is here is the seeding. This generator's
+// differs from the Go client's by the streamed half below.
 func (e *emitter) reach() map[string]bool {
-	seen := make(map[string]bool)
+	w := genutil.NewWalk(e.doc)
 
-	var follow func(name string)
-	visit := func(fields []ir.Field) {
-		for _, f := range fields {
-			switch f.TypeKind {
-			case ir.TypeKindEnum, ir.TypeKindObject, ir.TypeKindResource:
-				follow(f.Type)
-			}
-		}
-	}
-	follow = func(name string) {
-		if name == "" || seen[name] {
-			return
-		}
-		seen[name] = true
-
-		if obj := e.object(name); obj != nil {
-			visit(obj.Fields)
-		}
-	}
-
-	follow("Error")
-	follow("Pagination")
+	w.Follow("Error")
+	w.Follow("Pagination")
 
 	for _, res := range e.exposed() {
-		follow(res.Name)
-		follow(res.Name + "ListResponse")
+		w.Follow(res.Name)
+		w.Follow(res.Name + "ListResponse")
 
 		for i := range res.Endpoints {
-			ep := &res.Endpoints[i]
-			follow(ep.Request.BodyObject)
-			visit(ep.Request.BodyParams)
-			visit(ep.Request.QueryParams)
-			visit(ep.Request.PathParams)
-			for _, r := range ep.Responses {
-				follow(r.BodyObject)
-				visit(r.BodyFields)
-			}
+			w.Endpoint(&res.Endpoints[i])
 		}
 	}
 
@@ -368,11 +338,9 @@ func (e *emitter) reach() map[string]bool {
 	// declared by nothing: no enum file, no import, and a client that does not
 	// compile.
 	for _, res := range e.streamed() {
-		for _, f := range streamFields(res) {
-			visit([]ir.Field{f.Field})
-		}
+		w.Fields(genutil.PlainFields(streamFields(res)))
 	}
-	return seen
+	return w.Seen()
 }
 
 // streamFields are the columns a stream's row type carries: the shape's
@@ -394,17 +362,7 @@ func streamFields(res *ir.Resource) []ir.ResourceField {
 }
 
 // exposed is every resource with an API surface.
-func (e *emitter) exposed() []*ir.Resource {
-	var out []*ir.Resource
-	for i := range e.doc.API.Resources {
-		res := &e.doc.API.Resources[i]
-		if res.Unexposed || len(res.Endpoints) == 0 {
-			continue
-		}
-		out = append(out, res)
-	}
-	return out
-}
+func (e *emitter) exposed() []*ir.Resource { return genutil.Exposed(e.doc) }
 
 // streamed is every resource with a live-sync shape.
 //
@@ -425,14 +383,7 @@ func (e *emitter) streamed() []*ir.Resource {
 }
 
 // object finds a declared object by name.
-func (e *emitter) object(name string) *ir.Object {
-	for i := range e.doc.API.Objects {
-		if e.doc.API.Objects[i].Name == name {
-			return &e.doc.API.Objects[i]
-		}
-	}
-	return nil
-}
+func (e *emitter) object(name string) *ir.Object { return e.doc.Object(name) }
 
 // tsType renders a field's TypeScript type, without its nullability.
 //

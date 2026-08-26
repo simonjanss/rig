@@ -13,7 +13,7 @@ Status: `[ ]` open · `[x]` done
 
 ## A. Generators (`internal/gen`)
 
-### A1. Unify the copy-pasted IR-selection half of `goclient` / `tsclient` `[ ]`
+### A1. Unify the copy-pasted IR-selection half of `goclient` / `tsclient` `[x]`
 
 The language-independent half of the two SDK generators — which resources,
 objects, and enums to emit, and what to name them — is copy-pasted.
@@ -31,8 +31,15 @@ so are `searchFilterField`, `routePath`, `exposed()`, `filterObjects()`.
   `internal/gen/tsclient/{tsclient,types,methods}.go`, `internal/gen/genutil/surface.go`
 - **Size:** ~150-200 lines removed. **Risk:** low — golden output unchanged.
 - Closes the bug class where the Go SDK and TS SDK disagree about a type name.
+- **Done**, except the two `Generate` bodies. They are the same shape but the
+  shared loop's body calls six different per-generator file methods, and TS
+  appends `electricFile` + `indexFile` where Go appends `authFile`; a
+  callback-driven shared `Generate` costs more indirection than the duplication
+  did. The selection half — `QueryTypeName`, `FieldsTypeName`,
+  `SearchFilterField`, `RoutePath`, `Exposed`, `FilterObjects`,
+  `UnclaimedObjects` — is now `genutil`'s, with `claimed` as a seed parameter.
 
-### A2. One `Reach` instead of three `reach()`s `[ ]`
+### A2. One `Reach` instead of three `reach()`s `[x]`
 
 The type-reachability walk is written three times with an identical 12-line
 `follow`/`visit` core: `goclient/goclient.go:180-229`,
@@ -47,8 +54,14 @@ tsclient adds streamed row columns).
   do A1-A3 together or sequentially.**
 - **Size:** ~120 lines. **Risk:** low.
 - Closes "an enum reachable in the SDK but missing from the OpenAPI spec".
+- **Done** as `genutil.Walk` (`Follow`/`Fields`/`Endpoint`/`Seen`) rather than
+  one `Reach` with flags: the recursion is shared, the seeding stays with each
+  generator, which is what `openapigen.reach`'s comment was actually defending.
+  `tsclient` now walks endpoint headers like the other two — no compiled
+  document fills them yet, so no golden moved, and an enum-typed header will
+  now reach every output at once.
 
-### A3. Use the IR's indexed lookups instead of hand-rolled scans `[ ]`
+### A3. Use the IR's indexed lookups instead of hand-rolled scans `[x]`
 
 `goclient/goclient.go:244-252`, `tsclient/tsclient.go:428-436`, and
 `openapigen/openapigen.go:198-215` each hand-roll a linear `object()`/`enum()`
@@ -59,6 +72,8 @@ scan. `pkg/ir/document.go:135-148` already provides index-backed
 - **Fix:** one-line delegation, matching `servicego/servicego.go:145`.
 - **Files:** same three generators. **Overlaps with A1/A2.**
 - **Size:** ~40 lines. **Risk:** minimal.
+- **Done.** `openapigen`'s `object` turned out to have no caller left once A2
+  landed and is deleted rather than delegated.
 
 ### A4. Stop emitting the static row cache; move it to `runtime/cache` `[ ]`
 
@@ -101,7 +116,7 @@ re-emits error mapping `servergo` emits elsewhere.
 - **Files:** `internal/gen/persistgo/repository.go`, goldens, examples.
 - **Size:** ~40 lines + 3 lines of noise per generated repository. **Risk:** low.
 
-### A7. Small generator dedups `[ ]`
+### A7. Small generator dedups `[x]`
 
 - `wrap` is character-identical in `gobuf/gobuf.go:186-205` and
   `tsbuf/tsbuf.go:164-183` — export from `gobuf`, import in `tsbuf`.
@@ -114,6 +129,9 @@ re-emits error mapping `servergo` emits elsewhere.
 - `pointerTo` in `goclient/inputs.go:143-148` vs `compile/filter.go:369-377`
   differ only in empty-string handling.
 - **Size:** ~60 lines total. **Risk:** minimal.
+- **Done**, with one exception: `compile/filter.go`'s `pointerTo` stays. The
+  compiler must not import a generator package, and its empty-type arm is a
+  different contract. `genutil.PointerTo` says so where a reader will look.
 
 ---
 

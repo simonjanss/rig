@@ -2,6 +2,7 @@ package genutil
 
 import (
 	"net/http"
+	"strings"
 
 	"github.com/simonjanss/rig/pkg/ir"
 )
@@ -112,4 +113,144 @@ func IdempotentWrite(ep *ir.Endpoint) bool {
 		return true
 	}
 	return false
+}
+
+// RoutePath is the path half of a net/http pattern — "GET /v1/todos/{id}"
+// becomes "/v1/todos/{id}".
+//
+// A pattern with no method is returned whole. That is unreachable from a
+// compiled document, where [ir.Endpoint.Pattern] always carries one, and
+// returning the input rather than the empty string is what makes it unreachable
+// harmlessly.
+func RoutePath(pattern string) string {
+	if _, path, found := strings.Cut(pattern, " "); found {
+		return path
+	}
+	return pattern
+}
+
+// QueryTypeName is the shape an endpoint's query parameters arrive in.
+//
+// One answer for both SDKs: the Go struct and the TypeScript interface are the
+// same API described twice, and a caller reading one language's documentation to
+// write the other has to find the same name there.
+func QueryTypeName(res *ir.Resource, ep *ir.Endpoint) string {
+	return res.Name + ep.Name + "Query"
+}
+
+// FieldsTypeName is the shape a validation failure on this endpoint's body
+// arrives in, and is empty when there is no body to be wrong about.
+//
+// Two kinds of body are left out. A body that is a named object is shared
+// between endpoints, so its failure shape would have to be too, and nothing on
+// the server emits one to fill in. And a generated endpoint whose body is its
+// own — a search, a revert — is refused in some other shape than that body's: a
+// search's filter is a question nothing validates, and a revert replays the
+// version through the update path, so what comes back is the update's field
+// errors and not one about a version identifier. A shape per call there would be
+// the wrong shape, which decodes to an empty one rather than failing. Both fail
+// as a plain client error, which is what everything did before any of this
+// existed.
+//
+// A create and an update are generated too and are not left out: their bodies
+// are the model's inputs, and the validator that refuses one is generated beside
+// them.
+func FieldsTypeName(res *ir.Resource, ep *ir.Endpoint) string {
+	if ep.Request.BodyObject != "" || len(ep.Request.BodyParams) == 0 {
+		return ""
+	}
+	if ep.Impl.Kind == ir.EndpointGenerated && !UsesModelInput(ep) {
+		return ""
+	}
+	return res.Name + ep.Name + "Fields"
+}
+
+// SearchFilterField is the member of a search body that carries the conditions.
+//
+// Found rather than assumed: the body is one object field, and taking it from
+// the document means a rename in the compiler does not silently produce a client
+// that sends the wrong key.
+func SearchFilterField(ep *ir.Endpoint) (ir.Field, bool) {
+	for _, f := range ep.Request.BodyParams {
+		if f.TypeKind == ir.TypeKindObject && strings.HasSuffix(f.Type, "Filter") {
+			return f, true
+		}
+	}
+	return ir.Field{}, false
+}
+
+// Exposed is every resource with an API surface: endpoints to call, and not
+// marked unexposed.
+//
+// Both SDK generators ask this and they have to agree. A resource one of them
+// emits a client for and the other does not is not a difference between two
+// languages; it is one of them being wrong.
+//
+// The OpenAPI generator asks a wider question — a shape route is its own read
+// surface, so a resource can be unexposed and still belong in the specification
+// — and answers it for itself.
+func Exposed(doc *ir.Document) []*ir.Resource {
+	var out []*ir.Resource
+	for i := range doc.API.Resources {
+		res := &doc.API.Resources[i]
+		if res.Unexposed || len(res.Endpoints) == 0 {
+			continue
+		}
+		out = append(out, res)
+	}
+	return out
+}
+
+// FilterObjects are the search shapes belonging to a resource.
+//
+// A filter is reached from the search body rather than from the entity, so a
+// resource with no Search endpoint has filter shapes in the document and no use
+// for them here — which is why reachable is a parameter rather than something
+// this could work out from the resource alone.
+func FilterObjects(doc *ir.Document, reachable map[string]bool, res *ir.Resource) []*ir.Object {
+	var out []*ir.Object
+	for i := range doc.API.Objects {
+		obj := &doc.API.Objects[i]
+		if obj.Origin != ir.OriginFilter || !reachable[obj.Name] {
+			continue
+		}
+		if strings.HasPrefix(obj.Name, res.Name+"Filter") {
+			out = append(out, obj)
+		}
+	}
+	return out
+}
+
+// UnclaimedObjects are the reachable objects no resource's own file emits —
+// whatever a project declared for itself and a custom endpoint returns. They
+// have to land somewhere, or a method that returns one does not compile.
+//
+// A resource's entity, its page shape and its filters are its files'. What is
+// claimed beyond those differs by language and is the caller's to name: the Go
+// client declares Error and Pagination in its base file, and the TypeScript
+// client declares neither there. So claimed is a seed rather than a constant,
+// and it is read rather than written — a caller may pass nil.
+func UnclaimedObjects(
+	doc *ir.Document, reachable map[string]bool, claimed map[string]bool,
+) []*ir.Object {
+	taken := make(map[string]bool, len(claimed))
+	for name := range claimed {
+		taken[name] = true
+	}
+	for _, res := range Exposed(doc) {
+		taken[res.Name] = true
+		taken[res.Name+"ListResponse"] = true
+		for _, obj := range FilterObjects(doc, reachable, res) {
+			taken[obj.Name] = true
+		}
+	}
+
+	var out []*ir.Object
+	for i := range doc.API.Objects {
+		obj := &doc.API.Objects[i]
+		if !taken[obj.Name] && reachable[obj.Name] {
+			out = append(out, obj)
+		}
+	}
+	return out
 }

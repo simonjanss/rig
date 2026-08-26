@@ -217,7 +217,7 @@ func (e *emitter) signature(
 			"files: "+e.ref(b, createFilesTypeName(res)))
 		sig.form = createForm(ep)
 	case ep.Name == ir.OpSearch:
-		if filter, ok := searchFilterField(ep); ok {
+		if filter, ok := genutil.SearchFilterField(ep); ok {
 			params = append(params, "filter: "+e.tsType(b, filter))
 			sig.body = "{ " + tsbuf.Key(filter.Wire) + ": filter }"
 		}
@@ -237,7 +237,7 @@ func (e *emitter) signature(
 		sig.query = "query"
 		// Defaulted to an empty object: every member of it is optional, so a
 		// caller with nothing to say should not have to write `{}`.
-		params = append(params, "query: "+e.ref(b, queryTypeName(res, ep))+" = {}")
+		params = append(params, "query: "+e.ref(b, genutil.QueryTypeName(res, ep))+" = {}")
 	}
 
 	options := b.ImportType(e.cfg.ClientImport, "CallOptions")
@@ -313,7 +313,7 @@ func (e *emitter) fallbackPath(ep *ir.Endpoint) string {
 		return ""
 	}
 	for _, alias := range ep.AliasPatterns {
-		path := routePath(alias)
+		path := genutil.RoutePath(alias)
 		if strings.HasPrefix(path, e.doc.API.BasePath) {
 			return strings.TrimPrefix(path, e.doc.API.BasePath)
 		}
@@ -327,7 +327,7 @@ func (e *emitter) fallbackPath(ep *ir.Endpoint) string {
 // anything at all, and a slash in one would otherwise address a different route
 // entirely.
 func (e *emitter) pathExpr(b *tsbuf.Buf, ep *ir.Endpoint) string {
-	path := strings.TrimPrefix(routePath(ep.Pattern), e.doc.API.BasePath)
+	path := strings.TrimPrefix(genutil.RoutePath(ep.Pattern), e.doc.API.BasePath)
 
 	if len(ep.Request.PathParams) == 0 {
 		return tsbuf.Quote(path)
@@ -355,7 +355,7 @@ func (e *emitter) pathExpr(b *tsbuf.Buf, ep *ir.Endpoint) string {
 // empty object. Here there is one shape that compiles.
 func (e *emitter) guard(b *tsbuf.Buf, res *ir.Resource, ep *ir.Endpoint) {
 	name := guardName(res, ep)
-	fields := e.ref(b, fieldsTypeName(res, ep))
+	fields := e.ref(b, genutil.FieldsTypeName(res, ep))
 	rigError := b.ImportType(e.cfg.ClientImport, "RigError")
 	isInvalid := b.Import(e.cfg.ClientImport, "isInvalid")
 
@@ -380,26 +380,4 @@ func inputTypeName(res *ir.Resource, ep *ir.Endpoint) string {
 		return res.Name + name + "Input"
 	}
 	return ""
-}
-
-// searchFilterField is the member of a search body that carries the conditions.
-//
-// Found rather than assumed: the body is one object field, and taking it from
-// the document means a rename in the compiler does not silently produce a client
-// that sends the wrong key.
-func searchFilterField(ep *ir.Endpoint) (ir.Field, bool) {
-	for _, f := range ep.Request.BodyParams {
-		if f.TypeKind == ir.TypeKindObject && strings.HasSuffix(f.Type, "Filter") {
-			return f, true
-		}
-	}
-	return ir.Field{}, false
-}
-
-// routePath is the path half of a net/http pattern.
-func routePath(pattern string) string {
-	if _, path, ok := strings.Cut(pattern, " "); ok {
-		return path
-	}
-	return pattern
 }

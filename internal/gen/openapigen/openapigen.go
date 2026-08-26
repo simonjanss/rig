@@ -194,27 +194,10 @@ func (e *emitter) syncs(res *ir.Resource) bool {
 	return res.Electric != nil && *e.cfg.Electric
 }
 
-// object returns a named object from the document, or nil.
-func (e *emitter) object(name string) *ir.Object {
-	for i := range e.doc.API.Objects {
-		if e.doc.API.Objects[i].Name == name {
-			return &e.doc.API.Objects[i]
-		}
-	}
-	return nil
-}
-
 // enum returns a named enum from the document, or nil.
-func (e *emitter) enum(name string) *ir.Enum {
-	for i := range e.doc.API.Enums {
-		if e.doc.API.Enums[i].Name == name {
-			return &e.doc.API.Enums[i]
-		}
-	}
-	return nil
-}
+func (e *emitter) enum(name string) *ir.Enum { return e.doc.Enum(name) }
 
-// reach walks out from the endpoints and returns every shape they can carry.
+// reach names every shape an operation can carry.
 //
 // A compiled document describes more than an API exposes. The authentication
 // foundation's own tables have models, repositories and filter shapes and — on
@@ -224,42 +207,24 @@ func (e *emitter) enum(name string) *ir.Enum {
 // consumer that does not exist yet, and nothing references it, so it must not
 // appear here.
 //
-// This is goclient's walk, for goclient's reason. The two are kept separate
-// rather than shared because they seed differently — a client declares shapes
-// its methods mention, a specification declares shapes its operations carry,
-// and the QUERY-with-no-alias case below is one where those diverge.
+// The walk itself is [genutil.Walk], shared with the two client generators.
+// What is not shared is the seeding, and this generator's differs twice over: a
+// specification declares the shapes its operations carry rather than the ones a
+// method mentions, so ErrorCode is a seed here and an endpoint with no route in
+// 3.1 is skipped.
 func (e *emitter) reach() map[string]bool {
-	seen := make(map[string]bool)
-
-	var follow func(name string)
-	visit := func(fields []ir.Field) {
-		for _, f := range fields {
-			switch f.TypeKind {
-			case ir.TypeKindEnum, ir.TypeKindObject, ir.TypeKindResource:
-				follow(f.Type)
-			}
-		}
-	}
-	follow = func(name string) {
-		if name == "" || seen[name] {
-			return
-		}
-		seen[name] = true
-		if obj := e.object(name); obj != nil {
-			visit(obj.Fields)
-		}
-	}
+	w := genutil.NewWalk(e.doc)
 
 	// Error is in every operation's failures and ErrorCode is inside it;
 	// Pagination is in every list response. They are reachable whether or not a
 	// field happens to mention one.
-	follow(objectError)
-	follow(objectPagination)
-	follow(enumErrorCode)
+	w.Follow(objectError)
+	w.Follow(objectPagination)
+	w.Follow(enumErrorCode)
 
 	for _, res := range e.exposed() {
-		follow(res.Name)
-		follow(res.Name + "ListResponse")
+		w.Follow(res.Name)
+		w.Follow(res.Name + "ListResponse")
 
 		for i := range res.Endpoints {
 			ep := &res.Endpoints[i]
@@ -269,21 +234,10 @@ func (e *emitter) reach() map[string]bool {
 			if len(routesOf(ep)) == 0 {
 				continue
 			}
-
-			follow(ep.Request.BodyObject)
-			visit(ep.Request.PathParams)
-			visit(ep.Request.QueryParams)
-			visit(ep.Request.BodyParams)
-			visit(ep.Request.Headers)
-
-			for _, r := range ep.Responses {
-				follow(r.BodyObject)
-				visit(r.BodyFields)
-				visit(r.Headers)
-			}
+			w.Endpoint(ep)
 		}
 	}
-	return seen
+	return w.Seen()
 }
 
 // schemas builds components/schemas: every reachable object and enum, plus the

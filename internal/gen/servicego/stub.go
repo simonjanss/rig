@@ -317,10 +317,5 @@ func (e *emitter) methodSignatureQualified(b *gobuf.Buf, res *ir.Resource, ep *i
 
 // expand fills the layout placeholders in a stub directory template.
 func (e *emitter) expand(tmpl string, res *ir.Resource) string {
-	table := res.Storage.Table
-	return strings.NewReplacer(
-		"{table}", table,
-		"{Table}", e.namer.Go(table),
-		"{tables}", naming.Snake(e.namer.Plural(table)),
-	).Replace(tmpl)
+	return genutil.ExpandLayout(e.namer, res, tmpl)
 }
