@@ -128,6 +128,30 @@ func TestAnErrorBecomesItsMessage(t *testing.T) {
 	}
 }
 
+// Newest first, which is what a person opening a log wants and the opposite of
+// what [observe.ReadSpans] answers.
+//
+// Two other tests already depend on the order — they index `recs[1]` for the
+// line written first and say so in a comment — but neither is named for it, and
+// the doc comment on Read said "oldest first" for as long as it existed. A test
+// whose name is the property is what makes the next reader who notices the
+// disagreement fix the comment in the right direction.
+func TestLogsReadIsNewestFirst(t *testing.T) {
+	logger, logs, _ := sink(t, observe.LogConfig{})
+
+	logger.InfoContext(context.Background(), "first")
+	logger.InfoContext(context.Background(), "second")
+
+	recs := written(t, logs)
+	if len(recs) != 2 {
+		t.Fatalf("wrote %d lines, want 2", len(recs))
+	}
+	if recs[0].Msg != "second" || recs[1].Msg != "first" {
+		t.Errorf("Read gave %q then %q, want the newest line first",
+			recs[0].Msg, recs[1].Msg)
+	}
+}
+
 // The trace is the whole reason every log call in rig passes the context.
 func TestTheTraceComesFromTheContext(t *testing.T) {
 	logger, logs, _ := sink(t, observe.LogConfig{})

@@ -56,14 +56,25 @@ func ReadTraces(path string, maxTraces int) ([]TraceRecord, error) {
 //
 // A missing file returns no records and no error.
 func ReadSpans(path string, max int) ([]SpanRecord, error) {
+	return decodeLines[SpanRecord](path, max)
+}
+
+// decodeLines is [tailLines] decoded: the last max records of a JSONL file rig
+// wrote, oldest first, with anything that does not parse left out.
+//
+// Skipping rather than failing is the whole reason this is not one call to
+// [encoding/json.Decoder]: the last line of a file a process was killed while
+// writing is a partial object, and a page that refused to render because of it
+// would fail in exactly the case somebody opened it for.
+func decodeLines[T any](path string, max int) ([]T, error) {
 	lines, err := tailLines(path, max)
 	if err != nil {
 		return nil, err
 	}
 
-	out := make([]SpanRecord, 0, len(lines))
+	out := make([]T, 0, len(lines))
 	for _, line := range lines {
-		var rec SpanRecord
+		var rec T
 		if err := json.Unmarshal(line, &rec); err != nil {
 			continue
 		}

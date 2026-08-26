@@ -1,7 +1,6 @@
 package observe
 
 import (
-	"encoding/json"
 	"slices"
 	"strings"
 )
@@ -22,23 +21,17 @@ import (
 // level and msg are slog's own keys, and anything else lands in
 // [LogRecord.Attrs].
 func ReadLogs(path string, max int) ([]LogRecord, error) {
-	lines, err := tailLines(path, max)
+	out, err := decodeLines[LogRecord](path, max)
 	if err != nil {
 		return nil, err
 	}
 
-	out := make([]LogRecord, 0, len(lines))
-	for _, line := range lines {
-		var rec LogRecord
-		if err := json.Unmarshal(line, &rec); err != nil {
-			continue
+	// A foreign file's handler may have used slog's own group nesting for the
+	// trace, or none at all. Either way the page wants one field.
+	for i := range out {
+		if out[i].TraceID == "" {
+			out[i].TraceID = attrString(out[i].Attrs, "trace_id")
 		}
-		// A foreign file's handler may have used slog's own group nesting for
-		// the trace, or none at all. Either way the page wants one field.
-		if rec.TraceID == "" {
-			rec.TraceID = attrString(rec.Attrs, "trace_id")
-		}
-		out = append(out, rec)
 	}
 
 	slices.Reverse(out)

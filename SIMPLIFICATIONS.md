@@ -249,13 +249,22 @@ expiry if `Start` was never called.
 - **Size:** ~120 → ~50 lines, and the `notify.Engine` hazards go away.
 - **Risk:** low-medium.
 
-### B8. `observe` small items `[ ]`
+### B8. `observe` small items `[x]`
 
-- `ReadLogs` (`observe/logread.go:24-45`) and `ReadSpans`
-  (`observe/spanread.go:58-73`) are the same tail-decode loop; a generic
-  `decodeLines[T](path, max)` removes one.
-- **Doc bug:** `observe/logfile.go:219` says "oldest first" but the function
-  delegates to `ReadLogs`, which is newest-first. Fix the comment.
+- **Doc bug, and the valuable half.** `observe/logfile.go:218` — not `:219` —
+  said `Logs.Read` was "oldest first"; it delegates to `ReadLogs`, which ends in
+  `slices.Reverse` and whose own doc says newest first. Every other comment in
+  the package agreed with newest-first, so this was the single outlier. The
+  behaviour was already pinned sideways by two tests that index `recs[1]` for the
+  line written first, but neither was *named* for it — so `Logs.Read` now has
+  `TestLogsReadIsNewestFirst`, which is what makes the next reader who notices
+  the disagreement fix the comment rather than the code.
+- `ReadLogs` and `ReadSpans` were the same tail-decode loop.
+  `decodeLines[T](path, max)` now lives beside `tailLines` in
+  `observe/spanread.go`; `ReadSpans` is a one-liner and `ReadLogs` is the
+  generic plus its TraceID backfill and the reverse. `observe` stays
+  dependency-free — nothing here needed a rig import.
+- **Size:** ~10 lines. The generic is the smaller half.
 
 ---
 
