@@ -20,6 +20,21 @@ export type BeatBody = {
     activity?: PresenceActivity | undefined;
 };
 
+/** What one beat produced: the server's answer, and the header it was sent with. */
+export type Beat = {
+    answer: Beaten;
+    /**
+     * The `Authorization` this beat was sent with, for {@link leave} to reuse.
+     *
+     * Carried out of the beat rather than asked for again, because the leave
+     * cannot wait for a credential: `apply` may be async — a session refreshes
+     * ahead of expiry — and a page being unloaded may not outlive a promise.
+     * The last successful beat's header is at most one heartbeat stale, which
+     * is well inside the token's own lifetime.
+     */
+    authorization: string;
+};
+
 /**
  * Sends one heartbeat.
  *
@@ -36,10 +51,15 @@ export async function beat(
     runtime: Runtime,
     path: string,
     body: BeatBody,
-): Promise<Beaten> {
-    const res = await send(runtime, path, "PUT", JSON.stringify(body));
+): Promise<Beat> {
+    const { res, authorization } = await send(
+        runtime,
+        path,
+        "PUT",
+        JSON.stringify(body),
+    );
     if (!res.ok) throw new Error(`presence: heartbeat answered ${res.status}`);
-    return (await res.json()) as Beaten;
+    return { answer: (await res.json()) as Beaten, authorization };
 }
 
 /**
@@ -84,18 +104,18 @@ export function leave(
 /**
  * Applies the credential and makes the call.
  *
- * The `Authorization` it produced is returned as well, because the leave above
- * cannot wait for a credential: `apply` may be async — a session refreshes ahead
- * of expiry — and a page being unloaded may not outlive a promise. The last
- * successful beat's header is at most one heartbeat stale, which is well inside
- * the token's own lifetime.
+ * The `Authorization` the credential produced is read back off the headers this
+ * built and returned with the response, so that {@link Beat.authorization} costs
+ * nothing: `apply` is called once per request, and asking a second time is not
+ * a second read of the same value — with a session credential it is a second
+ * run of the whole stale-check-and-exchange path.
  */
 export async function send(
     runtime: Runtime,
     path: string,
     method: string,
     body: string | undefined,
-): Promise<Response> {
+): Promise<{ res: Response; authorization: string }> {
     const headers = runtime.baseHeaders();
     if (body !== undefined) headers.set("Content-Type", "application/json");
     await runtime.getCredential()?.apply(headers);
@@ -106,14 +126,11 @@ export async function send(
     const init: RequestInit = { method, headers };
     if (body !== undefined) init.body = body;
 
-    return runtime.fetch(runtime.url(path, undefined, undefined, true), init);
-}
-
-/** The `Authorization` a credential produces, for the leave to reuse. */
-export async function authorizationOf(runtime: Runtime): Promise<string> {
-    const headers = new Headers();
-    await runtime.getCredential()?.apply(headers);
-    return headers.get("Authorization") ?? "";
+    const res = await runtime.fetch(
+        runtime.url(path, undefined, undefined, true),
+        init,
+    );
+    return { res, authorization: headers.get("Authorization") ?? "" };
 }
 
 /** Turns a target into the three optional fields the route takes. */

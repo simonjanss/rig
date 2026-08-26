@@ -2,7 +2,6 @@ package project
 
 import (
 	"net/netip"
-	"reflect"
 	"slices"
 	"strconv"
 	"strings"
@@ -17,8 +16,7 @@ import (
 // `expose` and `own` are about generation and mean something in a project with
 // no authentication at all, so they do not count as having configured one.
 func (a Auth) Configured() bool {
-	bare := Auth{Enabled: a.Enabled, Expose: a.Expose, Own: a.Own}
-	return !reflect.DeepEqual(a, bare)
+	return configured(a, Auth{Enabled: a.Enabled, Expose: a.Expose, Own: a.Own})
 }
 
 // checkAuth validates what the JSON Schema cannot: values that only make sense

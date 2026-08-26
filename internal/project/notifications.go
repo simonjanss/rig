@@ -1,7 +1,6 @@
 package project
 
 import (
-	"reflect"
 	"slices"
 	"time"
 
@@ -145,8 +144,7 @@ const LongestDigestWindow = 7 * 24 * time.Hour
 // whether there is an inbox and how its tables are treated, the same way
 // [Files.Configured] does.
 func (n Notifications) Configured() bool {
-	bare := Notifications{Enabled: n.Enabled, Expose: n.Expose}
-	return !reflect.DeepEqual(n, bare)
+	return configured(n, Notifications{Enabled: n.Enabled, Expose: n.Expose})
 }
 
 // checkNotifications validates what the JSON Schema cannot: values that only
@@ -244,7 +242,7 @@ func (p *Project) checkNotifications() diag.List {
 	// notification is addressed to an account, and an application whose claims
 	// come from a header has accounts like any other. Whether those tables are
 	// there is a question about migrations rather than about configuration, and
-	// it is asked where the migrations are — see checkNotificationsFoundation.
+	// it is asked where the migrations are — see checkFoundationBlock.
 
 	return diags
 }

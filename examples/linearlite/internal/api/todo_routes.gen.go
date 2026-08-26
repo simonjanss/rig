@@ -10,6 +10,7 @@ import (
 
 	"github.com/simonjanss/rig/examples/linearlite/internal/model"
 	"github.com/simonjanss/rig/observe"
+	"github.com/simonjanss/rig/runtime/httpx"
 	"github.com/simonjanss/rig/runtime/idempotency"
 	"github.com/simonjanss/rig/runtime/reqlog"
 	"github.com/simonjanss/rig/runtime/tenancy"
@@ -54,13 +55,13 @@ func handleListTodos(s Server, svc TodoService) http.HandlerFunc {
 		}
 
 		var query TodoListQuery
-		limitParam, err := queryInt(r, "limit", 50)
+		limitParam, err := httpx.QueryInt(r, "limit", 50)
 		if err != nil {
 			fail(s, w, r, rc, err)
 			return
 		}
 		query.Limit = limitParam
-		offsetParam, err := queryInt(r, "offset", 0)
+		offsetParam, err := httpx.QueryInt(r, "offset", 0)
 		if err != nil {
 			fail(s, w, r, rc, err)
 			return
@@ -152,13 +153,13 @@ func handleSearchTodos(s Server, svc TodoService) http.HandlerFunc {
 		}
 
 		var query TodoSearchQuery
-		limitParam, err := queryInt(r, "limit", 50)
+		limitParam, err := httpx.QueryInt(r, "limit", 50)
 		if err != nil {
 			fail(s, w, r, rc, err)
 			return
 		}
 		query.Limit = limitParam
-		offsetParam, err := queryInt(r, "offset", 0)
+		offsetParam, err := httpx.QueryInt(r, "offset", 0)
 		if err != nil {
 			fail(s, w, r, rc, err)
 			return
@@ -210,13 +211,13 @@ func handleListDeletedTodos(s Server, svc TodoService) http.HandlerFunc {
 		}
 
 		var query TodoListDeletedQuery
-		limitParam, err := queryInt(r, "limit", 50)
+		limitParam, err := httpx.QueryInt(r, "limit", 50)
 		if err != nil {
 			fail(s, w, r, rc, err)
 			return
 		}
 		query.Limit = limitParam
-		offsetParam, err := queryInt(r, "offset", 0)
+		offsetParam, err := httpx.QueryInt(r, "offset", 0)
 		if err != nil {
 			fail(s, w, r, rc, err)
 			return
@@ -260,7 +261,7 @@ func handleDeleteTodo(s Server, svc TodoService) http.HandlerFunc {
 		}
 
 		var path TodoDeletePath
-		idParam, err := pathUUID(r, "id")
+		idParam, err := httpx.PathUUID(r, "id")
 		if err != nil {
 			fail(s, w, r, rc, err)
 			return
@@ -300,7 +301,7 @@ func handleGetTodo(s Server, svc TodoService) http.HandlerFunc {
 		}
 
 		var path TodoGetPath
-		idParam, err := pathUUID(r, "id")
+		idParam, err := httpx.PathUUID(r, "id")
 		if err != nil {
 			fail(s, w, r, rc, err)
 			return
@@ -344,7 +345,7 @@ func handleUpdateTodo(s Server, svc TodoService) http.HandlerFunc {
 		}
 
 		var path TodoUpdatePath
-		idParam, err := pathUUID(r, "id")
+		idParam, err := httpx.PathUUID(r, "id")
 		if err != nil {
 			fail(s, w, r, rc, err)
 			return
@@ -412,7 +413,7 @@ func handleClaimTodo(s Server, svc TodoService) http.HandlerFunc {
 		}
 
 		var path TodoClaimPath
-		idParam, err := pathUUID(r, "id")
+		idParam, err := httpx.PathUUID(r, "id")
 		if err != nil {
 			fail(s, w, r, rc, err)
 			return
@@ -488,7 +489,7 @@ func handleRestoreTodo(s Server, svc TodoService) http.HandlerFunc {
 		}
 
 		var path TodoRestorePath
-		idParam, err := pathUUID(r, "id")
+		idParam, err := httpx.PathUUID(r, "id")
 		if err != nil {
 			fail(s, w, r, rc, err)
 			return
@@ -546,7 +547,7 @@ func handleRevertTodo(s Server, svc TodoService) http.HandlerFunc {
 		}
 
 		var path TodoRevertPath
-		idParam, err := pathUUID(r, "id")
+		idParam, err := httpx.PathUUID(r, "id")
 		if err != nil {
 			fail(s, w, r, rc, err)
 			return
@@ -612,7 +613,7 @@ func handleVersionsOfTodo(s Server, svc TodoService) http.HandlerFunc {
 		}
 
 		var path TodoVersionsPath
-		idParam, err := pathUUID(r, "id")
+		idParam, err := httpx.PathUUID(r, "id")
 		if err != nil {
 			fail(s, w, r, rc, err)
 			return

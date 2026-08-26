@@ -1,7 +1,6 @@
 package project
 
 import (
-	"reflect"
 	"time"
 
 	"github.com/simonjanss/rig/internal/diag"
@@ -116,8 +115,7 @@ const PresenceBeatsBeforeGone = 3
 // there is presence and how its table is treated, the same way
 // [Notifications.Configured] does.
 func (p Presence) Configured() bool {
-	bare := Presence{Enabled: p.Enabled, Expose: p.Expose}
-	return !reflect.DeepEqual(p, bare)
+	return configured(p, Presence{Enabled: p.Enabled, Expose: p.Expose})
 }
 
 // checkPresence validates what the JSON Schema cannot: values that only make

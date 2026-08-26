@@ -10,6 +10,7 @@ import (
 
 	"github.com/simonjanss/rig/examples/fantasyfootball/internal/model"
 	"github.com/simonjanss/rig/observe"
+	"github.com/simonjanss/rig/runtime/httpx"
 	"github.com/simonjanss/rig/runtime/idempotency"
 	"github.com/simonjanss/rig/runtime/reqlog"
 )
@@ -45,13 +46,13 @@ func handleListPlayers(s Server, svc PlayerService) http.HandlerFunc {
 		}
 
 		var query PlayerListQuery
-		limitParam, err := queryInt(r, "limit", 50)
+		limitParam, err := httpx.QueryInt(r, "limit", 50)
 		if err != nil {
 			fail(s, w, r, rc, err)
 			return
 		}
 		query.Limit = limitParam
-		offsetParam, err := queryInt(r, "offset", 0)
+		offsetParam, err := httpx.QueryInt(r, "offset", 0)
 		if err != nil {
 			fail(s, w, r, rc, err)
 			return
@@ -133,13 +134,13 @@ func handleSearchPlayers(s Server, svc PlayerService) http.HandlerFunc {
 		}
 
 		var query PlayerSearchQuery
-		limitParam, err := queryInt(r, "limit", 50)
+		limitParam, err := httpx.QueryInt(r, "limit", 50)
 		if err != nil {
 			fail(s, w, r, rc, err)
 			return
 		}
 		query.Limit = limitParam
-		offsetParam, err := queryInt(r, "offset", 0)
+		offsetParam, err := httpx.QueryInt(r, "offset", 0)
 		if err != nil {
 			fail(s, w, r, rc, err)
 			return
@@ -186,13 +187,13 @@ func handleListDeletedPlayers(s Server, svc PlayerService) http.HandlerFunc {
 		}
 
 		var query PlayerListDeletedQuery
-		limitParam, err := queryInt(r, "limit", 50)
+		limitParam, err := httpx.QueryInt(r, "limit", 50)
 		if err != nil {
 			fail(s, w, r, rc, err)
 			return
 		}
 		query.Limit = limitParam
-		offsetParam, err := queryInt(r, "offset", 0)
+		offsetParam, err := httpx.QueryInt(r, "offset", 0)
 		if err != nil {
 			fail(s, w, r, rc, err)
 			return
@@ -231,7 +232,7 @@ func handleDeletePlayer(s Server, svc PlayerService) http.HandlerFunc {
 		}
 
 		var path PlayerDeletePath
-		idParam, err := pathUUID(r, "id")
+		idParam, err := httpx.PathUUID(r, "id")
 		if err != nil {
 			fail(s, w, r, rc, err)
 			return
@@ -266,7 +267,7 @@ func handleGetPlayer(s Server, svc PlayerService) http.HandlerFunc {
 		}
 
 		var path PlayerGetPath
-		idParam, err := pathUUID(r, "id")
+		idParam, err := httpx.PathUUID(r, "id")
 		if err != nil {
 			fail(s, w, r, rc, err)
 			return
@@ -305,7 +306,7 @@ func handleUpdatePlayer(s Server, svc PlayerService) http.HandlerFunc {
 		}
 
 		var path PlayerUpdatePath
-		idParam, err := pathUUID(r, "id")
+		idParam, err := httpx.PathUUID(r, "id")
 		if err != nil {
 			fail(s, w, r, rc, err)
 			return
@@ -376,7 +377,7 @@ func handleRestorePlayer(s Server, svc PlayerService) http.HandlerFunc {
 		}
 
 		var path PlayerRestorePath
-		idParam, err := pathUUID(r, "id")
+		idParam, err := httpx.PathUUID(r, "id")
 		if err != nil {
 			fail(s, w, r, rc, err)
 			return

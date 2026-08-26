@@ -3,7 +3,6 @@ package project
 import (
 	"fmt"
 	"net/http"
-	"reflect"
 	"strings"
 	"time"
 
@@ -69,7 +68,7 @@ const DefaultThrottleInterval = time.Second
 
 // Configured reports whether the block says anything beyond being switched on.
 func (t Throttle) Configured() bool {
-	return !reflect.DeepEqual(t, Throttle{Enabled: t.Enabled})
+	return configured(t, Throttle{Enabled: t.Enabled})
 }
 
 // checkThrottle validates what the JSON Schema cannot.

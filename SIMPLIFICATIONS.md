@@ -75,48 +75,118 @@ scan. `pkg/ir/document.go:135-148` already provides index-backed
 - **Done.** `openapigen`'s `object` turned out to have no caller left once A2
   landed and is deleted rather than delegated.
 
-### A4. Stop emitting the static row cache; move it to `runtime/cache` `[ ]`
+### A4. Stop emitting the static row cache; move it to `runtime/cache` `[x]`
 
-`persistgo.cacheHelpers` (`internal/gen/persistgo/cache.go:75-187`) is ~112
-lines of `b.L` calls that emit a fixed generic `rowCache[V]` — zero dependence
-on the document — into every generated store (~98 lines each, see
-`testdata/rowcache/store.gen.go:281-378`). `runtime/cache` already exports
-`Bus`, `Topic`, `Map[V]`, `Forgetter`; the missing type belongs beside them.
+`persistgo.cacheHelpers` emitted a fixed generic `rowCache[V]` with zero
+dependence on the document into every generated store. It is
+`cache.RowCache[V]` now, and the generator emits two call sites.
 
-- **Fix:** add `cache.RowCache[V]` to `runtime/cache`; the generator emits
-  `*cache.RowCache[*model.Lesson]` / `cache.NewRowCache[...]` call sites only.
-- **Files:** `internal/gen/persistgo/cache.go`, `runtime/cache/`, regenerated
-  goldens + `make update-examples`.
-- **Size:** ~112 generator lines + ~98 lines per generated project.
-- **Risk:** medium — it's the trickiest concurrency code in rig, but the move
-  makes it unit-testable as ordinary Go instead of golden-file-only.
+- **The reason it was emitted had already been removed, by B3.**
+  `cacheHelpers`'s own doc comment said it could not live in `runtime/cache`
+  because "what it adds is not about caching: it is the deferred attachment. A
+  `cache.Map` wants its Live function at construction and the bus does not exist
+  yet… rig/auth has the same shape in `auth.GrantsCache`, for the same reason and
+  with the same three states." B3 took exactly that three-state deferred
+  attachment out of `GrantsCache` and made it `cache.Keyed`'s — so the argument
+  had been true when it was written and was not true any more, and nothing said
+  so. That is the case for reading these comments as claims rather than as
+  settled facts.
+- **`RowCache` is a `Keyed` and the two places it departs from one, each written
+  against Keyed's opposite choice.** They are not incidental:
+  - **A write is dropped locally as well as published.** `Keyed.Forget` publishes
+    and drops nothing, "because the publisher hears its own notification". The
+    row cache does both, because a notification travels out through Postgres and
+    back in on the listener's connection, and those moments belong to the caller
+    who just wrote — somebody shown the old value after saving has been told
+    their write did not happen. The two types are now the only place in rig
+    where that trade is made both ways, and each says why.
+  - **There is no serving it locally.** `Keyed.ServeLocally` is "attached to no
+    channel and holding anyway", which is a real posture for a session cache. It
+    is not one for the application's own rows, so `RowCache.Serve(nil)` leaves it
+    dead. Reaching that state for a test needs `ServeLocallyForTest`, which is in
+    an internal test file, is a function rather than a method, and says why.
+- **Six tests where there were none.** The old ones were golden comparisons —
+  they prove the text did not move and say nothing about what it does. The
+  properties now asserted: an unserved cache holds nothing, a nil bus is the same
+  as unserved, a nil receiver reads through and forgets nothing, `Forget` with no
+  transaction still drops locally, forgetting an unheld key is fine, a zero TTL
+  holds nothing. What still cannot be asserted in `make test` is the publication
+  and its atomicity with the writing transaction; that is `internal/authtest`'s,
+  through `Keyed`.
+- **`cache_test.go`'s `TestAnUncachedTableIsUntouched` was re-aimed, not
+  deleted.** It asserts `"runtime/cache"` is absent from a project that caches
+  nothing, and that assertion is now more load-bearing than before: the import
+  is the whole of what a cached project adds.
+- **Size:** 123 generator lines and 102 per generated store, against 114 lines
+  of `runtime/cache/rowcache.go` — most of it the prose above — and 130 of test.
+  **Risk:** medium, as filed, and the risk was concurrency code. What removes it
+  is that the concurrency is `Keyed`'s, which B3 already tested.
 
-### A5. Shared HTTP parameter parsers for `servergo` / `electricgo` `[ ]`
+### A5. Shared HTTP parameter parsers for `servergo` / `electricgo` `[x]`
 
-Both generators emit the same static parsers (bool/int/UUID/RFC-3339 time),
-down to the wording of the 400 message: `servergo/server.go:607-678` and
-`electricgo/base.go:237-297`. `electricgo`'s `fail` (`base.go:219-232`) also
-re-emits error mapping `servergo` emits elsewhere.
+`runtime/httpx/param.go`, and both generators emit call sites. Additions to the
+package B2 created rather than a new `runtime/httparg`, as filed.
 
-- **Fix:** additions to the `runtime/httpx` that B2 created (its package doc
-  already says it is the wire shape of the routes rig owns) with
-  `PathUUID/PathInt/QueryBool/QueryTime/...`; generators emit call sites. Not a
-  new `runtime/httparg` — that would be two packages for one job.
-- **Files:** `internal/gen/servergo/server.go`, `internal/gen/electricgo/base.go`,
-  new runtime package, goldens, examples.
-- **Size:** ~130 emit lines + ~140 lines per generated project. **Risk:** low-medium.
+- **What the two generators actually shared, and it was not the functions.**
+  `servergo` emitted eight readers that take a `*http.Request`;
+  `electricgo` emitted two readers and six parsers that take `(name, raw)`. Only
+  four bodies were textually identical. What *was* shared, entirely, is the
+  conversion and the sentence the 400 carries — and that sentence is a wire
+  contract: it is what a client reads when it sends `limit=soon`. Two copies of a
+  promise is one promise that can come to be made two ways. So the split in
+  `httpx` follows that: `ParseInt`/`ParseBool`/`ParseUUID`/… take `(name, raw)`
+  because the two generators disagree about where `raw` comes from, and the
+  `Path*`/`Query*` readers on top are the shapes they need.
+- **A reader only one generator needs is still shared**, because the refusal it
+  writes is the same refusal.
+- **`electricgo`'s `fail` was a third bug of B2's kind, in the place B2 did not
+  look.** It re-emitted the classification *and* wrote it with `http.Error` —
+  **`text/plain`** — while every other route in the same binary answers the flat
+  JSON envelope. Live rather than latent: the fallback runs whenever `OnError` is
+  nil, and `examples/linearlite/main.go:443` constructs
+  `genelectric.Server{Proxy, GetClaims}` with no `OnError`, which is the only
+  real application in the repository. `@rig/client`'s `readError` decodes a flat
+  JSON body, against which text is an empty code — so `isUnauthorized()` answered
+  false about a 401 from a stream route, which is exactly the failure B2 found in
+  the nested envelope. It is `httpx.Fail` now, and `docs/electric.md` says so.
+- **One eager-import trap on the way in, of A6's kind.** The first version took
+  `b.Import(".../httpx")` at the top of `parseParams`, which put the import into
+  every shape file — including the ones with no declared parameters, where
+  nothing used it. `gobuf.Import` registers the moment it is called; the import
+  moved inside the loop.
+- **Size:** 72 emit lines out of `servergo`, 76 out of `electricgo`, ~190 lines
+  per generated project. `runtime/httpx/param.go` is 178 including its prose, and
+  it has 150 lines of test where the emitted copies had a golden file.
 
-### A6. `persistgo` repository emit cleanups `[ ]`
+### A6. `persistgo` repository emit cleanups `[x]`
 
-- The `writableFields → columns/values` loop is emitted verbatim in
-  `updateMethod` and `restoreMethod` (`repository.go:984-1004` vs `1508-1519`).
-- `deleteMethod` emits the hard-delete chain twice (`1247-1263` and
-  `1285-1300`).
-- `repository.go:1264-1268` emits `var _ = time.Now` etc. to paper over
-  eagerly-registered imports; `gobuf.Import` is lazy by design — move the
-  `b.Import` calls into the branches that use them and delete the blanks.
-- **Files:** `internal/gen/persistgo/repository.go`, goldens, examples.
-- **Size:** ~40 lines + 3 lines of noise per generated repository. **Risk:** low.
+- The `writableFields → columns/values` loop is `writableAssignments`, called by
+  `updateMethod` and `restoreMethod`. What differs between them — the restore
+  also clears the soft-delete columns and re-stamps the audit ones — stays at the
+  call sites. There is a third `writableFields(res, ir.FieldOpUpdate)` loop at
+  `repository.go:1654` and it is **not** this shape: it builds an `UpdateInput`
+  out of a snapshot row, with `snapshot_ignore` and array handling that have no
+  counterpart here.
+- **The duplicated hard-delete chain was hiding a bug.** It is `hardDelete` now,
+  and only one of the two copies removed the snapshots first. Nothing joins the
+  two flags — `ResourceStorage.IsSnapshotable` and `IsSoftDeletable` are
+  independent in the IR and the compiler has no rule pairing them, which
+  `pkg/ir/accessors_test.go:149` builds a case for — so a table with versions and
+  no `deleted_at` emitted a bare `DELETE` against a row its snapshot rows still
+  reference, and answered whatever a foreign-key violation reads as. No fixture
+  has that shape, which is why no golden moved and why nothing had noticed.
+- **The three `var _ =` blanks are gone**, with the eager imports that made them
+  necessary. `deleteMethod` named seven packages in one block; only the
+  soft-delete path uses `time` and `fmt`, and **nothing at all used `rigerr`** —
+  it was imported to be blanked. The generated diff is exactly those three lines
+  per hard-delete-only repository, which is what the entry predicted.
+- **B5's deferred sixth copy of `conn(ctx)` was not folded in after all.**
+  `persistgo/store.go`'s emitted `(*Store).connFor` is a method on the generated
+  `Store` over its own pool, not a free function over `dbx.Conn`; replacing it
+  with `dbx.ConnFor` at ~200 call sites is a rename with no shared body to
+  remove, and it is the wrong company for a branch that also moves the row cache.
+  Left open, and this is the record of why.
+- **Size:** 40 generator lines and 3 per hard-delete repository, as filed.
 
 ### A7. Small generator dedups `[x]`
 
@@ -755,100 +825,232 @@ the call site is how that confusion gets institutionalised rather than fixed.
 
 ## D. TypeScript workspace (`ts/`)
 
-### D1. `client/src/transport.ts`: extract the duplicated retry ladder `[ ]`
+### D1. `client/src/transport.ts`: extract the duplicated retry ladder `[x]`
 
-The transport-throw path (`:219-237`) and bad-status path (`:276-306`) run the
-identical check-repeatable → check-attempts → delay → budget → wait → increment
-ladder. Extract `backoffOrThrow(...)` returning the next attempt or throwing;
-hoist `attemptsOf(retry)` out of the loop. ~~Mirror of C3.~~
+The transport-throw path and the bad-status path ran the identical
+check-repeatable → check-attempts → delay → budget → wait → increment ladder.
+Both are now `backoffOrThrow`, which waits and answers what attempt it is, or
+throws the caller's own error.
 
 ~~Mirror of C3~~ — C3 landed and this is not the other half of it. Its two
 helpers are about a response body closed by hand and a form seeked back to where
-it started, and TypeScript has neither. The ladder duplicated here is real and
-still worth extracting; it is just its own item now. See the note under C3.
+it started, and TypeScript has neither. The ladder duplicated here was real and
+worth extracting; it was just its own item. See the note under C3.
 
-- **Size:** ~25 lines. **Risk:** low-medium (retry engine).
+- **Two parameters, because the two sites disagree about exactly two things.**
+  What makes a failure worth repeating at all — `!isAbort(err, signal)` on the
+  transport side, `retryable(res.status)` on the server's — and what the server
+  asked to be waited. Everything under those is one ladder. Both are computed at
+  the call site as a plain boolean, so the helper has no opinion about which
+  kind of failure it is looking at.
+- **The invariants travel as one `Ladder` object built before the loop**, rather
+  than as four more parameters. This is C3's lesson applied on the other side:
+  the reason C3 left its refusal arm inline was a seven-parameter signature with
+  five of them loop state. Here only `attempt` is loop state, and it is the
+  return value.
+- **`attemptsOf(retry)` is hoisted**, which it had to be anyway — it was already
+  being called once before the loop for the idempotency-key decision and twice
+  more inside it, three calls to answer one question that cannot change.
+- **The `MAX_RETRY_AFTER_MS` ceiling is now on both paths, and that is a no-op
+  rather than a change.** The transport-throw site passes `retryAfterMs: 0`,
+  and no server said anything, so there is nothing to refuse.
+- **Size:** loop body 107 → 84 lines; the helper is 20 including the reason
+  it exists. **Risk:** low-medium (retry engine) — all 18 of
+  `transport.test.ts` pass unchanged, which is what the risk was about.
 
-### D2. Trim `@rig/client`'s public surface `[ ]`
+### D2. Trim `@rig/client`'s public surface `[x]`
 
-`ts/packages/client/src/index.ts` exports ~15 symbols nothing outside the
-package imports and no doc mentions: `asPost`, `isIdempotent`, `writes`,
-`isBindable`, `readError`, `parseRetryAfter`, `formatParam`, `retryable`,
-`retryDelayMs`, the `DEFAULT_*`/`MAX_*` constants, the `RATE_LIMIT_*` header
-names. Exporting plumbing freezes it as SemVer surface. Keep what the
-generator emits (verified consumed set includes `METHOD_QUERY`, `send*`,
-`pathValue`, `setParam(s)`, `multipart`, `Session`, error predicates).
+Sixteen exports gone: `asPost`, `isIdempotent`, `writes`, `isBindable`,
+`readError`, `parseRetryAfter`, `formatParam`, `retryable`, `retryDelayMs`, the
+four retry `DEFAULT_*`/`MAX_*` constants and the three `RATE_LIMIT_*` header
+names. Each is still exported from its own module — this is the entry point's
+surface, not the package's internals.
 
-- **Size:** ~25 export lines. **Risk:** low — verify against
-  `internal/gen/tsclient` emit sites before deleting each.
+- **How the consumed set was established**, since a `grep` over `ts/` is the
+  wrong instrument: the generator is a consumer that writes TypeScript from Go
+  string literals. Three sources, all of them checked. `b.Import` and
+  `b.ImportType` call sites in `internal/gen/tsclient/*.go` — ten values and six
+  types, and `emitter.ref`/`refValue` only ever name the project's own generated
+  modules, never `@rig/client`. Every `from "@rig/client"` block in the goldens
+  and in `examples/linearlite/web` — the same set plus `Session`, `TokenPair`,
+  `isConflict`. And `docs/`, where `fraction` and `fieldsAs` appear and none of
+  the sixteen do. The generated `index.ts` names `RigError`, `Session` and
+  `paginate` in its own doc comment as what a caller reaches for; all three
+  stay.
+- **Two the entry named that stayed, and the reason is the same one.**
+  `DEFAULT_REQUEST_ID_HEADER` and `DEFAULT_REVISION_HEADER` are the documented
+  defaults of two `Config` fields — a caller comparing what it is about to set
+  against what it would get — and `tsclient.go:56` pins the second one by name
+  in a comment. They are not plumbing; they are the answer to a question the
+  configuration raises. `Op` also stays: it is what `send` takes, and the
+  predicates over it are what went.
+- **The entry point now says what it is for**, in a paragraph at the top,
+  because "why is this not exported" is the question a reader will have and the
+  answer is not derivable from the list.
+- **Verification:** `make ts` plus `make linearlite-web`, which is the one real
+  application compiled against this surface — 302 modules, `tsc --noEmit` and a
+  production build.
+- **Size:** 22 export lines. **Risk:** low, and the risk is not backwards: this
+  is a removal from a published package's entry point, so it is a breaking
+  change for anybody who had reached for one. Nothing in this repository had.
 
-### D3. `electric/src/params.ts`: latent cache-key collision `[ ]`
+### D3. `electric/src/params.ts`: latent cache-key collision `[x]`
 
-`paramsCacheKey` hand-rolls `join("&")`, so `{a: "b&c=d"}` and
-`{a: "b", c: "d"}` produce the same key. Rebuild on `serializeParams` +
-`URLSearchParams` (`q.sort(); q.toString()`), which percent-encodes and
-removes the duplication with `serializeParams`. **This one is a bug fix, not
+`paramsCacheKey` hand-rolled `join("&")`, so `{a: "b&c=d"}` and
+`{a: "b", c: "d"}` produced the same key. It is `serializeParams` +
+`URLSearchParams` now (`q.sort(); q.toString()`), which percent-encodes and
+removes the duplication with `serializeParams`. **This one was a bug fix, not
 just cleanup.**
 
-- **Size:** ~26 → ~10 lines. **Risk:** low (cache keys change shape once).
+- **What the collision actually did.** `createCollectionCache` keys on
+  `${runtime.origin}|${paramsCacheKey(params)}`, and a collection is a live
+  stream over a shape. Two collections asking for different rows shared one
+  instance, so one of them was silently handed the other's rows — a wrong
+  answer, not a slow one. Reachable from any param a person can type into.
+- **The sort changed from `localeCompare` to `URLSearchParams.sort`**, which
+  orders by code unit. Only stability matters — nobody reads this key — and a
+  key that depends on the reader's locale was the weaker of the two.
+- **Two tests where there were none for the property**, asserting that
+  `{a: "b&c=d"}` and `{a: "b", c: "d"}` are now different keys. The existing
+  "stable across literal order" test passes unchanged, which is the whole reason
+  to keep it.
+- **Size:** 12 → 12 lines of code, and 12 of comment saying why. **Risk:** low
+  (cache keys change shape once).
 
-### D4. Presence applies the credential twice per heartbeat `[ ]`
+### D4. Presence applies the credential twice per heartbeat `[x]`
 
-`send()` awaits `credential.apply(headers)`; `presence.ts:245-255` then calls
-`authorizationOf(runtime)` which builds a second `Headers` and awaits `apply`
-again just to read back the same value — with a `Session` credential that can
-run the whole stale/exchange path twice per beat.
+`send()` awaited `credential.apply(headers)`; `presence.ts` then called
+`authorizationOf(runtime)`, which built a second `Headers` and awaited `apply`
+again just to read back the same value — with a `Session` credential, the whole
+stale-check-and-exchange path, twice per beat, in every open tab.
 
-- **Fix:** have `beat` return `{ answer, authorization }`; delete
-  `authorizationOf` (`presence/src/transport.ts:113-117`).
+`send` now returns `{ res, authorization }` — the header it already built, read
+back off itself — and `beat` returns `{ answer, authorization }`.
+`authorizationOf` is gone.
+
+- **The rationale moved with the value.** The doc comment explaining why the
+  leave cannot ask for a credential itself — `apply` may be async, and a page
+  being unloaded may not outlive a promise — now sits on `Beat.authorization`,
+  which is the thing that exists because of it.
+- **Two tests, and the second one is the one that matters.** That the credential
+  is applied once per beat and not twice is the fix; that the leave still sends
+  the beat's `Authorization` is the property the fix could have broken, and
+  dropping an apply that nothing checked would have dropped the header with it.
+- **Nothing here was public.** `presence/src/transport.ts` is not re-exported
+  from the package's `index.ts`, so `beat`, `send` and `authorizationOf` were
+  internal and this is not a surface change.
 - **Size:** ~20 lines. **Risk:** low.
 
-### D5. TS small items `[ ]`
+### D5. TS small items `[x]`
 
-- `errors.ts:222-225` — the lowercase `x-request-id` fallback is unreachable
-  (`Headers.get` is case-insensitive), and both lines hardcode the name past
-  `Runtime.requestIdHeader`; pass the configured name in from `transport.ts`.
-- `retry.ts:98-104` — replace the doubling loop with
-  `Math.min(base * 2 ** (attempt - 2), cap)`.
-- `credential.ts:62-83` — `apiKey` is a byte-identical copy of `staticToken`;
-  make it `export const apiKey = staticToken;` (or keep both bodies only if
-  the types should diverge).
-- `presence.ts:320-324` — `others()` chains five array allocations on the
-  `useSyncExternalStore` hot path; one loop + sort.
+- **`errors.ts` — a latent bug, not just an unreachable line.** The lowercase
+  `x-request-id` fallback was indeed dead (`Headers.get` is case-insensitive by
+  specification), but the half worth fixing is the other one: both lines
+  hardcoded `X-Request-Id` past `Runtime.requestIdHeader`, so a project that
+  renamed the header had the answer read back under the default name and lost
+  the identifier from **every** refusal — in exactly the projects that cared
+  enough to rename it. `readError` now takes the configured name, which
+  `transport.ts` passes from `rt.requestIdHeader`. A required parameter rather
+  than one defaulting to `DEFAULT_REQUEST_ID_HEADER`, because a default here is
+  a second place the default lives; D2 had just taken `readError` off the entry
+  point, so there was no published signature to keep. Two tests: a renamed
+  header is read, and a server answering in lowercase still is.
+- **`retry.ts` — the doubling loop is `Math.min(base * 2 ** …, cap)`.** With the
+  exponent clamped at 32 rather than left to run: `attempts` is a caller-supplied
+  number with no ceiling, and past about a thousand `2 ** n` is `Infinity`, which
+  reaches the cap correctly for a positive base and answers **`NaN`** for
+  `baseMs: 0` — which `?? DEFAULT_RETRY_BASE_MS` lets through, since `0 ?? x` is
+  `0`. The loop it replaced had the mirror-image problem: for the same input it
+  spun a thousand times to reach the answer it started with.
+- **`credential.ts` — `apiKey` is `staticToken`.** An alias rather than a second
+  body, with the doc naming the condition under which it stops being one.
+- **`presence.ts` — `others()` is one pass.** Four chained `.filter`/`.map` calls
+  and a sort became a loop and a sort. It is read back after every commit, which
+  is what `useSyncExternalStore` does, so each link was another array as long as
+  the room. The identity-cache below it is unchanged; that one is a correctness
+  requirement rather than an optimization, and its own comment says so.
 
 ---
 
 ## E. CLI & project config (`internal/cli`, `internal/project`)
 
-### E1. Foundation checks: three copies of one control flow `[ ]`
+### E1. Foundation checks: three copies of one control flow `[x]`
 
-`checkFilesFoundation` / `checkNotificationsFoundation` /
-`checkPresenceFoundation` (`internal/cli/load.go:280-395`, plus the
-`checkFoundationPresent` variant at `:407-427`) share the whole
-enabled → managed-tables → expose-warnings flow; only the anchor path and one
-message differ.
+`checkFilesFoundation`, `checkNotificationsFoundation` and
+`checkPresenceFoundation` are one `checkFoundationBlock(p, set, block)`, driven
+off a `foundationBlocks(p)` slice of `{name, enabled, expose, tables,
+exposeReason}`.
 
-- **Fix:** one `checkFoundationBlock(p, set, spec)` driven by a slice of
-  `{enabled, expose, anchor, tables, exposeReason}` specs. Makes it impossible
-  for a fourth foundation block to forget the expose half.
-- **Size:** ~60 lines. **Risk:** low.
+- **The two messages turned out to be one message each.** Both differ only in
+  the block name and the table, and the expose one in a single clause naming
+  what the generated write path would be a way to do — full CRUD over a storage
+  key, a write path over what somebody was told, a Create with a body in it.
+  That clause is `exposeReason`, and it is the only per-block prose left.
+- **`checkFoundationPresent` stays as it is, and the entry was wrong to file it
+  as a variant of the same flow.** It answers a different question — not "is
+  this block's table missing" but "is there any foundation at all" — so it tests
+  `len(managed) == 0` rather than membership, its message names no table because
+  none is missing in particular, its guard is `!Enabled || Own` rather than
+  `!Enabled`, and it has no expose half because `auth.expose` is a list of
+  tables rather than a switch. Folding it in would mean three flags to express
+  one twelve-line function, and the flags would be read on every other block's
+  behalf.
+- **The test that makes the point is new**, because there was none:
+  `TestEveryFoundationBlockReportsBothHalves` runs both halves against all three
+  blocks and asserts each names its own block, its own table, its own remedy and
+  its own reason. Before this, no test read any of the six messages — the only
+  coverage was `files_test.go` following the advice one of them gives, which
+  cannot notice a block that gives none.
+- **Which is what the item was actually about.** The two halves are not equally
+  important: a missing migration fails on the first request either way, while an
+  exposed table with no configuration turns a table rig wrote into a resource
+  with a generated write path over it. In three hand-written copies that second
+  half is the one a fourth block would leave out. It is now impossible to add a
+  block without it — there is nowhere to put the entry that does not carry it.
+- **Size:** 118 lines become 112, so effectively nothing. The doc comments
+  moved rather than merged, which is right: each block's danger is its own and
+  none of that prose deduplicates. What was bought is the control flow and the
+  test.
 
-### E2. Small CLI/config dedups `[ ]`
+### E2. Small CLI/config dedups `[x]`
 
-- `Configured()` is `!reflect.DeepEqual(x, bare)` in six `internal/project`
-  blocks — one generic `configured[T](v, bare T)`.
-- `mustProject()` + `!p.UsesContainer()` + the "database.url is set, so rig
-  does not manage this database" refusal repeats at
-  `internal/cli/db.go:39,95,129,185`.
+- **`configured[T any](v, bare T)` in `internal/project/config.go`**, and the
+  six blocks call it. `reflect` went from six files to one, and the paragraph
+  explaining what the question actually is — everything except the fields that
+  say whether the thing exists and how its tables are generated — is written
+  once instead of implied six times. Each site still names its own `bare`,
+  because only the block knows which of its fields are not configuration.
+- **The `db.go` count was four and the truth is two.** `db down` and `db reset`
+  are identical: `mustProject`, `!UsesContainer`, and the same one-sentence
+  refusal. They are `e.managedProject()` now. The other two are not the same
+  check. **`db up` does not refuse at all** — pointed at a database rig does not
+  manage, applying the migrations is the useful thing to do, and its refusal is
+  about `database.electric`, a sync service rig would have to run itself, with
+  its own three-clause message. **`db url` is `!dockerdb.Isolated() ||
+  !p.UsesContainer()`**, a different condition, and it answers rather than
+  refusing. Folding either in would have changed behaviour under cover of a
+  dedup.
+- **Size:** ~20 lines, and the point is not the lines. One refusal sentence in
+  one place is a sentence that cannot come to be worded two ways, which is what
+  two copies of it were on their way to.
 
 ---
 
-## F. Dead code sweep (verify each before deleting) `[ ]`
+## F. Dead code sweep (verify each before deleting) `[x]`
 
-Zero references found in code, tests, docs, or generated templates. Two of the
-rows below are struck by B and two by C, and in three of those four cases the
-"zero references" claim or the suggested fix turned out to be wrong on
-inspection — which is the reason for this section's parenthesis:
+"Zero references found in code, tests, docs, or generated templates."
+**Re-checked, row by row, and the claim held for three of the ten.** Two rows
+were struck by B and two by C; of the six that were still open, three have
+callers — `password.AtLeast` at `auth/password/password.go:169`,
+`account.DefaultSlug` at `auth/account/tenant.go:191`, and
+`apikey.Key.Allows` at `auth/apikey/apikey.go:427`, which also settles the ⚠:
+it is not a missing call. Two were deleted under D and one is struck below.
+
+That is a hit rate of three in ten for a table whose whole content is a claim
+about references, and it is the reason for the parenthesis in this heading.
+A `grep` that misses a call is not a rare accident here — the names are short,
+some of them are ordinary English words, and one of the consumers writes Go and
+TypeScript out of string literals.
 
 | Symbol | Location | Note |
 |---|---|---|
@@ -857,11 +1059,32 @@ inspection — which is the reason for this section's parenthesis:
 | ~~`electric.Where.NotEq`~~ | `runtime/electric/where.go:26` | Kept under C6 — `electricgo` emits no comparison but `Eq`, so this argument condemns `Gt`/`Gte`/`Lt`/`Lte`/`In` too. It wants a test, not a deletion. |
 | `password.AtLeast` | `auth/password/password.go` | |
 | `account.DefaultSlug` | `auth/account/tenant.go:264` | |
-| `(*account.Service).HasPassword` | `auth/account/service.go:885` | |
-| `(*files.File).Uploaded` | `files/files.go:102` | |
-| `(*blob.Memory).SetClock` | `files/blob/memory.go:43` | |
+| ~~`(*account.Service).HasPassword`~~ | `auth/account/service.go:885` | **Kept.** Genuinely uncalled, and deleted anyway would have been the wrong call — see below. |
+| ~~`(*files.File).Uploaded`~~ | `files/files.go:102` | Done under D — confirmed unreferenced anywhere, deleted. |
+| ~~`(*blob.Memory).SetClock`~~ | `files/blob/memory.go:43` | Done under D, and it took more with it than the row says — see below. |
 | `(*apikey.Key).Allows` | `auth/apikey/apikey.go:98` | ⚠ CIDR check — may be a **missing call**, not dead code. Decide, don't just delete. |
 | ~~`var _ = dbx.IsNoRows`~~ | `notify/dispatch.go:513` | Done under B1 — the `dbx` import went with it, which is what the blank was papering over. |
+
+**`HasPassword` has no caller and stays.** It is the only one of `account.Service`'s
+twelve exported methods with no route in `authhttp`, no test and no caller, and
+that pattern is what made it look dead. It is also the only one whose doc
+comment names the flow it is for and argues against the alternative: an
+application deciding between "set a password" and "change your password" would
+otherwise fetch the credential to look, and be an application holding a hash it
+has no use for. `auth/account` is a published module and its `Service` is what
+an application embeds; that rig itself has no route for a question a UI asks is
+not evidence the question is not asked. This is B4's argument at one-hundredth
+the size, and it comes out the same way. What it wants is a test, which it does
+not have.
+
+**`SetClock` was a seam that did not do what its comment said.** The field it
+wrote — `Memory.now` — was read in one place, `Put`'s `ModTime`. The doc comment
+said it was "for a test that needs to age an object", but ageing an object is
+`Mark(ctx, key, state, at)`, whose clock comes from the caller and always did.
+So the deletion took the `now` field and `clock()`'s nil branch with it,
+`Put` reads `time.Now().UTC()` directly, and what went was not just an unused
+method but a second, non-functioning answer to a question `Mark` already
+answers. Nothing was made harder to test.
 
 ---
 
@@ -882,11 +1105,18 @@ What follows describes the rest.
 2. ~~**C1** (throttle) ·~~ **D1-D5** (all of ts/) · **E1+E2** — all of C went on
    one branch instead; see the note at the top of that section. D1 is no longer
    coupled to C3.
-3. **A4** and **A5** each touch goldens + examples broadly — run them after
-   batch 1 lands, not alongside. A5's HTTP parameter parsers should go into the
-   `runtime/httpx` that B2 created rather than a new `runtime/httparg`; one
-   package for one job.
-4. **F** (dead code) conflicts with almost everything by nature of touching
-   many modules lightly — do it first or last, not in the middle. Two of its rows
-   are already struck: `migrate.Version` under B6 and the `dbx.IsNoRows` blank
-   under B1.
+3. **A4, A5 and A6 went on one branch**, after D and E, and grouping them was
+   the point: each one moves generated output, so each would otherwise drag
+   `make update-golden` and `make update-examples` through a merge of its own.
+   Done in that order — A6 first because it is the smallest and its diff is three
+   lines per file, then A5, then A4 — with the goldens regenerated and read after
+   each, so that every moved line had one item to belong to.
+4. **F** (dead code) was done across D and E rather than on its own. Three of its
+   six open rows turned out to have callers, two were deleted, one is struck with
+   its reasoning. Doing it inside the branches that already touched those modules
+   cost nothing; doing it alone would have been a branch touching six modules to
+   delete three methods.
+
+**Everything in this document is now closed.** The one item left open on purpose
+is named in A6: the emitted `(*Store).connFor`, which B5 deferred and A6 declined,
+with the reason in both places.

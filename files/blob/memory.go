@@ -24,9 +24,6 @@ import (
 type Memory struct {
 	mu      sync.RWMutex
 	objects map[string]*object
-	// now is the clock, so a test can make the restore window pass without
-	// waiting. Nil means time.Now.
-	now func() time.Time
 }
 
 type object struct {
@@ -38,20 +35,6 @@ type object struct {
 
 // NewMemory builds an empty store.
 func NewMemory() *Memory { return &Memory{objects: map[string]*object{}} }
-
-// SetClock replaces the clock, for a test that needs to age an object.
-func (m *Memory) SetClock(now func() time.Time) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.now = now
-}
-
-func (m *Memory) clock() time.Time {
-	if m.now != nil {
-		return m.now()
-	}
-	return time.Now().UTC()
-}
 
 // Put implements [Store].
 func (m *Memory) Put(_ context.Context, key string, r io.Reader, _ PutOptions) (Info, error) {
@@ -67,7 +50,7 @@ func (m *Memory) Put(_ context.Context, key string, r io.Reader, _ PutOptions) (
 	info := Info{
 		Size:     int64(len(buf)),
 		Checksum: hex.EncodeToString(sum.Sum(nil)),
-		ModTime:  m.clock(),
+		ModTime:  time.Now().UTC(),
 	}
 
 	m.mu.Lock()

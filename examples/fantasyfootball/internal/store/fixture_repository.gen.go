@@ -1028,7 +1028,3 @@ func (r *fixtureRepo) Delete(ctx context.Context, in dbhook.Delete[model.Fixture
 
 	return nil
 }
-
-var _ = time.Now
-var _ = fmt.Sprintf
-var _ = rigerr.NotFound

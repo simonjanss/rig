@@ -13,6 +13,9 @@ import {
 
 const NOW = Date.parse("2026-08-21T10:00:00Z");
 
+/** The header name a client is configured with, unless it says otherwise. */
+const ID_HEADER = "X-Request-Id";
+
 function refusal(status: number, body: unknown, headers: HeadersInit = {}) {
     return new Response(JSON.stringify(body), {
         status,
@@ -33,6 +36,7 @@ describe("readError", () => {
                 { "X-Request-Id": "header-id" },
             ),
             NOW,
+            ID_HEADER,
         );
 
         expect(err.status).toBe(404);
@@ -48,8 +52,34 @@ describe("readError", () => {
         const err = await readError(
             refusal(500, { code: "Internal" }, { "X-Request-Id": "header-id" }),
             NOW,
+            ID_HEADER,
         );
         expect(err.requestId).toBe("header-id");
+    });
+
+    // The header name is the client's, not this module's. A project that renamed
+    // it on the way out was still having the answer read back under the default,
+    // so the identifier went missing from every refusal in exactly the projects
+    // that cared enough to rename it.
+    it("reads the header the client was configured with", async () => {
+        const err = await readError(
+            refusal(500, { code: "Internal" }, { "X-Trace-Id": "trace-id" }),
+            NOW,
+            "X-Trace-Id",
+        );
+        expect(err.requestId).toBe("trace-id");
+    });
+
+    // Headers.get is case-insensitive by specification, so a server answering
+    // in lowercase needs no second lookup — and the one this used to make could
+    // not have answered anything the first did not.
+    it("does not care what case the server wrote the header in", async () => {
+        const err = await readError(
+            refusal(500, { code: "Internal" }, { "x-request-id": "lower" }),
+            NOW,
+            ID_HEADER,
+        );
+        expect(err.requestId).toBe("lower");
     });
 
     it("keeps per-field detail on a 422 and nothing elsewhere", async () => {
@@ -59,6 +89,7 @@ describe("readError", () => {
                 fields: { title: { message: "must not be blank" } },
             }),
             NOW,
+            ID_HEADER,
         );
         expect(isInvalid(invalid)).toBe(true);
         expect(invalid.fields).toEqual({
@@ -68,6 +99,7 @@ describe("readError", () => {
         const missing = await readError(
             refusal(404, { code: "NotFound" }),
             NOW,
+            ID_HEADER,
         );
         expect(missing.fields).toBeUndefined();
     });
@@ -78,7 +110,7 @@ describe("readError", () => {
             headers: { "Content-Type": "text/html" },
         });
 
-        const err = await readError(res, NOW);
+        const err = await readError(res, NOW, ID_HEADER);
         expect(err.status).toBe(502);
         expect(err.code).toBe("");
         expect(err.body).toContain("502 Bad Gateway");

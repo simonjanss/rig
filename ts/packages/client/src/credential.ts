@@ -71,13 +71,10 @@ export function staticToken(token: string): Credential {
  * An API key, presented the same way a token is.
  *
  * The server tells the two apart by what the value is, not by how it arrived, so
- * this is a separate function only because a caller holding one should not have
- * to know that.
+ * this is a separate name only because a caller holding one should not have to
+ * know that. It is {@link staticToken} and not a copy of it: two bodies that
+ * have to stay identical is how one of them eventually does not, and there is
+ * nothing here that could correctly differ — the day a key travels somewhere a
+ * token does not, this stops being an alias and starts being a function.
  */
-export function apiKey(key: string): Credential {
-    return {
-        apply(headers) {
-            headers.set("Authorization", `Bearer ${key}`);
-        },
-    };
-}
+export const apiKey = staticToken;

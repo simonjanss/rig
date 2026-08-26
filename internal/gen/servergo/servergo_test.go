@@ -257,7 +257,7 @@ func TestHandlerDecodesEachSlot(t *testing.T) {
 		update, _ = between(src, "func handleUpdateLesson(", "\n}\n\n")
 	}
 	for _, want := range []string{
-		`pathUUID(r, "id")`,
+		`httpx.PathUUID(r, "id")`,
 		"var body model.LessonUpdateInput",
 		"decodeBody(r, &body)",
 		"NewRequest(claims, path, struct{}{}, body, rc)",
@@ -268,7 +268,7 @@ func TestHandlerDecodesEachSlot(t *testing.T) {
 	}
 
 	list, _ := between(src, "func handleListLessons(", "\nfunc ")
-	if !strings.Contains(collapse(list), `queryInt(r, "limit", 50)`) {
+	if !strings.Contains(collapse(list), `httpx.QueryInt(r, "limit", 50)`) {
 		t.Errorf("a pagination parameter should carry its default:\n%s", list)
 	}
 	if !strings.Contains(collapse(list), "NewRequest(claims, struct{}{}, query, struct{}{}, rc)") {
@@ -536,7 +536,7 @@ func TestTheScopeParameterIsParsedAndAuthorized(t *testing.T) {
 	src := collapse(find(t, artifacts, "memo_routes.gen.go"))
 
 	for _, want := range []string{
-		`scopeParam, err := tenancy.ParseScope(queryString(r, "scope", "own"))`,
+		`scopeParam, err := tenancy.ParseScope(httpx.QueryString(r, "scope", "own"))`,
 		`if err := tenancy.RequireScope(claims, scopeParam, "memo.read.all"); err != nil { fail(s, w, r, rc, err) return }`,
 		`query.Scope = scopeParam`,
 	} {

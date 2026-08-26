@@ -178,24 +178,27 @@ func (e *emitter) paramType(b *gobuf.Buf, p ir.ElectricParam) string {
 	}
 }
 
-// parse names the helper that reads one parameter's type.
-func parseCall(p ir.ElectricParam) string {
+// parseCall names the [runtime/httpx] parser a declared parameter goes through,
+// or "" for one that arrives as text and needs none.
+func parseCall(b *gobuf.Buf, p ir.ElectricParam) string {
+	name := ""
 	switch p.Type {
 	case ir.TypeBool:
-		return "parseBool"
+		name = "ParseBool"
 	case ir.TypeInt:
-		return "parseInt"
+		name = "ParseInt"
 	case ir.TypeInt64:
-		return "parseInt64"
+		name = "ParseInt64"
 	case ir.TypeFloat64:
-		return "parseFloat"
+		name = "ParseFloat"
 	case ir.TypeUUID:
-		return "parseUUID"
+		name = "ParseUUID"
 	case ir.TypeDate, ir.TypeTime, ir.TypeTimestamp:
-		return "parseTime"
+		name = "ParseTime"
 	default:
 		return ""
 	}
+	return b.Import(runtimeModule+"/httpx") + "." + name
 }
 
 func (e *emitter) parseParams(b *gobuf.Buf, res *ir.Resource) {
@@ -208,11 +211,15 @@ func (e *emitter) parseParams(b *gobuf.Buf, res *ir.Resource) {
 
 	for _, param := range res.Electric.Params {
 		b.NL()
+		// Inside the loop: a shape with no declared parameters reads nothing,
+		// and gobuf.Import registers the moment it is called — an import taken
+		// above this would land in every shape file that has none.
+		httpxPkg := b.Import(runtimeModule + "/httpx")
 		quoted := gobuf.Quote(param.Name)
-		call := parseCall(param)
+		call := parseCall(b, param)
 
 		if param.Optional {
-			b.L("if raw, ok := optional(r, %s); ok {", quoted)
+			b.L("if raw, ok := %s.QueryOptional(r, %s); ok {", httpxPkg, quoted)
 			if call == "" {
 				b.L("p.%s = raw", param.Field)
 			} else {
@@ -225,7 +232,7 @@ func (e *emitter) parseParams(b *gobuf.Buf, res *ir.Resource) {
 			continue
 		}
 
-		b.L("raw%s, err := required(r, %s)", param.Field, quoted)
+		b.L("raw%s, err := %s.QueryRequired(r, %s)", param.Field, httpxPkg, quoted)
 		b.L("if err != nil { return p, err }")
 		if call == "" {
 			b.L("p.%s = raw%s", param.Field, param.Field)
@@ -319,7 +326,7 @@ func (e *emitter) handler(b *gobuf.Buf, res *ir.Resource, sh shape) {
 		b.Comment("Before the filter rather than after, because this one is part of it: " +
 			"a history shape with no row to be the history of would be every version " +
 			"of everything.")
-		b.L("id, err := parseUUID(%s, r.PathValue(%s))", gobuf.Quote("id"), gobuf.Quote("id"))
+		b.L("id, err := %s.PathUUID(r, %s)", b.Import(runtimeModule+"/httpx"), gobuf.Quote("id"))
 		b.L("if err != nil {")
 		b.L("fail(s, w, r, err)")
 		b.L("return")

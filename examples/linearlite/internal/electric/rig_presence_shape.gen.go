@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/simonjanss/rig/examples/linearlite/internal/model"
 	"github.com/simonjanss/rig/runtime/electric"
+	"github.com/simonjanss/rig/runtime/httpx"
 	"github.com/simonjanss/rig/runtime/tenancy"
 )
 
@@ -38,13 +39,13 @@ type RigPresenceShapeParams struct {
 func parseRigPresenceShapeParams(r *http.Request) (RigPresenceShapeParams, error) {
 	var p RigPresenceShapeParams
 
-	if raw, ok := optional(r, "scope"); ok {
+	if raw, ok := httpx.QueryOptional(r, "scope"); ok {
 		p.Scope = raw
 		p.HasScope = true
 	}
 
-	if raw, ok := optional(r, "target_id"); ok {
-		v, err := parseUUID("target_id", raw)
+	if raw, ok := httpx.QueryOptional(r, "target_id"); ok {
+		v, err := httpx.ParseUUID("target_id", raw)
 		if err != nil {
 			return p, err
 		}

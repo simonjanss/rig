@@ -1,7 +1,6 @@
 package project
 
 import (
-	"reflect"
 	"slices"
 	"time"
 
@@ -24,8 +23,7 @@ func Backends() []string { return []string{BackendMemory, BackendS3} }
 // Configured reports whether the files block says anything beyond how the
 // managed table is treated, the same way [Auth.Configured] does.
 func (f Files) Configured() bool {
-	bare := Files{Enabled: f.Enabled, Expose: f.Expose}
-	return !reflect.DeepEqual(f, bare)
+	return configured(f, Files{Enabled: f.Enabled, Expose: f.Expose})
 }
 
 // RestoreWindowDays is [Files.RestoreWindow] in whole days, which is the

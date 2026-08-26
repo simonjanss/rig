@@ -7,6 +7,25 @@
 // configuration means the same thing regardless of where it is run from.
 package project
 
+import "reflect"
+
+// configured reports whether a block says anything beyond the fields that are
+// not configuration.
+//
+// Every block that owns a piece of the foundation has the same question to
+// answer and the same trap in it: `enabled`, `expose` and `own` say whether the
+// thing exists and how its tables are generated, and a project with none of the
+// feature can still mean all three. So "did somebody configure this" is
+// everything *except* those — which is what `bare` names, per block, because
+// only the block knows which of its fields are not configuration.
+//
+// [reflect.DeepEqual] rather than a field-by-field comparison, so that a field
+// added to a block is covered the day it is added rather than the day somebody
+// remembers to come back here.
+func configured[T any](v, bare T) bool {
+	return !reflect.DeepEqual(v, bare)
+}
+
 // Config is the contents of rig.yaml.
 type Config struct {
 	Version int `yaml:"version,omitempty" json:"version,omitempty" jsonschema_description:"Configuration format version."`

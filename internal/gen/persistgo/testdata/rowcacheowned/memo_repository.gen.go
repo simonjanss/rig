@@ -484,7 +484,7 @@ func (r *memoRepo) Get(ctx context.Context, id uuid.UUID, opts ...readopt.Option
 	// A miss is an error rather than a nil row, which is what keeps it out of the
 	// map: runtime/cache never stores what a failing loader returned. So nothing
 	// has to withdraw a not-found, and a create has nothing to publish.
-	held, err := r.db.memoCache.load(memoCacheKey(claims.TenantID, claims.AccountID, id), func() (*model.Memo, error) {
+	held, err := r.db.memoCache.Load(memoCacheKey(claims.TenantID, claims.AccountID, id), func() (*model.Memo, error) {
 		return r.readMemo(ctx, id, opts...)
 	})
 	if err != nil {
@@ -814,7 +814,7 @@ func (r *memoRepo) Update(ctx context.Context, id uuid.UUID, in dbhook.Update[mo
 
 		// Every replica forgets this row when this transaction commits, and none of
 		// them does if it rolls back.
-		if err := r.db.memoCache.forget(ctx, memoCacheKey(prev.TenantID, ownerOfMemo(prev), id)); err != nil {
+		if err := r.db.memoCache.Forget(ctx, memoCacheKey(prev.TenantID, ownerOfMemo(prev), id)); err != nil {
 			return err
 		}
 
@@ -873,7 +873,7 @@ func (r *memoRepo) Delete(ctx context.Context, in dbhook.Delete[model.MemoDelete
 				return writeError(err, "memo")
 			}
 			// The row is gone, so the held copy of it has to be.
-			if err := r.db.memoCache.forget(ctx, memoCacheKey(prev.TenantID, ownerOfMemo(prev), in.Input.ID)); err != nil {
+			if err := r.db.memoCache.Forget(ctx, memoCacheKey(prev.TenantID, ownerOfMemo(prev), in.Input.ID)); err != nil {
 				return err
 			}
 
@@ -899,7 +899,7 @@ func (r *memoRepo) Delete(ctx context.Context, in dbhook.Delete[model.MemoDelete
 		}
 		// Get returns a row whatever its lifecycle state, so a retirement changes what
 		// a held copy says rather than whether there is one.
-		if err := r.db.memoCache.forget(ctx, memoCacheKey(prev.TenantID, ownerOfMemo(prev), in.Input.ID)); err != nil {
+		if err := r.db.memoCache.Forget(ctx, memoCacheKey(prev.TenantID, ownerOfMemo(prev), in.Input.ID)); err != nil {
 			return err
 		}
 
@@ -1005,7 +1005,7 @@ func (r *memoRepo) Restore(ctx context.Context, id uuid.UUID, in dbhook.Restore[
 		}
 
 		// The row came back, and a held copy of it still says it was retired.
-		if err := r.db.memoCache.forget(ctx, memoCacheKey(prev.TenantID, ownerOfMemo(prev), id)); err != nil {
+		if err := r.db.memoCache.Forget(ctx, memoCacheKey(prev.TenantID, ownerOfMemo(prev), id)); err != nil {
 			return err
 		}
 
@@ -1062,5 +1062,5 @@ func (r *memoRepo) ForgetCached(ctx context.Context, row *model.Memo) error {
 	if row == nil {
 		return nil
 	}
-	return r.db.memoCache.forget(ctx, memoCacheKey(row.TenantID, ownerOfMemo(row), row.ID))
+	return r.db.memoCache.Forget(ctx, memoCacheKey(row.TenantID, ownerOfMemo(row), row.ID))
 }

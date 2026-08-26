@@ -11,7 +11,6 @@ import (
 	"log/slog"
 	"net/http"
 	"net/netip"
-	"strconv"
 	"time"
 
 	"github.com/google/uuid"
@@ -648,85 +647,4 @@ func decodeReader(r io.Reader, into any) error {
 		return rigerr.BadRequest("cannot read the request body: %v", err)
 	}
 	return nil
-}
-
-func pathUUID(r *http.Request, name string) (uuid.UUID, error) {
-	raw := r.PathValue(name)
-	id, err := uuid.Parse(raw)
-	if err != nil {
-		return uuid.Nil, rigerr.BadRequest("%s is not a valid identifier", name)
-	}
-	return id, nil
-}
-
-func pathInt(r *http.Request, name string) (int, error) {
-	v, err := strconv.Atoi(r.PathValue(name))
-	if err != nil {
-		return 0, rigerr.BadRequest("%s must be a whole number", name)
-	}
-	return v, nil
-}
-
-func pathString(r *http.Request, name string) (string, error) {
-	raw := r.PathValue(name)
-	if raw == "" {
-		return "", rigerr.BadRequest("%s is required", name)
-	}
-	return raw, nil
-}
-
-// queryInt reads an integer query parameter, falling back when absent.
-func queryInt(r *http.Request, name string, fallback int) (int, error) {
-	raw := r.URL.Query().Get(name)
-	if raw == "" {
-		return fallback, nil
-	}
-	v, err := strconv.Atoi(raw)
-	if err != nil {
-		return 0, rigerr.BadRequest("%s must be a whole number", name)
-	}
-	return v, nil
-}
-
-func queryString(r *http.Request, name, fallback string) string {
-	if raw := r.URL.Query().Get(name); raw != "" {
-		return raw
-	}
-	return fallback
-}
-
-func queryBool(r *http.Request, name string, fallback bool) (bool, error) {
-	raw := r.URL.Query().Get(name)
-	if raw == "" {
-		return fallback, nil
-	}
-	v, err := strconv.ParseBool(raw)
-	if err != nil {
-		return false, rigerr.BadRequest("%s must be true or false", name)
-	}
-	return v, nil
-}
-
-func queryUUID(r *http.Request, name string) (uuid.UUID, error) {
-	raw := r.URL.Query().Get(name)
-	if raw == "" {
-		return uuid.Nil, nil
-	}
-	v, err := uuid.Parse(raw)
-	if err != nil {
-		return uuid.Nil, rigerr.BadRequest("%s is not a valid identifier", name)
-	}
-	return v, nil
-}
-
-func queryTime(r *http.Request, name string) (time.Time, error) {
-	raw := r.URL.Query().Get(name)
-	if raw == "" {
-		return time.Time{}, nil
-	}
-	v, err := time.Parse(time.RFC3339, raw)
-	if err != nil {
-		return time.Time{}, rigerr.BadRequest("%s must be an RFC 3339 timestamp", name)
-	}
-	return v, nil
 }

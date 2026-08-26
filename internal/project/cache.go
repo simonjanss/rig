@@ -1,7 +1,6 @@
 package project
 
 import (
-	"reflect"
 	"time"
 
 	"github.com/simonjanss/rig/internal/diag"
@@ -70,7 +69,7 @@ const (
 
 // Configured reports whether the block says anything beyond being switched on.
 func (c Cache) Configured() bool {
-	return !reflect.DeepEqual(c, Cache{Enabled: c.Enabled})
+	return configured(c, Cache{Enabled: c.Enabled})
 }
 
 // applyCacheDefaults resolves every value the cache block leaves out.

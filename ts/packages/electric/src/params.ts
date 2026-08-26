@@ -36,13 +36,27 @@ export function serializeParams(
 /**
  * A stable key for a param set, sorted so two callers passing the same params in
  * a different literal order share one collection.
+ *
+ * Built on {@link serializeParams} and `URLSearchParams` rather than on a hand
+ * rolled `join("&")`, for the reason a hand rolled one cannot be right: a value
+ * containing the separators is indistinguishable from more params. `{a: "b&c=d"}`
+ * and `{a: "b", c: "d"}` produced the identical key, so two collections over
+ * different params shared one instance — and the rows one of them was asking for
+ * were never the rows it got. Percent-encoding is what removes the ambiguity.
+ *
+ * The sort is `URLSearchParams.sort`, which orders by code unit rather than by
+ * locale. Only stability matters here — nobody reads this key — and a key that
+ * depends on the reader's locale is the weaker of the two.
  */
 export function paramsCacheKey(
     params: Readonly<Record<string, ParamValue | undefined>>,
 ): string {
-    return Object.entries(params)
-        .filter(([, value]) => value !== undefined)
-        .sort(([left], [right]) => left.localeCompare(right))
-        .map(([name, value]) => `${name}=${String(value)}`)
-        .join("&");
+    const q = new URLSearchParams(
+        Object.entries(serializeParams(params)).map(([name, value]) => [
+            name,
+            String(value),
+        ]),
+    );
+    q.sort();
+    return q.toString();
 }

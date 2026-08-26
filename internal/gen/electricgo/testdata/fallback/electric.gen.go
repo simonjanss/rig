@@ -9,13 +9,10 @@
 package electric
 
 import (
-	"errors"
 	"net/http"
-	"strconv"
-	"time"
 
-	"github.com/google/uuid"
 	"github.com/simonjanss/rig/runtime/electric"
+	"github.com/simonjanss/rig/runtime/httpx"
 	"github.com/simonjanss/rig/runtime/rigerr"
 	"github.com/simonjanss/rig/runtime/tenancy"
 )
@@ -35,7 +32,8 @@ type Server struct {
 	// unconfigured.
 	IsAdmin func(tenancy.Claims) bool
 
-	// OnError renders a refusal. Nil writes the status and a short line.
+	// OnError renders a refusal. Nil answers the same flat JSON envelope every
+	// other rig-owned route does, without the request identifier.
 	OnError func(w http.ResponseWriter, r *http.Request, err error)
 }
 
@@ -137,83 +135,24 @@ func prepare(s Server, w http.ResponseWriter, r *http.Request, admin bool) (tena
 	return claims, &electric.Where{}, true
 }
 
+// fail writes a refusal.
+//
+// Without OnError it is httpx.Fail, which is the same flat JSON envelope the
+// generated server and every rig-owned route answers with. It used to be
+// net/http's Error — a second copy of the classification, writing text/plain
+// — and a project that mounted these routes without an error writer
+// therefore had one family of routes answering a shape its own generated
+// client cannot read: the client decodes a flat JSON body, against which text
+// is an empty code, and every error predicate answers false about a refusal
+// that plainly happened.
+//
+// A project that supplies OnError still gets the request identifier on the
+// body and the failure in the same log line as the rest, which is why passing
+// the generated server's writer is what the wiring does.
 func fail(s Server, w http.ResponseWriter, r *http.Request, err error) {
 	if s.OnError != nil {
 		s.OnError(w, r, err)
 		return
 	}
-
-	code := rigerr.CodeOf(err)
-	message := err.Error()
-	var typed *rigerr.Error
-	if errors.As(err, &typed) {
-		message = typed.Message
-	}
-	if code == rigerr.CodeInternal {
-		message = "something went wrong"
-	}
-	http.Error(w, message, code.HTTPStatus())
-}
-
-// required reads a parameter that must be present. A shape whose scoping
-// depends on a value is a shape that must not stream without it.
-func required(r *http.Request, name string) (string, error) {
-	v := r.URL.Query().Get(name)
-	if v == "" {
-		return "", rigerr.BadRequest("%s is required", name)
-	}
-	return v, nil
-}
-
-func optional(r *http.Request, name string) (string, bool) {
-	v := r.URL.Query().Get(name)
-	return v, v != ""
-}
-
-func parseInt(name, raw string) (int, error) {
-	v, err := strconv.Atoi(raw)
-	if err != nil {
-		return 0, rigerr.BadRequest("%s must be a whole number", name)
-	}
-	return v, nil
-}
-
-func parseInt64(name, raw string) (int64, error) {
-	v, err := strconv.ParseInt(raw, 10, 64)
-	if err != nil {
-		return 0, rigerr.BadRequest("%s must be a whole number", name)
-	}
-	return v, nil
-}
-
-func parseFloat(name, raw string) (float64, error) {
-	v, err := strconv.ParseFloat(raw, 64)
-	if err != nil {
-		return 0, rigerr.BadRequest("%s must be a number", name)
-	}
-	return v, nil
-}
-
-func parseBool(name, raw string) (bool, error) {
-	v, err := strconv.ParseBool(raw)
-	if err != nil {
-		return false, rigerr.BadRequest("%s must be true or false", name)
-	}
-	return v, nil
-}
-
-func parseUUID(name, raw string) (uuid.UUID, error) {
-	v, err := uuid.Parse(raw)
-	if err != nil {
-		return uuid.Nil, rigerr.BadRequest("%s is not a valid identifier", name)
-	}
-	return v, nil
-}
-
-func parseTime(name, raw string) (time.Time, error) {
-	v, err := time.Parse(time.RFC3339, raw)
-	if err != nil {
-		return time.Time{}, rigerr.BadRequest("%s must be an RFC 3339 timestamp", name)
-	}
-	return v, nil
+	httpx.Fail(w, r, err)
 }

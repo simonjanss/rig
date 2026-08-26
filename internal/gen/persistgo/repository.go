@@ -982,27 +982,7 @@ func (e *emitter) updateMethod(b *gobuf.Buf, res *ir.Resource, typeName string) 
 	b.L("values := []any{}")
 	b.NL()
 
-	for _, f := range writableFields(res, ir.FieldOpUpdate) {
-		column := gobuf.Quote(f.Column.Name)
-
-		if f.IsNullable() {
-			// Touched covers a value and an explicit clear alike: both are
-			// things the caller asked for, and both belong in the statement.
-			b.L("if in.Input.%s.Touched() {", f.Name)
-			b.L("columns = append(columns, %s)", column)
-			// A nil pointer is exactly how the driver writes a NULL, so the
-			// clear needs no branch of its own.
-			b.L("values = append(values, in.Input.%s.Ptr())", f.Name)
-		} else {
-			// There is no null to guard against. The type cannot hold one, so
-			// the check this used to make is now the compiler's.
-			b.L("if v, ok := in.Input.%s.Get(); ok {", f.Name)
-			b.L("columns = append(columns, %s)", column)
-			b.L("values = append(values, v)")
-		}
-
-		b.L("}")
-	}
+	writableAssignments(b, res)
 	b.NL()
 
 	b.L("if len(columns) == 0 {")
@@ -1218,14 +1198,18 @@ func (e *emitter) versionSnapshot(b *gobuf.Buf, res *ir.Resource) string {
 func (e *emitter) deleteMethod(b *gobuf.Buf, res *ir.Resource, typeName string) {
 	var (
 		ctxPkg  = b.Import("context")
-		errPkg  = b.Import(runtimeModule + "/rigerr")
 		dbxPkg  = b.Import(runtimeModule + "/dbx")
 		hookPkg = b.Import(runtimeModule + "/dbhook")
 		tenPkg  = b.Import(runtimeModule + "/tenancy")
-		timePkg = b.Import("time")
-		fmtPkg  = b.Import("fmt")
 	)
 	s := res.Storage
+
+	// `time`, `fmt` and `rigerr` are deliberately not here. Only the soft-delete
+	// path below uses the first two and nothing uses the third, and gobuf.Import
+	// registers an import the moment it is called — so naming all seven up here
+	// made a hard-delete-only repository import three packages it had no use
+	// for, papered over with three `var _ =` lines at the bottom of the file.
+	// Import where used, and the blanks have nothing left to hide.
 
 	b.Comment("Delete implements " + res.Name + "Repository.")
 	b.L("func (%s *%s) Delete(ctx %s.Context, in %s.Delete[%sDeleteInput, %s]) error {",
@@ -1248,24 +1232,13 @@ func (e *emitter) deleteMethod(b *gobuf.Buf, res *ir.Resource, typeName string) 
 	if !s.IsSoftDeletable() {
 		e.beforeDelete(b, res)
 		e.childrenDeleting(b, res)
-		b.L("if _, err := tx.Exec(ctx, \"DELETE FROM %s WHERE id = $1\", in.Input.ID); err != nil {", s.Table)
-		b.L("return writeError(err, %s)", gobuf.Quote(s.Table))
-		b.L("}")
-		e.cacheForget(b, res, "prev", "in.Input.ID",
-			"The row is gone, so the held copy of it has to be.")
-		e.afterDelete(b, res)
-		e.childrenDeleted(b, res)
-		b.L("return nil")
+		e.hardDelete(b, res)
 		b.L("})")
 		b.L("if err != nil { return err }")
 		b.NL()
 		e.afterCommit(b, res, "Delete", "prev")
 		b.L("return nil")
 		b.L("}")
-		b.NL()
-		b.L("var _ = %s.Now", timePkg)
-		b.L("var _ = %s.Sprintf", fmtPkg)
-		b.L("var _ = %s.NotFound", errPkg)
 		b.NL()
 		return
 	}
@@ -1282,19 +1255,11 @@ func (e *emitter) deleteMethod(b *gobuf.Buf, res *ir.Resource, typeName string) 
 	e.childrenDeleting(b, res)
 
 	b.L("if in.Input.Hard {")
-	if s.IsSnapshotable() {
-		e.deleteSnapshots(b, res)
-	}
-	b.L("if _, err := tx.Exec(ctx, \"DELETE FROM %s WHERE id = $1\", in.Input.ID); err != nil {", s.Table)
-	b.L("return writeError(err, %s)", gobuf.Quote(s.Table))
-	b.L("}")
-	e.cacheForget(b, res, "prev", "in.Input.ID",
-		"The row is gone, so the held copy of it has to be.")
-	e.afterDelete(b, res)
-	e.childrenDeleted(b, res)
-	b.L("return nil")
+	e.hardDelete(b, res)
 	b.L("}")
 	b.NL()
+
+	timePkg := b.Import("time")
 
 	b.L("columns := []string{%s}", gobuf.Quote(s.SoftDelete.Column.Name))
 	b.L("values := []any{%s.Now().UTC()}", timePkg)
@@ -1313,7 +1278,7 @@ func (e *emitter) deleteMethod(b *gobuf.Buf, res *ir.Resource, typeName string) 
 		"so it neither bumps updated_at nor takes a snapshot of a row nobody " +
 		"changed.")
 	b.L("sql := %s.Sprintf(\"UPDATE %s SET %%s WHERE id = $%%d\", assignments(columns), len(values))",
-		fmtPkg, s.Table)
+		b.Import("fmt"), s.Table)
 	b.L("if _, err := tx.Exec(ctx, sql, values...); err != nil {")
 	b.L("return writeError(err, %s)", gobuf.Quote(s.Table))
 	b.L("}")
@@ -1331,6 +1296,75 @@ func (e *emitter) deleteMethod(b *gobuf.Buf, res *ir.Resource, typeName string) 
 	b.L("return nil")
 	b.L("}")
 	b.NL()
+}
+
+// writableAssignments emits the loop that turns an update input into the
+// `columns` and `values` the statement is built from.
+//
+// The update and the restore both write whatever the input changed, out of the
+// same input type, into the same two slices. What differs is what else goes in
+// beside it — a restore also clears the soft-delete columns and re-stamps the
+// audit ones — and that stays at the two call sites, because it is the part
+// that is genuinely different.
+//
+// This part is the part with no room to differ, which is exactly the shape that
+// comes to differ: one of the two gets a branch for a new field kind and the
+// other does not, and the restore is the one nobody notices, because a project
+// has to have deleted a row and changed its mind to reach it.
+func writableAssignments(b *gobuf.Buf, res *ir.Resource) {
+	for _, f := range writableFields(res, ir.FieldOpUpdate) {
+		column := gobuf.Quote(f.Column.Name)
+
+		if f.IsNullable() {
+			// Touched covers a value and an explicit clear alike: both are
+			// things the caller asked for, and both belong in the statement.
+			b.L("if in.Input.%s.Touched() {", f.Name)
+			b.L("columns = append(columns, %s)", column)
+			// A nil pointer is exactly how the driver writes a NULL, so the
+			// clear needs no branch of its own.
+			b.L("values = append(values, in.Input.%s.Ptr())", f.Name)
+		} else {
+			// There is no null to guard against. The type cannot hold one, so
+			// the check this used to make is now the compiler's.
+			b.L("if v, ok := in.Input.%s.Get(); ok {", f.Name)
+			b.L("columns = append(columns, %s)", column)
+			b.L("values = append(values, v)")
+		}
+
+		b.L("}")
+	}
+}
+
+// hardDelete emits the row actually going: its snapshots first, then the row,
+// then the held copy, then the two after-hooks.
+//
+// Both arms of [emitter.deleteMethod] end this way — the one for a table with no
+// soft delete, where every Delete is this, and the `in.Input.Hard` branch of the
+// one that retires rows instead. What differs is everything above it: the
+// already-deleted no-op, and where the Before hook and the children's Deleting
+// sit relative to the branch.
+//
+// **The two copies had come to differ, and the difference was a bug.** Only the
+// soft-delete arm removed the snapshots first. Nothing requires a snapshotable
+// table to be soft-deletable — they are independent in the IR, and the compiler
+// has no rule joining them — so a table with versions and no `deleted_at` emitted
+// a bare DELETE against a row its snapshot rows still reference, and answered
+// whatever a foreign-key violation reads as. That arm gets the same first step
+// now, which is the whole reason this is one function rather than two.
+func (e *emitter) hardDelete(b *gobuf.Buf, res *ir.Resource) {
+	s := res.Storage
+
+	if s.IsSnapshotable() {
+		e.deleteSnapshots(b, res)
+	}
+	b.L("if _, err := tx.Exec(ctx, \"DELETE FROM %s WHERE id = $1\", in.Input.ID); err != nil {", s.Table)
+	b.L("return writeError(err, %s)", gobuf.Quote(s.Table))
+	b.L("}")
+	e.cacheForget(b, res, "prev", "in.Input.ID",
+		"The row is gone, so the held copy of it has to be.")
+	e.afterDelete(b, res)
+	e.childrenDeleted(b, res)
+	b.L("return nil")
 }
 
 // beforeDelete and afterDelete emit the two hooks that bracket a deletion.
@@ -1505,19 +1539,7 @@ func (e *emitter) restoreMethod(b *gobuf.Buf, res *ir.Resource, typeName string)
 	b.Comment("Whatever the input changed goes in the same statement. No " +
 		"snapshot is taken: a snapshot has to be a copy of a live row — the " +
 		"CHECK constraint says so — and there was no live row to copy.")
-	for _, f := range writableFields(res, ir.FieldOpUpdate) {
-		column := gobuf.Quote(f.Column.Name)
-		if f.IsNullable() {
-			b.L("if in.Input.%s.Touched() {", f.Name)
-			b.L("columns = append(columns, %s)", column)
-			b.L("values = append(values, in.Input.%s.Ptr())", f.Name)
-		} else {
-			b.L("if v, ok := in.Input.%s.Get(); ok {", f.Name)
-			b.L("columns = append(columns, %s)", column)
-			b.L("values = append(values, v)")
-		}
-		b.L("}")
-	}
+	writableAssignments(b, res)
 	b.NL()
 
 	if s.Audit != nil && s.Audit.UpdatedAt != nil {

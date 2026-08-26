@@ -214,15 +214,22 @@ const MAX_ERROR_BODY = 8 * 1024;
  *
  * The response is consumed here, whatever the content type — a caller that got
  * this far is not going to read the body a second way.
+ *
+ * `requestIdHeader` is the name the client is configured with, passed in rather
+ * than written here: a project that renamed the header on the way out was still
+ * having the answer read back under the default name, so the identifier went
+ * missing from every refusal in exactly the projects that cared enough to
+ * rename it.
  */
 export async function readError(
     res: Response,
     nowMs: number,
+    requestIdHeader: string,
 ): Promise<RigError> {
-    const requestIdHeader =
-        res.headers.get("X-Request-Id") ??
-        res.headers.get("x-request-id") ??
-        "";
+    // One lookup, because `Headers.get` is case-insensitive by specification —
+    // the lowercase second try this used to make could not answer anything the
+    // first did not.
+    const headerRequestId = res.headers.get(requestIdHeader) ?? "";
     const retryAfterMs = parseRetryAfter(res.headers.get("Retry-After"), nowMs);
 
     let raw = "";
@@ -244,7 +251,7 @@ export async function readError(
         detail: envelope?.message ?? "",
         // The body's request id wins over the header's: it is what the handler
         // recorded against the line in its own log.
-        requestId: envelope?.request_id ?? requestIdHeader,
+        requestId: envelope?.request_id ?? headerRequestId,
         // Only a 422 carries per-field detail. See RigError.fields.
         ...(envelope?.fields !== undefined ? { fields: envelope.fields } : {}),
         retryAfterMs,

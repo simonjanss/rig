@@ -129,4 +129,19 @@ describe("paramsCacheKey", () => {
             "a=1&b=2",
         );
     });
+
+    it("does not read a value carrying the separators as more params", () => {
+        // What a hand rolled join("&") could not do. These two produced the
+        // identical key, so two collections asking for different rows shared
+        // one instance and one of them silently got the other's.
+        expect(paramsCacheKey({ a: "b&c=d" })).not.toBe(
+            paramsCacheKey({ a: "b", c: "d" }),
+        );
+    });
+
+    it("distinguishes a value from a name it could be split into", () => {
+        expect(paramsCacheKey({ a: "1&b=2" })).not.toBe(
+            paramsCacheKey({ a: "1", b: "2" }),
+        );
+    });
 });

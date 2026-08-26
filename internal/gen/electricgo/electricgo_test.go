@@ -344,10 +344,10 @@ func TestDeclaredParametersAreTyped(t *testing.T) {
 	}
 
 	parse, _ := between(src, "func parseLessonShapeParams(", "\n}")
-	if !strings.Contains(collapse(parse), `required(r, "status")`) {
+	if !strings.Contains(collapse(parse), `httpx.QueryRequired(r, "status")`) {
 		t.Errorf("a required parameter should be required:\n%s", parse)
 	}
-	if !strings.Contains(collapse(parse), `optional(r, "matchday")`) {
+	if !strings.Contains(collapse(parse), `httpx.QueryOptional(r, "matchday")`) {
 		t.Errorf("an optional one should not be:\n%s", parse)
 	}
 }
@@ -475,7 +475,7 @@ func TestAHistoryShapeIsScopedToOneRow(t *testing.T) {
 	collapsed := collapse(body)
 
 	for _, want := range []string{
-		`id, err := parseUUID("id", r.PathValue("id"))`,
+		`id, err := httpx.PathUUID(r, "id")`,
 		`where.Eq("tenant_id", claims.TenantID.String())`,
 		`where.EqText("version_type", "Snapshot")`,
 		`where.Eq("snapshot_from_lesson_id", id.String())`,

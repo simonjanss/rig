@@ -154,6 +154,86 @@ describe("others", () => {
     });
 });
 
+describe("the credential", () => {
+    /**
+     * A runtime whose credential counts how many times it is applied, and which
+     * records every request init it was handed.
+     */
+    function countingRuntime(applied: { count: number }, sent: RequestInit[]) {
+        return {
+            baseHeaders: () => new Headers(),
+            getCredential: () => ({
+                apply: (headers: Headers) => {
+                    applied.count++;
+                    headers.set("Authorization", "Bearer beat");
+                    return Promise.resolve();
+                },
+            }),
+            url: (path: string) => `https://api.example.com${path}`,
+            fetch: (_url: string, init: RequestInit) => {
+                sent.push(init);
+                return Promise.resolve(beaten(20));
+            },
+        } as unknown as Runtime;
+    }
+
+    // The beat used to apply the credential twice: once to build the request
+    // headers, and again immediately after, purely to read the same
+    // Authorization back for the leave to reuse. With a session credential the
+    // second one is the whole stale-check-and-exchange path run again — at the
+    // heartbeat rate, in every open tab.
+    it("is applied once per beat, not twice", async () => {
+        vi.useFakeTimers();
+
+        const applied = { count: 0 };
+        const handle = createPresence({
+            runtime: countingRuntime(applied, []),
+            scope: "board",
+            sessionKey: "my-tab",
+            stream: { toArray: [] },
+        });
+
+        try {
+            await vi.advanceTimersByTimeAsync(0);
+            expect(applied.count).toBe(1);
+
+            await vi.advanceTimersByTimeAsync(21_000);
+            expect(applied.count).toBe(2);
+        } finally {
+            handle.close();
+        }
+    });
+
+    // The other half: what the beat carried out has to be the header the leave
+    // sends, or dropping the second apply would have dropped the authorization
+    // with it. The leave cannot ask for one itself — a page being unloaded may
+    // not outlive a promise.
+    it("hands the beat's Authorization to the leave", async () => {
+        vi.useFakeTimers();
+
+        const applied = { count: 0 };
+        const sent: RequestInit[] = [];
+
+        const handle = createPresence({
+            runtime: countingRuntime(applied, sent),
+            scope: "board",
+            sessionKey: "my-tab",
+            stream: { toArray: [] },
+        });
+
+        await vi.advanceTimersByTimeAsync(0);
+        handle.close();
+
+        const leave = sent.at(-1);
+        expect(leave?.method).toBe("DELETE");
+        expect(new Headers(leave?.headers).get("Authorization")).toBe(
+            "Bearer beat",
+        );
+        // And it cost no further trip through the credential.
+        expect(applied.count).toBe(1);
+    });
+});
+
 describe("the heartbeat schedule", () => {
     // The interval the server answered with, and not half of it. Every beat is a
     // row change delivered to every subscriber, so beating twice as often is

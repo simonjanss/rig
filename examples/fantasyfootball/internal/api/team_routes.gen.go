@@ -10,6 +10,7 @@ import (
 
 	"github.com/simonjanss/rig/examples/fantasyfootball/internal/model"
 	"github.com/simonjanss/rig/observe"
+	"github.com/simonjanss/rig/runtime/httpx"
 	"github.com/simonjanss/rig/runtime/idempotency"
 	"github.com/simonjanss/rig/runtime/reqlog"
 )
@@ -45,13 +46,13 @@ func handleListTeams(s Server, svc TeamService) http.HandlerFunc {
 		}
 
 		var query TeamListQuery
-		limitParam, err := queryInt(r, "limit", 50)
+		limitParam, err := httpx.QueryInt(r, "limit", 50)
 		if err != nil {
 			fail(s, w, r, rc, err)
 			return
 		}
 		query.Limit = limitParam
-		offsetParam, err := queryInt(r, "offset", 0)
+		offsetParam, err := httpx.QueryInt(r, "offset", 0)
 		if err != nil {
 			fail(s, w, r, rc, err)
 			return
@@ -133,13 +134,13 @@ func handleSearchTeams(s Server, svc TeamService) http.HandlerFunc {
 		}
 
 		var query TeamSearchQuery
-		limitParam, err := queryInt(r, "limit", 50)
+		limitParam, err := httpx.QueryInt(r, "limit", 50)
 		if err != nil {
 			fail(s, w, r, rc, err)
 			return
 		}
 		query.Limit = limitParam
-		offsetParam, err := queryInt(r, "offset", 0)
+		offsetParam, err := httpx.QueryInt(r, "offset", 0)
 		if err != nil {
 			fail(s, w, r, rc, err)
 			return
@@ -186,13 +187,13 @@ func handleListDeletedTeams(s Server, svc TeamService) http.HandlerFunc {
 		}
 
 		var query TeamListDeletedQuery
-		limitParam, err := queryInt(r, "limit", 50)
+		limitParam, err := httpx.QueryInt(r, "limit", 50)
 		if err != nil {
 			fail(s, w, r, rc, err)
 			return
 		}
 		query.Limit = limitParam
-		offsetParam, err := queryInt(r, "offset", 0)
+		offsetParam, err := httpx.QueryInt(r, "offset", 0)
 		if err != nil {
 			fail(s, w, r, rc, err)
 			return
@@ -231,7 +232,7 @@ func handleDeleteTeam(s Server, svc TeamService) http.HandlerFunc {
 		}
 
 		var path TeamDeletePath
-		idParam, err := pathUUID(r, "id")
+		idParam, err := httpx.PathUUID(r, "id")
 		if err != nil {
 			fail(s, w, r, rc, err)
 			return
@@ -266,7 +267,7 @@ func handleGetTeam(s Server, svc TeamService) http.HandlerFunc {
 		}
 
 		var path TeamGetPath
-		idParam, err := pathUUID(r, "id")
+		idParam, err := httpx.PathUUID(r, "id")
 		if err != nil {
 			fail(s, w, r, rc, err)
 			return
@@ -305,7 +306,7 @@ func handleUpdateTeam(s Server, svc TeamService) http.HandlerFunc {
 		}
 
 		var path TeamUpdatePath
-		idParam, err := pathUUID(r, "id")
+		idParam, err := httpx.PathUUID(r, "id")
 		if err != nil {
 			fail(s, w, r, rc, err)
 			return
@@ -376,7 +377,7 @@ func handleRestoreTeam(s Server, svc TeamService) http.HandlerFunc {
 		}
 
 		var path TeamRestorePath
-		idParam, err := pathUUID(r, "id")
+		idParam, err := httpx.PathUUID(r, "id")
 		if err != nil {
 			fail(s, w, r, rc, err)
 			return

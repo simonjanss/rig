@@ -9,7 +9,7 @@ import type {
 
 import { freshest, isFresh } from "./clock.js";
 import { SESSION_KEY } from "./session-key.js";
-import { authorizationOf, beat, bodyOf, leave } from "./transport.js";
+import { beat, bodyOf, leave } from "./transport.js";
 import { onTarget, personOfRow, sameTarget } from "./types.js";
 
 /**
@@ -207,8 +207,9 @@ export function createPresence(args: PresenceArgs): PresenceHandle {
     let ttlMs = 0;
     let heartbeatMs = 0;
     let lastSeenAt: string | undefined;
-    // Captured from the last successful beat, because the leave cannot await a
-    // credential on a page that is being torn down.
+    // Carried out of the last successful beat, because the leave cannot await a
+    // credential on a page that is being torn down — and because asking the
+    // credential a second time per beat is not free.
     let authorization = "";
 
     let beatTimer: ReturnType<typeof setTimeout> | undefined;
@@ -242,17 +243,17 @@ export function createPresence(args: PresenceArgs): PresenceHandle {
         if (closed) return;
         const now = { target, activity };
         try {
-            const answer = await beat(
+            const beaten = await beat(
                 runtime,
                 path,
                 bodyOf(sessionKey, scope, now.target, now.activity),
             );
             if (closed) return;
             sent = now;
-            lastSeenAt = answer.seenAt;
-            ttlMs = answer.ttlSeconds * 1_000;
-            heartbeatMs = answer.heartbeatSeconds * 1_000;
-            authorization = await authorizationOf(runtime);
+            lastSeenAt = beaten.answer.seenAt;
+            ttlMs = beaten.answer.ttlSeconds * 1_000;
+            heartbeatMs = beaten.answer.heartbeatSeconds * 1_000;
+            authorization = beaten.authorization;
             notify();
         } catch {
             // Swallowed on purpose. A beat that failed is not worth reporting to
@@ -317,11 +318,18 @@ export function createPresence(args: PresenceArgs): PresenceHandle {
         const people = rows().map(personOfRow);
         const now = freshest(people, lastSeenAt);
 
-        const next = people
-            .filter((p) => p.sessionKey !== sessionKey)
-            .filter((p) => isFresh(p, now, ttlMs))
-            .filter((p) => only === undefined || onTarget(p, only))
-            .sort((a, b) => b.seenAt.localeCompare(a.seenAt));
+        // One pass rather than a chain. This is read back after every commit
+        // — that is what useSyncExternalStore does — so it is the hot path in
+        // the package, and every link in a chain is another array as long as
+        // the room.
+        const next: Person[] = [];
+        for (const p of people) {
+            if (p.sessionKey === sessionKey) continue;
+            if (!isFresh(p, now, ttlMs)) continue;
+            if (only !== undefined && !onTarget(p, only)) continue;
+            next.push(p);
+        }
+        next.sort((a, b) => b.seenAt.localeCompare(a.seenAt));
 
         // One entry per target asked about, and a bound on it. A caller asks
         // about what is on its screen, so this is a handful in practice; a

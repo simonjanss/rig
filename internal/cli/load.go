@@ -55,9 +55,9 @@ func compileFrom(p *project.Project, schema ir.Schema) (*ir.Document, diag.List)
 	}
 	diags.Append(checkFoundationMode(p))
 	diags.Append(checkFoundationPresent(p))
-	diags.Append(checkFilesFoundation(p, set))
-	diags.Append(checkNotificationsFoundation(p, set))
-	diags.Append(checkPresenceFoundation(p, set))
+	for _, block := range foundationBlocks(p) {
+		diags.Append(checkFoundationBlock(p, set, block))
+	}
 
 	doc, d := compile.Compile(schema, set, compile.Options{
 		Project:      p,
@@ -160,7 +160,7 @@ func foundationTables(p *project.Project) (ignore, foundation []string, err erro
 		//
 		// `auth.expose` deliberately does not reach it. It would happen to work
 		// and would leave `files.expose` — which the rest of rig reads, and which
-		// checkFilesFoundation guards — saying the opposite.
+		// checkFoundationBlock guards — saying the opposite.
 		if table == compile.FileTable {
 			if p.Config.Files.Enabled && p.Config.Files.Expose {
 				continue
@@ -232,11 +232,10 @@ func foundationTables(p *project.Project) (ignore, foundation []string, err erro
 // over the migrations the project forked, stopping on a table that already exists.
 //
 // The reverse — `vendored` with none of them while a block that needs them is on —
-// is already reported, and better, by [checkFoundationPresent],
-// [checkFilesFoundation] and [checkNotificationsFoundation]: each names the block
-// that wants the part and tells you to run `setup-project`, which in that mode is
-// exactly right. Saying it a second time here would be two diagnostics for one
-// mistake.
+// is already reported, and better, by [checkFoundationPresent] and
+// [checkFoundationBlock]: each names the block that wants the part and tells you
+// to run `setup-project`, which in that mode is exactly right. Saying it a
+// second time here would be two diagnostics for one mistake.
 //
 // Adopting an existing schema into a fresh bookkeeping table is a real feature and
 // this is deliberately not it. There is no baseline command; what there is, is a
@@ -279,53 +278,88 @@ func checkFoundationMode(p *project.Project) diag.List {
 	return diags
 }
 
-// checkFilesFoundation reports a files block whose table is not there, and an
-// exposed rig_file with no configuration saying what may be done to it.
+// foundationBlock is one rig.yaml block whose tables rig maintains: whether it
+// is on, whether it is exposed, which tables it owns, and what a generated write
+// path over them would be a way to do.
 //
-// The second one is the dangerous half. Removing rig_file from the ignore list
-// is what makes it a resource; the table configuration is what makes that
-// resource read-only and narrow. Without the configuration it would arrive with
-// full CRUD over the storage key — which is a way to point a row at any object
-// in the bucket, and precisely what the design refuses to generate.
-func checkFilesFoundation(p *project.Project, set *tableconf.Set) diag.List {
-	var diags diag.List
-	if !p.Config.Files.Enabled {
-		return diags
-	}
-
-	managed, err := foundationManaged(p)
-	if err != nil {
-		return diags
-	}
-
-	if !slices.Contains(managed, compile.FileTable) {
-		diags.Add(diag.CodeConfigInvalid, p.At("files", "enabled"),
-			"files.enabled is set but this project has no %s migration; "+
-				"run `rig setup-project`", compile.FileTable)
-		return diags
-	}
-
-	if p.Config.Files.Expose && set != nil && set.Get(compile.FileTable) == nil {
-		diags.Add(diag.CodeConfigInvalid, p.At("files", "expose"),
-			"files.expose projects %s, but there is no table configuration for it, so it would "+
-				"arrive with full CRUD over its storage key; "+
-				"run `rig setup-project --expose %s`", compile.FileTable, compile.FileTable)
-	}
-	return diags
+// A description rather than three near-identical functions, because the flow
+// they shared has two halves and only one of them is harmless. A missing
+// migration is reported for tidiness — the project fails on its first request
+// either way. An exposed table with no configuration is the one that matters,
+// and in three hand-written copies it is also the one a fourth block would be
+// most likely to leave out. Here it cannot be left out: it comes with the entry.
+type foundationBlock struct {
+	// name is the rig.yaml key. It is both anchors and the first word of both
+	// messages, which is why there is only one of it.
+	name    string
+	enabled bool
+	expose  bool
+	tables  []string
+	// exposeReason completes "…there is no table configuration for it, so it
+	// would ", naming what the generated write path is a way to do. It is the
+	// whole difference between the three messages, and it is per-block because
+	// the danger is.
+	exposeReason string
 }
 
-// checkNotificationsFoundation reports a notifications block whose tables are
-// not there, and an exposed inbox with no configuration saying what may be done
-// to it.
+// foundationBlocks describes every block that owns rig tables.
 //
-// The second one is the dangerous half, exactly as it is for rig_file. Exposing
-// the inbox is what makes it a resource; the table configuration is what makes
-// that resource read-and-delete. Without it, the inbox would arrive with a
-// generated PATCH over `kind` and `event_count` — which is a way to rewrite what
-// somebody was told, and a POST that could address a notification to anybody.
-func checkNotificationsFoundation(p *project.Project, set *tableconf.Set) diag.List {
+// Adding one here is the whole of adding it, and the order is the order the
+// diagnostics come out in.
+func foundationBlocks(p *project.Project) []foundationBlock {
+	return []foundationBlock{
+		{
+			name:    "files",
+			enabled: p.Config.Files.Enabled,
+			expose:  p.Config.Files.Expose,
+			tables:  []string{compile.FileTable},
+			// Removing rig_file from the ignore list is what makes it a
+			// resource; the table configuration is what makes that resource
+			// read-only and narrow. Without the configuration it would arrive
+			// with full CRUD over the storage key — which is a way to point a
+			// row at any object in the bucket, and precisely what the design
+			// refuses to generate.
+			exposeReason: "arrive with full CRUD over its storage key",
+		},
+		{
+			name:    "notifications",
+			enabled: p.Config.Notifications.Enabled,
+			expose:  p.Config.Notifications.Expose,
+			tables:  compile.NotificationTables(),
+			// Exposing the inbox is what makes it a resource; the table
+			// configuration is what makes that resource read-and-delete.
+			// Without it, the inbox would arrive with a generated PATCH over
+			// `kind` and `event_count` — which is a way to rewrite what
+			// somebody was told, and a POST that could address a notification
+			// to anybody.
+			exposeReason: "arrive with a generated write path over what somebody was told",
+		},
+		{
+			name:    "presence",
+			enabled: p.Config.Presence.Enabled,
+			expose:  p.Config.Presence.Expose,
+			tables:  []string{compile.PresenceTable},
+			// The sharpest of the three. Exposing presence is what makes it a
+			// resource; the table configuration is what keeps that resource to
+			// Get and List. Without it, presence would arrive with a generated
+			// Create — and a Create takes a body, and a body is somewhere to
+			// name an account that is not yours. The whole reason the write
+			// path is three hand-written routes is that they have nowhere to
+			// put one.
+			exposeReason: "arrive with a generated Create — and a Create takes a body, which is " +
+				"somewhere to claim that somebody else is editing something",
+		},
+	}
+}
+
+// checkFoundationBlock reports a block whose tables are not there, and an
+// exposed table with no configuration saying what may be done to it.
+//
+// The second one is the dangerous half, and [foundationBlock.exposeReason] says
+// how, per block.
+func checkFoundationBlock(p *project.Project, set *tableconf.Set, b foundationBlock) diag.List {
 	var diags diag.List
-	if !p.Config.Notifications.Enabled {
+	if !b.enabled {
 		return diags
 	}
 
@@ -334,65 +368,27 @@ func checkNotificationsFoundation(p *project.Project, set *tableconf.Set) diag.L
 		return diags
 	}
 
-	for _, table := range compile.NotificationTables() {
+	for _, table := range b.tables {
 		if !slices.Contains(managed, table) {
-			diags.Add(diag.CodeConfigInvalid, p.At("notifications", "enabled"),
-				"notifications.enabled is set but this project has no %s migration; "+
-					"run `rig setup-project`", table)
+			diags.Add(diag.CodeConfigInvalid, p.At(b.name, "enabled"),
+				"%s.enabled is set but this project has no %s migration; "+
+					"run `rig setup-project`", b.name, table)
+			// One diagnostic and not one per table: they are missing for the
+			// same reason, and `setup-project` writes all of them at once.
 			return diags
 		}
 	}
 
-	if !p.Config.Notifications.Expose || set == nil {
+	if !b.expose || set == nil {
 		return diags
 	}
-	for _, table := range compile.NotificationTables() {
+	for _, table := range b.tables {
 		if set.Get(table) == nil {
-			diags.Add(diag.CodeConfigInvalid, p.At("notifications", "expose"),
-				"notifications.expose projects %s, but there is no table configuration for it, "+
-					"so it would arrive with a generated write path over what somebody was told; "+
-					"run `rig setup-project --expose %s`", table, table)
+			diags.Add(diag.CodeConfigInvalid, p.At(b.name, "expose"),
+				"%s.expose projects %s, but there is no table configuration for it, so it would "+
+					"%s; run `rig setup-project --expose %s`",
+				b.name, table, b.exposeReason, table)
 		}
-	}
-	return diags
-}
-
-// checkPresenceFoundation reports a presence block whose table is not there, and
-// an exposed presence table with no configuration saying what may be done to it.
-//
-// The second one is the dangerous half, the way it is for rig_file and for the
-// inbox, and here it is the sharpest of the three. Exposing presence is what
-// makes it a resource; the table configuration is what keeps that resource to
-// Get and List. Without it, presence would arrive with a generated Create — and a
-// Create takes a body, and a body is somewhere to name an account that is not
-// yours. The whole reason the write path is three hand-written routes is that
-// they have nowhere to put one.
-func checkPresenceFoundation(p *project.Project, set *tableconf.Set) diag.List {
-	var diags diag.List
-	if !p.Config.Presence.Enabled {
-		return diags
-	}
-
-	managed, err := foundationManaged(p)
-	if err != nil {
-		return diags
-	}
-	if !slices.Contains(managed, compile.PresenceTable) {
-		diags.Add(diag.CodeConfigInvalid, p.At("presence", "enabled"),
-			"presence.enabled is set but this project has no %s migration; "+
-				"run `rig setup-project`", compile.PresenceTable)
-		return diags
-	}
-
-	if !p.Config.Presence.Expose || set == nil {
-		return diags
-	}
-	if set.Get(compile.PresenceTable) == nil {
-		diags.Add(diag.CodeConfigInvalid, p.At("presence", "expose"),
-			"presence.expose projects %s, but there is no table configuration for it, so it "+
-				"would arrive with a generated Create — and a Create takes a body, which is "+
-				"somewhere to claim that somebody else is editing something; "+
-				"run `rig setup-project --expose %s`", compile.PresenceTable, compile.PresenceTable)
 	}
 	return diags
 }
@@ -469,6 +465,33 @@ func (e *env) mustProject() (*project.Project, error) {
 	}
 	if err := e.report(&diags); err != nil {
 		return nil, err
+	}
+	return p, nil
+}
+
+// managedProject is [env.mustProject], refused unless rig is the one that runs
+// this project's database.
+//
+// `database.url` is how a project points rig at a database somebody else runs,
+// and a command that stops one or throws one away had better not. Two commands
+// do — `db down` and `db reset` — and they refused in the same sentence, which
+// is the whole reason this is a function rather than the six lines it replaces:
+// one rule that two places word for themselves is one rule that can come to be
+// worded two ways.
+//
+// The two commands that look like they belong here and do not. `db up` does not
+// refuse at all: pointed at a database it does not manage, applying the
+// migrations is exactly the useful thing to do, and its one refusal is about
+// `database.electric`, which is a sync service rig would have to run itself.
+// And `db url` answers for an unmanaged database rather than refusing, because
+// printing a connection string costs the database nothing.
+func (e *env) managedProject() (*project.Project, error) {
+	p, err := e.mustProject()
+	if err != nil {
+		return nil, err
+	}
+	if !p.UsesContainer() {
+		return nil, fmt.Errorf("database.url is set, so rig does not manage this database")
 	}
 	return p, nil
 }

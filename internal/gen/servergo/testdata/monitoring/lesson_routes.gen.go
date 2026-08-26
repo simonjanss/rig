@@ -10,6 +10,7 @@ import (
 	"rigtest/model"
 
 	"github.com/simonjanss/rig/observe"
+	"github.com/simonjanss/rig/runtime/httpx"
 	"github.com/simonjanss/rig/runtime/idempotency"
 	"github.com/simonjanss/rig/runtime/reqlog"
 	"github.com/simonjanss/rig/runtime/tenancy"
@@ -54,13 +55,13 @@ func handleListLessons(s Server, svc LessonService) http.HandlerFunc {
 		}
 
 		var query LessonListQuery
-		limitParam, err := queryInt(r, "limit", 50)
+		limitParam, err := httpx.QueryInt(r, "limit", 50)
 		if err != nil {
 			fail(s, w, r, rc, err)
 			return
 		}
 		query.Limit = limitParam
-		offsetParam, err := queryInt(r, "offset", 0)
+		offsetParam, err := httpx.QueryInt(r, "offset", 0)
 		if err != nil {
 			fail(s, w, r, rc, err)
 			return
@@ -152,13 +153,13 @@ func handleSearchLessons(s Server, svc LessonService) http.HandlerFunc {
 		}
 
 		var query LessonSearchQuery
-		limitParam, err := queryInt(r, "limit", 50)
+		limitParam, err := httpx.QueryInt(r, "limit", 50)
 		if err != nil {
 			fail(s, w, r, rc, err)
 			return
 		}
 		query.Limit = limitParam
-		offsetParam, err := queryInt(r, "offset", 0)
+		offsetParam, err := httpx.QueryInt(r, "offset", 0)
 		if err != nil {
 			fail(s, w, r, rc, err)
 			return
@@ -210,13 +211,13 @@ func handleListDeletedLessons(s Server, svc LessonService) http.HandlerFunc {
 		}
 
 		var query LessonListDeletedQuery
-		limitParam, err := queryInt(r, "limit", 50)
+		limitParam, err := httpx.QueryInt(r, "limit", 50)
 		if err != nil {
 			fail(s, w, r, rc, err)
 			return
 		}
 		query.Limit = limitParam
-		offsetParam, err := queryInt(r, "offset", 0)
+		offsetParam, err := httpx.QueryInt(r, "offset", 0)
 		if err != nil {
 			fail(s, w, r, rc, err)
 			return
@@ -260,7 +261,7 @@ func handleDeleteLesson(s Server, svc LessonService) http.HandlerFunc {
 		}
 
 		var path LessonDeletePath
-		idParam, err := pathUUID(r, "id")
+		idParam, err := httpx.PathUUID(r, "id")
 		if err != nil {
 			fail(s, w, r, rc, err)
 			return
@@ -300,7 +301,7 @@ func handleGetLesson(s Server, svc LessonService) http.HandlerFunc {
 		}
 
 		var path LessonGetPath
-		idParam, err := pathUUID(r, "id")
+		idParam, err := httpx.PathUUID(r, "id")
 		if err != nil {
 			fail(s, w, r, rc, err)
 			return
@@ -344,7 +345,7 @@ func handleUpdateLesson(s Server, svc LessonService) http.HandlerFunc {
 		}
 
 		var path LessonUpdatePath
-		idParam, err := pathUUID(r, "id")
+		idParam, err := httpx.PathUUID(r, "id")
 		if err != nil {
 			fail(s, w, r, rc, err)
 			return
@@ -403,7 +404,7 @@ func handlePublishLesson(s Server, svc LessonService) http.HandlerFunc {
 		}
 
 		var path LessonPublishPath
-		idParam, err := pathUUID(r, "id")
+		idParam, err := httpx.PathUUID(r, "id")
 		if err != nil {
 			fail(s, w, r, rc, err)
 			return
@@ -479,7 +480,7 @@ func handleRestoreLesson(s Server, svc LessonService) http.HandlerFunc {
 		}
 
 		var path LessonRestorePath
-		idParam, err := pathUUID(r, "id")
+		idParam, err := httpx.PathUUID(r, "id")
 		if err != nil {
 			fail(s, w, r, rc, err)
 			return
@@ -537,7 +538,7 @@ func handleRevertLesson(s Server, svc LessonService) http.HandlerFunc {
 		}
 
 		var path LessonRevertPath
-		idParam, err := pathUUID(r, "id")
+		idParam, err := httpx.PathUUID(r, "id")
 		if err != nil {
 			fail(s, w, r, rc, err)
 			return
@@ -603,7 +604,7 @@ func handleVersionsOfLesson(s Server, svc LessonService) http.HandlerFunc {
 		}
 
 		var path LessonVersionsPath
-		idParam, err := pathUUID(r, "id")
+		idParam, err := httpx.PathUUID(r, "id")
 		if err != nil {
 			fail(s, w, r, rc, err)
 			return

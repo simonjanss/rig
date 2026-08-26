@@ -312,9 +312,6 @@ func (e *emitter) helpers(b *gobuf.Buf) {
 		jsonPkg = b.Import("encoding/json")
 		ctxPkg  = b.Import("context")
 		ioPkg   = b.Import("io")
-		strPkg  = b.Import("strconv")
-		timePkg = b.Import("time")
-		uuidPkg = b.Import("github.com/google/uuid")
 		errPkg  = b.Import(runtimeModule + "/rigerr")
 		tenPkg  = b.Import(runtimeModule + "/tenancy")
 		slogPkg = b.Import("log/slog")
@@ -592,79 +589,5 @@ func (e *emitter) helpers(b *gobuf.Buf) {
 	if e.anyRequiredFilePart() {
 		e.hasPartHelper(b)
 	}
-
-	e.paramHelpers(b, httpPkg, errPkg, uuidPkg, strPkg, timePkg)
-}
-
-// paramHelpers parse path and query parameters.
-func (e *emitter) paramHelpers(b *gobuf.Buf, httpPkg, errPkg, uuidPkg, strPkg, timePkg string) {
-	b.L("func pathUUID(r *%s.Request, name string) (%s.UUID, error) {", httpPkg, uuidPkg)
-	b.L("raw := r.PathValue(name)")
-	b.L("id, err := %s.Parse(raw)", uuidPkg)
-	b.L("if err != nil {")
-	b.L("return %s.Nil, %s.BadRequest(\"%%s is not a valid identifier\", name)", uuidPkg, errPkg)
-	b.L("}")
-	b.L("return id, nil")
-	b.L("}")
-	b.NL()
-
-	b.L("func pathInt(r *%s.Request, name string) (int, error) {", httpPkg)
-	b.L("v, err := %s.Atoi(r.PathValue(name))", strPkg)
-	b.L("if err != nil { return 0, %s.BadRequest(\"%%s must be a whole number\", name) }", errPkg)
-	b.L("return v, nil")
-	b.L("}")
-	b.NL()
-
-	b.L("func pathString(r *%s.Request, name string) (string, error) {", httpPkg)
-	b.L("raw := r.PathValue(name)")
-	b.L("if raw == \"\" { return \"\", %s.BadRequest(\"%%s is required\", name) }", errPkg)
-	b.L("return raw, nil")
-	b.L("}")
-	b.NL()
-
-	b.Comment("queryInt reads an integer query parameter, falling back when absent.")
-	b.L("func queryInt(r *%s.Request, name string, fallback int) (int, error) {", httpPkg)
-	b.L("raw := r.URL.Query().Get(name)")
-	b.L("if raw == \"\" { return fallback, nil }")
-	b.L("v, err := %s.Atoi(raw)", strPkg)
-	b.L("if err != nil { return 0, %s.BadRequest(\"%%s must be a whole number\", name) }", errPkg)
-	b.L("return v, nil")
-	b.L("}")
-	b.NL()
-
-	b.L("func queryString(r *%s.Request, name, fallback string) string {", httpPkg)
-	b.L("if raw := r.URL.Query().Get(name); raw != \"\" { return raw }")
-	b.L("return fallback")
-	b.L("}")
-	b.NL()
-
-	b.L("func queryBool(r *%s.Request, name string, fallback bool) (bool, error) {", httpPkg)
-	b.L("raw := r.URL.Query().Get(name)")
-	b.L("if raw == \"\" { return fallback, nil }")
-	b.L("v, err := %s.ParseBool(raw)", strPkg)
-	b.L("if err != nil { return false, %s.BadRequest(\"%%s must be true or false\", name) }", errPkg)
-	b.L("return v, nil")
-	b.L("}")
-	b.NL()
-
-	b.L("func queryUUID(r *%s.Request, name string) (%s.UUID, error) {", httpPkg, uuidPkg)
-	b.L("raw := r.URL.Query().Get(name)")
-	b.L("if raw == \"\" { return %s.Nil, nil }", uuidPkg)
-	b.L("v, err := %s.Parse(raw)", uuidPkg)
-	b.L("if err != nil { return %s.Nil, %s.BadRequest(\"%%s is not a valid identifier\", name) }", uuidPkg, errPkg)
-	b.L("return v, nil")
-	b.L("}")
-	b.NL()
-
-	b.L("func queryTime(r *%s.Request, name string) (%s.Time, error) {", httpPkg, timePkg)
-	b.L("raw := r.URL.Query().Get(name)")
-	b.L("if raw == \"\" { return %s.Time{}, nil }", timePkg)
-	b.L("v, err := %s.Parse(%s.RFC3339, raw)", timePkg, timePkg)
-	b.L("if err != nil {")
-	b.L("return %s.Time{}, %s.BadRequest(\"%%s must be an RFC 3339 timestamp\", name)", timePkg, errPkg)
-	b.L("}")
-	b.L("return v, nil")
-	b.L("}")
-	b.NL()
 
 }
