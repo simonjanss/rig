@@ -657,9 +657,6 @@ type ChildLink struct {
 // Supports reports whether the resource has the given operation.
 func (r *Resource) Supports(op string) bool { return slices.Contains(r.Operations, op) }
 
-// IsPublic reports whether an operation answers without a credential.
-func (r *Resource) IsPublic(op string) bool { return slices.Contains(r.Public, op) }
-
 // Endpoint returns the named endpoint, or nil.
 func (r *Resource) Endpoint(name string) *Endpoint {
 	for i := range r.Endpoints {
