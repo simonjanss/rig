@@ -129,16 +129,21 @@ func (l *Limiter) WithClock(fn func() time.Time) *Limiter {
 	return &out
 }
 
-// Allow evaluates every check and reports the outcome.
+// fold runs per over every check and keeps the tightest answer it gets.
 //
-// Every check runs, even after one fails, because the headers should describe
-// the tightest constraint the caller is actually under rather than whichever
-// one happened to be listed first.
-func (l *Limiter) Allow(ctx context.Context, checks ...Check) (Decision, error) {
-	if l.counter == nil {
-		return Decision{}, errors.New("throttle: Allow needs a limiter built with New")
-	}
-
+// One clock reading for the whole call rather than one per check. Two limits
+// read a microsecond apart would measure their windows from different instants,
+// and the Retry-After that came back would be derived from a now that the
+// decision beside it never saw.
+//
+// Every check runs, including after one has answered no. Why that matters is not
+// the same for the two verbs, and each says so on its own doc — see
+// [Limiter.Allow] and [Limiter.Take].
+func (l *Limiter) fold(
+	ctx context.Context,
+	checks []Check,
+	per func(context.Context, time.Time, Check) (Decision, error),
+) (Decision, error) {
 	now := l.now()
 
 	var (
@@ -147,7 +152,7 @@ func (l *Limiter) Allow(ctx context.Context, checks ...Check) (Decision, error) 
 	)
 
 	for _, c := range checks {
-		d, err := l.evaluate(ctx, now, c)
+		d, err := per(ctx, now, c)
 		if err != nil {
 			return Decision{}, err
 		}
@@ -161,6 +166,18 @@ func (l *Limiter) Allow(ctx context.Context, checks ...Check) (Decision, error) 
 		return Decision{Allowed: true}, nil
 	}
 	return worst, nil
+}
+
+// Allow evaluates every check and reports the outcome.
+//
+// Every check runs, even after one fails, because the headers should describe
+// the tightest constraint the caller is actually under rather than whichever
+// one happened to be listed first.
+func (l *Limiter) Allow(ctx context.Context, checks ...Check) (Decision, error) {
+	if l.counter == nil {
+		return Decision{}, errors.New("throttle: Allow needs a limiter built with New")
+	}
+	return l.fold(ctx, checks, l.evaluate)
 }
 
 func (l *Limiter) evaluate(ctx context.Context, now time.Time, c Check) (Decision, error) {
@@ -211,28 +228,7 @@ func (l *Limiter) Take(ctx context.Context, checks ...Check) (Decision, error) {
 		// be indistinguishable from a configured one until somebody attacked it.
 		return Decision{}, errors.New("throttle: Take needs a limiter built with NewRecording")
 	}
-
-	now := l.now()
-
-	var (
-		worst   Decision
-		decided bool
-	)
-
-	for _, c := range checks {
-		d, err := l.spend(ctx, now, c)
-		if err != nil {
-			return Decision{}, err
-		}
-		if !decided || d.tighterThan(worst) {
-			worst, decided = d, true
-		}
-	}
-
-	if !decided {
-		return Decision{Allowed: true}, nil
-	}
-	return worst, nil
+	return l.fold(ctx, checks, l.spend)
 }
 
 func (l *Limiter) spend(ctx context.Context, now time.Time, c Check) (Decision, error) {
