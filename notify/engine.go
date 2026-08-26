@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/simonjanss/rig/runtime/dbx"
+	"github.com/simonjanss/rig/runtime/serve"
 	"github.com/simonjanss/rig/runtime/tenancy"
 )
 
@@ -49,13 +50,16 @@ type Engine struct {
 	jitter        func(int64) int64
 	defaultDigest Digest
 
-	nudge chan struct{}
-	stop  chan struct{}
-	done  chan struct{}
+	// The lifecycle is [serve.Ticker]'s. It was three channels and a hand-rolled
+	// loop here, and it had two hazards a shutdown path could not afford: a
+	// second Start spawned a second goroutine, and both of them closed `done` on
+	// the way out; and a Close with no prior Start waited on a goroutine that did
+	// not exist, for the whole registered timeout, on every deploy an operator
+	// left the dispatching to the cron task.
+	ticker *serve.Ticker
 
 	mu       sync.Mutex
 	claiming bool
-	interval time.Duration
 	// held are the leases this process currently owns, so a clean shutdown can
 	// give them back rather than leaving them to expire.
 	held map[uuid.UUID]bool
@@ -200,7 +204,7 @@ func NewEngine(cfg EngineConfig) *Engine {
 		digest = DigestImmediate
 	}
 
-	return &Engine{
+	e := &Engine{
 		cfg:   cfg.Config,
 		store: store{db: cfg.DB},
 		links: cfg.Links,
@@ -217,13 +221,19 @@ func NewEngine(cfg EngineConfig) *Engine {
 		jitter:        jitter,
 		defaultDigest: digest,
 
-		nudge:    make(chan struct{}, 1),
-		stop:     make(chan struct{}),
-		done:     make(chan struct{}),
 		claiming: true,
-		interval: interval,
 		held:     make(map[uuid.UUID]bool),
 	}
+	e.ticker = serve.NewTicker(serve.TickerConfig{
+		Interval: interval,
+		Pass:     e.pass,
+		// No PassTimeout, which is the default and is deliberate here: Dispatch
+		// bounds its own pass by claimTTL, five minutes against a one-minute
+		// interval. A timeout imposed out here would cancel every pass at the
+		// interval — cutting sends mid-flight, and cutting the ReleaseClaims
+		// that follows them.
+	})
+	return e
 }
 
 // ClaimedBy is this process's lease identifier, for the log line that makes a
@@ -270,21 +280,14 @@ func (e *Engine) heldIDs() []uuid.UUID {
 // notification write the same inbox lines, and the unique index absorbs it.
 // What it buys is that a reply notification is in somebody's inbox in
 // milliseconds rather than by the next tick.
-func (e *Engine) Start() {
-	go e.run()
-}
+func (e *Engine) Start() { e.ticker.Start() }
 
 // Nudge asks for a pass now.
 //
 // It is an optimization and nothing may be built on it. A dropped nudge — and
 // they are dropped, because the channel holds one — costs at most one interval,
 // since the row is Pending and the next pass takes it.
-func (e *Engine) Nudge() {
-	select {
-	case e.nudge <- struct{}{}:
-	default:
-	}
-}
+func (e *Engine) Nudge() { e.ticker.Nudge() }
 
 // StopClaiming stops taking new work while the server is still answering.
 //
@@ -303,15 +306,8 @@ func (e *Engine) StopClaiming(context.Context) error {
 // Registered with app.CloseWithin, which runs before the pool closes — not
 // incidental, because what is in flight is a write.
 func (e *Engine) Close(ctx context.Context) error {
-	select {
-	case <-e.stop:
-	default:
-		close(e.stop)
-	}
-	select {
-	case <-e.done:
-	case <-ctx.Done():
-		return ctx.Err()
+	if err := e.ticker.Close(ctx); err != nil {
+		return err
 	}
 
 	// And then the work goes back rather than being left to expire. The TTL is
@@ -322,32 +318,24 @@ func (e *Engine) Close(ctx context.Context) error {
 	return err
 }
 
-func (e *Engine) run() {
-	defer close(e.done)
-
-	ticker := time.NewTicker(e.interval)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-e.stop:
-			return
-		case <-ticker.C:
-		case <-e.nudge:
-		}
-
-		e.mu.Lock()
-		claiming := e.claiming
-		e.mu.Unlock()
-		if !claiming {
-			continue
-		}
-
-		// A pass that fails is a pass: the rows are still Pending and the next
-		// one takes them. Nothing here may take the process down.
-		_, _ = e.Resolve(context.Background())
-		_, _ = e.Dispatch(context.Background())
+// pass is one run of the goroutine's work.
+//
+// The claiming gate stays here rather than becoming something [serve.Ticker]
+// knows about: StopClaiming is a separate `serve.Drain` step with its own reason
+// to exist, and a ticker that knew about readiness would be a ticker with an
+// opinion about what it is ticking.
+func (e *Engine) pass(ctx context.Context) {
+	e.mu.Lock()
+	claiming := e.claiming
+	e.mu.Unlock()
+	if !claiming {
+		return
 	}
+
+	// A pass that fails is a pass: the rows are still Pending and the next one
+	// takes them. Nothing here may take the process down.
+	_, _ = e.Resolve(ctx)
+	_, _ = e.Dispatch(ctx)
 }
 
 // Report is what one pass did, for the log line the task writes.

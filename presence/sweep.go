@@ -3,8 +3,9 @@ package presence
 import (
 	"context"
 	"fmt"
-	"sync"
 	"time"
+
+	"github.com/simonjanss/rig/runtime/serve"
 )
 
 // sweepBatch bounds one pass, so a table that had a bad week does not become a
@@ -53,15 +54,13 @@ func (r SweepReport) String() string {
 // wrong, and there is none here. The absence of a lease is a decision, not an
 // omission.
 type Sweeper struct {
-	svc      *Service
-	interval time.Duration
-	grace    time.Duration
+	svc   *Service
+	grace time.Duration
 
-	mu      sync.Mutex
-	stop    chan struct{}
-	done    chan struct{}
-	running bool
-	closed  bool
+	// The lifecycle is [serve.Ticker]'s, which is where the four properties a
+	// hand-rolled one keeps getting wrong are asserted once. What is left here is
+	// the pass.
+	ticker *serve.Ticker
 }
 
 // SweeperConfig is what a sweeper needs beyond a [Service].
@@ -98,56 +97,30 @@ func NewSweeper(cfg SweeperConfig) *Sweeper {
 	if grace == 0 {
 		grace = DefaultGrace
 	}
-	return &Sweeper{
-		svc:      cfg.Service,
-		interval: interval,
-		grace:    grace,
-		stop:     make(chan struct{}),
-		done:     make(chan struct{}),
-	}
+	sw := &Sweeper{svc: cfg.Service, grace: grace}
+	sw.ticker = serve.NewTicker(serve.TickerConfig{
+		Interval: interval,
+		Pass:     func(ctx context.Context) { _, _ = sw.Sweep(ctx) },
+		// The pass gets its own bounded context rather than one that lives as
+		// long as the process: a sweep that cannot reach the database should fail
+		// and be retried on the next tick, not hold a slot forever. It can be
+		// bounded at all because nothing here holds a lease — see the type's own
+		// note on why there is no claim to lose.
+		PassTimeout: interval,
+	})
+	return sw
 }
 
 // Start begins the ticker. A negative interval starts nothing and is not an
 // error: it is how an operator says the cron job owns this.
 //
-// Idempotent, and safe on a sweeper that has already been closed. What it
-// records is whether there is a goroutine for [Sweeper.Close] to wait for —
-// starting nothing has to be told apart from starting something, because the
-// difference is whether `done` will ever be closed.
-func (s *Sweeper) Start() {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.running || s.closed || s.interval < 0 {
-		return
-	}
-	s.running = true
-	go s.loop()
-}
-
-// loop sweeps on a ticker until Close.
+// Idempotent, and safe on a sweeper that has already been closed — see
+// [serve.Ticker], which is where those two properties are asserted.
 //
-// No nudge channel, and its absence mirrors notify: a nudge exists there so a
+// No Nudge is exposed, and its absence mirrors notify: a nudge exists there so a
 // notification that has just been committed is dispatched in milliseconds rather
-// than at the next tick. Nothing about presence is waiting on this.
-func (s *Sweeper) loop() {
-	defer close(s.done)
-	ticker := time.NewTicker(s.interval)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-s.stop:
-			return
-		case <-ticker.C:
-			// The pass gets its own bounded context rather than one that lives as
-			// long as the process: a sweep that cannot reach the database should
-			// fail and be retried on the next tick, not hold a slot forever.
-			ctx, cancel := context.WithTimeout(context.Background(), s.interval)
-			_, _ = s.Sweep(ctx)
-			cancel()
-		}
-	}
-}
+// than at the next tick. Nothing about presence is waiting on a sweep.
+func (s *Sweeper) Start() { s.ticker.Start() }
 
 // Close stops the ticker and waits for a pass in flight.
 //
@@ -166,25 +139,7 @@ func (s *Sweeper) loop() {
 // timeout over a goroutine that does not exist. And the wait honours the context
 // it is given, the way notify's engine does: a pass that cannot reach the
 // database should not outlive the deadline the caller declared for it.
-func (s *Sweeper) Close(ctx context.Context) error {
-	s.mu.Lock()
-	running := s.running
-	if !s.closed {
-		s.closed = true
-		close(s.stop)
-	}
-	s.mu.Unlock()
-
-	if !running {
-		return nil
-	}
-	select {
-	case <-s.done:
-		return nil
-	case <-ctx.Done():
-		return ctx.Err()
-	}
-}
+func (s *Sweeper) Close(ctx context.Context) error { return s.ticker.Close(ctx) }
 
 // Sweep runs one pass.
 //

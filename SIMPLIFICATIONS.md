@@ -285,17 +285,54 @@ forms now delegate:
   `make test-docker` says nothing about it.
 - **Size:** ~40 lines, not the 90 estimated; `Version` was 13 of them.
 
-### B7. One safe ticker lifecycle for `presence.Sweeper` / `notify.Engine` `[ ]`
+### B7. One safe ticker lifecycle for `presence.Sweeper` / `notify.Engine` `[x]`
 
-Two hand-rolled ticker-goroutine lifecycles with divergent safety:
-`presence/sweep.go:55-180` is idempotent and close-safe; `notify/engine.go`'s
-`Start` spawns a second goroutine if called twice, and `Close` hangs until ctx
-expiry if `Start` was never called.
+Two hand-rolled ticker-goroutine lifecycles with divergent safety.
+`presence.Sweeper` was idempotent and close-safe; `notify.Engine` was neither.
+Both are now `serve.Ticker` (`runtime/serve/ticker.go`), where the four
+properties are asserted once.
 
-- **Fix:** `serve.Ticker{Interval, Nudge, Pass}` with safe
-  `Start`/`Nudge`/`Close(ctx)` in `runtime/serve`, used by both.
-- **Size:** ~120 → ~50 lines, and the `notify.Engine` hazards go away.
-- **Risk:** low-medium.
+- **Three hazards in `notify.Engine`, all demonstrated before they were fixed.**
+  Two Starts panicked with `close of closed channel` — both goroutines
+  `defer close(e.done)`, so `Close` woke both and the second one to return took
+  the process down from a shutdown path. `Close` with no prior `Start` waited on
+  `e.done` until the context expired, which with the documented
+  `app.CloseWithin("notifications", 15*time.Second, …)` is a fifteen-second stall
+  and a reported shutdown failure on every deploy for anyone who left dispatching
+  to the cron task. And `Close`'s `select`/`default`/`close(e.stop)` was an
+  unlocked check-then-act, so two concurrent Closes both took the branch. All
+  three are now `notify/engine_lifecycle_test.go`, a file that did not exist —
+  `notify` had no lifecycle tests at all.
+- **`PassTimeout` defaults to unbounded, and that is the load-bearing decision.**
+  Presence bounds its pass by the interval, which reads as simply better and is
+  not: `Engine.Dispatch` bounds its own pass by `claimTTL`, five minutes against
+  a one-minute interval, so an interval-bounded pass context would cancel every
+  dispatch at sixty seconds — cutting sends mid-flight and cutting the
+  `ReleaseClaims` after them. Presence passes `PassTimeout: interval` explicitly;
+  notify leaves it zero. `TestAZeroPassTimeoutIsUnbounded` is the guard.
+- **The `claiming` gate stayed in notify**, not in the Ticker: `StopClaiming` is a
+  separate `serve.Drain` step, and a ticker that knew about readiness would be a
+  ticker with an opinion about what it is ticking.
+- **Follow-up found, not fixed:** the two modules disagree about a non-positive
+  `Interval`. `presence` reads a negative as "the cron job owns this" and starts
+  nothing; `notify` resolves zero *and* negative to `DefaultInterval`
+  (`engine.go:135`), so an operator who turned notify's goroutine off by writing
+  `-1` got a dispatcher running every minute. `serve.Ticker` supports "never", so
+  the setting is one line away — but adding it would turn a working configuration
+  into a silent no-op for anyone relying on the current answer. Left as it is and
+  pinned by `TestANonPositiveIntervalIsTheDefaultAndNotNever`, so the asymmetry
+  is at least written down.
+- **`presence.Sweeper`'s three lifecycle tests pass unchanged**, which was the
+  acceptance criterion; they are also ported onto `serve.Ticker` so the
+  properties are asserted at the source as well as through the wrapper.
+- **Files:** new `runtime/serve/ticker.go` + `ticker_test.go`,
+  `presence/sweep.go`, `notify/engine.go`, new
+  `notify/engine_lifecycle_test.go`.
+- **Cost worth naming:** `notify` and `presence` now depend on `runtime/serve`,
+  which imports `pgxpool`, so both gained `puddle/v2` and `golang.org/x/sync` as
+  indirects. Two service modules depending on the server-framework package for a
+  sixty-line ticker. If that ever bites, the fix is a leaf `runtime/tick` plus
+  `type Ticker = tick.Ticker` in `serve` — a zero-cost alias that keeps the name.
 
 ### B8. `observe` small items `[x]`
 
