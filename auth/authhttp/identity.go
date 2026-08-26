@@ -9,6 +9,7 @@ import (
 	"github.com/simonjanss/rig/auth/account"
 	"github.com/simonjanss/rig/auth/session"
 	"github.com/simonjanss/rig/runtime/authwire"
+	"github.com/simonjanss/rig/runtime/httpx"
 	"github.com/simonjanss/rig/runtime/rigerr"
 )
 
@@ -66,7 +67,7 @@ func (h *Handler) register(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, signInOf(res))
+	httpx.WriteJSON(w, http.StatusCreated, signInOf(res))
 }
 
 // myInvitations lists the invitations waiting for the caller, in every tenant.
@@ -99,7 +100,7 @@ func (h *Handler) myInvitations(w http.ResponseWriter, r *http.Request) {
 			Role: string(i.Role), CreatedAt: i.CreatedAt, ExpiresAt: i.ExpiresAt,
 		})
 	}
-	writeJSON(w, http.StatusOK, authwire.List[authwire.InvitationToMeView]{Data: out})
+	httpx.WriteJSON(w, http.StatusOK, authwire.List[authwire.InvitationToMeView]{Data: out})
 }
 
 // myTenants lists the tenants the caller belongs to.
@@ -128,7 +129,7 @@ func (h *Handler) myTenants(w http.ResponseWriter, r *http.Request) {
 			// reason they are asking.
 		})
 	}
-	writeJSON(w, http.StatusOK, authwire.List[authwire.TenantView]{Data: out})
+	httpx.WriteJSON(w, http.StatusOK, authwire.List[authwire.TenantView]{Data: out})
 }
 
 // endIdentitySession signs somebody out of the picker.
@@ -265,5 +266,5 @@ func (h *Handler) answerWithTenant(
 			Current: s.TenantID == tok.TenantID,
 		})
 	}
-	writeJSON(w, http.StatusOK, out)
+	httpx.WriteJSON(w, http.StatusOK, out)
 }

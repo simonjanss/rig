@@ -138,26 +138,76 @@ to the line" (`dispatch.go:261`).
   semantics, and it adds a runtime dependency both modules must share. The
   twin-ness may be deliberate module independence; decide that first.
 
-### B2. One HTTP scaffold; fix the error-envelope drift `[ ]`
+### B2. One HTTP scaffold; fix the error-envelope drift `[x]`
 
-`notifyhttp` and `presencehttp` are copy-paste (`Handler`, `Options`, `New`,
-`with()` claims middleware, `writeJSON`, `writeError`, `decode`). Worse, their
-fallback error writer emits a **nested** `{"error":{code,message}}` envelope
-(`notifyhttp.go:264`, `presencehttp.go:339`) while `authhttp.go:495` and the
-generated server's `DefaultErrorMapper` emit a **flat** `{code,message}` —
-a client-visible inconsistency. `authhttp.fail` also re-implements
-`DefaultErrorMapper` verbatim, redaction and Retry-After included.
-Content-Type differs too (`application/json` vs `; charset=utf-8`).
+`notifyhttp` and `presencehttp` were copy-paste, and their fallback error writer
+emitted a **nested** `{"error":{code,message}}` while `authhttp` and the
+generated server emitted a **flat** `{code,message}`. All three now write
+`httpx.Error` from the new `runtime/httpx`.
 
-- **Fix:** `WriteJSON`, `WriteError` (one envelope, flat), `Decode`
-  (DisallowUnknownFields + limit reader), `ClaimsMiddleware` in a shared
-  runtime package (`runtime/rigerr` or a new `runtime/httpx`); delete the
-  copies. Decide the canonical envelope first — flat is what the generated
-  server ships.
-- **Files:** `notify/notifyhttp/`, `presence/presencehttp/`,
-  `auth/authhttp/authhttp.go`, `observe/page.go:702-706`, runtime package.
-- **Size:** ~200 lines. **Risk:** medium — the envelope change is
-  client-visible for anyone parsing the nested shape.
+- **The canonical envelope is flat, camelCase, `application/json; charset=utf-8`.**
+  Nothing read the nested shape: `rigclient/error.go` and
+  `ts/packages/client/src/errors.ts` both decode a flat struct, against which a
+  nested body comes out all-zero — so every error predicate answered false and
+  the caller saw a status and nothing else.
+- **`runtime/httpx` had to be a new package, not additions to `runtime/rigerr`.**
+  The error writer needs `throttle.RefusalOf` for the Retry-After, and
+  `runtime/throttle` already imports `rigerr` (`go list -deps ./throttle`). In
+  `rigerr` it would be a cycle. Said so in the package doc so nobody folds it
+  back.
+- **The generated `DefaultErrorMapper` stays emitted and does not delegate.** Its
+  field names go through the project's `api.json_case`, so a `json_case: snake`
+  project answers `request_id`; `httpx.Error` is fixed camelCase, because these
+  routes are identical in every project and the browser packages are compiled
+  against them once. One struct cannot be both. `httpx.AnswerFor` exists as the
+  seam if the *classification* half is ever worth sharing — the encoding half is
+  correctly two implementations.
+
+**Three bugs fixed, each demonstrated before the fix:**
+
+1. **`notify.ErrNotFound` answered 500 in every real application.** It was a bare
+   `errors.New`, so `rigerr.CodeOf` read `CodeInternal`; the 404 lived only in
+   `notifyhttp`'s fallback writer, which every generated project replaces by
+   supplying `Fail`. So `POST /notifications/{id}/_read` and `DELETE
+   /notifications/{id}` on a missing or foreign row answered
+   `500 something went wrong`. It is now `rigerr.NotFound`, so it carries its own
+   status wherever it surfaces and there is no mapping left for a caller to be
+   missing. (`files` solved the same problem differently, with a `notFound()`
+   translator at the service edge — `files/service.go:347`. Either works; the
+   sentinel carrying the code is the one that cannot be bypassed.)
+2. **`presencehttp.decode` had no limit reader** — the only route in rig that
+   would read an unbounded request body. Now `httpx.Decode(r, 1<<16, …)`.
+3. **`authhttp.fail` dropped `fields`.** It wrote a `map[string]string`, so
+   per-field validation detail had nowhere to go. Latent rather than live —
+   nothing in `auth` produces a field-carrying error today — but it is the kind of
+   gap only somebody's client finds. Pinned by `runtime/httpx`'s own tests.
+
+- **`observe/page.go` was dropped from scope.** `observe/go.mod` has no rig
+  dependency by design, and its `writeJSON` is already the correct form with no
+  error writer at all. A new module edge for a five-line function is a worse trade
+  than the duplicate.
+- **`authhttp` took `WriteJSON`/`Decode`/`WriteError` only, not `Caller`.** Twelve
+  handlers call `h.Claims(r)` inline and it has no middleware to replace;
+  retrofitting one is a separate change. `presencehttp` kept its
+  `(w, r, claims)` handler signature — `presence.Service` takes claims
+  explicitly — but now reads them back through `tenancy.FromContext`, which
+  *validates*: claims that are well-formed with no tenant are refused here rather
+  than written into a row.
+- **The test that stops this coming back is `internal/httpxtest`.** It is in the
+  root module because that is the only one that can import `rig/auth`,
+  `rig/notify` and `rig/presence` at once — there was nowhere a test could stand
+  and see all three, which is most of why they drifted. It mounts all three,
+  provokes an unestablished caller, and asserts one status, one Content-Type, one
+  key set and one code.
+- **Files:** new `runtime/httpx/` (+ tests), new `internal/httpxtest/`,
+  `notify/notify.go`, `notify/notifyhttp/` (+ its first test file),
+  `presence/presencehttp/`, `auth/authhttp/{authhttp,handlers,invite,identity,provision}.go`.
+- **Follow-up found, unrelated to this change:**
+  `examples/auth/auth_docker_test.go`'s `TestAServiceAccountCannotSignIn` logs in
+  as the fixed address `nobody-at-all@example.com`, so the failed-attempt counter
+  accumulates in the database across runs. After enough runs against one database
+  it flips from `Unauthorized` to `RateLimited` and the test fails, having proved
+  nothing about the property it names. Randomize the address or reset the counter.
 
 ### B3. `cache.Keyed[V]`: four near-identical cache wrappers in `auth` `[ ]`
 

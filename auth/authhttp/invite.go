@@ -7,6 +7,7 @@ import (
 
 	"github.com/simonjanss/rig/auth/account"
 	"github.com/simonjanss/rig/runtime/authwire"
+	"github.com/simonjanss/rig/runtime/httpx"
 	"github.com/simonjanss/rig/runtime/rigerr"
 	"github.com/simonjanss/rig/runtime/tenancy"
 )
@@ -33,7 +34,7 @@ func (h *Handler) acceptInvitation(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, pairOf(pair))
+	httpx.WriteJSON(w, http.StatusOK, pairOf(pair))
 }
 
 // listInvitations answers with the invitations into the caller's tenant that are
@@ -66,7 +67,7 @@ func (h *Handler) listInvitations(w http.ResponseWriter, r *http.Request) {
 			Role: string(i.Role), CreatedAt: i.CreatedAt, ExpiresAt: i.ExpiresAt,
 		})
 	}
-	writeJSON(w, http.StatusOK, authwire.List[authwire.InvitationView]{Data: out})
+	httpx.WriteJSON(w, http.StatusOK, authwire.List[authwire.InvitationView]{Data: out})
 }
 
 // revokeInvitation withdraws one.
@@ -121,7 +122,7 @@ func (h *Handler) listTenants(w http.ResponseWriter, r *http.Request) {
 			Current: s.TenantID == claims.TenantID,
 		})
 	}
-	writeJSON(w, http.StatusOK, authwire.List[authwire.TenantView]{Data: out})
+	httpx.WriteJSON(w, http.StatusOK, authwire.List[authwire.TenantView]{Data: out})
 }
 
 // switchTenant issues a session for another tenant the caller belongs to.
@@ -149,5 +150,5 @@ func (h *Handler) switchTenant(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, pairOf(pair))
+	httpx.WriteJSON(w, http.StatusOK, pairOf(pair))
 }

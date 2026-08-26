@@ -16,6 +16,7 @@ import (
 
 	"github.com/simonjanss/rig/presence"
 	"github.com/simonjanss/rig/presence/presencehttp"
+	"github.com/simonjanss/rig/runtime/rigerr"
 	"github.com/simonjanss/rig/runtime/tenancy"
 )
 
@@ -222,6 +223,79 @@ func TestTheAnswerCarriesTheIntervals(t *testing.T) {
 	}
 	if want := int(presence.DefaultHeartbeat.Seconds()); body.HeartbeatSeconds != want {
 		t.Errorf("heartbeatSeconds = %d, want %d", body.HeartbeatSeconds, want)
+	}
+}
+
+// A body over the limit is refused rather than read.
+//
+// Until these routes used [httpx.Decode] there was no limit here at all — the
+// only route in rig that would read an unbounded request body. Authenticated, so
+// never an anonymous hole, but a signed-in client streaming forever into a
+// heartbeat is not a threat model worth keeping.
+func TestABodyOverTheLimitIsRefused(t *testing.T) {
+	t.Parallel()
+
+	// A syntactically valid object whose one string runs well past the 64 KiB
+	// bound, so what refuses it is the limit and not the parser.
+	huge := `{"sessionKey":"` + strings.Repeat("x", 1<<17) + `","scope":"board"}`
+
+	rec := beat(t, someone(), huge)
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("a body of %d bytes answered %d, want 400", len(huge), rec.Code)
+	}
+}
+
+// The envelope is flat and the same one every other rig route answers with.
+//
+// It used to be nested under an `error` key, which neither of rig's client
+// libraries can read: the flat struct they decode into comes out all-zero, so
+// every error predicate answers false and the caller is left with the status.
+func TestTheFallbackEnvelopeIsFlat(t *testing.T) {
+	t.Parallel()
+
+	// No Fail supplied, so this is the package's own fallback.
+	h := presencehttp.New(presence.NewService(presence.Config{DB: stubDB{}}),
+		presencehttp.Options{
+			Claims: func(*http.Request) (tenancy.Claims, error) {
+				return tenancy.Claims{}, rigerr.Forbidden("not for you")
+			},
+		})
+	mux := http.NewServeMux()
+	h.Mount(mux)
+
+	rec := send(mux, http.MethodGet, "/presence", "")
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403", rec.Code)
+	}
+	if got := rec.Header().Get("Content-Type"); got != "application/json; charset=utf-8" {
+		t.Errorf("Content-Type = %q", got)
+	}
+
+	var raw map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &raw); err != nil {
+		t.Fatal(err)
+	}
+	if _, nested := raw["error"]; nested {
+		t.Error(`the envelope has an "error" key, which neither client library reads`)
+	}
+	if raw["code"] != string(rigerr.CodeForbidden) {
+		t.Errorf("code = %v, want %q", raw["code"], rigerr.CodeForbidden)
+	}
+	if raw["message"] != "not for you" {
+		t.Errorf("message = %v", raw["message"])
+	}
+}
+
+// Claims that are well formed but carry no tenant are refused here rather than
+// written into a row. The project's own Claims function is not asked to have
+// checked: [tenancy.FromContext] is, and it is the one source the handlers read.
+func TestClaimsWithNoTenantAreRefused(t *testing.T) {
+	t.Parallel()
+
+	rec := beat(t, tenancy.Claims{AccountID: uuid.New(), Subject: tenancy.SubjectAccount},
+		`{"sessionKey":"tab-1","scope":"board"}`)
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("claims with no tenant answered %d, want 401", rec.Code)
 	}
 }
 
