@@ -1,6 +1,6 @@
 import type { Op } from "./op.js";
 import type { Runtime } from "./runtime.js";
-import type { Budget } from "./retry.js";
+import type { Budget, Retry } from "./retry.js";
 
 import { isReauthorizer } from "./credential.js";
 import { RigError, readError } from "./errors.js";
@@ -187,7 +187,12 @@ async function call(
     // the caller did not supply one, and only when there is a retry to name it
     // for: a client configured not to retry should not be making the server keep
     // a record against the possibility.
-    if (!repeatable && writes(op) && attemptsOf(retry) > 1) {
+    const attempts = attemptsOf(retry);
+
+    // Everything the ladder below needs that does not change between sends.
+    const ladder: Ladder = { rt, opts, retry, budget, attempts };
+
+    if (!repeatable && writes(op) && attempts > 1) {
         const key =
             opts.idempotencyKey ??
             headers.get("Idempotency-Key") ??
@@ -222,17 +227,13 @@ async function call(
             // A request the transport could not make at all. Its own failures —
             // an abort, a body that would not encode — are not the network's and
             // are not retried.
-            if (
-                !repeatable ||
-                attempt >= attemptsOf(retry) ||
-                isAbort(err, opts.signal)
-            ) {
-                throw err;
-            }
-            const wait = retryDelayMs(retry, attempt, 0, rt.jitter);
-            if (!budgetAllows(budget, wait)) throw err;
-            await waitFor(wait, opts.signal);
-            attempt++;
+            attempt = await backoffOrThrow(
+                ladder,
+                attempt,
+                repeatable && !isAbort(err, opts.signal),
+                0,
+                err,
+            );
             continue;
         }
 
@@ -261,7 +262,11 @@ async function call(
                 // Read before the body is discarded: a reauthorizer that answers
                 // false leaves this 401 as the answer, and a refusal with no code
                 // on it would make isUnauthorized say no about a 401.
-                const refusal = await readError(res, rt.now());
+                const refusal = await readError(
+                    res,
+                    rt.now(),
+                    rt.requestIdHeader,
+                );
                 if (!(await cred.reauthorize(opts.signal))) throw refusal;
                 reauthorized = true;
                 continue;
@@ -274,39 +279,71 @@ async function call(
         if (res.status === 304 && opts.ifNoneMatch !== undefined) return res;
 
         if (res.status < 200 || res.status > 299) {
-            const refusal = await readError(res, rt.now());
-            if (
-                !repeatable ||
-                !retryable(res.status) ||
-                attempt >= attemptsOf(retry)
-            ) {
-                throw refusal;
-            }
-            const wait = retryDelayMs(
-                retry,
+            const refusal = await readError(res, rt.now(), rt.requestIdHeader);
+            attempt = await backoffOrThrow(
+                ladder,
                 attempt,
+                repeatable && retryable(res.status),
                 refusal.retryAfterMs,
-                rt.jitter,
+                refusal,
             );
-            if (
-                refusal.retryAfterMs > MAX_RETRY_AFTER_MS ||
-                !budgetAllows(budget, wait)
-            ) {
-                // The server asked for longer than a library may agree to on
-                // somebody's behalf, or for longer than this call has left.
-                // Either way the caller gets the server's own refusal with
-                // retryAfterMs still on it — the same information, handed to
-                // somebody who can decide — and not a timeout blaming this clock
-                // for somebody else's outage.
-                throw refusal;
-            }
-            await waitFor(wait, opts.signal);
-            attempt++;
             continue;
         }
 
         return res;
     }
+}
+
+/** What the ladder needs that does not change between two sends of one call. */
+type Ladder = {
+    rt: Runtime;
+    opts: CallOptions;
+    retry: Retry;
+    budget: Budget;
+    attempts: number;
+};
+
+/**
+ * Waits for the gap before the next send, and answers what attempt it is.
+ *
+ * Throws `cause` — the caller's own error, never one invented here — when there
+ * is no next send: nothing left to repeat, no attempts left, or no room in the
+ * budget. So the caller gets the transport's own failure, or the server's own
+ * refusal with `retryAfterMs` still on it, rather than a timeout from this
+ * clock blaming it for somebody else's outage.
+ *
+ * The two call sites disagree about exactly two things, and those are the two
+ * parameters: what makes a failure worth repeating at all — an abort is the
+ * transport's own answer and a 400 is the server's — and what the server asked
+ * to be waited. Everything under them is one ladder: the attempt ceiling, the
+ * delay, the budget, the wait, the increment. It is written once because a
+ * retry engine whose two halves count differently is a bug that surfaces as a
+ * call giving up one send early, on the path nobody was looking at.
+ *
+ * A `retryAfterMs` of 0 is a wait nobody asked for, which is why the ceiling
+ * test below is safe for the transport-throw site that passes it: no server
+ * said anything, so there is nothing to refuse.
+ */
+async function backoffOrThrow(
+    ladder: Ladder,
+    attempt: number,
+    worthRepeating: boolean,
+    retryAfterMs: number,
+    cause: unknown,
+): Promise<number> {
+    const { rt, opts, retry, budget, attempts } = ladder;
+
+    if (!worthRepeating || attempt >= attempts) throw cause;
+
+    const wait = retryDelayMs(retry, attempt, retryAfterMs, rt.jitter);
+    // The server asked for longer than a library may agree to on somebody's
+    // behalf, or for longer than this call has left.
+    if (retryAfterMs > MAX_RETRY_AFTER_MS || !budgetAllows(budget, wait)) {
+        throw cause;
+    }
+
+    await waitFor(wait, opts.signal);
+    return attempt + 1;
 }
 
 /** Builds and performs one HTTP request. */

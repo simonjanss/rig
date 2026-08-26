@@ -97,9 +97,6 @@ type File struct {
 	DeletedAt  *time.Time
 }
 
-// Uploaded reports whether the bytes ever landed. A file that is not is
-// invisible to every read and is what the sweeper's first rule reaps.
-func (f *File) Uploaded() bool { return f.UploadedAt != nil }
 
 // Upload is a file on its way in.
 //

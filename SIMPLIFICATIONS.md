@@ -755,66 +755,150 @@ the call site is how that confusion gets institutionalised rather than fixed.
 
 ## D. TypeScript workspace (`ts/`)
 
-### D1. `client/src/transport.ts`: extract the duplicated retry ladder `[ ]`
+### D1. `client/src/transport.ts`: extract the duplicated retry ladder `[x]`
 
-The transport-throw path (`:219-237`) and bad-status path (`:276-306`) run the
-identical check-repeatable → check-attempts → delay → budget → wait → increment
-ladder. Extract `backoffOrThrow(...)` returning the next attempt or throwing;
-hoist `attemptsOf(retry)` out of the loop. ~~Mirror of C3.~~
+The transport-throw path and the bad-status path ran the identical
+check-repeatable → check-attempts → delay → budget → wait → increment ladder.
+Both are now `backoffOrThrow`, which waits and answers what attempt it is, or
+throws the caller's own error.
 
 ~~Mirror of C3~~ — C3 landed and this is not the other half of it. Its two
 helpers are about a response body closed by hand and a form seeked back to where
-it started, and TypeScript has neither. The ladder duplicated here is real and
-still worth extracting; it is just its own item now. See the note under C3.
+it started, and TypeScript has neither. The ladder duplicated here was real and
+worth extracting; it was just its own item. See the note under C3.
 
-- **Size:** ~25 lines. **Risk:** low-medium (retry engine).
+- **Two parameters, because the two sites disagree about exactly two things.**
+  What makes a failure worth repeating at all — `!isAbort(err, signal)` on the
+  transport side, `retryable(res.status)` on the server's — and what the server
+  asked to be waited. Everything under those is one ladder. Both are computed at
+  the call site as a plain boolean, so the helper has no opinion about which
+  kind of failure it is looking at.
+- **The invariants travel as one `Ladder` object built before the loop**, rather
+  than as four more parameters. This is C3's lesson applied on the other side:
+  the reason C3 left its refusal arm inline was a seven-parameter signature with
+  five of them loop state. Here only `attempt` is loop state, and it is the
+  return value.
+- **`attemptsOf(retry)` is hoisted**, which it had to be anyway — it was already
+  being called once before the loop for the idempotency-key decision and twice
+  more inside it, three calls to answer one question that cannot change.
+- **The `MAX_RETRY_AFTER_MS` ceiling is now on both paths, and that is a no-op
+  rather than a change.** The transport-throw site passes `retryAfterMs: 0`,
+  and no server said anything, so there is nothing to refuse.
+- **Size:** loop body 107 → 84 lines; the helper is 20 including the reason
+  it exists. **Risk:** low-medium (retry engine) — all 18 of
+  `transport.test.ts` pass unchanged, which is what the risk was about.
 
-### D2. Trim `@rig/client`'s public surface `[ ]`
+### D2. Trim `@rig/client`'s public surface `[x]`
 
-`ts/packages/client/src/index.ts` exports ~15 symbols nothing outside the
-package imports and no doc mentions: `asPost`, `isIdempotent`, `writes`,
-`isBindable`, `readError`, `parseRetryAfter`, `formatParam`, `retryable`,
-`retryDelayMs`, the `DEFAULT_*`/`MAX_*` constants, the `RATE_LIMIT_*` header
-names. Exporting plumbing freezes it as SemVer surface. Keep what the
-generator emits (verified consumed set includes `METHOD_QUERY`, `send*`,
-`pathValue`, `setParam(s)`, `multipart`, `Session`, error predicates).
+Sixteen exports gone: `asPost`, `isIdempotent`, `writes`, `isBindable`,
+`readError`, `parseRetryAfter`, `formatParam`, `retryable`, `retryDelayMs`, the
+four retry `DEFAULT_*`/`MAX_*` constants and the three `RATE_LIMIT_*` header
+names. Each is still exported from its own module — this is the entry point's
+surface, not the package's internals.
 
-- **Size:** ~25 export lines. **Risk:** low — verify against
-  `internal/gen/tsclient` emit sites before deleting each.
+- **How the consumed set was established**, since a `grep` over `ts/` is the
+  wrong instrument: the generator is a consumer that writes TypeScript from Go
+  string literals. Three sources, all of them checked. `b.Import` and
+  `b.ImportType` call sites in `internal/gen/tsclient/*.go` — ten values and six
+  types, and `emitter.ref`/`refValue` only ever name the project's own generated
+  modules, never `@rig/client`. Every `from "@rig/client"` block in the goldens
+  and in `examples/linearlite/web` — the same set plus `Session`, `TokenPair`,
+  `isConflict`. And `docs/`, where `fraction` and `fieldsAs` appear and none of
+  the sixteen do. The generated `index.ts` names `RigError`, `Session` and
+  `paginate` in its own doc comment as what a caller reaches for; all three
+  stay.
+- **Two the entry named that stayed, and the reason is the same one.**
+  `DEFAULT_REQUEST_ID_HEADER` and `DEFAULT_REVISION_HEADER` are the documented
+  defaults of two `Config` fields — a caller comparing what it is about to set
+  against what it would get — and `tsclient.go:56` pins the second one by name
+  in a comment. They are not plumbing; they are the answer to a question the
+  configuration raises. `Op` also stays: it is what `send` takes, and the
+  predicates over it are what went.
+- **The entry point now says what it is for**, in a paragraph at the top,
+  because "why is this not exported" is the question a reader will have and the
+  answer is not derivable from the list.
+- **Verification:** `make ts` plus `make linearlite-web`, which is the one real
+  application compiled against this surface — 302 modules, `tsc --noEmit` and a
+  production build.
+- **Size:** 22 export lines. **Risk:** low, and the risk is not backwards: this
+  is a removal from a published package's entry point, so it is a breaking
+  change for anybody who had reached for one. Nothing in this repository had.
 
 ### D3. `electric/src/params.ts`: latent cache-key collision `[ ]`
 
-`paramsCacheKey` hand-rolls `join("&")`, so `{a: "b&c=d"}` and
-`{a: "b", c: "d"}` produce the same key. Rebuild on `serializeParams` +
-`URLSearchParams` (`q.sort(); q.toString()`), which percent-encodes and
-removes the duplication with `serializeParams`. **This one is a bug fix, not
+`paramsCacheKey` hand-rolled `join("&")`, so `{a: "b&c=d"}` and
+`{a: "b", c: "d"}` produced the same key. It is `serializeParams` +
+`URLSearchParams` now (`q.sort(); q.toString()`), which percent-encodes and
+removes the duplication with `serializeParams`. **This one was a bug fix, not
 just cleanup.**
 
-- **Size:** ~26 → ~10 lines. **Risk:** low (cache keys change shape once).
+- **What the collision actually did.** `createCollectionCache` keys on
+  `${runtime.origin}|${paramsCacheKey(params)}`, and a collection is a live
+  stream over a shape. Two collections asking for different rows shared one
+  instance, so one of them was silently handed the other's rows — a wrong
+  answer, not a slow one. Reachable from any param a person can type into.
+- **The sort changed from `localeCompare` to `URLSearchParams.sort`**, which
+  orders by code unit. Only stability matters — nobody reads this key — and a
+  key that depends on the reader's locale was the weaker of the two.
+- **Two tests where there were none for the property**, asserting that
+  `{a: "b&c=d"}` and `{a: "b", c: "d"}` are now different keys. The existing
+  "stable across literal order" test passes unchanged, which is the whole reason
+  to keep it.
+- **Size:** 12 → 12 lines of code, and 12 of comment saying why. **Risk:** low
+  (cache keys change shape once).
 
 ### D4. Presence applies the credential twice per heartbeat `[ ]`
 
-`send()` awaits `credential.apply(headers)`; `presence.ts:245-255` then calls
-`authorizationOf(runtime)` which builds a second `Headers` and awaits `apply`
-again just to read back the same value — with a `Session` credential that can
-run the whole stale/exchange path twice per beat.
+`send()` awaited `credential.apply(headers)`; `presence.ts` then called
+`authorizationOf(runtime)`, which built a second `Headers` and awaited `apply`
+again just to read back the same value — with a `Session` credential, the whole
+stale-check-and-exchange path, twice per beat, in every open tab.
 
-- **Fix:** have `beat` return `{ answer, authorization }`; delete
-  `authorizationOf` (`presence/src/transport.ts:113-117`).
+`send` now returns `{ res, authorization }` — the header it already built, read
+back off itself — and `beat` returns `{ answer, authorization }`.
+`authorizationOf` is gone.
+
+- **The rationale moved with the value.** The doc comment explaining why the
+  leave cannot ask for a credential itself — `apply` may be async, and a page
+  being unloaded may not outlive a promise — now sits on `Beat.authorization`,
+  which is the thing that exists because of it.
+- **Two tests, and the second one is the one that matters.** That the credential
+  is applied once per beat and not twice is the fix; that the leave still sends
+  the beat's `Authorization` is the property the fix could have broken, and
+  dropping an apply that nothing checked would have dropped the header with it.
+- **Nothing here was public.** `presence/src/transport.ts` is not re-exported
+  from the package's `index.ts`, so `beat`, `send` and `authorizationOf` were
+  internal and this is not a surface change.
 - **Size:** ~20 lines. **Risk:** low.
 
-### D5. TS small items `[ ]`
+### D5. TS small items `[x]`
 
-- `errors.ts:222-225` — the lowercase `x-request-id` fallback is unreachable
-  (`Headers.get` is case-insensitive), and both lines hardcode the name past
-  `Runtime.requestIdHeader`; pass the configured name in from `transport.ts`.
-- `retry.ts:98-104` — replace the doubling loop with
-  `Math.min(base * 2 ** (attempt - 2), cap)`.
-- `credential.ts:62-83` — `apiKey` is a byte-identical copy of `staticToken`;
-  make it `export const apiKey = staticToken;` (or keep both bodies only if
-  the types should diverge).
-- `presence.ts:320-324` — `others()` chains five array allocations on the
-  `useSyncExternalStore` hot path; one loop + sort.
+- **`errors.ts` — a latent bug, not just an unreachable line.** The lowercase
+  `x-request-id` fallback was indeed dead (`Headers.get` is case-insensitive by
+  specification), but the half worth fixing is the other one: both lines
+  hardcoded `X-Request-Id` past `Runtime.requestIdHeader`, so a project that
+  renamed the header had the answer read back under the default name and lost
+  the identifier from **every** refusal — in exactly the projects that cared
+  enough to rename it. `readError` now takes the configured name, which
+  `transport.ts` passes from `rt.requestIdHeader`. A required parameter rather
+  than one defaulting to `DEFAULT_REQUEST_ID_HEADER`, because a default here is
+  a second place the default lives; D2 had just taken `readError` off the entry
+  point, so there was no published signature to keep. Two tests: a renamed
+  header is read, and a server answering in lowercase still is.
+- **`retry.ts` — the doubling loop is `Math.min(base * 2 ** …, cap)`.** With the
+  exponent clamped at 32 rather than left to run: `attempts` is a caller-supplied
+  number with no ceiling, and past about a thousand `2 ** n` is `Infinity`, which
+  reaches the cap correctly for a positive base and answers **`NaN`** for
+  `baseMs: 0` — which `?? DEFAULT_RETRY_BASE_MS` lets through, since `0 ?? x` is
+  `0`. The loop it replaced had the mirror-image problem: for the same input it
+  spun a thousand times to reach the answer it started with.
+- **`credential.ts` — `apiKey` is `staticToken`.** An alias rather than a second
+  body, with the doc naming the condition under which it stops being one.
+- **`presence.ts` — `others()` is one pass.** Four chained `.filter`/`.map` calls
+  and a sort became a loop and a sort. It is read back after every commit, which
+  is what `useSyncExternalStore` does, so each link was another array as long as
+  the room. The identity-cache below it is unchanged; that one is a correctness
+  requirement rather than an optimization, and its own comment says so.
 
 ---
 
@@ -858,10 +942,19 @@ inspection — which is the reason for this section's parenthesis:
 | `password.AtLeast` | `auth/password/password.go` | |
 | `account.DefaultSlug` | `auth/account/tenant.go:264` | |
 | `(*account.Service).HasPassword` | `auth/account/service.go:885` | |
-| `(*files.File).Uploaded` | `files/files.go:102` | |
-| `(*blob.Memory).SetClock` | `files/blob/memory.go:43` | |
+| ~~`(*files.File).Uploaded`~~ | `files/files.go:102` | Done under D — confirmed unreferenced anywhere, deleted. |
+| ~~`(*blob.Memory).SetClock`~~ | `files/blob/memory.go:43` | Done under D, and it took more with it than the row says — see below. |
 | `(*apikey.Key).Allows` | `auth/apikey/apikey.go:98` | ⚠ CIDR check — may be a **missing call**, not dead code. Decide, don't just delete. |
 | ~~`var _ = dbx.IsNoRows`~~ | `notify/dispatch.go:513` | Done under B1 — the `dbx` import went with it, which is what the blank was papering over. |
+
+**`SetClock` was a seam that did not do what its comment said.** The field it
+wrote — `Memory.now` — was read in one place, `Put`'s `ModTime`. The doc comment
+said it was "for a test that needs to age an object", but ageing an object is
+`Mark(ctx, key, state, at)`, whose clock comes from the caller and always did.
+So the deletion took the `now` field and `clock()`'s nil branch with it,
+`Put` reads `time.Now().UTC()` directly, and what went was not just an unused
+method but a second, non-functioning answer to a question `Mark` already
+answers. Nothing was made harder to test.
 
 ---
 

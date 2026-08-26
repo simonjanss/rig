@@ -96,12 +96,16 @@ export function retryDelayMs(
     if (attempt <= 1) return 0;
 
     const cap = retry.capMs ?? DEFAULT_RETRY_CAP_MS;
-    let window = retry.baseMs ?? DEFAULT_RETRY_BASE_MS;
-    for (let i = 0; i < attempt - 2; i++) {
-        if (window >= cap) break;
-        window *= 2;
-    }
-    window = Math.min(window, cap);
+    const base = retry.baseMs ?? DEFAULT_RETRY_BASE_MS;
+
+    // Doubling, capped. The second attempt waits `base` and each one after that
+    // twice the last, so the exponent runs two behind the attempt number.
+    //
+    // The exponent is clamped rather than left to overflow: a caller may set any
+    // number of attempts, and past about a thousand `2 ** n` is Infinity — which
+    // reaches the cap correctly for a positive base and answers NaN for a base of
+    // zero. 2 ** 32 is already past every cap a schedule this short can have.
+    const window = Math.min(base * 2 ** Math.min(attempt - 2, 32), cap);
 
     // Half the window, plus a random share of the other half. Full jitter — a
     // wait anywhere in [0, window] — spreads a crowd better still, but it also

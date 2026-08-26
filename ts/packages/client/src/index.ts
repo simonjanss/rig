@@ -15,6 +15,16 @@
  *
  * Nothing here is React, and nothing here is live sync. Streams are
  * `@rig/electric`, which takes the {@link Runtime} this module builds.
+ *
+ * **What is exported is what a caller or a generated client uses, and nothing
+ * else.** The plumbing under those — how an operation is classified, how a
+ * refusal is read off a response, how a delay is computed, what the retry
+ * defaults happen to be — is not exported, because exporting it would freeze it
+ * as SemVer surface: a package that names its own internals in its entry point
+ * cannot change them without a major version, for the benefit of nobody who
+ * asked. Anything genuinely needed from in here is reachable through the shapes
+ * that are exported — a `Retry` on the {@link Config} rather than the numbers it
+ * defaults to, a {@link RigError} rather than the reader that built it.
  */
 
 export {
@@ -24,12 +34,7 @@ export {
 } from "./runtime.js";
 export type { ApiDescriptor, AuthProfile, Config } from "./runtime.js";
 
-export {
-    staticToken,
-    apiKey,
-    isReauthorizer,
-    isBindable,
-} from "./credential.js";
+export { staticToken, apiKey, isReauthorizer } from "./credential.js";
 export type { Bindable, Credential, Reauthorizer } from "./credential.js";
 
 export { Session, NoSessionError } from "./session.js";
@@ -38,7 +43,10 @@ export type { TokenPair } from "./session.js";
 export { send, sendContent, sendNoContent, sendOptional } from "./transport.js";
 export type { CallOptions } from "./transport.js";
 
-export { METHOD_QUERY, asPost, isIdempotent, writes } from "./op.js";
+// `Op` travels because it is what `send` takes; the predicates over it —
+// `asPost`, `isIdempotent`, `writes` — are how the transport decides what to do
+// with one, which is not a decision a caller makes.
+export { METHOD_QUERY } from "./op.js";
 export type { Op } from "./op.js";
 
 export {
@@ -57,35 +65,22 @@ export {
     isUnauthorized,
     isUnsupportedMediaType,
     isUpgradeRequired,
-    parseRetryAfter,
-    readError,
 } from "./errors.js";
 export type { FieldError } from "./errors.js";
 
-export {
-    DEFAULT_ATTEMPTS,
-    DEFAULT_RETRY_BASE_MS,
-    DEFAULT_RETRY_CAP_MS,
-    MAX_RETRY_AFTER_MS,
-    retryable,
-    retryDelayMs,
-} from "./retry.js";
+// Only the shape. The defaults a `Retry` falls back to are the transport's
+// business, and a caller that wants a different number writes the number.
 export type { Retry } from "./retry.js";
 
-export {
-    RATE_LIMIT_LIMIT,
-    RATE_LIMIT_REMAINING,
-    RATE_LIMIT_RESET,
-    fraction,
-    rateLimitOf,
-    used,
-} from "./rate-limit.js";
+// `rateLimitOf` is how the headers are read; the header names it reads are not
+// a second, worse way to do the same thing.
+export { fraction, rateLimitOf, used } from "./rate-limit.js";
 export type { RateLimitStatus } from "./rate-limit.js";
 
 export { paginate } from "./paginate.js";
 export type { Page } from "./paginate.js";
 
-export { formatParam, pathValue, setParam, setParams } from "./query.js";
+export { pathValue, setParam, setParams } from "./query.js";
 export type { ParamValue } from "./query.js";
 
 export { multipart } from "./upload.js";
