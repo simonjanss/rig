@@ -73,8 +73,5 @@ func RequireScope(c Claims, s Scope, wide string) error {
 	if s != ScopeAll {
 		return nil
 	}
-	if err := Require(c, wide); err != nil {
-		return err
-	}
-	return nil
+	return Require(c, wide)
 }
