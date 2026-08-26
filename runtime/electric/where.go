@@ -89,6 +89,11 @@ func (w *Where) NotNull(column string) *Where {
 // place in this package where the caller is responsible for what reaches the
 // database. Never build the string from a request; use the other methods, which
 // bind their values.
+//
+// Two databases, now. What is written here is parsed by the sync service in a
+// grammar of its own, and — where [Config.DB] is set — concatenated into a
+// statement this package sends to Postgres. The second is the stricter test of
+// the sentence above.
 func (w *Where) Raw(condition string) *Where {
 	if condition = strings.TrimSpace(condition); condition != "" {
 		w.parts = append(w.parts, "("+condition+")")

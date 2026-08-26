@@ -823,6 +823,20 @@ type ElectricEndpoint struct {
 	// route when the document is frozen, the same way an endpoint's is.
 	Path   string          `json:"path"`
 	Params []ElectricParam `json:"params,omitempty"`
+
+	// Fallback is whether this shape answers from the database when the sync
+	// service cannot be reached, rather than answering 502.
+	//
+	// True for a table that asked for a shape at all, because a page whose list
+	// *is* a shape renders nothing without its rows. False is for a shape whose
+	// value is its freshness rather than its rows: a snapshot of who was looking
+	// at this a moment ago, that then stops updating, is worth less than an empty
+	// list.
+	//
+	// No omitempty, deliberately. The interesting value is the false one, and a
+	// tag that hid it would leave the shape that opted out looking exactly like
+	// one nobody had thought about.
+	Fallback bool `json:"fallback"`
 }
 
 // DeletedPath is the route of the trash shape, and VersionsPath the route of the

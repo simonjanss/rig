@@ -425,7 +425,16 @@ electric:
       type: Timestamp
       optional: true
       description: Only rows changed after this moment.
+  # Answer this shape from the database while the sync service is unreachable.
+  # On by default, and one key for all three of the table's shapes.
+  fallback: true
 ```
+
+`fallback` is worth turning off for a shape whose value is its freshness rather
+than its rows: a snapshot that then stops updating is worth less than the empty
+list a refusal leaves. It takes effect only where the proxy was given a database
+to read from at all — see
+[electric.md](electric.md#when-the-sync-service-is-down).
 
 See [electric.md](electric.md).
 

@@ -169,6 +169,11 @@ func generatorsYAML(module string) string {
 	fmt.Fprintf(&b, "      shape_import: %s/internal/electric\n", module)
 	b.WriteString("      # Where your extra scoping goes. Written once, then yours.\n")
 	b.WriteString("      stub_dir: services/{table}\n")
+	b.WriteString("      # Nothing here decides what happens when the sync service is\n")
+	b.WriteString("      # unreachable. Pass DB to electric.Config where you build the\n")
+	b.WriteString("      # proxy and every shape answers from its own filter instead of\n")
+	b.WriteString("      # 502; leave it out and a sync outage is a subscriber with no\n")
+	b.WriteString("      # rows. See docs/electric.md.\n")
 	return b.String()
 }
 

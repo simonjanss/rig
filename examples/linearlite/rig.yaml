@@ -215,8 +215,3 @@ generators:
       shape_import: github.com/simonjanss/rig/examples/linearlite/internal/electric
       # Where your extra scoping goes. Written once, then yours.
       stub_dir: services/{table}
-      # Naming the model turns on the fallback seam: a Fallback field per shape
-      # on Handlers, and the row encoder a snapshot needs. Without it a sync
-      # outage is a 502 and a subscriber with no rows. services/todo/
-      # todo_fallback.go is the one wired here.
-      model_import: github.com/simonjanss/rig/examples/linearlite/internal/model

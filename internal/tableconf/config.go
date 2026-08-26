@@ -206,6 +206,14 @@ type Electric struct {
 
 	// Params are extra query parameters, keyed by the query-string key.
 	Params map[string]ElectricParam `yaml:"params,omitempty" json:"params,omitempty" jsonschema_description:"Extra query parameters, keyed by query-string key."`
+
+	// Fallback is whether this shape answers from the database while the sync
+	// service is unreachable. Defaults to true.
+	//
+	// A pointer, so that "not mentioned" and "false" are different answers: the
+	// default is on, and there is no way to write the default down that could be
+	// mistaken for having asked for it.
+	Fallback *bool `yaml:"fallback,omitempty" json:"fallback,omitempty" jsonschema_description:"Answer this shape from the database while the sync service is unreachable. On by default."`
 }
 
 // ElectricParam is one declared query parameter of a live-sync endpoint.

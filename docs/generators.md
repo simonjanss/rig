@@ -50,7 +50,6 @@ Every generator takes `out_dir` and an `options` block. The common ones:
 |---|---|---|
 | `package` | all | The Go package the generated files declare |
 | `model_import` | `persist-go`, `service-go`, `server-go` | Import path of the generated model package. Required |
-| `model_import` | `electric` | Optional there, and the switch that turns the [fallback](electric.md#when-the-sync-service-is-down) on. Omit it and a shape has no fallback seam at all |
 | `store_import` | `service-go` | Import path of the generated persistence layer |
 | `api_import` | `service-go` | Import path of the generated API package, so a stub elsewhere can refer back |
 | `stub_dir` | `service-go`, `electric` | Where your hand-owned files go. `{table}` and `{Table}` are substituted. Empty writes no stubs |

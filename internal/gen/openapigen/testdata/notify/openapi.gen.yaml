@@ -743,7 +743,7 @@ paths:
                 "403":
                     $ref: '#/components/responses/Forbidden'
                 "502":
-                    description: The sync service could not be reached, and this shape has nothing to answer with instead.
+                    description: 'The sync service could not be reached, and this shape had nothing to answer with instead: no database was configured, this shape asked not to be answered from one, or the read failed or was larger than a snapshot may be.'
                     content:
                         text/plain: {}
                 "503":
@@ -838,7 +838,7 @@ paths:
                 "403":
                     $ref: '#/components/responses/Forbidden'
                 "502":
-                    description: The sync service could not be reached, and this shape has nothing to answer with instead.
+                    description: 'The sync service could not be reached, and this shape had nothing to answer with instead: no database was configured, this shape asked not to be answered from one, or the read failed or was larger than a snapshot may be.'
                     content:
                         text/plain: {}
                 "503":

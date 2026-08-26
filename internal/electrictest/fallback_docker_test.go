@@ -47,7 +47,10 @@ CREATE TABLE IF NOT EXISTS wide (
     c_jsonb     jsonb,
     c_enum      wide_kind,
     c_textarr   text[],
-    c_bytea     bytea
+    c_bytea     bytea,
+    c_boolarr   boolean[],
+    c_int2      smallint,
+    c_float4    real
 );
 `
 
@@ -55,8 +58,12 @@ CREATE TABLE IF NOT EXISTS wide (
 var wideColumns = []string{
 	"id", "tenant_id", "c_text", "c_bool", "c_int8", "c_numeric", "c_float8",
 	"c_tstz", "c_date", "c_time", "c_uuid", "c_jsonb", "c_enum", "c_textarr",
-	"c_bytea",
+	"c_bytea", "c_boolarr", "c_int2", "c_float4",
 }
+
+// wideKey is what identifies a row of the shape, the way a generated shape
+// carries its table's primary key.
+var wideKey = []string{"id"}
 
 // wideRow is what a generated model holds for those columns, with the Go types
 // rig's own mapping picks.
@@ -76,6 +83,9 @@ type wideRow struct {
 	Enum     *string
 	TextArr  []string
 	Bytea    []byte
+	BoolArr  []bool
+	Int2     *int16
+	Float4   *float32
 }
 
 // render is what the generated encoder does, by hand: one electric.Value per
@@ -99,6 +109,9 @@ func (w wideRow) render() electric.Row {
 			"c_enum":    electric.Value(w.Enum),
 			"c_textarr": electric.Value(w.TextArr),
 			"c_bytea":   electric.Value(w.Bytea),
+			"c_boolarr": electric.Value(w.BoolArr),
+			"c_int2":    electric.Value(w.Int2),
+			"c_float4":  electric.Value(w.Float4),
 		},
 	}
 }
@@ -107,7 +120,8 @@ func (w wideRow) render() electric.Row {
 func readWide(ctx context.Context, p *pgxpool.Pool, tenant uuid.UUID) ([]wideRow, error) {
 	rows, err := p.Query(ctx, `
 		SELECT id, tenant_id, c_text, c_bool, c_int8, c_numeric, c_float8,
-		       c_tstz, c_date, c_time, c_uuid, c_jsonb, c_enum, c_textarr, c_bytea
+		       c_tstz, c_date, c_time, c_uuid, c_jsonb, c_enum, c_textarr, c_bytea,
+		       c_boolarr, c_int2, c_float4
 		FROM wide WHERE tenant_id = $1`, tenant)
 	if err != nil {
 		return nil, err
@@ -119,7 +133,8 @@ func readWide(ctx context.Context, p *pgxpool.Pool, tenant uuid.UUID) ([]wideRow
 		var w wideRow
 		if err := rows.Scan(&w.ID, &w.TenantID, &w.Text, &w.Bool, &w.Int8,
 			&w.Numeric, &w.Float8, &w.TSTZ, &w.Date, &w.Clock, &w.UUID,
-			&w.JSONB, &w.Enum, &w.TextArr, &w.Bytea); err != nil {
+			&w.JSONB, &w.Enum, &w.TextArr, &w.Bytea,
+			&w.BoolArr, &w.Int2, &w.Float4); err != nil {
 			return nil, err
 		}
 		out = append(out, w)
@@ -128,21 +143,26 @@ func readWide(ctx context.Context, p *pgxpool.Pool, tenant uuid.UUID) ([]wideRow
 }
 
 // wideFront serves the shape, through a proxy the caller chooses: the real sync
-// service, or one pointed nowhere with a fallback behind it.
-func wideFront(t *testing.T, proxy *electric.Proxy, tenant uuid.UUID, fb electric.Fallback) *httptest.Server {
+// service, or one pointed nowhere. The mutator is what a generated handler would
+// have put on the Shape — a Fallback, or the key and schema the proxy reads it
+// with — and is nil for the shape as the sync service sees it.
+func wideFront(t *testing.T, proxy *electric.Proxy, tenant uuid.UUID, on func(*electric.Shape)) *httptest.Server {
 	t.Helper()
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var where electric.Where
 		where.Eq("tenant_id", tenant.String())
 
-		proxy.Serve(w, r, electric.Shape{
-			Table:    "wide",
-			Where:    where.SQL(),
-			Params:   where.Params(),
-			Columns:  wideColumns,
-			Fallback: fb,
-		})
+		s := electric.Shape{
+			Table:   "wide",
+			Where:   where.SQL(),
+			Params:  where.Params(),
+			Columns: wideColumns,
+		}
+		if on != nil {
+			on(&s)
+		}
+		proxy.Serve(w, r, s)
 	}))
 	t.Cleanup(srv.Close)
 	return srv
@@ -189,11 +209,12 @@ func insertWide(t *testing.T, p *pgxpool.Pool, tenant uuid.UUID) {
 	if _, err := p.Exec(context.Background(), `
 		INSERT INTO wide (id, tenant_id, c_text, c_bool, c_int8, c_numeric,
 		    c_float8, c_tstz, c_date, c_time, c_uuid, c_jsonb, c_enum, c_textarr,
-		    c_bytea)
+		    c_bytea, c_boolarr, c_int2, c_float4)
 		VALUES ($1, $2, 'a "quoted" text', true, 9007199254740993, 12345.6789,
 		    1.5, '2026-08-25 10:06:07.123456+02', '2026-08-25', '10:06:07.5', $3,
 		    '{"z":1,"a":{"b":[1,2,null]}}', 'Snapshot',
-		    ARRAY['one','two, with comma','has "quote"'], '\x00ff10')`,
+		    ARRAY['one','two, with comma','has "quote"'], '\x00ff10',
+		    ARRAY[true,false], -32768, 1.5)`,
 		uuid.New(), tenant, uuid.New()); err != nil {
 		t.Fatal(err)
 	}
@@ -205,8 +226,16 @@ func insertWide(t *testing.T, p *pgxpool.Pool, tenant uuid.UUID) {
 	}
 }
 
-// The claim the whole feature rests on: for the same rows, a fallback snapshot
-// and a chunk of the real shape carry the same values.
+// The claim the whole feature rests on: for the same rows, a snapshot the proxy
+// builds and a chunk of the real shape carry the same values.
+//
+// This is the one the fallback needs and the unit tests cannot be. Everything
+// about rendering — an array's quoting, a numeric's scale, whether a boolean is
+// t or true, what a bytea looks like — is the sync service's answer rather than
+// this package's opinion, and only one of the two sides is rig's to produce. Both
+// paths are checked: the read the proxy builds from the shape's own filter, which
+// is what every project gets, and a hand-written Fallback, which is the escape
+// hatch and the only thing that exercises electric.Value against real rows.
 func TestAFallbackSnapshotAgreesWithTheSyncService(t *testing.T) {
 	p, url := environment(t)
 	ctx := context.Background()
@@ -229,40 +258,136 @@ func TestAFallbackSnapshotAgreesWithTheSyncService(t *testing.T) {
 	}
 
 	fromSync, syncHeaders := values(t, wideFront(t, live, tenant, nil))
-	fromFallback, fbHeaders := values(t, wideFront(t, gone, tenant, func(ctx context.Context) (electric.Snapshot, error) {
-		read, err := readWide(ctx, p, tenant)
-		if err != nil {
-			return electric.Snapshot{}, err
-		}
-		out := make([]electric.Row, 0, len(read))
-		for _, w := range read {
-			out = append(out, w.render())
-		}
-		return electric.Snapshot{Rows: out, Schema: syncHeaders.Get("electric-schema")}, nil
-	}))
+	schema := syncHeaders.Get("electric-schema")
 
-	if fbHeaders.Get("X-Rig-Sync-Fallback") == "" {
-		t.Fatal("the second answer came from the sync service, so this proves nothing")
-	}
-	if len(fromSync) != 2 || len(fromFallback) != 2 {
-		t.Fatalf("got %d rows from the sync service and %d from the fallback",
-			len(fromSync), len(fromFallback))
+	// A proxy given the database. Nothing on the shape but the key and the schema
+	// — the filter it reads with is the one it would have sent upstream, which is
+	// the whole claim.
+	read, err := electric.New(electric.Config{URL: "http://127.0.0.1:1", DB: p})
+	if err != nil {
+		t.Fatal(err)
 	}
 
-	for key, want := range fromSync {
-		got, ok := fromFallback[key]
-		if !ok {
-			t.Errorf("the fallback did not send %s, so the keys disagree", key)
-			continue
-		}
-		for _, col := range wideColumns {
-			compare(t, key, col, want[col], got[col])
-		}
+	for _, tc := range []struct {
+		name string
+		on   func(*electric.Shape)
+	}{
+		{"the read the proxy builds", func(s *electric.Shape) {
+			s.Key = wideKey
+			s.Schema = schema
+		}},
+		{"a hand-written fallback", func(s *electric.Shape) {
+			s.Fallback = func(ctx context.Context) (electric.Snapshot, error) {
+				rows, err := readWide(ctx, p, tenant)
+				if err != nil {
+					return electric.Snapshot{}, err
+				}
+				out := make([]electric.Row, 0, len(rows))
+				for _, w := range rows {
+					out = append(out, w.render())
+				}
+				return electric.Snapshot{Rows: out, Schema: schema}, nil
+			}
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			proxy := read
+			if tc.name == "a hand-written fallback" {
+				proxy = gone
+			}
+			fromFallback, fbHeaders := values(t, wideFront(t, proxy, tenant, tc.on))
+
+			if fbHeaders.Get("X-Rig-Sync-Fallback") == "" {
+				t.Fatal("this answer came from the sync service, so it proves nothing")
+			}
+			if got := fbHeaders.Get("electric-schema"); got != schema {
+				t.Errorf("electric-schema:\n got %s\nwant %s", got, schema)
+			}
+			if len(fromSync) != 2 || len(fromFallback) != 2 {
+				t.Fatalf("got %d rows from the sync service and %d from the fallback",
+					len(fromSync), len(fromFallback))
+			}
+
+			for key, want := range fromSync {
+				got, ok := fromFallback[key]
+				if !ok {
+					t.Errorf("the fallback did not send %s, so the keys disagree", key)
+					continue
+				}
+				for _, col := range wideColumns {
+					compare(t, key, col, want[col], got[col])
+				}
+			}
+		})
 	}
 }
 
-// compare is column equality, with the two columns that are equal without being
+// A shape that opted out answers a sync outage the way it always did, even where
+// the proxy has a database and every other shape is answered from it.
+func TestAShapeThatOptedOutIsStillABadGateway(t *testing.T) {
+	p, _ := environment(t)
+
+	if _, err := p.Exec(context.Background(), wideSchema); err != nil {
+		t.Fatal(err)
+	}
+	tenant := uuid.New()
+	insertWide(t, p, tenant)
+
+	proxy, err := electric.New(electric.Config{URL: "http://127.0.0.1:1", DB: p})
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := wideFront(t, proxy, tenant, func(s *electric.Shape) {
+		s.Key = wideKey
+		s.NoFallback = true
+	})
+
+	res, err := srv.Client().Get(srv.URL + "?offset=-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusBadGateway {
+		t.Errorf("status %d, want %d", res.StatusCode, http.StatusBadGateway)
+	}
+}
+
+// The bound refuses rather than truncating, and does it as a LIMIT — so the rows
+// past it are never read. A subscriber cannot tell a short answer from a
+// complete one, which is why a partial snapshot would be worse than none.
+func TestAShapePastItsBoundIsRefusedByTheRead(t *testing.T) {
+	p, _ := environment(t)
+
+	if _, err := p.Exec(context.Background(), wideSchema); err != nil {
+		t.Fatal(err)
+	}
+	tenant := uuid.New()
+	insertWide(t, p, tenant)
+
+	// Two rows, and room for one.
+	proxy, err := electric.New(electric.Config{URL: "http://127.0.0.1:1", DB: p, MaxSnapshotRows: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := wideFront(t, proxy, tenant, func(s *electric.Shape) { s.Key = wideKey })
+
+	res, err := srv.Client().Get(srv.URL + "?offset=-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusBadGateway {
+		t.Errorf("status %d, want %d — a snapshot past its bound is refused", res.StatusCode, http.StatusBadGateway)
+	}
+}
+
+// compare is column equality, with the one column that is equal without being
 // identical named and explained rather than skipped.
+//
+// One, now. A jsonb document used to be compared as JSON, on the grounds that
+// Postgres prints it normalised and Go prints what it was handed — but both paths
+// send the bytes Postgres printed, so there is nothing left for that tolerance to
+// forgive, and a tolerance nothing needs is one that hides something.
 func compare(t *testing.T, key, col string, want, got any) {
 	t.Helper()
 
@@ -273,29 +398,20 @@ func compare(t *testing.T, key, col string, want, got any) {
 		return
 	}
 
-	switch col {
-	// The sync service writes "2026-08-25 08:06:07.123456+00" and the fallback
+	// The sync service writes "2026-08-25 08:06:07.123456+00" and a snapshot
 	// writes the RFC 3339 form the API sends. Both parse to the same instant,
 	// which is what a subscriber ends up with, and only one of them is also what
-	// the same column looks like over REST.
-	case "c_tstz":
-		a, b := instant(t, want), instant(t, got)
-		if !a.Equal(b) {
+	// the same column looks like over REST — so this is a decision rather than a
+	// discrepancy, and electric.Value has the reasoning.
+	if col == "c_tstz" {
+		if a, b := instant(t, want), instant(t, got); !a.Equal(b) {
 			t.Errorf("%s.%s: %s and %s are different moments", key, col, want, got)
 		}
+		return
+	}
 
-	// Postgres prints jsonb normalised — keys sorted, a space after every colon
-	// — and Go prints what it was handed. The document is the value, and
-	// JSON.parse does not care which of the two it reads.
-	case "c_jsonb":
-		if !sameJSON(t, want, got) {
-			t.Errorf("%s.%s: sync service %s, fallback %s", key, col, want, got)
-		}
-
-	default:
-		if want != got {
-			t.Errorf("%s.%s: sync service %#v, fallback %#v", key, col, want, got)
-		}
+	if want != got {
+		t.Errorf("%s.%s: sync service %#v, fallback %#v", key, col, want, got)
 	}
 }
 
@@ -318,24 +434,6 @@ func instant(t *testing.T, v any) time.Time {
 	return at
 }
 
-func sameJSON(t *testing.T, a, b any) bool {
-	t.Helper()
-
-	var left, right any
-	as, aok := a.(string)
-	bs, bok := b.(string)
-	if !aok || !bok {
-		return false
-	}
-	if err := json.Unmarshal([]byte(as), &left); err != nil {
-		t.Fatalf("parse %q: %v", as, err)
-	}
-	if err := json.Unmarshal([]byte(bs), &right); err != nil {
-		t.Fatalf("parse %q: %v", bs, err)
-	}
-	return fmt.Sprint(left) == fmt.Sprint(right)
-}
-
 // How a subscriber that was served a snapshot gets back onto real sync. The
 // proxy arranges none of it: a handle the sync service never issued is a
 // must-refetch, which is the protocol's own way of saying start again.
@@ -352,11 +450,15 @@ func TestASubscriberRecoversOntoRealSyncAfterAFallback(t *testing.T) {
 	gone, _ := electric.New(electric.Config{URL: "http://127.0.0.1:1"})
 	live, _ := electric.New(electric.Config{URL: url})
 
-	fallback := func(context.Context) (electric.Snapshot, error) {
-		return electric.Snapshot{Rows: []electric.Row{{
-			Key:   electric.RowKey("wide", "1"),
-			Value: map[string]any{"id": "1"},
-		}}}, nil
+	// A hand-written one, so this test says nothing about where the rows came
+	// from: what it is about is the handle protocol.
+	fallback := func(s *electric.Shape) {
+		s.Fallback = func(context.Context) (electric.Snapshot, error) {
+			return electric.Snapshot{Rows: []electric.Row{{
+				Key:   electric.RowKey("wide", "1"),
+				Value: map[string]any{"id": "1"},
+			}}}, nil
+		}
 	}
 
 	// While the outage lasts: a snapshot, and a handle of this proxy's own.

@@ -442,6 +442,7 @@ func applyTableConfig(
 	diags.Append(applyColumnConfig(loaded, t, &out, cfg, n, opt))
 	diags.Append(applyRelationConfig(loaded, &out, cfg))
 	diags.Append(applyElectricConfig(loaded, &out, cfg, n))
+	keepPresenceRefusal(&out, t, opt)
 	diags.Append(applyEndpointConfig(loaded, &out, cfg, n))
 
 	return out, diags
@@ -899,8 +900,9 @@ func applyNotificationTable(res *ir.Resource, t *ir.Table, opt ConfigOptions) {
 
 	if res.Electric == nil {
 		res.Electric = &ir.ElectricEndpoint{
-			Auth: ir.ElectricAuthTenant,
-			Path: "/" + res.Storage.Table + ir.ElectricStreamSuffix,
+			Auth:     ir.ElectricAuthTenant,
+			Path:     "/" + res.Storage.Table + ir.ElectricStreamSuffix,
+			Fallback: true,
 		}
 	}
 }
@@ -908,7 +910,7 @@ func applyNotificationTable(res *ir.Resource, t *ir.Table, opt ConfigOptions) {
 // applyPresenceTable settles what is true of rig's own presence table in every
 // project, which is why none of it is a key in a YAML file.
 //
-// Three things, and the second is the one with teeth.
+// Four things, and the second is the one with teeth.
 //
 // **It is read-only from the outside, and unexposed unless asked for.** The
 // scaffolded configuration is `operations: [Get, List]`; `presence.expose` is
@@ -930,6 +932,24 @@ func applyNotificationTable(res *ir.Resource, t *ir.Table, opt ConfigOptions) {
 // everybody else. `scope` and `target_id` are declared so a subscriber can ask
 // for one screen's worth rather than the tenant's, which is the difference
 // between linear and quadratic in the number of people present.
+//
+// **And that shape gets no fallback.** Every other shape answers from the
+// database while the sync service is unreachable, because a page whose list is a
+// shape renders nothing without its rows. Presence is the exception, and it is a
+// decision rather than an omission: a snapshot of who was here a moment ago,
+// that then stops updating, is worth less than an empty list, because the
+// feature *is* the freshness. It is also the one that would come out right
+// anyway — the heartbeat is a REST call an outage does not touch, so it goes on
+// supplying a fresh reading of the server's clock while the streamed rows sit
+// still, and @rig/presence ages them out at the TTL. A fallback here would buy a
+// minute of ghosts and then the empty room it already shows.
+//
+// Here rather than in every project's configuration, for the reason the owner
+// column is: a decision each project has to remember to write down is one that
+// eventually does not get written down, and this one fails as a room full of
+// people who left. And held there by keepPresenceRefusal, which runs after the
+// project's own electric block — the one thing below that a table configuration
+// could otherwise put back.
 func applyPresenceTable(res *ir.Resource, t *ir.Table, opt ConfigOptions, n *naming.Namer) {
 	cfg := opt.Presence
 	if cfg == nil || !cfg.Enabled || res.Storage == nil {
@@ -954,6 +974,8 @@ func applyPresenceTable(res *ir.Resource, t *ir.Table, opt ConfigOptions, n *nam
 		res.Electric = &ir.ElectricEndpoint{
 			Auth: ir.ElectricAuthTenant,
 			Path: "/" + res.Storage.Table + ir.ElectricStreamSuffix,
+			// Not set, and the paragraph above is why.
+			Fallback: false,
 			// Query-string keys, with the Go identifier derived by the same
 			// namer applyElectricConfig uses — so a param rig declares here and
 			// one a project declares in YAML arrive in the same shape.
@@ -975,6 +997,27 @@ func applyPresenceTable(res *ir.Resource, t *ir.Table, opt ConfigOptions, n *nam
 			},
 		}
 	}
+}
+
+// keepPresenceRefusal holds applyPresenceTable's fourth decision against the
+// project's own configuration.
+//
+// It is the same defence [applyPresenceTable] makes for the owner column, made
+// from a second place because what it defends against runs later:
+// applyElectricConfig replaces the endpoint rather than merging into it, so a
+// table configuration naming `electric: {enabled: true}` for rig's presence
+// table would otherwise put the default back — and this is the one thing about
+// that shape a project is not supposed to be able to turn on by accident, least
+// of all as a side effect of asking for something else.
+func keepPresenceRefusal(res *ir.Resource, t *ir.Table, opt ConfigOptions) {
+	cfg := opt.Presence
+	if cfg == nil || !cfg.Enabled || res.Electric == nil {
+		return
+	}
+	if !isPresenceTable(t.Name) {
+		return
+	}
+	res.Electric.Fallback = false
 }
 
 // ownerColumn resolves and checks a named `access.owner`.
@@ -1059,6 +1102,11 @@ func applyElectricConfig(loaded *tableconf.Loaded, res *ir.Resource, cfg tableco
 	e := &ir.ElectricEndpoint{
 		Auth: auth,
 		Path: "/" + res.Storage.Table + ir.ElectricStreamSuffix,
+		// On unless the table said otherwise. A shape exists because something
+		// renders from it, and a sync outage that leaves that something blank is
+		// the case a fallback is for — so the default is the one that keeps the
+		// page working, and turning it off is a decision somebody writes down.
+		Fallback: cfg.Electric.Fallback == nil || *cfg.Electric.Fallback,
 	}
 
 	names := make([]string, 0, len(cfg.Electric.Params))

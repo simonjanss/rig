@@ -192,9 +192,9 @@ connections while nobody looks.
 
 ## Take the sync service down
 
-The pill in the header is the whole point of the fallback wired in
-`services/todo/todo_fallback.go`, and it is the one thing in this example you
-cannot see by reading it. With both windows open:
+The pill in the header is the whole point of `DB: pool` on `electric.Config` in
+`main.go`, and it is the one thing in this example you cannot see by reading it.
+With both windows open:
 
 1. The pill reads **Live sync**. Press **Stop**. The container goes down
    immediately; the pill stays green for a moment and then turns amber and reads
@@ -215,14 +215,15 @@ cannot see by reading it. With both windows open:
    | `503` | the poll after it, carrying rig's own handle. Keep your rows and come back |
    | `503` | again, every five seconds, for as long as it lasts |
 
-   No reload anywhere in that, and no 502. The rows on screen are this
-   application's own `List`, in the sync protocol's own format, so nothing in
-   `web/` knows the difference.
+   No reload anywhere in that, and no 502. The rows on screen came out of this
+   application's own database, under the shape's own filter, in the sync
+   protocol's own format — so nothing in `web/` knows the difference.
 
    **Trash**, the bell, and an item's **History** all keep working too, each
-   from a different read: `ListDeleted`, a `List` the repository narrows to your
-   account, and `ListSnapshots` on one id. Four screens, four fallbacks, all
-   wired in `main.go`.
+   under its own filter: not deleted, deleted, narrowed to your account, one
+   row's snapshots. Four screens, and not a line of code here for any of them —
+   each shape's filter was already written, and answering from it is running the
+   same predicate against Postgres instead of sending it upstream.
 
    The one thing that does go is presence — **and the headers empty out about a
    minute in, not at once.** Their rows freeze the moment the stream dies, but
@@ -232,11 +233,13 @@ cannot see by reading it. With both windows open:
    age out at the TTL — a minute here — and the one-second tick makes them
    disappear with no event to carry it.
 
-   That is why presence wires no fallback, and the reason is not squeamishness:
-   a snapshot of who was here a moment ago, that then stops updating, is worth
-   less than an empty list, because the feature *is* the freshness. It is also
-   the shape where a fallback would change the least — it would buy a minute of
-   ghosts and then the empty room you already get.
+   That is why presence is the one shape rig gives no fallback, and the reason
+   is not squeamishness: a snapshot of who was here a moment ago, that then
+   stops updating, is worth less than an empty list, because the feature *is*
+   the freshness. It is also the shape where one would change the least — it
+   would buy a minute of ghosts and then the empty room you already get. rig
+   decides that for its own presence table, so it is not a line anybody here
+   wrote and not one anybody can forget.
 
 3. Drag a card. The write lands — the API never went anywhere — and then the
    card snaps back after ten seconds, because a snapshot does not update and
@@ -244,8 +247,8 @@ cannot see by reading it. With both windows open:
 
    **The row is in its new column the whole time, and the reload is what shows
    that.** A snapshot is read per request, not once per outage: reloading is a
-   read from the beginning, the fallback runs `List` again, and the card comes
-   back where you dropped it. The other window, still holding the snapshot it
+   read from the beginning, the shape is read again, and the card comes back
+   where you dropped it. The other window, still holding the snapshot it
    took before the drag, does not see it until sync is back. So the board a
    reload gets is more correct than the board that was watching — which is the
    confusing part, and the reason the strip under the header says a write will

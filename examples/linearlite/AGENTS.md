@@ -143,16 +143,16 @@ Beyond the todo example's layout, five directories and one file:
   dependency lists. `docs/presence.md` says all three in prose.
 - `importer/` + `import/` — the batch job over the generated Go client, split
   so the docker test drives the same loop the command runs.
-- `services/todo/todo_fallback.go` + `services/rig_notification_recipient/rig_notification_recipient_fallback.go`
-  — what answers a shape when the sync service cannot be reached. Four of the
-  five shapes a screen subscribes to have one; presence is the exception and
-  `main.go` says why beside the wiring. The recipient one is the file to read
-  before adding a fifth: **a fallback must narrow exactly as far as its shape
-  does**, that shape narrows on `account_id` as well as the tenant, and nothing
-  checks that the read agrees. It does agree, because `access: {scope: own}`
-  makes the repository narrow the same way from the same claims — derived from
-  one declaration rather than written twice — and that is the sentence to verify
-  rather than assume for any new one.
+- **There are no fallback files here, and that is the point.** What answers a
+  shape when the sync service cannot be reached is `DB: pool` on
+  `electric.Config` in `main.go` — one field, and every shape survives an outage
+  on a snapshot of its own rows. There used to be a file per shape, and the
+  hazard they carried was that **a fallback had to narrow exactly as far as its
+  shape did** with nothing checking it; the read the proxy builds *is* the
+  shape's `WHERE` clause, so there is no second description to keep in step.
+  Presence is the exception and rig decides it rather than this project —
+  `applyPresenceTable` sets `Fallback: false`, and
+  `electric_docker_test.go`'s 502 assertion is the guard on that.
 - `services/rig_presence/` — one file, the scope stub, and the only filled-in
   scope stub in the repository. Every other shape here leaves the generated
   tenant filter as the whole scope; this one narrows on `scope` and `target_id`,
@@ -180,7 +180,7 @@ Beyond the todo example's layout, five directories and one file:
   port of its own and a relative href reaches the API instead.
 
   The switch stops and starts the ElectricSQL container so the board can
-  demonstrate the fallback in `services/todo/todo_fallback.go` — the README's
+  demonstrate surviving without it — the README's
   "Take the sync service down" is the script. Two things about it are
   load-bearing. **It is gated on `$RIG_DEMO_SYNC_CONTAINER` and the gate is not
   a 403**: a handler that shells out to `docker stop` must not exist in a build

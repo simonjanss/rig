@@ -187,9 +187,11 @@ func TestTheBoardSurvivesTheSyncServiceBeingDown(t *testing.T) {
 		}
 	}
 
-	// And presence, which wires no fallback on purpose, still refuses: a
+	// And presence, which rig gives no fallback on purpose, still refuses: a
 	// snapshot of who was here a moment ago and then stopped updating is worth
-	// less than nothing.
+	// less than nothing. Nothing in this project says so — applyPresenceTable
+	// does — which makes this the guard on that decision rather than on a line
+	// somebody wrote in main.go.
 	presence := api.do(t, request{
 		method: http.MethodGet,
 		path:   "/api/v1/rig_presence/_stream?offset=-1&scope=board",

@@ -21,6 +21,12 @@ import (
 //
 // It takes any because it is called on whatever a row's field happens to be,
 // including a nil pointer, which is the null.
+//
+// Two callers. A hand-written [Fallback] renders its rows with this, because Go
+// values are what it has. The read [Config.DB] answers with takes most columns as
+// the text Postgres prints and needs no renderer for them, and calls this for the
+// four it decodes instead — the unexported binaryFormats says why those four are
+// not read as text.
 func Value(v any) any {
 	switch v := v.(type) {
 	case nil:
@@ -149,12 +155,15 @@ func isNull(v any) bool {
 // DateOnly renders a date column: the day, with no time and no zone, which is
 // what Postgres prints and what the same column looks like over the stream.
 //
-// It exists because a date and a timestamp are both a time.Time by the time
-// they reach here, and [Value] cannot tell them apart. The generated code can,
-// so it calls this one.
+// It exists because a date and a timestamp are both a time.Time by the time they
+// reach here, and [Value] cannot tell them apart. Something upstream can: the
+// read [Config.DB] answers with asks the column's own type, and a hand-written
+// [Fallback] knows which of its fields is which.
 func DateOnly(v any) any { return dayOrClock(v, time.DateOnly) }
 
-// TimeOnly renders a time-of-day column, for the reason [DateOnly] exists.
+// TimeOnly renders a time-of-day column, for the reason [DateOnly] exists — for a
+// hand-written [Fallback] only, since Postgres prints a time in one form whatever
+// the session says and the read [Config.DB] answers with takes it as it comes.
 //
 // With the fraction, because a time column keeps microseconds and Postgres
 // prints them: the sync service sends "10:06:07.5" for a column holding half a

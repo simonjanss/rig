@@ -6,11 +6,9 @@ package electric
 
 import (
 	"context"
-	"fmt"
 	"net/http"
 
 	"github.com/google/uuid"
-	"github.com/simonjanss/rig/examples/linearlite/internal/model"
 	"github.com/simonjanss/rig/runtime/electric"
 	"github.com/simonjanss/rig/runtime/rigerr"
 	"github.com/simonjanss/rig/runtime/tenancy"
@@ -45,36 +43,9 @@ func parseRigNotificationRecipientShapeParams(r *http.Request) (RigNotificationR
 // Returning an error refuses the subscription.
 type RigNotificationRecipientScope func(ctx context.Context, r *http.Request, claims tenancy.Claims, p RigNotificationRecipientShapeParams, w *electric.Where) error
 
-// RigNotificationRecipientFallback answers this shape from the application's
-// own read path when the sync service cannot be reached.
-//
-// It is called for a subscriber reading the shape from the beginning, and
-// never for one resuming a subscription — so what it returns is every row
-// the shape holds, not a change to one. The rows go out in the sync protocol's
-// own format, which is why a subscriber needs to know nothing about this and
-// why what it gets is a snapshot rather than a stream: correct when it was
-// read, and not updated until the sync service is back.
-//
-// The context already carries the subscriber's claims, so a generated
-// repository read scopes itself to the right tenant without being asked.
-//
-// The read this corresponds to is List, with the repository's default filters:
-// this tenant, not deleted, not a snapshot.
-//
-// **Whatever the scope narrows, narrow here too.** A scope is a filter the
-// proxy sends to the sync service and can therefore promise; this is a read
-// the proxy cannot see inside. A shape scoped to less than its table, with a
-// fallback that is not, shows a subscriber rows the subscription would have
-// withheld — and only while something else is broken, which is the worst
-// time to find out.
-//
-// Returning an error answers 502, which is what a shape with no fallback
-// answers anyway.
-type RigNotificationRecipientFallback func(ctx context.Context, r *http.Request, claims tenancy.Claims, p RigNotificationRecipientShapeParams) ([]*model.RigNotificationRecipient, error)
-
 // handleRigNotificationRecipientShape serves GET
 // /api/v1/rig_notification_recipient/_stream.
-func handleRigNotificationRecipientShape(s Server, scope RigNotificationRecipientScope, fallback RigNotificationRecipientFallback) http.HandlerFunc {
+func handleRigNotificationRecipientShape(s Server, scope RigNotificationRecipientScope) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		claims, where, ok := prepare(s, w, r, false)
 		if !ok {
@@ -123,45 +94,14 @@ func handleRigNotificationRecipientShape(s Server, scope RigNotificationRecipien
 			// every column it names to every subscriber, and a column that is not in the
 			// API has no business in a live stream either.
 			Columns: RigNotificationRecipientShapeColumns,
-			// What answers this if the sync service cannot be reached. Nil unless the
-			// application wired one, and nil is the 502 this route answered before the
-			// field existed.
-			Fallback: rigNotificationRecipientFallback(fallback, r, claims, params),
+			// What the proxy needs to answer this shape itself while the sync service
+			// cannot be reached: the columns that name a row, and the types a subscriber
+			// reads them with. The filter above is the rest of it, which is the whole
+			// point — the read is this shape's own predicate, so there is nothing to
+			// write per shape and nothing that could narrow differently.
+			Key:    RigNotificationRecipientShapeKey,
+			Schema: RigNotificationRecipientShapeSchema,
 		})
-	}
-}
-
-// rigNotificationRecipientFallback adapts one of these reads to what the proxy
-// asks for.
-//
-// The claims go onto the context here, and not in the function an application
-// writes, for the reason the tenant condition is built in the handler: a
-// generated read takes its claims from the context, and one that reached it
-// without them is a read with no tenant filter. Making that somebody's job to
-// remember is making it somebody's job to forget.
-//
-// Nil stays nil, which is how the proxy knows there is nothing to fall back
-// to.
-func rigNotificationRecipientFallback(fn RigNotificationRecipientFallback, r *http.Request, claims tenancy.Claims, p RigNotificationRecipientShapeParams) electric.Fallback {
-	if fn == nil {
-		return nil
-	}
-	return func(ctx context.Context) (electric.Snapshot, error) {
-		rows, err := fn(tenancy.NewContext(ctx, claims), r, claims, p)
-		if err != nil {
-			return electric.Snapshot{}, err
-		}
-
-		out := make([]electric.Row, 0, len(rows))
-		for _, m := range rows {
-			// A nil in the slice is not a row, and rendering one would send a subscriber a
-			// row of nulls with an empty key.
-			if m == nil {
-				continue
-			}
-			out = append(out, rigNotificationRecipientShapeRow(m))
-		}
-		return electric.Snapshot{Rows: out, Schema: RigNotificationRecipientShapeSchema}, nil
 	}
 }
 
@@ -177,37 +117,9 @@ func rigNotificationRecipientFallback(fn RigNotificationRecipientFallback, r *ht
 // Returning an error refuses the subscription.
 type RigNotificationRecipientDeletedScope func(ctx context.Context, r *http.Request, claims tenancy.Claims, p RigNotificationRecipientShapeParams, w *electric.Where) error
 
-// RigNotificationRecipientDeletedFallback answers this shape from the
-// application's own read path when the sync service cannot be reached.
-//
-// It is called for a subscriber reading the shape from the beginning, and
-// never for one resuming a subscription — so what it returns is every row
-// the shape holds, not a change to one. The rows go out in the sync protocol's
-// own format, which is why a subscriber needs to know nothing about this and
-// why what it gets is a snapshot rather than a stream: correct when it was
-// read, and not updated until the sync service is back.
-//
-// The context already carries the subscriber's claims, so a generated
-// repository read scopes itself to the right tenant without being asked.
-//
-// The read this corresponds to is ListDeleted — the trash, which the API
-// also exposes as GET /_deleted. Note that the repository applies the restore
-// window and this shape does not, so the fallback is the narrower of the two.
-//
-// **Whatever the scope narrows, narrow here too.** A scope is a filter the
-// proxy sends to the sync service and can therefore promise; this is a read
-// the proxy cannot see inside. A shape scoped to less than its table, with a
-// fallback that is not, shows a subscriber rows the subscription would have
-// withheld — and only while something else is broken, which is the worst
-// time to find out.
-//
-// Returning an error answers 502, which is what a shape with no fallback
-// answers anyway.
-type RigNotificationRecipientDeletedFallback func(ctx context.Context, r *http.Request, claims tenancy.Claims, p RigNotificationRecipientShapeParams) ([]*model.RigNotificationRecipient, error)
-
 // handleRigNotificationRecipientDeletedShape serves GET
 // /api/v1/rig_notification_recipient/_deleted/_stream.
-func handleRigNotificationRecipientDeletedShape(s Server, scope RigNotificationRecipientDeletedScope, fallback RigNotificationRecipientDeletedFallback) http.HandlerFunc {
+func handleRigNotificationRecipientDeletedShape(s Server, scope RigNotificationRecipientDeletedScope) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		claims, where, ok := prepare(s, w, r, false)
 		if !ok {
@@ -257,45 +169,14 @@ func handleRigNotificationRecipientDeletedShape(s Server, scope RigNotificationR
 			// every column it names to every subscriber, and a column that is not in the
 			// API has no business in a live stream either.
 			Columns: RigNotificationRecipientShapeColumns,
-			// What answers this if the sync service cannot be reached. Nil unless the
-			// application wired one, and nil is the 502 this route answered before the
-			// field existed.
-			Fallback: rigNotificationRecipientDeletedFallback(fallback, r, claims, params),
+			// What the proxy needs to answer this shape itself while the sync service
+			// cannot be reached: the columns that name a row, and the types a subscriber
+			// reads them with. The filter above is the rest of it, which is the whole
+			// point — the read is this shape's own predicate, so there is nothing to
+			// write per shape and nothing that could narrow differently.
+			Key:    RigNotificationRecipientShapeKey,
+			Schema: RigNotificationRecipientShapeSchema,
 		})
-	}
-}
-
-// rigNotificationRecipientDeletedFallback adapts one of these reads to what
-// the proxy asks for.
-//
-// The claims go onto the context here, and not in the function an application
-// writes, for the reason the tenant condition is built in the handler: a
-// generated read takes its claims from the context, and one that reached it
-// without them is a read with no tenant filter. Making that somebody's job to
-// remember is making it somebody's job to forget.
-//
-// Nil stays nil, which is how the proxy knows there is nothing to fall back
-// to.
-func rigNotificationRecipientDeletedFallback(fn RigNotificationRecipientDeletedFallback, r *http.Request, claims tenancy.Claims, p RigNotificationRecipientShapeParams) electric.Fallback {
-	if fn == nil {
-		return nil
-	}
-	return func(ctx context.Context) (electric.Snapshot, error) {
-		rows, err := fn(tenancy.NewContext(ctx, claims), r, claims, p)
-		if err != nil {
-			return electric.Snapshot{}, err
-		}
-
-		out := make([]electric.Row, 0, len(rows))
-		for _, m := range rows {
-			// A nil in the slice is not a row, and rendering one would send a subscriber a
-			// row of nulls with an empty key.
-			if m == nil {
-				continue
-			}
-			out = append(out, rigNotificationRecipientShapeRow(m))
-		}
-		return electric.Snapshot{Rows: out, Schema: RigNotificationRecipientShapeSchema}, nil
 	}
 }
 
@@ -319,30 +200,13 @@ var RigNotificationRecipientShapeColumns = []string{
 	"read_at",
 }
 
-// rigNotificationRecipientShapeRow renders one row the way the sync service
-// renders it.
+// RigNotificationRecipientShapeKey are the columns that identify a row of this
+// shape.
 //
-// Every value is the text Postgres prints for it, or null, because that is
-// what a subscriber's parsers expect — the type each column is read as comes
-// from RigNotificationRecipientShapeSchema and not from the JSON.
-func rigNotificationRecipientShapeRow(m *model.RigNotificationRecipient) electric.Row {
-	return electric.Row{
-		Key: electric.RowKey("rig_notification_recipient", fmt.Sprint(m.ID)),
-		Value: map[string]any{
-			"id":                    electric.Value(m.ID),
-			"tenant_id":             electric.Value(m.TenantID),
-			"notification_id":       electric.Value(m.NotificationID),
-			"account_id":            electric.Value(m.AccountID),
-			"created_at":            electric.Value(m.CreatedAt),
-			"updated_at":            electric.Value(m.UpdatedAt),
-			"deleted_at":            electric.Value(m.DeletedAt),
-			"deleted_by_account_id": electric.Value(m.DeletedByAccountID),
-			"kind":                  electric.Value(m.Kind),
-			"group_key":             electric.Value(m.GroupKey),
-			"event_count":           electric.Value(m.EventCount),
-			"read_at":               electric.Value(m.ReadAt),
-		},
-	}
+// The table's primary key, in the order the table declares it. A snapshot
+// names each row by it, the way the sync service does.
+var RigNotificationRecipientShapeKey = []string{
+	"id",
 }
 
 // RigNotificationRecipientShapeSchema describes the columns this shape

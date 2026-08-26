@@ -41,7 +41,7 @@ export const basePath = "/api/v1";
  * calling. Regenerating against an unchanged API leaves it alone — it is not
  * a build stamp.
  */
-export const revision = "2026-08-25";
+export const revision = "2026-08-26";
 
 /**
  * Where the revision is sent: the same header the server generated from this
