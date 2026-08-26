@@ -208,16 +208,34 @@ Re-declared per module:
   `dbx.Conn` (this also simplifies `presence/stub_test.go`).
 - **Size:** ~80 lines, plus the "which copy did I fix" question. **Risk:** low.
 
-### B6. `migrate`: singular API as one-liners over the plural `[ ]`
+### B6. `migrate`: singular API as one-liners over the plural `[x]`
 
-`Apply` (`migrate/migrate.go:378-406`) and `ApplyAll` (`:211-227`) have the
+`Apply` (`migrate/migrate.go:378-406`) and `ApplyAll` (`:211-227`) had the
 same body modulo `Up` vs `UpAll`; `Require`/`RequireAll` likewise, identical
-error string included. Both halves have callers, so keep both — but the
-singular forms should delegate:
+error string included. Both halves have callers, so both stayed — the singular
+forms now delegate:
 `Apply(fsys, opt) → ApplyAll([]Source{{FS: fsys, Dir: opt.Dir, Table: opt.Table}}, opt)`.
 
-- **Also:** `migrate.Version` (`:358-376`) has zero callers anywhere — delete.
-- **Size:** ~90 lines. **Risk:** low.
+- **The message changed, deliberately.** `PendingAll` runs every path through
+  `label` (`:270-279`), which prefixes it with `Source.who()` — the literal word
+  `migrations` for a set with no name. So `Require`'s refusal now reads
+  `...starting with migrations 00001_create.sql` and `Apply`'s failure gains a
+  `migrations: ` wrapper. Accepted rather than worked around: it is the plural
+  form's behaviour arriving in the singular, and contorting `label` to drop the
+  prefix would leak into `UpAll`/`PendingAll` for every unnamed source. Pinned by
+  `migrate/migrate_docker_test.go`'s `TestRequireRefusesUntilApplied`.
+- **Correction:** `migrate.Version` did **not** have zero callers — it had two,
+  both tests (`migrate/options_test.go:55`, `migrate/migrate_docker_test.go:71`).
+  Deleted with them. `make test` would not have caught it, since the second is
+  behind `//go:build docker`; `make lint` would, because `.golangci.yml` sets
+  `build-tags: [docker]`.
+- **Also worth knowing:** `make test-docker` skips this module entirely.
+  `migrate/migrate_docker_test.go` starts no container of its own — it reads
+  `DATABASE_URL` and falls back to port 55440, which under `RIG_DB_ISOLATE` is
+  not this checkout's todo database. The suite must be run by hand with a
+  `DATABASE_URL` from this checkout's own `rig db url`, and a green
+  `make test-docker` says nothing about it.
+- **Size:** ~40 lines, not the 90 estimated; `Version` was 13 of them.
 
 ### B7. One safe ticker lifecycle for `presence.Sweeper` / `notify.Engine` `[ ]`
 
@@ -404,7 +422,7 @@ Zero references found in code, tests, docs, or generated templates:
 
 | Symbol | Location | Note |
 |---|---|---|
-| `migrate.Version` | `migrate/migrate.go:358` | |
+| ~~`migrate.Version`~~ | `migrate/migrate.go:358` | Done under B6 — and it had two test callers, not zero. |
 | `ir.Resource.IsPublic` | `pkg/ir/api.go:660` | or make generators use it |
 | `electric.Where.NotEq` | `runtime/electric/where.go:26` | |
 | `password.AtLeast` | `auth/password/password.go` | |
