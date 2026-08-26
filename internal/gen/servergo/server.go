@@ -528,33 +528,25 @@ func (e *emitter) helpers(b *gobuf.Buf) {
 	b.NL()
 
 	b.Comment("DefaultErrorMapper turns an error into a response.\n\n" +
-		"An internal failure's detail never reaches the client: it is exactly the " +
-		"kind of thing that leaks a table name or a connection string. The request " +
-		"identifier goes out instead, so the detail can be found in the logs.")
+		"The decision is [" + runtimeModule + "/httpx.AnswerFor]'s, shared with the " +
+		"routes rig mounts itself, " +
+		"so a failure from /auth/login and a failure from a generated route are " +
+		"classified once: the same code, the same status, an internal failure's " +
+		"detail redacted — it is exactly the kind of thing that leaks a table name " +
+		"or a connection string, and the request identifier goes out instead so " +
+		"the detail can be found in the logs — and a 429 leaving with its " +
+		"Retry-After.\n\n" +
+		"What is not shared is the envelope. This one's field names go through the " +
+		"project's `api.json_case` and rig's own routes always answer camelCase, " +
+		"so one struct cannot be both. The classification is one implementation, " +
+		"the encoding is two.")
 	b.L("func DefaultErrorMapper(w %s.ResponseWriter, _ *%s.Request, rc RequestContext, err error) {", httpPkg, httpPkg)
-	b.L("code := %s.CodeOf(err)", errPkg)
-	b.NL()
-	b.L("message := err.Error()")
-	b.L("var typed *%s.Error", errPkg)
-	b.L("if %s.As(err, &typed) { message = typed.Message }", b.Import("errors"))
-	b.L("if code == %s.CodeInternal { message = \"something went wrong\" }", errPkg)
-	b.NL()
-	b.Comment("A 429 with no Retry-After leaves a client with nothing to do but " +
-		"guess, and clients that guess retry immediately.")
-	b.L("if refusal, ok := %s.RefusalOf(err); ok { refusal.Decision().SetHeaders(w.Header()) }",
-		b.Import(runtimeModule+"/throttle"))
-	b.NL()
-	b.Comment("A validation failure carries its own shape — one member per field " +
-		"of the input — and answering with that instead of only a sentence is " +
-		"the difference between a client highlighting the field and a client " +
-		"parsing prose to find out which one.")
-	b.L("fields, _ := %s.FieldsOf(err)", errPkg)
-	b.NL()
-	b.L("writeJSON(w, code.HTTPStatus(), Error{")
-	b.L("Code:      code,")
-	b.L("Message:   message,")
+	b.L("answer := %s.AnswerFor(w, err)", b.Import(runtimeModule+"/httpx"))
+	b.L("writeJSON(w, answer.Status, Error{")
+	b.L("Code:      answer.Code,")
+	b.L("Message:   answer.Message,")
 	b.L("RequestID: rc.RequestID,")
-	b.L("Fields:    fields,")
+	b.L("Fields:    answer.Fields,")
 	b.L("})")
 	b.L("}")
 	b.NL()

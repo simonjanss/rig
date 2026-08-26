@@ -199,13 +199,19 @@ generated server emitted a **flat** `{code,message}`. All three now write
   `runtime/throttle` already imports `rigerr` (`go list -deps ./throttle`). In
   `rigerr` it would be a cycle. Said so in the package doc so nobody folds it
   back.
-- **The generated `DefaultErrorMapper` stays emitted and does not delegate.** Its
-  field names go through the project's `api.json_case`, so a `json_case: snake`
-  project answers `request_id`; `httpx.Error` is fixed camelCase, because these
-  routes are identical in every project and the browser packages are compiled
-  against them once. One struct cannot be both. `httpx.AnswerFor` exists as the
-  seam if the *classification* half is ever worth sharing — the encoding half is
-  correctly two implementations.
+- **The generated `DefaultErrorMapper` keeps its own envelope and shares the
+  classification.** Its field names go through the project's `api.json_case`, so a
+  `json_case: snake` project answers `request_id`; `httpx.Error` is fixed
+  camelCase, because these routes are identical in every project and the browser
+  packages are compiled against them once. One struct cannot be both, so the
+  *encoding* stays two implementations — but the emitted mapper is now four lines
+  over `httpx.AnswerFor` rather than a second copy of `CodeOf`, the `errors.As`
+  redaction, `throttle.RefusalOf` and `FieldsOf`. That copy was the one every real
+  application actually runs, so leaving it emitted would have meant the drift this
+  section is about surviving in the one place it matters most. `errors` and
+  `throttle` drop out of the generated imports with it.
+  `servergo.TestInternalErrorsAreNotDetailed` now asserts the delegation; the
+  redaction itself is asserted against behaviour in `runtime/httpx`.
 
 **Three bugs fixed, each demonstrated before the fix:**
 
@@ -479,7 +485,7 @@ forms now delegate:
 
 Two hand-rolled ticker-goroutine lifecycles with divergent safety.
 `presence.Sweeper` was idempotent and close-safe; `notify.Engine` was neither.
-Both are now `serve.Ticker` (`runtime/serve/ticker.go`), where the four
+Both are now `tick.Ticker` (`runtime/tick/tick.go`), where the four
 properties are asserted once.
 
 - **Three hazards in `notify.Engine`, all demonstrated before they were fixed.**
