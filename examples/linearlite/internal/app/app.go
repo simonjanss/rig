@@ -44,10 +44,11 @@ import (
 // function rather than a block inside the mount closure: the audience for a
 // notification is a method on a service, so a job has to be able to build one.
 func New(ctx context.Context, pool *pgxpool.Pool, log *slog.Logger, page *observe.Page) (*http.ServeMux, *notify.Engine, error) {
-	// The tracer is a package-level value the provider in main installed, so a
-	// task that never called observe.Setup gets a no-op here and every query
-	// below runs untraced rather than differently.
-	repos := store.New(pool, store.Config{Tracer: observe.Tracer()})
+	// No Tracer: the generated store.New settles a nil one to observe.Tracer(),
+	// which is a package-level value the provider in main installed. A task that
+	// never called observe.Setup gets a no-op there and every query below runs
+	// untraced rather than differently.
+	repos := store.New(pool, store.Config{})
 
 	// The mail this example would have sent — the links the auth package mints,
 	// and the email copy of an inbox line. Two interfaces, one ring buffer, and
@@ -144,15 +145,8 @@ func New(ctx context.Context, pool *pgxpool.Pool, log *slog.Logger, page *observ
 
 	mux := api.Register(api.Handlers{
 		Server: api.Server{
-			Auth: front,
-			DB:   pool,
-			// The trace this request belongs to, so the identifier in an error
-			// body, the request_id on every log line and the span on the
-			// monitoring page are one string. A caller that sent its own
-			// X-Request-Id is honoured first.
-			RequestID: func(r *http.Request) string {
-				return cmp.Or(r.Header.Get("X-Request-Id"), observe.TraceID(r))
-			},
+			Auth:   front,
+			DB:     pool,
 			Logger: log,
 		},
 		Account:             members,

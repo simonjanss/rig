@@ -113,17 +113,19 @@ the corrected request that follows.
   second request blocks until the first commits or rolls back — usually it then
   replays — and gives up after five seconds rather than holding a connection for
   as long as the first one takes.
-- **A key is remembered until it is pruned**, which is a day by default and
-  nothing at all until you schedule it. `api.IdempotencyPruner(0)` is a
-  `serve.Task`, and it wants a cron entry the way `FileSweeper` does:
+- **A key is remembered until it is pruned**, which is a day by default. The
+  subcommand is already wired: `api.Tasks(…)` carries `prune-idempotency` in
+  every project, because every project has the table.
 
   ```go
-  Tasks: map[string]serve.Task{"prune-idempotency": api.IdempotencyPruner(0)},
+  Tasks: api.Tasks(map[string]serve.Task{ /* yours */ }),
   ```
 
-  Without it `rig_idempotency` keeps every record ever written, and a key reused
-  a month later replays instead of writing — which is not what a key is for, since
-  a request arriving a day later is not a retry.
+  **Nothing schedules it for you** — it is a subcommand of your binary, and what
+  runs it hourly is your deployment's business. Without that cron entry
+  `rig_idempotency` keeps every record ever written, and a key reused a month
+  later replays instead of writing — which is not what a key is for, since a
+  request arriving a day later is not a retry.
 
 - **An upload route is not recorded.** `POST /todos/{id}/cover-file` and its kind
   take the key and ignore it: the body is still arriving when the handler runs,
@@ -174,9 +176,9 @@ served rather than refused. Both are deliberate; the reasoning, and the knob for
 the first, are in [rig-yaml.md](rig-yaml.md#throttle).
 
 **The counters want a cron entry.** `rig_throttle` gains a row per caller per
-window and nothing prunes it for you; `api.ThrottleSweeper(0)` is the
-`serve.Task` that does, the way `IdempotencyPruner` is for keys. See
-[rig-yaml.md](rig-yaml.md#throttle).
+window; `api.Tasks(…)` carries a `sweep-throttle` subcommand that deletes the
+dead ones, the way it carries `prune-idempotency` for keys, but nothing schedules
+it. See [rig-yaml.md](rig-yaml.md#throttle).
 
 The [auth endpoints](auth.md) have limits of their own, counted differently —
 exactly, out of the audit log — because a login limiter that guessed high or

@@ -71,30 +71,35 @@ func main() {
 		Hint: "run `rig db up` to start a local Postgres for this project, " +
 			"or point $DATABASE_URL at one you already have",
 
-		MaxStartup:  30 * time.Second,
-		MaxShutdown: 20 * time.Second,
+		MaxStartup: 30 * time.Second,
+		// api.ShutdownBudget is twenty-five — fifteen for the notification
+		// engine, which is the one closer `notifications:` registers, and ten
+		// left for the requests still in flight — and the ten added to it is
+		// this example's own two: five for the recorder and five for the store's
+		// cache subscription. Both are registered in the mount closure below,
+		// and serve adds up what it was actually given before the server
+		// listens, so a budget this arithmetic got wrong is a refusal to start
+		// rather than a truncated shutdown under load.
+		MaxShutdown: api.ShutdownBudget() + 10*time.Second,
 
 		// `todo migrate` applies the schema and exits: a job before the
 		// rollout, so one process migrates and the replicas only serve.
-		// `todo sweep-files` is the file housekeeping: abandoned uploads, and
-		// trash past the restore window. A subcommand rather than a goroutine,
-		// so it is a cron job rather than something racing itself in every
-		// replica.
-		Tasks: map[string]serve.Task{
+		//
+		// `todo sweep-files` and `todo prune-idempotency` are api.Tasks's, out
+		// of the `files:` block and the idempotency table every project has: the
+		// abandoned uploads and the trash past its restore window, and the
+		// records of writes nobody is going to send again. Subcommands rather
+		// than goroutines, so each is a cron job rather than something racing
+		// itself in every replica.
+		Tasks: api.Tasks(map[string]serve.Task{
 			"migrate": migrate.Apply(migrations, migrate.Options{Log: os.Stdout}),
-			"sweep-files": func(ctx context.Context, pool *pgxpool.Pool) error {
-				return api.FileSweeper(api.NewFiles(pool))(ctx, pool)
-			},
 			// The guarantee behind the inbox, for everything the in-process
 			// engine did not get to. It builds its own object graph because it
 			// needs the same one the server does: the audience is a method on a
-			// service, which is the honest cost of computing it late.
+			// service, which is the honest cost of computing it late — and the
+			// reason this one is not api.Tasks's.
 			"dispatch-notifications": dispatchNotifications,
-			// Records of writes nobody is going to send again. Zero takes the
-			// default retention, a day; without this the table keeps every key
-			// ever used and a stale one replays instead of writing.
-			"prune-idempotency": api.IdempotencyPruner(0),
-		},
+		}),
 
 		// The server does not apply them. It refuses to start without them,
 		// which is what catches a deploy that got ahead of its migration job.
@@ -165,17 +170,19 @@ func main() {
 		// the inbox works anyway — it is not a channel, which is the whole
 		// reason it cannot be turned off. examples/auth has the other half.
 		engine := api.NewNotificationEngine(app.Pool, reg, nil)
-		engine.Start()
-		app.Drain("notifications", engine.StopClaiming)
-		app.CloseWithin("notifications", 15*time.Second, engine.Close)
+		api.StartNotificationEngine(app, engine)
 
 		mux := api.Register(api.Handlers{
 			Server: api.Server{
 				GetClaims: headerClaims,
 				// Where a write that carried an Idempotency-Key is recorded,
 				// so a client that had to send one twice gets one row.
-				DB:        app.Pool,
-				RequestID: func(r *http.Request) string { return r.Header.Get("X-Request-Id") },
+				DB: app.Pool,
+				// No RequestID: the generated default already reads the caller's
+				// own X-Request-Id, bounded and checked before it is believed.
+				// This project does not trace, so that is the only identifier
+				// there is — turning `tracing:` on is what would give every
+				// request one whether or not the caller thought to send it.
 				// app.Logger rather than the package default, so a request
 				// line, a shutdown step and anything a dependency says all
 				// land wherever the server was told to write.

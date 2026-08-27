@@ -15,36 +15,23 @@ import (
 // same binary. It is not a route on the mux Register returns, and it cannot be
 // made into one: which interface the page is bound to is the only boundary in
 // front of it that a client cannot talk its way around, and sharing the API's
-// listener would be giving that up. Serving it is two fields on the server
-// this application already runs:
+// listener would be giving that up.
 //
-//	page, err := tracing.Page(api.Monitoring())
-//	if err != nil { return nil, err }
-//	if why := page.Unarmed(); why != "" {
-//		app.Logger.Info("monitoring page not listening", "reason", why)
-//	}
+// [NewProcess] is what builds the page out of this, and [Process.Configure]
+// what serves it. Both halves of what it reads are settled there: the span
+// file, because the page hangs off the provider writing it, and the log sink,
+// because the constructor that opens the sink is the one that fills
+// [github.com/simonjanss/rig/observe.PageConfig.Logs] with it. Two places
+// naming either path would be one too many, and the failure would be a page
+// that is permanently empty for no visible reason.
 //
-//	// ... serve.Config{Monitor: page.Handler(), MonitorAddr: page.Addr()}
+// This stays exported for a project that builds its own page — a log sink at
+// a level of its own, most likely, which is the one thing NewProcess does not
+// let you choose:
 //
-// For the log half, open a sink, tee its handler into the logger this
-// application already has, and set it on what this returns:
-//
-//	logs, err := observe.OpenLogs(observe.LogConfig{})
-//	// ... serve.Config{Logger: slog.New(observe.Tee(base, logs.Handler()))}
 //	cfg := api.Monitoring()
 //	cfg.Logs = logs
-//	page, err := tracing.Page(cfg)
-//
-// It is not a field a generator can fill in, because it is the sink itself
-// rather than a path: the page reading the file the handler is writing is what
-// makes a request and the lines it wrote one view, and two places naming that
-// path would be one too many. Without it the page serves its request half and
-// says why the other is empty.
-//
-// It hangs off the provider rather than standing alone because the page reads
-// the span file that provider is writing: two places naming a path is two
-// places to get it wrong, and the failure would be a page that is permanently
-// empty for no visible reason.
+//	page, err := provider.Page(cfg)
 //
 // What is not here is where the spans go — that is the deployment's, the
 // same as it is for [Tracing] — and, unless this project wrote one into its

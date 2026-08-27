@@ -126,8 +126,10 @@ type PageConfig struct {
 	// same object here.
 	//
 	// It is not in rig.yaml and cannot be, because it is an object rather than a
-	// value — so this is one of the two fields a generated Monitoring() leaves
-	// for a main to fill in.
+	// value. A generated Monitoring() therefore leaves it empty — but a
+	// generated NewProcess() fills it, because that constructor is where the
+	// sink is opened. A main that builds its own page is the caller that still
+	// sets this by hand.
 	Logs *Logs
 
 	// Password is a literal from rig.yaml, for a project that wants the page

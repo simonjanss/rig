@@ -278,6 +278,26 @@ func (e *authEmitter) hooks(b *gobuf.Buf) {
 	b.L("OnError func(w %s.ResponseWriter, r *%s.Request, err error)", httpPkg, httpPkg)
 	b.NL()
 
+	b.Comment("RequestID labels an authentication request, exactly as " +
+		"[Server.RequestID] labels every other one, and nil means the same " +
+		"default: the caller's own " + e.cfg.RequestIDHeader + ", if it sent one " +
+		"worth trusting.\n\n" +
+		"It is a second field rather than read from the Server for the reason " +
+		"Logger is: this configuration is built first, and what it produces is " +
+		"what Server.Auth is then set to. Set both or neither — a project whose " +
+		"resource routes label a request one way and whose sign-in labels it " +
+		"another has two answers to the question the label exists to settle.\n\n" +
+		"**A caller that sends no header gets no identifier here, even in a " +
+		"project that traces**, and that is worth knowing rather than " +
+		"discovering. These routes are rig's own: they are mounted by " +
+		"Auth.Mount rather than emitted per endpoint, so no span is opened over " +
+		"them and there is no trace to fall back to. A resource route in the " +
+		"same project answers with one. A client that wants its sign-in " +
+		"correlated with the rest of its requests sends the header — which is " +
+		"the case this field exists to make work, and the one it now does.")
+	b.L("RequestID func(*%s.Request) string", httpPkg)
+	b.NL()
+
 	b.Comment("Logger records why an authentication request failed. Nil uses " +
 		"[log/slog.Default].\n\n" +
 		"Give it the same logger as [Server.Logger]. These routes are mounted on " +
@@ -511,16 +531,17 @@ func (e *authEmitter) configFunc(b *gobuf.Buf) {
 		"returns, and is recorded the same way. Through fail rather than straight " +
 		"to the mapper, because the line that says why a 500 happened is written " +
 		"there — an auth route is the one place a project cannot reach to add it, " +
-		"and it is also where the interesting 500s are.")
+		"and it is also where the interesting 500s are.\n\n" +
+		"Through requestContext rather than a literal of its own, for the same " +
+		"reason one step out: a literal here is a second place deciding what a " +
+		"request looks like, and the two had already drifted — this one named no " +
+		"caller, no client revision, and a request identifier nothing validated. " +
+		"What it still cannot reach is the trace fallback, because these routes " +
+		"carry no span; [Hooks.RequestID] says what that costs.")
 	b.L("if cfg.OnError == nil {")
-	b.L("srv := Server{Logger: h.Logger}")
+	b.L("srv := Server{Logger: h.Logger, RequestID: h.RequestID}")
 	b.L("cfg.OnError = func(w %s.ResponseWriter, r *%s.Request, err error) {", httpPkg, httpPkg)
-	b.L("fail(srv, w, r, RequestContext{")
-	b.L("RequestID: r.Header.Get(%s),", gobuf.Quote(e.cfg.RequestIDHeader))
-	b.L("Method: r.Method,")
-	b.L("Path: r.URL.Path,")
-	b.L("Route: r.Pattern,")
-	b.L("}, err)")
+	b.L("fail(srv, w, r, requestContext(srv, r), err)")
 	b.L("}")
 	b.L("}")
 	b.NL()

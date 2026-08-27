@@ -790,12 +790,12 @@ refused. Both SDKs honour all three — see
 
 **The counters need sweeping.** They live in `rig_throttle`, which `rig
 setup-project` writes, and it gains a row per caller per window — for the address
-limit, a row per address per minute. `api.ThrottleSweeper(0)` is the `serve.Task`
-that deletes the dead ones, and it wants a cron entry the way
-`IdempotencyPruner` does:
+limit, a row per address per minute. `api.Tasks(…)` carries a `sweep-throttle`
+subcommand that deletes the dead ones — turning this block on is what puts it
+there, the same way `files:` puts `sweep-files` there:
 
 ```go
-Tasks: map[string]serve.Task{"sweep-throttle": api.ThrottleSweeper(0)},
+Tasks: api.Tasks(map[string]serve.Task{ /* yours */ }),
 ```
 
 Nothing schedules it for you. Zero means twice the longest window you configured,

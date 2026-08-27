@@ -5,6 +5,7 @@
 package api
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"io"
@@ -25,6 +26,44 @@ import (
 	"github.com/simonjanss/rig/runtime/serve"
 	"github.com/simonjanss/rig/runtime/tenancy"
 )
+
+// RequestIDHeader is where a caller may name its own request, so that its logs
+// and this API's can be lined up afterwards.
+//
+// It is read on every route, including the authentication ones. What is done
+// with it is [Server.RequestID]'s documentation.
+const RequestIDHeader = "X-Request-Id"
+
+// maxRequestIDBytes bounds what a caller may name its own request.
+//
+// The value reaches an error body and every log line the request writes, so it
+// is client-controlled text in two places that are read by machines. A bound
+// and a character class are what keep a header from being a way to write
+// whatever it likes into a log file. The number is generous: every identifier
+// anybody actually uses — a UUID, a trace id — is well under it.
+const maxRequestIDBytes = 128
+
+// callerRequestID is the identifier the caller asked this request to be known
+// by, or empty when it did not ask or asked for something not worth repeating.
+//
+// Refusing rather than truncating or escaping, because a header this API does
+// not understand is not one it should half-quote into a log line. What a
+// caller gets for sending nonsense is the identifier it would have got for
+// sending nothing.
+func callerRequestID(r *http.Request) string {
+	id := r.Header.Get(RequestIDHeader)
+	if id == "" || len(id) > maxRequestIDBytes {
+		return ""
+	}
+	// Printable ASCII, which is what every identifier format in use is and what a
+	// log line can carry without an escape.
+	for i := 0; i < len(id); i++ {
+		if id[i] < 0x20 || id[i] > 0x7e {
+			return ""
+		}
+	}
+	return id
+}
 
 // Authenticator identifies a caller and serves its own routes.
 //
@@ -64,8 +103,14 @@ type Server struct {
 	// way, or has no auth routes to mount.
 	GetClaims func(*http.Request) (tenancy.Claims, error)
 
-	// RequestID labels a request for the logs. Nil generates nothing, and the
-	// field is simply absent from error bodies.
+	// RequestID labels a request for the logs and for the error body it may end
+	// in.
+	//
+	// Nil is the ordinary case and does not mean nothing: it means
+	// [callerRequestID] — the caller's own X-Request-Id, if it sent one worth
+	// trusting, and this request's trace otherwise. Set this only to answer the
+	// question differently; the default is already the answer every route in this
+	// package gives, including the authentication ones.
 	RequestID func(*http.Request) string
 
 	// Logger is where this server says what it did and why a request failed. Nil
@@ -288,11 +333,13 @@ func requestContext(s Server, r *http.Request) RequestContext {
 	if s.RequestID != nil {
 		rc.RequestID = s.RequestID(r)
 	} else {
-		// This project traces, so this request already has an identifier, and
-		// inventing a second one would be inventing a second answer to the same
-		// question. The requestId in the error body, the request_id on every log line
-		// and the trace in a collector are one string, and nobody had to wire it up.
-		rc.RequestID = observe.TraceID(r)
+		// The caller's own first, so a client correlating its side with this one is
+		// believed. Failing that, the trace: this project traces, so the request
+		// already has an identifier, and inventing a second one would be inventing a
+		// second answer to the same question. The requestId in the error body, the
+		// request_id on every log line and the trace in a collector are one string,
+		// and nobody had to wire it up.
+		rc.RequestID = cmp.Or(callerRequestID(r), observe.TraceID(r))
 	}
 	return rc
 }

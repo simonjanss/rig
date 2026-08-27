@@ -69,7 +69,7 @@ func (*Generator) Description() string {
 }
 
 // Version implements [gen.Generator].
-func (*Generator) Version() string { return "1" }
+func (*Generator) Version() string { return "2" }
 
 // Generate implements [gen.Generator].
 func (g *Generator) Generate(_ context.Context, doc *ir.Document, opts gen.Options) ([]gen.Artifact, error) {
@@ -139,7 +139,7 @@ func (g *Generator) Generate(_ context.Context, doc *ir.Document, opts gen.Optio
 	// The file wiring, when there is any to write. A project with no `files:`
 	// block gets no file, which is what keeps its API package — and so its
 	// module — free of a blob store and a multipart reader.
-	if doc.API.Files != nil && doc.API.Files.Enabled {
+	if e.hasFiles() {
 		files, err := e.filesFile()
 		if err != nil {
 			return nil, err
@@ -188,6 +188,21 @@ func (g *Generator) Generate(_ context.Context, doc *ir.Document, opts gen.Optio
 		}
 		artifacts = append(artifacts, presence)
 	}
+
+	// The process around the server, as far as this project's configuration
+	// decided it: the subcommands it can name itself, the shutdown its own steps
+	// add up to, and — for a project that traces — the log sink, the provider and
+	// the page as one object with the order between them settled.
+	//
+	// Written for every project, unlike the six conditional files above, because
+	// every project has at least one task to merge into. Everything in it that
+	// names rig/observe is behind the same predicate tracing.gen.go is, so a
+	// project that asked for no spans gets a file with no import of one.
+	process, err := e.processFile()
+	if err != nil {
+		return nil, err
+	}
+	artifacts = append(artifacts, process)
 
 	return artifacts, nil
 }

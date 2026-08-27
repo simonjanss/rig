@@ -3483,6 +3483,17 @@ is a switch nobody finds.
   with the generated services. Which means the setup's answers reach it —
   authentication changes what it mounts — and it is the one file in the project
   where the questions become something you can read.
+- **`process.gen.go` shipped ahead of this and made it smaller** (commit that
+  added `api.NewProcess`, `api.Tasks`, `api.ShutdownBudget`,
+  `api.StartPresenceSweeper`, `api.StartNotificationEngine`). The parts of a main
+  that vary with the blocks — the log sink, the provider, the page, the
+  housekeeping subcommands, the shutdown arithmetic, the two background loops —
+  are now generated `Overwrite` files that a `CreateOnce` main *calls* rather
+  than contains. That inverts the awkward half of this milestone: the template
+  no longer has to grow a branch per block, because turning `presence:` on after
+  init changes `process.gen.go` and not the main. What is left for the
+  `CreateOnce` file is the genuinely per-project part — the embed, the DSN, the
+  addresses, the hint, and which services are wired to which repositories.
 - Ending in a project that builds costs a database, and that is the honest
   price. `rig generate` with no `--schema` migrates and introspects a real one
   (`resolveSchema`, `internal/cli/schema_source.go`), so the shortest path from

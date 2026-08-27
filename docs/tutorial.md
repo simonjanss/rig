@@ -380,12 +380,13 @@ func main() {
 
 		// `todo migrate` applies the schema and exits: a job before the
 		// rollout, so one process migrates and the replicas only serve.
-		// `todo prune-idempotency` is the other kind of job: a cron entry,
-		// deleting the records of writes nobody will send again.
-		Tasks: map[string]serve.Task{
-			"migrate":           migrate.Apply(migrations, migrate.Options{Log: os.Stdout}),
-			"prune-idempotency": api.IdempotencyPruner(0),
-		},
+		//
+		// api.Tasks adds the housekeeping this project's blocks already decided
+		// — `todo prune-idempotency` here, deleting the records of writes nobody
+		// will send again — and yours wins on a shared name.
+		Tasks: api.Tasks(map[string]serve.Task{
+			"migrate": migrate.Apply(migrations, migrate.Options{Log: os.Stdout}),
+		}),
 		// The server refuses to start when the database is behind, which is
 		// what catches a deploy that got ahead of its migration job.
 		Migrate: migrate.Require(migrations, migrate.Options{}),

@@ -102,19 +102,24 @@ func main() {
 		Hint: "run `rig db up` to start a local Postgres for this project, " +
 			"then open http://acme.localhost:8083",
 
-		MaxStartup:  30 * time.Second,
+		MaxStartup: 30 * time.Second,
+		// Stated rather than api.ShutdownBudget()'s, because there is no budget
+		// to state: this project has none of `tracing:`, `notifications:` or
+		// `presence:`, so rig registers no closer of its own and generates no
+		// ShutdownBudget to add to. Twenty is serve's own default, written out
+		// so it is a number somebody chose.
 		MaxShutdown: 20 * time.Second,
 
-		Tasks: map[string]serve.Task{
+		Tasks: api.Tasks(map[string]serve.Task{
 			"migrate": migrate.ApplyAll(migrationSources(), migrate.Options{Log: os.Stdout}),
 			// Two tenants and one person with a password, so both interesting
 			// sign-ins are reachable: a stranger joining, and an existing account
 			// being linked.
 			"seed": seed,
-			// Records of writes nobody is going to send again. A cron entry, not
-			// a goroutine: one thing running rather than one per replica.
-			"prune-idempotency": api.IdempotencyPruner(0),
-		},
+			// prune-idempotency is api.Tasks's: records of writes nobody is going
+			// to send again, as a cron entry rather than a goroutine — one thing
+			// running rather than one per replica.
+		}),
 		Migrate: migrate.RequireAll(migrationSources(), migrate.Options{}),
 	}, func(ctx context.Context, app *serve.App) (http.Handler, error) {
 		return newAPI(ctx, app.Pool, baseURL(), app.Logger)
@@ -223,9 +228,11 @@ func newAPI(ctx context.Context, pool *pgxpool.Pool, base string, log *slog.Logg
 
 	mux := api.Register(api.Handlers{
 		Server: api.Server{
-			Auth:      front,
-			RequestID: func(r *http.Request) string { return r.Header.Get("X-Request-Id") },
-			Logger:    log,
+			Auth: front,
+			// No RequestID: the generated default already reads the caller's own
+			// X-Request-Id, bounded and checked before it is believed, on the
+			// auth routes and the resource routes alike.
+			Logger: log,
 			// Where a write that carried an Idempotency-Key is recorded, so a
 			// client that had to send one twice gets one row and one answer.
 			DB: pool,

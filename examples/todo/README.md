@@ -161,6 +161,14 @@ start when they do not fit, so the stated maximum and the parts cannot drift
 apart. A step that ignores its context is abandoned rather than waited for: the
 process exits on time either way.
 
+This example states `api.ShutdownBudget() + 10*time.Second`, and the two halves
+are the point. `ShutdownBudget()` is generated: it adds up the closers rig itself
+registers for the blocks in `rig.yaml` — here just the notification engine's
+fifteen seconds, plus ten seconds of headroom for the requests in flight. The ten
+added to it is this example's own two closers, the recorder and the store's cache
+subscription, which no generator can know about. Adding rather than restating is
+what keeps a new block from silently eating the headroom.
+
 `api.Register` makes the mux and hands it back, so adding a table is one field
 in `api.Handlers` and anything else this server answers is a `Handle` call on
 the same mux.

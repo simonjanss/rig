@@ -81,10 +81,16 @@ func main() {
 		Hint: "run `rig db up` to start a local Postgres for this project, " +
 			"or point $DATABASE_URL at one you already have",
 
-		MaxStartup:  30 * time.Second,
-		MaxShutdown: 20 * time.Second,
+		MaxStartup: 30 * time.Second,
+		// api.ShutdownBudget is twenty-five — fifteen for the notification
+		// engine, which is the one closer `notifications:` registers, and ten
+		// left for the requests still in flight — and the five added to it is
+		// this example's own: the cache listener behind `cache:`, closed in the
+		// mount closure below. Written as a sum rather than as thirty because
+		// only one of the two halves is this file's to know.
+		MaxShutdown: api.ShutdownBudget() + 5*time.Second,
 
-		Tasks: map[string]serve.Task{
+		Tasks: api.Tasks(map[string]serve.Task{
 			"migrate": migrate.Apply(migrations, migrate.Options{Log: os.Stdout}),
 			// The guarantee behind the inbox. The engine the server runs is
 			// latency — it turns a notification into an inbox line in
@@ -107,16 +113,16 @@ func main() {
 			// this one, and a project that turns the queue on first has a window
 			// where its mail silently stops.
 			"dispatch-auth-mail": dispatchAuthMail,
-			// The same shape for the other thing kept only until nobody will ask
-			// for it again: the records of writes that carried an
-			// Idempotency-Key. Zero takes the default retention, a day.
-			"prune-idempotency": api.IdempotencyPruner(0),
+			// prune-idempotency is api.Tasks's: the same shape for the other
+			// thing kept only until nobody will ask for it again, the records of
+			// writes that carried an Idempotency-Key.
+			//
 			// `auth seed` makes a tenant, an account to sign in as, and the role
 			// that lets it write. There is no registration endpoint in this
 			// example: who may create an account is a product decision, and the
 			// foundation deliberately does not make it for you.
 			"seed": seed,
-		},
+		}),
 		Migrate: migrate.Require(migrations, migrate.Options{}),
 	}, func(ctx context.Context, app *serve.App) (http.Handler, error) {
 		mux, front, engine, err := newAPI(ctx, app.Pool, app.Logger)
@@ -125,14 +131,10 @@ func main() {
 		}
 
 		// A dependency with a shutdown of its own, registered beside the line
-		// that built it. Draining stops it taking new work while the server is
-		// still answering, which is the right order: the requests in flight are
-		// the last ones whose commits will nudge it, and what is left of the
-		// window is better spent finishing than starting. Closing runs before
-		// the pool does, because what is in flight is a write.
-		engine.Start()
-		app.Drain("notifications", engine.StopClaiming)
-		app.CloseWithin("notifications", 15*time.Second, engine.Close)
+		// that built it — the drain and the close both, which is why it is one
+		// generated call rather than three lines this file has to keep in step
+		// with the budget above.
+		api.StartNotificationEngine(app, engine)
 
 		// The listener behind `cache:` in rig.yaml, which rig started when it
 		// built the foundation and nobody here has to think about again. This is
@@ -321,9 +323,12 @@ func newAPI(ctx context.Context, pool *pgxpool.Pool, log *slog.Logger) (http.Han
 			// The field is an interface the generated package declares, not this
 			// package's type, which is why examples/todo does not depend on argon2
 			// to serve a list of chores.
-			Auth:      front,
-			RequestID: func(r *http.Request) string { return r.Header.Get("X-Request-Id") },
-			Logger:    log,
+			Auth: front,
+			// No RequestID: the generated default already reads the caller's own
+			// X-Request-Id, bounded and checked before it is believed — and the
+			// auth routes above answer with the same one, which they did not
+			// before it was a default rather than a field.
+			Logger: log,
 			// Where a write that carried an Idempotency-Key is recorded, so a
 			// client that had to send one twice gets one row and one answer.
 			DB: pool,
