@@ -51,12 +51,12 @@ func PresenceTargets() []string {
 	return []string{
 		"rig_account",
 		"account_role",
-		"permission",
 		"rig_notification",
 		"rig_notification_delivery",
 		"rig_notification_device",
 		"rig_notification_recipient",
 		"rig_notification_setting",
+		"permission",
 		"role",
 		"todo",
 		"todo_attachment",

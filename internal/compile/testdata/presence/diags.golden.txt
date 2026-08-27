@@ -1,2 +1,0 @@
-warning[RIG6030] rig_presence: column rig_presence.account_id references rig_account, so it should be named rig_account_id or <qualifier>_rig_account_id
-warning[RIG6030] rig_presence: column rig_presence.tenant_id references rig_tenant, so it should be named rig_tenant_id or <qualifier>_rig_tenant_id

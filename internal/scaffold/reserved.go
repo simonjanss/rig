@@ -35,6 +35,29 @@ func ReservedResources() map[string]string {
 	return out
 }
 
+// TableConfig is rig's own configuration for one of its own tables, as YAML.
+//
+// It is the same text `rig setup-project --expose` writes to disk, returned as
+// bytes so the compiler can read it without a file. That is the whole point: how
+// rig's tables project — the API name the `rig_` prefix strips to, which
+// operations exist, which columns are read-only, what each enum value means — is
+// rig's answer and not a thing every project should have to write out. A project
+// that wants to differ runs `--expose` and edits the file it gets, and a file on
+// disk wins over this outright.
+//
+// ok is false for a table rig does not own, and for one it owns and has nothing
+// to say about.
+func TableConfig(table string) (yaml []byte, ok bool) {
+	for _, name := range Parts() {
+		for _, c := range foundationPart(name).configs {
+			if c.table == table {
+				return []byte(c.content), true
+			}
+		}
+	}
+	return nil, false
+}
+
 // plannedResources are names rig has decided on and not built yet.
 //
 // Empty, and that is the healthy state: everything rig has decided on exists,

@@ -65,126 +65,6 @@ type AccountRepository interface {
 	ListDeleted(ctx context.Context, f model.AccountFilter, page model.AccountPage, opts ...readopt.Option) ([]*model.Account, int64, error)
 }
 
-// accountAccountRigNotificationDevicesFilter collects the conditions written
-// on a Account's AccountRigNotificationDevices.
-//
-// The bool is whether there were any: a relation nobody mentioned is not a
-// condition that everything satisfies, it is no condition at all.
-func accountAccountRigNotificationDevicesFilter(f model.AccountFilter) (model.RigNotificationDeviceFilter, bool) {
-	var (
-		sub   model.RigNotificationDeviceFilter
-		asked bool
-	)
-
-	if p := f.Equals; p != nil && p.AccountRigNotificationDevices != nil {
-		sub.Equals, asked = p.AccountRigNotificationDevices, true
-	}
-	if p := f.NotEquals; p != nil && p.AccountRigNotificationDevices != nil {
-		sub.NotEquals, asked = p.AccountRigNotificationDevices, true
-	}
-	if p := f.GreaterThan; p != nil && p.AccountRigNotificationDevices != nil {
-		sub.GreaterThan, asked = p.AccountRigNotificationDevices, true
-	}
-	if p := f.SmallerThan; p != nil && p.AccountRigNotificationDevices != nil {
-		sub.SmallerThan, asked = p.AccountRigNotificationDevices, true
-	}
-	if p := f.GreaterOrEqual; p != nil && p.AccountRigNotificationDevices != nil {
-		sub.GreaterOrEqual, asked = p.AccountRigNotificationDevices, true
-	}
-	if p := f.SmallerOrEqual; p != nil && p.AccountRigNotificationDevices != nil {
-		sub.SmallerOrEqual, asked = p.AccountRigNotificationDevices, true
-	}
-	if p := f.Contains; p != nil && p.AccountRigNotificationDevices != nil {
-		sub.Contains, asked = p.AccountRigNotificationDevices, true
-	}
-	if p := f.NotContains; p != nil && p.AccountRigNotificationDevices != nil {
-		sub.NotContains, asked = p.AccountRigNotificationDevices, true
-	}
-	if p := f.Like; p != nil && p.AccountRigNotificationDevices != nil {
-		sub.Like, asked = p.AccountRigNotificationDevices, true
-	}
-	if p := f.NotLike; p != nil && p.AccountRigNotificationDevices != nil {
-		sub.NotLike, asked = p.AccountRigNotificationDevices, true
-	}
-	if p := f.Null; p != nil && p.AccountRigNotificationDevices != nil {
-		sub.Null, asked = p.AccountRigNotificationDevices, true
-	}
-	if p := f.NotNull; p != nil && p.AccountRigNotificationDevices != nil {
-		sub.NotNull, asked = p.AccountRigNotificationDevices, true
-	}
-
-	if !asked {
-		return sub, false
-	}
-
-	// The connective comes down with them, and it has to: under OR the caller
-	// asked for a related row satisfying either condition, and one subquery whose
-	// inside is a disjunction is exactly that. Under AND it is the same row
-	// satisfying both, which is the part a subquery per operator could not say.
-	sub.OrCondition = f.OrCondition
-	return sub, true
-}
-
-// accountAccountRigNotificationSettingsFilter collects the conditions written
-// on a Account's AccountRigNotificationSettings.
-//
-// The bool is whether there were any: a relation nobody mentioned is not a
-// condition that everything satisfies, it is no condition at all.
-func accountAccountRigNotificationSettingsFilter(f model.AccountFilter) (model.RigNotificationSettingFilter, bool) {
-	var (
-		sub   model.RigNotificationSettingFilter
-		asked bool
-	)
-
-	if p := f.Equals; p != nil && p.AccountRigNotificationSettings != nil {
-		sub.Equals, asked = p.AccountRigNotificationSettings, true
-	}
-	if p := f.NotEquals; p != nil && p.AccountRigNotificationSettings != nil {
-		sub.NotEquals, asked = p.AccountRigNotificationSettings, true
-	}
-	if p := f.GreaterThan; p != nil && p.AccountRigNotificationSettings != nil {
-		sub.GreaterThan, asked = p.AccountRigNotificationSettings, true
-	}
-	if p := f.SmallerThan; p != nil && p.AccountRigNotificationSettings != nil {
-		sub.SmallerThan, asked = p.AccountRigNotificationSettings, true
-	}
-	if p := f.GreaterOrEqual; p != nil && p.AccountRigNotificationSettings != nil {
-		sub.GreaterOrEqual, asked = p.AccountRigNotificationSettings, true
-	}
-	if p := f.SmallerOrEqual; p != nil && p.AccountRigNotificationSettings != nil {
-		sub.SmallerOrEqual, asked = p.AccountRigNotificationSettings, true
-	}
-	if p := f.Contains; p != nil && p.AccountRigNotificationSettings != nil {
-		sub.Contains, asked = p.AccountRigNotificationSettings, true
-	}
-	if p := f.NotContains; p != nil && p.AccountRigNotificationSettings != nil {
-		sub.NotContains, asked = p.AccountRigNotificationSettings, true
-	}
-	if p := f.Like; p != nil && p.AccountRigNotificationSettings != nil {
-		sub.Like, asked = p.AccountRigNotificationSettings, true
-	}
-	if p := f.NotLike; p != nil && p.AccountRigNotificationSettings != nil {
-		sub.NotLike, asked = p.AccountRigNotificationSettings, true
-	}
-	if p := f.Null; p != nil && p.AccountRigNotificationSettings != nil {
-		sub.Null, asked = p.AccountRigNotificationSettings, true
-	}
-	if p := f.NotNull; p != nil && p.AccountRigNotificationSettings != nil {
-		sub.NotNull, asked = p.AccountRigNotificationSettings, true
-	}
-
-	if !asked {
-		return sub, false
-	}
-
-	// The connective comes down with them, and it has to: under OR the caller
-	// asked for a related row satisfying either condition, and one subquery whose
-	// inside is a disjunction is exactly that. Under AND it is the same row
-	// satisfying both, which is the part a subquery per operator could not say.
-	sub.OrCondition = f.OrCondition
-	return sub, true
-}
-
 // accountAssigneeAccountTodosFilter collects the conditions written on a
 // Account's AssigneeAccountTodos.
 //
@@ -681,34 +561,6 @@ func accountGroup(f model.AccountFilter, sc filterScope) (query.Group, error) {
 		}
 	}
 
-	if sub, ok := accountAccountRigNotificationDevicesFilter(f); ok {
-		inner, from, on := sc.hasMany("rig_notification_device", "account_id", "id")
-		where, err := rigNotificationDeviceGroup(sub, inner)
-		if err != nil {
-			return query.Group{}, err
-		}
-
-		// The far side is scoped whatever the read asked for. A read option widens
-		// what this query returns, not what it may look through to decide.
-		where.Add(inner.tenant("tenant_id"))
-
-		g.Add(query.Related(query.Exists{From: from, On: on, Where: where}))
-	}
-
-	if sub, ok := accountAccountRigNotificationSettingsFilter(f); ok {
-		inner, from, on := sc.hasMany("rig_notification_setting", "account_id", "id")
-		where, err := rigNotificationSettingGroup(sub, inner)
-		if err != nil {
-			return query.Group{}, err
-		}
-
-		// The far side is scoped whatever the read asked for. A read option widens
-		// what this query returns, not what it may look through to decide.
-		where.Add(inner.tenant("tenant_id"))
-
-		g.Add(query.Related(query.Exists{From: from, On: on, Where: where}))
-	}
-
 	if sub, ok := accountAssigneeAccountTodosFilter(f); ok {
 		inner, from, on := sc.hasMany("todo", "assignee_account_id", "id")
 		where, err := todoGroup(sub, inner)
@@ -723,34 +575,6 @@ func accountGroup(f model.AccountFilter, sc filterScope) (query.Group, error) {
 		where.Add(inner.original("version_type", model.TodoVersionTypeOriginal))
 
 		g.Add(query.Related(query.Exists{From: from, On: on, Where: where}))
-	}
-
-	if p := f.Without; p != nil && p.AccountRigNotificationDevices != nil {
-		inner, from, on := sc.hasMany("rig_notification_device", "account_id", "id")
-		where, err := rigNotificationDeviceGroup(*p.AccountRigNotificationDevices, inner)
-		if err != nil {
-			return query.Group{}, err
-		}
-
-		// The far side is scoped whatever the read asked for. A read option widens
-		// what this query returns, not what it may look through to decide.
-		where.Add(inner.tenant("tenant_id"))
-
-		g.Add(query.Related(query.Exists{From: from, On: on, Where: where, Not: true}))
-	}
-
-	if p := f.Without; p != nil && p.AccountRigNotificationSettings != nil {
-		inner, from, on := sc.hasMany("rig_notification_setting", "account_id", "id")
-		where, err := rigNotificationSettingGroup(*p.AccountRigNotificationSettings, inner)
-		if err != nil {
-			return query.Group{}, err
-		}
-
-		// The far side is scoped whatever the read asked for. A read option widens
-		// what this query returns, not what it may look through to decide.
-		where.Add(inner.tenant("tenant_id"))
-
-		g.Add(query.Related(query.Exists{From: from, On: on, Where: where, Not: true}))
 	}
 
 	if p := f.Without; p != nil && p.AssigneeAccountTodos != nil {
@@ -1040,8 +864,8 @@ func (r *accountRepo) Create(ctx context.Context, in dbhook.Create[model.Account
 			}
 		}
 
-		columns := []string{"id", "tenant_id", "created_at", "created_by_account_id", "created_by_api_key_id", "identity_id", "kind", "role", "email_address", "display_name", "time_zone", "is_active"}
-		values := []any{id, claims.TenantID, now, claims.Actor(), claims.ActorKey(), in.Input.IdentityID, in.Input.Kind, in.Input.Role, in.Input.EmailAddress, in.Input.DisplayName, in.Input.TimeZone, in.Input.IsActive}
+		columns := []string{"id", "tenant_id", "created_at", "created_by_account_id", "created_by_api_key_id", "display_name", "time_zone"}
+		values := []any{id, claims.TenantID, now, claims.Actor(), claims.ActorKey(), in.Input.DisplayName, in.Input.TimeZone}
 
 		sql := fmt.Sprintf("INSERT INTO rig_account (%s) VALUES (%s) RETURNING %s", joinColumns(columns), placeholders(len(values)), accountRepoSelect)
 
@@ -1135,22 +959,6 @@ func (r *accountRepo) Update(ctx context.Context, id uuid.UUID, in dbhook.Update
 		columns := []string{}
 		values := []any{}
 
-		if in.Input.IdentityID.Touched() {
-			columns = append(columns, "identity_id")
-			values = append(values, in.Input.IdentityID.Ptr())
-		}
-		if v, ok := in.Input.Kind.Get(); ok {
-			columns = append(columns, "kind")
-			values = append(values, v)
-		}
-		if v, ok := in.Input.Role.Get(); ok {
-			columns = append(columns, "role")
-			values = append(values, v)
-		}
-		if v, ok := in.Input.EmailAddress.Get(); ok {
-			columns = append(columns, "email_address")
-			values = append(values, v)
-		}
 		if v, ok := in.Input.DisplayName.Get(); ok {
 			columns = append(columns, "display_name")
 			values = append(values, v)
@@ -1158,10 +966,6 @@ func (r *accountRepo) Update(ctx context.Context, id uuid.UUID, in dbhook.Update
 		if in.Input.TimeZone.Touched() {
 			columns = append(columns, "time_zone")
 			values = append(values, in.Input.TimeZone.Ptr())
-		}
-		if v, ok := in.Input.IsActive.Get(); ok {
-			columns = append(columns, "is_active")
-			values = append(values, v)
 		}
 
 		if len(columns) == 0 {
@@ -1375,22 +1179,6 @@ func (r *accountRepo) Restore(ctx context.Context, id uuid.UUID, in dbhook.Resto
 		// Whatever the input changed goes in the same statement. No snapshot is taken:
 		// a snapshot has to be a copy of a live row — the CHECK constraint says so
 		// — and there was no live row to copy.
-		if in.Input.IdentityID.Touched() {
-			columns = append(columns, "identity_id")
-			values = append(values, in.Input.IdentityID.Ptr())
-		}
-		if v, ok := in.Input.Kind.Get(); ok {
-			columns = append(columns, "kind")
-			values = append(values, v)
-		}
-		if v, ok := in.Input.Role.Get(); ok {
-			columns = append(columns, "role")
-			values = append(values, v)
-		}
-		if v, ok := in.Input.EmailAddress.Get(); ok {
-			columns = append(columns, "email_address")
-			values = append(values, v)
-		}
 		if v, ok := in.Input.DisplayName.Get(); ok {
 			columns = append(columns, "display_name")
 			values = append(values, v)
@@ -1398,10 +1186,6 @@ func (r *accountRepo) Restore(ctx context.Context, id uuid.UUID, in dbhook.Resto
 		if in.Input.TimeZone.Touched() {
 			columns = append(columns, "time_zone")
 			values = append(values, in.Input.TimeZone.Ptr())
-		}
-		if v, ok := in.Input.IsActive.Get(); ok {
-			columns = append(columns, "is_active")
-			values = append(values, v)
 		}
 
 		// The row changed, so it is stamped as changed. A restore that left the update

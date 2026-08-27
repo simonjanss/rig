@@ -39,36 +39,55 @@ const (
 	// Read accounts — One person inside one tenant. The person is the identity;
 	// this is who they are here.
 	PermissionRigAccountRead = "rig_account.read"
-	// Delete rignotificationdevices — Where a push can reach somebody. Email is
+	// Read notifications — Something worth telling somebody about, and when it
+	// is due. Carries no recipients: the audience is computed when it is sent.
+	PermissionRigNotificationRead = "rig_notification.read"
+	// Read notificationdeliveries — One copy of an inbox line on its way to a
+	// channel. Claimed by lease, sent outside any transaction, and marked
+	// afterwards.
+	PermissionRigNotificationDeliveryRead = "rig_notification_delivery.read"
+	// Delete notificationdevices — Where a push can reach somebody. Email is
 	// refused: the address is on the account already.
 	PermissionRigNotificationDeviceDelete = "rig_notification_device.delete"
-	// Read rignotificationdevices — Where a push can reach somebody. Email is
+	// Read notificationdevices — Where a push can reach somebody. Email is
 	// refused: the address is on the account already.
 	PermissionRigNotificationDeviceRead = "rig_notification_device.read"
-	// Read every rignotificationdevice in the tenant, not only the caller's own.
-	// Held in addition to rig_notification_device.read rather than instead of it:
-	// the endpoint's own check runs first, so this one widens a read somebody may
+	// Read every notificationdevice in the tenant, not only the caller's own. Held
+	// in addition to rig_notification_device.read rather than instead of it: the
+	// endpoint's own check runs first, so this one widens a read somebody may
 	// already do and grants nothing on its own. Without it, ?scope=all is refused.
 	PermissionRigNotificationDeviceReadAll = "rig_notification_device.read.all"
-	// Create and change rignotificationdevices — Where a push can reach
-	// somebody. Email is refused: the address is on the account already.
+	// Create and change notificationdevices — Where a push can reach somebody.
+	// Email is refused: the address is on the account already.
 	PermissionRigNotificationDeviceWrite = "rig_notification_device.write"
-	// Delete rignotificationsettings — What somebody wants on a channel, and
-	// when. Resolved in three steps: this kind, then this channel, then the
-	// project default.
+	// Delete notificationrecipients — One inbox line: a notification, an
+	// account, and whether it has been read.
+	PermissionRigNotificationRecipientDelete = "rig_notification_recipient.delete"
+	// Read notificationrecipients — One inbox line: a notification, an account,
+	// and whether it has been read.
+	PermissionRigNotificationRecipientRead = "rig_notification_recipient.read"
+	// Read every notificationrecipient in the tenant, not only the caller's own.
+	// Held in addition to rig_notification_recipient.read rather than instead of
+	// it: the endpoint's own check runs first, so this one widens a read somebody
+	// may already do and grants nothing on its own. Without it, ?scope=all is
+	// refused.
+	PermissionRigNotificationRecipientReadAll = "rig_notification_recipient.read.all"
+	// Delete notificationsettings — What somebody wants on a channel, and when.
+	// Resolved in three steps: this kind, then this channel, then the project
+	// default.
 	PermissionRigNotificationSettingDelete = "rig_notification_setting.delete"
-	// Read rignotificationsettings — What somebody wants on a channel, and when.
+	// Read notificationsettings — What somebody wants on a channel, and when.
 	// Resolved in three steps: this kind, then this channel, then the project
 	// default.
 	PermissionRigNotificationSettingRead = "rig_notification_setting.read"
-	// Read every rignotificationsetting in the tenant, not only the caller's own.
+	// Read every notificationsetting in the tenant, not only the caller's own.
 	// Held in addition to rig_notification_setting.read rather than instead of it:
 	// the endpoint's own check runs first, so this one widens a read somebody may
 	// already do and grants nothing on its own. Without it, ?scope=all is refused.
 	PermissionRigNotificationSettingReadAll = "rig_notification_setting.read.all"
-	// Create and change rignotificationsettings — What somebody wants on a
-	// channel, and when. Resolved in three steps: this kind, then this channel,
-	// then the project default.
+	// Create and change notificationsettings — What somebody wants on a channel,
+	// and when. Resolved in three steps: this kind, then this channel, then the
+	// project default.
 	PermissionRigNotificationSettingWrite = "rig_notification_setting.write"
 	// Take the item.
 	PermissionTodoClaim = "todo.claim"

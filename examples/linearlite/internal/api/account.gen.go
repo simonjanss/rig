@@ -28,6 +28,20 @@ type AccountListQuery struct {
 	Offset int `json:"offset"`
 }
 
+// Query parameters for Account.Search.
+type AccountSearchQuery struct {
+	// Maximum rows to return.
+	Limit int `json:"limit"`
+	// Rows to skip before the first returned row.
+	Offset int `json:"offset"`
+}
+
+// The request body for Account.Search.
+type AccountSearchBody struct {
+	// Conditions rows must satisfy.
+	Filter model.AccountFilter `json:"filter"`
+}
+
 // Query parameters for Account.ListDeleted.
 type AccountListDeletedQuery struct {
 	// Maximum rows to return.

@@ -155,11 +155,14 @@ type Handlers struct {
 	// the API.
 	Presence *presence.Service
 
-	Account                AccountService
-	RigNotificationDevice  RigNotificationDeviceService
-	RigNotificationSetting RigNotificationSettingService
-	Todo                   TodoService
-	TodoAttachment         TodoAttachmentService
+	Account               AccountService
+	Notification          NotificationService
+	NotificationDelivery  NotificationDeliveryService
+	NotificationDevice    NotificationDeviceService
+	NotificationRecipient NotificationRecipientService
+	NotificationSetting   NotificationSettingService
+	Todo                  TodoService
+	TodoAttachment        TodoAttachmentService
 }
 
 // Register mounts every route and returns the mux.
@@ -205,11 +208,20 @@ func Register(h Handlers) *http.ServeMux {
 	if h.Account != nil {
 		registerAccount(mux, h.Server, h.Account)
 	}
-	if h.RigNotificationDevice != nil {
-		registerRigNotificationDevice(mux, h.Server, h.RigNotificationDevice)
+	if h.Notification != nil {
+		registerNotification(mux, h.Server, h.Notification)
 	}
-	if h.RigNotificationSetting != nil {
-		registerRigNotificationSetting(mux, h.Server, h.RigNotificationSetting)
+	if h.NotificationDelivery != nil {
+		registerNotificationDelivery(mux, h.Server, h.NotificationDelivery)
+	}
+	if h.NotificationDevice != nil {
+		registerNotificationDevice(mux, h.Server, h.NotificationDevice)
+	}
+	if h.NotificationRecipient != nil {
+		registerNotificationRecipient(mux, h.Server, h.NotificationRecipient)
+	}
+	if h.NotificationSetting != nil {
+		registerNotificationSetting(mux, h.Server, h.NotificationSetting)
 	}
 	if h.Todo != nil {
 		registerTodo(mux, h.Server, h.Todo)
@@ -298,6 +310,19 @@ func IdempotencyPruner(retention time.Duration) serve.Task {
 // appended to. A resource whose field is nil is skipped, and a parent whose
 // children are all nil adopts an empty list, which is what it had before.
 func Link(h Handlers) {
+	if h.NotificationRecipient != nil {
+		var cs NotificationRecipientChildDeletes
+		if h.NotificationDelivery != nil {
+			p := h.NotificationDelivery.ParentHooks()
+			cs = append(cs, dbhook.ChildDelete[model.NotificationRecipientDeleteInput, model.NotificationRecipient]{
+				Child:    "rig_notification_delivery",
+				Deleting: p.RecipientDeleting,
+				Deleted:  p.RecipientDeleted,
+			})
+		}
+		h.NotificationRecipient.AdoptChildren(cs)
+	}
+
 	if h.Todo != nil {
 		var cs TodoChildDeletes
 		// The row's own notifications, which are a child of it in every way that

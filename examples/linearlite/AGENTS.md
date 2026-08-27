@@ -55,7 +55,7 @@ checked by the generated code. Do not write it again.
 | Pattern | Who owns it |
 |---|---|
 | `rig.yaml` | you — the project's whole configuration |
-| `migrations/*.sql` | you |
+| `migrations/*.sql` | you — and only yours; rig's are carried by its modules |
 | `services/<table>/<table>.yaml` | you, via `rig sync` |
 | `main.go` | you |
 | `internal/app/*.go` | you — the one hand-written directory under `internal/` |
@@ -172,8 +172,12 @@ Beyond the todo example's layout, seven directories and one file:
   tenant filter as the whole scope; this one narrows on `scope` and `target_id`,
   because a heartbeat is a row change delivered to every subscriber and the
   fan-out is what decides whether presence is affordable. There is no
-  `rig_presence.yaml` beside it: `presence.expose` is off, so the table has a
-  model, a repository and a shape and no REST surface.
+  `rig_presence.yaml` beside it, and there is none anywhere under `services/`
+  for a table of rig's: rig ships their configuration and the compiler reads it
+  from there. It is also the one `services/rig_*` file left, and it is
+  hand-written rather than scaffolded — rig no longer writes stubs for its own
+  tables, because the three others here were `return nil` and two were imported
+  by nothing.
 - `services/authz/` — the roles-and-permissions model, an adapted copy of
   examples/auth's; that copy's comments explain every decision. Note the one
   name spelled out in it: `todo.claim` is the key rig derived from the custom
@@ -223,13 +227,16 @@ Beyond the todo example's layout, seven directories and one file:
   about it here short of restarting the server, and the failure is
   indistinguishable from the outage the switch exists to demonstrate. The pill
   reads "Sync moved" and the strip names both ports.
-- `services/rig_notification_device/` + `services/rig_notification_setting/` —
-  the two notification tables a person owns rather than reads, exposed as
-  ordinary resources by `notifications: expose: true` plus an `operations:` line
-  each. Both are `access: {scope: own, owner: account_id}`, so reads and updates
-  are narrowed before any code here runs; the one thing each service layer adds
-  is the rule a create needs, because a create has no row to be narrowed by.
-  The other three notification tables say `expose: false` in their own files.
+- **The notification devices and settings have no service layer**, and nothing
+  under `services/` at all. They are the two notification tables a person owns
+  rather than reads, projected as `NotificationDevice` and `NotificationSetting`
+  by `notifications: expose: true`; `internal/app` builds each with
+  `api.NewDefault<Name>Service(repo, api.<Name>Contract{})`, which is the
+  documented way to say there are no rules to add. `internal/compile` makes both
+  owner-scoped on `account_id`, so reads and updates are narrowed before any code
+  here runs, and the create — the one write with no row to narrow by — is checked
+  in the generated writer. That check used to be a hand-written validator in each
+  of these two directories, the same eleven lines twice.
 
 The `/auth/*` screens are worth knowing about before adding another: `web/src/`
 already covers sign-in, registration, the picker, reset, invitations (send,

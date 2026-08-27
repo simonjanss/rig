@@ -485,7 +485,15 @@ func applyColumnConfig(
 		cc, configured := cfg.Columns[col.Name]
 
 		if !configured {
-			if !IsManagedColumn(t.Name, col.Name) {
+			// Not rig's own configuration either. rig ships one for each of its
+			// tables and deliberately lists no columns in it, because every
+			// column is commented by the migration that created it and arrives
+			// through introspection — so a second copy there would be a second
+			// place to edit and one place to forget. That leaves every column of
+			// every projected rig table technically unmentioned, which is a true
+			// statement and useless advice: the rule exists to nudge somebody
+			// into documenting a column they own, and nobody owns these.
+			if !IsManagedColumn(t.Name, col.Name) && !loaded.IsBuiltin() {
 				diags.AddSeverity(diag.CodeUnmentionedColumn, opt.UnmentionedColumn,
 					anchorForTable(loaded, t.Name, "columns"),
 					"column %s.%s is not mentioned in its table configuration", t.Name, col.Name)
@@ -882,7 +890,22 @@ func applyNotificationTable(res *ir.Resource, t *ir.Table, opt ConfigOptions) {
 		res.Operations = nil
 	}
 
-	if t.Name != NotificationRecipientTable {
+	// The inbox, the devices and the settings all narrow to the caller, on
+	// account_id rather than on the audit column, and the compiler settles it
+	// rather than the shipped table configuration for two reasons.
+	//
+	// It is the same answer in every project — an inbox line belongs to the
+	// person it is addressed to, a device is one machine of one person's, a
+	// preference is a preference about yourself — so a key in a file could only
+	// ever disagree with this.
+	//
+	// And an `access: owner:` key would not work everywhere: it is refused
+	// unless the column has a visible relation to rig_account, which needs
+	// rig_account to be a projected resource. A project with `notifications:`
+	// and no `auth.expose` has the table and not the resource, so the key would
+	// be an error in exactly the project that most needs the narrowing —
+	// examples/todo is that project.
+	if !slices.Contains(ownerScopedNotificationTables, t.Name) {
 		return
 	}
 
@@ -896,6 +919,10 @@ func applyNotificationTable(res *ir.Resource, t *ir.Table, opt ConfigOptions) {
 			res.Storage.Owner = &owner
 			break
 		}
+	}
+
+	if t.Name != NotificationRecipientTable {
+		return
 	}
 
 	if res.Electric == nil {

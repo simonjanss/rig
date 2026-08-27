@@ -105,7 +105,13 @@ func (g *Generator) Generate(_ context.Context, doc *ir.Document, opts gen.Optio
 		}
 		artifacts = append(artifacts, types, service)
 
-		if cfg.StubDir != "" {
+		// No stub for a table rig created. A stub is a file for the project's own
+		// rules about its own table, and rig's tables are neither: what may be
+		// done to one is [ir.Resource.Foundation]'s configuration, and a project
+		// that wants a rule on top writes the file itself — CreateOnce leaves an
+		// existing one alone, so writing one by hand still works and still
+		// survives every regenerate.
+		if cfg.StubDir != "" && !res.Foundation {
 			stub, err := e.stubFile(res)
 			if err != nil {
 				return nil, err

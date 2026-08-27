@@ -16,6 +16,8 @@ import (
 // registerAccount mounts Account's routes.
 func registerAccount(mux *http.ServeMux, s Server, svc AccountService) {
 	mux.HandleFunc("GET /api/v1/accounts", handleListAccounts(s, svc))
+	mux.HandleFunc("QUERY /api/v1/accounts", handleSearchAccounts(s, svc))
+	mux.HandleFunc("POST /api/v1/accounts/_search", handleSearchAccounts(s, svc))
 	mux.HandleFunc("GET /api/v1/accounts/_deleted", handleListDeletedAccounts(s, svc))
 	mux.HandleFunc("GET /api/v1/accounts/{id}", handleGetAccount(s, svc))
 }
@@ -59,6 +61,59 @@ func handleListAccounts(s Server, svc AccountService) http.HandlerFunc {
 		req := NewRequest(claims, struct{}{}, query, struct{}{}, rc)
 
 		out, err := svc.List(ctx, req)
+		if err != nil {
+			fail(s, w, r, rc, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, out)
+	}
+}
+
+// handleSearchAccounts serves QUERY /api/v1/accounts.
+//
+// Search Accounts with filters.
+func handleSearchAccounts(s Server, svc AccountService) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		rec := reqlog.Wrap(w)
+		w = rec
+
+		r, span := observe.Server(r, "QUERY /api/v1/accounts", rec.Status)
+		defer span.End()
+
+		ctx, claims, rc, ok := prepare(s, w, r)
+		defer logRequest(s, r, rec, rc)
+		if !ok {
+			return
+		}
+
+		if err := tenancy.Require(claims, "rig_account.read"); err != nil {
+			fail(s, w, r, rc, err)
+			return
+		}
+
+		var query AccountSearchQuery
+		limitParam, err := httpx.QueryInt(r, "limit", 50)
+		if err != nil {
+			fail(s, w, r, rc, err)
+			return
+		}
+		query.Limit = limitParam
+		offsetParam, err := httpx.QueryInt(r, "offset", 0)
+		if err != nil {
+			fail(s, w, r, rc, err)
+			return
+		}
+		query.Offset = offsetParam
+
+		var body AccountSearchBody
+		if err := decodeBody(r, &body); err != nil {
+			fail(s, w, r, rc, err)
+			return
+		}
+
+		req := NewRequest(claims, struct{}{}, query, body, rc)
+
+		out, err := svc.Search(ctx, req)
 		if err != nil {
 			fail(s, w, r, rc, err)
 			return

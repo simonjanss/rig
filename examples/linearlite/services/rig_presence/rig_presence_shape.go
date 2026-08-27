@@ -35,7 +35,7 @@ import (
 //
 // Unlike the .gen.go files, this one is yours: rig writes it once and never
 // touches it again.
-func Shape(ctx context.Context, r *http.Request, claims tenancy.Claims, p internalelectric.RigPresenceShapeParams, w *electric.Where) error {
+func Shape(ctx context.Context, r *http.Request, claims tenancy.Claims, p internalelectric.PresenceShapeParams, w *electric.Where) error {
 	if p.HasScope {
 		w.Eq("scope", p.Scope)
 	}
@@ -48,4 +48,4 @@ func Shape(ctx context.Context, r *http.Request, claims tenancy.Claims, p intern
 // Shape satisfies the generated signature. The check is here so that a
 // parameter added to the configuration becomes a compile error rather than a
 // value nobody reads.
-var _ internalelectric.RigPresenceScope = Shape
+var _ internalelectric.PresenceScope = Shape

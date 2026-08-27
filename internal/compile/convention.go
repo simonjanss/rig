@@ -285,6 +285,27 @@ const (
 // the table it was written against.
 const NotificationRecipientOwner = "account_id"
 
+// ownerScopedNotificationTables are the notification tables a read narrows to
+// the caller, all three on the same column.
+//
+// The inbox is the one the column was named for. The other two are the rows a
+// person owns rather than reads: where a push can reach them, and what they want
+// on each channel. A device token addresses one person's machine and the list of
+// them is the list of places they read this from; a preference is a preference
+// about yourself, and it is also what the engine resolves a send by — so the
+// column a read narrows on and the column a send goes to are one column.
+//
+// The remaining two are deliberately absent. rig_notification carries no
+// recipient at all, so there is nobody for a row to belong to, and
+// rig_notification_delivery is the dispatcher's bookkeeping — exposed so that
+// "why did I not get that mail" can be answered, which is a question support
+// asks about somebody else.
+var ownerScopedNotificationTables = []string{
+	NotificationRecipientTable,
+	NotificationDeviceTable,
+	NotificationSettingTable,
+}
+
 // fileColumnSuffix is what makes a column a file column.
 const fileColumnSuffix = "_file_id"
 

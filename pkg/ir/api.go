@@ -556,6 +556,23 @@ type Resource struct {
 	// It is negative so that the zero value is the ordinary case.
 	Unexposed bool `json:"unexposed,omitempty"`
 
+	// Foundation says rig created this table: it is one of the `rig_` tables a
+	// module's migration set carries, and rig ships the configuration that
+	// decides how it projects.
+	//
+	// What reads it is the stub writers. A stub is a file rig creates once and
+	// then never touches, for a project to put its own rules in — and for a
+	// table the project did not create, has no migration for and cannot change,
+	// the rules are usually that there are none. Three of the four such stubs in
+	// this repository's own examples were byte-identical no-ops, and two of those
+	// were not imported by anything.
+	//
+	// It is not read anywhere the answer matters for correctness, and that is
+	// deliberate: it comes from the project's migrations or its configuration
+	// rather than from the `rig_` prefix, so a project with `auth.own` — which
+	// has taken the schema over — has none of these, and gets its stubs.
+	Foundation bool `json:"foundation,omitempty"`
+
 	Operations []string `json:"operations"`
 	// Public names the operations that answer without a credential, generated
 	// and custom alike. An endpoint carries the resolved flag; this is the

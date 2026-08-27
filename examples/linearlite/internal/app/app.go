@@ -25,9 +25,6 @@ import (
 	"github.com/simonjanss/rig/examples/linearlite/internal/store"
 	"github.com/simonjanss/rig/examples/linearlite/services/authz"
 	"github.com/simonjanss/rig/examples/linearlite/services/outbox"
-	"github.com/simonjanss/rig/examples/linearlite/services/rig_account"
-	"github.com/simonjanss/rig/examples/linearlite/services/rig_notification_device"
-	"github.com/simonjanss/rig/examples/linearlite/services/rig_notification_setting"
 	"github.com/simonjanss/rig/examples/linearlite/services/rig_presence"
 	"github.com/simonjanss/rig/examples/linearlite/services/todo"
 	"github.com/simonjanss/rig/examples/linearlite/services/todo_attachment"
@@ -90,17 +87,28 @@ func New(ctx context.Context, pool *pgxpool.Pool, log *slog.Logger, page *observ
 	// the guarantee — which is why losing it in a test that passes nil is fine.
 	todos := todo.New(repos.Todos, inbox, engine.Nudge, pool)
 	attachments := todo_attachment.New(repos.TodoAttachments, api.NewFiles(pool))
-	members := rig_account.New(repos.Accounts)
+	// The tables rig created, and there is no services/ directory for any of
+	// them: what may be done to a table rig owns is rig's answer, and the
+	// contract is empty because this schema has no rule to add to one. An empty
+	// contract is a documented thing to write rather than an oversight — see
+	// NewDefaultAccountService — and the alternative was a stub file per table,
+	// which is what this used to be: four of them, and three were `nil` in every
+	// field.
+	//
+	// Account is the one this example actually reads. The board needs names to
+	// put on assignees, and `auth.expose: [rig_account]` in rig.yaml is what
+	// projects it — a resource beside the auth module's own queries against the
+	// same table.
+	members := api.NewDefaultAccountService(repos.Accounts, api.AccountContract{})
 
 	// The two notification tables a person owns rather than reads: where a push
-	// can reach them, and what they want on each channel. Ordinary generated
-	// resources — `notifications: expose: true` and an `operations:` line each —
-	// which is the whole reason there is no hand-written HTTP for either. They
-	// are owner-scoped in the configuration, so a read is already narrowed to
-	// the caller's own rows and the service layer only has to say that a row
-	// cannot be created naming somebody else.
-	devices := rig_notification_device.New(repos.RigNotificationDevices)
-	prefs := rig_notification_setting.New(repos.RigNotificationSettings)
+	// can reach them, and what they want on each channel. `notifications:
+	// expose: true` is the whole of it, which is the reason there is no
+	// hand-written HTTP for either — and rig's configuration is what makes them
+	// owner-scoped, so a read is narrowed to the caller's own rows and a create
+	// cannot name somebody else.
+	devices := api.NewDefaultNotificationDeviceService(repos.NotificationDevices, api.NotificationDeviceContract{})
+	prefs := api.NewDefaultNotificationSettingService(repos.NotificationSettings, api.NotificationSettingContract{})
 
 	reg.Register(api.NewTodoSubject(todos))
 
@@ -147,12 +155,12 @@ func New(ctx context.Context, pool *pgxpool.Pool, log *slog.Logger, page *observ
 			},
 			Logger: log,
 		},
-		Account:                members,
-		Todo:                   todos,
-		TodoAttachment:         attachments,
-		RigNotificationDevice:  devices,
-		RigNotificationSetting: prefs,
-		Notifications:          inbox,
+		Account:             members,
+		Todo:                todos,
+		TodoAttachment:      attachments,
+		NotificationDevice:  devices,
+		NotificationSetting: prefs,
+		Notifications:       inbox,
 		// Who is here. Setting it mounts the three routes under /presence; nil
 		// leaves them unmounted, which is what a project that generated the
 		// wiring and has not written the front end yet wants.
@@ -219,8 +227,8 @@ func New(ctx context.Context, pool *pgxpool.Pool, log *slog.Logger, page *observ
 	// field above rather than a line per shape here, which is most of what this
 	// registration used to be.
 	genelectric.Register(mux, genelectric.Handlers{
-		Server:      genelectric.Server{Proxy: proxy, GetClaims: front.Claims},
-		RigPresence: rig_presence.Shape,
+		Server:   genelectric.Server{Proxy: proxy, GetClaims: front.Claims},
+		Presence: rig_presence.Shape,
 	})
 
 	// The permission table, made to match what the handlers check — including

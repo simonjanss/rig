@@ -36,10 +36,10 @@ type Account struct {
 	// Account that soft-deleted this row, taken from the request's claims.
 	DeletedByAccountID *uuid.UUID `json:"deletedByAccountId,omitempty"`
 	// Whether this is a person or a service account an integration acts as.
-	Kind RigAccountKind `json:"kind"`
+	Kind AccountKind `json:"kind"`
 	// The coarse level in this tenant: Owner, Admin, or Basic. Somebody can be an
 	// Owner here and Basic elsewhere.
-	Role RigAccountRoleLevel `json:"role"`
+	Role AccountRoleLevel `json:"role"`
 	// A copy of the identity's address, kept here so listing accounts is one
 	// query. For a service account it is a label nobody signs in with.
 	EmailAddress string `json:"emailAddress"`

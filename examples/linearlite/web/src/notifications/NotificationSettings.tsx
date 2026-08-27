@@ -1,15 +1,12 @@
 import { useCallback, useEffect, useState } from "react";
 
-import type {
-    RigNotificationDevice,
-    RigNotificationSetting,
-} from "../api/index.js";
+import type { NotificationDevice, NotificationSetting } from "../api/index.js";
 import type { Tour } from "../outbox/outboxApi.js";
 
 import {
-    allRigNotificationDigest,
-    RigNotificationChannel,
-    RigNotificationDigest,
+    allNotificationDigest,
+    NotificationChannel,
+    NotificationDigest,
 } from "../api/index.js";
 import { useAuth } from "../auth/AuthContext.js";
 import { client } from "../lib/client.js";
@@ -19,17 +16,16 @@ import { useToasts } from "../toast/ToastContext.js";
  * How somebody wants to be told, and where a push could reach them.
  *
  * Two generated resources, not a hand-written route between them:
- * `notifications: expose: true` in rig.yaml projects the notification tables,
- * and an `operations:` line in each of the two people actually own — their
- * devices and their preferences — is the whole of it. So this component talks to
- * `client.rigNotificationSettings` and `client.rigNotificationDevices` like it
- * talks to the board, with the same filter grammar, the same error shapes and
- * the same permission keys.
+ * `notifications: expose: true` in rig.yaml is the whole of it, and there is no
+ * `services/` directory for either table — how rig's own tables project is
+ * rig's answer. So this component talks to `client.notificationSettings` and
+ * `client.notificationDevices` like it talks to the board, with the same filter
+ * grammar, the same error shapes and the same permission keys.
  *
- * Both tables are owner-scoped in the configuration (`access: { scope: own,
- * owner: account_id }`), which is why nothing here filters by account: a read is
- * already narrowed to the caller's own rows, and a write to somebody else's is a
- * 404 rather than a 403 — the row is not theirs to know about.
+ * Both tables are owner-scoped on `account_id`, which is why nothing here
+ * filters by account: a read is already narrowed to the caller's own rows, and a
+ * write to somebody else's is a 404 rather than a 403 — the row is not theirs to
+ * know about.
  *
  * The absence of a row is the interesting state. `notifications.default_digest`
  * in rig.yaml is what an account with no setting gets, which is why deleting a
@@ -40,17 +36,17 @@ export function NotificationSettings() {
     const { tenant } = useAuth();
     const { push } = useToasts();
 
-    const [settings, setSettings] = useState<RigNotificationSetting[]>([]);
-    const [devices, setDevices] = useState<RigNotificationDevice[]>([]);
+    const [settings, setSettings] = useState<NotificationSetting[]>([]);
+    const [devices, setDevices] = useState<NotificationDevice[]>([]);
     const [tour, setTour] = useState<Tour | null>(null);
     const [busy, setBusy] = useState(false);
 
     const refresh = useCallback(() => {
-        client.rigNotificationSettings
+        client.notificationSettings
             .list({ limit: 50 })
             .then((page) => setSettings(page.data))
             .catch(() => undefined);
-        client.rigNotificationDevices
+        client.notificationDevices
             .list({ limit: 50 })
             .then((page) => setDevices(page.data))
             .catch(() => undefined);
@@ -70,7 +66,7 @@ export function NotificationSettings() {
     }, [refresh]);
 
     /** The channel-wide row, which is the one with no kind on it. */
-    function settingFor(channel: string): RigNotificationSetting | undefined {
+    function settingFor(channel: string): NotificationSetting | undefined {
         return settings.find((s) => s.channel === channel && !s.kind);
     }
 
@@ -80,19 +76,22 @@ export function NotificationSettings() {
         try {
             const existing = settingFor(channel);
             if (existing) {
-                await client.rigNotificationSettings.update(existing.id, {
-                    digest: digest as RigNotificationDigest,
+                await client.notificationSettings.update(existing.id, {
+                    digest: digest as NotificationDigest,
                     isEnabled: true,
                 });
             } else {
-                // accountId is sent rather than inferred, and the service layer
-                // refuses one that is not the caller's: owner scoping narrows
-                // reads and updates by reading the row first, and a create has
-                // no row to read. See services/rig_notification_setting.
-                await client.rigNotificationSettings.create({
+                // accountId is sent rather than inferred, and the generated
+                // writer refuses one that is not the caller's. Owner scoping
+                // settles which row a write reaches; who the row belongs to
+                // afterwards is the other half, and the guard in
+                // NewNotificationSettingWriter is that half. Sending your own
+                // is what a client that has the value does; leaving it out
+                // would be filled in with the same answer.
+                await client.notificationSettings.create({
                     accountId: tenant.accountId,
-                    channel: channel as RigNotificationChannel,
-                    digest: digest as RigNotificationDigest,
+                    channel: channel as NotificationChannel,
+                    digest: digest as NotificationDigest,
                     isEnabled: true,
                     activeDays: [],
                 });
@@ -109,9 +108,9 @@ export function NotificationSettings() {
         }
     }
 
-    async function reset(s: RigNotificationSetting) {
+    async function reset(s: NotificationSetting) {
         try {
-            await client.rigNotificationSettings.delete(s.id);
+            await client.notificationSettings.delete(s.id);
             refresh();
         } catch (err) {
             push({
@@ -144,9 +143,9 @@ export function NotificationSettings() {
                 // shape to demonstrate.
                 await Notification.requestPermission();
             }
-            await client.rigNotificationDevices.create({
+            await client.notificationDevices.create({
                 accountId: tenant.accountId,
-                channel: RigNotificationChannel.Desktop,
+                channel: NotificationChannel.Desktop,
                 token: `webpush-demo:${crypto.randomUUID()}`,
                 label: navigator.platform || "this browser",
             });
@@ -167,9 +166,9 @@ export function NotificationSettings() {
         }
     }
 
-    async function revoke(d: RigNotificationDevice) {
+    async function revoke(d: NotificationDevice) {
         try {
-            await client.rigNotificationDevices.delete(d.id);
+            await client.notificationDevices.delete(d.id);
             refresh();
         } catch (err) {
             push({
@@ -194,7 +193,7 @@ export function NotificationSettings() {
                 and everything here is a copy of it.
             </p>
 
-            {Object.values(RigNotificationChannel).map((channel) => {
+            {Object.values(NotificationChannel).map((channel) => {
                 const s = settingFor(channel);
                 const registered = known.includes(channel);
                 return (
@@ -232,7 +231,7 @@ export function NotificationSettings() {
                                 <option value="" disabled>
                                     default
                                 </option>
-                                {allRigNotificationDigest.map((d) => (
+                                {allNotificationDigest.map((d) => (
                                     <option key={d} value={d}>
                                         {d}
                                     </option>

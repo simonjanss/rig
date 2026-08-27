@@ -3,7 +3,7 @@
   "info": {
     "title": "linearlite",
     "description": "The linearlite HTTP API.\n\nThe authentication endpoints under `/auth` are served by a hand-written module and are not described here.\n\nThe notification inbox endpoints are served by a hand-written module and are not described here.",
-    "version": "2026-08-26"
+    "version": "2026-08-27"
   },
   "servers": [
     {
@@ -152,6 +152,90 @@
         "x-rig-permission": "rig_account.read"
       }
     },
+    "/api/v1/accounts/_search": {
+      "post": {
+        "tags": [
+          "Accounts"
+        ],
+        "summary": "Search Accounts with filters.",
+        "description": "Search Accounts with filters.\n\nThe primary form of this operation is `QUERY /api/v1/accounts` — a read that carries a body, and so safe and idempotent in a way POST is not. OpenAPI 3.1 cannot describe an operation on the QUERY method, so it is documented here as the POST alias that exists for intermediaries which reject unfamiliar methods. One handler serves both routes and they answer identically.\n\nRequires the `rig_account.read` permission.",
+        "operationId": "searchAccounts",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Maximum rows to return.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "default": 50
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "description": "Rows to skip before the first returned row.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "default": 0
+            }
+          },
+          {
+            "$ref": "#/components/parameters/ApiRevision"
+          }
+        ],
+        "requestBody": {
+          "description": "The request body for Account.Search.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AccountSearchBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "A page of matching Accounts.",
+            "headers": {
+              "API-Revision": {
+                "$ref": "#/components/headers/ApiRevision"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountListResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnprocessableEntity"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-rig-permission": "rig_account.read"
+      }
+    },
     "/api/v1/accounts/{id}": {
       "get": {
         "tags": [
@@ -213,14 +297,145 @@
         "x-rig-permission": "rig_account.read"
       }
     },
-    "/api/v1/rig-notification-devices": {
+    "/api/v1/notification-deliveries": {
       "get": {
         "tags": [
-          "RigNotificationDevices"
+          "NotificationDeliveries"
         ],
-        "summary": "List RigNotificationDevices.",
-        "description": "List RigNotificationDevices.\n\nRequires the `rig_notification_device.read` permission.",
-        "operationId": "listRigNotificationDevices",
+        "summary": "List NotificationDeliveries.",
+        "description": "List NotificationDeliveries.\n\nRequires the `rig_notification_delivery.read` permission.",
+        "operationId": "listNotificationDeliveries",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Maximum rows to return.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "default": 50
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "description": "Rows to skip before the first returned row.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "default": 0
+            }
+          },
+          {
+            "$ref": "#/components/parameters/ApiRevision"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of NotificationDeliveries.",
+            "headers": {
+              "API-Revision": {
+                "$ref": "#/components/headers/ApiRevision"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationDeliveryListResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-rig-permission": "rig_notification_delivery.read"
+      }
+    },
+    "/api/v1/notification-deliveries/{id}": {
+      "get": {
+        "tags": [
+          "NotificationDeliveries"
+        ],
+        "summary": "Fetch one NotificationDelivery by identifier.",
+        "description": "Fetch one NotificationDelivery by identifier.\n\nRequires the `rig_notification_delivery.read` permission.",
+        "operationId": "getNotificationDelivery",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Identifier of the NotificationDelivery.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/ApiRevision"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The requested NotificationDelivery.",
+            "headers": {
+              "API-Revision": {
+                "$ref": "#/components/headers/ApiRevision"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationDelivery"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-rig-permission": "rig_notification_delivery.read"
+      }
+    },
+    "/api/v1/notification-devices": {
+      "get": {
+        "tags": [
+          "NotificationDevices"
+        ],
+        "summary": "List NotificationDevices.",
+        "description": "List NotificationDevices.\n\nRequires the `rig_notification_device.read` permission.",
+        "operationId": "listNotificationDevices",
         "parameters": [
           {
             "name": "limit",
@@ -247,7 +462,7 @@
           {
             "name": "scope",
             "in": "query",
-            "description": "How wide to read: own for the rignotificationdevices the caller created, which is the default, or all for every one in the tenant. Asking for all requires the rig_notification_device.read.all permission and is refused without it, rather than quietly answering with fewer rows.",
+            "description": "How wide to read: own for the notificationdevices the caller created, which is the default, or all for every one in the tenant. Asking for all requires the rig_notification_device.read.all permission and is refused without it, rather than quietly answering with fewer rows.",
             "required": false,
             "schema": {
               "type": "string",
@@ -264,7 +479,7 @@
         ],
         "responses": {
           "200": {
-            "description": "A page of RigNotificationDevices.",
+            "description": "A page of NotificationDevices.",
             "headers": {
               "API-Revision": {
                 "$ref": "#/components/headers/ApiRevision"
@@ -273,7 +488,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RigNotificationDeviceListResponse"
+                  "$ref": "#/components/schemas/NotificationDeviceListResponse"
                 }
               }
             }
@@ -299,11 +514,11 @@
       },
       "post": {
         "tags": [
-          "RigNotificationDevices"
+          "NotificationDevices"
         ],
-        "summary": "Create a RigNotificationDevice.",
-        "description": "Create a RigNotificationDevice.\n\nRequires the `rig_notification_device.write` permission.",
-        "operationId": "createRigNotificationDevice",
+        "summary": "Create a NotificationDevice.",
+        "description": "Create a NotificationDevice.\n\nRequires the `rig_notification_device.write` permission.",
+        "operationId": "createNotificationDevice",
         "parameters": [
           {
             "$ref": "#/components/parameters/ApiRevision"
@@ -313,11 +528,11 @@
           }
         ],
         "requestBody": {
-          "description": "The fields a new RigNotificationDevice is created with. A field the database cannot supply for itself is required.",
+          "description": "The fields a new NotificationDevice is created with. A field the database cannot supply for itself is required.",
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/RigNotificationDeviceCreateInput"
+                "$ref": "#/components/schemas/NotificationDeviceCreateInput"
               }
             }
           },
@@ -325,7 +540,7 @@
         },
         "responses": {
           "201": {
-            "description": "The created RigNotificationDevice.",
+            "description": "The created NotificationDevice.",
             "headers": {
               "API-Revision": {
                 "$ref": "#/components/headers/ApiRevision"
@@ -337,7 +552,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RigNotificationDevice"
+                  "$ref": "#/components/schemas/NotificationDevice"
                 }
               }
             }
@@ -367,19 +582,93 @@
         "x-rig-permission": "rig_notification_device.write"
       }
     },
-    "/api/v1/rig-notification-devices/{id}": {
-      "delete": {
+    "/api/v1/notification-devices/{id}": {
+      "get": {
         "tags": [
-          "RigNotificationDevices"
+          "NotificationDevices"
         ],
-        "summary": "Delete a RigNotificationDevice.",
-        "description": "Delete a RigNotificationDevice.\n\nRequires the `rig_notification_device.delete` permission.",
-        "operationId": "deleteRigNotificationDevice",
+        "summary": "Fetch one NotificationDevice by identifier.",
+        "description": "Fetch one NotificationDevice by identifier.\n\nRequires the `rig_notification_device.read` permission.",
+        "operationId": "getNotificationDevice",
         "parameters": [
           {
             "name": "id",
             "in": "path",
-            "description": "Identifier of the RigNotificationDevice.",
+            "description": "Identifier of the NotificationDevice.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "scope",
+            "in": "query",
+            "description": "How wide to read: own for the notificationdevices the caller created, which is the default, or all for every one in the tenant. Asking for all requires the rig_notification_device.read.all permission and is refused without it, rather than quietly answering with fewer rows.",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "own",
+                "all"
+              ],
+              "default": "own"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/ApiRevision"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The requested NotificationDevice.",
+            "headers": {
+              "API-Revision": {
+                "$ref": "#/components/headers/ApiRevision"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationDevice"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-rig-permission": "rig_notification_device.read",
+        "x-rig-wide-permission": "rig_notification_device.read.all"
+      },
+      "delete": {
+        "tags": [
+          "NotificationDevices"
+        ],
+        "summary": "Delete a NotificationDevice.",
+        "description": "Delete a NotificationDevice.\n\nRequires the `rig_notification_device.delete` permission.",
+        "operationId": "deleteNotificationDevice",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Identifier of the NotificationDevice.",
             "required": true,
             "schema": {
               "type": "string",
@@ -392,7 +681,7 @@
         ],
         "responses": {
           "204": {
-            "description": "The RigNotificationDevice was deleted.",
+            "description": "The NotificationDevice was deleted.",
             "headers": {
               "API-Revision": {
                 "$ref": "#/components/headers/ApiRevision"
@@ -424,14 +713,14 @@
         "x-rig-permission": "rig_notification_device.delete"
       }
     },
-    "/api/v1/rig-notification-settings": {
+    "/api/v1/notification-recipients": {
       "get": {
         "tags": [
-          "RigNotificationSettings"
+          "NotificationRecipients"
         ],
-        "summary": "List RigNotificationSettings.",
-        "description": "List RigNotificationSettings.\n\nRequires the `rig_notification_setting.read` permission.",
-        "operationId": "listRigNotificationSettings",
+        "summary": "List NotificationRecipients.",
+        "description": "List NotificationRecipients.\n\nRequires the `rig_notification_recipient.read` permission.",
+        "operationId": "listNotificationRecipients",
         "parameters": [
           {
             "name": "limit",
@@ -458,7 +747,7 @@
           {
             "name": "scope",
             "in": "query",
-            "description": "How wide to read: own for the rignotificationsettings the caller created, which is the default, or all for every one in the tenant. Asking for all requires the rig_notification_setting.read.all permission and is refused without it, rather than quietly answering with fewer rows.",
+            "description": "How wide to read: own for the notificationrecipients the caller created, which is the default, or all for every one in the tenant. Asking for all requires the rig_notification_recipient.read.all permission and is refused without it, rather than quietly answering with fewer rows.",
             "required": false,
             "schema": {
               "type": "string",
@@ -475,7 +764,7 @@
         ],
         "responses": {
           "200": {
-            "description": "A page of RigNotificationSettings.",
+            "description": "A page of NotificationRecipients.",
             "headers": {
               "API-Revision": {
                 "$ref": "#/components/headers/ApiRevision"
@@ -484,7 +773,407 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RigNotificationSettingListResponse"
+                  "$ref": "#/components/schemas/NotificationRecipientListResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-rig-permission": "rig_notification_recipient.read",
+        "x-rig-wide-permission": "rig_notification_recipient.read.all"
+      }
+    },
+    "/api/v1/notification-recipients/_deleted": {
+      "get": {
+        "tags": [
+          "NotificationRecipients"
+        ],
+        "summary": "List retired NotificationRecipients.",
+        "description": "A deletion stamps the row rather than removing it, so this is what was deleted and can still be brought back. Only rows inside the 0-day restore window appear: past it a row is gone as far as anyone is concerned, so it is not in the trash either.\n\nRequires the `rig_notification_recipient.read` permission.",
+        "operationId": "listDeletedNotificationRecipients",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Maximum rows to return.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "default": 50
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "description": "Rows to skip before the first returned row.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "default": 0
+            }
+          },
+          {
+            "name": "scope",
+            "in": "query",
+            "description": "How wide to read: own for the notificationrecipients the caller created, which is the default, or all for every one in the tenant. Asking for all requires the rig_notification_recipient.read.all permission and is refused without it, rather than quietly answering with fewer rows.",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "own",
+                "all"
+              ],
+              "default": "own"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/ApiRevision"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of retired NotificationRecipients.",
+            "headers": {
+              "API-Revision": {
+                "$ref": "#/components/headers/ApiRevision"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationRecipientListResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-rig-permission": "rig_notification_recipient.read",
+        "x-rig-wide-permission": "rig_notification_recipient.read.all"
+      }
+    },
+    "/api/v1/notification-recipients/_search": {
+      "post": {
+        "tags": [
+          "NotificationRecipients"
+        ],
+        "summary": "Search NotificationRecipients with filters.",
+        "description": "Search NotificationRecipients with filters.\n\nThe primary form of this operation is `QUERY /api/v1/notification-recipients` — a read that carries a body, and so safe and idempotent in a way POST is not. OpenAPI 3.1 cannot describe an operation on the QUERY method, so it is documented here as the POST alias that exists for intermediaries which reject unfamiliar methods. One handler serves both routes and they answer identically.\n\nRequires the `rig_notification_recipient.read` permission.",
+        "operationId": "searchNotificationRecipients",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Maximum rows to return.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "default": 50
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "description": "Rows to skip before the first returned row.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "default": 0
+            }
+          },
+          {
+            "name": "scope",
+            "in": "query",
+            "description": "How wide to read: own for the notificationrecipients the caller created, which is the default, or all for every one in the tenant. Asking for all requires the rig_notification_recipient.read.all permission and is refused without it, rather than quietly answering with fewer rows.",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "own",
+                "all"
+              ],
+              "default": "own"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/ApiRevision"
+          }
+        ],
+        "requestBody": {
+          "description": "The request body for NotificationRecipient.Search.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NotificationRecipientSearchBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "A page of matching NotificationRecipients.",
+            "headers": {
+              "API-Revision": {
+                "$ref": "#/components/headers/ApiRevision"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationRecipientListResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnprocessableEntity"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-rig-permission": "rig_notification_recipient.read",
+        "x-rig-wide-permission": "rig_notification_recipient.read.all"
+      }
+    },
+    "/api/v1/notification-recipients/{id}": {
+      "get": {
+        "tags": [
+          "NotificationRecipients"
+        ],
+        "summary": "Fetch one NotificationRecipient by identifier.",
+        "description": "Fetch one NotificationRecipient by identifier.\n\nRequires the `rig_notification_recipient.read` permission.",
+        "operationId": "getNotificationRecipient",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Identifier of the NotificationRecipient.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "scope",
+            "in": "query",
+            "description": "How wide to read: own for the notificationrecipients the caller created, which is the default, or all for every one in the tenant. Asking for all requires the rig_notification_recipient.read.all permission and is refused without it, rather than quietly answering with fewer rows.",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "own",
+                "all"
+              ],
+              "default": "own"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/ApiRevision"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The requested NotificationRecipient.",
+            "headers": {
+              "API-Revision": {
+                "$ref": "#/components/headers/ApiRevision"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationRecipient"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-rig-permission": "rig_notification_recipient.read",
+        "x-rig-wide-permission": "rig_notification_recipient.read.all"
+      },
+      "delete": {
+        "tags": [
+          "NotificationRecipients"
+        ],
+        "summary": "Delete a NotificationRecipient.",
+        "description": "The row is retired by stamping a deletion time; it stops appearing in reads but can be restored within the retention window.\n\nRequires the `rig_notification_recipient.delete` permission.",
+        "operationId": "deleteNotificationRecipient",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Identifier of the NotificationRecipient.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/ApiRevision"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "The NotificationRecipient was deleted.",
+            "headers": {
+              "API-Revision": {
+                "$ref": "#/components/headers/ApiRevision"
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-rig-permission": "rig_notification_recipient.delete"
+      }
+    },
+    "/api/v1/notification-settings": {
+      "get": {
+        "tags": [
+          "NotificationSettings"
+        ],
+        "summary": "List NotificationSettings.",
+        "description": "List NotificationSettings.\n\nRequires the `rig_notification_setting.read` permission.",
+        "operationId": "listNotificationSettings",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Maximum rows to return.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "default": 50
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "description": "Rows to skip before the first returned row.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "default": 0
+            }
+          },
+          {
+            "name": "scope",
+            "in": "query",
+            "description": "How wide to read: own for the notificationsettings the caller created, which is the default, or all for every one in the tenant. Asking for all requires the rig_notification_setting.read.all permission and is refused without it, rather than quietly answering with fewer rows.",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "own",
+                "all"
+              ],
+              "default": "own"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/ApiRevision"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of NotificationSettings.",
+            "headers": {
+              "API-Revision": {
+                "$ref": "#/components/headers/ApiRevision"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationSettingListResponse"
                 }
               }
             }
@@ -510,11 +1199,11 @@
       },
       "post": {
         "tags": [
-          "RigNotificationSettings"
+          "NotificationSettings"
         ],
-        "summary": "Create a RigNotificationSetting.",
-        "description": "Create a RigNotificationSetting.\n\nRequires the `rig_notification_setting.write` permission.",
-        "operationId": "createRigNotificationSetting",
+        "summary": "Create a NotificationSetting.",
+        "description": "Create a NotificationSetting.\n\nRequires the `rig_notification_setting.write` permission.",
+        "operationId": "createNotificationSetting",
         "parameters": [
           {
             "$ref": "#/components/parameters/ApiRevision"
@@ -524,11 +1213,11 @@
           }
         ],
         "requestBody": {
-          "description": "The fields a new RigNotificationSetting is created with. A field the database cannot supply for itself is required.",
+          "description": "The fields a new NotificationSetting is created with. A field the database cannot supply for itself is required.",
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/RigNotificationSettingCreateInput"
+                "$ref": "#/components/schemas/NotificationSettingCreateInput"
               }
             }
           },
@@ -536,7 +1225,7 @@
         },
         "responses": {
           "201": {
-            "description": "The created RigNotificationSetting.",
+            "description": "The created NotificationSetting.",
             "headers": {
               "API-Revision": {
                 "$ref": "#/components/headers/ApiRevision"
@@ -548,7 +1237,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RigNotificationSetting"
+                  "$ref": "#/components/schemas/NotificationSetting"
                 }
               }
             }
@@ -578,19 +1267,93 @@
         "x-rig-permission": "rig_notification_setting.write"
       }
     },
-    "/api/v1/rig-notification-settings/{id}": {
-      "delete": {
+    "/api/v1/notification-settings/{id}": {
+      "get": {
         "tags": [
-          "RigNotificationSettings"
+          "NotificationSettings"
         ],
-        "summary": "Delete a RigNotificationSetting.",
-        "description": "Delete a RigNotificationSetting.\n\nRequires the `rig_notification_setting.delete` permission.",
-        "operationId": "deleteRigNotificationSetting",
+        "summary": "Fetch one NotificationSetting by identifier.",
+        "description": "Fetch one NotificationSetting by identifier.\n\nRequires the `rig_notification_setting.read` permission.",
+        "operationId": "getNotificationSetting",
         "parameters": [
           {
             "name": "id",
             "in": "path",
-            "description": "Identifier of the RigNotificationSetting.",
+            "description": "Identifier of the NotificationSetting.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "scope",
+            "in": "query",
+            "description": "How wide to read: own for the notificationsettings the caller created, which is the default, or all for every one in the tenant. Asking for all requires the rig_notification_setting.read.all permission and is refused without it, rather than quietly answering with fewer rows.",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "own",
+                "all"
+              ],
+              "default": "own"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/ApiRevision"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The requested NotificationSetting.",
+            "headers": {
+              "API-Revision": {
+                "$ref": "#/components/headers/ApiRevision"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationSetting"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-rig-permission": "rig_notification_setting.read",
+        "x-rig-wide-permission": "rig_notification_setting.read.all"
+      },
+      "delete": {
+        "tags": [
+          "NotificationSettings"
+        ],
+        "summary": "Delete a NotificationSetting.",
+        "description": "Delete a NotificationSetting.\n\nRequires the `rig_notification_setting.delete` permission.",
+        "operationId": "deleteNotificationSetting",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Identifier of the NotificationSetting.",
             "required": true,
             "schema": {
               "type": "string",
@@ -603,7 +1366,7 @@
         ],
         "responses": {
           "204": {
-            "description": "The RigNotificationSetting was deleted.",
+            "description": "The NotificationSetting was deleted.",
             "headers": {
               "API-Revision": {
                 "$ref": "#/components/headers/ApiRevision"
@@ -636,16 +1399,16 @@
       },
       "patch": {
         "tags": [
-          "RigNotificationSettings"
+          "NotificationSettings"
         ],
-        "summary": "Update a RigNotificationSetting.",
+        "summary": "Update a NotificationSetting.",
         "description": "Only the fields present in the body are changed. A field set to null is cleared; a field left out is left alone.\n\nRequires the `rig_notification_setting.write` permission.",
-        "operationId": "updateRigNotificationSetting",
+        "operationId": "updateNotificationSetting",
         "parameters": [
           {
             "name": "id",
             "in": "path",
-            "description": "Identifier of the RigNotificationSetting.",
+            "description": "Identifier of the NotificationSetting.",
             "required": true,
             "schema": {
               "type": "string",
@@ -660,11 +1423,11 @@
           }
         ],
         "requestBody": {
-          "description": "The fields of a RigNotificationSetting to change. Every member is optional: one left out is left alone, and an explicit null clears it.",
+          "description": "The fields of a NotificationSetting to change. Every member is optional: one left out is left alone, and an explicit null clears it.",
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/RigNotificationSettingUpdateInput"
+                "$ref": "#/components/schemas/NotificationSettingUpdateInput"
               }
             }
           },
@@ -672,7 +1435,7 @@
         },
         "responses": {
           "200": {
-            "description": "The updated RigNotificationSetting.",
+            "description": "The updated NotificationSetting.",
             "headers": {
               "API-Revision": {
                 "$ref": "#/components/headers/ApiRevision"
@@ -684,7 +1447,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RigNotificationSetting"
+                  "$ref": "#/components/schemas/NotificationSetting"
                 }
               }
             }
@@ -717,14 +1480,145 @@
         "x-rig-permission": "rig_notification_setting.write"
       }
     },
+    "/api/v1/notifications": {
+      "get": {
+        "tags": [
+          "Notifications"
+        ],
+        "summary": "List Notifications.",
+        "description": "List Notifications.\n\nRequires the `rig_notification.read` permission.",
+        "operationId": "listNotifications",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Maximum rows to return.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "default": 50
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "description": "Rows to skip before the first returned row.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "default": 0
+            }
+          },
+          {
+            "$ref": "#/components/parameters/ApiRevision"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of Notifications.",
+            "headers": {
+              "API-Revision": {
+                "$ref": "#/components/headers/ApiRevision"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationListResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-rig-permission": "rig_notification.read"
+      }
+    },
+    "/api/v1/notifications/{id}": {
+      "get": {
+        "tags": [
+          "Notifications"
+        ],
+        "summary": "Fetch one Notification by identifier.",
+        "description": "Fetch one Notification by identifier.\n\nRequires the `rig_notification.read` permission.",
+        "operationId": "getNotification",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Identifier of the Notification.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/ApiRevision"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The requested Notification.",
+            "headers": {
+              "API-Revision": {
+                "$ref": "#/components/headers/ApiRevision"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Notification"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-rig-permission": "rig_notification.read"
+      }
+    },
     "/api/v1/rig_notification_recipient/_deleted/_stream": {
       "get": {
         "tags": [
-          "RigNotificationRecipients"
+          "NotificationRecipients"
         ],
-        "summary": "Subscribe to retired RigNotificationRecipients.",
+        "summary": "Subscribe to retired NotificationRecipients.",
         "description": "The rows a delete stamped rather than removed, kept up to date.\n\nA shape is a filtered view of one table that a client subscribes to. This route is a proxy in front of the sync service: which rows exist in the shape — the tenant, the lifecycle predicate, and the application's own scoping — is decided by the server and cannot be influenced from here. Where the client is in the stream is forwarded untouched.\n\nWith `live=true` the request is a long poll: it does not answer until something changes, so a client timeout set for an ordinary request will cut it short.\n\nThe response body is the sync protocol's own and is not described here. The `electric-*` response headers carry the cursor: send `handle` and `offset` back on the next request, or the subscription starts over.\n\nRequires a session scoped to a tenant, and the shape is filtered to it.",
-        "operationId": "streamDeletedRigNotificationRecipients",
+        "operationId": "streamDeletedNotificationRecipients",
         "parameters": [
           {
             "name": "offset",
@@ -852,11 +1746,11 @@
     "/api/v1/rig_notification_recipient/_stream": {
       "get": {
         "tags": [
-          "RigNotificationRecipients"
+          "NotificationRecipients"
         ],
-        "summary": "Subscribe to the live RigNotificationRecipient shape.",
-        "description": "Every RigNotificationRecipient the caller may read, kept up to date.\n\nA shape is a filtered view of one table that a client subscribes to. This route is a proxy in front of the sync service: which rows exist in the shape — the tenant, the lifecycle predicate, and the application's own scoping — is decided by the server and cannot be influenced from here. Where the client is in the stream is forwarded untouched.\n\nWith `live=true` the request is a long poll: it does not answer until something changes, so a client timeout set for an ordinary request will cut it short.\n\nThe response body is the sync protocol's own and is not described here. The `electric-*` response headers carry the cursor: send `handle` and `offset` back on the next request, or the subscription starts over.\n\nRequires a session scoped to a tenant, and the shape is filtered to it.",
-        "operationId": "streamRigNotificationRecipients",
+        "summary": "Subscribe to the live NotificationRecipient shape.",
+        "description": "Every NotificationRecipient the caller may read, kept up to date.\n\nA shape is a filtered view of one table that a client subscribes to. This route is a proxy in front of the sync service: which rows exist in the shape — the tenant, the lifecycle predicate, and the application's own scoping — is decided by the server and cannot be influenced from here. Where the client is in the stream is forwarded untouched.\n\nWith `live=true` the request is a long poll: it does not answer until something changes, so a client timeout set for an ordinary request will cut it short.\n\nThe response body is the sync protocol's own and is not described here. The `electric-*` response headers carry the cursor: send `handle` and `offset` back on the next request, or the subscription starts over.\n\nRequires a session scoped to a tenant, and the shape is filtered to it.",
+        "operationId": "streamNotificationRecipients",
         "parameters": [
           {
             "name": "offset",
@@ -984,11 +1878,11 @@
     "/api/v1/rig_presence/_stream": {
       "get": {
         "tags": [
-          "RigPresences"
+          "Presences"
         ],
-        "summary": "Subscribe to the live RigPresence shape.",
-        "description": "Every RigPresence the caller may read, kept up to date.\n\nA shape is a filtered view of one table that a client subscribes to. This route is a proxy in front of the sync service: which rows exist in the shape — the tenant, the lifecycle predicate, and the application's own scoping — is decided by the server and cannot be influenced from here. Where the client is in the stream is forwarded untouched.\n\nWith `live=true` the request is a long poll: it does not answer until something changes, so a client timeout set for an ordinary request will cut it short.\n\nThe response body is the sync protocol's own and is not described here. The `electric-*` response headers carry the cursor: send `handle` and `offset` back on the next request, or the subscription starts over.\n\nRequires a session scoped to a tenant, and the shape is filtered to it.",
-        "operationId": "streamRigPresences",
+        "summary": "Subscribe to the live Presence shape.",
+        "description": "Every Presence the caller may read, kept up to date.\n\nA shape is a filtered view of one table that a client subscribes to. This route is a proxy in front of the sync service: which rows exist in the shape — the tenant, the lifecycle predicate, and the application's own scoping — is decided by the server and cannot be influenced from here. Where the client is in the stream is forwarded untouched.\n\nWith `live=true` the request is a long poll: it does not answer until something changes, so a client timeout set for an ordinary request will cut it short.\n\nThe response body is the sync protocol's own and is not described here. The `electric-*` response headers carry the cursor: send `handle` and `offset` back on the next request, or the subscription starts over.\n\nRequires a session scoped to a tenant, and the shape is filtered to it.",
+        "operationId": "streamPresences",
         "parameters": [
           {
             "name": "offset",
@@ -3181,15 +4075,16 @@
             "readOnly": true
           },
           "kind": {
-            "$ref": "#/components/schemas/RigAccountKind",
+            "$ref": "#/components/schemas/AccountKind",
             "description": "Whether this is a person or a service account an integration acts as."
           },
           "role": {
-            "$ref": "#/components/schemas/RigAccountRoleLevel",
+            "$ref": "#/components/schemas/AccountRoleLevel",
             "description": "The coarse level in this tenant: Owner, Admin, or Basic. Somebody can be an Owner here and Basic elsewhere."
           },
           "emailAddress": {
             "type": "string",
+            "format": "email",
             "description": "A copy of the identity's address, kept here so listing accounts is one query. For a service account it is a label nobody signs in with."
           },
           "displayName": {
@@ -3237,6 +4132,666 @@
         },
         "description": "One person inside one tenant. The person is the identity; this is who they are here."
       },
+      "AccountFilter": {
+        "type": "object",
+        "properties": {
+          "equals": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/AccountFilterEquals"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Fields that must equal the given value."
+          },
+          "notEquals": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/AccountFilterEquals"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Fields that must not equal the given value."
+          },
+          "greaterThan": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/AccountFilterRange"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Fields that must be greater than the given value."
+          },
+          "smallerThan": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/AccountFilterRange"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Fields that must be less than the given value."
+          },
+          "greaterOrEqual": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/AccountFilterRange"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Fields that must be greater than or equal to the given value."
+          },
+          "smallerOrEqual": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/AccountFilterRange"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Fields that must be less than or equal to the given value."
+          },
+          "contains": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/AccountFilterContains"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Fields that must be one of the given values."
+          },
+          "notContains": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/AccountFilterContains"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Fields that must not be one of the given values."
+          },
+          "like": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/AccountFilterLike"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Text fields that must match the given pattern."
+          },
+          "notLike": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/AccountFilterLike"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Text fields that must not match the given pattern."
+          },
+          "null": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/AccountFilterNull"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Fields that must be null."
+          },
+          "notNull": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/AccountFilterNull"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Fields that must not be null."
+          },
+          "orCondition": {
+            "type": "boolean",
+            "description": "Combine this filter's conditions with OR instead of AND."
+          },
+          "nestedFilters": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AccountFilter"
+            },
+            "description": "Sub-filters combined with this one, so that AND and OR can be mixed to any depth."
+          },
+          "without": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/AccountFilterWithout"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Relations with no row matching the given conditions. An empty one asks for no related row at all.\n\nThis is where a negation belongs when what you mean is \"not\": it negates whether a matching related row exists, so a row with no related row at all satisfies it. The negative operators above negate the comparison instead and still require the related row to be there — \"no related row called X\" is here, \"a related row not called X\" is NotEquals."
+          }
+        },
+        "description": "Conditions a Account must satisfy to match a search."
+      },
+      "AccountFilterContains": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Unique identifier for this row."
+          },
+          "identityId": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "The person this account belongs to, or null for a service account, which is nobody."
+          },
+          "createdAt": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "description": "When this row was created. Set automatically and never changes."
+          },
+          "createdByAccountId": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Account that created this row, taken from the request's claims."
+          },
+          "updatedAt": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "description": "When this row was last updated. Set automatically on every update."
+          },
+          "updatedByAccountId": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Account that last updated this row, taken from the request's claims."
+          },
+          "deletedAt": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "description": "When this row was soft-deleted. Null while the row is live."
+          },
+          "deletedByAccountId": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Account that soft-deleted this row, taken from the request's claims."
+          },
+          "kind": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AccountKind"
+            },
+            "description": "Whether this is a person or a service account an integration acts as."
+          },
+          "role": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AccountRoleLevel"
+            },
+            "description": "The coarse level in this tenant: Owner, Admin, or Basic. Somebody can be an Owner here and Basic elsewhere."
+          },
+          "emailAddress": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "format": "email",
+            "description": "A copy of the identity's address, kept here so listing accounts is one query. For a service account it is a label nobody signs in with."
+          },
+          "displayName": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "What to call the person in this tenant."
+          },
+          "timeZone": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "IANA name, for example Europe/Stockholm. Null means UTC."
+          },
+          "isActive": {
+            "type": "array",
+            "items": {
+              "type": "boolean"
+            },
+            "description": "Whether the account may be used. A disabled account is refused with 403, not 401."
+          },
+          "createdByApiKeyId": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "API key this row was created through, when it was an integration rather than a person."
+          },
+          "updatedByApiKeyId": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "API key this row was last updated through, when it was an integration rather than a person."
+          },
+          "deletedByApiKeyId": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "API key this row was soft-deleted through, when it was an integration rather than a person."
+          },
+          "assigneeAccountTodos": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/TodoFilterContains"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Conditions on one of this row's AssigneeAccountTodos.\n\nEvery condition has to hold of the same one, not of the set between them.\n\nUnder the negative operators this asks whether one of them differs, which is not the same as none of them matching: a row can have one that matches and one that does not, satisfying the first and failing the second. Without.AssigneeAccountTodos asks the second."
+          }
+        },
+        "description": "Set-membership conditions on Account fields."
+      },
+      "AccountFilterEquals": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Unique identifier for this row."
+          },
+          "identityId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The person this account belongs to, or null for a service account, which is nobody."
+          },
+          "createdAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When this row was created. Set automatically and never changes."
+          },
+          "createdByAccountId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Account that created this row, taken from the request's claims."
+          },
+          "updatedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When this row was last updated. Set automatically on every update."
+          },
+          "updatedByAccountId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Account that last updated this row, taken from the request's claims."
+          },
+          "deletedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When this row was soft-deleted. Null while the row is live."
+          },
+          "deletedByAccountId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Account that soft-deleted this row, taken from the request's claims."
+          },
+          "kind": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/AccountKind"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Whether this is a person or a service account an integration acts as."
+          },
+          "role": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/AccountRoleLevel"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The coarse level in this tenant: Owner, Admin, or Basic. Somebody can be an Owner here and Basic elsewhere."
+          },
+          "emailAddress": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "email",
+            "description": "A copy of the identity's address, kept here so listing accounts is one query. For a service account it is a label nobody signs in with."
+          },
+          "displayName": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "What to call the person in this tenant."
+          },
+          "timeZone": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "IANA name, for example Europe/Stockholm. Null means UTC."
+          },
+          "isActive": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Whether the account may be used. A disabled account is refused with 403, not 401."
+          },
+          "createdByApiKeyId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "API key this row was created through, when it was an integration rather than a person."
+          },
+          "updatedByApiKeyId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "API key this row was last updated through, when it was an integration rather than a person."
+          },
+          "deletedByApiKeyId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "API key this row was soft-deleted through, when it was an integration rather than a person."
+          },
+          "assigneeAccountTodos": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/TodoFilterEquals"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Conditions on one of this row's AssigneeAccountTodos.\n\nEvery condition has to hold of the same one, not of the set between them.\n\nUnder the negative operators this asks whether one of them differs, which is not the same as none of them matching: a row can have one that matches and one that does not, satisfying the first and failing the second. Without.AssigneeAccountTodos asks the second."
+          }
+        },
+        "description": "Exact-match conditions on Account fields."
+      },
+      "AccountFilterLike": {
+        "type": "object",
+        "properties": {
+          "emailAddress": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "email",
+            "description": "A copy of the identity's address, kept here so listing accounts is one query. For a service account it is a label nobody signs in with."
+          },
+          "displayName": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "What to call the person in this tenant."
+          },
+          "timeZone": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "IANA name, for example Europe/Stockholm. Null means UTC."
+          },
+          "assigneeAccountTodos": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/TodoFilterLike"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Conditions on one of this row's AssigneeAccountTodos.\n\nEvery condition has to hold of the same one, not of the set between them.\n\nUnder the negative operators this asks whether one of them differs, which is not the same as none of them matching: a row can have one that matches and one that does not, satisfying the first and failing the second. Without.AssigneeAccountTodos asks the second."
+          }
+        },
+        "description": "Pattern conditions on Account text fields."
+      },
+      "AccountFilterNull": {
+        "type": "object",
+        "properties": {
+          "identityId": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "The person this account belongs to, or null for a service account, which is nobody."
+          },
+          "createdByAccountId": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Account that created this row, taken from the request's claims."
+          },
+          "updatedAt": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "When this row was last updated. Set automatically on every update."
+          },
+          "updatedByAccountId": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Account that last updated this row, taken from the request's claims."
+          },
+          "deletedAt": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "When this row was soft-deleted. Null while the row is live."
+          },
+          "deletedByAccountId": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Account that soft-deleted this row, taken from the request's claims."
+          },
+          "timeZone": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "IANA name, for example Europe/Stockholm. Null means UTC."
+          },
+          "createdByApiKeyId": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "API key this row was created through, when it was an integration rather than a person."
+          },
+          "updatedByApiKeyId": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "API key this row was last updated through, when it was an integration rather than a person."
+          },
+          "deletedByApiKeyId": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "API key this row was soft-deleted through, when it was an integration rather than a person."
+          },
+          "assigneeAccountTodos": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/TodoFilterNull"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Conditions on one of this row's AssigneeAccountTodos.\n\nEvery condition has to hold of the same one, not of the set between them.\n\nUnder the negative operators this asks whether one of them differs, which is not the same as none of them matching: a row can have one that matches and one that does not, satisfying the first and failing the second. Without.AssigneeAccountTodos asks the second."
+          }
+        },
+        "description": "Presence conditions on nullable Account fields."
+      },
+      "AccountFilterRange": {
+        "type": "object",
+        "properties": {
+          "createdAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When this row was created. Set automatically and never changes."
+          },
+          "updatedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When this row was last updated. Set automatically on every update."
+          },
+          "deletedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When this row was soft-deleted. Null while the row is live."
+          },
+          "assigneeAccountTodos": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/TodoFilterRange"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Conditions on one of this row's AssigneeAccountTodos.\n\nEvery condition has to hold of the same one, not of the set between them.\n\nUnder the negative operators this asks whether one of them differs, which is not the same as none of them matching: a row can have one that matches and one that does not, satisfying the first and failing the second. Without.AssigneeAccountTodos asks the second."
+          }
+        },
+        "description": "Ordering conditions on Account fields that can be compared."
+      },
+      "AccountFilterWithout": {
+        "type": "object",
+        "properties": {
+          "assigneeAccountTodos": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/TodoFilter"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Match rows with no AssigneeAccountTodos satisfying these conditions, including rows with none at all.\n\nThis negates the existence of a matching row rather than the comparison, which is the whole difference from NotEquals.AssigneeAccountTodos: that one is satisfied by one of them differing, and a row can have one that differs and one that matches at the same time. An empty object asks for rows with no AssigneeAccountTodos at all."
+          }
+        },
+        "description": "Relations a Account must have no matching row for."
+      },
+      "AccountKind": {
+        "type": "string",
+        "enum": [
+          "Person",
+          "Service"
+        ],
+        "description": "What an account is.",
+        "x-enum-varnames": [
+          "Person",
+          "Service"
+        ]
+      },
       "AccountListResponse": {
         "type": "object",
         "properties": {
@@ -3253,6 +4808,33 @@
           }
         },
         "description": "A page of Accounts."
+      },
+      "AccountRoleLevel": {
+        "type": "string",
+        "enum": [
+          "Owner",
+          "Admin",
+          "Basic"
+        ],
+        "description": "The coarse level an account holds in one tenant.",
+        "x-enum-varnames": [
+          "Owner",
+          "Admin",
+          "Basic"
+        ]
+      },
+      "AccountSearchBody": {
+        "type": "object",
+        "properties": {
+          "filter": {
+            "$ref": "#/components/schemas/AccountFilter",
+            "description": "Conditions rows must satisfy."
+          }
+        },
+        "required": [
+          "filter"
+        ],
+        "description": "The request body for Account.Search."
       },
       "Error": {
         "type": "object",
@@ -3308,85 +4890,121 @@
           "Internal"
         ]
       },
-      "Pagination": {
-        "type": "object",
-        "properties": {
-          "offset": {
-            "type": "integer",
-            "format": "int32",
-            "description": "Number of rows skipped before this page."
-          },
-          "limit": {
-            "type": "integer",
-            "format": "int32",
-            "description": "Maximum number of rows in this page."
-          },
-          "total": {
-            "type": "integer",
-            "format": "int64",
-            "description": "Total number of rows matching the query, ignoring pagination."
-          }
-        },
-        "description": "Where the returned page sits within the full result set."
-      },
-      "RigAccountKind": {
-        "type": "string",
-        "enum": [
-          "Person",
-          "Service"
-        ],
-        "description": "Whether an account is a person or a machine.",
-        "x-enum-varnames": [
-          "Person",
-          "Service"
-        ]
-      },
-      "RigAccountRoleLevel": {
-        "type": "string",
-        "enum": [
-          "Owner",
-          "Admin",
-          "Basic"
-        ],
-        "description": "The coarse level an account holds in its tenant.",
-        "x-enum-varnames": [
-          "Owner",
-          "Admin",
-          "Basic"
-        ]
-      },
-      "RigFile": {
+      "Notification": {
         "type": "object",
         "properties": {
           "id": {
             "type": "string",
             "format": "uuid",
-            "description": "Identifier of the file."
+            "description": "Unique identifier for this row.",
+            "readOnly": true
           },
-          "url": {
+          "tenantId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Tenant this row belongs to. Every query is scoped by it.",
+            "readOnly": true
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When this row was created. Set automatically and never changes.",
+            "readOnly": true
+          },
+          "createdByAccountId": {
             "type": [
               "string",
               "null"
             ],
-            "description": "Where the file is served from. Stable and unsigned, so it is safe to keep and to sync and grants nothing on its own: the endpoint behind it still checks the caller. Null until the upload is finished."
+            "format": "uuid",
+            "description": "Account that created this row, taken from the request's claims.",
+            "readOnly": true
           },
-          "fileName": {
+          "createdByApiKeyId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "API key this row was created through, when it was an integration rather than a person.",
+            "readOnly": true
+          },
+          "updatedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When this row was last updated. Set automatically on every update.",
+            "readOnly": true
+          },
+          "kind": {
             "type": "string",
-            "description": "What the file was called when it arrived. It is for the save dialog, and it is not a path: if you write the file somewhere, you decide where and you sanitize what."
+            "description": "What happened, as the application names it. Narrow it to an enum of your own to get a switch the compiler can see."
           },
-          "contentType": {
+          "state": {
+            "$ref": "#/components/schemas/NotificationState",
+            "description": "Resolved means the audience was determined and the inbox lines exist. It does not mean anything was sent."
+          },
+          "deliverAt": {
             "type": "string",
-            "description": "What the bytes were sniffed to be, which is what a download announces. It is not necessarily what the client claimed on the way up."
+            "format": "date-time",
+            "description": "When this is due. now() is the ordinary case; a scheduled notification is the same row with a later time, which is the only difference between the two."
           },
-          "sizeBytes": {
+          "resolvedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When the audience was computed. Null while the notification is still pending or was cancelled."
+          },
+          "payload": {
+            "description": "What a template needs beyond the linked row. Give it a Go type with the go_type key if it has a shape."
+          },
+          "groupKey": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "What collapses several of these into one inbox line, decided when the announcement was written and copied onto the line when the audience is resolved."
+          },
+          "accountIds": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "A recipient list captured at write time, and the one exception to computing the audience late. Null is the ordinary case; a list here skips the question entirely, for an audience that genuinely cannot be re-derived."
+          },
+          "claimedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When a dispatcher took this to resolve. Past notifications.claim_ttl another may, which is what makes a crashed process recoverable."
+          },
+          "claimedBy": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Which process holds the lease, so a stuck one traces to a pod rather than to a mystery."
+          },
+          "attempts": {
             "type": "integer",
-            "format": "int64",
-            "description": "How large the file is, in bytes."
+            "format": "int32",
+            "description": "How many times resolving this has been attempted."
           }
         },
-        "description": "One uploaded file. Metadata only; the bytes are fetched from Url."
+        "description": "Something worth telling somebody about, and when it is due. Carries no recipients: the audience is computed when it is sent."
       },
-      "RigNotificationChannel": {
+      "NotificationChannel": {
         "type": "string",
         "enum": [
           "Desktop",
@@ -3400,7 +5018,140 @@
           "Email"
         ]
       },
-      "RigNotificationDevice": {
+      "NotificationDelivery": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Unique identifier for this row.",
+            "readOnly": true
+          },
+          "tenantId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Tenant this row belongs to. Every query is scoped by it.",
+            "readOnly": true
+          },
+          "recipientId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The inbox line this is a copy of. The line is the truth and this is one way it was repeated."
+          },
+          "accountId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Who it is for, denormalized off the line so a claim can group by it without a join."
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When this row was created. Set automatically and never changes.",
+            "readOnly": true
+          },
+          "updatedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When this row was last updated. Set automatically on every update.",
+            "readOnly": true
+          },
+          "channel": {
+            "$ref": "#/components/schemas/NotificationChannel",
+            "description": "Where it is going. One row per line per channel, which is what the unique index below enforces."
+          },
+          "kind": {
+            "type": "string",
+            "description": "Copied from the notification, so the settings resolution needs no join either."
+          },
+          "digest": {
+            "$ref": "#/components/schemas/NotificationDigest",
+            "description": "What the setting said when this row was written. Immediate rows are sent on their own; the rest are batched per account and channel."
+          },
+          "state": {
+            "$ref": "#/components/schemas/NotificationDeliveryState",
+            "description": "Skipped means a setting refused it, which is different from Failed and worth telling apart in a report."
+          },
+          "deliverAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When this is due. A delivery held outside somebody hours moves to the next opening; a digested one moves to its window close."
+          },
+          "sentAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When a channel accepted it, which is not the same as it arriving."
+          },
+          "failedReason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "What the channel said last time. Kept on a retry as well as on a failure, so a pattern is visible before the cap is reached."
+          },
+          "attempts": {
+            "type": "integer",
+            "format": "int32",
+            "description": "How many times this has been claimed. Past notifications.max_attempts it is Failed and stops being claimed."
+          },
+          "claimedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When a dispatcher took it. Past notifications.claim_ttl another one may, which is what makes a crashed process recoverable."
+          },
+          "claimedBy": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Which process holds the lease. A uuid generated once per process, with the hostname beside it in the log line, so a stuck lease traces to a pod rather than to a mystery."
+          }
+        },
+        "description": "One copy of an inbox line on its way to a channel. Claimed by lease, sent outside any transaction, and marked afterwards."
+      },
+      "NotificationDeliveryListResponse": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/NotificationDelivery"
+            },
+            "description": "The rows in this page."
+          },
+          "pagination": {
+            "$ref": "#/components/schemas/Pagination",
+            "description": "Where this page sits in the full result set."
+          }
+        },
+        "description": "A page of NotificationDeliveries."
+      },
+      "NotificationDeliveryState": {
+        "type": "string",
+        "enum": [
+          "Pending",
+          "Sent",
+          "Failed",
+          "Skipped"
+        ],
+        "description": "What happened to one copy of an inbox line on its way to a channel.",
+        "x-enum-varnames": [
+          "Pending",
+          "Sent",
+          "Failed",
+          "Skipped"
+        ]
+      },
+      "NotificationDevice": {
         "type": "object",
         "properties": {
           "id": {
@@ -3436,7 +5187,7 @@
             "readOnly": true
           },
           "channel": {
-            "$ref": "#/components/schemas/RigNotificationChannel",
+            "$ref": "#/components/schemas/NotificationChannel",
             "description": "Desktop or Mobile. Email is refused by the CHECK above."
           },
           "token": {
@@ -3469,7 +5220,7 @@
         },
         "description": "Where a push can reach somebody. Email is refused: the address is on the account already."
       },
-      "RigNotificationDeviceCreateInput": {
+      "NotificationDeviceCreateInput": {
         "type": "object",
         "properties": {
           "accountId": {
@@ -3478,7 +5229,7 @@
             "description": "Whose device it is."
           },
           "channel": {
-            "$ref": "#/components/schemas/RigNotificationChannel",
+            "$ref": "#/components/schemas/NotificationChannel",
             "description": "Desktop or Mobile. Email is refused by the CHECK above."
           },
           "token": {
@@ -3514,15 +5265,15 @@
           "channel",
           "token"
         ],
-        "description": "The fields a new RigNotificationDevice is created with. A field the database cannot supply for itself is required."
+        "description": "The fields a new NotificationDevice is created with. A field the database cannot supply for itself is required."
       },
-      "RigNotificationDeviceListResponse": {
+      "NotificationDeviceListResponse": {
         "type": "object",
         "properties": {
           "data": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/RigNotificationDevice"
+              "$ref": "#/components/schemas/NotificationDevice"
             },
             "description": "The rows in this page."
           },
@@ -3531,9 +5282,9 @@
             "description": "Where this page sits in the full result set."
           }
         },
-        "description": "A page of RigNotificationDevices."
+        "description": "A page of NotificationDevices."
       },
-      "RigNotificationDigest": {
+      "NotificationDigest": {
         "type": "string",
         "enum": [
           "Immediate",
@@ -3551,7 +5302,579 @@
           "Off"
         ]
       },
-      "RigNotificationSetting": {
+      "NotificationListResponse": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Notification"
+            },
+            "description": "The rows in this page."
+          },
+          "pagination": {
+            "$ref": "#/components/schemas/Pagination",
+            "description": "Where this page sits in the full result set."
+          }
+        },
+        "description": "A page of Notifications."
+      },
+      "NotificationRecipient": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Unique identifier for this row.",
+            "readOnly": true
+          },
+          "tenantId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Tenant this row belongs to. Every query is scoped by it.",
+            "readOnly": true
+          },
+          "notificationId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "What happened. The line is separate from it so that one person clearing their inbox changes nothing anybody else sees."
+          },
+          "accountId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Who this line is for. An account rather than an identity: an identity has no tenant, so a row addressed to one would fall outside every generated query."
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When this row was created. Set automatically and never changes.",
+            "readOnly": true
+          },
+          "updatedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When this row was last updated. Set automatically on every update.",
+            "readOnly": true
+          },
+          "deletedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When this row was soft-deleted. Null while the row is live.",
+            "readOnly": true
+          },
+          "deletedByAccountId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Account that soft-deleted this row, taken from the request's claims.",
+            "readOnly": true
+          },
+          "kind": {
+            "type": "string",
+            "description": "Copied from the notification, so the inbox and its live-sync shape never touch a table holding rows for people who are not recipients."
+          },
+          "groupKey": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "What collapses several events into one line. Null opts out and every event is its own row."
+          },
+          "eventCount": {
+            "type": "integer",
+            "format": "int32",
+            "description": "How many events this line stands for. One unless a group key collapsed them."
+          },
+          "readAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When the person read it. Null is unread, which is what the badge counts."
+          }
+        },
+        "description": "One inbox line: a notification, an account, and whether it has been read."
+      },
+      "NotificationRecipientFilter": {
+        "type": "object",
+        "properties": {
+          "equals": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/NotificationRecipientFilterEquals"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Fields that must equal the given value."
+          },
+          "notEquals": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/NotificationRecipientFilterEquals"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Fields that must not equal the given value."
+          },
+          "greaterThan": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/NotificationRecipientFilterRange"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Fields that must be greater than the given value."
+          },
+          "smallerThan": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/NotificationRecipientFilterRange"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Fields that must be less than the given value."
+          },
+          "greaterOrEqual": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/NotificationRecipientFilterRange"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Fields that must be greater than or equal to the given value."
+          },
+          "smallerOrEqual": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/NotificationRecipientFilterRange"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Fields that must be less than or equal to the given value."
+          },
+          "contains": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/NotificationRecipientFilterContains"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Fields that must be one of the given values."
+          },
+          "notContains": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/NotificationRecipientFilterContains"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Fields that must not be one of the given values."
+          },
+          "like": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/NotificationRecipientFilterLike"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Text fields that must match the given pattern."
+          },
+          "notLike": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/NotificationRecipientFilterLike"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Text fields that must not match the given pattern."
+          },
+          "null": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/NotificationRecipientFilterNull"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Fields that must be null."
+          },
+          "notNull": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/NotificationRecipientFilterNull"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Fields that must not be null."
+          },
+          "orCondition": {
+            "type": "boolean",
+            "description": "Combine this filter's conditions with OR instead of AND."
+          },
+          "nestedFilters": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/NotificationRecipientFilter"
+            },
+            "description": "Sub-filters combined with this one, so that AND and OR can be mixed to any depth."
+          }
+        },
+        "description": "Conditions a NotificationRecipient must satisfy to match a search."
+      },
+      "NotificationRecipientFilterContains": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Unique identifier for this row."
+          },
+          "notificationId": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "What happened. The line is separate from it so that one person clearing their inbox changes nothing anybody else sees."
+          },
+          "accountId": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Who this line is for. An account rather than an identity: an identity has no tenant, so a row addressed to one would fall outside every generated query."
+          },
+          "createdAt": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "description": "When this row was created. Set automatically and never changes."
+          },
+          "updatedAt": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "description": "When this row was last updated. Set automatically on every update."
+          },
+          "deletedAt": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "description": "When this row was soft-deleted. Null while the row is live."
+          },
+          "deletedByAccountId": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Account that soft-deleted this row, taken from the request's claims."
+          },
+          "kind": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Copied from the notification, so the inbox and its live-sync shape never touch a table holding rows for people who are not recipients."
+          },
+          "groupKey": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "What collapses several events into one line. Null opts out and every event is its own row."
+          },
+          "eventCount": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int32"
+            },
+            "description": "How many events this line stands for. One unless a group key collapsed them."
+          },
+          "readAt": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "description": "When the person read it. Null is unread, which is what the badge counts."
+          }
+        },
+        "description": "Set-membership conditions on NotificationRecipient fields."
+      },
+      "NotificationRecipientFilterEquals": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Unique identifier for this row."
+          },
+          "notificationId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "What happened. The line is separate from it so that one person clearing their inbox changes nothing anybody else sees."
+          },
+          "accountId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Who this line is for. An account rather than an identity: an identity has no tenant, so a row addressed to one would fall outside every generated query."
+          },
+          "createdAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When this row was created. Set automatically and never changes."
+          },
+          "updatedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When this row was last updated. Set automatically on every update."
+          },
+          "deletedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When this row was soft-deleted. Null while the row is live."
+          },
+          "deletedByAccountId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Account that soft-deleted this row, taken from the request's claims."
+          },
+          "kind": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Copied from the notification, so the inbox and its live-sync shape never touch a table holding rows for people who are not recipients."
+          },
+          "groupKey": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "What collapses several events into one line. Null opts out and every event is its own row."
+          },
+          "eventCount": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "How many events this line stands for. One unless a group key collapsed them."
+          },
+          "readAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When the person read it. Null is unread, which is what the badge counts."
+          }
+        },
+        "description": "Exact-match conditions on NotificationRecipient fields."
+      },
+      "NotificationRecipientFilterLike": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Copied from the notification, so the inbox and its live-sync shape never touch a table holding rows for people who are not recipients."
+          },
+          "groupKey": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "What collapses several events into one line. Null opts out and every event is its own row."
+          }
+        },
+        "description": "Pattern conditions on NotificationRecipient text fields."
+      },
+      "NotificationRecipientFilterNull": {
+        "type": "object",
+        "properties": {
+          "updatedAt": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "When this row was last updated. Set automatically on every update."
+          },
+          "deletedAt": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "When this row was soft-deleted. Null while the row is live."
+          },
+          "deletedByAccountId": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Account that soft-deleted this row, taken from the request's claims."
+          },
+          "groupKey": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "What collapses several events into one line. Null opts out and every event is its own row."
+          },
+          "readAt": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "When the person read it. Null is unread, which is what the badge counts."
+          }
+        },
+        "description": "Presence conditions on nullable NotificationRecipient fields."
+      },
+      "NotificationRecipientFilterRange": {
+        "type": "object",
+        "properties": {
+          "createdAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When this row was created. Set automatically and never changes."
+          },
+          "updatedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When this row was last updated. Set automatically on every update."
+          },
+          "deletedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When this row was soft-deleted. Null while the row is live."
+          },
+          "eventCount": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "How many events this line stands for. One unless a group key collapsed them."
+          },
+          "readAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When the person read it. Null is unread, which is what the badge counts."
+          }
+        },
+        "description": "Ordering conditions on NotificationRecipient fields that can be compared."
+      },
+      "NotificationRecipientListResponse": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/NotificationRecipient"
+            },
+            "description": "The rows in this page."
+          },
+          "pagination": {
+            "$ref": "#/components/schemas/Pagination",
+            "description": "Where this page sits in the full result set."
+          }
+        },
+        "description": "A page of NotificationRecipients."
+      },
+      "NotificationRecipientSearchBody": {
+        "type": "object",
+        "properties": {
+          "filter": {
+            "$ref": "#/components/schemas/NotificationRecipientFilter",
+            "description": "Conditions rows must satisfy."
+          }
+        },
+        "required": [
+          "filter"
+        ],
+        "description": "The request body for NotificationRecipient.Search."
+      },
+      "NotificationSetting": {
         "type": "object",
         "properties": {
           "id": {
@@ -3594,7 +5917,7 @@
             "description": "Null is the default for the channel, which is the second step of the resolution."
           },
           "channel": {
-            "$ref": "#/components/schemas/RigNotificationChannel",
+            "$ref": "#/components/schemas/NotificationChannel",
             "description": "Which channel it answers for."
           },
           "isEnabled": {
@@ -3602,7 +5925,7 @@
             "description": "False writes no delivery row at all. Not the same as digest Off, which is about preferring to look rather than be told."
           },
           "digest": {
-            "$ref": "#/components/schemas/RigNotificationDigest",
+            "$ref": "#/components/schemas/NotificationDigest",
             "description": "Immediate sends each on its own; anything else waits for the window and goes out as one message."
           },
           "activeFrom": {
@@ -3632,7 +5955,7 @@
         },
         "description": "What somebody wants on a channel, and when. Resolved in three steps: this kind, then this channel, then the project default."
       },
-      "RigNotificationSettingCreateInput": {
+      "NotificationSettingCreateInput": {
         "type": "object",
         "properties": {
           "accountId": {
@@ -3648,7 +5971,7 @@
             "description": "Null is the default for the channel, which is the second step of the resolution."
           },
           "channel": {
-            "$ref": "#/components/schemas/RigNotificationChannel",
+            "$ref": "#/components/schemas/NotificationChannel",
             "description": "Which channel it answers for."
           },
           "isEnabled": {
@@ -3657,7 +5980,7 @@
             "default": true
           },
           "digest": {
-            "$ref": "#/components/schemas/RigNotificationDigest",
+            "$ref": "#/components/schemas/NotificationDigest",
             "description": "Immediate sends each on its own; anything else waits for the window and goes out as one message."
           },
           "activeFrom": {
@@ -3689,15 +6012,15 @@
           "accountId",
           "channel"
         ],
-        "description": "The fields a new RigNotificationSetting is created with. A field the database cannot supply for itself is required."
+        "description": "The fields a new NotificationSetting is created with. A field the database cannot supply for itself is required."
       },
-      "RigNotificationSettingListResponse": {
+      "NotificationSettingListResponse": {
         "type": "object",
         "properties": {
           "data": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/RigNotificationSetting"
+              "$ref": "#/components/schemas/NotificationSetting"
             },
             "description": "The rows in this page."
           },
@@ -3706,9 +6029,9 @@
             "description": "Where this page sits in the full result set."
           }
         },
-        "description": "A page of RigNotificationSettings."
+        "description": "A page of NotificationSettings."
       },
-      "RigNotificationSettingUpdateInput": {
+      "NotificationSettingUpdateInput": {
         "type": "object",
         "properties": {
           "accountId": {
@@ -3724,7 +6047,7 @@
             "description": "Null is the default for the channel, which is the second step of the resolution."
           },
           "channel": {
-            "$ref": "#/components/schemas/RigNotificationChannel",
+            "$ref": "#/components/schemas/NotificationChannel",
             "description": "Which channel it answers for."
           },
           "isEnabled": {
@@ -3733,7 +6056,7 @@
             "default": true
           },
           "digest": {
-            "$ref": "#/components/schemas/RigNotificationDigest",
+            "$ref": "#/components/schemas/NotificationDigest",
             "description": "Immediate sends each on its own; anything else waits for the window and goes out as one message."
           },
           "activeFrom": {
@@ -3761,7 +6084,73 @@
             "description": "ISO weekdays, 1 being Monday. Empty means every day. An array rather than a bitmask because [1,2,3,4,5] is legible in a settings payload and 62 is not."
           }
         },
-        "description": "The fields of a RigNotificationSetting to change. Every member is optional: one left out is left alone, and an explicit null clears it."
+        "description": "The fields of a NotificationSetting to change. Every member is optional: one left out is left alone, and an explicit null clears it."
+      },
+      "NotificationState": {
+        "type": "string",
+        "enum": [
+          "Pending",
+          "Resolved",
+          "Cancelled"
+        ],
+        "description": "Where a notification is in its life. Nothing here says anything was sent: that is the delivery table's business.",
+        "x-enum-varnames": [
+          "Pending",
+          "Resolved",
+          "Cancelled"
+        ]
+      },
+      "Pagination": {
+        "type": "object",
+        "properties": {
+          "offset": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Number of rows skipped before this page."
+          },
+          "limit": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Maximum number of rows in this page."
+          },
+          "total": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Total number of rows matching the query, ignoring pagination."
+          }
+        },
+        "description": "Where the returned page sits within the full result set."
+      },
+      "RigFile": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Identifier of the file."
+          },
+          "url": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Where the file is served from. Stable and unsigned, so it is safe to keep and to sync and grants nothing on its own: the endpoint behind it still checks the caller. Null until the upload is finished."
+          },
+          "fileName": {
+            "type": "string",
+            "description": "What the file was called when it arrived. It is for the save dialog, and it is not a path: if you write the file somewhere, you decide where and you sanitize what."
+          },
+          "contentType": {
+            "type": "string",
+            "description": "What the bytes were sniffed to be, which is what a download announces. It is not necessarily what the client claimed on the way up."
+          },
+          "sizeBytes": {
+            "type": "integer",
+            "format": "int64",
+            "description": "How large the file is, in bytes."
+          }
+        },
+        "description": "One uploaded file. Metadata only; the bytes are fetched from Url."
       },
       "Todo": {
         "type": "object",
@@ -5552,19 +7941,27 @@
       "description": "One person inside one tenant. The person is the identity; this is who they are here."
     },
     {
-      "name": "RigNotificationDevices",
+      "name": "Notifications",
+      "description": "Something worth telling somebody about, and when it is due. Carries no recipients: the audience is computed when it is sent."
+    },
+    {
+      "name": "NotificationDeliveries",
+      "description": "One copy of an inbox line on its way to a channel. Claimed by lease, sent outside any transaction, and marked afterwards."
+    },
+    {
+      "name": "NotificationDevices",
       "description": "Where a push can reach somebody. Email is refused: the address is on the account already."
     },
     {
-      "name": "RigNotificationRecipients",
+      "name": "NotificationRecipients",
       "description": "One inbox line: a notification, an account, and whether it has been read."
     },
     {
-      "name": "RigNotificationSettings",
+      "name": "NotificationSettings",
       "description": "What somebody wants on a channel, and when. Resolved in three steps: this kind, then this channel, then the project default."
     },
     {
-      "name": "RigPresences",
+      "name": "Presences",
       "description": "Who is here and what they are looking at. One row per browser tab, rewritten every heartbeat and deleted once it is stale."
     },
     {

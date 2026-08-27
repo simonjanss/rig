@@ -17,10 +17,11 @@ import (
 
 // The two notification tables a person owns, as ordinary generated resources.
 //
-// `notifications: expose: true` and an `operations:` line each is the whole of
-// the wiring — there is no hand-written HTTP for either — and both are
-// owner-scoped, which is what everything below is really about: a preference and
-// a device are rows whose owner is the only person they concern.
+// `notifications: expose: true` is the whole of the wiring — no hand-written
+// HTTP for either, and no `services/` directory either, because how rig's own
+// tables project is rig's answer — and both are owner-scoped, which is what
+// everything below is really about: a preference and a device are rows whose
+// owner is the only person they concern.
 func TestNotificationPreferencesAreYourOwn(t *testing.T) {
 	api := newServer(t)
 	tenant := api.seed(t)
@@ -30,7 +31,7 @@ func TestNotificationPreferencesAreYourOwn(t *testing.T) {
 	demo := api.accountID(t, tenant, app.SeedEmail)
 	alex := api.accountID(t, tenant, app.SeedEmail2)
 
-	const settings = "/api/v1/rig-notification-settings"
+	const settings = "/api/v1/notification-settings"
 
 	// One row per account per channel is a unique index, and this database is
 	// throwaway without being reset between runs — so the create below is only a
@@ -111,7 +112,7 @@ func TestNotificationPreferencesAreYourOwn(t *testing.T) {
 		// address of somebody's machine, and this is what "the product does not
 		// answer that question" looks like from outside.
 		if res := api.do(t, request{
-			method: http.MethodGet, path: "/api/v1/rig-notification-devices?scope=all", token: demoToken,
+			method: http.MethodGet, path: "/api/v1/notification-devices?scope=all", token: demoToken,
 		}); res.status != http.StatusForbidden {
 			t.Errorf("the Owner asking for everybody's devices: %d %s, want 403", res.status, res.body)
 		}
@@ -146,7 +147,7 @@ func TestADesktopDeliveryReachesTheDeviceChannel(t *testing.T) {
 	demo := api.accountID(t, tenant, app.SeedEmail)
 
 	if res := api.do(t, request{
-		method: http.MethodPost, path: "/api/v1/rig-notification-devices", token: demoToken,
+		method: http.MethodPost, path: "/api/v1/notification-devices", token: demoToken,
 		body: map[string]any{
 			"accountId": demo, "channel": "Desktop",
 			"token": "webpush-demo:" + uuid.NewString(), "label": "the test's laptop",
@@ -232,7 +233,7 @@ func clearPreference(t *testing.T, api *server, token, channel string) {
 	t.Helper()
 
 	res := api.do(t, request{
-		method: http.MethodGet, path: "/api/v1/rig-notification-settings?limit=50", token: token,
+		method: http.MethodGet, path: "/api/v1/notification-settings?limit=50", token: token,
 	})
 	if res.status != http.StatusOK {
 		t.Fatalf("list preferences: %d %s", res.status, res.body)
@@ -252,7 +253,7 @@ func clearPreference(t *testing.T, api *server, token, channel string) {
 		}
 		if res := api.do(t, request{
 			method: http.MethodDelete,
-			path:   "/api/v1/rig-notification-settings/" + row.ID.String(), token: token,
+			path:   "/api/v1/notification-settings/" + row.ID.String(), token: token,
 		}); res.status != http.StatusNoContent {
 			t.Fatalf("clear the %s preference: %d %s", channel, res.status, res.body)
 		}

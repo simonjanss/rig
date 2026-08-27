@@ -15,12 +15,17 @@
 import type { Config } from "@rig/client";
 
 import { AccountClient } from "./account_client.gen.js";
+import { NotificationClient } from "./notification_client.gen.js";
 import {
-    RigNotificationDeviceClient,
-} from "./rig_notification_device_client.gen.js";
+    NotificationDeliveryClient,
+} from "./notification_delivery_client.gen.js";
+import { NotificationDeviceClient } from "./notification_device_client.gen.js";
 import {
-    RigNotificationSettingClient,
-} from "./rig_notification_setting_client.gen.js";
+    NotificationRecipientClient,
+} from "./notification_recipient_client.gen.js";
+import {
+    NotificationSettingClient,
+} from "./notification_setting_client.gen.js";
 import { TodoAttachmentClient } from "./todo_attachment_client.gen.js";
 import { TodoClient } from "./todo_client.gen.js";
 import { Runtime } from "@rig/client";
@@ -41,7 +46,7 @@ export const basePath = "/api/v1";
  * calling. Regenerating against an unchanged API leaves it alone — it is not
  * a build stamp.
  */
-export const revision = "2026-08-26";
+export const revision = "2026-08-27";
 
 /**
  * Where the revision is sent: the same header the server generated from this
@@ -72,15 +77,27 @@ export type Client = {
      */
     readonly accounts: AccountClient;
     /**
+     * Something worth telling somebody about, and when it is due. Carries no
+     * recipients: the audience is computed when it is sent.
+     */
+    readonly notifications: NotificationClient;
+    /**
+     * One copy of an inbox line on its way to a channel. Claimed by lease, sent
+     * outside any transaction, and marked afterwards.
+     */
+    readonly notificationDeliveries: NotificationDeliveryClient;
+    /**
      * Where a push can reach somebody. Email is refused: the address is on the
      * account already.
      */
-    readonly rigNotificationDevices: RigNotificationDeviceClient;
+    readonly notificationDevices: NotificationDeviceClient;
+    /** One inbox line: a notification, an account, and whether it has been read. */
+    readonly notificationRecipients: NotificationRecipientClient;
     /**
      * What somebody wants on a channel, and when. Resolved in three steps: this
      * kind, then this channel, then the project default.
      */
-    readonly rigNotificationSettings: RigNotificationSettingClient;
+    readonly notificationSettings: NotificationSettingClient;
     /** One item on the board. */
     readonly todos: TodoClient;
     /** A file attached to a todo. */
@@ -110,8 +127,11 @@ export function createClient(config: Config): Client {
     return {
         runtime,
         accounts: new AccountClient(runtime),
-        rigNotificationDevices: new RigNotificationDeviceClient(runtime),
-        rigNotificationSettings: new RigNotificationSettingClient(runtime),
+        notifications: new NotificationClient(runtime),
+        notificationDeliveries: new NotificationDeliveryClient(runtime),
+        notificationDevices: new NotificationDeviceClient(runtime),
+        notificationRecipients: new NotificationRecipientClient(runtime),
+        notificationSettings: new NotificationSettingClient(runtime),
         todos: new TodoClient(runtime),
         todoAttachments: new TodoAttachmentClient(runtime),
     };

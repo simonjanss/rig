@@ -35,15 +35,30 @@ const (
 	// services/todo/todo.yaml.
 	PermissionClaimTodo = "todo.claim"
 
-	// The two owner-scoped tables' deletes: a person's own devices and their own
-	// notification preferences.
+	// The owner-scoped tables' deletes: a person's own devices, their own
+	// notification preferences, and dismissing a line from their own inbox.
 	PermissionDeleteDevice     = "rig_notification_device.delete"
 	PermissionDeletePreference = "rig_notification_setting.delete"
+	PermissionDismissInboxLine = "rig_notification_recipient.delete"
 
 	// PermissionReadAllDevices is the widening rig derived from the device table
 	// being owner-scoped — and the one key in this catalogue that no role below
 	// grants, not even the Owner.
 	PermissionReadAllDevices = "rig_notification_device.read.all"
+
+	// The engine's own two tables. `notifications: expose: true` projects all
+	// five, and these are the two nobody owns a row of: an announcement before
+	// its audience has been computed, and the dispatcher's record of each copy
+	// it tried to send.
+	//
+	// Neither is owner-scoped, because neither has an owner — rig_notification
+	// names no recipient at all until it resolves. So a read of them is a read
+	// of the whole tenant's, and that is administrative rather than ordinary:
+	// the announcement nobody has been told about yet is on the first table, and
+	// "why did I not get that mail" is a question support answers from the
+	// second. Both stay with the Owner and the Admin.
+	PermissionReadNotifications = "rig_notification.read"
+	PermissionReadDeliveries    = "rig_notification_delivery.read"
 )
 
 // Levels maps a coarse level to the permissions it holds.
@@ -113,7 +128,22 @@ func Levels(all []string) map[string][]string {
 		}
 	}
 
-	basic := append(reads, writes...)
+	// Two of the derived reads are not ordinary, and the suffix rule cannot tell:
+	// the engine's notification table and its delivery log are the two nobody
+	// owns a row of, so a read of either is a read of the whole tenant's. See the
+	// constants. They are the same kind of read as a widening key and reach Basic
+	// the same accidental way, which is by matching a suffix rather than by
+	// anybody deciding they should.
+	administrative := []string{PermissionReadNotifications, PermissionReadDeliveries}
+
+	basic := make([]string, 0, len(reads)+len(writes)+4)
+	for _, key := range reads {
+		if slices.Contains(administrative, key) {
+			continue
+		}
+		basic = append(basic, key)
+	}
+	basic = append(basic, writes...)
 	basic = append(basic, authhttp.PermissionOwnAPIKey)
 	// Claiming an item is a write on the board in everything but its name, so
 	// everybody who may drag a card may take one. Only if the endpoint is still
@@ -124,11 +154,13 @@ func Levels(all []string) map[string][]string {
 	}
 	// Delete is administrative on the board and ordinary on your own row. The
 	// suffix rule above keeps every delete with Owner and Admin, which is right
-	// for an item somebody else can see and wrong for these two: both tables are
-	// owner-scoped, so the only row anybody can reach is their own, and deleting
-	// a preference row is how somebody goes back to the project default rather
-	// than destroying anything.
-	for _, key := range []string{PermissionDeleteDevice, PermissionDeletePreference} {
+	// for an item somebody else can see and wrong for these three: all three
+	// tables are owner-scoped, so the only row anybody can reach is their own.
+	// Deleting a preference row is how somebody goes back to the project default
+	// rather than destroying anything, and deleting an inbox line is dismissing
+	// it — the same act the hand-written /notifications routes offer, on the
+	// resource `notifications: expose: true` puts beside them.
+	for _, key := range []string{PermissionDeleteDevice, PermissionDeletePreference, PermissionDismissInboxLine} {
 		if slices.Contains(all, key) {
 			basic = append(basic, key)
 		}

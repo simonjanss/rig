@@ -5,8 +5,8 @@
 // Package model is the generated model layer: one definition of each entity,
 // shared by the persistence layer that reads it and the API layer that returns
 // it. Nothing here knows about SQL or HTTP, which is what lets both import it.
-// A validation failure is one type per input —
-// RigNotificationCreateInputError, say — whose members are the input's
-// members. What goes in them is rigerr.FieldError, which is the same
-// everywhere and so is not generated here.
+// A validation failure is one type per input — NotificationCreateInputError,
+// say — whose members are the input's members. What goes in them is
+// rigerr.FieldError, which is the same everywhere and so is not generated
+// here.
 package model

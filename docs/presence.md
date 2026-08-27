@@ -199,7 +199,7 @@ In full in [clients.md](clients.md#presence). The shape of it:
 const presence = createPresence({
     runtime: client.runtime,
     scope: "board",
-    stream: createRigPresenceStream(client.runtime, { scope: "board" }),
+    stream: createPresenceStream(client.runtime, { scope: "board" }),
 });
 
 // Everybody else, narrowed to what is on the screen.

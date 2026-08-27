@@ -333,18 +333,37 @@ func TestARemovedGeneratorsOutputIsStale(t *testing.T) {
 	next, _ := gen.Write(root, results, deltas, gen.WriteOptions{})
 	_ = next.Save(root)
 
-	// `b` is gone from the configuration, so this is a full run of everything
-	// that is left.
-	only, _ := gen.Run(context.Background(), registryWith(a, b), validDoc(), root, []gen.Spec{{Name: "a"}})
-	manifest, _ := gen.LoadManifest(root)
+	// Twice, because the record is what carries the exemption. A run that spared
+	// the file and then recorded it as an ordinary overwrite would have spent
+	// the exemption on itself, and the second `--prune` would take somebody's
+	// hook — with nothing in the output of either run to say so.
+	for round := 1; round <= 2; round++ {
+		// `b` is gone from the configuration, so this is a full run of
+		// everything that is left.
+		only, _ := gen.Run(context.Background(), registryWith(a, b), validDoc(), root, []gen.Spec{{Name: "a"}})
+		manifest, _ := gen.LoadManifest(root)
 
-	deltas, err := gen.Diff(root, only, manifest, gen.DiffOptions{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	stale := staleNames(root, deltas)
-	if len(stale) != 1 || stale[0] != "services/b/b.go" {
-		t.Fatalf("a removed generator's output should be reported: %v", stale)
+		deltas, err := gen.Diff(root, only, manifest, gen.DiffOptions{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		stale := staleNames(root, deltas)
+		if len(stale) != 1 || stale[0] != "services/b/b.go" {
+			t.Fatalf("round %d: a removed generator's output should be reported: %v", round, stale)
+		}
+
+		// Reported, and left alone: it is a create-once file, so what is inside
+		// it is somebody's own code and `--prune` is not entitled to it.
+		next, err := gen.Write(root, only, deltas, gen.WriteOptions{Prune: true})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := next.Save(root); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := os.Stat(filepath.Join(root, "services", "b", "b.go")); err != nil {
+			t.Fatalf("round %d: --prune deleted a create-once file: %v", round, err)
+		}
 	}
 }
 

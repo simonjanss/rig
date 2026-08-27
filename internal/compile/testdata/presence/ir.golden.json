@@ -1613,6 +1613,7 @@
         "plural": "RigAccounts",
         "path_segment": "rig-accounts",
         "description": "One person's membership of one tenant.",
+        "foundation": true,
         "operations": [
           "Create",
           "Get",
@@ -2060,6 +2061,7 @@
         "path_segment": "rig-presences",
         "description": "Who is here and what they are looking at. One row per browser tab, rewritten every heartbeat and deleted once it is stale.",
         "unexposed": true,
+        "foundation": true,
         "operations": null,
         "fields": [
           {
@@ -2409,6 +2411,7 @@
         "plural": "RigTenants",
         "path_segment": "rig-tenants",
         "description": "One customer of this application.",
+        "foundation": true,
         "operations": [
           "Create",
           "Get",

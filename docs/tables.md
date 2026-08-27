@@ -31,6 +31,27 @@ Everything is keyed by **physical names**: the table, column, and enum label as
 spelled in Postgres. API names are derived and can change under you, so keying
 on them would move your configuration the first time you renamed a resource.
 
+## rig's own tables need no file
+
+`rig sync` writes a file for every table of yours. It writes none for rig's — the
+`rig_` ones a module's migration set created — and neither should you.
+
+rig ships their configuration. What each table is for, what may be done to it,
+which of its columns are read-only, and what each of its enum values means are
+rig's answers, and the compiler reads them from rig rather than from your
+`services/` directory. So `notifications: {enabled: true, expose: true}` projects
+`NotificationSetting` on `/notification-settings` with the operations a settings
+screen needs, and `auth: {expose: [rig_account]}` projects `Account` on
+`/accounts`, read-only — without a line of YAML in your project.
+
+Their column comments come from the `COMMENT ON` statements in the migration that
+created them, the same way your own tables' do.
+
+If you do want to differ, `rig setup-project --expose <table>` writes rig's answer
+to disk for you to edit, and a file on disk wins outright — no merging, so what
+you read in `services/` is what applies. `rig sync` then keeps that file in step
+with the schema like any other.
+
 ## New entries arrive with a TODO
 
 When `rig sync` finds a column your file does not mention, it adds it with a
@@ -142,6 +163,29 @@ It narrows **writes** too, and there is no widening for those: an owner-scoped
 table refuses to change somebody else's row outright. A write is a different
 kind of decision from a read, and one flag answering both would be a bad answer
 to two questions.
+
+That narrowing settles *which* row a write may reach: every generated write
+starts by reading it, so a row that is not the caller's is a 404 and the write
+never happens. What it does not settle is who the row belongs to **afterwards** —
+that is the owner column in the body, and two writes carry one. A create has no
+row to read at all; an update has the column in its patch. So rig generates the
+check for both, into the writer every write passes through:
+
+- On a create, the owner column absent from the body is filled in with the
+  caller's account. A client has no choice about the value, so it does not have
+  to send one.
+- On an update, absent is left alone: the column is not in the statement and the
+  row keeps the owner it had.
+- On either, the owner column naming somebody else is refused, 422, under that
+  field — the same answer a validation rule on the column would give.
+
+A delete and a restore need nothing further: neither carries a body, so there is
+nothing in one to name an owner.
+
+You do not write any of that, and a hook on `Create` or `Update` still runs,
+after it, so it can rely on the owner already being the caller's. A column the
+configuration froze — `operations: [Read]` — has nothing to guard, and gets no
+check for the operation it cannot reach.
 
 ### `on_delete`
 

@@ -5,7 +5,7 @@ info:
         The todo HTTP API.
 
         The notification inbox endpoints are served by a hand-written module and are not described here.
-    version: "2026-08-26"
+    version: "2026-08-27"
 servers:
     - url: /
       description: This server. Set openapi.servers to name the deployment instead.
@@ -13,8 +13,8 @@ paths:
     /api/v1/rig_notification_recipient/_deleted/_stream:
         get:
             tags:
-                - RigNotificationRecipients
-            summary: Subscribe to retired RigNotificationRecipients.
+                - NotificationRecipients
+            summary: Subscribe to retired NotificationRecipients.
             description: |-
                 The rows a delete stamped rather than removed, kept up to date.
 
@@ -25,7 +25,7 @@ paths:
                 The response body is the sync protocol's own and is not described here. The `electric-*` response headers carry the cursor: send `handle` and `offset` back on the next request, or the subscription starts over.
 
                 Requires a session scoped to a tenant, and the shape is filtered to it.
-            operationId: streamDeletedRigNotificationRecipients
+            operationId: streamDeletedNotificationRecipients
             parameters:
                 - name: offset
                   in: query
@@ -108,10 +108,10 @@ paths:
     /api/v1/rig_notification_recipient/_stream:
         get:
             tags:
-                - RigNotificationRecipients
-            summary: Subscribe to the live RigNotificationRecipient shape.
+                - NotificationRecipients
+            summary: Subscribe to the live NotificationRecipient shape.
             description: |-
-                Every RigNotificationRecipient the caller may read, kept up to date.
+                Every NotificationRecipient the caller may read, kept up to date.
 
                 A shape is a filtered view of one table that a client subscribes to. This route is a proxy in front of the sync service: which rows exist in the shape — the tenant, the lifecycle predicate, and the application's own scoping — is decided by the server and cannot be influenced from here. Where the client is in the stream is forwarded untouched.
 
@@ -120,7 +120,7 @@ paths:
                 The response body is the sync protocol's own and is not described here. The `electric-*` response headers carry the cursor: send `handle` and `offset` back on the next request, or the subscription starts over.
 
                 Requires a session scoped to a tenant, and the shape is filtered to it.
-            operationId: streamRigNotificationRecipients
+            operationId: streamNotificationRecipients
             parameters:
                 - name: offset
                   in: query
@@ -3078,7 +3078,7 @@ components:
             schema:
                 type: integer
 tags:
-    - name: RigNotificationRecipients
+    - name: NotificationRecipients
       description: 'One inbox line: a notification, an account, and whether it has been read.'
     - name: Todos
       description: One thing somebody means to do.

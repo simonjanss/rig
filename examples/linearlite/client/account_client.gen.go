@@ -38,6 +38,29 @@ func (c *AccountClient) List(ctx context.Context, q AccountListQuery, opts ...ri
 	return rigclient.Do[AccountListResponse](ctx, c.rt, op, opts...)
 }
 
+// Search Accounts with filters.
+//
+// QUERY /api/v1/accounts, falling back to POST /api/v1/accounts/_search when
+// something between here and the server refuses the method. The fallback is
+// remembered, so it is tried once.
+//
+// Operation searchAccounts.
+func (c *AccountClient) Search(ctx context.Context, filter AccountFilter, q AccountSearchQuery, opts ...rigclient.CallOption) (*AccountListResponse, error) {
+	query := url.Values{}
+	rigclient.SetInt(query, "limit", q.Limit)
+	rigclient.SetInt(query, "offset", q.Offset)
+
+	op := rigclient.Op{
+		Name:     "searchAccounts",
+		Method:   rigclient.MethodQuery,
+		Path:     "/accounts",
+		Query:    query,
+		Body:     AccountSearchBody{Filter: filter},
+		Fallback: "/accounts/_search",
+	}
+	return rigclient.Do[AccountListResponse](ctx, c.rt, op, opts...)
+}
+
 // List retired Accounts.
 //
 // A deletion stamps the row rather than removing it, so this is what was

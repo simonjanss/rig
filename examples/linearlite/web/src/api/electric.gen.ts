@@ -18,69 +18,13 @@
  * own documentation.
  */
 
-import type { RigPresenceActivity } from "./rig_presence_activity.gen.js";
+import type { NotificationRecipientRow } from "./notification_recipient.gen.js";
+import type { PresenceActivity } from "./presence_activity.gen.js";
 import type { TodoRow } from "./todo.gen.js";
 import type { Runtime } from "@rig/client";
 
 import { pathValue } from "@rig/client";
 import { createCollectionCache, createRigCollection } from "@rig/electric";
-
-/**
- * RigNotificationRecipientRow is a RigNotificationRecipient as a live-sync
- * stream sends it.
- *
- * The same row as RigNotificationRecipient, under different keys. A stream
- * carries what Postgres printed, so the keys are column names — `created_at`
- * where the API sends `createdAt` — and the values have been through the
- * corrections in the streaming runtime, which is what makes a timestamp here
- * the same string the API would have sent.
- *
- * A member is nullable rather than optional: the sync service sends every
- * column of the projection on every row, with a null where the column is null,
- * so nothing here is ever absent.
- */
-export type RigNotificationRecipientRow = {
-    /** Unique identifier for this row. */
-    id: string;
-    /** Tenant this row belongs to. Every query is scoped by it. */
-    tenant_id: string;
-    /**
-     * What happened. The line is separate from it so that one person clearing
-     * their inbox changes nothing anybody else sees.
-     */
-    notification_id: string;
-    /**
-     * Who this line is for. An account rather than an identity: an identity has
-     * no tenant, so a row addressed to one would fall outside every generated
-     * query.
-     */
-    account_id: string;
-    /** When this row was created. Set automatically and never changes. */
-    created_at: string;
-    /** When this row was last updated. Set automatically on every update. */
-    updated_at: string | null;
-    /** When this row was soft-deleted. Null while the row is live. */
-    deleted_at: string | null;
-    /** Account that soft-deleted this row, taken from the request's claims. */
-    deleted_by_account_id: string | null;
-    /**
-     * Copied from the notification, so the inbox and its live-sync shape never
-     * touch a table holding rows for people who are not recipients.
-     */
-    kind: string;
-    /**
-     * What collapses several events into one line. Null opts out and every
-     * event is its own row.
-     */
-    group_key: string | null;
-    /**
-     * How many events this line stands for. One unless a group key collapsed
-     * them.
-     */
-    event_count: number;
-    /** When the person read it. Null is unread, which is what the badge counts. */
-    read_at: string | null;
-};
 
 /**
  * Streams the rows an ordinary read returns: not deleted, and not a snapshot.
@@ -91,9 +35,9 @@ export type RigNotificationRecipientRow = {
  * stream survives a navigation and two callers share one subscription. Safe to
  * call during render — no memoization needed.
  */
-export const createRigNotificationRecipientStream = createCollectionCache(
+export const createNotificationRecipientStream = createCollectionCache(
     (runtime: Runtime, params: Record<string, never>) =>
-        createRigCollection<RigNotificationRecipientRow>({
+        createRigCollection<NotificationRecipientRow>({
             runtime,
             path: "/api/v1/rig_notification_recipient/_stream",
             params: {},
@@ -116,9 +60,9 @@ export const createRigNotificationRecipientStream = createCollectionCache(
  * stream survives a navigation and two callers share one subscription. Safe to
  * call during render — no memoization needed.
  */
-export const createRigNotificationRecipientDeletedStream = createCollectionCache(
+export const createNotificationRecipientDeletedStream = createCollectionCache(
     (runtime: Runtime, params: Record<string, never>) =>
-        createRigCollection<RigNotificationRecipientRow>({
+        createRigCollection<NotificationRecipientRow>({
             runtime,
             path: "/api/v1/rig_notification_recipient/_deleted/_stream",
             params: {},
@@ -127,9 +71,9 @@ export const createRigNotificationRecipientDeletedStream = createCollectionCache
 );
 
 /**
- * RigPresenceRow is a RigPresence as a live-sync stream sends it.
+ * PresenceRow is a Presence as a live-sync stream sends it.
  *
- * The same row as RigPresence, under different keys. A stream carries what
+ * The same row as Presence, under different keys. A stream carries what
  * Postgres printed, so the keys are column names — `created_at` where the API
  * sends `createdAt` — and the values have been through the corrections in the
  * streaming runtime, which is what makes a timestamp here the same string the
@@ -139,7 +83,7 @@ export const createRigNotificationRecipientDeletedStream = createCollectionCache
  * column of the projection on every row, with a null where the column is null,
  * so nothing here is ever absent.
  */
-export type RigPresenceRow = {
+export type PresenceRow = {
     /**
      * The row's identifier. Nothing references it: a client addresses its own
      * presence by session key, so this identifier never leaves the server
@@ -206,17 +150,17 @@ export type RigPresenceRow = {
      * client may know somebody is editing before it knows which control has
      * focus.
      */
-    activity: RigPresenceActivity;
+    activity: PresenceActivity;
 };
 
 /**
- * The params the RigPresence streams accept.
+ * The params the Presence streams accept.
  *
  * They are handed to the scoping function the application wrote, which can only
  * narrow what a subscriber sees. Nothing here can widen a shape — the tenant
  * and lifecycle filters are the server's and are not a client's to send.
  */
-export type RigPresenceStreamParams = {
+export type PresenceStreamParams = {
     /** Only presence in this part of the application. */
     scope?: string;
     /** Only presence on this row. */
@@ -232,9 +176,9 @@ export type RigPresenceStreamParams = {
  * stream survives a navigation and two callers share one subscription. Safe to
  * call during render — no memoization needed.
  */
-export const createRigPresenceStream = createCollectionCache(
-    (runtime: Runtime, params: RigPresenceStreamParams) =>
-        createRigCollection<RigPresenceRow>({
+export const createPresenceStream = createCollectionCache(
+    (runtime: Runtime, params: PresenceStreamParams) =>
+        createRigCollection<PresenceRow>({
             runtime,
             path: "/api/v1/rig_presence/_stream",
             params: { scope: params.scope, target_id: params.target_id },

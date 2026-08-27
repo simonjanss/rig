@@ -1,6 +1,8 @@
 package servicego
 
 import (
+	"fmt"
+
 	"github.com/simonjanss/rig/internal/gen/gobuf"
 	"github.com/simonjanss/rig/internal/naming"
 	"github.com/simonjanss/rig/pkg/gen"
@@ -188,6 +190,7 @@ func (e *emitter) writerType(b *gobuf.Buf, res *ir.Resource) {
 	b.Comment("New" + name + " pairs a repository with the rules that apply to it.")
 	b.L("func New%s(repo %s.%sRepository, hooks %sHooks) %s {",
 		name, store, res.Name, res.Name, name)
+	e.attachOwnerGuard(b, res)
 	if e.hasChildren(res) {
 		b.L("return %s{repo: repo, hooks: hooks, children: new(%s)}", name, childDeletesAlias(res))
 	} else {
@@ -700,6 +703,123 @@ func (e *emitter) scopeArgs(b *gobuf.Buf, res *ir.Resource) string {
 		return ""
 	}
 	return ", readScope(r.Query.Scope)..."
+}
+
+// attachOwnerGuard puts the owner column beyond a caller's reach.
+//
+// `access: scope: own` narrows every read to the caller's own rows, and every
+// generated write reads the row it is about to change — so a caller cannot touch
+// a row that is not theirs. What the narrow read does not settle is who the row
+// belongs to *afterwards*: it proves the row going in is yours, and says nothing
+// about the owner column in the body. Two writes can name one, and both are
+// guarded here.
+//
+// A create has no row to read at all, so an unguarded owner is a device
+// registered against somebody else's account. An update has a row to read and
+// the owner column in its patch, so an unguarded one is the row handed over —
+// somebody writing a `digest: Off` preference onto an account that is not
+// theirs, and losing sight of it in the same request. Until this was generated
+// every project closed both by hand, in a validator listed under Create and
+// Update alike; the two in this repository's own linearlite example were the
+// same eleven lines twice.
+//
+// It goes on the writer rather than into the generated handler for the reason
+// the read filter sits in the repository: this is the floor. A custom endpoint,
+// a hook reaching for the writer and the generated handler all pass through
+// here, so a rule attached anywhere further out would be one a hand-written
+// endpoint silently drops.
+//
+// The project's own Before still runs, and runs second, so a hook can read the
+// owner and rely on it already being the caller's.
+func (e *emitter) attachOwnerGuard(b *gobuf.Buf, res *ir.Resource) {
+	if !res.Storage.IsOwnerScoped() {
+		return
+	}
+	// The owner has to be writable for there to be anything to guard. A column
+	// the configuration made read-only is not in that input at all, and is
+	// filled by a default or by a hook.
+	var field *ir.ResourceField
+	for i := range res.Fields {
+		if c := res.Fields[i].Column; c != nil && c.Name == res.Storage.Owner.Name {
+			field = &res.Fields[i]
+			break
+		}
+	}
+	if field == nil {
+		return
+	}
+	var (
+		onCreate = field.In(ir.FieldOpCreate)
+		onUpdate = field.In(ir.FieldOpUpdate)
+	)
+	if !onCreate && !onUpdate {
+		return
+	}
+
+	var (
+		ctxPkg = b.Import("context")
+		errPkg = b.Import(runtimeModule + "/rigerr")
+		tenPkg = b.Import(runtimeModule + "/tenancy")
+		model  = e.model(b)
+		refuse = gobuf.Quote("this row is yours, so " + res.Storage.Owner.Name +
+			" has to be your own")
+	)
+
+	// The input's error type rather than a bare field error, which is a 500 by
+	// design: on its own a field error says what was wrong without saying what
+	// it was wrong about. This is the envelope a generated validator returns, so
+	// the answer is the 422 naming the field that a hand-written rule on the
+	// same column would have produced. Said once here rather than in both
+	// branches below, which is also why it is not in the generated file twice.
+	refused := func(op string) string {
+		return fmt.Sprintf("&%s.%s%sInputError{%s: %s.NewFieldError(%s.FieldCodeInvalidValue, %s)}",
+			model, res.Name, op, field.Name, errPkg, errPkg, refuse)
+	}
+
+	if onCreate {
+		b.Comment("The owner column is the caller's, and a create is the write " +
+			"with no stored row to check it against.")
+		b.L("nextCreate := hooks.Create.Before")
+		b.L("hooks.Create.Before = func(ctx %s.Context, claims %s.Claims, in *%s.%sCreateInput) error {",
+			ctxPkg, tenPkg, model, res.Name)
+		b.L("if in.%s == %s.Nil {", field.Name, b.Import("github.com/google/uuid"))
+		b.Comment("Not given, so there is nothing to disagree with and one right " +
+			"answer to fill in.")
+		b.L("in.%s = claims.AccountID", field.Name)
+		b.L("} else if in.%s != claims.AccountID {", field.Name)
+		b.Comment("Given, and somebody else's. Refused rather than overwritten: a " +
+			"client that meant to name itself has a bug worth hearing about, and a " +
+			"client that meant to name somebody else has been told no.")
+		b.L("return %s", refused("Create"))
+		b.L("}")
+		b.L("if nextCreate != nil {")
+		b.L("return nextCreate(ctx, claims, in)")
+		b.L("}")
+		b.L("return nil")
+		b.L("}")
+		b.NL()
+	}
+
+	if onUpdate {
+		b.Comment("And an update cannot give the row away. The narrow read " +
+			"proves the row going in is the caller's; the owner column in the " +
+			"patch is the other half.")
+		b.L("nextUpdate := hooks.Update.Before")
+		b.L("hooks.Update.Before = func(ctx %s.Context, claims %s.Claims, in *%s.%sUpdateInput, prev *%s.%s) error {",
+			ctxPkg, tenPkg, model, res.Name, model, res.Name)
+		b.Comment("Left out is left alone, which is the ordinary case and " +
+			"already right: the column is not in the statement, so the row keeps " +
+			"the owner it had. Only a value that was sent is judged.")
+		b.L("if v, ok := in.%s.Get(); ok && v != claims.AccountID {", field.Name)
+		b.L("return %s", refused("Update"))
+		b.L("}")
+		b.L("if nextUpdate != nil {")
+		b.L("return nextUpdate(ctx, claims, in, prev)")
+		b.L("}")
+		b.L("return nil")
+		b.L("}")
+		b.NL()
+	}
 }
 
 // anyOwnerScoped reports whether the package needs the scope helper at all. A

@@ -72,8 +72,14 @@ checkout CI makes. `rig generate --prune` removes what it reports.
 The scan stops where the project does: it skips dot directories, `node_modules`,
 `vendor`, `dist`, `build` and `testdata`, and it does not descend into a
 directory with its own `rig.yaml`, which is another project checking itself. A
-hand-owned stub has no `.gen.` and no banner, so it is never reported and never
-pruned.
+hand-owned stub has no `.gen.` and no banner, so the scan never finds one.
+
+`.rig/manifest.json` does remember the stubs rig wrote, so a generator that stops
+producing one — the table went away, or rig stopped scaffolding for that kind of
+table — reports it as `stale`. `--prune` leaves it there regardless: rig wrote
+that file once, at its final name, and everything in it since is yours. Whether
+to delete it is your call, and the report is how you know there is a call to
+make.
 
 `--strict` adds warnings to that list. The one worth failing on is
 [RIG3100](diagnostics.md): a column exists in the database, and so in the

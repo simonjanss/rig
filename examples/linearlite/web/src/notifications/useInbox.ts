@@ -1,8 +1,8 @@
 import { useLiveQuery } from "@tanstack/react-db";
 
-import type { RigNotificationRecipientRow } from "../api/electric.gen.js";
+import type { NotificationRecipientRow } from "../api/notification_recipient.gen.js";
 
-import { createRigNotificationRecipientStream } from "../api/electric.gen.js";
+import { createNotificationRecipientStream } from "../api/electric.gen.js";
 import { client } from "../lib/client.js";
 
 /**
@@ -22,7 +22,7 @@ export type InboxLine = {
     todoId: string | null;
 };
 
-function toLine(row: RigNotificationRecipientRow): InboxLine {
+function toLine(row: NotificationRecipientRow): InboxLine {
     const [table, subject] = (row.group_key ?? "").split(":");
     return {
         id: row.id,
@@ -52,7 +52,7 @@ export function useInbox(): {
     unread: number;
     ready: boolean;
 } {
-    const inbox = createRigNotificationRecipientStream(client.runtime, {});
+    const inbox = createNotificationRecipientStream(client.runtime, {});
     const { data, isReady } = useLiveQuery((q) => q.from({ inbox }));
 
     const lines = (data ?? [])

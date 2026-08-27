@@ -65,6 +65,31 @@ import (
 //go:embed migrations/*.sql
 var migrations embed.FS
 
+// migrationSources is this example's migrations and rig's, in the order they have
+// to be applied.
+//
+// `migrations.foundation: embedded` in rig.yaml is what makes this a list rather
+// than the one embed above: rig's dozen tables are carried by the modules that own
+// them — rig/auth, rig/files, rig/notify, rig/presence, rig/runtime — rather than
+// vendored into migrations/, and api.MigrationSources is the wiring `rig generate`
+// writes for that. It returns the module sets first and this example's last, which
+// is the order that matters: 00001_create_todo.sql references rig_tenant, and
+// 00003_roles_and_permissions.sql references rig_account.
+//
+// Each set records itself in its own bookkeeping table, so `rig db up` here and a
+// deployment of this binary agree about what has run. Which is why the directory
+// and the table are named on the Source rather than on migrate.Options: they are
+// per-set facts, so ApplyAll and RequireAll read them from each Source and ignore
+// the ones on Options.
+func migrationSources() []migrate.Source {
+	return api.MigrationSources(migrate.Source{
+		Name:  "linearlite",
+		FS:    migrations,
+		Dir:   "migrations",
+		Table: migrate.DefaultTable,
+	})
+}
+
 // localDSN is what `rig db url` prints for this project. TimeZone is pinned
 // for the reason every example pins it: date arithmetic reads the session's
 // zone, and a daily total should not depend on the machine.
@@ -174,7 +199,7 @@ func main() {
 		Pool: observe.Pool,
 
 		Tasks: map[string]serve.Task{
-			"migrate": migrate.Apply(migrations, migrate.Options{Log: os.Stdout}),
+			"migrate": migrate.ApplyAll(migrationSources(), migrate.Options{Log: os.Stdout}),
 			// The demo tenant, two people to sign in as, the level roles, and a
 			// board's worth of items. Idempotent, so running it twice is not an
 			// error.
@@ -201,7 +226,7 @@ func main() {
 			// job's, mostly. Zero takes the default retention, a day.
 			"prune-idempotency": api.IdempotencyPruner(0),
 		},
-		Migrate: migrate.Require(migrations, migrate.Options{}),
+		Migrate: migrate.RequireAll(migrationSources(), migrate.Options{}),
 	}, func(ctx context.Context, srv *serve.App) (http.Handler, error) {
 		// Its own limit, because a flush to a collector that is not answering
 		// must not spend the whole shutdown budget. The provider it stops was

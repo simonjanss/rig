@@ -27,7 +27,7 @@ const BasePath = "/api/v1"
 // to answer before removing anything: how old is the oldest client still
 // calling. Regenerating against an unchanged API leaves it alone — it is not
 // a build stamp.
-const Revision = "2026-08-26"
+const Revision = "2026-08-27"
 
 // RevisionHeader is where [Revision] is sent: the same header the server
 // generated from this document reads.
@@ -46,12 +46,20 @@ type Client struct {
 	// One person inside one tenant. The person is the identity; this is who they
 	// are here.
 	Accounts *AccountClient
+	// Something worth telling somebody about, and when it is due. Carries no
+	// recipients: the audience is computed when it is sent.
+	Notifications *NotificationClient
+	// One copy of an inbox line on its way to a channel. Claimed by lease, sent
+	// outside any transaction, and marked afterwards.
+	NotificationDeliveries *NotificationDeliveryClient
 	// Where a push can reach somebody. Email is refused: the address is on the
 	// account already.
-	RigNotificationDevices *RigNotificationDeviceClient
+	NotificationDevices *NotificationDeviceClient
+	// One inbox line: a notification, an account, and whether it has been read.
+	NotificationRecipients *NotificationRecipientClient
 	// What somebody wants on a channel, and when. Resolved in three steps: this
 	// kind, then this channel, then the project default.
-	RigNotificationSettings *RigNotificationSettingClient
+	NotificationSettings *NotificationSettingClient
 	// One item on the board.
 	Todos *TodoClient
 	// A file attached to a todo.
@@ -80,8 +88,11 @@ func New(cfg rigclient.Config) (*Client, error) {
 
 	c := &Client{rt: rt}
 	c.Accounts = &AccountClient{rt: rt}
-	c.RigNotificationDevices = &RigNotificationDeviceClient{rt: rt}
-	c.RigNotificationSettings = &RigNotificationSettingClient{rt: rt}
+	c.Notifications = &NotificationClient{rt: rt}
+	c.NotificationDeliveries = &NotificationDeliveryClient{rt: rt}
+	c.NotificationDevices = &NotificationDeviceClient{rt: rt}
+	c.NotificationRecipients = &NotificationRecipientClient{rt: rt}
+	c.NotificationSettings = &NotificationSettingClient{rt: rt}
 	c.Todos = &TodoClient{rt: rt}
 	c.TodoAttachments = &TodoAttachmentClient{rt: rt}
 	c.Auth = rt.Auth()

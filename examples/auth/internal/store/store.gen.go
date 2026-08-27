@@ -151,15 +151,15 @@ type Config struct{}
 type Store struct {
 	pool *pgxpool.Pool
 
-	AccountRoles              AccountRoleRepository
-	Notes                     NoteRepository
-	Permissions               PermissionRepository
-	RigNotifications          RigNotificationRepository
-	RigNotificationDeliveries RigNotificationDeliveryRepository
-	RigNotificationDevices    RigNotificationDeviceRepository
-	RigNotificationRecipients RigNotificationRecipientRepository
-	RigNotificationSettings   RigNotificationSettingRepository
-	Roles                     RoleRepository
+	AccountRoles           AccountRoleRepository
+	Notes                  NoteRepository
+	Notifications          NotificationRepository
+	NotificationDeliveries NotificationDeliveryRepository
+	NotificationDevices    NotificationDeviceRepository
+	NotificationRecipients NotificationRecipientRepository
+	NotificationSettings   NotificationSettingRepository
+	Permissions            PermissionRepository
+	Roles                  RoleRepository
 }
 
 // New builds a store over a connection pool.
@@ -167,12 +167,12 @@ func New(pool *pgxpool.Pool, _ Config) *Store {
 	s := &Store{pool: pool}
 	s.AccountRoles = &accountRoleRepo{db: s}
 	s.Notes = &noteRepo{db: s}
+	s.Notifications = &notificationRepo{db: s}
+	s.NotificationDeliveries = &notificationDeliveryRepo{db: s}
+	s.NotificationDevices = &notificationDeviceRepo{db: s}
+	s.NotificationRecipients = &notificationRecipientRepo{db: s}
+	s.NotificationSettings = &notificationSettingRepo{db: s}
 	s.Permissions = &permissionRepo{db: s}
-	s.RigNotifications = &rigNotificationRepo{db: s}
-	s.RigNotificationDeliveries = &rigNotificationDeliveryRepo{db: s}
-	s.RigNotificationDevices = &rigNotificationDeviceRepo{db: s}
-	s.RigNotificationRecipients = &rigNotificationRecipientRepo{db: s}
-	s.RigNotificationSettings = &rigNotificationSettingRepo{db: s}
 	s.Roles = &roleRepo{db: s}
 	return s
 }

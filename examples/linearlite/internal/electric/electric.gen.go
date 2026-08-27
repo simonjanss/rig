@@ -60,12 +60,12 @@ const DefaultElectricURL = "http://localhost:55445"
 type Handlers struct {
 	Server Server
 
-	RigNotificationRecipient        RigNotificationRecipientScope
-	RigNotificationRecipientDeleted RigNotificationRecipientDeletedScope
-	RigPresence                     RigPresenceScope
-	Todo                            TodoScope
-	TodoDeleted                     TodoDeletedScope
-	TodoVersions                    TodoVersionsScope
+	NotificationRecipient        NotificationRecipientScope
+	NotificationRecipientDeleted NotificationRecipientDeletedScope
+	Presence                     PresenceScope
+	Todo                         TodoScope
+	TodoDeleted                  TodoDeletedScope
+	TodoVersions                 TodoVersionsScope
 }
 
 // Register mounts every shape endpoint.
@@ -85,8 +85,8 @@ func Register(mux *http.ServeMux, h Handlers) {
 
 	// A derived shape falls back to the live shape's scope. Nil stays nil: a table
 	// nobody scoped is scoped by tenant and lifecycle on all three of its routes.
-	if h.RigNotificationRecipientDeleted == nil {
-		h.RigNotificationRecipientDeleted = RigNotificationRecipientDeletedScope(h.RigNotificationRecipient)
+	if h.NotificationRecipientDeleted == nil {
+		h.NotificationRecipientDeleted = NotificationRecipientDeletedScope(h.NotificationRecipient)
 	}
 	if h.TodoDeleted == nil {
 		h.TodoDeleted = TodoDeletedScope(h.Todo)
@@ -95,9 +95,9 @@ func Register(mux *http.ServeMux, h Handlers) {
 		h.TodoVersions = versionsFromLiveTodo(h.Todo)
 	}
 
-	mux.HandleFunc("GET /api/v1/rig_notification_recipient/_stream", handleRigNotificationRecipientShape(h.Server, h.RigNotificationRecipient))
-	mux.HandleFunc("GET /api/v1/rig_notification_recipient/_deleted/_stream", handleRigNotificationRecipientDeletedShape(h.Server, h.RigNotificationRecipientDeleted))
-	mux.HandleFunc("GET /api/v1/rig_presence/_stream", handleRigPresenceShape(h.Server, h.RigPresence))
+	mux.HandleFunc("GET /api/v1/rig_notification_recipient/_stream", handleNotificationRecipientShape(h.Server, h.NotificationRecipient))
+	mux.HandleFunc("GET /api/v1/rig_notification_recipient/_deleted/_stream", handleNotificationRecipientDeletedShape(h.Server, h.NotificationRecipientDeleted))
+	mux.HandleFunc("GET /api/v1/rig_presence/_stream", handlePresenceShape(h.Server, h.Presence))
 	mux.HandleFunc("GET /api/v1/todo/_stream", handleTodoShape(h.Server, h.Todo))
 	mux.HandleFunc("GET /api/v1/todo/_deleted/_stream", handleTodoDeletedShape(h.Server, h.TodoDeleted))
 	mux.HandleFunc("GET /api/v1/todo/{id}/_versions/_stream", handleTodoVersionsShape(h.Server, h.TodoVersions))

@@ -673,7 +673,7 @@ import { usePresence } from "@rig/presence/react";
 const presence = createPresence({
     runtime: client.runtime,
     scope: "board",
-    stream: createRigPresenceStream(client.runtime, { scope: "board" }),
+    stream: createPresenceStream(client.runtime, { scope: "board" }),
 });
 ```
 
