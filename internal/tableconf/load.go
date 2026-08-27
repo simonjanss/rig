@@ -34,7 +34,24 @@ type Loaded struct {
 	Path  string
 	File  *File
 	Index *yamlconf.Index
+	// Builtin says rig supplied this configuration rather than a project, so
+	// [Loaded.Path] names no file anybody can open.
+	//
+	// It is the difference between "nobody has said what this column is for"
+	// and "rig has, in prose it keeps in the migration that created it". The
+	// `unmentioned_column` rule needs that difference: rig's own configurations
+	// list no columns on purpose, so without this the rule would tell every
+	// project to run `rig sync` against a file `rig sync` will not write.
+	//
+	// A project that writes its own file for one of rig's tables loses the
+	// exemption with it, which is the intended reading: `rig sync` does keep
+	// that file up to date, so the advice has somewhere to land.
+	Builtin bool
 }
+
+// IsBuiltin reports whether rig supplied this configuration. Nil is a table
+// with no configuration at all, which is nobody's answer rather than rig's.
+func (l *Loaded) IsBuiltin() bool { return l != nil && l.Builtin }
 
 // At returns the anchor for a dotted path within this file.
 func (l *Loaded) At(segments ...string) diag.Anchor {

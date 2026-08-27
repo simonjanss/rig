@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -654,6 +655,223 @@ func skipAllBut(keep string) []string {
 		if part != keep {
 			out = append(out, part)
 		}
+	}
+	return out
+}
+
+// The configuration the compiler reads and the configuration `--expose` writes
+// are one string.
+//
+// Two paths reach the same content now — a file on disk, and [scaffold.TableConfig]
+// for the ordinary project that has no file — and the second is the one nearly
+// every project gets. If they could differ, a project would find that writing the
+// file out changed the API it already had.
+func TestTableConfigIsWhatExposeWrites(t *testing.T) {
+	t.Parallel()
+
+	for _, table := range scaffold.Tables() {
+		if slices.Contains(joinTables, table) {
+			continue
+		}
+
+		opt := options()
+		opt.Expose = []string{table}
+		opt.ConfigsOnly = true
+
+		written := scaffold.Foundation(opt)
+		shipped, ok := scaffold.TableConfig(table)
+		if len(written) == 0 {
+			if ok {
+				t.Errorf("TableConfig has an answer for %s and --expose writes no file for it", table)
+			}
+			continue
+		}
+		if !ok {
+			t.Errorf("--expose writes a file for %s and TableConfig has no answer for it", table)
+			continue
+		}
+		if got, want := string(shipped), written[0].Content; got != want {
+			t.Errorf("TableConfig(%s) is not what --expose writes:\n--- shipped\n%s\n--- written\n%s", table, got, want)
+		}
+	}
+}
+
+// Every table rig creates says what may be done to it.
+//
+// The compiler reads these now, so a table with no `operations:` and no
+// `expose: false` is not a gap somebody discovers and fills in — it is a table
+// arriving on the public API with the full CRUD default, in every project that
+// turned the block on. rig_tenant with a generated Create is an administrative
+// back door; the inbox with a generated PATCH is a way to rewrite what somebody
+// was told.
+func TestEveryCreatedTableSaysWhatMayBeDoneToIt(t *testing.T) {
+	t.Parallel()
+
+	for _, table := range scaffold.Tables() {
+		if slices.Contains(joinTables, table) {
+			continue
+		}
+
+		content, ok := scaffold.TableConfig(table)
+		if !ok {
+			t.Errorf("%s has no table configuration, so it would project with full CRUD", table)
+			continue
+		}
+		loaded, diags := tableconf.Parse("rig/"+table, content)
+		if diags.HasErrors() {
+			t.Errorf("%s does not parse:\n%s", table, diags.String())
+			continue
+		}
+		if loaded.File.Expose != nil && !*loaded.File.Expose {
+			continue
+		}
+		if len(loaded.File.Operations) == 0 {
+			t.Errorf("%s is exposed and names no operations, so it would project with full CRUD", table)
+		}
+	}
+}
+
+// A generated write on a table rig owns is either narrowed to the caller or it
+// does not exist.
+//
+// The reason is that these configurations are the default now rather than
+// something `--expose` writes for somebody to read: one line of rig.yaml is what
+// turns a block on, and whatever is listed here arrives with it. A tenant-wide
+// write among them is therefore an endpoint nobody chose, guarded by nothing but
+// a permission key — and a project whose roles grant every `.write` key to
+// ordinary members, which is the obvious way to write that mapping, has handed
+// the table to everybody.
+//
+// rig_account is the case worth naming, because a write path over it is the most
+// obviously useful thing in this file and it is still refused: a PATCH over
+// `role` needs a rule about who may raise somebody to Owner, and rig cannot
+// invent that rule. Without it, the default would put every member of a tenant
+// one request away from owning it.
+func TestNoFoundationTableGetsATenantWideWrite(t *testing.T) {
+	t.Parallel()
+
+	writes := []string{"Create", "Update", "Delete", "Restore"}
+
+	for _, table := range scaffold.Tables() {
+		if slices.Contains(joinTables, table) {
+			continue
+		}
+
+		content, ok := scaffold.TableConfig(table)
+		if !ok {
+			continue
+		}
+		loaded, diags := tableconf.Parse("rig/"+table, content)
+		if diags.HasErrors() {
+			continue
+		}
+		if loaded.File.Expose != nil && !*loaded.File.Expose {
+			continue
+		}
+
+		var offered []string
+		for _, op := range loaded.File.Operations {
+			if slices.Contains(writes, op) {
+				offered = append(offered, op)
+			}
+		}
+		if len(offered) == 0 {
+			continue
+		}
+		if loaded.File.Access != nil && loaded.File.Access.Scope == "own" {
+			continue
+		}
+		if slices.Contains(narrowedByTheCompiler, table) {
+			continue
+		}
+		t.Errorf("%s is exposed with %v and nothing narrows it to the caller; either "+
+			"drop the write or say `access: {scope: own}`", table, offered)
+	}
+}
+
+// narrowedByTheCompiler are the tables whose owner scope is imposed by
+// internal/compile rather than written in their configuration.
+//
+// None of the three can say it for itself: an `access: owner:` key is refused
+// unless the column has a visible relation to rig_account, which needs
+// rig_account to be a projected resource — and a project with `notifications:`
+// and no `auth.expose` has these tables and not that resource. So the compiler
+// settles it, in ownerScopedNotificationTables, and this is the one place that
+// has to agree with a list it cannot import. Adding a fourth there without
+// adding it here fails nothing; adding a write to a table that is on neither
+// list is what this catches.
+var narrowedByTheCompiler = []string{
+	"rig_notification_recipient",
+	"rig_notification_device",
+	"rig_notification_setting",
+}
+
+// Every enum rig's own migrations create has prose for every one of its values.
+//
+// Postgres cannot comment an enum label — COMMENT ON TYPE is the whole type, and
+// there is nothing to hang on a value — so unlike a column comment, this cannot
+// arrive through introspection. It is here or it is nowhere, and nowhere means
+// every project that exposes the table ships `TODO: describe this` in its
+// OpenAPI document and its generated clients. Four of notify's enums and
+// presence's one were exactly that until this test existed.
+func TestEveryCreatedEnumIsDescribed(t *testing.T) {
+	t.Parallel()
+
+	described := map[string]map[string]bool{}
+	for _, table := range scaffold.Tables() {
+		content, ok := scaffold.TableConfig(table)
+		if !ok {
+			continue
+		}
+		loaded, diags := tableconf.Parse("rig/"+table, content)
+		if diags.HasErrors() {
+			continue
+		}
+		for name, e := range loaded.File.Enums {
+			if described[name] == nil {
+				described[name] = map[string]bool{}
+			}
+			for value, v := range e.Values {
+				if v.Description != "" && !strings.HasPrefix(v.Description, "TODO") {
+					described[name][value] = true
+				}
+			}
+		}
+	}
+
+	for name, values := range createdEnums(t) {
+		for _, value := range values {
+			if !described[name][value] {
+				t.Errorf("%s has no description for %q, so every client that reads it gets a TODO", name, value)
+			}
+		}
+	}
+}
+
+// createdEnums are the enum types rig's own migrations create, with their
+// labels, read out of the DDL rather than listed — so a type added to a set is
+// covered by having been written.
+func createdEnums(t *testing.T) map[string][]string {
+	t.Helper()
+
+	// One statement at a time rather than one line at a time: a set is free to
+	// write the labels on one line or on five, and both spellings are in the
+	// foundation already.
+	decl := regexp.MustCompile(`(?s)CREATE TYPE (\w+) AS ENUM \(([^)]*)\)`)
+
+	out := map[string][]string{}
+	for _, f := range scaffold.Foundation(options()) {
+		if !strings.HasSuffix(f.Path, ".sql") {
+			continue
+		}
+		for _, m := range decl.FindAllStringSubmatch(f.Content, -1) {
+			for _, label := range strings.Split(m[2], ",") {
+				out[m[1]] = append(out[m[1]], strings.Trim(strings.TrimSpace(label), "'"))
+			}
+		}
+	}
+	if len(out) == 0 {
+		t.Fatal("no enum types found in the foundation's migrations")
 	}
 	return out
 }

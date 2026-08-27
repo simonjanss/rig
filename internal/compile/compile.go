@@ -13,6 +13,8 @@
 package compile
 
 import (
+	"slices"
+
 	"github.com/simonjanss/rig/internal/diag"
 	"github.com/simonjanss/rig/internal/naming"
 	"github.com/simonjanss/rig/internal/project"
@@ -98,6 +100,8 @@ func Compile(raw ir.Schema, set *tableconf.Set, opt Options) (*ir.Document, diag
 	doc, d := Freeze(api, schema, Meta{Tool: opt.Tool, Permissions: cfg.API.Permissions})
 	diags.Append(d)
 
+	markFoundation(doc, p, opt.Foundation)
+
 	diags.Append(checkReserved(doc, set, p, opt.Foundation))
 	diags.Append(Validate(doc, set, p))
 
@@ -129,4 +133,28 @@ func namerOrDefault(n *naming.Namer) *naming.Namer {
 		return n
 	}
 	return naming.New(naming.Config{})
+}
+
+// markFoundation flags the resources over tables rig created.
+//
+// After freezing rather than during, because it changes nothing the later stages
+// read — the stub writers are its only audience, and they run over the finished
+// document. [ir.Resource.Foundation] says what it is for.
+//
+// Nothing is flagged under `auth.own`. Such a project has forked the migrations
+// and maintains those tables itself, so they are its own to write rules about
+// and its own to describe — which is the whole of what the flag turns off.
+// [Options.Foundation] still names them, because a forked foundation and a
+// project that never scaffolded look identical from the ignore list and
+// [checkReserved] has to tell them apart.
+func markFoundation(doc *ir.Document, p *project.Project, foundation []string) {
+	if len(foundation) == 0 || p.Config.Auth.Own {
+		return
+	}
+	for i := range doc.API.Resources {
+		res := &doc.API.Resources[i]
+		if res.Storage != nil && slices.Contains(foundation, res.Storage.Table) {
+			res.Foundation = true
+		}
+	}
 }

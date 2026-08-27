@@ -989,3 +989,138 @@ func TestNotifyGolden(t *testing.T) {
 
 	gentest.Golden(t, filepath.Join("testdata", "notify"), artifacts, *update)
 }
+
+// What `access: scope: own` does not settle on its own, closed in generated
+// code.
+//
+// The narrow read proves the row a write is about is the caller's. It says
+// nothing about the owner column in the body, and two writes carry one. A create
+// has no row to read at all, so an unguarded owner is a push token registered
+// against somebody else's account. An update has the column in its patch, so an
+// unguarded one is the row handed over — a `digest: Off` preference written onto
+// an account that is not yours.
+//
+// Until this was generated, every project with an owner-scoped table wrote the
+// same validator by hand, listed under Create and Update alike; linearlite wrote
+// it twice. It goes on the writer because that is the floor: a custom endpoint,
+// a hook reaching for the writer and the generated handler all pass through
+// there.
+func TestAnOwnerScopedWriteCannotNameSomebodyElse(t *testing.T) {
+	t.Parallel()
+
+	src := find(t, gentest.Run(t, servicego.New(), ownerScopedDoc(t), opts()), "lesson_service.gen.go")
+	ctor, ok := between(src, "func NewLessonWriter(", "\n}")
+	if !ok {
+		t.Fatal("no LessonWriter constructor")
+	}
+
+	for _, want := range []string{
+		// The project's own Before is composed rather than replaced, and runs
+		// second, so a hook can rely on the owner already being the caller's.
+		"nextCreate := hooks.Create.Before",
+		"hooks.Create.Before = func(",
+		// Absent is filled in, so a client need not send a value it has no
+		// choice about.
+		"in.CreatedByAccountID = claims.AccountID",
+		// Present and somebody else's is refused, under the field, as a 422.
+		"in.CreatedByAccountID != claims.AccountID",
+		"model.LessonCreateInputError{CreatedByAccountID:",
+		"return nextCreate(ctx, claims, in)",
+
+		// And the same column on the way through an update. Left out is left
+		// alone — the column is not in the statement — so only a value that was
+		// sent is judged, which is what `Get()` asks.
+		"nextUpdate := hooks.Update.Before",
+		"hooks.Update.Before = func(",
+		"if v, ok := in.CreatedByAccountID.Get(); ok && v != claims.AccountID {",
+		"model.LessonUpdateInputError{CreatedByAccountID:",
+		"return nextUpdate(ctx, claims, in, prev)",
+	} {
+		if !strings.Contains(collapse(ctor), collapse(want)) {
+			t.Errorf("the owner guard is missing %q:\n%s", want, ctor)
+		}
+	}
+}
+
+// And a table that never asked to be owner-scoped gets none of it. Turning the
+// feature on for one table must not rewrite the writer of every other.
+func TestAWriterWithNoOwnerIsUntouched(t *testing.T) {
+	t.Parallel()
+
+	src := find(t, gentest.Run(t, servicego.New(), gentest.LoadDocument(t, filepath.Join("testdata", fixture)), opts()), "lesson_service.gen.go")
+	ldr, ok := between(src, "func NewLessonWriter(", "\n}")
+	if !ok {
+		t.Fatal("no LessonWriter constructor")
+	}
+	for _, unwanted := range []string{"hooks.Create.Before", "hooks.Update.Before"} {
+		if strings.Contains(ldr, unwanted) {
+			t.Errorf("a table with no owner grew a %s guard:\n%s", unwanted, ldr)
+		}
+	}
+}
+
+// A guard is emitted per writable operation, not per owner-scoped table: a
+// column the configuration froze after creation has nothing to guard on an
+// update, and a closure over a hook nobody can reach is dead code in every
+// project that has such a table.
+func TestAnImmutableOwnerGetsNoUpdateGuard(t *testing.T) {
+	t.Parallel()
+
+	doc := ownerScopedDoc(t)
+	res := doc.Resource("Lesson")
+	for i := range res.Fields {
+		if f := &res.Fields[i]; f.Column != nil && f.Column.Name == res.Storage.Owner.Name {
+			f.Operations = []string{ir.FieldOpCreate, ir.FieldOpRead}
+		}
+	}
+	doc.Reindex()
+
+	src := find(t, gentest.Run(t, servicego.New(), doc, opts()), "lesson_service.gen.go")
+	ctor, ok := between(src, "func NewLessonWriter(", "\n}")
+	if !ok {
+		t.Fatal("no LessonWriter constructor")
+	}
+	if !strings.Contains(ctor, "hooks.Create.Before") {
+		t.Errorf("the create guard should still be there:\n%s", ctor)
+	}
+	if strings.Contains(ctor, "hooks.Update.Before") {
+		t.Errorf("an owner nobody can patch grew an update guard:\n%s", ctor)
+	}
+}
+
+// ownerScopedDoc is the ordinary fixture with `access: scope: own` applied to
+// it, over an owner column a caller can write.
+//
+// Both halves matter. Pointing Storage.Owner at the audit column is what
+// internal/compile does when `access:` names no owner, and it needs no guard: a
+// created_by_account_id is filled by the repository, so it is in neither input
+// and there is nothing for a client to name. The hole is the other reading —
+// `access: {scope: own, owner: account_id}` over an ordinary column, which is
+// what a table like rig_notification_setting has — so the field is made writable
+// here to produce that shape. Contrived as a fixture, identical as an IR: an
+// owner column that is in the create input and in the patch.
+func ownerScopedDoc(t *testing.T) *ir.Document {
+	t.Helper()
+
+	doc := gentest.LoadDocument(t, filepath.Join("testdata", fixture))
+	res := doc.Resource("Lesson")
+	if res == nil {
+		t.Fatal("no Lesson in the fixture")
+	}
+	if res.Storage.Audit == nil || res.Storage.Audit.CreatedBy == nil {
+		t.Fatal("the fixture has no audit column to own by")
+	}
+	owner := *res.Storage.Audit.CreatedBy
+	res.Storage.Owner = &owner
+
+	for i := range res.Fields {
+		f := &res.Fields[i]
+		if f.Column != nil && f.Column.Name == owner.Name {
+			f.Operations = []string{ir.FieldOpCreate, ir.FieldOpRead, ir.FieldOpUpdate}
+			doc.Reindex()
+			return doc
+		}
+	}
+	t.Fatalf("no field for %s", owner.Name)
+	return nil
+}

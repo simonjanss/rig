@@ -23,6 +23,9 @@ type AccountService interface {
 	// List Accounts.
 	List(ctx context.Context, r Request[struct{}, AccountListQuery, struct{}]) (*AccountListResponse, error)
 
+	// Search Accounts with filters.
+	Search(ctx context.Context, r Request[struct{}, AccountSearchQuery, AccountSearchBody]) (*AccountListResponse, error)
+
 	// List retired Accounts.
 	//
 	// A deletion stamps the row rather than removing it, so this is what was
@@ -209,6 +212,29 @@ func (s DefaultAccountService) readRows(ctx context.Context, claims tenancy.Clai
 func (s DefaultAccountService) List(ctx context.Context, r Request[struct{}, AccountListQuery, struct{}]) (*AccountListResponse, error) {
 	page := model.AccountPage{Limit: r.Query.Limit, Offset: r.Query.Offset}
 	asked := model.NewAccountFilter()
+	filter, err := s.readFilter(ctx, r.Claims, asked)
+	if err != nil {
+		return nil, err
+	}
+
+	rows, total, err := s.repo.List(ctx, filter, page)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.readRows(ctx, r.Claims, rows); err != nil {
+		return nil, err
+	}
+
+	return &AccountListResponse{
+		Data:       rows,
+		Pagination: Pagination{Offset: page.Offset, Limit: page.Limit, Total: total},
+	}, nil
+}
+
+// Search implements AccountService.
+func (s DefaultAccountService) Search(ctx context.Context, r Request[struct{}, AccountSearchQuery, AccountSearchBody]) (*AccountListResponse, error) {
+	page := model.AccountPage{Limit: r.Query.Limit, Offset: r.Query.Offset}
+	asked := r.Body.Filter
 	filter, err := s.readFilter(ctx, r.Claims, asked)
 	if err != nil {
 		return nil, err

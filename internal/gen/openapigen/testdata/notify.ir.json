@@ -3116,6 +3116,7 @@
         "plural": "RigAccounts",
         "path_segment": "rig-accounts",
         "description": "One person's membership of one tenant.",
+        "foundation": true,
         "operations": [
           "Create",
           "Get",
@@ -3563,6 +3564,7 @@
         "path_segment": "rig-notifications",
         "description": "Something worth telling somebody about, and when it is due.",
         "unexposed": true,
+        "foundation": true,
         "operations": null,
         "fields": [
           {
@@ -3817,6 +3819,7 @@
         "path_segment": "rig-notification-recipients",
         "description": "One inbox line: a notification, an account, and whether it has been read.",
         "unexposed": true,
+        "foundation": true,
         "operations": null,
         "fields": [
           {

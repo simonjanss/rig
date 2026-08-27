@@ -60,8 +60,8 @@ const DefaultElectricURL = "http://localhost:3000"
 type Handlers struct {
 	Server Server
 
-	RigNotificationRecipient        RigNotificationRecipientScope
-	RigNotificationRecipientDeleted RigNotificationRecipientDeletedScope
+	NotificationRecipient        NotificationRecipientScope
+	NotificationRecipientDeleted NotificationRecipientDeletedScope
 }
 
 // Register mounts every shape endpoint.
@@ -81,12 +81,12 @@ func Register(mux *http.ServeMux, h Handlers) {
 
 	// A derived shape falls back to the live shape's scope. Nil stays nil: a table
 	// nobody scoped is scoped by tenant and lifecycle on all three of its routes.
-	if h.RigNotificationRecipientDeleted == nil {
-		h.RigNotificationRecipientDeleted = RigNotificationRecipientDeletedScope(h.RigNotificationRecipient)
+	if h.NotificationRecipientDeleted == nil {
+		h.NotificationRecipientDeleted = NotificationRecipientDeletedScope(h.NotificationRecipient)
 	}
 
-	mux.HandleFunc("GET /api/v1/rig_notification_recipient/_stream", handleRigNotificationRecipientShape(h.Server, h.RigNotificationRecipient))
-	mux.HandleFunc("GET /api/v1/rig_notification_recipient/_deleted/_stream", handleRigNotificationRecipientDeletedShape(h.Server, h.RigNotificationRecipientDeleted))
+	mux.HandleFunc("GET /api/v1/rig_notification_recipient/_stream", handleNotificationRecipientShape(h.Server, h.NotificationRecipient))
+	mux.HandleFunc("GET /api/v1/rig_notification_recipient/_deleted/_stream", handleNotificationRecipientDeletedShape(h.Server, h.NotificationRecipientDeleted))
 }
 
 // prepare authenticates a subscription and starts its filter.

@@ -30,10 +30,10 @@ type AccountFilterEquals struct {
 	// Account that soft-deleted this row, taken from the request's claims.
 	DeletedByAccountID *uuid.UUID `json:"deletedByAccountId,omitempty"`
 	// Whether this is a person or a service account an integration acts as.
-	Kind *RigAccountKind `json:"kind,omitempty"`
+	Kind *AccountKind `json:"kind,omitempty"`
 	// The coarse level in this tenant: Owner, Admin, or Basic. Somebody can be an
 	// Owner here and Basic elsewhere.
-	Role *RigAccountRoleLevel `json:"role,omitempty"`
+	Role *AccountRoleLevel `json:"role,omitempty"`
 	// A copy of the identity's address, kept here so listing accounts is one
 	// query. For a service account it is a label nobody signs in with.
 	EmailAddress *string `json:"emailAddress,omitempty"`
@@ -53,24 +53,6 @@ type AccountFilterEquals struct {
 	// API key this row was soft-deleted through, when it was an integration rather
 	// than a person.
 	DeletedByAPIKeyID *uuid.UUID `json:"deletedByApiKeyId,omitempty"`
-	// Conditions on one of this row's AccountRigNotificationDevices.
-	//
-	// Every condition has to hold of the same one, not of the set between them.
-	//
-	// Under the negative operators this asks whether one of them differs, which is
-	// not the same as none of them matching: a row can have one that matches and
-	// one that does not, satisfying the first and failing the second.
-	// Without.AccountRigNotificationDevices asks the second.
-	AccountRigNotificationDevices *RigNotificationDeviceFilterEquals `json:"accountRigNotificationDevices,omitempty"`
-	// Conditions on one of this row's AccountRigNotificationSettings.
-	//
-	// Every condition has to hold of the same one, not of the set between them.
-	//
-	// Under the negative operators this asks whether one of them differs, which is
-	// not the same as none of them matching: a row can have one that matches and
-	// one that does not, satisfying the first and failing the second.
-	// Without.AccountRigNotificationSettings asks the second.
-	AccountRigNotificationSettings *RigNotificationSettingFilterEquals `json:"accountRigNotificationSettings,omitempty"`
 	// Conditions on one of this row's AssigneeAccountTodos.
 	//
 	// Every condition has to hold of the same one, not of the set between them.
@@ -90,24 +72,6 @@ type AccountFilterRange struct {
 	UpdatedAt *time.Time `json:"updatedAt,omitempty"`
 	// When this row was soft-deleted. Null while the row is live.
 	DeletedAt *time.Time `json:"deletedAt,omitempty"`
-	// Conditions on one of this row's AccountRigNotificationDevices.
-	//
-	// Every condition has to hold of the same one, not of the set between them.
-	//
-	// Under the negative operators this asks whether one of them differs, which is
-	// not the same as none of them matching: a row can have one that matches and
-	// one that does not, satisfying the first and failing the second.
-	// Without.AccountRigNotificationDevices asks the second.
-	AccountRigNotificationDevices *RigNotificationDeviceFilterRange `json:"accountRigNotificationDevices,omitempty"`
-	// Conditions on one of this row's AccountRigNotificationSettings.
-	//
-	// Every condition has to hold of the same one, not of the set between them.
-	//
-	// Under the negative operators this asks whether one of them differs, which is
-	// not the same as none of them matching: a row can have one that matches and
-	// one that does not, satisfying the first and failing the second.
-	// Without.AccountRigNotificationSettings asks the second.
-	AccountRigNotificationSettings *RigNotificationSettingFilterRange `json:"accountRigNotificationSettings,omitempty"`
 	// Conditions on one of this row's AssigneeAccountTodos.
 	//
 	// Every condition has to hold of the same one, not of the set between them.
@@ -139,10 +103,10 @@ type AccountFilterContains struct {
 	// Account that soft-deleted this row, taken from the request's claims.
 	DeletedByAccountID []uuid.UUID `json:"deletedByAccountId,omitempty"`
 	// Whether this is a person or a service account an integration acts as.
-	Kind []RigAccountKind `json:"kind,omitempty"`
+	Kind []AccountKind `json:"kind,omitempty"`
 	// The coarse level in this tenant: Owner, Admin, or Basic. Somebody can be an
 	// Owner here and Basic elsewhere.
-	Role []RigAccountRoleLevel `json:"role,omitempty"`
+	Role []AccountRoleLevel `json:"role,omitempty"`
 	// A copy of the identity's address, kept here so listing accounts is one
 	// query. For a service account it is a label nobody signs in with.
 	EmailAddress []string `json:"emailAddress,omitempty"`
@@ -162,24 +126,6 @@ type AccountFilterContains struct {
 	// API key this row was soft-deleted through, when it was an integration rather
 	// than a person.
 	DeletedByAPIKeyID []uuid.UUID `json:"deletedByApiKeyId,omitempty"`
-	// Conditions on one of this row's AccountRigNotificationDevices.
-	//
-	// Every condition has to hold of the same one, not of the set between them.
-	//
-	// Under the negative operators this asks whether one of them differs, which is
-	// not the same as none of them matching: a row can have one that matches and
-	// one that does not, satisfying the first and failing the second.
-	// Without.AccountRigNotificationDevices asks the second.
-	AccountRigNotificationDevices *RigNotificationDeviceFilterContains `json:"accountRigNotificationDevices,omitempty"`
-	// Conditions on one of this row's AccountRigNotificationSettings.
-	//
-	// Every condition has to hold of the same one, not of the set between them.
-	//
-	// Under the negative operators this asks whether one of them differs, which is
-	// not the same as none of them matching: a row can have one that matches and
-	// one that does not, satisfying the first and failing the second.
-	// Without.AccountRigNotificationSettings asks the second.
-	AccountRigNotificationSettings *RigNotificationSettingFilterContains `json:"accountRigNotificationSettings,omitempty"`
 	// Conditions on one of this row's AssigneeAccountTodos.
 	//
 	// Every condition has to hold of the same one, not of the set between them.
@@ -200,24 +146,6 @@ type AccountFilterLike struct {
 	DisplayName *string `json:"displayName,omitempty"`
 	// IANA name, for example Europe/Stockholm. Null means UTC.
 	TimeZone *string `json:"timeZone,omitempty"`
-	// Conditions on one of this row's AccountRigNotificationDevices.
-	//
-	// Every condition has to hold of the same one, not of the set between them.
-	//
-	// Under the negative operators this asks whether one of them differs, which is
-	// not the same as none of them matching: a row can have one that matches and
-	// one that does not, satisfying the first and failing the second.
-	// Without.AccountRigNotificationDevices asks the second.
-	AccountRigNotificationDevices *RigNotificationDeviceFilterLike `json:"accountRigNotificationDevices,omitempty"`
-	// Conditions on one of this row's AccountRigNotificationSettings.
-	//
-	// Every condition has to hold of the same one, not of the set between them.
-	//
-	// Under the negative operators this asks whether one of them differs, which is
-	// not the same as none of them matching: a row can have one that matches and
-	// one that does not, satisfying the first and failing the second.
-	// Without.AccountRigNotificationSettings asks the second.
-	AccountRigNotificationSettings *RigNotificationSettingFilterLike `json:"accountRigNotificationSettings,omitempty"`
 	// Conditions on one of this row's AssigneeAccountTodos.
 	//
 	// Every condition has to hold of the same one, not of the set between them.
@@ -255,24 +183,6 @@ type AccountFilterNull struct {
 	// API key this row was soft-deleted through, when it was an integration rather
 	// than a person.
 	DeletedByAPIKeyID *bool `json:"deletedByApiKeyId,omitempty"`
-	// Conditions on one of this row's AccountRigNotificationDevices.
-	//
-	// Every condition has to hold of the same one, not of the set between them.
-	//
-	// Under the negative operators this asks whether one of them differs, which is
-	// not the same as none of them matching: a row can have one that matches and
-	// one that does not, satisfying the first and failing the second.
-	// Without.AccountRigNotificationDevices asks the second.
-	AccountRigNotificationDevices *RigNotificationDeviceFilterNull `json:"accountRigNotificationDevices,omitempty"`
-	// Conditions on one of this row's AccountRigNotificationSettings.
-	//
-	// Every condition has to hold of the same one, not of the set between them.
-	//
-	// Under the negative operators this asks whether one of them differs, which is
-	// not the same as none of them matching: a row can have one that matches and
-	// one that does not, satisfying the first and failing the second.
-	// Without.AccountRigNotificationSettings asks the second.
-	AccountRigNotificationSettings *RigNotificationSettingFilterNull `json:"accountRigNotificationSettings,omitempty"`
 	// Conditions on one of this row's AssigneeAccountTodos.
 	//
 	// Every condition has to hold of the same one, not of the set between them.
@@ -286,24 +196,6 @@ type AccountFilterNull struct {
 
 // Relations a Account must have no matching row for.
 type AccountFilterWithout struct {
-	// Match rows with no AccountRigNotificationDevices satisfying these
-	// conditions, including rows with none at all.
-	//
-	// This negates the existence of a matching row rather than the comparison,
-	// which is the whole difference from NotEquals.AccountRigNotificationDevices:
-	// that one is satisfied by one of them differing, and a row can have one that
-	// differs and one that matches at the same time. An empty object asks for rows
-	// with no AccountRigNotificationDevices at all.
-	AccountRigNotificationDevices *RigNotificationDeviceFilter `json:"accountRigNotificationDevices,omitempty"`
-	// Match rows with no AccountRigNotificationSettings satisfying these
-	// conditions, including rows with none at all.
-	//
-	// This negates the existence of a matching row rather than the comparison,
-	// which is the whole difference from NotEquals.AccountRigNotificationSettings:
-	// that one is satisfied by one of them differing, and a row can have one that
-	// differs and one that matches at the same time. An empty object asks for rows
-	// with no AccountRigNotificationSettings at all.
-	AccountRigNotificationSettings *RigNotificationSettingFilter `json:"accountRigNotificationSettings,omitempty"`
 	// Match rows with no AssigneeAccountTodos satisfying these conditions,
 	// including rows with none at all.
 	//

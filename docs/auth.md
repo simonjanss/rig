@@ -645,11 +645,12 @@ correctness. What is *not* fail-safe is the half rig cannot check — a role wri
 you forgot to publish from is a permission that goes on working until `ttl`
 expires. That is the trade, and it is why this is opt-in.
 
-**Watch for the write paths that are not yours.** If your `Grants` reads
-`rig_account.role` — the scaffolded configuration exposes it as `Update` — then a
-`PATCH` on that resource changes the answer without going anywhere near your role
-tables. A `dbhook` `BeforeCommit` on that update is where the `Invalidate` goes,
-inside the transaction rather than after it.
+**Watch for the write paths that are not yours.** rig's own configuration for
+`rig_account` is read-only, and this is one of the reasons: if your `Grants` reads
+`rig_account.role` and you widen that resource to `Update`, a `PATCH` on it
+changes the answer without going anywhere near your role tables. A `dbhook`
+`BeforeCommit` on that update is where the `Invalidate` goes, inside the
+transaction rather than after it.
 
 ---
 
@@ -712,9 +713,11 @@ audit log rig used to have.
 
 ### Or expose the table instead
 
-`rig setup-project --expose rig_auth_log` gives you the log as an ordinary
-resource: a model, a repository, and `Get`, `List` and `Search` with the generated
-filters and live sync. Both answers stay, and the difference between them is the
+`auth: {expose: [rig_auth_log]}` gives you the log as an ordinary resource: a
+model, a repository, and `Get`, `List` and `Search` with the generated filters and
+live sync. That one line is the whole of it — the configuration saying which
+operations belong on rig's own table is rig's, and there is no file to write. See
+[rig's own tables need no file](tables.md#rigs-own-tables-need-no-file). Both answers stay, and the difference between them is the
 point. A generated read filters by tenant, so it cannot see the tenant-less rows
 **and has nowhere to explain that it cannot**. The endpoint excludes them
 deliberately, and this page is where it says so. Take the resource if you want the

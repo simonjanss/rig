@@ -38,6 +38,60 @@ func loadTables(p *project.Project) (*tableconf.Set, diag.List) {
 	return set, diags
 }
 
+// addFoundationConfigs fills in rig's own answer for every table of rig's the
+// project did not write a file for.
+//
+// A table rig created is a table rig knows how to project: the API name the
+// `rig_` prefix strips to, which operations belong on it, which of its columns
+// are read-only, and what each of its enum values means. All of that is in
+// [scaffold.TableConfig] already — it is the text `rig setup-project --expose`
+// writes — and until this ran it reached a project only by being written to disk.
+// So every project that exposed one of rig's tables kept a few hundred lines
+// describing rig's schema, most of it copied verbatim out of the COMMENT ON
+// statements the module's own migration carries.
+//
+// A file on disk wins outright rather than being merged with this. Wholesale is
+// the rule that can be stated in one sentence: what a project reads in its own
+// services/ directory is what applies. Merging would mean every key having an
+// answer to "and what if both say something", and a project could no longer
+// widen an operation list by editing the file in front of it.
+//
+// The path is not a path. Nothing reads a foundation configuration off disk, and
+// a diagnostic anchored to a file somebody could go and open would send them
+// looking for one that is not there.
+func addFoundationConfigs(set *tableconf.Set, schema ir.Schema, foundation, ignore []string) diag.List {
+	var diags diag.List
+	for _, table := range foundation {
+		if set.Get(table) != nil || set.Failed(table) {
+			continue
+		}
+		// Only the ones being projected. A configuration for a table rig
+		// generates nothing from is refused as RIG3107, and rightly — it is a
+		// file describing a table that will not be in the document — so an
+		// ignored table gets nothing, and neither does one whose migration has
+		// not been applied yet: RIG3102 is what a file for a table that is not
+		// in the database earns.
+		if slices.Contains(ignore, table) || !hasTable(schema, table) {
+			continue
+		}
+		content, ok := scaffold.TableConfig(table)
+		if !ok {
+			continue
+		}
+		loaded, d := tableconf.Parse("rig/"+table, content)
+		diags.Append(d)
+		if loaded != nil {
+			// Marked as rig's, because one rule has to tell this apart from a
+			// file: rig's configurations list no columns, and
+			// `unmentioned_column` over them is sixty warnings telling a project
+			// to run `rig sync` against a file `rig sync` will not write.
+			loaded.Builtin = true
+			set.Add(loaded)
+		}
+	}
+	return diags
+}
+
 // compileFrom builds the document from a schema already in hand.
 //
 // Until introspection lands, the schema comes from a file — which is also how
@@ -53,10 +107,15 @@ func compileFrom(p *project.Project, schema ir.Schema) (*ir.Document, diag.List)
 	if err != nil {
 		diags.Add(diag.CodeConfigFile, diag.Anchor{}, "%v", err)
 	}
+	if !p.Config.Auth.Own {
+		// `auth.own` means the project took rig's schema over, so the tables are
+		// its own to describe and rig has no answer to offer about them.
+		diags.Append(addFoundationConfigs(set, schema, foundation, ignore))
+	}
 	diags.Append(checkFoundationMode(p))
 	diags.Append(checkFoundationPresent(p))
 	for _, block := range foundationBlocks(p) {
-		diags.Append(checkFoundationBlock(p, set, block))
+		diags.Append(checkFoundationBlock(p, block))
 	}
 
 	doc, d := compile.Compile(schema, set, compile.Options{
@@ -68,6 +127,11 @@ func compileFrom(p *project.Project, schema ir.Schema) (*ir.Document, diag.List)
 	diags.Append(d)
 
 	return doc, diags
+}
+
+// hasTable reports whether the introspected schema holds a table by this name.
+func hasTable(schema ir.Schema, table string) bool {
+	return slices.ContainsFunc(schema.Tables, func(t ir.Table) bool { return t.Name == table })
 }
 
 // foundationParts names the parts of rig's foundation this project has, by
@@ -279,27 +343,20 @@ func checkFoundationMode(p *project.Project) diag.List {
 }
 
 // foundationBlock is one rig.yaml block whose tables rig maintains: whether it
-// is on, whether it is exposed, which tables it owns, and what a generated write
-// path over them would be a way to do.
+// is on, and which tables it owns.
 //
-// A description rather than three near-identical functions, because the flow
-// they shared has two halves and only one of them is harmless. A missing
-// migration is reported for tidiness — the project fails on its first request
-// either way. An exposed table with no configuration is the one that matters,
-// and in three hand-written copies it is also the one a fourth block would be
-// most likely to leave out. Here it cannot be left out: it comes with the entry.
+// A description rather than three near-identical functions. It carried two
+// checks and now carries one, because the half that mattered — an exposed table
+// with no configuration saying what may be done to it — became unreachable when
+// [addFoundationConfigs] started supplying that configuration. What is left is
+// reported for tidiness: a project missing the migration fails on its first
+// request either way.
 type foundationBlock struct {
-	// name is the rig.yaml key. It is both anchors and the first word of both
-	// messages, which is why there is only one of it.
+	// name is the rig.yaml key. It is the anchor and the first word of the
+	// message, which is why there is only one of it.
 	name    string
 	enabled bool
-	expose  bool
 	tables  []string
-	// exposeReason completes "…there is no table configuration for it, so it
-	// would ", naming what the generated write path is a way to do. It is the
-	// whole difference between the three messages, and it is per-block because
-	// the danger is.
-	exposeReason string
 }
 
 // foundationBlocks describes every block that owns rig tables.
@@ -311,53 +368,30 @@ func foundationBlocks(p *project.Project) []foundationBlock {
 		{
 			name:    "files",
 			enabled: p.Config.Files.Enabled,
-			expose:  p.Config.Files.Expose,
 			tables:  []string{compile.FileTable},
-			// Removing rig_file from the ignore list is what makes it a
-			// resource; the table configuration is what makes that resource
-			// read-only and narrow. Without the configuration it would arrive
-			// with full CRUD over the storage key — which is a way to point a
-			// row at any object in the bucket, and precisely what the design
-			// refuses to generate.
-			exposeReason: "arrive with full CRUD over its storage key",
 		},
 		{
 			name:    "notifications",
 			enabled: p.Config.Notifications.Enabled,
-			expose:  p.Config.Notifications.Expose,
 			tables:  compile.NotificationTables(),
-			// Exposing the inbox is what makes it a resource; the table
-			// configuration is what makes that resource read-and-delete.
-			// Without it, the inbox would arrive with a generated PATCH over
-			// `kind` and `event_count` — which is a way to rewrite what
-			// somebody was told, and a POST that could address a notification
-			// to anybody.
-			exposeReason: "arrive with a generated write path over what somebody was told",
 		},
 		{
 			name:    "presence",
 			enabled: p.Config.Presence.Enabled,
-			expose:  p.Config.Presence.Expose,
 			tables:  []string{compile.PresenceTable},
-			// The sharpest of the three. Exposing presence is what makes it a
-			// resource; the table configuration is what keeps that resource to
-			// Get and List. Without it, presence would arrive with a generated
-			// Create — and a Create takes a body, and a body is somewhere to
-			// name an account that is not yours. The whole reason the write
-			// path is three hand-written routes is that they have nowhere to
-			// put one.
-			exposeReason: "arrive with a generated Create — and a Create takes a body, which is " +
-				"somewhere to claim that somebody else is editing something",
 		},
 	}
 }
 
-// checkFoundationBlock reports a block whose tables are not there, and an
-// exposed table with no configuration saying what may be done to it.
+// checkFoundationBlock reports a block whose tables are not there.
 //
-// The second one is the dangerous half, and [foundationBlock.exposeReason] says
-// how, per block.
-func checkFoundationBlock(p *project.Project, set *tableconf.Set, b foundationBlock) diag.List {
+// It used to also refuse an exposed table with no configuration saying what may
+// be done to it — the inbox arriving with a generated PATCH over what somebody
+// was told, presence arriving with a generated Create. [addFoundationConfigs]
+// retired that half by making it unreachable: rig writes the answer for its own
+// table into the set now, so there is no reading left under which one of them
+// arrives with the full CRUD default.
+func checkFoundationBlock(p *project.Project, b foundationBlock) diag.List {
 	var diags diag.List
 	if !b.enabled {
 		return diags
@@ -376,18 +410,6 @@ func checkFoundationBlock(p *project.Project, set *tableconf.Set, b foundationBl
 			// One diagnostic and not one per table: they are missing for the
 			// same reason, and `setup-project` writes all of them at once.
 			return diags
-		}
-	}
-
-	if !b.expose || set == nil {
-		return diags
-	}
-	for _, table := range b.tables {
-		if set.Get(table) == nil {
-			diags.Add(diag.CodeConfigInvalid, p.At(b.name, "expose"),
-				"%s.expose projects %s, but there is no table configuration for it, so it would "+
-					"%s; run `rig setup-project --expose %s`",
-				b.name, table, b.exposeReason, table)
 		}
 	}
 	return diags

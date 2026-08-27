@@ -15,6 +15,23 @@ type AccountListQuery struct {
 	Offset *int `json:"offset"`
 }
 
+// AccountSearchBody is the request body for Account.Search.
+type AccountSearchBody struct {
+	// Conditions rows must satisfy.
+	Filter AccountFilter `json:"filter"`
+}
+
+// AccountSearchQuery is the query for Account.Search.
+//
+// A nil member is left out of the request, and the server applies its own
+// default. rigclient.P takes the address of a value, for filling one in.
+type AccountSearchQuery struct {
+	// Maximum rows to return. Left out, the server uses 50.
+	Limit *int `json:"limit"`
+	// Rows to skip before the first returned row. Left out, the server uses 0.
+	Offset *int `json:"offset"`
+}
+
 // AccountListDeletedQuery is the query for Account.ListDeleted.
 //
 // A nil member is left out of the request, and the server applies its own

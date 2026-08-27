@@ -6,10 +6,12 @@ import type { Account, AccountListResponse } from "./account.gen.js";
 import type {
     AccountListDeletedQuery,
     AccountListQuery,
+    AccountSearchQuery,
 } from "./account_input.gen.js";
+import type { AccountFilter } from "./account_query.gen.js";
 import type { CallOptions, Runtime } from "@rig/client";
 
-import { pathValue, send, setParam } from "@rig/client";
+import { METHOD_QUERY, pathValue, send, setParam } from "@rig/client";
 
 /**
  * AccountClient calls the Account endpoints. It is reached as `client.accounts`
@@ -39,6 +41,30 @@ export class AccountClient {
             method: "GET",
             path: "/accounts",
             query: search,
+        }, options);
+    }
+
+    /**
+     * Search Accounts with filters.
+     *
+     * QUERY /api/v1/accounts, falling back to POST /api/v1/accounts/_search
+     * when something between here and the server refuses the method. The
+     * fallback is remembered, so it is tried once.
+     *
+     * Operation searchAccounts.
+     */
+    search(filter: AccountFilter, query: AccountSearchQuery = {}, options?: CallOptions): Promise<AccountListResponse> {
+        const search = new URLSearchParams();
+        setParam(search, "limit", query.limit);
+        setParam(search, "offset", query.offset);
+
+        return send<AccountListResponse>(this.#rt, {
+            name: "searchAccounts",
+            method: METHOD_QUERY,
+            path: "/accounts",
+            query: search,
+            body: { filter: filter },
+            fallback: "/accounts/_search",
         }, options);
     }
 

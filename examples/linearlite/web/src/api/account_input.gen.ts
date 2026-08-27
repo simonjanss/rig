@@ -2,6 +2,8 @@
 //
 // This file is rewritten on every run. Put changes in the code that calls it.
 
+import type { AccountFilter } from "./account_query.gen.js";
+
 /**
  * AccountListQuery is the query string listAccounts takes.
  *
@@ -10,6 +12,26 @@
  * than for zero.
  */
 export type AccountListQuery = {
+    /** Maximum rows to return. */
+    limit?: number;
+    /** Rows to skip before the first returned row. */
+    offset?: number;
+};
+
+/** The body searchAccounts sends. */
+export type AccountSearchBody = {
+    /** Conditions rows must satisfy. */
+    filter: AccountFilter;
+};
+
+/**
+ * AccountSearchQuery is the query string searchAccounts takes.
+ *
+ * Every member is optional. The server applies a parameter's default when the
+ * parameter is absent, so leaving one out is how to ask for the default rather
+ * than for zero.
+ */
+export type AccountSearchQuery = {
     /** Maximum rows to return. */
     limit?: number;
     /** Rows to skip before the first returned row. */

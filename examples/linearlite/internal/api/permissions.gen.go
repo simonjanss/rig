@@ -23,14 +23,19 @@ import (
 func Permissions() []tenancy.Permission {
 	return []tenancy.Permission{
 		{Key: "rig_account.read", Name: "Read accounts", Description: "Read accounts — One person inside one tenant. The person is the identity; this is who they are here."},
-		{Key: "rig_notification_device.delete", Name: "Delete rignotificationdevices", Description: "Delete rignotificationdevices — Where a push can reach somebody. Email is refused: the address is on the account already."},
-		{Key: "rig_notification_device.read", Name: "Read rignotificationdevices", Description: "Read rignotificationdevices — Where a push can reach somebody. Email is refused: the address is on the account already."},
-		{Key: "rig_notification_device.read.all", Name: "Read all rignotificationdevices", Description: "Read every rignotificationdevice in the tenant, not only the caller's own. Held in addition to rig_notification_device.read rather than instead of it: the endpoint's own check runs first, so this one widens a read somebody may already do and grants nothing on its own. Without it, ?scope=all is refused."},
-		{Key: "rig_notification_device.write", Name: "Write rignotificationdevices", Description: "Create and change rignotificationdevices — Where a push can reach somebody. Email is refused: the address is on the account already."},
-		{Key: "rig_notification_setting.delete", Name: "Delete rignotificationsettings", Description: "Delete rignotificationsettings — What somebody wants on a channel, and when. Resolved in three steps: this kind, then this channel, then the project default."},
-		{Key: "rig_notification_setting.read", Name: "Read rignotificationsettings", Description: "Read rignotificationsettings — What somebody wants on a channel, and when. Resolved in three steps: this kind, then this channel, then the project default."},
-		{Key: "rig_notification_setting.read.all", Name: "Read all rignotificationsettings", Description: "Read every rignotificationsetting in the tenant, not only the caller's own. Held in addition to rig_notification_setting.read rather than instead of it: the endpoint's own check runs first, so this one widens a read somebody may already do and grants nothing on its own. Without it, ?scope=all is refused."},
-		{Key: "rig_notification_setting.write", Name: "Write rignotificationsettings", Description: "Create and change rignotificationsettings — What somebody wants on a channel, and when. Resolved in three steps: this kind, then this channel, then the project default."},
+		{Key: "rig_notification.read", Name: "Read notifications", Description: "Read notifications — Something worth telling somebody about, and when it is due. Carries no recipients: the audience is computed when it is sent."},
+		{Key: "rig_notification_delivery.read", Name: "Read notificationdeliveries", Description: "Read notificationdeliveries — One copy of an inbox line on its way to a channel. Claimed by lease, sent outside any transaction, and marked afterwards."},
+		{Key: "rig_notification_device.delete", Name: "Delete notificationdevices", Description: "Delete notificationdevices — Where a push can reach somebody. Email is refused: the address is on the account already."},
+		{Key: "rig_notification_device.read", Name: "Read notificationdevices", Description: "Read notificationdevices — Where a push can reach somebody. Email is refused: the address is on the account already."},
+		{Key: "rig_notification_device.read.all", Name: "Read all notificationdevices", Description: "Read every notificationdevice in the tenant, not only the caller's own. Held in addition to rig_notification_device.read rather than instead of it: the endpoint's own check runs first, so this one widens a read somebody may already do and grants nothing on its own. Without it, ?scope=all is refused."},
+		{Key: "rig_notification_device.write", Name: "Write notificationdevices", Description: "Create and change notificationdevices — Where a push can reach somebody. Email is refused: the address is on the account already."},
+		{Key: "rig_notification_recipient.delete", Name: "Delete notificationrecipients", Description: "Delete notificationrecipients — One inbox line: a notification, an account, and whether it has been read."},
+		{Key: "rig_notification_recipient.read", Name: "Read notificationrecipients", Description: "Read notificationrecipients — One inbox line: a notification, an account, and whether it has been read."},
+		{Key: "rig_notification_recipient.read.all", Name: "Read all notificationrecipients", Description: "Read every notificationrecipient in the tenant, not only the caller's own. Held in addition to rig_notification_recipient.read rather than instead of it: the endpoint's own check runs first, so this one widens a read somebody may already do and grants nothing on its own. Without it, ?scope=all is refused."},
+		{Key: "rig_notification_setting.delete", Name: "Delete notificationsettings", Description: "Delete notificationsettings — What somebody wants on a channel, and when. Resolved in three steps: this kind, then this channel, then the project default."},
+		{Key: "rig_notification_setting.read", Name: "Read notificationsettings", Description: "Read notificationsettings — What somebody wants on a channel, and when. Resolved in three steps: this kind, then this channel, then the project default."},
+		{Key: "rig_notification_setting.read.all", Name: "Read all notificationsettings", Description: "Read every notificationsetting in the tenant, not only the caller's own. Held in addition to rig_notification_setting.read rather than instead of it: the endpoint's own check runs first, so this one widens a read somebody may already do and grants nothing on its own. Without it, ?scope=all is refused."},
+		{Key: "rig_notification_setting.write", Name: "Write notificationsettings", Description: "Create and change notificationsettings — What somebody wants on a channel, and when. Resolved in three steps: this kind, then this channel, then the project default."},
 		{Key: "todo.claim", Name: "Claim todo", Description: "Take the item."},
 		{Key: "todo.delete", Name: "Delete todos", Description: "Delete todos — One item on the board."},
 		{Key: "todo.read", Name: "Read todos", Description: "Read todos — One item on the board."},
@@ -50,7 +55,7 @@ func Permissions() []tenancy.Permission {
 // — a hand-written one goes stale the moment a table is added, and the owner
 // of a brand new tenant silently cannot touch it.
 func PermissionKeys() []string {
-	out := make([]string, 0, 18)
+	out := make([]string, 0, 23)
 	for _, p := range Permissions() {
 		out = append(out, p.Key)
 	}

@@ -164,18 +164,18 @@ type Store struct {
 	pool   *pgxpool.Pool
 	tracer trace.Tracer
 
-	Accounts                  AccountRepository
-	AccountRoles              AccountRoleRepository
-	Permissions               PermissionRepository
-	RigNotifications          RigNotificationRepository
-	RigNotificationDeliveries RigNotificationDeliveryRepository
-	RigNotificationDevices    RigNotificationDeviceRepository
-	RigNotificationRecipients RigNotificationRecipientRepository
-	RigNotificationSettings   RigNotificationSettingRepository
-	RigPresences              RigPresenceRepository
-	Roles                     RoleRepository
-	Todos                     TodoRepository
-	TodoAttachments           TodoAttachmentRepository
+	Accounts               AccountRepository
+	AccountRoles           AccountRoleRepository
+	Notifications          NotificationRepository
+	NotificationDeliveries NotificationDeliveryRepository
+	NotificationDevices    NotificationDeviceRepository
+	NotificationRecipients NotificationRecipientRepository
+	NotificationSettings   NotificationSettingRepository
+	Permissions            PermissionRepository
+	Presences              PresenceRepository
+	Roles                  RoleRepository
+	Todos                  TodoRepository
+	TodoAttachments        TodoAttachmentRepository
 }
 
 // New builds a store over a connection pool.
@@ -187,13 +187,13 @@ func New(pool *pgxpool.Pool, cfg Config) *Store {
 	s := &Store{pool: pool, tracer: cfg.Tracer}
 	s.Accounts = &accountRepo{db: s}
 	s.AccountRoles = &accountRoleRepo{db: s}
+	s.Notifications = &notificationRepo{db: s}
+	s.NotificationDeliveries = &notificationDeliveryRepo{db: s}
+	s.NotificationDevices = &notificationDeviceRepo{db: s}
+	s.NotificationRecipients = &notificationRecipientRepo{db: s}
+	s.NotificationSettings = &notificationSettingRepo{db: s}
 	s.Permissions = &permissionRepo{db: s}
-	s.RigNotifications = &rigNotificationRepo{db: s}
-	s.RigNotificationDeliveries = &rigNotificationDeliveryRepo{db: s}
-	s.RigNotificationDevices = &rigNotificationDeviceRepo{db: s}
-	s.RigNotificationRecipients = &rigNotificationRecipientRepo{db: s}
-	s.RigNotificationSettings = &rigNotificationSettingRepo{db: s}
-	s.RigPresences = &rigPresenceRepo{db: s}
+	s.Presences = &presenceRepo{db: s}
 	s.Roles = &roleRepo{db: s}
 	s.Todos = &todoRepo{db: s}
 	s.TodoAttachments = &todoAttachmentRepo{db: s}

@@ -269,8 +269,9 @@ whose address is on the account and needs nothing registered, and `Desktop`,
 which is handed device rows and would be a Web Push subscription in a real one.
 That example also exposes `rig_notification_device` and
 `rig_notification_setting` as owner-scoped resources — `notifications: expose:
-true` and an `operations:` line each — which is how somebody registers a device
-and chooses a digest without a hand-written endpoint anywhere.
+true` and nothing else, since rig ships the configuration for its own tables —
+which is how somebody registers a device and chooses a digest without a
+hand-written endpoint anywhere.
 
 A sender is handed a `notify.Message` — the deliveries it stands for, and where
 they go. One delivery for an immediate send, several for a digest, and what to

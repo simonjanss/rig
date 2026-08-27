@@ -3,7 +3,7 @@
   "info": {
     "title": "auth",
     "description": "The auth HTTP API.\n\nThe authentication endpoints under `/auth` are served by a hand-written module and are not described here.\n\nThe notification inbox endpoints are served by a hand-written module and are not described here.",
-    "version": "2026-08-26"
+    "version": "2026-08-27"
   },
   "servers": [
     {
@@ -639,11 +639,11 @@
     "/api/v1/rig_notification_recipient/_deleted/_stream": {
       "get": {
         "tags": [
-          "RigNotificationRecipients"
+          "NotificationRecipients"
         ],
-        "summary": "Subscribe to retired RigNotificationRecipients.",
+        "summary": "Subscribe to retired NotificationRecipients.",
         "description": "The rows a delete stamped rather than removed, kept up to date.\n\nA shape is a filtered view of one table that a client subscribes to. This route is a proxy in front of the sync service: which rows exist in the shape — the tenant, the lifecycle predicate, and the application's own scoping — is decided by the server and cannot be influenced from here. Where the client is in the stream is forwarded untouched.\n\nWith `live=true` the request is a long poll: it does not answer until something changes, so a client timeout set for an ordinary request will cut it short.\n\nThe response body is the sync protocol's own and is not described here. The `electric-*` response headers carry the cursor: send `handle` and `offset` back on the next request, or the subscription starts over.\n\nRequires a session scoped to a tenant, and the shape is filtered to it.",
-        "operationId": "streamDeletedRigNotificationRecipients",
+        "operationId": "streamDeletedNotificationRecipients",
         "parameters": [
           {
             "name": "offset",
@@ -771,11 +771,11 @@
     "/api/v1/rig_notification_recipient/_stream": {
       "get": {
         "tags": [
-          "RigNotificationRecipients"
+          "NotificationRecipients"
         ],
-        "summary": "Subscribe to the live RigNotificationRecipient shape.",
-        "description": "Every RigNotificationRecipient the caller may read, kept up to date.\n\nA shape is a filtered view of one table that a client subscribes to. This route is a proxy in front of the sync service: which rows exist in the shape — the tenant, the lifecycle predicate, and the application's own scoping — is decided by the server and cannot be influenced from here. Where the client is in the stream is forwarded untouched.\n\nWith `live=true` the request is a long poll: it does not answer until something changes, so a client timeout set for an ordinary request will cut it short.\n\nThe response body is the sync protocol's own and is not described here. The `electric-*` response headers carry the cursor: send `handle` and `offset` back on the next request, or the subscription starts over.\n\nRequires a session scoped to a tenant, and the shape is filtered to it.",
-        "operationId": "streamRigNotificationRecipients",
+        "summary": "Subscribe to the live NotificationRecipient shape.",
+        "description": "Every NotificationRecipient the caller may read, kept up to date.\n\nA shape is a filtered view of one table that a client subscribes to. This route is a proxy in front of the sync service: which rows exist in the shape — the tenant, the lifecycle predicate, and the application's own scoping — is decided by the server and cannot be influenced from here. Where the client is in the stream is forwarded untouched.\n\nWith `live=true` the request is a long poll: it does not answer until something changes, so a client timeout set for an ordinary request will cut it short.\n\nThe response body is the sync protocol's own and is not described here. The `electric-*` response headers carry the cursor: send `handle` and `offset` back on the next request, or the subscription starts over.\n\nRequires a session scoped to a tenant, and the shape is filtered to it.",
+        "operationId": "streamNotificationRecipients",
         "parameters": [
           {
             "name": "offset",
@@ -1850,7 +1850,7 @@
       "description": "Something somebody wrote down."
     },
     {
-      "name": "RigNotificationRecipients",
+      "name": "NotificationRecipients",
       "description": "One inbox line: a notification, an account, and whether it has been read."
     }
   ]

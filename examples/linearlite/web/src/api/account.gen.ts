@@ -2,9 +2,9 @@
 //
 // This file is rewritten on every run. Put changes in the code that calls it.
 
+import type { AccountKind } from "./account_kind.gen.js";
+import type { AccountRoleLevel } from "./account_role_level.gen.js";
 import type { Pagination } from "./objects.gen.js";
-import type { RigAccountKind } from "./rig_account_kind.gen.js";
-import type { RigAccountRoleLevel } from "./rig_account_role_level.gen.js";
 
 /**
  * One person inside one tenant. The person is the identity; this is who they
@@ -36,12 +36,12 @@ export type Account = {
     /** Account that soft-deleted this row, taken from the request's claims. */
     deletedByAccountId?: string | null;
     /** Whether this is a person or a service account an integration acts as. */
-    kind: RigAccountKind;
+    kind: AccountKind;
     /**
      * The coarse level in this tenant: Owner, Admin, or Basic. Somebody can be
      * an Owner here and Basic elsewhere.
      */
-    role: RigAccountRoleLevel;
+    role: AccountRoleLevel;
     /**
      * A copy of the identity's address, kept here so listing accounts is one
      * query. For a service account it is a label nobody signs in with.

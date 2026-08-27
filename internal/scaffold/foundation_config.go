@@ -5,8 +5,27 @@ package scaffold
 // Column comments are absent on purpose: the migrations carry COMMENT ON for
 // every column, so they arrive through introspection and there is one place to
 // edit them. What is here is the intent Postgres cannot express — whether a
-// table belongs in the API, how long a deleted row stays restorable, and what
-// each enum value means.
+// table belongs in the API, how long a deleted row stays restorable, what a read
+// is narrowed to, and what each enum value means.
+//
+// This is not only what `rig setup-project --expose` writes. The compiler reads
+// it too, through [TableConfig] and addFoundationConfigs, for every table of
+// rig's a project did not write a file for — which is the ordinary case and now
+// the recommended one. So a stanza left out here is not a stanza a project can
+// discover and add: it is one every project silently goes without.
+//
+// And a stanza present here is one every project's API gets. That cuts the other
+// way and it is the sharper direction, which is why there is a rule about the
+// `operations:` lines below and [TestNoFoundationTableGetsATenantWideWrite] is
+// what holds it: **a generated write on a table rig owns is either narrowed to
+// the caller or it does not exist.** The three that are written to — a device, a
+// preference, an inbox line — are somebody's own rows, and the compiler narrows
+// every read and every write over them to the caller. Everything else here is
+// read-only, rig_account included, and that one is read-only despite a write
+// path over it being the most obviously useful thing in this file: the rule that
+// would have to come with it is one rig cannot invent. A project that wants the
+// write writes the file and the rule together, which is a thing a default cannot
+// do — so a default does not offer the write.
 
 func tenancyConfigs() []tableConfig {
 	return []tableConfig{
@@ -43,10 +62,25 @@ expose: false`,
         description: Brings a person into a tenant, whether or not they already have an identity.`,
 		),
 		config("rig_account", "Account",
-			`# Everything but Create. An account created through plain CRUD would have
-# no identity behind it and no invitation sent, so joining a tenant is an
-# auth endpoint rather than a POST anyone can make.
-operations: [Get, List, Search, Update, Delete]`,
+			`# Read-only from the outside. The reason to expose this table is an
+# administration screen that needs names to put beside things, and reading
+# is the whole of that.
+#
+# No generated write, and it is the sharpest case of the rule this file is
+# written to: the auth module reaches these rows through its own queries, so
+# a generated write path is a second door into them — one where nothing
+# hashes a password, sends an invitation, or ends the sessions of somebody
+# who has just been deactivated. Joining a tenant, changing an address and
+# deactivating an account are auth endpoints for that reason.
+#
+# It is a default and not a ceiling. A project that wants an admin screen
+# to raise somebody to Owner writes this file — start it with
+# `+"`"+`rig setup-project --expose rig_account`+"`"+` — adds the operation, and writes
+# the hook that says who may do it. rig does not generate that endpoint by
+# default precisely because it cannot invent the rule that has to come with
+# it: a PATCH over `+"`"+`role`+"`"+` with no such rule is every member of the tenant
+# one request away from owning it.
+operations: [Get, List, Search]`,
 			`restore_window_days: 30`,
 			`order_by: [-created_at, id]`,
 			`columns:
@@ -65,13 +99,15 @@ operations: [Get, List, Search, Update, Delete]`,
     # password to make it a person. Which it is, is decided when it is created.
     operations: [Read]
   role:
-    # The coarse level. Who may raise somebody to Owner is your rule to write —
-    # a hook on this table is the place for it — and rig will not invent one.
-    operations: [Read, Update]
-  time_zone:
-    # Whatever the person set it to. An unknown zone is not worth refusing a
-    # write over: the account package falls back to UTC when it cannot load one.
-    operations: [Read, Create, Update]`,
+    # The coarse level. Read here and written by the auth endpoints, because
+    # who may raise somebody to Owner is a rule rig will not invent.
+    operations: [Read]
+  is_active:
+    # Whether the account may be used. Deactivation is an auth endpoint: it
+    # ends the sessions as well as setting the column, and a bare UPDATE here
+    # would leave somebody locked out of the front door and signed in
+    # everywhere else.
+    operations: [Read]`,
 			`enums:
   rig_account_kind:
     name: AccountKind
@@ -392,6 +428,13 @@ expose: false`,
 // is the rest of what a configuration asks for — the filter grammar, the sort
 // keys, the generated client — for a project that turned `expose` on because the
 // hand-written inbox routes were not enough.
+//
+// The owner scope on the devices and the settings is not here either, and it is
+// the same reason twice over. It is the same answer in every project, so a key
+// here could only disagree with the compiler's — and an `access: owner:` key is
+// refused unless rig_account is a projected resource, which a project with
+// `notifications:` and no `auth.expose` does not have. See
+// ownerScopedNotificationTables in internal/compile.
 func notificationConfigs() []tableConfig {
 	return []tableConfig{
 		config("rig_notification", "Notification",
@@ -403,6 +446,20 @@ func notificationConfigs() []tableConfig {
 # people who are not recipients yet and may never be, which is also why it
 # has no live-sync shape.
 operations: [Get, List]`,
+			`enums:
+  rig_notification_state:
+    name: NotificationState
+    description: 'Where a notification is in its life. Nothing here says anything was sent: that is the delivery table''s business.'
+    values:
+      Pending:
+        name: Pending
+        description: The audience has not been computed yet. Every notification starts here, and a scheduled one waits here until it is due.
+      Resolved:
+        name: Resolved
+        description: The audience was computed and the inbox lines exist. It does not mean anything was sent — a notification with an inbox line and no mail is a working notification.
+      Cancelled:
+        name: Cancelled
+        description: 'It never will be resolved: the row it was about was retired before its time came.'`,
 		),
 		config("rig_notification_device", "NotificationDevice",
 			`# Where a push can reach somebody, and the one notification table a
@@ -416,6 +473,46 @@ operations: [Create, Get, List, Delete]`,
 # CRUD surface over exactly this, which is why it has one — and it is the
 # only table here where a full one is the right answer.
 operations: [Create, Get, List, Update, Delete]`,
+			`# The two enums a person meets, described here because this is the table
+# where they meet both of them. Postgres cannot comment an enum label — a
+# COMMENT ON TYPE is the whole type and there is nothing to hang on a value —
+# so unlike every column above, this prose cannot arrive through
+# introspection and has to be here or nowhere. Nowhere means every project
+# that exposes this table ships `+"`"+`TODO: describe this`+"`"+` in its OpenAPI document
+# and its generated clients.
+enums:
+  rig_notification_channel:
+    name: NotificationChannel
+    description: Where a copy of an inbox line can be sent. The inbox itself is not one of them.
+    values:
+      Desktop:
+        name: Desktop
+        description: A browser or a desktop application, addressed by a device row.
+      Mobile:
+        name: Mobile
+        description: A phone, addressed by a device row.
+      Email:
+        name: Email
+        description: 'The address on the account. No device row: there is nothing to register, because the address is on the account already.'
+  rig_notification_digest:
+    name: NotificationDigest
+    description: How often somebody wants to be told, on one channel.
+    values:
+      Immediate:
+        name: Immediate
+        description: Each notification on its own, as soon as it is due.
+      Hourly:
+        name: Hourly
+        description: Whatever accumulated in an hour, as one message.
+      Daily:
+        name: Daily
+        description: The same, a day at a time.
+      Weekly:
+        name: Weekly
+        description: The widest window, and the one notifications.retention has to outlive — a weekly digest is assembled from rows a shorter retention would have pruned.
+      Off:
+        name: Off
+        description: 'Nothing on this channel, and the inbox line is written anyway: this is somebody preferring to look rather than be told. is_enabled false is the other thing, and says the channel is not available to them at all.'`,
 		),
 		config("rig_notification_delivery", "NotificationDelivery",
 			`# Read-only, and narrow. A delivery row is the dispatcher's bookkeeping:
@@ -426,6 +523,23 @@ operations: [Create, Get, List, Update, Delete]`,
 # It is exposed at all because "why did I not get that mail" is a question
 # support has to be able to answer.
 operations: [Get, List]`,
+			`enums:
+  rig_notification_delivery_state:
+    name: NotificationDeliveryState
+    description: What happened to one copy of an inbox line on its way to a channel.
+    values:
+      Pending:
+        name: Pending
+        description: Owed and not yet claimed, or claimed by a dispatcher that has not marked it.
+      Sent:
+        name: Sent
+        description: A channel accepted it, which is not the same as it arriving — rig does not pretend to know the difference.
+      Failed:
+        name: Failed
+        description: Past notifications.max_attempts, and no longer claimed. Without the cap a permanently broken address would consume a lease forever.
+      Skipped:
+        name: Skipped
+        description: 'A setting refused it, or the row it was a copy of was retired before it went. Worth telling apart from Failed in a report: it is ''we decided against this'' rather than ''this did not work''.'`,
 		),
 		config("rig_notification_recipient", "NotificationRecipient",
 			`# The inbox. Read and delete, and nothing else: what a person may change
@@ -469,6 +583,17 @@ func presenceConfigs() []tableConfig {
 # client cannot phrase rather than a rule somebody enforces. A generated
 # Create would take a body, and a body is somewhere to name somebody else.
 operations: [Get, List]`,
+			`enums:
+  rig_presence_activity:
+    name: PresenceActivity
+    description: What somebody is doing with the thing they are on, as far as their own client can tell.
+    values:
+      viewing:
+        name: Viewing
+        description: Looking at it. The default, and what a heartbeat says when nothing else was claimed.
+      editing:
+        name: Editing
+        description: Typing into it. What draws the ring on a control somebody else has open, and the only reason this column exists rather than presence being a row per person.`,
 		),
 	}
 }

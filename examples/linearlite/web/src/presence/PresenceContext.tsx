@@ -4,7 +4,7 @@ import type { ReactNode } from "react";
 import { createPresence } from "@rig/presence";
 import { createContext, useContext, useEffect, useState } from "react";
 
-import { createRigPresenceStream } from "../api/electric.gen.js";
+import { createPresenceStream } from "../api/electric.gen.js";
 import { client } from "../lib/client.js";
 
 /**
@@ -66,7 +66,7 @@ export function PresenceProvider({ children }: { children: ReactNode }) {
             // Safe to call here for the same reason it is safe during render:
             // the factory caches by runtime and params, so this is one
             // subscription however many times it is asked for.
-            stream: createRigPresenceStream(client.runtime, { scope: SCOPE }),
+            stream: createPresenceStream(client.runtime, { scope: SCOPE }),
         });
         setHandle(live);
         return () => {

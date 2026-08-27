@@ -167,6 +167,66 @@ auth:
 	}
 }
 
+// And `auth.own` keeps everything rig withholds from a table of its own.
+//
+// A forked foundation is the project's schema. The stub is where its rules go —
+// there is nowhere else, because rig ships no configuration for a table it no
+// longer considers its own — and the convention rules are advice about a schema
+// somebody maintains, which this now is. Both are withheld by the same two
+// readings of one list, and the list is deliberately still populated here for
+// [checkReserved]'s sake, so both have to ask.
+func TestAuthOwnKeepsItsStubsAndItsAdvice(t *testing.T) {
+	t.Parallel()
+
+	root := newProject(t)
+	write(t, filepath.Join(root, "rig.yaml"), `project:
+  name: demo
+  module: example.com/demo
+validate:
+  missing_comment: "off"
+  unmentioned_column: warn
+auth:
+  own: true
+files:
+  enabled: true
+layout:
+  table_dir: services/{table}
+  config_file: "{table_dir}/{table}.yaml"
+generators:
+  - name: model-go
+    out_dir: internal/model
+    options:
+      package: model
+  - name: persist-go
+    out_dir: internal/store
+    options:
+      package: store
+      model_import: example.com/demo/internal/model
+  - name: service-go
+    out_dir: internal/api
+    options:
+      package: api
+      model_import: example.com/demo/internal/model
+      store_import: example.com/demo/internal/store
+      api_import: example.com/demo/internal/api
+      stub_dir: services/{table}
+`)
+	write(t, filepath.Join(root, "migrations", "00001_rig_files.sql"),
+		"-- +goose Up\nSELECT 1;\n")
+	addFileTable(t, filepath.Join(root, "schema.json"))
+
+	_, stderr, code := runWithSchema(t, root, "generate", "-C", root)
+	if code != 0 {
+		t.Fatalf("generate failed:\n%s", stderr)
+	}
+	if _, err := os.Stat(filepath.Join(root, "services", "rig_file", "rig_file.go")); err != nil {
+		t.Errorf("a forked foundation table got no service stub: %v", err)
+	}
+	if !strings.Contains(stderr, "rig_file.storage_key is not mentioned") {
+		t.Errorf("the columns of a forked foundation table are the project's to describe:\n%s", stderr)
+	}
+}
+
 // A table one of rig's sets creates is rig's, whether or not the configuration
 // asked for the feature that migration belongs to.
 //
@@ -296,34 +356,31 @@ func TestSetupProjectVendorsByDefault(t *testing.T) {
 	}
 }
 
-// Both halves of every block that owns rig tables, driven off the same
-// description the checks are.
+// Every block that owns rig tables refuses being turned on with nothing behind
+// it, driven off the same description the check is.
 //
-// This was three copies of one control flow, one per block, and the two halves
-// are not equally important. A missing migration is reported for tidiness — the
-// project fails on its first request either way. An exposed table with no
-// configuration is the one that matters: it is what turns a table rig wrote
-// into a resource with a generated write path over it, and in three
-// hand-written copies it is also the half a fourth block would be most likely
-// to leave out. A block with no expose reason cannot pass here.
-func TestEveryFoundationBlockReportsBothHalves(t *testing.T) {
+// This was three copies of one control flow and it carried two checks. The other
+// one — an exposed table with no table configuration — is gone, because rig now
+// supplies that configuration itself: see addFoundationConfigs, and
+// TestExposingFilesNeedsNoConfiguration for the reading that replaced it.
+//
+// What is left is reported for tidiness rather than safety: a project whose
+// migration never ran fails on its first request either way.
+func TestEveryFoundationBlockRefusesBeingTurnedOnWithNothingBehindIt(t *testing.T) {
 	t.Parallel()
 
 	for _, tc := range []struct {
 		block string
 		table string
-		// reason is the clause that says what the generated write path would
-		// be a way to do. It is per-block because the danger is.
-		reason string
 	}{
-		{"files", "rig_file", "full CRUD over its storage key"},
-		{"notifications", "rig_notification", "a generated write path over what somebody was told"},
-		{"presence", "rig_presence", "a generated Create"},
+		{"files", "rig_file"},
+		{"notifications", "rig_notification"},
+		{"presence", "rig_presence"},
 	} {
 		t.Run(tc.block, func(t *testing.T) {
 			t.Parallel()
 
-			// Enabled with nothing scaffolded: the first half.
+			// Enabled with nothing scaffolded.
 			bare := newProject(t)
 			write(t, filepath.Join(bare, "rig.yaml"), `project:
   name: demo
@@ -337,43 +394,11 @@ validate:
 			if code == 0 {
 				t.Errorf("%s.enabled with no migration should be refused", tc.block)
 			}
-			if !strings.Contains(stderr, tc.block+".enabled is set but this project has no ") ||
+			if !strings.Contains(stderr, tc.block+".enabled is set but this project has no "+tc.table) ||
 				!strings.Contains(stderr, "run `rig setup-project`") {
-				t.Errorf("the missing migration does not name the block and the remedy:\n%s", stderr)
+				t.Errorf("the missing migration does not name the block, the table and the remedy:\n%s", stderr)
 			}
 
-			// Scaffolded and exposed, with no table configuration: the second.
-			root := newProject(t)
-			write(t, filepath.Join(root, "rig.yaml"), `project:
-  name: demo
-  module: example.com/demo
-validate:
-  missing_comment: "off"
-`+tc.block+`:
-  enabled: true
-  expose: true
-`)
-			if _, stderr, code := run(t, "setup-project", "-C", root); code != 0 {
-				t.Fatalf("setup-project failed:\n%s", stderr)
-			}
-			// What `--expose` would have written, and deliberately not written.
-			if err := os.RemoveAll(filepath.Join(root, "services")); err != nil {
-				t.Fatal(err)
-			}
-
-			_, stderr, code = runWithSchema(t, root, "validate", "-C", root)
-			if code == 0 {
-				t.Errorf("%s.expose with no table configuration should be refused", tc.block)
-			}
-			if !strings.Contains(stderr, tc.block+".expose projects "+tc.table) {
-				t.Errorf("the expose refusal does not name the block and the table:\n%s", stderr)
-			}
-			if !strings.Contains(stderr, tc.reason) {
-				t.Errorf("the expose refusal does not say what it would let somebody do:\n%s", stderr)
-			}
-			if !strings.Contains(stderr, "run `rig setup-project --expose "+tc.table+"`") {
-				t.Errorf("the expose refusal does not name the remedy:\n%s", stderr)
-			}
 		})
 	}
 }

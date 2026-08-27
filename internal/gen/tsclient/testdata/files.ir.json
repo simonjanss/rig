@@ -4501,6 +4501,7 @@
         "plural": "RigFiles",
         "path_segment": "rig-files",
         "description": "One uploaded file. Metadata only — the bytes live in the blob store, and the storage key never leaves the server.",
+        "foundation": true,
         "operations": [
           "Create",
           "Get",

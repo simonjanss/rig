@@ -87,6 +87,21 @@ func newSyncCmd(e *env) *cobra.Command {
 				if c.Kind != tablesync.ChangeCreate {
 					return false
 				}
+				// A table rig created gets no file either, and silently: rig
+				// ships the configuration for its own tables and the compiler
+				// reads it from there, so there is nothing missing to repair.
+				// Writing one would copy a few hundred lines of rig's own
+				// COMMENT ON prose into the project and give it a second place
+				// to drift from.
+				//
+				// Create only. A project that has a file for one of rig's tables
+				// has taken it over — a file on disk wins outright — and a
+				// migration that added a column to it still has to reach that
+				// file, or the project silently stops mentioning a column it
+				// owns the answer for.
+				if slices.Contains(foundation, c.Table) && !p.Config.Auth.Own {
+					return true
+				}
 				why, escapable := compile.Reserved(p, foundation, c.Table)
 				if why == "" {
 					return false

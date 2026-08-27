@@ -25,12 +25,12 @@ import { pathValue } from "@rig/client";
 import { createCollectionCache, createRigCollection } from "@rig/electric";
 
 /**
- * RigNotificationRecipientRow is a RigNotificationRecipient as a live-sync
- * stream sends it.
+ * NotificationRecipientRow is a NotificationRecipient as a live-sync stream
+ * sends it.
  *
- * The same row as RigNotificationRecipient, under different keys. A stream
- * carries what Postgres printed, so the keys are column names — `created_at`
- * where the API sends `createdAt` — and the values have been through the
+ * The same row as NotificationRecipient, under different keys. A stream carries
+ * what Postgres printed, so the keys are column names — `created_at` where
+ * the API sends `createdAt` — and the values have been through the
  * corrections in the streaming runtime, which is what makes a timestamp here
  * the same string the API would have sent.
  *
@@ -38,7 +38,7 @@ import { createCollectionCache, createRigCollection } from "@rig/electric";
  * column of the projection on every row, with a null where the column is null,
  * so nothing here is ever absent.
  */
-export type RigNotificationRecipientRow = {
+export type NotificationRecipientRow = {
     /** Unique identifier for this row. */
     id: string;
     /** Tenant this row belongs to. Every query is scoped by it. */
@@ -90,9 +90,9 @@ export type RigNotificationRecipientRow = {
  * stream survives a navigation and two callers share one subscription. Safe to
  * call during render — no memoization needed.
  */
-export const createRigNotificationRecipientStream = createCollectionCache(
+export const createNotificationRecipientStream = createCollectionCache(
     (runtime: Runtime, params: Record<string, never>) =>
-        createRigCollection<RigNotificationRecipientRow>({
+        createRigCollection<NotificationRecipientRow>({
             runtime,
             path: "/api/v1/rig_notification_recipient/_stream",
             params: {},
@@ -115,9 +115,9 @@ export const createRigNotificationRecipientStream = createCollectionCache(
  * stream survives a navigation and two callers share one subscription. Safe to
  * call during render — no memoization needed.
  */
-export const createRigNotificationRecipientDeletedStream = createCollectionCache(
+export const createNotificationRecipientDeletedStream = createCollectionCache(
     (runtime: Runtime, params: Record<string, never>) =>
-        createRigCollection<RigNotificationRecipientRow>({
+        createRigCollection<NotificationRecipientRow>({
             runtime,
             path: "/api/v1/rig_notification_recipient/_deleted/_stream",
             params: {},

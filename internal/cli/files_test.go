@@ -2,8 +2,10 @@ package cli_test
 
 import (
 	"encoding/json"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -27,11 +29,20 @@ func filesProject(t *testing.T, block string, withMigration, withConfig bool) st
   module: example.com/demo
 validate:
   missing_comment: "off"
+generators:
+  - name: openapi
+    out_dir: docs
+    options:
+      formats: [json]
 `+block)
 
 	if withMigration {
 		write(t, filepath.Join(root, "migrations", "00001_rig_files.sql"),
 			"-- +goose Up\nSELECT 1;\n")
+		// A project whose migration ran has the table, and rig_file has to be in
+		// the schema for the exposed cases to say anything: with no rig_file to
+		// project, `expose` is a key over nothing.
+		addFileTable(t, filepath.Join(root, "schema.json"))
 	}
 	if withConfig {
 		// No restore_window_days: rig_file's window is files.restore_window, and
@@ -39,7 +50,6 @@ validate:
 		// holds the real scaffolded file to the same shape.
 		write(t, filepath.Join(root, "services", "rig_file", "rig_file.yaml"),
 			"table: rig_file\nresource: File\noperations: [Get, List]\n")
-		addFileTable(t, filepath.Join(root, "schema.json"))
 	}
 	return root
 }
@@ -112,22 +122,39 @@ func TestFilesNeedsItsMigration(t *testing.T) {
 	}
 }
 
-// The dangerous case, and the reason this check exists at all.
+// The case this used to refuse, and now answers.
 //
 // files.expose is what takes rig_file out of the ignore list and makes it a
-// resource. The table configuration is what makes that resource read-only and
-// narrow. With the first and not the second, rig_file would arrive with full
-// CRUD over its storage key — a way to point a row at any object in the bucket,
-// which is exactly what the design refuses to generate.
-func TestExposingFilesWithoutAConfigurationIsRefused(t *testing.T) {
+// resource. What makes that resource read-only and narrow is rig's own table
+// configuration — and rig supplies it, so a project that turned the switch on
+// and wrote no file gets File on /files with Get and List, rather than either a
+// refusal or full CRUD over the storage key.
+//
+// The storage key is the whole point of the assertion. A generated write over it
+// is a way to point a row at any object in the bucket, and the reason a
+// no-configuration reading was refused for as long as there was no answer to
+// offer instead.
+func TestExposingFilesNeedsNoConfiguration(t *testing.T) {
 	root := filesProject(t, "files:\n  enabled: true\n  expose: true\n", true, false)
 
 	_, stderr, code := runWithSchema(t, root, "validate", "-C", root)
-	if code == 0 {
-		t.Error("exposing rig_file with no table configuration should not validate")
+	if code != 0 {
+		t.Errorf("exposing rig_file with no table configuration should validate:\n%s", stderr)
 	}
-	if !strings.Contains(stderr, "full CRUD over its storage key") {
-		t.Errorf("stderr does not say why it matters:\n%s", stderr)
+
+	paths := generatedPaths(t, root)
+	if _, ok := paths["/api/v1/files/{id}"]; !ok {
+		t.Errorf("rig_file did not project as File on /files; paths were %v", slices.Sorted(maps.Keys(paths)))
+	}
+	for path, methods := range paths {
+		if !strings.HasPrefix(path, "/api/v1/files") {
+			continue
+		}
+		for _, method := range slices.Sorted(maps.Keys(methods)) {
+			if method != "get" {
+				t.Errorf("rig's own configuration leaves rig_file read-only, but %s %s was generated", method, path)
+			}
+		}
 	}
 }
 
@@ -260,4 +287,29 @@ func TestAuthExposeDoesNotReachRigFile(t *testing.T) {
 	if !strings.Contains(stderr, "files.expose") {
 		t.Errorf("stderr does not name the switch that does:\n%s", stderr)
 	}
+}
+
+// generatedPaths runs the generators and returns the OpenAPI document's paths,
+// each with the methods on it.
+//
+// The document rather than the compiled IR, because it is what a caller of this
+// API would see. A project cannot reach the IR, so a claim about the surface is
+// better made against the artifact that describes it.
+func generatedPaths(t *testing.T, root string) map[string]map[string]any {
+	t.Helper()
+
+	if _, stderr, code := runWithSchema(t, root, "generate", "-C", root); code != 0 {
+		t.Fatalf("generate failed:\n%s", stderr)
+	}
+	raw, err := os.ReadFile(filepath.Join(root, "docs", "openapi.gen.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc struct {
+		Paths map[string]map[string]any `json:"paths"`
+	}
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		t.Fatal(err)
+	}
+	return doc.Paths
 }

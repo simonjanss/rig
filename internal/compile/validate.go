@@ -57,7 +57,7 @@ func Validate(doc *ir.Document, set *tableconf.Set, p *project.Project) diag.Lis
 		diags.Append(checkIndexes(t, loaded,
 			sev(v.ForeignKeyNotIndexed, diag.CodeForeignKeyNotIndexed),
 			sev(v.TenantIndexLeading, diag.CodeTenantIndexNotLeading)))
-		diags.Append(checkColumnNaming(t, loaded,
+		diags.Append(checkColumnNaming(t, loaded, res != nil && res.Foundation,
 			sev(v.BooleanPrefix, diag.CodeBooleanPrefix),
 			sev(v.TimestampSuffix, diag.CodeTimestampSuffix),
 			sev(v.DateSuffix, diag.CodeDateSuffix),
@@ -486,7 +486,7 @@ func carriesTenantInKey(t *ir.Table, column string) bool {
 	return false
 }
 
-func checkColumnNaming(t *ir.Table, loaded *tableconf.Loaded, boolSev, tsSev, dateSev, fkSev diag.Severity) diag.List {
+func checkColumnNaming(t *ir.Table, loaded *tableconf.Loaded, rigsOwn bool, boolSev, tsSev, dateSev, fkSev diag.Severity) diag.List {
 	var diags diag.List
 
 	for i := range t.Columns {
@@ -562,10 +562,15 @@ func checkColumnNaming(t *ir.Table, loaded *tableconf.Loaded, boolSev, tsSev, da
 		inboxOwner := t.Name == NotificationRecipientTable &&
 			c.Name == NotificationRecipientOwner
 
-		// And every column of rig's own two tables, which a project cannot
+		// And every column of every table rig created, which a project cannot
 		// rename and did not write. The rule is advice about a schema somebody
-		// is writing, and this is not one of those.
-		rigsOwn := isNotificationTable(t.Name)
+		// is writing, and this is not one of those — the advice here would be to
+		// rename rig_account.tenant_id, in a migration the project does not own,
+		// to satisfy a convention rig chose not to follow in its own DDL.
+		//
+		// It covered the notification tables only, because those were the ones a
+		// project projected without a table configuration. Now every one of
+		// rig's is projected that way.
 
 		if fkSev != "" && c.ForeignKey != nil && !isAuditActorColumn(c.Name) &&
 			!selfReference && !isFileColumn(t, c) && !notificationLink && !inboxOwner && !rigsOwn {

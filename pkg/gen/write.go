@@ -133,12 +133,21 @@ func Diff(root string, results []Result, m *Manifest, opt DiffOptions) ([]Delta,
 			continue // already gone
 		}
 		reported[e.Path] = true
-		deltas = append(deltas, Delta{
+		delta := Delta{
 			Generator: e.Generator,
 			Path:      abs,
 			Status:    Stale,
 			Reason:    "no generator produces this any more",
-		})
+		}
+		if e.Mode == CreateOnce.String() {
+			// Reported, but not rig's to take back — see the Stale branch in
+			// [Write]. The mode is carried on the delta rather than looked up
+			// again there, because the manifest is the only thing that knows it
+			// and this is where the manifest is being read.
+			delta.mode = CreateOnce
+			delta.Reason = "no generator produces this any more; yours to keep or delete"
+		}
+		deltas = append(deltas, delta)
 	}
 
 	// And anything on disk that rig wrote, whether or not there is a manifest
@@ -208,7 +217,14 @@ func Write(root string, results []Result, deltas []Delta, opt WriteOptions) (*Ma
 	for _, d := range deltas {
 		switch d.Status {
 		case Stale:
-			if opt.Prune {
+			// A create-once file is not rig's to take back, so `--prune` leaves
+			// it. rig wrote it once, at its final name, and everything since is
+			// somebody's own code — a hook, a validator, the scoping on a live
+			// shape. A generator that stops claiming one, because a table went
+			// away or because rig stopped scaffolding for that kind of table, is
+			// not evidence that what is inside it was worthless. It is still
+			// reported, so it can be deleted by whoever can read it.
+			if opt.Prune && d.mode != CreateOnce {
 				if err := os.Remove(d.Path); err != nil && !errors.Is(err, fs.ErrNotExist) {
 					return nil, fmt.Errorf("remove %s: %w", d.Path, err)
 				}
@@ -220,11 +236,15 @@ func Write(root string, results []Result, deltas []Delta, opt WriteOptions) (*Ma
 			if d.Generator == "" {
 				continue
 			}
-			// Not pruned, so it is still on disk and still rig's to remember.
+			// Not pruned, so it is still on disk and still rig's to remember —
+			// under the mode it was written with. Recording `overwrite` here
+			// would spend the exemption above on one run: the next `--prune`
+			// would read an ordinary stale file and take the hook, the
+			// validator or the shape scoping inside it.
 			next.Files = append(next.Files, Entry{
 				Path:      relSlash(root, d.Path),
 				Generator: d.Generator,
-				Mode:      Overwrite.String(),
+				Mode:      d.mode.String(),
 				SHA256:    sumFile(d.Path),
 			})
 

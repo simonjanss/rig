@@ -19,24 +19,10 @@ import (
 // The identifier, the tenant, and the audit columns are absent: those are
 // stamped by the repository from the request's claims.
 type AccountCreateInput struct {
-	// The person this account belongs to, or null for a service account, which is
-	// nobody.
-	IdentityID *uuid.UUID `json:"identityId"`
-	// Whether this is a person or a service account an integration acts as.
-	Kind RigAccountKind `json:"kind"`
-	// The coarse level in this tenant: Owner, Admin, or Basic. Somebody can be an
-	// Owner here and Basic elsewhere.
-	Role RigAccountRoleLevel `json:"role"`
-	// A copy of the identity's address, kept here so listing accounts is one
-	// query. For a service account it is a label nobody signs in with.
-	EmailAddress string `json:"emailAddress"`
 	// What to call the person in this tenant.
 	DisplayName string `json:"displayName"`
 	// IANA name, for example Europe/Stockholm. Null means UTC.
 	TimeZone *string `json:"timeZone"`
-	// Whether the account may be used. A disabled account is refused with 403, not
-	// 401.
-	IsActive bool `json:"isActive"`
 }
 
 // Normalize tidies what was given before anything checks it.
@@ -46,25 +32,9 @@ type AccountCreateInput struct {
 // and rejecting the second for a length rule the first passes would be
 // indefensible.
 func (i *AccountCreateInput) Normalize() {
-	if v, ok := ParseRigAccountKind(string(i.Kind)); ok {
-		i.Kind = v
-	}
-	if i.Kind == "" {
-		i.Kind = RigAccountKindPerson
-	}
-	if v, ok := ParseRigAccountRoleLevel(string(i.Role)); ok {
-		i.Role = v
-	}
-	if i.Role == "" {
-		i.Role = RigAccountRoleLevelBasic
-	}
-	i.EmailAddress = strings.TrimSpace(i.EmailAddress)
 	i.DisplayName = strings.TrimSpace(i.DisplayName)
 	if i.TimeZone != nil {
 		*i.TimeZone = strings.TrimSpace(*i.TimeZone)
-	}
-	if i.IsActive == false {
-		i.IsActive = true
 	}
 }
 
@@ -76,24 +46,10 @@ func (i *AccountCreateInput) Normalize() {
 // field was fine, and the whole value is nil when the input was. It is what
 // the 422 carries.
 type AccountCreateInputError struct {
-	// The person this account belongs to, or null for a service account, which is
-	// nobody.
-	IdentityID *rigerr.FieldError `json:"identityId,omitempty"`
-	// Whether this is a person or a service account an integration acts as.
-	Kind *rigerr.FieldError `json:"kind,omitempty"`
-	// The coarse level in this tenant: Owner, Admin, or Basic. Somebody can be an
-	// Owner here and Basic elsewhere.
-	Role *rigerr.FieldError `json:"role,omitempty"`
-	// A copy of the identity's address, kept here so listing accounts is one
-	// query. For a service account it is a label nobody signs in with.
-	EmailAddress *rigerr.FieldError `json:"emailAddress,omitempty"`
 	// What to call the person in this tenant.
 	DisplayName *rigerr.FieldError `json:"displayName,omitempty"`
 	// IANA name, for example Europe/Stockholm. Null means UTC.
 	TimeZone *rigerr.FieldError `json:"timeZone,omitempty"`
-	// Whether the account may be used. A disabled account is refused with 403, not
-	// 401.
-	IsActive *rigerr.FieldError `json:"isActive,omitempty"`
 
 	// Entity is a problem with the row as a whole rather than with one field: what
 	// the Entity rule said.
@@ -107,33 +63,18 @@ func (e *AccountCreateInputError) Empty() bool {
 		return true
 	}
 
-	return e.IdentityID == nil && e.Kind == nil && e.Role == nil && e.EmailAddress == nil && e.DisplayName == nil && e.TimeZone == nil && e.IsActive == nil && e.Entity == nil
+	return e.DisplayName == nil && e.TimeZone == nil && e.Entity == nil
 }
 
 // Error implements error. The sentence is for logs and for a person; the
 // structure above is what a client acts on.
 func (e *AccountCreateInputError) Error() string {
 	var parts []string
-	if e.IdentityID != nil {
-		parts = append(parts, "identityId "+e.IdentityID.Error())
-	}
-	if e.Kind != nil {
-		parts = append(parts, "kind "+e.Kind.Error())
-	}
-	if e.Role != nil {
-		parts = append(parts, "role "+e.Role.Error())
-	}
-	if e.EmailAddress != nil {
-		parts = append(parts, "emailAddress "+e.EmailAddress.Error())
-	}
 	if e.DisplayName != nil {
 		parts = append(parts, "displayName "+e.DisplayName.Error())
 	}
 	if e.TimeZone != nil {
 		parts = append(parts, "timeZone "+e.TimeZone.Error())
-	}
-	if e.IsActive != nil {
-		parts = append(parts, "isActive "+e.IsActive.Error())
 	}
 	if e.Entity != nil {
 		parts = append(parts, e.Entity.Error())
@@ -161,15 +102,6 @@ func (e *AccountCreateInputError) ErrorFields() any { return e }
 func (i *AccountCreateInput) Validate() error {
 	var failed AccountCreateInputError
 
-	if !i.Kind.Valid() {
-		failed.Kind = rigerr.NewFieldError(rigerr.FieldCodeInvalidValue, "%q is not one of the allowed values", i.Kind)
-	}
-	if !i.Role.Valid() {
-		failed.Role = rigerr.NewFieldError(rigerr.FieldCodeInvalidValue, "%q is not one of the allowed values", i.Role)
-	}
-	if strings.TrimSpace(i.EmailAddress) == "" {
-		failed.EmailAddress = rigerr.NewFieldError(rigerr.FieldCodeCannotBeEmpty, "cannot be empty")
-	}
 	if strings.TrimSpace(i.DisplayName) == "" {
 		failed.DisplayName = rigerr.NewFieldError(rigerr.FieldCodeCannotBeEmpty, "cannot be empty")
 	}
@@ -187,24 +119,10 @@ func (i *AccountCreateInput) Validate() error {
 // way to be given one, so clearing it is a compile error rather than a
 // rejection at runtime. Immutable fields are not here at all.
 type AccountUpdateInput struct {
-	// The person this account belongs to, or null for a service account, which is
-	// nobody.
-	IdentityID patch.Nullable[uuid.UUID] `json:"identityId"`
-	// Whether this is a person or a service account an integration acts as.
-	Kind patch.Optional[RigAccountKind] `json:"kind"`
-	// The coarse level in this tenant: Owner, Admin, or Basic. Somebody can be an
-	// Owner here and Basic elsewhere.
-	Role patch.Optional[RigAccountRoleLevel] `json:"role"`
-	// A copy of the identity's address, kept here so listing accounts is one
-	// query. For a service account it is a label nobody signs in with.
-	EmailAddress patch.Optional[string] `json:"emailAddress"`
 	// What to call the person in this tenant.
 	DisplayName patch.Optional[string] `json:"displayName"`
 	// IANA name, for example Europe/Stockholm. Null means UTC.
 	TimeZone patch.Nullable[string] `json:"timeZone"`
-	// Whether the account may be used. A disabled account is refused with 403, not
-	// 401.
-	IsActive patch.Optional[bool] `json:"isActive"`
 }
 
 // Normalize tidies the fields this request actually carries.
@@ -214,22 +132,6 @@ type AccountUpdateInput struct {
 // write of every column — so two requests changing different fields of one
 // row would start overwriting each other instead of composing.
 func (i *AccountUpdateInput) Normalize() {
-	if v, ok := i.Kind.Get(); ok {
-		if parsed, ok := ParseRigAccountKind(string(v)); ok {
-			v = parsed
-		}
-		i.Kind = patch.NewOptional(v)
-	}
-	if v, ok := i.Role.Get(); ok {
-		if parsed, ok := ParseRigAccountRoleLevel(string(v)); ok {
-			v = parsed
-		}
-		i.Role = patch.NewOptional(v)
-	}
-	if v, ok := i.EmailAddress.Get(); ok {
-		v = strings.TrimSpace(v)
-		i.EmailAddress = patch.NewOptional(v)
-	}
 	if v, ok := i.DisplayName.Get(); ok {
 		v = strings.TrimSpace(v)
 		i.DisplayName = patch.NewOptional(v)
@@ -251,26 +153,11 @@ func (i *AccountUpdateInput) Normalize() {
 func (i AccountUpdateInput) Merged(prev *Account) Account {
 	out := *prev
 
-	if i.IdentityID.Touched() {
-		out.IdentityID = i.IdentityID.Ptr()
-	}
-	if v, ok := i.Kind.Get(); ok {
-		out.Kind = v
-	}
-	if v, ok := i.Role.Get(); ok {
-		out.Role = v
-	}
-	if v, ok := i.EmailAddress.Get(); ok {
-		out.EmailAddress = v
-	}
 	if v, ok := i.DisplayName.Get(); ok {
 		out.DisplayName = v
 	}
 	if i.TimeZone.Touched() {
 		out.TimeZone = i.TimeZone.Ptr()
-	}
-	if v, ok := i.IsActive.Get(); ok {
-		out.IsActive = v
 	}
 
 	return out
@@ -284,24 +171,10 @@ func (i AccountUpdateInput) Merged(prev *Account) Account {
 // field was fine, and the whole value is nil when the input was. It is what
 // the 422 carries.
 type AccountUpdateInputError struct {
-	// The person this account belongs to, or null for a service account, which is
-	// nobody.
-	IdentityID *rigerr.FieldError `json:"identityId,omitempty"`
-	// Whether this is a person or a service account an integration acts as.
-	Kind *rigerr.FieldError `json:"kind,omitempty"`
-	// The coarse level in this tenant: Owner, Admin, or Basic. Somebody can be an
-	// Owner here and Basic elsewhere.
-	Role *rigerr.FieldError `json:"role,omitempty"`
-	// A copy of the identity's address, kept here so listing accounts is one
-	// query. For a service account it is a label nobody signs in with.
-	EmailAddress *rigerr.FieldError `json:"emailAddress,omitempty"`
 	// What to call the person in this tenant.
 	DisplayName *rigerr.FieldError `json:"displayName,omitempty"`
 	// IANA name, for example Europe/Stockholm. Null means UTC.
 	TimeZone *rigerr.FieldError `json:"timeZone,omitempty"`
-	// Whether the account may be used. A disabled account is refused with 403, not
-	// 401.
-	IsActive *rigerr.FieldError `json:"isActive,omitempty"`
 
 	// Entity is a problem with the row as a whole rather than with one field: what
 	// the Entity rule said.
@@ -315,33 +188,18 @@ func (e *AccountUpdateInputError) Empty() bool {
 		return true
 	}
 
-	return e.IdentityID == nil && e.Kind == nil && e.Role == nil && e.EmailAddress == nil && e.DisplayName == nil && e.TimeZone == nil && e.IsActive == nil && e.Entity == nil
+	return e.DisplayName == nil && e.TimeZone == nil && e.Entity == nil
 }
 
 // Error implements error. The sentence is for logs and for a person; the
 // structure above is what a client acts on.
 func (e *AccountUpdateInputError) Error() string {
 	var parts []string
-	if e.IdentityID != nil {
-		parts = append(parts, "identityId "+e.IdentityID.Error())
-	}
-	if e.Kind != nil {
-		parts = append(parts, "kind "+e.Kind.Error())
-	}
-	if e.Role != nil {
-		parts = append(parts, "role "+e.Role.Error())
-	}
-	if e.EmailAddress != nil {
-		parts = append(parts, "emailAddress "+e.EmailAddress.Error())
-	}
 	if e.DisplayName != nil {
 		parts = append(parts, "displayName "+e.DisplayName.Error())
 	}
 	if e.TimeZone != nil {
 		parts = append(parts, "timeZone "+e.TimeZone.Error())
-	}
-	if e.IsActive != nil {
-		parts = append(parts, "isActive "+e.IsActive.Error())
 	}
 	if e.Entity != nil {
 		parts = append(parts, e.Entity.Error())
@@ -369,15 +227,6 @@ func (i *AccountUpdateInput) Validate(prev *Account) error {
 
 	merged := i.Merged(prev)
 
-	if !merged.Kind.Valid() {
-		failed.Kind = rigerr.NewFieldError(rigerr.FieldCodeInvalidValue, "%q is not one of the allowed values", merged.Kind)
-	}
-	if !merged.Role.Valid() {
-		failed.Role = rigerr.NewFieldError(rigerr.FieldCodeInvalidValue, "%q is not one of the allowed values", merged.Role)
-	}
-	if strings.TrimSpace(merged.EmailAddress) == "" {
-		failed.EmailAddress = rigerr.NewFieldError(rigerr.FieldCodeCannotBeEmpty, "cannot be empty")
-	}
 	if strings.TrimSpace(merged.DisplayName) == "" {
 		failed.DisplayName = rigerr.NewFieldError(rigerr.FieldCodeCannotBeEmpty, "cannot be empty")
 	}
@@ -435,20 +284,6 @@ func (c *AccountValidatorContext) Previous() Account { return c.previous }
 // everything is new.
 func (c *AccountValidatorContext) Changed(column string) bool { return c.changed[column] }
 
-// IdentityIDChanged reports whether this request set identity_id.
-func (c *AccountValidatorContext) IdentityIDChanged() bool { return c.changed[ColumnAccountIdentityID] }
-
-// KindChanged reports whether this request set kind.
-func (c *AccountValidatorContext) KindChanged() bool { return c.changed[ColumnAccountKind] }
-
-// RoleChanged reports whether this request set role.
-func (c *AccountValidatorContext) RoleChanged() bool { return c.changed[ColumnAccountRole] }
-
-// EmailAddressChanged reports whether this request set email_address.
-func (c *AccountValidatorContext) EmailAddressChanged() bool {
-	return c.changed[ColumnAccountEmailAddress]
-}
-
 // DisplayNameChanged reports whether this request set display_name.
 func (c *AccountValidatorContext) DisplayNameChanged() bool {
 	return c.changed[ColumnAccountDisplayName]
@@ -456,9 +291,6 @@ func (c *AccountValidatorContext) DisplayNameChanged() bool {
 
 // TimeZoneChanged reports whether this request set time_zone.
 func (c *AccountValidatorContext) TimeZoneChanged() bool { return c.changed[ColumnAccountTimeZone] }
-
-// IsActiveChanged reports whether this request set is_active.
-func (c *AccountValidatorContext) IsActiveChanged() bool { return c.changed[ColumnAccountIsActive] }
 
 // AccountCreateValidator is the rules for bringing a Account into existence:
 // what the schema cannot express.
@@ -472,24 +304,10 @@ func (c *AccountValidatorContext) IsActiveChanged() bool { return c.changed[Colu
 // A hook returns a FieldError to attach the message to a specific field, or
 // any other error to fail the request outright.
 type AccountCreateValidator struct {
-	// The person this account belongs to, or null for a service account, which is
-	// nobody.
-	IdentityID func(ctx context.Context, c *AccountValidatorContext, value *uuid.UUID) error
-	// Whether this is a person or a service account an integration acts as.
-	Kind func(ctx context.Context, c *AccountValidatorContext, value RigAccountKind) error
-	// The coarse level in this tenant: Owner, Admin, or Basic. Somebody can be an
-	// Owner here and Basic elsewhere.
-	Role func(ctx context.Context, c *AccountValidatorContext, value RigAccountRoleLevel) error
-	// A copy of the identity's address, kept here so listing accounts is one
-	// query. For a service account it is a label nobody signs in with.
-	EmailAddress func(ctx context.Context, c *AccountValidatorContext, value string) error
 	// What to call the person in this tenant.
 	DisplayName func(ctx context.Context, c *AccountValidatorContext, value string) error
 	// IANA name, for example Europe/Stockholm. Null means UTC.
 	TimeZone func(ctx context.Context, c *AccountValidatorContext, value *string) error
-	// Whether the account may be used. A disabled account is refused with 403, not
-	// 401.
-	IsActive func(ctx context.Context, c *AccountValidatorContext, value bool) error
 
 	// Entity runs after the per-field hooks, for a rule that is about the row
 	// rather than about one column.
@@ -506,20 +324,10 @@ type AccountCreateValidator struct {
 func (v AccountCreateValidator) RunCreate(ctx context.Context, claims tenancy.Claims, i *AccountCreateInput) error {
 	// Everything is new, so everything counts as changed.
 	c := &AccountValidatorContext{Claims: claims, changed: map[string]bool{}}
-	c.Values.IdentityID = i.IdentityID
-	c.changed[ColumnAccountIdentityID] = true
-	c.Values.Kind = i.Kind
-	c.changed[ColumnAccountKind] = true
-	c.Values.Role = i.Role
-	c.changed[ColumnAccountRole] = true
-	c.Values.EmailAddress = i.EmailAddress
-	c.changed[ColumnAccountEmailAddress] = true
 	c.Values.DisplayName = i.DisplayName
 	c.changed[ColumnAccountDisplayName] = true
 	c.Values.TimeZone = i.TimeZone
 	c.changed[ColumnAccountTimeZone] = true
-	c.Values.IsActive = i.IsActive
-	c.changed[ColumnAccountIsActive] = true
 
 	failed, err := v.run(ctx, c)
 	if err != nil {
@@ -543,42 +351,6 @@ func (v AccountCreateValidator) RunCreate(ctx context.Context, claims tenancy.Cl
 func (v AccountCreateValidator) run(ctx context.Context, c *AccountValidatorContext) (*AccountCreateInputError, error) {
 	var failed AccountCreateInputError
 
-	if v.IdentityID != nil {
-		if err := v.IdentityID(ctx, c, c.Values.IdentityID); err != nil {
-			field, ok := rigerr.AsFieldError(err)
-			if !ok {
-				return nil, rigerr.Wrap(err, "validate identity_id")
-			}
-			failed.IdentityID = field
-		}
-	}
-	if v.Kind != nil {
-		if err := v.Kind(ctx, c, c.Values.Kind); err != nil {
-			field, ok := rigerr.AsFieldError(err)
-			if !ok {
-				return nil, rigerr.Wrap(err, "validate kind")
-			}
-			failed.Kind = field
-		}
-	}
-	if v.Role != nil {
-		if err := v.Role(ctx, c, c.Values.Role); err != nil {
-			field, ok := rigerr.AsFieldError(err)
-			if !ok {
-				return nil, rigerr.Wrap(err, "validate role")
-			}
-			failed.Role = field
-		}
-	}
-	if v.EmailAddress != nil {
-		if err := v.EmailAddress(ctx, c, c.Values.EmailAddress); err != nil {
-			field, ok := rigerr.AsFieldError(err)
-			if !ok {
-				return nil, rigerr.Wrap(err, "validate email_address")
-			}
-			failed.EmailAddress = field
-		}
-	}
 	if v.DisplayName != nil {
 		if err := v.DisplayName(ctx, c, c.Values.DisplayName); err != nil {
 			field, ok := rigerr.AsFieldError(err)
@@ -595,15 +367,6 @@ func (v AccountCreateValidator) run(ctx context.Context, c *AccountValidatorCont
 				return nil, rigerr.Wrap(err, "validate time_zone")
 			}
 			failed.TimeZone = field
-		}
-	}
-	if v.IsActive != nil {
-		if err := v.IsActive(ctx, c, c.Values.IsActive); err != nil {
-			field, ok := rigerr.AsFieldError(err)
-			if !ok {
-				return nil, rigerr.Wrap(err, "validate is_active")
-			}
-			failed.IsActive = field
 		}
 	}
 
@@ -635,24 +398,10 @@ func (v AccountCreateValidator) run(ctx context.Context, c *AccountValidatorCont
 // A hook returns a FieldError to attach the message to a specific field, or
 // any other error to fail the request outright.
 type AccountUpdateValidator struct {
-	// The person this account belongs to, or null for a service account, which is
-	// nobody.
-	IdentityID func(ctx context.Context, c *AccountValidatorContext, value *uuid.UUID) error
-	// Whether this is a person or a service account an integration acts as.
-	Kind func(ctx context.Context, c *AccountValidatorContext, value RigAccountKind) error
-	// The coarse level in this tenant: Owner, Admin, or Basic. Somebody can be an
-	// Owner here and Basic elsewhere.
-	Role func(ctx context.Context, c *AccountValidatorContext, value RigAccountRoleLevel) error
-	// A copy of the identity's address, kept here so listing accounts is one
-	// query. For a service account it is a label nobody signs in with.
-	EmailAddress func(ctx context.Context, c *AccountValidatorContext, value string) error
 	// What to call the person in this tenant.
 	DisplayName func(ctx context.Context, c *AccountValidatorContext, value string) error
 	// IANA name, for example Europe/Stockholm. Null means UTC.
 	TimeZone func(ctx context.Context, c *AccountValidatorContext, value *string) error
-	// Whether the account may be used. A disabled account is refused with 403, not
-	// 401.
-	IsActive func(ctx context.Context, c *AccountValidatorContext, value bool) error
 
 	// Entity runs after the per-field hooks, for a rule that is about the row
 	// rather than about one column.
@@ -670,13 +419,8 @@ func (v AccountUpdateValidator) RunUpdate(ctx context.Context, claims tenancy.Cl
 		isUpdate: true,
 		changed:  map[string]bool{},
 	}
-	c.changed[ColumnAccountIdentityID] = i.IdentityID.Touched()
-	c.changed[ColumnAccountKind] = i.Kind.IsSet()
-	c.changed[ColumnAccountRole] = i.Role.IsSet()
-	c.changed[ColumnAccountEmailAddress] = i.EmailAddress.IsSet()
 	c.changed[ColumnAccountDisplayName] = i.DisplayName.IsSet()
 	c.changed[ColumnAccountTimeZone] = i.TimeZone.Touched()
-	c.changed[ColumnAccountIsActive] = i.IsActive.IsSet()
 
 	failed, err := v.run(ctx, c)
 	if err != nil {
@@ -702,13 +446,8 @@ func (v AccountUpdateValidator) RunRestore(ctx context.Context, claims tenancy.C
 		isUpdate: true,
 		changed:  map[string]bool{},
 	}
-	c.changed[ColumnAccountIdentityID] = true
-	c.changed[ColumnAccountKind] = true
-	c.changed[ColumnAccountRole] = true
-	c.changed[ColumnAccountEmailAddress] = true
 	c.changed[ColumnAccountDisplayName] = true
 	c.changed[ColumnAccountTimeZone] = true
-	c.changed[ColumnAccountIsActive] = true
 
 	failed, err := v.run(ctx, c)
 	if err != nil {
@@ -732,42 +471,6 @@ func (v AccountUpdateValidator) RunRestore(ctx context.Context, claims tenancy.C
 func (v AccountUpdateValidator) run(ctx context.Context, c *AccountValidatorContext) (*AccountUpdateInputError, error) {
 	var failed AccountUpdateInputError
 
-	if v.IdentityID != nil {
-		if err := v.IdentityID(ctx, c, c.Values.IdentityID); err != nil {
-			field, ok := rigerr.AsFieldError(err)
-			if !ok {
-				return nil, rigerr.Wrap(err, "validate identity_id")
-			}
-			failed.IdentityID = field
-		}
-	}
-	if v.Kind != nil {
-		if err := v.Kind(ctx, c, c.Values.Kind); err != nil {
-			field, ok := rigerr.AsFieldError(err)
-			if !ok {
-				return nil, rigerr.Wrap(err, "validate kind")
-			}
-			failed.Kind = field
-		}
-	}
-	if v.Role != nil {
-		if err := v.Role(ctx, c, c.Values.Role); err != nil {
-			field, ok := rigerr.AsFieldError(err)
-			if !ok {
-				return nil, rigerr.Wrap(err, "validate role")
-			}
-			failed.Role = field
-		}
-	}
-	if v.EmailAddress != nil {
-		if err := v.EmailAddress(ctx, c, c.Values.EmailAddress); err != nil {
-			field, ok := rigerr.AsFieldError(err)
-			if !ok {
-				return nil, rigerr.Wrap(err, "validate email_address")
-			}
-			failed.EmailAddress = field
-		}
-	}
 	if v.DisplayName != nil {
 		if err := v.DisplayName(ctx, c, c.Values.DisplayName); err != nil {
 			field, ok := rigerr.AsFieldError(err)
@@ -784,15 +487,6 @@ func (v AccountUpdateValidator) run(ctx context.Context, c *AccountValidatorCont
 				return nil, rigerr.Wrap(err, "validate time_zone")
 			}
 			failed.TimeZone = field
-		}
-	}
-	if v.IsActive != nil {
-		if err := v.IsActive(ctx, c, c.Values.IsActive); err != nil {
-			field, ok := rigerr.AsFieldError(err)
-			if !ok {
-				return nil, rigerr.Wrap(err, "validate is_active")
-			}
-			failed.IsActive = field
 		}
 	}
 

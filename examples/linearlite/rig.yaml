@@ -28,8 +28,15 @@ auth:
   # The people in a tenant, as an ordinary read-only resource. The board needs
   # names to put on assignees, and this is the documented way to get them: the
   # foundation table keeps its own authentication queries, and a generated
-  # model, repository and API appear beside them. Which operations exist is
-  # services/rig_account/rig_account.yaml.
+  # model, repository and API appear beside them.
+  #
+  # There is no services/rig_account/ to say which operations exist, and that is
+  # the point of this line being all of it: rig ships the configuration for its
+  # own tables, so Get, List and Search is what this projects. No write path —
+  # provisioning, changing an address and deactivating an account are the auth
+  # endpoints' business, and a generated PATCH here would be a second door into
+  # rows the foundation owns. A project that wants one writes the file, and the
+  # rule about who may raise somebody to Owner along with it.
   expose: [rig_account]
 
 # Uploads, for a todo's attachments. Memory because this example is a
@@ -54,8 +61,14 @@ notifications:
   # Project the notification tables as resources, so the two a person actually
   # owns — their devices and their preferences — come with a generated client, a
   # filter grammar and an OpenAPI entry rather than a hand-written route each.
-  # The other three say `expose: false` in their own files: the inbox already has
-  # rig's routes and a live shape, and a delivery is bookkeeping.
+  #
+  # It projects all five, and there is no file anywhere here saying otherwise:
+  # rig ships the configuration for its own tables, and what it says is read and
+  # delete on the inbox — beside rig's own routes rather than instead of them —
+  # and read on the engine's two. Those two are the ones nobody owns a row of, so
+  # a read of either is a read of the whole tenant's; services/authz is where
+  # this example decides that is the Owner's and the Admin's rather than
+  # everybody's.
   #
   # It is the settings table that makes this worth doing. Everything above
   # reaches a person because they were a stakeholder; this is the row where they
@@ -129,6 +142,19 @@ database:
   electric:
     enabled: true
     port: 55445
+
+# rig's own tables stay in the modules that own them, so migrations/ below holds
+# only this example's five migrations rather than the twelve hundred lines of DDL
+# nobody here wrote. examples/auth and examples/todo vendor theirs, which is the
+# default — between them all three readings are generated and run on every check.
+#
+# The cost is admitted rather than argued away: this directory no longer says what
+# is in the database. What is in it is these five files plus whatever rig/auth,
+# rig/files, rig/notify, rig/presence and rig/runtime ship, and `rig db up`
+# applies their sets first. main.go names both halves in one list, which is the
+# only place the order is written down.
+migrations:
+  foundation: embedded
 
 # Every table gets a configuration file. `rig sync` creates and updates them.
 layout:

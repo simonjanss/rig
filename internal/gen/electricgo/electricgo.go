@@ -103,7 +103,13 @@ func (g *Generator) Generate(_ context.Context, doc *ir.Document, opts gen.Optio
 		}
 		artifacts = append(artifacts, shape)
 
-		if cfg.StubDir != "" {
+		// No scope stub for a table rig created, for the reason the service
+		// generator gives: it would be a file about somebody else's table, and
+		// the three in this repository's own examples were byte-identical
+		// `return nil`s. A project that does want to narrow one — presence is the
+		// case that earns it, where every heartbeat reaches every subscriber —
+		// writes the file, and CreateOnce then leaves it alone.
+		if cfg.StubDir != "" && !res.Foundation {
 			for _, sh := range e.shapesFor(res) {
 				stub, err := e.stubFile(res, sh)
 				if err != nil {
