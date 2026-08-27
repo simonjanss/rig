@@ -203,7 +203,9 @@ counts as unreachable — the answer itself is then copied out however long it
 takes. `MaxSnapshotRows` (20,000) is how large a snapshot may be, applied as a
 `LIMIT` so the rows past the bound are never read, and `SnapshotTimeout` (5s) is
 how long one read may take. `OnError` is worth setting too — it is the only way
-the reason for a 502 on a shape route reaches your log.
+the reason for a 502 on a shape route reaches your log, and every error it is
+handed names the shape's table, so an outage across four shapes is four lines you
+can tell apart rather than four copies of one.
 
 **A refused shape route answers the same error envelope as every other route** —
 flat JSON with `code` and `message`, which is what `@rig/client`'s error

@@ -137,6 +137,29 @@ connections while nobody looks.
 
 ## The demo script
 
+**The first board fills in rather than arriving.** Sign in and the columns show
+pulsing placeholders for a moment before the cards land, and the wait is round
+trips rather than rows. A shape's read from the beginning ends with
+`snapshot-end` and **no** `Electric-Up-To-Date` header; it takes a second request
+to get one, and that header is what makes a subscriber ready rather than still
+loading. Three shapes start at once on this screen — the board, the bell and
+presence — so that is six requests before the board is furnished, over three of
+the six connections a browser gives an origin.
+
+On a laptop each of those is single-digit milliseconds, so what you see is mostly
+the front end starting: one 736 kB bundle, parsed and run once. The placeholders
+are there because without them an unfurnished column is indistinguishable from an
+empty one — it renders "Drop items here" and a count of zero, which is a wrong
+answer confidently given.
+
+Two things that are *not* what is slow, in case you go looking. A shape the sync
+service has never seen is built on first request, and for this board that is tens
+of milliseconds, not seconds. And a sync service that is still starting does not
+hold the board up either: the read is answered from this application's own
+database instead, which is the section at the end. `X-Rig-Sync-Fallback: snapshot`
+on `GET /api/v1/todo/_stream?offset=-1` is how to tell which of the two answered,
+and the log line beside it names the shape.
+
 1. Sign in as demo. Drag a card between columns.
 2. Second window, alex. Watch the card sit where demo left it; drag it back.
 3. As alex, open an item demo created and change its status — demo's window
