@@ -75,14 +75,19 @@ func TestTheRequestSpanIsNamedByTheRouteAndDeferred(t *testing.T) {
 }
 
 // With tracing on and no RequestID of the project's own, the identifier in the
-// error body is the trace id. That is the whole correlation story, and nobody
-// has to write it.
+// error body is the caller's own if it sent one worth trusting, and this
+// request's trace otherwise. That is the whole correlation story, and nobody has
+// to write it.
+//
+// The order is the point rather than the fallback: a client that labelled its
+// own request is believed, because it is the one correlating two sides. Only a
+// request nobody named gets a name invented for it.
 func TestTheRequestIDFallsBackToTheTrace(t *testing.T) {
 	t.Parallel()
 
 	src := artifactNamed(t, gentest.Run(t, servergo.New(), traced(t), opts()), "server.gen.go")
 
-	if !strings.Contains(src, "rc.RequestID = observe.TraceID(r)") {
+	if !strings.Contains(src, "rc.RequestID = cmp.Or(callerRequestID(r), observe.TraceID(r))") {
 		t.Errorf("no fallback to the trace id:\n%s", src)
 	}
 	if !strings.Contains(src, "observe.Fail(r.Context(), code.HTTPStatus(), err)") {

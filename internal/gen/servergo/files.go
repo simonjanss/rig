@@ -188,6 +188,14 @@ func (e *emitter) anyRequiredFilePart() bool {
 	return false
 }
 
+// hasFiles reports whether this project stores uploads at all.
+//
+// Without the block there is no files.gen.go, no blob store and no multipart
+// reader — and nothing in [emitter.tasksFunc] for an operator to sweep.
+func (e *emitter) hasFiles() bool {
+	return e.doc.API.Files != nil && e.doc.API.Files.Enabled
+}
+
 // filesFile emits the wiring for a project that accepts uploads.
 //
 // It is written here rather than by a generator of its own for the reason the

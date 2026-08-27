@@ -27,7 +27,6 @@ Give the server a logger. That is the whole setup:
 api.Register(api.Handlers{
     Server: api.Server{
         GetClaims: yourClaimsFunc,
-        RequestID: func(r *http.Request) string { return r.Header.Get("X-Request-Id") },
         Logger:    app.Logger,
     },
     Todo: todo.New(repos.Todos),
@@ -119,26 +118,39 @@ last of those has a collector.
 
 ### Wiring it up
 
-Four lines in your `main`, and the generated `api.Tracing()` supplies the name:
+Three lines in your `main`, and the generated `api.NewProcess()` is all of it:
 
 ```go
-serve.Main(serve.Config{
-    // A span per statement, from the connection: it sees every query,
-    // including the ones your hooks and tasks run.
-    Pool: observe.Pool,
-    ...
-}, func(ctx context.Context, app *serve.App) (http.Handler, error) {
-    tracing, err := observe.Setup(ctx, api.Tracing())
-    if err != nil {
-        return nil, err
-    }
-    // Its own limit: a flush to a collector that is not answering must not
-    // spend the whole shutdown budget.
-    app.CloseWithin("traces", 5*time.Second, tracing.Shutdown)
+process, err := api.NewProcess()
+if err != nil {
+    slog.Error("cannot set this process up", "error", err)
+    os.Exit(1)
+}
+defer process.Close()
 
-    repos := store.New(app.Pool, store.Config{Tracer: observe.Tracer()})
+serve.Main(process.Configure(serve.Config{
+    ...
+}), func(ctx context.Context, app *serve.App) (http.Handler, error) {
+    process.Attach(app)
+
+    repos := store.New(app.Pool, store.Config{})
     ...
 ```
+
+`NewProcess` installs the provider from `api.Tracing()`, which carries the
+service name out of `rig.yaml`. `Configure` sets `serve.Config.Pool` to
+`observe.Pool` — a span per statement, from the connection, so it sees every
+query including the ones your hooks and tasks run — and `Attach` registers the
+flush with a limit of its own, because a flush to a collector that is not
+answering must not spend the whole shutdown budget. `Close` is the same flush
+for the other way out: a `Tasks:` entry never reaches the mount closure, so a
+cron run would otherwise drop everything it buffered. `Provider.Shutdown` is
+idempotent, so the server path running both halves costs nothing.
+
+`store.Config` needs no `Tracer`: the generated `store.New` settles a nil one to
+`observe.Tracer()`, which is the value the provider installed. A task that never
+called `observe.Setup` gets a no-op there and runs untraced rather than
+differently.
 
 `examples/fantasyfootball` turns it on over a schema with nothing else going on,
 which is the smallest version of the wiring above. `examples/linearlite` turns
@@ -232,57 +244,41 @@ process, on a listener that is not your API's. See
 [its own port](#its-own-port) for why that is not a route, and
 [restricting it](#restricting-it-to-an-address) for what to put in it.
 
-Four lines next to the ones that set tracing up, and in `main` itself rather
-than in the mount function, because what comes out of them is part of the
-configuration `serve.Main` is called with:
-
-```go
-page, err := tracing.Page(api.Monitoring())
-if err != nil {
-    fmt.Fprintln(os.Stderr, "cannot build the monitoring page:", err)
-    os.Exit(1)
-}
-```
-
-and then two fields on the `serve.Config` you already build:
+**Serving it is nothing extra.** The same `api.NewProcess()` that installed the
+provider builds the page over it, and `process.Configure` fills in the two
+`serve.Config` fields that serve it:
 
 ```go
 serve.Config{
-    Monitor:     page.Handler(),
+    Monitor:     page.Handler(),   // Configure sets both, as a pair
     MonitorAddr: page.Addr(),
-    // ...
 }
 ```
 
 The page hangs off the provider because it reads the file that provider is
-writing: naming the path twice is one place too many to get it wrong. Both of
-those fields are zero when the page is unarmed, so a laptop with no password set
-opens no second port rather than one that refuses.
+writing: naming the path twice is one place too many to get it wrong, and that
+is why the constructor that installs the one builds the other. Both fields are
+zero when the page is unarmed, so a laptop with no password set opens no second
+port rather than one that refuses — and `process.Attach` says which half is not
+armed, and why, on the logger that writes to the file the page would have read.
 
-That it is unarmed is worth saying out loud once, and this half goes in the
-mount function rather than in `main`, because that is where there is a logger
-writing to the file the page would have read:
+`process.Page()` is there for an application with somewhere else to name the
+page: a link to it from a page of its own, most likely, since the page is on an
+origin of its own and a relative href does not reach it.
 
-```go
-if why := page.Unarmed(); why != "" {
-    app.Logger.Info("monitoring page not listening", "reason", why)
-}
-```
+**A `Tasks:` entry never reaches the mount function.** `serve.Main` runs the
+task and returns, so `Attach` is not the only path out of the process:
+`process.Close()`, deferred in `main`, is the flush a cron run reaches. The
+server path runs both halves and finds the second already done, because
+`Provider.Shutdown` is idempotent.
 
-`observe.Setup` moves out to `main` along with the page, since the page hangs
-off it. The `app.CloseWithin("traces", …)` that stops the provider stays in the
-mount function, where there is an `App` to register it with — but it is no
-longer the only path out of the process. **A `Tasks:` entry never reaches the
-mount function**: `serve.Main` runs the task and returns, so a provider built in
-`main` is a provider that command never flushes. Defer the flush in `main` as
-well, which the server path then reaches a second time and finds already done:
+`api.Monitoring()` is still exported, for the one thing `NewProcess` does not
+let you choose — a log sink at a level of its own:
 
 ```go
-defer func() {
-    flushing, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-    defer cancel()
-    _ = tracing.Shutdown(flushing)
-}()
+cfg := api.Monitoring()
+cfg.Logs = logs
+page, err := provider.Page(cfg)
 ```
 
 `examples/linearlite/main.go` is the arrangement in full.
@@ -407,32 +403,30 @@ has to keep the log lines where the page can read them. `slog` writes to
 wherever you pointed it, which is usually a terminal or a collector's agent, and
 neither is a file rig can open.
 
-So `observe` has a sink. Open it, tee its handler beside the one you already
-have, and hand the same object to the page:
+So `observe` has a sink — and `api.NewProcess()` is what opens it, tees its
+handler into the logger `Configure` hands the server, and gives the same object
+to the page. That is the reason the three are one call: the sink has to exist
+before the logger built out of it, and the page has to read the sink the logger
+is writing rather than a second one opened from the same path.
 
 ```go
-logs, err := observe.OpenLogs(observe.LogConfig{})
-if err != nil {
-    return err
-}
+process, err := api.NewProcess()
+// ... process.Configure(serve.Config{...}) sets:
+//     Logger:      stderr and the file, both, each at its own level
+//     Monitor:     the page, on its own port
+//     MonitorAddr: zero with it when the page is unarmed
+```
 
-monitoring := api.Monitoring()
-monitoring.Logs = logs
-page, err := tracing.Page(monitoring)
-if err != nil {
-    return err
-}
+The two levels are deliberate. The logger keeps whatever the default handler is
+set to; the file keeps debug — which is where rig's request line is, so the page
+has requests to list without the process printing one per request to a terminal
+nobody is watching.
 
-serve.Main(serve.Config{
-    // Stderr, and the file. Both.
-    Logger: slog.New(observe.Tee(slog.Default().Handler(), logs.Handler())),
-    // The page, on its own port. Both zero when it is unarmed.
-    Monitor:     page.Handler(),
-    MonitorAddr: page.Addr(),
-    // ...
-}, func(ctx context.Context, app *serve.App) (http.Handler, error) {
-    // ...
-})
+For an application with a handler of its own, set `Logger` yourself and tee
+`process.LogHandler()` into it — otherwise the page has nothing to list:
+
+```go
+Logger: slog.New(observe.Tee(myHandler, process.LogHandler()))
 ```
 
 ```
@@ -440,13 +434,15 @@ RIG_LOG_FILE=/var/log/myapp/rig.jsonl
 ```
 
 **With nothing in it nothing is written**, the same as `$RIG_TRACE_FILE`, and
-the page says so instead of showing an empty list. `logs.Unarmed()` is the
-reason, if you want a line about it at startup.
+the page says so instead of showing an empty list. `process.Attach` already
+writes that line at startup, with the reason `logs.Unarmed()` gave.
 
 It is the same store as the spans and makes the same promise: one JSON object
 per line, `observe.LogConfig.FileMaxBytes` (8 MiB) with one generation kept
 beside it as `<name>.1`. Writes are unbuffered, so there is nothing to flush and
-no shutdown step to add.
+no shutdown step to add — which is also why `process.Close()` does not close it:
+the last lines a server writes are written during its shutdown, and a step that
+closed the file would throw them away.
 
 ```json
 {"time":"2026-08-21T09:14:02.113Z","level":"ERROR","msg":"request failed",
@@ -530,25 +526,44 @@ that is not one — the page, the probes — is invisible to both.
 
 ## Correlating a log line with a trace
 
-With `tracing:` on and no `RequestID` of your own, rig sets one: the trace id.
-The `requestId` in the error body, the `request_id` on every log line and the
-trace in your collector are then the same string, and you wrote nothing. In the
-log file the sink writes, the same identifier is also `trace_id` on the line
-itself, taken from the context rather than from the request — which is what the
-monitoring page joins the two halves on.
+**`RequestID` is a field you almost never set.** Nil does not mean nothing: it
+means the caller's own `X-Request-Id` when it sent one, and — with `tracing:` on
+— this request's trace id when it did not. The `requestId` in the error body,
+the `request_id` on every log line and the trace in your collector are then the
+same string, and you wrote nothing.
 
-To keep a caller's own identifier when it sends one, and fall back to the trace:
+The order is the point. A client that labelled its own request is the one
+correlating two sides, so it is believed; only a request nobody named gets a
+name invented for it.
 
-```go
-RequestID: func(r *http.Request) string {
-    return cmp.Or(r.Header.Get("X-Request-Id"), observe.TraceID(r))
-},
-```
+In the log file the sink writes, the trace is also `trace_id` on the line itself,
+taken from the context rather than from the request — which is what the
+monitoring page joins the two halves on. That is why a caller-supplied
+`requestId` does not cost you the join: the page still has the trace.
 
-Without the block, `RequestID` is a function you supply and can return whatever
-identifies a request in the rest of your system — including a trace id from an
-OpenTelemetry setup that is entirely your own. rig needs no dependency for that;
-the only thing it has to do is not invent an identifier of its own.
+**A caller's header is bounded before it is believed** — at most 128 bytes of
+printable ASCII, and refused rather than truncated otherwise. The value reaches
+an error body and every log line the request writes, so it is client-controlled
+text in two places read by machines; a header rig does not understand is not one
+it should half-quote into a log file. What a caller gets for sending nonsense is
+the identifier it would have got for sending nothing.
+
+Without the `tracing:` block the caller's own is the only identifier there is,
+and a request that sent none gets an empty one. Turning `tracing:` on is what
+gives every request one whether or not the caller thought to send it.
+
+**The authentication routes are the one place the trace fallback does not
+reach.** `/auth/*` is mounted by `Auth.Mount` rather than emitted per endpoint,
+so no span is opened over it — a sign-in that sent no header gets no `requestId`,
+where a resource route in the same project gets a trace id. The caller's own
+header does reach it, and that is the case worth having: a client that wants its
+sign-in correlated with the rest of its requests sends one.
+
+Set `RequestID` only to answer the question differently — an identifier from the
+rest of your system, including a trace id from an OpenTelemetry setup that is
+entirely your own. rig needs no dependency for that. If you do set it, set
+`Hooks.RequestID` to the same function: the authentication routes are configured
+before the `Server` literal exists, so that is how the one answer reaches them.
 
 ## Tracing a client
 

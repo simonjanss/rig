@@ -157,11 +157,15 @@ func TestTheErrorMapperIsThisPackages(t *testing.T) {
 	doc := gentest.LoadDocument(t, filepath.Join("testdata", authFixture))
 	got := find(t, gentest.Run(t, servergo.New(), doc, authOpts()), "auth.gen.go")
 
-	if !strings.Contains(got, "fail(srv, w, r, RequestContext{") {
+	if !strings.Contains(got, "fail(srv, w, r, requestContext(srv, r), err)") {
 		t.Error("the wiring should fail through this package's own path, unqualified")
 	}
-	if !strings.Contains(got, `r.Header.Get("X-Request-Id")`) {
-		t.Error("the failure should carry the same request identifier as every other one")
+	if strings.Contains(got, "RequestContext{") {
+		t.Error("the mapper builds a request context of its own, which is the second " +
+			"answer requestContext exists to stop there being")
+	}
+	if !strings.Contains(got, "RequestID: h.RequestID") {
+		t.Error("a project that labels its requests its own way does not reach the auth routes")
 	}
 }
 

@@ -214,18 +214,23 @@ posts := blogpost.New(repos.BlogPosts, inbox, pool)
 reg.Register(api.NewBlogPostSubject(posts))
 
 engine := api.NewNotificationEngine(pool, reg)
-engine.Start()
-app.Drain("notifications", engine.StopClaiming)
-app.CloseWithin("notifications", 15*time.Second, engine.Close)
+// Starts it, drains it, and registers its shutdown — all three, so the number
+// it is closed within and the number api.ShutdownBudget() counts for it cannot
+// drift apart.
+api.StartNotificationEngine(app, engine)
 ```
 
 and the guarantee behind it, as a subcommand rather than a goroutine:
 
 ```go
-Tasks: map[string]serve.Task{
+Tasks: api.Tasks(map[string]serve.Task{
     "dispatch-notifications": dispatchNotifications,
-},
+}),
 ```
+
+That one is yours rather than `api.Tasks`'s, and for the same reason the
+constructor above takes a registry: the audience is a method on a service, so a
+task that dispatches has to build one.
 
 The in-process engine is **latency and nothing else** — it turns a notification
 into an inbox line in milliseconds rather than by the next tick. Nothing is lost

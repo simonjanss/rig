@@ -247,23 +247,31 @@ schema's — the generated client covers the API and stops at `/auth`.
 
 `presence:` is on with nothing but `enabled`, which is why there are three
 lines for it — `Presence` on `api.Handlers` and `RigPresence` on
-`genelectric.Handlers`, both in `internal/app`, and the sweeper with its own
-`CloseWithin` in `main.go`'s mount closure — and why
-`MaxShutdown` is thirty-five rather than thirty: a third closer changed the
-arithmetic the comment above that number states.
+`genelectric.Handlers`, both in `internal/app`, and
+`api.StartPresenceSweeper(srv)` in `main.go`'s mount closure.
 
-`tracing:` and `monitoring:` are on, which is why `main.go` opens a log sink and
-builds the tracing provider and the page *before* `serve.Main` rather than inside
-the mount closure: the page is half of `serve.Config` now — `Monitor:
-page.Handler()` and `MonitorAddr: page.Addr()` — and it listens on
-`127.0.0.1:9084`, its own port beside the API's 8084. The `CloseWithin("traces",
-…)` that stops the provider stays in the closure, where there is an `App`.
-`app.New` still takes a `*observe.Page`, but only so `/_demo/tour` can say where
-the page is; nil from a task, since a cron entry serving a page nobody can reach
-is not worth the wiring. The password and the two file paths are set by `make
-demo` into a gitignored `.run/`, never by rig.yaml, which is checked in — the
-address is the one part of it that *is* in rig.yaml, because who can reach the
-page is a decision worth reading off the file.
+**None of the shutdown arithmetic is in this directory any more.**
+`MaxShutdown: api.ShutdownBudget()` is thirty-five seconds, and it is thirty-five
+because `internal/api/process.gen.go` adds up the three closers rig registers for
+this project's blocks — fifteen for the engine, five for the trace flush, five
+for the sweeper — and leaves ten for the requests in flight. A fourth block would
+change the number without anything here being edited. Adding a closer of this
+example's own means `api.ShutdownBudget() + n`, not restating the total.
+
+`tracing:` and `monitoring:` are on, which is why `main.go` calls
+`api.NewProcess()` *before* `serve.Main` rather than inside the mount closure:
+the log sink, the provider and the page have to exist before the `serve.Config`
+that two of its fields come out of, and the page listens on `127.0.0.1:9084`, its
+own port beside the API's 8084. `process.Configure` fills `Monitor` and
+`MonitorAddr`; `process.Attach(srv)` registers the flush and says which half of
+the page is unarmed; `defer process.Close()` is the same flush for the path a
+`Tasks:` entry takes, which never reaches the closure at all. `app.New` still
+takes a `*observe.Page` — `process.Page()` — but only so `/_demo/tour` can say
+where the page is; nil from a task, since a cron entry serving a page nobody can
+reach is not worth the wiring. The password and the two file paths are set by
+`make demo` into a gitignored `.run/`, never by rig.yaml, which is checked in —
+the address is the one part of it that *is* in rig.yaml, because who can reach
+the page is a decision worth reading off the file.
 
 The auth foundation's tables came from `rig setup-project` (migrations 1–7),
 and `rig_account` is exposed read-only as the `Account` resource — the board's

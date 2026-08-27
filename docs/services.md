@@ -92,6 +92,11 @@ serve.Main(serve.Config{
     DatabaseURL: ...,
     Addr:        ...,
     Migrate:     migrate.Require(migrations, migrate.Options{}),
+    // The housekeeping subcommands this project's blocks already decided,
+    // merged with the ones only you can write. Yours wins on a shared name.
+    Tasks: api.Tasks(map[string]serve.Task{
+        "migrate": migrate.Apply(migrations, migrate.Options{Log: os.Stdout}),
+    }),
 }, func(ctx context.Context, app *serve.App) (http.Handler, error) {
     repos := store.New(app.Pool, store.Config{})
     return api.Register(api.Handlers{
@@ -109,9 +114,11 @@ database is behind; `migrate.Apply` migrates on the way up instead.
 nil means `slog.Default()` rather than silence — see
 [observability.md](observability.md).
 
-A project with `tracing:` on has three more lines here — `observe.Setup`, a
-`CloseWithin` for the flush, and a `Tracer` in `store.Config` — and
-[observability.md](observability.md#wiring-it-up) has them in full.
+A project with `tracing:` on has three more lines here — `api.NewProcess()`, a
+`defer process.Close()`, and a `process.Attach(app)` in the mount function — and
+[observability.md](observability.md#wiring-it-up) has them in full. It also gets
+`api.ShutdownBudget()` for `MaxShutdown`, which adds up the closers rig
+registers so you do not have to.
 
 ## See also
 

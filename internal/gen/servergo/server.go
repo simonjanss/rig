@@ -11,6 +11,7 @@ import (
 func (e *emitter) serverFile() (gen.Artifact, error) {
 	b := gobuf.New(e.cfg.Package)
 
+	e.requestIDWiring(b)
 	e.serverType(b)
 	e.handlersStruct(b)
 	e.registerFunc(b)
@@ -64,8 +65,20 @@ func (e *emitter) serverType(b *gobuf.Buf) {
 		"own way, or has no auth routes to mount.")
 	b.L("GetClaims func(*%s.Request) (%s.Claims, error)", httpPkg, tenPkg)
 	b.NL()
-	b.Comment("RequestID labels a request for the logs. Nil generates nothing, " +
-		"and the field is simply absent from error bodies.")
+	b.Comment("RequestID labels a request for the logs and for the error body it " +
+		"may end in.\n\n" +
+		"Nil is the ordinary case and does not mean nothing: it means " +
+		"[callerRequestID] — the caller's own " + e.cfg.RequestIDHeader + ", if " +
+		"it sent one worth trusting" +
+		func() string {
+			if e.tracing() {
+				return ", and this request's trace otherwise"
+			}
+			return ""
+		}() +
+		". Set this only to answer the question differently; the default is " +
+		"already the answer every route in this package gives, including the " +
+		"authentication ones.")
 	b.L("RequestID func(*%s.Request) string", httpPkg)
 	b.NL()
 
@@ -360,20 +373,26 @@ func (e *emitter) helpers(b *gobuf.Buf) {
 	b.L("UserAgent:  r.UserAgent(),")
 	b.L("ClientRevision: r.Header.Get(RevisionHeader),")
 	b.L("}")
+	b.L("if s.RequestID != nil {")
+	b.L("rc.RequestID = s.RequestID(r)")
+	b.L("} else {")
 	if e.tracing() {
-		b.L("if s.RequestID != nil {")
-		b.L("rc.RequestID = s.RequestID(r)")
-		b.L("} else {")
-		b.Comment("This project traces, so this request already has an identifier, " +
-			"and inventing a second one would be inventing a second answer to the " +
-			"same question. The requestId in the error body, the request_id on " +
-			"every log line and the trace in a collector are one string, and " +
-			"nobody had to wire it up.")
-		b.L("rc.RequestID = %s.TraceID(r)", b.Import(observeModule))
-		b.L("}")
+		b.Comment("The caller's own first, so a client correlating its side with " +
+			"this one is believed. Failing that, the trace: this project traces, " +
+			"so the request already has an identifier, and inventing a second one " +
+			"would be inventing a second answer to the same question. The " +
+			"requestId in the error body, the request_id on every log line and the " +
+			"trace in a collector are one string, and nobody had to wire it up.")
+		b.L("rc.RequestID = %s.Or(callerRequestID(r), %s.TraceID(r))",
+			b.Import("cmp"), b.Import(observeModule))
 	} else {
-		b.L("if s.RequestID != nil { rc.RequestID = s.RequestID(r) }")
+		b.Comment("This project does not trace, so the caller's own is the only " +
+			"identifier there is. Empty when it sent none, which is a request " +
+			"nothing can correlate — turning `tracing:` on in rig.yaml is what " +
+			"gives every request one whether or not the caller thought to.")
+		b.L("rc.RequestID = callerRequestID(r)")
 	}
+	b.L("}")
 	b.L("return rc")
 	b.L("}")
 	b.NL()
@@ -590,4 +609,63 @@ func (e *emitter) helpers(b *gobuf.Buf) {
 		e.hasPartHelper(b)
 	}
 
+}
+
+// maxRequestIDBytes bounds what a caller may name its own request.
+//
+// The value reaches an error body and every log line this request writes, so it
+// is client-controlled text in two places that are read by machines. A bound and
+// a character class are what keep a header from being a way to write whatever it
+// likes into a log file — and the number is generous: every identifier anybody
+// actually uses, a UUID or a trace id, is well under it.
+const maxRequestIDBytes = 128
+
+// requestIDWiring emits the header this API reads a caller's own identifier
+// from, and the one function that decides whether to believe it.
+//
+// A function rather than a Header.Get at each of the three call sites, because
+// the three had drifted: the resource routes took the trace, the auth routes
+// took the header, and a project that wanted both wrote the same closure into
+// its main. One answer, in one place, is the whole of this.
+func (e *emitter) requestIDWiring(b *gobuf.Buf) {
+	httpPkg := b.Import("net/http")
+
+	b.Comment("RequestIDHeader is where a caller may name its own request, so that " +
+		"its logs and this API's can be lined up afterwards.\n\n" +
+		"It is read on every route, including the authentication ones. What is " +
+		"done with it is [Server.RequestID]'s documentation.")
+	b.L("const RequestIDHeader = %s", gobuf.Quote(e.cfg.RequestIDHeader))
+	b.NL()
+
+	b.Comment("maxRequestIDBytes bounds what a caller may name its own request.\n\n" +
+		"The value reaches an error body and every log line the request writes, " +
+		"so it is client-controlled text in two places that are read by machines. " +
+		"A bound and a character class are what keep a header from being a way to " +
+		"write whatever it likes into a log file. The number is generous: every " +
+		"identifier anybody actually uses — a UUID, a trace id — is well under it.")
+	b.L("const maxRequestIDBytes = %d", maxRequestIDBytes)
+	b.NL()
+
+	b.Comment("callerRequestID is the identifier the caller asked this request to " +
+		"be known by, or empty when it did not ask or asked for something not " +
+		"worth repeating.\n\n" +
+		"Refusing rather than truncating or escaping, because a header this API " +
+		"does not understand is not one it should half-quote into a log line. " +
+		"What a caller gets for sending nonsense is the identifier it would have " +
+		"got for sending nothing.")
+	b.L("func callerRequestID(r *%s.Request) string {", httpPkg)
+	b.L("id := r.Header.Get(RequestIDHeader)")
+	b.L("if id == \"\" || len(id) > maxRequestIDBytes {")
+	b.L("return \"\"")
+	b.L("}")
+	b.Comment("Printable ASCII, which is what every identifier format in use is " +
+		"and what a log line can carry without an escape.")
+	b.L("for i := 0; i < len(id); i++ {")
+	b.L("if id[i] < 0x20 || id[i] > 0x7e {")
+	b.L("return \"\"")
+	b.L("}")
+	b.L("}")
+	b.L("return id")
+	b.L("}")
+	b.NL()
 }

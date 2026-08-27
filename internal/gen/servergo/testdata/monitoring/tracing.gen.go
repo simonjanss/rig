@@ -11,9 +11,14 @@ import (
 // Tracing is this API's tracing configuration, as far as generated code can
 // know it.
 //
-//	provider, err := observe.Setup(ctx, api.Tracing())
-//	if err != nil { return nil, err }
-//	app.CloseWithin("traces", 5*time.Second, provider.Shutdown)
+// [NewProcess] is what passes it to observe.Setup, along with the log sink and
+// the page, in the order the three have to be built in. This stays exported
+// for a project that wants the provider on terms of its own — a different
+// exporter, a service version this build knows and rig.yaml does not:
+//
+//	cfg := api.Tracing()
+//	cfg.ServiceVersion = build.Version
+//	provider, err := observe.Setup(ctx, cfg)
 //
 // The name comes from rig.yaml, so nothing is typed twice. What is not here is
 // where the spans go: a collector, or a file, is a property of the deployment

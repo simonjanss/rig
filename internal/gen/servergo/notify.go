@@ -69,6 +69,7 @@ func (e *emitter) notificationsFile() (gen.Artifact, error) {
 	b := gobuf.New(e.cfg.Package)
 
 	e.notifyConstructor(b)
+	e.notifyStarter(b)
 	e.notifyLinks(b)
 	e.notifyDispatcher(b)
 	e.notifyPropagation(b)
@@ -298,4 +299,38 @@ func (e *emitter) notifyPropagation(b *gobuf.Buf) {
 		b.L("}")
 		b.NL()
 	}
+}
+
+// notifyStarter emits the three lines every main that runs an engine used to
+// write out.
+//
+// The engine is a parameter rather than something built here, for the reason
+// NewNotificationEngine takes a registry: the audience for a notification is a
+// method on a service, and a service is built where the application decides.
+func (e *emitter) notifyStarter(b *gobuf.Buf) {
+	var (
+		notifyPkg = b.Import(notifyModule)
+		servePkg  = b.Import(runtimeModule + "/serve")
+	)
+
+	b.Comment("StartNotificationEngine starts the engine and registers its two " +
+		"shutdown steps, which is the whole of what a main function does with " +
+		"one:\n\n" +
+		"\tengine := api.NewNotificationEngine(app.Pool, reg, senders)\n" +
+		"\tapi.StartNotificationEngine(app, engine)\n\n" +
+		"Draining stops it claiming while the server is still answering, which is " +
+		"the right order: the requests in flight are the last ones whose commits " +
+		"will nudge it, and the time left is better spent finishing than " +
+		"starting. Closing runs before the pool goes, because what is in flight " +
+		"is a write.\n\n" +
+		"The engine this runs is latency, not the guarantee. " +
+		"[NotificationDispatcher] behind a `Tasks:` entry is the guarantee: it is " +
+		"what takes everything a process that died mid-pass, or a replica that " +
+		"never ran one, did not.")
+	b.L("func StartNotificationEngine(app *%s.App, engine *%s.Engine) {", servePkg, notifyPkg)
+	b.L("engine.Start()")
+	b.L("app.Drain(%s, engine.StopClaiming)", gobuf.Quote("notifications"))
+	b.L("app.CloseWithin(%s, %s, engine.Close)", gobuf.Quote("notifications"), notificationsConst)
+	b.L("}")
+	b.NL()
 }

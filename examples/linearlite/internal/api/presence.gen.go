@@ -63,12 +63,10 @@ func PresenceTargets() []string {
 	}
 }
 
-// NewPresenceSweeper builds the housekeeping. Start it and register its
-// shutdown beside the line that builds it:
-//
-//	sweeper := api.NewPresenceSweeper(presence)
-//	sweeper.Start()
-//	app.CloseWithin("presence", 5*time.Second, sweeper.Close)
+// NewPresenceSweeper builds the housekeeping, for a project that wants to
+// start it on terms of its own. [StartPresenceSweeper] is the ordinary way —
+// it builds one over the pool the server already has, starts it, and registers
+// its shutdown.
 //
 // No Drain step, unlike the notification engine. There is nothing in flight
 // worth finishing: a pass interrupted mid-DELETE leaves rows that the next
@@ -107,4 +105,30 @@ func PresenceSweep(sweeper *presence.Sweeper) serve.Task {
 		_, err := sweeper.Sweep(ctx)
 		return err
 	}
+}
+
+// StartPresenceSweeper starts the housekeeping and registers its shutdown,
+// which is the whole of what a main function does with it:
+//
+//	api.StartPresenceSweeper(app)
+//
+// The service it sweeps through is its own, built over app.Pool. Nothing in a
+// presence service is stateful — a heartbeat is a write and a read is a
+// query — so a second one beside the one the handlers were given is two
+// structs over one pool, and the alternative was threading a service out of
+// wherever this application happened to build it.
+//
+// A goroutine at all, unlike a dispatcher, and that is a decision rather than
+// an inconsistency. Resolving an audience twice costs a read and sending twice
+// costs somebody a duplicate mail, so that takes a lease; deleting rows that
+// have already expired is idempotent, so two replicas sweeping at once agree
+// and the loser deletes nothing. Running this and the `sweep-presence` task
+// both is not a mistake either, for the same reason.
+//
+// No Drain, because there is nothing in flight worth finishing: a pass
+// interrupted mid-DELETE leaves rows that the next pass takes.
+func StartPresenceSweeper(app *serve.App) {
+	sweeper := NewPresenceSweeper(NewPresence(app.Pool))
+	sweeper.Start()
+	app.CloseWithin("presence", presenceShutdown, sweeper.Close)
 }

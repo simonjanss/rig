@@ -38,27 +38,31 @@
 //
 // Every route above is mounted by internal/app's New, which is a package
 // rather than a function here so that the suite in integration/ builds exactly
-// what ships. What is left in this file is the process around it: the log
-// sink, the tracing provider, the embedded migrations, and the serve.Config
-// naming the tasks a cron entry runs.
+// what ships. What is left in this file is the part of the process rig.yaml
+// does not already decide: the embedded migrations, the two addresses, and the
+// three tasks that are this application's own.
+//
+// The rest of the process is generated from the blocks that describe it. The
+// log sink, the tracing provider and the monitoring page are api.NewProcess,
+// out of `tracing:` and `monitoring:`; the shutdown budget is
+// api.ShutdownBudget, out of the closers `tracing:`, `notifications:` and
+// `presence:` between them register; the housekeeping subcommands are
+// api.Tasks, out of `files:` and `presence:`. None of those numbers is written
+// down twice, which is the whole reason they are not written down here.
 package main
 
 import (
 	"cmp"
 	"context"
 	"embed"
-	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgxpool"
-
 	"github.com/simonjanss/rig/examples/linearlite/internal/api"
 	"github.com/simonjanss/rig/examples/linearlite/internal/app"
 	"github.com/simonjanss/rig/migrate"
-	"github.com/simonjanss/rig/observe"
 	"github.com/simonjanss/rig/runtime/serve"
 )
 
@@ -96,79 +100,36 @@ func migrationSources() []migrate.Source {
 const localDSN = "postgres://rig:rig@localhost:55444/rig?sslmode=disable&TimeZone=UTC"
 
 func main() {
-	// The log file rig's own monitoring page reads. Opened before the server,
-	// because the logger is built out of it and the lines written while
-	// starting up are lines worth having on the page. Nothing is written unless
-	// $RIG_LOG_FILE says where — `make demo` points it at .run/ — and then this
-	// costs one branch per log call and nothing else.
-	logs, err := observe.OpenLogs(observe.LogConfig{})
+	// The log file rig's own monitoring page reads, the provider writing the
+	// spans it reads beside them, and the page over both. One call, because the
+	// three have an order — the sink before the logger built out of it, the
+	// provider before the page that reads its file — and rig.yaml is where every
+	// part of it was decided.
+	//
+	// Nothing is written and nothing exported unless the environment says where:
+	// $RIG_LOG_FILE, $RIG_TRACE_FILE, $OTEL_EXPORTER_OTLP_ENDPOINT. `make demo`
+	// points the first two at .run/ and sets a monitoring password, which is what
+	// gives the tour something to open. With none of them set the spans cost
+	// nothing, the trace ids are still real — which is what the request id in
+	// every error body is — and the page opens no port and says so once.
+	process, err := api.NewProcess()
 	if err != nil {
-		// There is no logger yet: this is the thing that would have been half
-		// of one.
-		fmt.Fprintln(os.Stderr, "cannot open the log file:", err)
+		// There is no application logger yet: this is the thing that would have
+		// been half of one. slog.Default writes to stderr, which is where this
+		// went before it was a structured line.
+		slog.Error("cannot set this process up", "error", err)
 		os.Exit(1)
 	}
+	// The flush, here as well as in the CloseWithin that Attach registers below,
+	// because a provider built out here is reached by both ways out of this
+	// process. A `Tasks:` entry — `migrate`, `seed`, the cron ones — never
+	// reaches the mount closure: serve.Main runs the task and returns. Shutdown
+	// is idempotent, so the server path running both finds nothing to do twice.
+	defer process.Close()
 
-	// Spans. Nothing is exported unless the environment says where to:
-	// $OTEL_EXPORTER_OTLP_ENDPOINT for a collector, $RIG_TRACE_FILE for a file.
-	// With neither, the spans cost nothing and the trace ids are still real —
-	// which is what the request id in every error body is.
-	//
-	// Out here rather than inside the mount closure below, because the page
-	// hanging off it is half of serve.Config and the closure runs after that is
-	// built. context.Background rather than the startup budget for the same
-	// reason; setting a provider up talks to nothing.
-	tracing, err := observe.Setup(context.Background(), api.Tracing())
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "cannot set tracing up:", err)
-		os.Exit(1)
-	}
-
-	// And the flush, here as well as in the CloseWithin below, because a
-	// provider built in main is reached by both ways out of this process. A
-	// `Tasks:` entry — `migrate`, `seed`, the two cron ones — never reaches the
-	// mount closure: serve.Main runs the task and returns. Without this, an
-	// hourly dispatch-notifications with $RIG_TRACE_FILE set would open a
-	// second rotating writer on the span file the server is already rotating
-	// and then drop everything it buffered on the way out.
-	//
-	// The server path runs both, and the second finds nothing left to do:
-	// Shutdown is idempotent.
-	defer func() {
-		flushing, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		if err := tracing.Shutdown(flushing); err != nil {
-			fmt.Fprintln(os.Stderr, "cannot flush the spans:", err)
-		}
-	}()
-
-	// rig's own page over those spans and those log lines. It reads the span
-	// file the provider above is writing, which is why it hangs off it, and the
-	// log sink opened above, which is why that is set here rather than
-	// generated.
-	//
-	// It listens on 127.0.0.1:9084 — rig.yaml says so — rather than answering
-	// on the API's 8084, because a page that lists every path, request id and
-	// error cause this server has seen should be reachable on terms the kernel
-	// enforces rather than on a path. With no $RIG_MONITOR_PASSWORD it opens no
-	// port at all and says so once.
-	monitoring := api.Monitoring()
-	monitoring.Logs = logs
-	page, err := tracing.Page(monitoring)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "cannot build the monitoring page:", err)
-		os.Exit(1)
-	}
-
-	serve.Main(serve.Config{
+	serve.Main(process.Configure(serve.Config{
 		DatabaseURL: cmp.Or(os.Getenv("DATABASE_URL"), localDSN),
 		Addr:        cmp.Or(os.Getenv("ADDR"), "127.0.0.1:8084"),
-
-		// The monitoring page, on a listener of its own in this same process.
-		// Both are zero when the page is unarmed, and then no second port is
-		// opened — which is what a laptop with no password set gets.
-		Monitor:     page.Handler(),
-		MonitorAddr: page.Addr(),
 
 		LivenessPath:  "/livez",
 		ReadinessPath: "/readyz",
@@ -177,28 +138,17 @@ func main() {
 			"or point $DATABASE_URL at a database you already have",
 
 		MaxStartup: 30 * time.Second,
-		// Thirty-five, because the three closers below now declare twenty-five
-		// between them — fifteen for the notification engine, five for a trace
-		// flush, five for the presence sweeper — and a budget exactly spoken for
-		// leaves nothing for the requests still in flight. serve warns about
-		// that at startup rather than letting it turn up as a truncated
-		// shutdown under load.
-		MaxShutdown: 35 * time.Second,
+		// Thirty-five seconds, and not written here as one: the three closers
+		// rig registers declare twenty-five between them — fifteen for the
+		// notification engine, five for a trace flush, five for the presence
+		// sweeper — and ten is what is left for the requests still in flight.
+		// This example registers no closer of its own, so the generated budget
+		// is the whole of it. It is also the number to copy into Kubernetes'
+		// terminationGracePeriodSeconds, and api.ShutdownBudget's documentation
+		// states it in words for somebody reading a manifest rather than this.
+		MaxShutdown: api.ShutdownBudget(),
 
-		// Stderr, and the file the monitoring page reads. The two keep their
-		// own levels: this one stays at whatever the default handler is set to,
-		// and the file keeps debug — which is where rig's request line is, so
-		// the page has requests to list without this process printing one per
-		// request to a terminal nobody is watching.
-		Logger: slog.New(observe.Tee(slog.Default().Handler(), logs.Handler())),
-
-		// A span per statement, from the connection rather than from the
-		// generated code: a tracer here sees every query, including the ones the
-		// notification engine, the file sweeper and the Electric proxy run and
-		// the ones no generator wrote.
-		Pool: observe.Pool,
-
-		Tasks: map[string]serve.Task{
+		Tasks: api.Tasks(map[string]serve.Task{
 			"migrate": migrate.ApplyAll(migrationSources(), migrate.Options{Log: os.Stdout}),
 			// The demo tenant, two people to sign in as, the level roles, and a
 			// board's worth of items. Idempotent, so running it twice is not an
@@ -206,68 +156,39 @@ func main() {
 			"seed": app.Seed,
 			// The inbox's guarantee. The engine the server runs is latency; this
 			// is what takes everything it did not — a process that died mid-pass,
-			// a replica that never ran.
+			// a replica that never ran. It is written here rather than generated
+			// because the audience for a notification is a method on a service,
+			// and a task that dispatches has to build one.
 			"dispatch-notifications": app.DispatchNotifications,
-			// Uploads whose row never arrived, and file rows whose restore window
-			// has closed.
-			"sweep-files": func(ctx context.Context, pool *pgxpool.Pool) error {
-				return api.FileSweeper(api.NewFiles(pool))(ctx, pool)
-			},
-			// Presence rows past their window, for an operator who would rather
-			// this were a cron job than the goroutine below. Unlike
-			// dispatch-notifications it is not the guarantee behind anything:
-			// who is present is decided by whoever is reading, against the
-			// clock, and correctly within a second. This only keeps the table —
-			// and every new subscriber's first fetch — from carrying yesterday.
-			"sweep-presence": func(ctx context.Context, pool *pgxpool.Pool) error {
-				return api.PresenceSweep(api.NewPresenceSweeper(api.NewPresence(pool)))(ctx, pool)
-			},
-			// The records of writes that carried an Idempotency-Key — the import
-			// job's, mostly. Zero takes the default retention, a day.
-			"prune-idempotency": api.IdempotencyPruner(0),
-		},
+			// sweep-files, sweep-presence and prune-idempotency are api.Tasks's:
+			// one generated call each, with every number from rig.yaml and
+			// nothing left in them for this file to decide.
+		}),
 		Migrate: migrate.RequireAll(migrationSources(), migrate.Options{}),
-	}, func(ctx context.Context, srv *serve.App) (http.Handler, error) {
-		// Its own limit, because a flush to a collector that is not answering
-		// must not spend the whole shutdown budget. The provider it stops was
-		// built in main; this is the first place there is an App to register a
-		// closer with, and it is the server's half of the pair — the defer in
-		// main is the half a task run reaches.
-		srv.CloseWithin("traces", 5*time.Second, tracing.Shutdown)
+	}), func(ctx context.Context, srv *serve.App) (http.Handler, error) {
+		// The trace flush with a limit of its own, and a line about either half
+		// of the page that is not armed. Here rather than in main because an App
+		// is the first thing there is to register a shutdown step with, and
+		// because this is where there is a logger writing to the file the page
+		// would have read.
+		process.Attach(srv)
 
-		// Said here rather than in main because this is where there is a logger
-		// that writes to the file the page would have read.
-		if why := page.Unarmed(); why != "" {
-			srv.Logger.Info("monitoring page not listening", "reason", why)
-		}
+		// Housekeeping for rig_presence, and a goroutine rather than only the
+		// sweep-presence task above — which is a decision, not an inconsistency
+		// with the engine below. The dispatcher takes a lease because resolving
+		// an audience twice costs a read and sending twice costs somebody a
+		// duplicate mail; deleting rows that have already expired is idempotent,
+		// so two replicas sweeping at once agree and the loser deletes nothing.
+		api.StartPresenceSweeper(srv)
 
-		mux, engine, err := app.New(ctx, srv.Pool, srv.Logger, page)
+		mux, engine, err := app.New(ctx, srv.Pool, srv.Logger, process.Page())
 		if err != nil {
 			return nil, err
 		}
 
 		// The engine turns a committed notification into inbox lines within
-		// milliseconds; the cron task above is the guarantee behind it.
-		// Draining stops it claiming while the server finishes what it has,
-		// and closing runs before the pool goes, because what is in flight is
-		// a write.
-		engine.Start()
-		srv.Drain("notifications", engine.StopClaiming)
-		srv.CloseWithin("notifications", 15*time.Second, engine.Close)
-
-		// Housekeeping for rig_presence, and a goroutine rather than only the
-		// cron task above — which is a decision, not an inconsistency with the
-		// engine beside it. The dispatcher takes a lease because resolving an
-		// audience twice costs a read and sending twice costs somebody a
-		// duplicate mail; deleting rows that have already expired is
-		// idempotent, so two replicas sweeping at once agree and the loser
-		// deletes nothing.
-		//
-		// No Drain either: there is nothing in flight worth finishing. A pass
-		// interrupted mid-DELETE leaves rows the next pass takes.
-		sweeper := api.NewPresenceSweeper(api.NewPresence(srv.Pool))
-		sweeper.Start()
-		srv.CloseWithin("presence", 5*time.Second, sweeper.Close)
+		// milliseconds; dispatch-notifications above is the guarantee behind it.
+		api.StartNotificationEngine(srv, engine)
 
 		return mux, nil
 	})

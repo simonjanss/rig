@@ -11,6 +11,16 @@ import (
 // otel out of the go.mod of every project that did not.
 const observeModule = "github.com/simonjanss/rig/observe"
 
+// The three environment variables that decide whether any of this costs
+// anything at run time, spelled rather than imported for the reason
+// [observeAddrEnv] is: importing rig/observe would put OpenTelemetry in the
+// CLI's binary, and these are three strings in a doc comment.
+const (
+	observeLogFileEnv = "RIG_LOG_FILE"
+	observeFileEnv    = "RIG_TRACE_FILE"
+	otelEndpointEnv   = "OTEL_EXPORTER_OTLP_ENDPOINT"
+)
+
 // tracing reports whether this document asked for spans.
 func (e *emitter) tracing() bool {
 	return e.doc.API.Tracing != nil && e.doc.API.Tracing.Enabled
@@ -54,9 +64,14 @@ func (e *emitter) tracingFile() (gen.Artifact, error) {
 
 	b.Comment("Tracing is this API's tracing configuration, as far as generated " +
 		"code can know it.\n\n" +
-		"\tprovider, err := observe.Setup(ctx, api.Tracing())\n" +
-		"\tif err != nil { return nil, err }\n" +
-		"\tapp.CloseWithin(\"traces\", 5*time.Second, provider.Shutdown)\n\n" +
+		"[NewProcess] is what passes it to observe.Setup, along with the log sink " +
+		"and the page, in the order the three have to be built in. This stays " +
+		"exported for a project that wants the provider on terms of its own — a " +
+		"different exporter, a service version this build knows and rig.yaml does " +
+		"not:\n\n" +
+		"\tcfg := api.Tracing()\n" +
+		"\tcfg.ServiceVersion = build.Version\n" +
+		"\tprovider, err := observe.Setup(ctx, cfg)\n\n" +
 		"The name comes from rig.yaml, so nothing is typed twice. What is not " +
 		"here is where the spans go: a collector, or a file, is a property of " +
 		"the deployment rather than of this build, and the same binary runs " +

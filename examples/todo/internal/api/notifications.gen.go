@@ -67,6 +67,26 @@ func NewNotificationEngine(db notify.DB, reg *notify.Registry, senders map[notif
 	})
 }
 
+// StartNotificationEngine starts the engine and registers its two shutdown
+// steps, which is the whole of what a main function does with one:
+//
+//	engine := api.NewNotificationEngine(app.Pool, reg, senders)
+//	api.StartNotificationEngine(app, engine)
+//
+// Draining stops it claiming while the server is still answering, which is the
+// right order: the requests in flight are the last ones whose commits will
+// nudge it, and the time left is better spent finishing than starting. Closing
+// runs before the pool goes, because what is in flight is a write.
+//
+// The engine this runs is latency, not the guarantee. [NotificationDispatcher]
+// behind a `Tasks:` entry is the guarantee: it is what takes everything a
+// process that died mid-pass, or a replica that never ran one, did not.
+func StartNotificationEngine(app *serve.App, engine *notify.Engine) {
+	engine.Start()
+	app.Drain("notifications", engine.StopClaiming)
+	app.CloseWithin("notifications", notificationsShutdown, engine.Close)
+}
+
 // NotificationLinks are the join tables that say which row a notification is
 // about.
 //

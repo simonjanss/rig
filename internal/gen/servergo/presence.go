@@ -52,6 +52,7 @@ func (e *emitter) presenceFile() (gen.Artifact, error) {
 	e.presenceConstructor(b)
 	e.presenceTargetList(b)
 	e.presenceSweeper(b)
+	e.presenceStarter(b)
 
 	return artifact("presence.gen.go", b)
 }
@@ -132,11 +133,10 @@ func (e *emitter) presenceSweeper(b *gobuf.Buf) {
 	)
 	cfg := e.doc.API.Presence
 
-	b.Comment("NewPresenceSweeper builds the housekeeping. Start it and register " +
-		"its shutdown beside the line that builds it:\n\n" +
-		"\tsweeper := api.NewPresenceSweeper(presence)\n" +
-		"\tsweeper.Start()\n" +
-		"\tapp.CloseWithin(\"presence\", 5*time.Second, sweeper.Close)\n\n" +
+	b.Comment("NewPresenceSweeper builds the housekeeping, for a project that " +
+		"wants to start it on terms of its own. [StartPresenceSweeper] is the " +
+		"ordinary way — it builds one over the pool the server already has, starts " +
+		"it, and registers its shutdown.\n\n" +
 		"No Drain step, unlike the notification engine. There is nothing in " +
 		"flight worth finishing: a pass interrupted mid-DELETE leaves rows that " +
 		"the next pass takes, in whichever replica runs it.\n\n" +
@@ -173,6 +173,36 @@ func (e *emitter) presenceSweeper(b *gobuf.Buf) {
 	b.L("_, err := sweeper.Sweep(ctx)")
 	b.L("return err")
 	b.L("}")
+	b.L("}")
+	b.NL()
+}
+
+// presenceStarter emits the three lines every main that tracks presence used to
+// copy out of the comment above.
+func (e *emitter) presenceStarter(b *gobuf.Buf) {
+	servePkg := b.Import(runtimeModule + "/serve")
+
+	b.Comment("StartPresenceSweeper starts the housekeeping and registers its " +
+		"shutdown, which is the whole of what a main function does with it:\n\n" +
+		"\tapi.StartPresenceSweeper(app)\n\n" +
+		"The service it sweeps through is its own, built over app.Pool. Nothing " +
+		"in a presence service is stateful — a heartbeat is a write and a read is " +
+		"a query — so a second one beside the one the handlers were given is two " +
+		"structs over one pool, and the alternative was threading a service out " +
+		"of wherever this application happened to build it.\n\n" +
+		"A goroutine at all, unlike a dispatcher, and that is a decision rather " +
+		"than an inconsistency. Resolving an audience twice costs a read and " +
+		"sending twice costs somebody a duplicate mail, so that takes a lease; " +
+		"deleting rows that have already expired is idempotent, so two replicas " +
+		"sweeping at once agree and the loser deletes nothing. Running this and " +
+		"the `sweep-presence` task both is not a mistake either, for the same " +
+		"reason.\n\n" +
+		"No Drain, because there is nothing in flight worth finishing: a pass " +
+		"interrupted mid-DELETE leaves rows that the next pass takes.")
+	b.L("func StartPresenceSweeper(app *%s.App) {", servePkg)
+	b.L("sweeper := NewPresenceSweeper(NewPresence(app.Pool))")
+	b.L("sweeper.Start()")
+	b.L("app.CloseWithin(%s, %s, sweeper.Close)", gobuf.Quote("presence"), presenceConst)
 	b.L("}")
 	b.NL()
 }

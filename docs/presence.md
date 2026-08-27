@@ -97,16 +97,14 @@ Two ways to run it, and unlike the notification dispatcher **neither of them is
 the guarantee**:
 
 ```go
-// In the mount closure: a ticker, for latency.
-sweeper := api.NewPresenceSweeper(api.NewPresence(app.Pool))
-sweeper.Start()
-app.CloseWithin("presence", 5*time.Second, sweeper.Close)
-
-// And in Tasks, for an operator who would rather it were a cron job.
-"sweep-presence": func(ctx context.Context, pool *pgxpool.Pool) error {
-    return api.PresenceSweep(api.NewPresenceSweeper(api.NewPresence(pool)))(ctx, pool)
-},
+// In the mount closure: a ticker, for latency. It builds the sweeper over
+// app.Pool, starts it, and registers its shutdown.
+api.StartPresenceSweeper(app)
 ```
+
+The other way is already wired: `api.Tasks(…)` carries a `sweep-presence` entry
+for an operator who would rather it were a cron job than a goroutine. Running
+both is not a mistake — see below.
 
 Skipping both costs space and a slower first fetch, and nothing else — who is
 present is still right.
