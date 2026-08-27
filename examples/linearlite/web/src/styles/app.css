@@ -280,6 +280,47 @@
     padding: 14px;
 }
 
+/* The stand-in for a card whose row has not arrived yet. Sized like a card so
+   the board does not reflow when the real ones land, and pulsing rather than
+   static so it reads as waiting rather than as a card that failed to render.
+   Three per column is a guess at nothing: the count is unknown, and a guess is
+   the honest thing to show for an unknown one. */
+.card-skeleton {
+    height: 58px;
+    border-radius: var(--radius-small);
+    border: 1px solid var(--border);
+    background: var(--bg-hover);
+    animation: pulse 1.2s ease-in-out infinite;
+}
+
+.card-skeleton:nth-child(2) {
+    animation-delay: 0.15s;
+    opacity: 0.75;
+}
+
+.card-skeleton:nth-child(3) {
+    animation-delay: 0.3s;
+    opacity: 0.5;
+}
+
+@keyframes pulse {
+    0%,
+    100% {
+        opacity: 0.35;
+    }
+    50% {
+        opacity: 0.7;
+    }
+}
+
+/* Somebody who has asked not to see movement gets the placeholder without it.
+   The shape is the information; the pulse is only what says it is still coming. */
+@media (prefers-reduced-motion: reduce) {
+    .card-skeleton {
+        animation: none;
+    }
+}
+
 .card {
     background: var(--bg-hover);
     border: 1px solid var(--border);

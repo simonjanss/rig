@@ -432,6 +432,14 @@ func TestOnErrorSeesWhyTheAnswerWasNotTheSyncServices(t *testing.T) {
 	if !strings.Contains(seen[1], "the database is gone too") {
 		t.Errorf("the refusal did not reach OnError: %q", seen[1])
 	}
+	// And both name the shape. A handler is given a context and an error, so if
+	// the table is not in the line there is nothing it can add to find it —
+	// which during an outage is one indistinguishable line per shape.
+	for i, line := range seen {
+		if !strings.Contains(line, "lesson") {
+			t.Errorf("seen[%d] does not name the shape: %q", i, line)
+		}
+	}
 }
 
 // While the sync service answers, nothing else is consulted. A fallback that

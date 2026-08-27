@@ -244,6 +244,11 @@ type Config struct {
 	// A request the circuit refused to make is not one of them: it attempted
 	// nothing, so it learned nothing worth a second line. What is worth a line is
 	// the circuit opening, and that is [OnSyncState].
+	//
+	// Every error names the [Shape.Table] it came from. This takes a context and
+	// an error and nothing else, so a handler cannot add the route afterwards —
+	// and without it an application serving four shapes gets four identical lines
+	// during one outage.
 	OnError func(context.Context, error)
 
 	// OnSyncState is told when the answer to whether the sync service is there
@@ -547,7 +552,14 @@ func (p *Proxy) note(r *http.Request, reachable bool) {
 // unavailable answers a request the sync service could not, and reports why.
 func (p *Proxy) unavailable(w http.ResponseWriter, r *http.Request, s Shape, cause error) {
 	if p.onError != nil {
-		p.onError(r.Context(), cause)
+		// Named with its table, because [Config.OnError] takes a context and an
+		// error and nothing else: a request that has already been routed to a
+		// shape is past the point where a handler could add the route, so if the
+		// table is not in the error it is nowhere. An application serving four
+		// shapes otherwise gets four identical lines and no way to tell which
+		// subscriber waited — which matters most on the timeout, where the one
+		// that paid it is exactly the question.
+		p.onError(r.Context(), fmt.Errorf("%w, for shape %s", cause, s.Table))
 	}
 	p.answer(w, r, s)
 }

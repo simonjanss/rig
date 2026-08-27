@@ -19,7 +19,12 @@ import { useToasts } from "../toast/ToastContext.js";
  */
 export function TrashPage() {
     const deleted = createTodoDeletedStream(client.runtime, {});
-    const { data } = useLiveQuery((q) => q.from({ deleted }));
+    // isReady matters more here than on the board: until the stream reaches
+    // up-to-date, `data` is an empty array, and the empty state below does not
+    // say "nothing yet" — it asserts the trash is empty and invites you to go
+    // delete something. That is a false sentence for as long as the first
+    // response is in flight.
+    const { data, isReady } = useLiveQuery((q) => q.from({ deleted }));
     const { push } = useToasts();
     const [busy, setBusy] = useState<string | null>(null);
 
@@ -45,7 +50,8 @@ export function TrashPage() {
     return (
         <div className="trash">
             <h2>Trash</h2>
-            {rows.length === 0 && (
+            {!isReady && <p className="trash-empty">Loading…</p>}
+            {isReady && rows.length === 0 && (
                 <p className="trash-empty">
                     Nothing here. Delete an item on the board and it moves over
                     — live, in both directions.

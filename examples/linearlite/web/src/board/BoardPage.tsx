@@ -34,7 +34,14 @@ export function BoardPage() {
     // Safe to call during render: the factory caches by runtime and params,
     // so every visit to the board shares one subscription.
     const todos = createTodoStream(client.runtime, {});
-    const { data } = useLiveQuery((q) => q.from({ todos }));
+    // isReady, not just data: a shape's initial response ends with snapshot-end
+    // and it takes a second round trip to reach up-to-date, so there is a
+    // stretch where data is an empty array that means "not yet" rather than
+    // "nothing". Without this the columns render their empty affordance and a
+    // loading board is pixel-identical to an empty one — five columns, a count
+    // of zero and "Drop items here", which is a wrong answer confidently given
+    // rather than a wait somebody can read.
+    const { data, isReady } = useLiveQuery((q) => q.from({ todos }));
 
     const { move, apply, settleEchoed } = usePendingMoves();
     const [dragging, setDragging] = useState<BoardTodo | null>(null);
@@ -92,6 +99,7 @@ export function BoardPage() {
                             key={status}
                             status={status}
                             todos={byStatus.get(status) ?? []}
+                            loading={!isReady}
                         />
                     ))}
                 </div>
