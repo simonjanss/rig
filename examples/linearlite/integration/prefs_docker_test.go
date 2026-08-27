@@ -1,6 +1,6 @@
 //go:build docker
 
-package main
+package integration
 
 import (
 	"context"
@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/simonjanss/rig/examples/linearlite/internal/app"
 	"github.com/simonjanss/rig/examples/linearlite/services/outbox"
 	"github.com/simonjanss/rig/notify"
 )
@@ -24,10 +25,10 @@ func TestNotificationPreferencesAreYourOwn(t *testing.T) {
 	api := newServer(t)
 	tenant := api.seed(t)
 
-	demoToken := api.login(t, SeedEmail)
-	alexToken := api.login(t, SeedEmail2)
-	demo := api.accountID(t, tenant, SeedEmail)
-	alex := api.accountID(t, tenant, SeedEmail2)
+	demoToken := api.login(t, app.SeedEmail)
+	alexToken := api.login(t, app.SeedEmail2)
+	demo := api.accountID(t, tenant, app.SeedEmail)
+	alex := api.accountID(t, tenant, app.SeedEmail2)
 
 	const settings = "/api/v1/rig-notification-settings"
 
@@ -140,9 +141,9 @@ func TestADesktopDeliveryReachesTheDeviceChannel(t *testing.T) {
 	api := newServer(t)
 	tenant := api.seed(t)
 
-	demoToken := api.login(t, SeedEmail)
-	alexToken := api.login(t, SeedEmail2)
-	demo := api.accountID(t, tenant, SeedEmail)
+	demoToken := api.login(t, app.SeedEmail)
+	alexToken := api.login(t, app.SeedEmail2)
+	demo := api.accountID(t, tenant, app.SeedEmail)
 
 	if res := api.do(t, request{
 		method: http.MethodPost, path: "/api/v1/rig-notification-devices", token: demoToken,
@@ -268,7 +269,7 @@ func clearPreference(t *testing.T, api *server, token, channel string) {
 func TestTheTourNamesTheChannelsWithASender(t *testing.T) {
 	api := newServer(t)
 	api.seed(t)
-	token := api.login(t, SeedEmail)
+	token := api.login(t, app.SeedEmail)
 
 	res := api.do(t, request{method: http.MethodGet, path: "/_demo/tour", token: token})
 	if res.status != http.StatusOK {

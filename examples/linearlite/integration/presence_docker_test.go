@@ -1,6 +1,6 @@
 //go:build docker
 
-package main
+package integration
 
 import (
 	"context"
@@ -8,6 +8,8 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+
+	"github.com/simonjanss/rig/examples/linearlite/internal/app"
 )
 
 // Presence, over the three hand-written routes under /presence.
@@ -19,8 +21,8 @@ import (
 func TestPresence(t *testing.T) {
 	api := newServer(t)
 	tenant := api.seed(t)
-	token := api.login(t, SeedEmail)
-	demo := api.accountID(t, tenant, SeedEmail)
+	token := api.login(t, app.SeedEmail)
+	demo := api.accountID(t, tenant, app.SeedEmail)
 
 	// A tab has to name itself. Two tabs of one account are two rows, so the
 	// key is what keeps them from overwriting each other on every beat.

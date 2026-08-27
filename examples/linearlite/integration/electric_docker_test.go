@@ -1,6 +1,6 @@
 //go:build docker
 
-package main
+package integration
 
 import (
 	"encoding/json"
@@ -9,6 +9,8 @@ import (
 	"os/exec"
 	"strings"
 	"testing"
+
+	"github.com/simonjanss/rig/examples/linearlite/internal/app"
 )
 
 // The shape routes, against a real sync service when one is around.
@@ -42,7 +44,7 @@ func TestTheShapeRoutes(t *testing.T) {
 		t.Skip("no $ELECTRIC_URL: run `rig db up` here and export the sync URL it prints to run the live half")
 	}
 
-	token := api.login(t, SeedEmail)
+	token := api.login(t, app.SeedEmail)
 	for _, path := range []string{
 		"/api/v1/todo/_stream?offset=-1",
 		// The scope is what services/rig_presence narrows on, so this is also
@@ -73,7 +75,7 @@ func TestTheBoardSurvivesTheSyncServiceBeingDown(t *testing.T) {
 
 	api := newServer(t)
 	api.seed(t)
-	token := api.login(t, SeedEmail)
+	token := api.login(t, app.SeedEmail)
 
 	res := api.do(t, request{
 		method: http.MethodGet,
@@ -228,11 +230,11 @@ func TestTheBoardSurvivesTheSyncServiceBeingDown(t *testing.T) {
 // person clicking it.
 func TestTheSyncSwitch(t *testing.T) {
 	t.Run("is not there when no container is named", func(t *testing.T) {
-		t.Setenv(SyncSwitchEnv, "")
+		t.Setenv(app.SyncSwitchEnv, "")
 
 		api := newServer(t)
 		api.seed(t)
-		token := api.login(t, SeedEmail)
+		token := api.login(t, app.SeedEmail)
 
 		// Not 401, not 403: the route does not exist, which is what keeps a
 		// scan from learning this process can reach a container engine.
@@ -252,7 +254,7 @@ func TestTheSyncSwitch(t *testing.T) {
 		// A name no container has. The route then reports honestly rather than
 		// touching anything — the same answer a checkout that has never run
 		// `rig db up` would get, and the reason this test needs no sync service.
-		t.Setenv(SyncSwitchEnv, "linearlite-electric-no-such-container")
+		t.Setenv(app.SyncSwitchEnv, "linearlite-electric-no-such-container")
 
 		api := newServer(t)
 		api.seed(t)
@@ -262,7 +264,7 @@ func TestTheSyncSwitch(t *testing.T) {
 			t.Errorf("an anonymous GET /_demo/sync: %d %s, want 401", anon.status, anon.body)
 		}
 
-		token := api.login(t, SeedEmail)
+		token := api.login(t, app.SeedEmail)
 		if sync := api.tourSync(t, token); !sync {
 			t.Error("the tour hides a switch this build did mount")
 		}
@@ -271,7 +273,7 @@ func TestTheSyncSwitch(t *testing.T) {
 		if res.status != http.StatusOK {
 			t.Fatalf("GET /_demo/sync: %d %s", res.status, res.body)
 		}
-		var state syncState
+		var state app.SyncState
 		res.decode(t, &state)
 		if state.Container != "missing" {
 			t.Errorf("container = %q, want \"missing\" for one that was never created", state.Container)

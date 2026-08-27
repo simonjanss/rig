@@ -1,10 +1,20 @@
 //go:build docker
 
-// The example's docker suite shares one harness: a real database, the same
-// newAPI main serves, and a handful of helpers for the requests every flow
-// makes. Each concern then has a file of its own — the auth flow, the API's
-// lifecycle, the notifications, the import job, the shapes.
-package main
+// Package integration is this example's tests, all of them.
+//
+//	go test -tags docker ./integration/
+//
+// The docker suite shares one harness: a real database, the same app.New main
+// serves, and a handful of helpers for the requests every flow makes. Each
+// concern then has a file of its own — the auth flow, the API's lifecycle, the
+// notifications, the import job, the shapes. monitor_test.go is the one file
+// here with no build tag, so `go test ./...` runs it and nothing else.
+//
+// A folder of its own rather than the example root, which is where the rest of
+// the repository keeps a docker suite: these files build the server through
+// internal/app, and no test can import a `main`. The example root is the
+// application.
+package integration
 
 import (
 	"bytes"
@@ -19,6 +29,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/simonjanss/rig/examples/linearlite/internal/app"
 	"github.com/simonjanss/rig/examples/linearlite/services/outbox"
 	"github.com/simonjanss/rig/notify"
 )
@@ -56,7 +67,7 @@ func newServer(t *testing.T) *server {
 	// monitoring page: mounting one would need a password in the environment
 	// and a span file to read, and what it serves is covered on its own in
 	// monitor_test.go without a database.
-	handler, engine, err := newAPI(ctx, pool, slog.Default(), nil)
+	handler, engine, err := app.New(ctx, pool, slog.Default(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -100,10 +111,10 @@ func (s *server) outbox(t *testing.T, token string) []outbox.Message {
 // seed runs the example's own seed task and answers the tenant it made.
 func (s *server) seed(t *testing.T) uuid.UUID {
 	t.Helper()
-	if err := seed(context.Background(), s.pool); err != nil {
+	if err := app.Seed(context.Background(), s.pool); err != nil {
 		t.Fatal(err)
 	}
-	return uuid.MustParse(SeedTenantID)
+	return uuid.MustParse(app.SeedTenantID)
 }
 
 // login signs a seeded person in and answers their access token.
@@ -111,7 +122,7 @@ func (s *server) login(t *testing.T, email string) string {
 	t.Helper()
 	res := s.do(t, request{
 		method: http.MethodPost, path: "/auth/login",
-		body: map[string]any{"emailAddress": email, "password": SeedPassword},
+		body: map[string]any{"emailAddress": email, "password": app.SeedPassword},
 	})
 	if res.status != http.StatusOK {
 		t.Fatalf("login %s: %d %s", email, res.status, res.body)

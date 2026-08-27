@@ -1,4 +1,4 @@
-package main
+package integration
 
 import (
 	"context"
@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/simonjanss/rig/examples/linearlite/internal/api"
+	"github.com/simonjanss/rig/examples/linearlite/internal/app"
 	"github.com/simonjanss/rig/observe"
 )
 
@@ -79,7 +80,7 @@ func TestTheTourLinksAcrossTheOrigin(t *testing.T) {
 	t.Setenv("RIG_MONITOR_PASSWORD", "a password worth having")
 	t.Setenv(observe.AddrEnv, "")
 
-	got := monitorURL(buildPage(t))
+	got := app.MonitorURL(buildPage(t))
 	if !strings.HasPrefix(got, "http://127.0.0.1:9084/") {
 		t.Errorf("the tour link is %q, want an absolute URL at the page's own port", got)
 	}
@@ -95,7 +96,7 @@ func TestTheTourLinkRewritesAWildcardBind(t *testing.T) {
 	t.Setenv("RIG_MONITOR_PASSWORD", "a password worth having")
 	t.Setenv(observe.AddrEnv, ":9084")
 
-	if got := monitorURL(buildPage(t)); !strings.HasPrefix(got, "http://localhost:9084/") {
+	if got := app.MonitorURL(buildPage(t)); !strings.HasPrefix(got, "http://localhost:9084/") {
 		t.Errorf("the tour link is %q, want localhost in place of the wildcard", got)
 	}
 }
@@ -105,7 +106,7 @@ func TestTheTourLinkRewritesAWildcardBind(t *testing.T) {
 func TestTheTourHasNoLinkWithoutAPage(t *testing.T) {
 	t.Setenv("RIG_MONITOR_PASSWORD", "")
 
-	if got := monitorURL(buildPage(t)); got != "" {
+	if got := app.MonitorURL(buildPage(t)); got != "" {
 		t.Errorf("an unarmed page produced the link %q", got)
 	}
 }

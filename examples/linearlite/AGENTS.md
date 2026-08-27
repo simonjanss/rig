@@ -58,6 +58,8 @@ checked by the generated code. Do not write it again.
 | `migrations/*.sql` | you |
 | `services/<table>/<table>.yaml` | you, via `rig sync` |
 | `main.go` | you |
+| `internal/app/*.go` | you — the one hand-written directory under `internal/` |
+| `integration/*_test.go` | you |
 | `services/<table>/<table>.go` | you |
 | `*.gen.go`, `*.gen.ts` | rig — rewritten on every run, never edit |
 
@@ -117,7 +119,7 @@ generated proxy points at the default and the streams answer 502.
 
 ## This example's extras
 
-Beyond the todo example's layout, five directories and one file:
+Beyond the todo example's layout, seven directories and one file:
 
 - `web/` — the React front end. Its generated client is `web/src/api`
   (`*.gen.ts`, rig's, never edit) and everything else in `web/src` is yours.
@@ -127,7 +129,7 @@ Beyond the todo example's layout, five directories and one file:
   `.catch` swallows the parse error. `/_demo` was missing for as long as it had
   only one caller, which is why the tour's nav items never appeared under
   `pnpm dev`.
-  `pnpm build` writes `web/dist`, which `main.go` serves from disk; `make
+  `pnpm build` writes `web/dist`, which `internal/app` serves from disk; `make
   examples` deliberately never builds it, so the Go suite needs no pnpm. The
   `linearlite-web` make target at the repository root typechecks and builds it,
   and is part of `make check` — this is the only front end in the repository that
@@ -143,16 +145,28 @@ Beyond the todo example's layout, five directories and one file:
   dependency lists. `docs/presence.md` says all three in prose.
 - `importer/` + `import/` — the batch job over the generated Go client, split
   so the docker test drives the same loop the command runs.
+- `internal/app/` — the server itself: every service, hook and route the
+  binary mounts, built by `app.New` over a pool. The one hand-written
+  directory under `internal/`, and a package rather than a block in `main.go`
+  for one reason — a test cannot import a `main`, so this is what
+  `integration/` builds. What is left in `main.go` is the process around it:
+  the log sink, the tracing provider, the embedded migrations, and the
+  `serve.Config` naming the tasks.
+- `integration/` — every test in this example, the docker suite and the one
+  file that needs no database. `go test -tags docker ./integration/` runs it;
+  `make examples` reaches it like any other package. Nothing else in the
+  repository puts its suite in a folder: everywhere else the tests sit in the
+  package under test, which here would be `main`.
 - **There are no fallback files here, and that is the point.** What answers a
   shape when the sync service cannot be reached is `DB: pool` on
-  `electric.Config` in `main.go` — one field, and every shape survives an outage
+  `electric.Config` in `internal/app` — one field, and every shape survives an outage
   on a snapshot of its own rows. There used to be a file per shape, and the
   hazard they carried was that **a fallback had to narrow exactly as far as its
   shape did** with nothing checking it; the read the proxy builds *is* the
   shape's `WHERE` clause, so there is no second description to keep in step.
   Presence is the exception and rig decides it rather than this project —
   `applyPresenceTable` sets `Fallback: false`, and
-  `electric_docker_test.go`'s 502 assertion is the guard on that.
+  `integration/electric_docker_test.go`'s 502 assertion is the guard on that.
 - `services/rig_presence/` — one file, the scope stub, and the only filled-in
   scope stub in the repository. Every other shape here leaves the generated
   tenant filter as the whole scope; this one narrows on `scope` and `target_id`,
@@ -169,15 +183,16 @@ Beyond the todo example's layout, five directories and one file:
   `notify.Sender` (the email copy of an inbox line). It records instead of
   sending, which is the thing a real one must never do, and the front end says
   so where it shows them.
-- `demo.go` — the only hand-written HTTP here: `GET /_demo/outbox`,
-  `GET /_demo/tour`, and the sync switch (`GET /_demo/sync`,
-  `POST /_demo/sync/stop`, `POST /_demo/sync/start`). Hand-written because none
-  is about a table, so there is nothing for rig to generate from. Add a route
-  here rather than inventing a resource for something that lives in memory. All
-  of them need a session: where rig's monitoring page listens is not a fact to
-  hand an anonymous caller, since rig opens no port at all rather than one that
-  refuses. `/_demo/tour` hands back the page's absolute URL, because it is on a
-  port of its own and a relative href reaches the API instead.
+- `internal/app/demo.go` — the only hand-written HTTP here:
+  `GET /_demo/outbox`, `GET /_demo/tour`, and the sync switch
+  (`GET /_demo/sync`, `POST /_demo/sync/stop`, `POST /_demo/sync/start`).
+  Hand-written because none is about a table, so there is nothing for rig to
+  generate from. Add a route here rather than inventing a resource for
+  something that lives in memory. All of them need a session: where rig's
+  monitoring page listens is not a fact to hand an anonymous caller, since rig
+  opens no port at all rather than one that refuses. `/_demo/tour` hands back
+  the page's absolute URL, because it is on a port of its own and a relative
+  href reaches the API instead.
 
   The switch stops and starts the ElectricSQL container so the board can
   demonstrate surviving without it — the README's
@@ -204,7 +219,7 @@ Beyond the todo example's layout, five directories and one file:
   container keeps 55999 across a stop, a `--publish 127.0.0.1::3000` one does
   not. The proxy's URL is fixed by `electric.New` at boot, so the container comes
   back running, healthy and unreachable from this process. That is why
-  `syncState` carries `upstream`, `published` and `moved`: nothing can be done
+  `SyncState` carries `upstream`, `published` and `moved`: nothing can be done
   about it here short of restarting the server, and the failure is
   indistinguishable from the outage the switch exists to demonstrate. The pill
   reads "Sync moved" and the strip names both ports.
@@ -223,9 +238,10 @@ the authentication trail, and switching tenants. Those calls are hand-written in
 `web/src/auth/authApi.ts` because they are rig's endpoints rather than this
 schema's — the generated client covers the API and stops at `/auth`.
 
-`presence:` is on with nothing but `enabled`, which is why `main.go` has three
-lines for it — `Presence` on `api.Handlers`, `RigPresence` on
-`genelectric.Handlers`, and the sweeper with its own `CloseWithin` — and why
+`presence:` is on with nothing but `enabled`, which is why there are three
+lines for it — `Presence` on `api.Handlers` and `RigPresence` on
+`genelectric.Handlers`, both in `internal/app`, and the sweeper with its own
+`CloseWithin` in `main.go`'s mount closure — and why
 `MaxShutdown` is thirty-five rather than thirty: a third closer changed the
 arithmetic the comment above that number states.
 
@@ -235,7 +251,7 @@ the mount closure: the page is half of `serve.Config` now — `Monitor:
 page.Handler()` and `MonitorAddr: page.Addr()` — and it listens on
 `127.0.0.1:9084`, its own port beside the API's 8084. The `CloseWithin("traces",
 …)` that stops the provider stays in the closure, where there is an `App`.
-`newAPI` still takes a `*observe.Page`, but only so `/_demo/tour` can say where
+`app.New` still takes a `*observe.Page`, but only so `/_demo/tour` can say where
 the page is; nil from a task, since a cron entry serving a page nobody can reach
 is not worth the wiring. The password and the two file paths are set by `make
 demo` into a gitignored `.run/`, never by rig.yaml, which is checked in — the
@@ -244,6 +260,6 @@ page is a decision worth reading off the file.
 
 The auth foundation's tables came from `rig setup-project` (migrations 1–7),
 and `rig_account` is exposed read-only as the `Account` resource — the board's
-member list. The seed task (`go run . seed`) is `seed.go`, and the fixed
-identifiers at the top of it are what the docker tests and the README sign in
-with.
+member list. The seed task (`go run . seed`) is `app.Seed` in
+`internal/app/seed.go`, and the fixed identifiers at the top of it are what the
+docker tests and the README sign in with.
