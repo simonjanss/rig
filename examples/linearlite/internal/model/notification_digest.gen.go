@@ -26,3 +26,8 @@ const (
 
 // AllNotificationDigest is every value, in declaration order.
 var AllNotificationDigest = notifymodel.AllNotificationDigest
+
+// ParseNotificationDigest reads a value, accepting any casing and surrounding
+// space. A name rather than a method, so unlike Valid and String it does not
+// come with the type.
+var ParseNotificationDigest = notifymodel.ParseNotificationDigest

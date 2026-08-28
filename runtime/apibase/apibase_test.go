@@ -4,6 +4,8 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -14,6 +16,7 @@ import (
 	"github.com/simonjanss/rig/runtime/apirev"
 	"github.com/simonjanss/rig/runtime/rigerr"
 	"github.com/simonjanss/rig/runtime/tenancy"
+	"github.com/simonjanss/rig/runtime/throttle"
 )
 
 // tracer is an [apibase.Tracer] that records nothing and answers a fixed trace.
@@ -294,6 +297,121 @@ func TestTheCallersRequestIDIsBounded(t *testing.T) {
 			}
 			if got := apibase.CallerRequestID(r, ""); got != c.want {
 				t.Fatalf("CallerRequestID = %q, want %q", got, c.want)
+			}
+		})
+	}
+}
+
+// recorder is a [throttle.Recorder] that spends nothing and remembers what it
+// was asked about, so a test can read the key a request was counted under.
+type recorder struct {
+	keys  []throttle.Key
+	total int
+}
+
+func (rec *recorder) Incr(_ context.Context, _ throttle.Limit, key throttle.Key, now time.Time, _ int) (int, time.Time, error) {
+	rec.keys = append(rec.keys, key)
+	return rec.total, now.Add(time.Minute), nil
+}
+
+// gate builds a limiter over rec that allows max requests a minute per account
+// and per address.
+func gate(rec *recorder, max int) *throttle.Gate {
+	return throttle.NewGate(throttle.NewRecording(rec), throttle.APILimits{
+		ByAccount: throttle.Limit{Name: throttle.NameAccount, Max: max, Window: time.Minute},
+		ByIP:      throttle.Limit{Name: throttle.NameIP, Max: max, Window: time.Minute},
+	}, nil)
+}
+
+// TestTheThrottleChecksAfterTheClaims is an ordering, and the ordering is the
+// whole design: earlier and the limit cannot key on who is calling, later and
+// the work it exists to refuse has already been done.
+//
+// It is asserted through the key the counter was handed rather than through the
+// order of two lines, because that is the property that matters — a check that
+// ran first would count every caller as one anonymous address.
+func TestTheThrottleChecksAfterTheClaims(t *testing.T) {
+	account := uuid.New()
+	rec := &recorder{}
+	s := apibase.Server{
+		GetClaims: func(*http.Request) (tenancy.Claims, error) {
+			return tenancy.Claims{TenantID: uuid.New(), AccountID: account}, nil
+		},
+		Throttle: gate(rec, 100),
+	}
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/x", nil)
+	if _, _, _, ok := apibase.Prepare(s, w, r); !ok {
+		t.Fatal("resolve refused a request under its limit")
+	}
+
+	if want := throttle.Account(account.String()); !slices.Contains(rec.keys, want) {
+		t.Fatalf("counted under %v, want %v — the claims have to be in hand first", rec.keys, want)
+	}
+}
+
+// TestAThrottledRequestIsRefusedBeforeTheHandler is the other half: the refusal
+// stops the request, and it goes out through the same funnel every other
+// failure does, so a project's OnError sees it like any other.
+func TestAThrottledRequestIsRefusedBeforeTheHandler(t *testing.T) {
+	rec := &recorder{total: 500}
+	var funnelled bool
+	s := apibase.Server{
+		GetClaims: someClaims,
+		Throttle:  gate(rec, 1),
+		OnError: func(w http.ResponseWriter, _ *http.Request, _ apibase.RequestContext, err error) {
+			funnelled = true
+			w.WriteHeader(rigerr.CodeOf(err).HTTPStatus())
+		},
+	}
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/x", nil)
+	if _, _, _, ok := apibase.Prepare(s, w, r); ok {
+		t.Fatal("a caller over its limit was served")
+	}
+	if !funnelled {
+		t.Error("the refusal did not go through the project's error mapper")
+	}
+	if w.Code != http.StatusTooManyRequests {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusTooManyRequests)
+	}
+}
+
+// TestAnUnidentifiedCallerIsKeyedOnTheAddressOnlyThroughATrustedProxy keeps a
+// limit from being decorative. An address read from a header the client
+// controls is an address the client chooses, so X-Forwarded-For counts only
+// when the peer is one of TrustedProxies.
+func TestAnUnidentifiedCallerIsKeyedOnTheAddressOnlyThroughATrustedProxy(t *testing.T) {
+	forwarded := "203.0.113.7"
+
+	for _, c := range []struct {
+		name    string
+		trusted []netip.Prefix
+		want    string
+	}{
+		{"trusting nothing believes the peer", nil, "192.0.2.1"},
+		{"a trusted peer's header is believed", []netip.Prefix{netip.MustParsePrefix("192.0.2.0/24")}, forwarded},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			rec := &recorder{}
+			s := apibase.Server{
+				GetClaims:      func(*http.Request) (tenancy.Claims, error) { return tenancy.Claims{}, nil },
+				Throttle:       gate(rec, 100),
+				TrustedProxies: c.trusted,
+			}
+
+			w := httptest.NewRecorder()
+			r := httptest.NewRequest(http.MethodGet, "/x", nil)
+			r.RemoteAddr = "192.0.2.1:41234"
+			r.Header.Set("X-Forwarded-For", forwarded)
+			if _, _, _, ok := apibase.Prepare(s, w, r); !ok {
+				t.Fatal("resolve refused a request under its limit")
+			}
+
+			if want := throttle.IP(c.want); !slices.Contains(rec.keys, want) {
+				t.Fatalf("counted under %v, want %v", rec.keys, want)
 			}
 		})
 	}

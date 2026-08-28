@@ -25,3 +25,8 @@ const (
 
 // AllNotificationChannel is every value, in declaration order.
 var AllNotificationChannel = notifymodel.AllNotificationChannel
+
+// ParseNotificationChannel reads a value, accepting any casing and surrounding
+// space. A name rather than a method, so unlike Valid and String it does not
+// come with the type.
+var ParseNotificationChannel = notifymodel.ParseNotificationChannel

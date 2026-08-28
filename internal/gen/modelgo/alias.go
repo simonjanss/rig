@@ -73,6 +73,12 @@ func (e *emitter) aliasFile(res *ir.Resource, importPath, shipped string) (gen.A
 // The values come with the type: they are constants of it, so naming them here
 // is what keeps `model.NotificationStatePending` writable in a service that has
 // never heard of the module it came from.
+//
+// Valid and String need no line of their own, because they are methods and an
+// alias is the same type. Parse does: it is a function beside the type rather
+// than on it, so it has to be named here or `model.ParseNotificationState`
+// simply stops existing for the enums rig ships and goes on existing for every
+// other one.
 func (e *emitter) enumAliasFile(enum ir.Enum, importPath, shipped string) (gen.Artifact, error) {
 	b := gobuf.New(e.pkg)
 	pkg := b.Import(importPath)
@@ -93,6 +99,12 @@ func (e *emitter) enumAliasFile(enum ir.Enum, importPath, shipped string) (gen.A
 
 	b.Comment("All" + enum.Name + " is every value, in declaration order.")
 	b.L("var All%s = %s.All%s", enum.Name, pkg, shipped)
+	b.NL()
+
+	b.Comment("Parse" + enum.Name + " reads a value, accepting any casing and " +
+		"surrounding space. A name rather than a method, so unlike Valid and " +
+		"String it does not come with the type.")
+	b.L("var Parse%s = %s.Parse%s", enum.Name, pkg, shipped)
 	b.NL()
 
 	return e.artifact(naming.Snake(enum.Name)+".gen.go", b)

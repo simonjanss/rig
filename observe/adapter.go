@@ -3,8 +3,6 @@ package observe
 import (
 	"context"
 	"net/http"
-
-	"go.opentelemetry.io/otel/trace"
 )
 
 // APITracer is [Server], [TraceID] and [Fail] gathered into the three methods a
@@ -42,26 +40,3 @@ func (APITracer) TraceID(r *http.Request) string { return TraceID(r) }
 // Fail records why a request is being refused, on whatever span the context is
 // in. It ends nothing.
 func (APITracer) Fail(ctx context.Context, status int, err error) { Fail(ctx, status, err) }
-
-// DBTracer is [Trace] as the one method a repository's tracer field takes.
-//
-// Same trick as [APITracer] and for the same reason: the interface lives in
-// [github.com/simonjanss/rig/runtime/dbx], speaks only in standard-library
-// types, and this fits it without either module importing the other. It is what
-// lets a repository compiled into one of rig's own modules open a span, where a
-// generated one has spans written into it by the generator.
-//
-// The zero value traces on rig's own tracer, which is the global provider
-// [Setup] installed — so a project that never called Setup gets a no-op and
-// every query runs untraced rather than differently. Set Tracer to put these
-// spans somewhere else.
-type DBTracer struct {
-	// Tracer is where the spans go. Nil is rig's own, from [Tracer].
-	Tracer trace.Tracer
-}
-
-// Trace runs one stage of a repository call inside a span of its own. An error
-// returned from f is what marks that span failed, once.
-func (t DBTracer) Trace(ctx context.Context, name string, f func(context.Context) error) error {
-	return Trace(ctx, t.Tracer, name, f)
-}

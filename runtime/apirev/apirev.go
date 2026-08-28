@@ -39,6 +39,12 @@ const Layout = "2006-01-02"
 type Revision struct {
 	day   time.Time
 	known bool
+	// text is [Revision.String]'s answer, rendered once where the revision is
+	// made rather than at each call. A server announces its own on the way out
+	// of every response, so this is a formatting of the same date per request
+	// otherwise — and the value cannot change, because nothing outside [Parse]
+	// builds one.
+	text string
 }
 
 // MustParse is for a revision written down in source: a compatibility shim's
@@ -70,7 +76,10 @@ func Parse(date string) (Revision, bool) {
 	if err != nil {
 		return Revision{}, false
 	}
-	return Revision{day: day, known: true}, true
+	// Rendered rather than kept, because the two are not the same string: Go's
+	// parser accepts `2026-4-30` for this layout and the revision that travels is
+	// always `2026-04-30`.
+	return Revision{day: day, known: true, text: day.Format(Layout)}, true
 }
 
 // Known reports whether this is a revision at all.
@@ -110,9 +119,8 @@ func (r Revision) Time() time.Time { return r.day }
 
 // String is the revision as it travels, and empty for an unknown one — so a log
 // line that prints it says nothing rather than saying the wrong year.
-func (r Revision) String() string {
-	if !r.known {
-		return ""
-	}
-	return r.day.Format(Layout)
-}
+//
+// Rendered when the revision was parsed rather than here. It is on the way out
+// of every response a generated server writes, and a date formatted per request
+// is an allocation per request for an answer that cannot change.
+func (r Revision) String() string { return r.text }

@@ -115,6 +115,7 @@ func (e *emitter) baseAliases(b *gobuf.Buf) {
 		b.NL()
 	}
 }
+
 func (e *emitter) errorShape(b *gobuf.Buf) {
 	errPkg := b.Import(runtimeModule + "/rigerr")
 

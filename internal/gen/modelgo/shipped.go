@@ -1,5 +1,7 @@
 package modelgo
 
+import "github.com/simonjanss/rig/internal/compile"
+
 // notifyModelImport is the package that ships the Go for rig's notification
 // tables.
 //
@@ -40,22 +42,29 @@ const authModelImport = "github.com/simonjanss/rig/authmodel"
 // configuration is only the default. The shipped package was compiled against
 // one spelling, so the alias has to name both sides — the project's on the left,
 // rig's on the right.
+//
+// Which tables are on this list is [compile.ShippedModelTables]' answer and not
+// this file's, because a second place has to know it: the check that warns a
+// shipped table's camelCase keys will not follow `naming.json_case`. A table
+// added here and not there is a table that silently disagrees with the rest of
+// the API. A test holds the two sets equal.
 func shippedModel(table string) (importPath, name string, ok bool) {
-	switch table {
-	case "rig_notification":
-		return notifyModelImport, "Notification", true
-	case "rig_notification_recipient":
-		return notifyModelImport, "NotificationRecipient", true
-	case "rig_notification_device":
-		return notifyModelImport, "NotificationDevice", true
-	case "rig_notification_setting":
-		return notifyModelImport, "NotificationSetting", true
-	case "rig_notification_delivery":
-		return notifyModelImport, "NotificationDelivery", true
-	case "rig_account":
-		return authModelImport, "Account", true
-	}
-	return "", "", false
+	s, ok := shippedModels[table]
+	return s.importPath, s.name, ok
+}
+
+// shipped is where a table's Go is declared, and under what name.
+type shipped struct{ importPath, name string }
+
+// shippedModels is the mapping itself, as a table rather than a switch so that
+// its keys can be compared with the list they have to match.
+var shippedModels = map[string]shipped{
+	compile.NotificationTable:          {notifyModelImport, "Notification"},
+	compile.NotificationRecipientTable: {notifyModelImport, "NotificationRecipient"},
+	compile.NotificationDeviceTable:    {notifyModelImport, "NotificationDevice"},
+	compile.NotificationSettingTable:   {notifyModelImport, "NotificationSetting"},
+	compile.NotificationDeliveryTable:  {notifyModelImport, "NotificationDelivery"},
+	compile.AccountTable:               {authModelImport, "Account"},
 }
 
 // shippedEnum is [shippedModel] for a Postgres enum type.

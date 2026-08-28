@@ -25,3 +25,8 @@ const (
 
 // AllNotificationState is every value, in declaration order.
 var AllNotificationState = notifymodel.AllNotificationState
+
+// ParseNotificationState reads a value, accepting any casing and surrounding
+// space. A name rather than a method, so unlike Valid and String it does not
+// come with the type.
+var ParseNotificationState = notifymodel.ParseNotificationState

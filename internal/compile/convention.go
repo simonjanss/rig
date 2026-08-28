@@ -249,6 +249,26 @@ func isNotificationTable(name string) bool {
 	return slices.Contains(NotificationTables(), name)
 }
 
+// ShippedModelTables are the tables whose Go — the row, its write inputs and
+// its enums — is compiled into a module rig ships rather than generated into
+// the project. Exposing one gets an alias to that declaration.
+//
+// It is here rather than in the generator that writes the aliases because two
+// unrelated places have to agree about the list: that generator, and the check
+// that warns the tags it cannot reach are camelCase whatever `naming.json_case`
+// says. Splitting them is how a table gets one and not the other.
+//
+// Keyed by physical table name, which is the one thing a configuration file
+// cannot move.
+func ShippedModelTables() []string {
+	return append(NotificationTables(), AccountTable)
+}
+
+// isShippedModel reports whether a table's Go is one rig ships.
+func isShippedModel(name string) bool {
+	return slices.Contains(ShippedModelTables(), name)
+}
+
 // PresenceTable is who is here, and what they are looking at.
 //
 // One table, unlike the inbox's five, because a presence row is complete on its

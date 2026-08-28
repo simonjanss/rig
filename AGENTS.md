@@ -14,7 +14,7 @@ make check   # what that hook runs, and what CI runs
 ```bash
 make fmt-check   # gofmt; `make fmt` rewrites
 make vet
-make godoc-check # exported symbols in the five imported modules have doc comments
+make godoc-check # exported symbols in the imported modules have doc comments
 make build
 make test        # the fast suite
 make deps        # go mod tidy, then fail if anything changed
@@ -50,8 +50,8 @@ make test-docker   # the suite behind the `docker` build tag
 make examples      # check all five examples for drift and run them for real
 ```
 
-`make test-docker` covers `.`, `runtime`, `auth`, `files`, `notify`, `observe`,
-`presence`, `migrate` and `rigclient`.
+`make test-docker` covers `.`, `runtime`, `auth`, `authmodel`, `files`,
+`notify`, `observe`, `presence`, `migrate` and `rigclient`.
 Most of it starts its own Postgres on a port of its own and cleans up after
 itself. The `migrate` module is the exception: it expects a database at
 `localhost:55440`, or wherever `DATABASE_URL` points, and **skips itself
@@ -228,8 +228,8 @@ approved once per clone.
 
 ## Godoc
 
-`runtime/`, `auth/`, `files/`, `notify/`, `observe/`, `presence/`, `migrate/`
-and `rigclient/` are separate modules
+`runtime/`, `auth/`, `authmodel/`, `files/`, `notify/`, `observe/`, `presence/`,
+`migrate/` and `rigclient/` are separate modules
 that a generated application imports. Their godoc is the only documentation
 their Go surface has: `docs/` covers what somebody writes — `rig.yaml`, a
 migration, a service — and never what they call. So a doc comment there is

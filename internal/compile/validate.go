@@ -648,10 +648,10 @@ func checkEnumConsistency(doc *ir.Document) diag.List {
 // checkFoundationJSONCase reports an exposed table of rig's whose JSON keys will
 // not follow this project's `naming.json_case`.
 //
-// The Go for rig's notification tables is compiled once, in the module that owns
-// the schema, so its struct tags are fixed — and Go struct tags cannot be
-// parameterised. A project that asked for snake_case therefore gets it on its own
-// tables and camelCase on rig's.
+// The Go for rig's notification tables and for rig_account is compiled once, in
+// a module that ships rather than in this project, so its struct tags are fixed
+// — and Go struct tags cannot be parameterised. A project that asked for
+// snake_case therefore gets it on its own tables and camelCase on rig's.
 //
 // A warning rather than a refusal, because the project has done nothing wrong and
 // the mixture is not new: rig's hand-written routes have answered camelCase since
@@ -668,7 +668,7 @@ func checkFoundationJSONCase(doc *ir.Document, p *project.Project) diag.List {
 
 	for i := range doc.API.Resources {
 		r := &doc.API.Resources[i]
-		if r.Unexposed || r.Storage == nil || !isNotificationTable(r.Storage.Table) {
+		if r.Unexposed || r.Storage == nil || !isShippedModel(r.Storage.Table) {
 			continue
 		}
 		diags.Add(diag.CodeFoundationJSONCase, diag.At(r.Storage.Table),

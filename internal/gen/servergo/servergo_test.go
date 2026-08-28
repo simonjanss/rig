@@ -365,7 +365,6 @@ func TestRevisionIsReadAndAnnounced(t *testing.T) {
 			t.Errorf("Register is missing %s:\n%s", want, register)
 		}
 	}
-
 }
 
 // A date that has to be parsed is a date that can be typed wrong. Typed, the
@@ -904,4 +903,5 @@ func TestThrottleIsWiredOnlyWhereItExists(t *testing.T) {
 
 // The limiter is built from the pool the server already has, so a project does
 // not have to remember to. Where in a request the check runs — after the claims,
-// so it can key on who is calling — is runtime/apibase's, and is tested there.
+// so it can key on who is calling — is runtime/apibase's, and
+// TestTheThrottleChecksAfterTheClaims is where that ordering is held.

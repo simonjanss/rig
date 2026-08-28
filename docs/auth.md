@@ -808,7 +808,8 @@ auth:
   # for an administration screen listing the people in a tenant, most often. It
   # changes nothing about authentication: rig/auth still reaches these tables
   # through its own queries, and a generated repository beside them is a second
-  # door into the same rows.
+  # door into the same rows. rig_account's row comes from rig/authmodel, so its
+  # JSON keys are camelCase whatever naming.json_case says — RIG3260.
   expose: [rig_account]
 
   # Take the schema over: generate for every foundation table, and stop

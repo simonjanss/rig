@@ -327,12 +327,13 @@ naming:
 ```
 
 **`json_case` reaches your tables and not rig's.** The Go for `rig_notification`
-and the four tables around it is compiled once, in `rig/notify`, so its struct
-tags are fixed — and a Go struct tag cannot be parameterised. A project that asks
-for `snake` gets it on its own resources and camelCase on rig's, which is the
-same trade `/auth/*` and `/presence` have always made. `rig check` reports it
-rather than leaving it to be found in a response body, and setting `camel` — the
-default — is what makes the question go away.
+and the four tables around it is compiled once, in `rig/notify`, and the Go for
+`rig_account` in `rig/authmodel`, so their struct tags are fixed — and a Go
+struct tag cannot be parameterised. A project that asks for `snake` gets it on
+its own resources and camelCase on rig's, which is the same trade `/auth/*` and
+`/presence` have always made. `rig check` reports it — RIG3260, once per exposed
+table — rather than leaving it to be found in a response body, and setting
+`camel`, the default, is what makes the question go away.
 
 | Key | Default | |
 |---|---|---|
