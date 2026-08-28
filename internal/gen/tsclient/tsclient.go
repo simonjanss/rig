@@ -215,8 +215,9 @@ func (e *emitter) ref(b *tsbuf.Buf, name string) string {
 	return name
 }
 
-// refValue names something that is constructed rather than only mentioned — a
-// resource client, which the entry point calls `new` on.
+// refValue names something that is called rather than only mentioned — a
+// resource client's factory, which the entry point invokes to build the half of
+// the client that resource is.
 //
 // A separate method rather than a flag, because getting it wrong is a specific
 // and confusing error: TypeScript reports that the name "cannot be used as a
@@ -258,7 +259,9 @@ func (e *emitter) placements() map[string]string {
 			home[obj.Name] = query
 		}
 
-		home[res.Name+"Client"] = moduleFor(snake(res.Name) + "_client.gen")
+		client := moduleFor(snake(res.Name) + "_client.gen")
+		home[res.Name+"Client"] = client
+		home["create"+res.Name+"Client"] = client
 
 		input := moduleFor(snake(res.Name) + "_input.gen")
 		if createWithFiles(res) != nil {

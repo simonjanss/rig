@@ -25,16 +25,14 @@ import {
 } from "@rig/client";
 
 /**
- * RigFileClient calls the RigFile endpoints. It is reached as `client.rigFiles`
- * rather than built directly.
+ * RigFileClient is what `client.rigFiles` is, and what a test writes to stand
+ * in for it.
+ *
+ * The documentation for each call is here rather than on the object below,
+ * because this is the type the property resolves to and so this is what an
+ * editor shows.
  */
-export class RigFileClient {
-    readonly #rt: Runtime;
-
-    constructor(rt: Runtime) {
-        this.#rt = rt;
-    }
-
+export interface RigFileClient {
     /**
      * List RigFiles.
      *
@@ -42,18 +40,7 @@ export class RigFileClient {
      *
      * Operation listRigFiles.
      */
-    list(query: RigFileListQuery = {}, options?: CallOptions): Promise<RigFileListResponse> {
-        const search = new URLSearchParams();
-        setParam(search, "limit", query.limit);
-        setParam(search, "offset", query.offset);
-
-        return send<RigFileListResponse>(this.#rt, {
-            name: "listRigFiles",
-            method: "GET",
-            path: "/rig-files",
-            query: search,
-        }, options);
-    }
+    list(query?: RigFileListQuery, options?: CallOptions): Promise<RigFileListResponse>;
 
     /**
      * Create a RigFile.
@@ -65,14 +52,7 @@ export class RigFileClient {
      * A refusal is read back with `isRigFileCreateError`, whose `fields` say
      * what was wrong with each member of the body.
      */
-    create(input: RigFileCreateInput, options?: CallOptions): Promise<RigFile> {
-        return send<RigFile>(this.#rt, {
-            name: "createRigFile",
-            method: "POST",
-            path: "/rig-files",
-            body: input,
-        }, options);
-    }
+    create(input: RigFileCreateInput, options?: CallOptions): Promise<RigFile>;
 
     /**
      * Search RigFiles with filters.
@@ -83,20 +63,7 @@ export class RigFileClient {
      *
      * Operation searchRigFiles.
      */
-    search(filter: RigFileFilter, query: RigFileSearchQuery = {}, options?: CallOptions): Promise<RigFileListResponse> {
-        const search = new URLSearchParams();
-        setParam(search, "limit", query.limit);
-        setParam(search, "offset", query.offset);
-
-        return send<RigFileListResponse>(this.#rt, {
-            name: "searchRigFiles",
-            method: METHOD_QUERY,
-            path: "/rig-files",
-            query: search,
-            body: { filter: filter },
-            fallback: "/rig-files/_search",
-        }, options);
-    }
+    search(filter: RigFileFilter, query?: RigFileSearchQuery, options?: CallOptions): Promise<RigFileListResponse>;
 
     /**
      * A deletion stamps the row rather than removing it, so this is what was
@@ -108,18 +75,7 @@ export class RigFileClient {
      *
      * Operation listDeletedRigFiles.
      */
-    listDeleted(query: RigFileListDeletedQuery = {}, options?: CallOptions): Promise<RigFileListResponse> {
-        const search = new URLSearchParams();
-        setParam(search, "limit", query.limit);
-        setParam(search, "offset", query.offset);
-
-        return send<RigFileListResponse>(this.#rt, {
-            name: "listDeletedRigFiles",
-            method: "GET",
-            path: "/rig-files/_deleted",
-            query: search,
-        }, options);
-    }
+    listDeleted(query?: RigFileListDeletedQuery, options?: CallOptions): Promise<RigFileListResponse>;
 
     /**
      * The row is retired by stamping a deletion time; it stops appearing in
@@ -129,13 +85,7 @@ export class RigFileClient {
      *
      * Operation deleteRigFile.
      */
-    delete(iD: string, options?: CallOptions): Promise<void> {
-        return sendNoContent(this.#rt, {
-            name: "deleteRigFile",
-            method: "DELETE",
-            path: `/rig-files/${pathValue(iD)}`,
-        }, options);
-    }
+    delete(iD: string, options?: CallOptions): Promise<void>;
 
     /**
      * Fetch one RigFile by identifier.
@@ -144,13 +94,7 @@ export class RigFileClient {
      *
      * Operation getRigFile.
      */
-    get(iD: string, options?: CallOptions): Promise<RigFile> {
-        return send<RigFile>(this.#rt, {
-            name: "getRigFile",
-            method: "GET",
-            path: `/rig-files/${pathValue(iD)}`,
-        }, options);
-    }
+    get(iD: string, options?: CallOptions): Promise<RigFile>;
 
     /**
      * Only the fields present in the body are changed. A field set to null is
@@ -163,14 +107,7 @@ export class RigFileClient {
      * A refusal is read back with `isRigFileUpdateError`, whose `fields` say
      * what was wrong with each member of the body.
      */
-    update(iD: string, input: RigFileUpdateInput, options?: CallOptions): Promise<RigFile> {
-        return send<RigFile>(this.#rt, {
-            name: "updateRigFile",
-            method: "PATCH",
-            path: `/rig-files/${pathValue(iD)}`,
-            body: input,
-        }, options);
-    }
+    update(iD: string, input: RigFileUpdateInput, options?: CallOptions): Promise<RigFile>;
 
     /**
      * The deletion stamp is cleared and the row appears in reads again. It
@@ -194,13 +131,101 @@ export class RigFileClient {
      *
      * Operation restoreRigFile.
      */
-    restore(iD: string, options?: CallOptions): Promise<RigFile> {
-        return send<RigFile>(this.#rt, {
-            name: "restoreRigFile",
-            method: "POST",
-            path: `/rig-files/${pathValue(iD)}/_restore`,
-        }, options);
-    }
+    restore(iD: string, options?: CallOptions): Promise<RigFile>;
+}
+
+/**
+ * Builds the RigFile half of a client.
+ *
+ * Called by `createClient` and not usually by anything else: a resource reached
+ * through the client it belongs to shares that client's credential, and one
+ * built here would not.
+ */
+export function createRigFileClient(rt: Runtime): RigFileClient {
+    return {
+        list(query: RigFileListQuery = {}, options?: CallOptions): Promise<RigFileListResponse> {
+            const search = new URLSearchParams();
+            setParam(search, "limit", query.limit);
+            setParam(search, "offset", query.offset);
+
+            return send<RigFileListResponse>(rt, {
+                name: "listRigFiles",
+                method: "GET",
+                path: "/rig-files",
+                query: search,
+            }, options);
+        },
+
+        create(input: RigFileCreateInput, options?: CallOptions): Promise<RigFile> {
+            return send<RigFile>(rt, {
+                name: "createRigFile",
+                method: "POST",
+                path: "/rig-files",
+                body: input,
+            }, options);
+        },
+
+        search(filter: RigFileFilter, query: RigFileSearchQuery = {}, options?: CallOptions): Promise<RigFileListResponse> {
+            const search = new URLSearchParams();
+            setParam(search, "limit", query.limit);
+            setParam(search, "offset", query.offset);
+
+            return send<RigFileListResponse>(rt, {
+                name: "searchRigFiles",
+                method: METHOD_QUERY,
+                path: "/rig-files",
+                query: search,
+                body: { filter: filter },
+                fallback: "/rig-files/_search",
+            }, options);
+        },
+
+        listDeleted(query: RigFileListDeletedQuery = {}, options?: CallOptions): Promise<RigFileListResponse> {
+            const search = new URLSearchParams();
+            setParam(search, "limit", query.limit);
+            setParam(search, "offset", query.offset);
+
+            return send<RigFileListResponse>(rt, {
+                name: "listDeletedRigFiles",
+                method: "GET",
+                path: "/rig-files/_deleted",
+                query: search,
+            }, options);
+        },
+
+        delete(iD: string, options?: CallOptions): Promise<void> {
+            return sendNoContent(rt, {
+                name: "deleteRigFile",
+                method: "DELETE",
+                path: `/rig-files/${pathValue(iD)}`,
+            }, options);
+        },
+
+        get(iD: string, options?: CallOptions): Promise<RigFile> {
+            return send<RigFile>(rt, {
+                name: "getRigFile",
+                method: "GET",
+                path: `/rig-files/${pathValue(iD)}`,
+            }, options);
+        },
+
+        update(iD: string, input: RigFileUpdateInput, options?: CallOptions): Promise<RigFile> {
+            return send<RigFile>(rt, {
+                name: "updateRigFile",
+                method: "PATCH",
+                path: `/rig-files/${pathValue(iD)}`,
+                body: input,
+            }, options);
+        },
+
+        restore(iD: string, options?: CallOptions): Promise<RigFile> {
+            return send<RigFile>(rt, {
+                name: "restoreRigFile",
+                method: "POST",
+                path: `/rig-files/${pathValue(iD)}/_restore`,
+            }, options);
+        },
+    };
 }
 
 /**

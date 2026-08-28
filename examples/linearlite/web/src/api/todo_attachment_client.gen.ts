@@ -32,16 +32,14 @@ import {
 } from "@rig/client";
 
 /**
- * TodoAttachmentClient calls the TodoAttachment endpoints. It is reached as
- * `client.todoAttachments` rather than built directly.
+ * TodoAttachmentClient is what `client.todoAttachments` is, and what a test
+ * writes to stand in for it.
+ *
+ * The documentation for each call is here rather than on the object below,
+ * because this is the type the property resolves to and so this is what an
+ * editor shows.
  */
-export class TodoAttachmentClient {
-    readonly #rt: Runtime;
-
-    constructor(rt: Runtime) {
-        this.#rt = rt;
-    }
-
+export interface TodoAttachmentClient {
     /**
      * List TodoAttachments.
      *
@@ -49,18 +47,7 @@ export class TodoAttachmentClient {
      *
      * Operation listTodoAttachments.
      */
-    list(query: TodoAttachmentListQuery = {}, options?: CallOptions): Promise<TodoAttachmentListResponse> {
-        const search = new URLSearchParams();
-        setParam(search, "limit", query.limit);
-        setParam(search, "offset", query.offset);
-
-        return send<TodoAttachmentListResponse>(this.#rt, {
-            name: "listTodoAttachments",
-            method: "GET",
-            path: "/todo-attachments",
-            query: search,
-        }, options);
-    }
+    list(query?: TodoAttachmentListQuery, options?: CallOptions): Promise<TodoAttachmentListResponse>;
 
     /**
      * Create a TodoAttachment.
@@ -72,14 +59,7 @@ export class TodoAttachmentClient {
      * A refusal is read back with `isTodoAttachmentCreateError`, whose `fields`
      * say what was wrong with each member of the body.
      */
-    create(input: TodoAttachmentCreateInput, options?: CallOptions): Promise<TodoAttachment> {
-        return send<TodoAttachment>(this.#rt, {
-            name: "createTodoAttachment",
-            method: "POST",
-            path: "/todo-attachments",
-            body: input,
-        }, options);
-    }
+    create(input: TodoAttachmentCreateInput, options?: CallOptions): Promise<TodoAttachment>;
 
     /**
      * Search TodoAttachments with filters.
@@ -91,20 +71,7 @@ export class TodoAttachmentClient {
      *
      * Operation searchTodoAttachments.
      */
-    search(filter: TodoAttachmentFilter, query: TodoAttachmentSearchQuery = {}, options?: CallOptions): Promise<TodoAttachmentListResponse> {
-        const search = new URLSearchParams();
-        setParam(search, "limit", query.limit);
-        setParam(search, "offset", query.offset);
-
-        return send<TodoAttachmentListResponse>(this.#rt, {
-            name: "searchTodoAttachments",
-            method: METHOD_QUERY,
-            path: "/todo-attachments",
-            query: search,
-            body: { filter: filter },
-            fallback: "/todo-attachments/_search",
-        }, options);
-    }
+    search(filter: TodoAttachmentFilter, query?: TodoAttachmentSearchQuery, options?: CallOptions): Promise<TodoAttachmentListResponse>;
 
     /**
      * A deletion stamps the row rather than removing it, so this is what was
@@ -116,18 +83,7 @@ export class TodoAttachmentClient {
      *
      * Operation listDeletedTodoAttachments.
      */
-    listDeleted(query: TodoAttachmentListDeletedQuery = {}, options?: CallOptions): Promise<TodoAttachmentListResponse> {
-        const search = new URLSearchParams();
-        setParam(search, "limit", query.limit);
-        setParam(search, "offset", query.offset);
-
-        return send<TodoAttachmentListResponse>(this.#rt, {
-            name: "listDeletedTodoAttachments",
-            method: "GET",
-            path: "/todo-attachments/_deleted",
-            query: search,
-        }, options);
-    }
+    listDeleted(query?: TodoAttachmentListDeletedQuery, options?: CallOptions): Promise<TodoAttachmentListResponse>;
 
     /**
      * The row is retired by stamping a deletion time; it stops appearing in
@@ -137,13 +93,7 @@ export class TodoAttachmentClient {
      *
      * Operation deleteTodoAttachment.
      */
-    delete(iD: string, options?: CallOptions): Promise<void> {
-        return sendNoContent(this.#rt, {
-            name: "deleteTodoAttachment",
-            method: "DELETE",
-            path: `/todo-attachments/${pathValue(iD)}`,
-        }, options);
-    }
+    delete(iD: string, options?: CallOptions): Promise<void>;
 
     /**
      * Fetch one TodoAttachment by identifier.
@@ -152,13 +102,7 @@ export class TodoAttachmentClient {
      *
      * Operation getTodoAttachment.
      */
-    get(iD: string, options?: CallOptions): Promise<TodoAttachment> {
-        return send<TodoAttachment>(this.#rt, {
-            name: "getTodoAttachment",
-            method: "GET",
-            path: `/todo-attachments/${pathValue(iD)}`,
-        }, options);
-    }
+    get(iD: string, options?: CallOptions): Promise<TodoAttachment>;
 
     /**
      * Only the fields present in the body are changed. A field set to null is
@@ -171,14 +115,7 @@ export class TodoAttachmentClient {
      * A refusal is read back with `isTodoAttachmentUpdateError`, whose `fields`
      * say what was wrong with each member of the body.
      */
-    update(iD: string, input: TodoAttachmentUpdateInput, options?: CallOptions): Promise<TodoAttachment> {
-        return send<TodoAttachment>(this.#rt, {
-            name: "updateTodoAttachment",
-            method: "PATCH",
-            path: `/todo-attachments/${pathValue(iD)}`,
-            body: input,
-        }, options);
-    }
+    update(iD: string, input: TodoAttachmentUpdateInput, options?: CallOptions): Promise<TodoAttachment>;
 
     /**
      * The deletion stamp is cleared and the row appears in reads again. It
@@ -202,13 +139,7 @@ export class TodoAttachmentClient {
      *
      * Operation restoreTodoAttachment.
      */
-    restore(iD: string, options?: CallOptions): Promise<TodoAttachment> {
-        return send<TodoAttachment>(this.#rt, {
-            name: "restoreTodoAttachment",
-            method: "POST",
-            path: `/todo-attachments/${pathValue(iD)}/_restore`,
-        }, options);
-    }
+    restore(iD: string, options?: CallOptions): Promise<TodoAttachment>;
 
     /**
      * The form carries one part, named attachmentFile. Nothing else in it is
@@ -235,16 +166,7 @@ export class TodoAttachmentClient {
      * comes back as it happened, and retrying is the caller's decision because
      * only the caller still has the bytes.
      */
-    uploadAttachmentFile(iD: string, file: Upload, options?: CallOptions): Promise<RigFile> {
-        const form = multipart(undefined, [["attachmentFile", file]]);
-
-        return send<RigFile>(this.#rt, {
-            name: "uploadTodoAttachmentAttachmentFile",
-            method: "POST",
-            path: `/todo-attachments/${pathValue(iD)}/attachment-file`,
-            form,
-        }, options);
-    }
+    uploadAttachmentFile(iD: string, file: Upload, options?: CallOptions): Promise<RigFile>;
 
     /**
      * Answers range and conditional requests, so a resumed download does not
@@ -254,14 +176,7 @@ export class TodoAttachmentClient {
      *
      * Operation downloadTodoAttachmentAttachmentFile.
      */
-    downloadAttachmentFile(iD: string, fileID: string, filename: string, options?: CallOptions): Promise<Response> {
-        return sendContent(this.#rt, {
-            name: "downloadTodoAttachmentAttachmentFile",
-            method: "GET",
-            path: `/todo-attachments/${pathValue(iD)}/attachment-file/${pathValue(fileID)}/${pathValue(filename)}`,
-            accept: "*/*",
-        }, options);
-    }
+    downloadAttachmentFile(iD: string, fileID: string, filename: string, options?: CallOptions): Promise<Response>;
 
     /**
      * Creates a TodoAttachment and its files in one request.
@@ -281,16 +196,132 @@ export class TodoAttachmentClient {
      * is not. **This call is never sent twice**, for the reason an upload is
      * not — a form is the one write no idempotency key names.
      */
-    createWithFiles(input: Omit<TodoAttachmentCreateInput, "attachmentFileId">, files: TodoAttachmentCreateFiles, options?: CallOptions): Promise<TodoAttachment> {
-        const form = multipart(input, [["attachmentFile", files.attachmentFile]]);
+    createWithFiles(input: Omit<TodoAttachmentCreateInput, "attachmentFileId">, files: TodoAttachmentCreateFiles, options?: CallOptions): Promise<TodoAttachment>;
+}
 
-        return send<TodoAttachment>(this.#rt, {
-            name: "createTodoAttachment",
-            method: "POST",
-            path: "/todo-attachments",
-            form,
-        }, options);
-    }
+/**
+ * Builds the TodoAttachment half of a client.
+ *
+ * Called by `createClient` and not usually by anything else: a resource reached
+ * through the client it belongs to shares that client's credential, and one
+ * built here would not.
+ */
+export function createTodoAttachmentClient(rt: Runtime): TodoAttachmentClient {
+    return {
+        list(query: TodoAttachmentListQuery = {}, options?: CallOptions): Promise<TodoAttachmentListResponse> {
+            const search = new URLSearchParams();
+            setParam(search, "limit", query.limit);
+            setParam(search, "offset", query.offset);
+
+            return send<TodoAttachmentListResponse>(rt, {
+                name: "listTodoAttachments",
+                method: "GET",
+                path: "/todo-attachments",
+                query: search,
+            }, options);
+        },
+
+        create(input: TodoAttachmentCreateInput, options?: CallOptions): Promise<TodoAttachment> {
+            return send<TodoAttachment>(rt, {
+                name: "createTodoAttachment",
+                method: "POST",
+                path: "/todo-attachments",
+                body: input,
+            }, options);
+        },
+
+        search(filter: TodoAttachmentFilter, query: TodoAttachmentSearchQuery = {}, options?: CallOptions): Promise<TodoAttachmentListResponse> {
+            const search = new URLSearchParams();
+            setParam(search, "limit", query.limit);
+            setParam(search, "offset", query.offset);
+
+            return send<TodoAttachmentListResponse>(rt, {
+                name: "searchTodoAttachments",
+                method: METHOD_QUERY,
+                path: "/todo-attachments",
+                query: search,
+                body: { filter: filter },
+                fallback: "/todo-attachments/_search",
+            }, options);
+        },
+
+        listDeleted(query: TodoAttachmentListDeletedQuery = {}, options?: CallOptions): Promise<TodoAttachmentListResponse> {
+            const search = new URLSearchParams();
+            setParam(search, "limit", query.limit);
+            setParam(search, "offset", query.offset);
+
+            return send<TodoAttachmentListResponse>(rt, {
+                name: "listDeletedTodoAttachments",
+                method: "GET",
+                path: "/todo-attachments/_deleted",
+                query: search,
+            }, options);
+        },
+
+        delete(iD: string, options?: CallOptions): Promise<void> {
+            return sendNoContent(rt, {
+                name: "deleteTodoAttachment",
+                method: "DELETE",
+                path: `/todo-attachments/${pathValue(iD)}`,
+            }, options);
+        },
+
+        get(iD: string, options?: CallOptions): Promise<TodoAttachment> {
+            return send<TodoAttachment>(rt, {
+                name: "getTodoAttachment",
+                method: "GET",
+                path: `/todo-attachments/${pathValue(iD)}`,
+            }, options);
+        },
+
+        update(iD: string, input: TodoAttachmentUpdateInput, options?: CallOptions): Promise<TodoAttachment> {
+            return send<TodoAttachment>(rt, {
+                name: "updateTodoAttachment",
+                method: "PATCH",
+                path: `/todo-attachments/${pathValue(iD)}`,
+                body: input,
+            }, options);
+        },
+
+        restore(iD: string, options?: CallOptions): Promise<TodoAttachment> {
+            return send<TodoAttachment>(rt, {
+                name: "restoreTodoAttachment",
+                method: "POST",
+                path: `/todo-attachments/${pathValue(iD)}/_restore`,
+            }, options);
+        },
+
+        uploadAttachmentFile(iD: string, file: Upload, options?: CallOptions): Promise<RigFile> {
+            const form = multipart(undefined, [["attachmentFile", file]]);
+
+            return send<RigFile>(rt, {
+                name: "uploadTodoAttachmentAttachmentFile",
+                method: "POST",
+                path: `/todo-attachments/${pathValue(iD)}/attachment-file`,
+                form,
+            }, options);
+        },
+
+        downloadAttachmentFile(iD: string, fileID: string, filename: string, options?: CallOptions): Promise<Response> {
+            return sendContent(rt, {
+                name: "downloadTodoAttachmentAttachmentFile",
+                method: "GET",
+                path: `/todo-attachments/${pathValue(iD)}/attachment-file/${pathValue(fileID)}/${pathValue(filename)}`,
+                accept: "*/*",
+            }, options);
+        },
+
+        createWithFiles(input: Omit<TodoAttachmentCreateInput, "attachmentFileId">, files: TodoAttachmentCreateFiles, options?: CallOptions): Promise<TodoAttachment> {
+            const form = multipart(input, [["attachmentFile", files.attachmentFile]]);
+
+            return send<TodoAttachment>(rt, {
+                name: "createTodoAttachment",
+                method: "POST",
+                path: "/todo-attachments",
+                form,
+            }, options);
+        },
+    };
 }
 
 /**

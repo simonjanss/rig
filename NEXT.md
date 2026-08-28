@@ -5906,6 +5906,33 @@ are already broken.
 - `throttle.Postgres.qualify` prefixes known column names by string replacement.
   It is fed from a closed map rig owns, and it is still the least pleasant code
   in the runtime.
+- **Testing the TypeScript SDK is half done.** `<Resource>Client` is now an
+  interface and `create<Resource>Client` returns a literal, so a test can stand
+  in for a resource and spread the real one for the methods it does not name;
+  `docs/clients.md` has the section, and `ts/typecheck-fixture/src/fake-client.ts`
+  is what keeps it true. Two things it does not reach.
+
+  **There is no test-support entry point.** The `harness()` in
+  `ts/packages/client/src/transport.test.ts` — a scripted `fetch` that records
+  every attempt, with a fixed clock and no backoff — is the thing every consumer
+  will write for themselves, badly. A `@rig/client/testing` export is the obvious
+  home, and it is new public surface, so it wants a design pass rather than a
+  lift-and-shift.
+
+  **And a live-sync fake still has to speak the sync protocol.** Offsets, the
+  handle, the schema header, `up-to-date`, and an answer per `live=true` poll.
+  `ts/packages/electric/src/fallback.test.ts` does it in three hundred lines and
+  nobody outside this repository will. Whatever that helper turns out to be, it
+  belongs beside the one above.
+- **`createCollectionCache` has no reset, and the day anyone runs a component
+  test it will matter.** `ts/packages/electric/src/collection-cache.ts` holds a
+  module-level map keyed by `runtime.origin` and params, evicted only when a
+  collection reaches `cleaned-up`. That is right in a browser and wrong in a
+  suite: two tests on one base URL share a collection, and the second one starts
+  with the first one's rows. Nothing hits it today because the only tests that
+  build collections call `createRigCollection` directly and stub `window` per
+  test — which is itself the workaround, written before there was anything to
+  work around.
 - **Impersonation may not belong in rig.** `POST /auth/impersonate` and its
   `DELETE` are mounted unconditionally by `authhttp.Handler.Mount`. The handler
   is careful — it requires `account.impersonate` and refuses to nest, so an

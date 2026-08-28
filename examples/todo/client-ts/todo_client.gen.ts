@@ -32,16 +32,14 @@ import {
 } from "@rig/client";
 
 /**
- * TodoClient calls the Todo endpoints. It is reached as `client.todos` rather
- * than built directly.
+ * TodoClient is what `client.todos` is, and what a test writes to stand in for
+ * it.
+ *
+ * The documentation for each call is here rather than on the object below,
+ * because this is the type the property resolves to and so this is what an
+ * editor shows.
  */
-export class TodoClient {
-    readonly #rt: Runtime;
-
-    constructor(rt: Runtime) {
-        this.#rt = rt;
-    }
-
+export interface TodoClient {
     /**
      * List Todos.
      *
@@ -49,18 +47,7 @@ export class TodoClient {
      *
      * Operation listTodos.
      */
-    list(query: TodoListQuery = {}, options?: CallOptions): Promise<TodoListResponse> {
-        const search = new URLSearchParams();
-        setParam(search, "limit", query.limit);
-        setParam(search, "offset", query.offset);
-
-        return send<TodoListResponse>(this.#rt, {
-            name: "listTodos",
-            method: "GET",
-            path: "/todos",
-            query: search,
-        }, options);
-    }
+    list(query?: TodoListQuery, options?: CallOptions): Promise<TodoListResponse>;
 
     /**
      * Create a Todo.
@@ -72,14 +59,7 @@ export class TodoClient {
      * A refusal is read back with `isTodoCreateError`, whose `fields` say what
      * was wrong with each member of the body.
      */
-    create(input: TodoCreateInput, options?: CallOptions): Promise<Todo> {
-        return send<Todo>(this.#rt, {
-            name: "createTodo",
-            method: "POST",
-            path: "/todos",
-            body: input,
-        }, options);
-    }
+    create(input: TodoCreateInput, options?: CallOptions): Promise<Todo>;
 
     /**
      * Search Todos with filters.
@@ -90,20 +70,7 @@ export class TodoClient {
      *
      * Operation searchTodos.
      */
-    search(filter: TodoFilter, query: TodoSearchQuery = {}, options?: CallOptions): Promise<TodoListResponse> {
-        const search = new URLSearchParams();
-        setParam(search, "limit", query.limit);
-        setParam(search, "offset", query.offset);
-
-        return send<TodoListResponse>(this.#rt, {
-            name: "searchTodos",
-            method: METHOD_QUERY,
-            path: "/todos",
-            query: search,
-            body: { filter: filter },
-            fallback: "/todos/_search",
-        }, options);
-    }
+    search(filter: TodoFilter, query?: TodoSearchQuery, options?: CallOptions): Promise<TodoListResponse>;
 
     /**
      * A deletion stamps the row rather than removing it, so this is what was
@@ -115,18 +82,7 @@ export class TodoClient {
      *
      * Operation listDeletedTodos.
      */
-    listDeleted(query: TodoListDeletedQuery = {}, options?: CallOptions): Promise<TodoListResponse> {
-        const search = new URLSearchParams();
-        setParam(search, "limit", query.limit);
-        setParam(search, "offset", query.offset);
-
-        return send<TodoListResponse>(this.#rt, {
-            name: "listDeletedTodos",
-            method: "GET",
-            path: "/todos/_deleted",
-            query: search,
-        }, options);
-    }
+    listDeleted(query?: TodoListDeletedQuery, options?: CallOptions): Promise<TodoListResponse>;
 
     /**
      * The row is retired by stamping a deletion time; it stops appearing in
@@ -136,13 +92,7 @@ export class TodoClient {
      *
      * Operation deleteTodo.
      */
-    delete(iD: string, options?: CallOptions): Promise<void> {
-        return sendNoContent(this.#rt, {
-            name: "deleteTodo",
-            method: "DELETE",
-            path: `/todos/${pathValue(iD)}`,
-        }, options);
-    }
+    delete(iD: string, options?: CallOptions): Promise<void>;
 
     /**
      * Fetch one Todo by identifier.
@@ -151,13 +101,7 @@ export class TodoClient {
      *
      * Operation getTodo.
      */
-    get(iD: string, options?: CallOptions): Promise<Todo> {
-        return send<Todo>(this.#rt, {
-            name: "getTodo",
-            method: "GET",
-            path: `/todos/${pathValue(iD)}`,
-        }, options);
-    }
+    get(iD: string, options?: CallOptions): Promise<Todo>;
 
     /**
      * Only the fields present in the body are changed. A field set to null is
@@ -170,14 +114,7 @@ export class TodoClient {
      * A refusal is read back with `isTodoUpdateError`, whose `fields` say what
      * was wrong with each member of the body.
      */
-    update(iD: string, input: TodoUpdateInput, options?: CallOptions): Promise<Todo> {
-        return send<Todo>(this.#rt, {
-            name: "updateTodo",
-            method: "PATCH",
-            path: `/todos/${pathValue(iD)}`,
-            body: input,
-        }, options);
-    }
+    update(iD: string, input: TodoUpdateInput, options?: CallOptions): Promise<Todo>;
 
     /**
      * Completing a task that is already done is a conflict rather than a no-op:
@@ -191,14 +128,7 @@ export class TodoClient {
      * A refusal is read back with `isTodoCompleteError`, whose `fields` say
      * what was wrong with each member of the body.
      */
-    complete(iD: string, input: TodoCompleteBody, options?: CallOptions): Promise<Todo> {
-        return send<Todo>(this.#rt, {
-            name: "completeTodo",
-            method: "POST",
-            path: `/todos/${pathValue(iD)}/_complete`,
-            body: input,
-        }, options);
-    }
+    complete(iD: string, input: TodoCompleteBody, options?: CallOptions): Promise<Todo>;
 
     /**
      * The deletion stamp is cleared and the row appears in reads again. It
@@ -222,13 +152,7 @@ export class TodoClient {
      *
      * Operation restoreTodo.
      */
-    restore(iD: string, options?: CallOptions): Promise<Todo> {
-        return send<Todo>(this.#rt, {
-            name: "restoreTodo",
-            method: "POST",
-            path: `/todos/${pathValue(iD)}/_restore`,
-        }, options);
-    }
+    restore(iD: string, options?: CallOptions): Promise<Todo>;
 
     /**
      * The version is replayed through the ordinary update path rather than
@@ -240,14 +164,7 @@ export class TodoClient {
      *
      * Operation revertTodo.
      */
-    revert(iD: string, input: TodoRevertBody, options?: CallOptions): Promise<Todo> {
-        return send<Todo>(this.#rt, {
-            name: "revertTodo",
-            method: "POST",
-            path: `/todos/${pathValue(iD)}/_revert`,
-            body: input,
-        }, options);
-    }
+    revert(iD: string, input: TodoRevertBody, options?: CallOptions): Promise<Todo>;
 
     /**
      * Every update copies the row as it was before writing the change, so this
@@ -261,13 +178,7 @@ export class TodoClient {
      *
      * Operation versionsOfTodo.
      */
-    versions(iD: string, options?: CallOptions): Promise<TodoListResponse> {
-        return send<TodoListResponse>(this.#rt, {
-            name: "versionsOfTodo",
-            method: "GET",
-            path: `/todos/${pathValue(iD)}/_versions`,
-        }, options);
-    }
+    versions(iD: string, options?: CallOptions): Promise<TodoListResponse>;
 
     /**
      * The column is cleared and the file is retired. Its bytes outlive the
@@ -278,13 +189,7 @@ export class TodoClient {
      *
      * Operation deleteTodoCoverFile.
      */
-    deleteCoverFile(iD: string, options?: CallOptions): Promise<void> {
-        return sendNoContent(this.#rt, {
-            name: "deleteTodoCoverFile",
-            method: "DELETE",
-            path: `/todos/${pathValue(iD)}/cover-file`,
-        }, options);
-    }
+    deleteCoverFile(iD: string, options?: CallOptions): Promise<void>;
 
     /**
      * The form carries one part, named coverFile. Nothing else in it is
@@ -311,16 +216,7 @@ export class TodoClient {
      * comes back as it happened, and retrying is the caller's decision because
      * only the caller still has the bytes.
      */
-    uploadCoverFile(iD: string, file: Upload, options?: CallOptions): Promise<RigFile> {
-        const form = multipart(undefined, [["coverFile", file]]);
-
-        return send<RigFile>(this.#rt, {
-            name: "uploadTodoCoverFile",
-            method: "POST",
-            path: `/todos/${pathValue(iD)}/cover-file`,
-            form,
-        }, options);
-    }
+    uploadCoverFile(iD: string, file: Upload, options?: CallOptions): Promise<RigFile>;
 
     /**
      * Answers range and conditional requests, so a resumed download does not
@@ -330,14 +226,7 @@ export class TodoClient {
      *
      * Operation downloadTodoCoverFile.
      */
-    downloadCoverFile(iD: string, fileID: string, filename: string, options?: CallOptions): Promise<Response> {
-        return sendContent(this.#rt, {
-            name: "downloadTodoCoverFile",
-            method: "GET",
-            path: `/todos/${pathValue(iD)}/cover-file/${pathValue(fileID)}/${pathValue(filename)}`,
-            accept: "*/*",
-        }, options);
-    }
+    downloadCoverFile(iD: string, fileID: string, filename: string, options?: CallOptions): Promise<Response>;
 
     /**
      * Creates a Todo and its files in one request.
@@ -356,16 +245,166 @@ export class TodoClient {
      * is not. **This call is never sent twice**, for the reason an upload is
      * not — a form is the one write no idempotency key names.
      */
-    createWithFiles(input: TodoCreateInput, files: TodoCreateFiles, options?: CallOptions): Promise<Todo> {
-        const form = multipart(input, [["coverFile", files.coverFile]]);
+    createWithFiles(input: TodoCreateInput, files: TodoCreateFiles, options?: CallOptions): Promise<Todo>;
+}
 
-        return send<Todo>(this.#rt, {
-            name: "createTodo",
-            method: "POST",
-            path: "/todos",
-            form,
-        }, options);
-    }
+/**
+ * Builds the Todo half of a client.
+ *
+ * Called by `createClient` and not usually by anything else: a resource reached
+ * through the client it belongs to shares that client's credential, and one
+ * built here would not.
+ */
+export function createTodoClient(rt: Runtime): TodoClient {
+    return {
+        list(query: TodoListQuery = {}, options?: CallOptions): Promise<TodoListResponse> {
+            const search = new URLSearchParams();
+            setParam(search, "limit", query.limit);
+            setParam(search, "offset", query.offset);
+
+            return send<TodoListResponse>(rt, {
+                name: "listTodos",
+                method: "GET",
+                path: "/todos",
+                query: search,
+            }, options);
+        },
+
+        create(input: TodoCreateInput, options?: CallOptions): Promise<Todo> {
+            return send<Todo>(rt, {
+                name: "createTodo",
+                method: "POST",
+                path: "/todos",
+                body: input,
+            }, options);
+        },
+
+        search(filter: TodoFilter, query: TodoSearchQuery = {}, options?: CallOptions): Promise<TodoListResponse> {
+            const search = new URLSearchParams();
+            setParam(search, "limit", query.limit);
+            setParam(search, "offset", query.offset);
+
+            return send<TodoListResponse>(rt, {
+                name: "searchTodos",
+                method: METHOD_QUERY,
+                path: "/todos",
+                query: search,
+                body: { filter: filter },
+                fallback: "/todos/_search",
+            }, options);
+        },
+
+        listDeleted(query: TodoListDeletedQuery = {}, options?: CallOptions): Promise<TodoListResponse> {
+            const search = new URLSearchParams();
+            setParam(search, "limit", query.limit);
+            setParam(search, "offset", query.offset);
+
+            return send<TodoListResponse>(rt, {
+                name: "listDeletedTodos",
+                method: "GET",
+                path: "/todos/_deleted",
+                query: search,
+            }, options);
+        },
+
+        delete(iD: string, options?: CallOptions): Promise<void> {
+            return sendNoContent(rt, {
+                name: "deleteTodo",
+                method: "DELETE",
+                path: `/todos/${pathValue(iD)}`,
+            }, options);
+        },
+
+        get(iD: string, options?: CallOptions): Promise<Todo> {
+            return send<Todo>(rt, {
+                name: "getTodo",
+                method: "GET",
+                path: `/todos/${pathValue(iD)}`,
+            }, options);
+        },
+
+        update(iD: string, input: TodoUpdateInput, options?: CallOptions): Promise<Todo> {
+            return send<Todo>(rt, {
+                name: "updateTodo",
+                method: "PATCH",
+                path: `/todos/${pathValue(iD)}`,
+                body: input,
+            }, options);
+        },
+
+        complete(iD: string, input: TodoCompleteBody, options?: CallOptions): Promise<Todo> {
+            return send<Todo>(rt, {
+                name: "completeTodo",
+                method: "POST",
+                path: `/todos/${pathValue(iD)}/_complete`,
+                body: input,
+            }, options);
+        },
+
+        restore(iD: string, options?: CallOptions): Promise<Todo> {
+            return send<Todo>(rt, {
+                name: "restoreTodo",
+                method: "POST",
+                path: `/todos/${pathValue(iD)}/_restore`,
+            }, options);
+        },
+
+        revert(iD: string, input: TodoRevertBody, options?: CallOptions): Promise<Todo> {
+            return send<Todo>(rt, {
+                name: "revertTodo",
+                method: "POST",
+                path: `/todos/${pathValue(iD)}/_revert`,
+                body: input,
+            }, options);
+        },
+
+        versions(iD: string, options?: CallOptions): Promise<TodoListResponse> {
+            return send<TodoListResponse>(rt, {
+                name: "versionsOfTodo",
+                method: "GET",
+                path: `/todos/${pathValue(iD)}/_versions`,
+            }, options);
+        },
+
+        deleteCoverFile(iD: string, options?: CallOptions): Promise<void> {
+            return sendNoContent(rt, {
+                name: "deleteTodoCoverFile",
+                method: "DELETE",
+                path: `/todos/${pathValue(iD)}/cover-file`,
+            }, options);
+        },
+
+        uploadCoverFile(iD: string, file: Upload, options?: CallOptions): Promise<RigFile> {
+            const form = multipart(undefined, [["coverFile", file]]);
+
+            return send<RigFile>(rt, {
+                name: "uploadTodoCoverFile",
+                method: "POST",
+                path: `/todos/${pathValue(iD)}/cover-file`,
+                form,
+            }, options);
+        },
+
+        downloadCoverFile(iD: string, fileID: string, filename: string, options?: CallOptions): Promise<Response> {
+            return sendContent(rt, {
+                name: "downloadTodoCoverFile",
+                method: "GET",
+                path: `/todos/${pathValue(iD)}/cover-file/${pathValue(fileID)}/${pathValue(filename)}`,
+                accept: "*/*",
+            }, options);
+        },
+
+        createWithFiles(input: TodoCreateInput, files: TodoCreateFiles, options?: CallOptions): Promise<Todo> {
+            const form = multipart(input, [["coverFile", files.coverFile]]);
+
+            return send<Todo>(rt, {
+                name: "createTodo",
+                method: "POST",
+                path: "/todos",
+                form,
+            }, options);
+        },
+    };
 }
 
 /**

@@ -12,11 +12,18 @@
  * which of them it was.
  */
 
+import type {
+    ProfileAttachmentClient,
+} from "./profile_attachment_client.gen.js";
+import type { ProfileClient } from "./profile_client.gen.js";
+import type { RigFileClient } from "./rig_file_client.gen.js";
 import type { Config } from "@rig/client";
 
-import { ProfileAttachmentClient } from "./profile_attachment_client.gen.js";
-import { ProfileClient } from "./profile_client.gen.js";
-import { RigFileClient } from "./rig_file_client.gen.js";
+import {
+    createProfileAttachmentClient,
+} from "./profile_attachment_client.gen.js";
+import { createProfileClient } from "./profile_client.gen.js";
+import { createRigFileClient } from "./rig_file_client.gen.js";
 import { Runtime } from "@rig/client";
 
 /**
@@ -84,8 +91,8 @@ export function createClient(config: Config): Client {
 
     return {
         runtime,
-        profiles: new ProfileClient(runtime),
-        profileAttachments: new ProfileAttachmentClient(runtime),
-        rigFiles: new RigFileClient(runtime),
+        profiles: createProfileClient(runtime),
+        profileAttachments: createProfileAttachmentClient(runtime),
+        rigFiles: createRigFileClient(runtime),
     };
 }

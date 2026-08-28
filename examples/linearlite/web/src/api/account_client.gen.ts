@@ -14,16 +14,14 @@ import type { CallOptions, Runtime } from "@rig/client";
 import { METHOD_QUERY, pathValue, send, setParam } from "@rig/client";
 
 /**
- * AccountClient calls the Account endpoints. It is reached as `client.accounts`
- * rather than built directly.
+ * AccountClient is what `client.accounts` is, and what a test writes to stand
+ * in for it.
+ *
+ * The documentation for each call is here rather than on the object below,
+ * because this is the type the property resolves to and so this is what an
+ * editor shows.
  */
-export class AccountClient {
-    readonly #rt: Runtime;
-
-    constructor(rt: Runtime) {
-        this.#rt = rt;
-    }
-
+export interface AccountClient {
     /**
      * List Accounts.
      *
@@ -31,18 +29,7 @@ export class AccountClient {
      *
      * Operation listAccounts.
      */
-    list(query: AccountListQuery = {}, options?: CallOptions): Promise<AccountListResponse> {
-        const search = new URLSearchParams();
-        setParam(search, "limit", query.limit);
-        setParam(search, "offset", query.offset);
-
-        return send<AccountListResponse>(this.#rt, {
-            name: "listAccounts",
-            method: "GET",
-            path: "/accounts",
-            query: search,
-        }, options);
-    }
+    list(query?: AccountListQuery, options?: CallOptions): Promise<AccountListResponse>;
 
     /**
      * Search Accounts with filters.
@@ -53,20 +40,7 @@ export class AccountClient {
      *
      * Operation searchAccounts.
      */
-    search(filter: AccountFilter, query: AccountSearchQuery = {}, options?: CallOptions): Promise<AccountListResponse> {
-        const search = new URLSearchParams();
-        setParam(search, "limit", query.limit);
-        setParam(search, "offset", query.offset);
-
-        return send<AccountListResponse>(this.#rt, {
-            name: "searchAccounts",
-            method: METHOD_QUERY,
-            path: "/accounts",
-            query: search,
-            body: { filter: filter },
-            fallback: "/accounts/_search",
-        }, options);
-    }
+    search(filter: AccountFilter, query?: AccountSearchQuery, options?: CallOptions): Promise<AccountListResponse>;
 
     /**
      * A deletion stamps the row rather than removing it, so this is what was
@@ -78,18 +52,7 @@ export class AccountClient {
      *
      * Operation listDeletedAccounts.
      */
-    listDeleted(query: AccountListDeletedQuery = {}, options?: CallOptions): Promise<AccountListResponse> {
-        const search = new URLSearchParams();
-        setParam(search, "limit", query.limit);
-        setParam(search, "offset", query.offset);
-
-        return send<AccountListResponse>(this.#rt, {
-            name: "listDeletedAccounts",
-            method: "GET",
-            path: "/accounts/_deleted",
-            query: search,
-        }, options);
-    }
+    listDeleted(query?: AccountListDeletedQuery, options?: CallOptions): Promise<AccountListResponse>;
 
     /**
      * Fetch one Account by identifier.
@@ -98,11 +61,65 @@ export class AccountClient {
      *
      * Operation getAccount.
      */
-    get(iD: string, options?: CallOptions): Promise<Account> {
-        return send<Account>(this.#rt, {
-            name: "getAccount",
-            method: "GET",
-            path: `/accounts/${pathValue(iD)}`,
-        }, options);
-    }
+    get(iD: string, options?: CallOptions): Promise<Account>;
+}
+
+/**
+ * Builds the Account half of a client.
+ *
+ * Called by `createClient` and not usually by anything else: a resource reached
+ * through the client it belongs to shares that client's credential, and one
+ * built here would not.
+ */
+export function createAccountClient(rt: Runtime): AccountClient {
+    return {
+        list(query: AccountListQuery = {}, options?: CallOptions): Promise<AccountListResponse> {
+            const search = new URLSearchParams();
+            setParam(search, "limit", query.limit);
+            setParam(search, "offset", query.offset);
+
+            return send<AccountListResponse>(rt, {
+                name: "listAccounts",
+                method: "GET",
+                path: "/accounts",
+                query: search,
+            }, options);
+        },
+
+        search(filter: AccountFilter, query: AccountSearchQuery = {}, options?: CallOptions): Promise<AccountListResponse> {
+            const search = new URLSearchParams();
+            setParam(search, "limit", query.limit);
+            setParam(search, "offset", query.offset);
+
+            return send<AccountListResponse>(rt, {
+                name: "searchAccounts",
+                method: METHOD_QUERY,
+                path: "/accounts",
+                query: search,
+                body: { filter: filter },
+                fallback: "/accounts/_search",
+            }, options);
+        },
+
+        listDeleted(query: AccountListDeletedQuery = {}, options?: CallOptions): Promise<AccountListResponse> {
+            const search = new URLSearchParams();
+            setParam(search, "limit", query.limit);
+            setParam(search, "offset", query.offset);
+
+            return send<AccountListResponse>(rt, {
+                name: "listDeletedAccounts",
+                method: "GET",
+                path: "/accounts/_deleted",
+                query: search,
+            }, options);
+        },
+
+        get(iD: string, options?: CallOptions): Promise<Account> {
+            return send<Account>(rt, {
+                name: "getAccount",
+                method: "GET",
+                path: `/accounts/${pathValue(iD)}`,
+            }, options);
+        },
+    };
 }

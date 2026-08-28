@@ -33,16 +33,14 @@ import {
 } from "@rig/client";
 
 /**
- * ProfileAttachmentClient calls the ProfileAttachment endpoints. It is reached
- * as `client.profileAttachments` rather than built directly.
+ * ProfileAttachmentClient is what `client.profileAttachments` is, and what a
+ * test writes to stand in for it.
+ *
+ * The documentation for each call is here rather than on the object below,
+ * because this is the type the property resolves to and so this is what an
+ * editor shows.
  */
-export class ProfileAttachmentClient {
-    readonly #rt: Runtime;
-
-    constructor(rt: Runtime) {
-        this.#rt = rt;
-    }
-
+export interface ProfileAttachmentClient {
     /**
      * List ProfileAttachments.
      *
@@ -50,18 +48,7 @@ export class ProfileAttachmentClient {
      *
      * Operation listProfileAttachments.
      */
-    list(query: ProfileAttachmentListQuery = {}, options?: CallOptions): Promise<ProfileAttachmentListResponse> {
-        const search = new URLSearchParams();
-        setParam(search, "limit", query.limit);
-        setParam(search, "offset", query.offset);
-
-        return send<ProfileAttachmentListResponse>(this.#rt, {
-            name: "listProfileAttachments",
-            method: "GET",
-            path: "/profile-attachments",
-            query: search,
-        }, options);
-    }
+    list(query?: ProfileAttachmentListQuery, options?: CallOptions): Promise<ProfileAttachmentListResponse>;
 
     /**
      * Create a ProfileAttachment.
@@ -73,14 +60,7 @@ export class ProfileAttachmentClient {
      * A refusal is read back with `isProfileAttachmentCreateError`, whose
      * `fields` say what was wrong with each member of the body.
      */
-    create(input: ProfileAttachmentCreateInput, options?: CallOptions): Promise<ProfileAttachment> {
-        return send<ProfileAttachment>(this.#rt, {
-            name: "createProfileAttachment",
-            method: "POST",
-            path: "/profile-attachments",
-            body: input,
-        }, options);
-    }
+    create(input: ProfileAttachmentCreateInput, options?: CallOptions): Promise<ProfileAttachment>;
 
     /**
      * Search ProfileAttachments with filters.
@@ -92,20 +72,7 @@ export class ProfileAttachmentClient {
      *
      * Operation searchProfileAttachments.
      */
-    search(filter: ProfileAttachmentFilter, query: ProfileAttachmentSearchQuery = {}, options?: CallOptions): Promise<ProfileAttachmentListResponse> {
-        const search = new URLSearchParams();
-        setParam(search, "limit", query.limit);
-        setParam(search, "offset", query.offset);
-
-        return send<ProfileAttachmentListResponse>(this.#rt, {
-            name: "searchProfileAttachments",
-            method: METHOD_QUERY,
-            path: "/profile-attachments",
-            query: search,
-            body: { filter: filter },
-            fallback: "/profile-attachments/_search",
-        }, options);
-    }
+    search(filter: ProfileAttachmentFilter, query?: ProfileAttachmentSearchQuery, options?: CallOptions): Promise<ProfileAttachmentListResponse>;
 
     /**
      * Delete a ProfileAttachment.
@@ -114,13 +81,7 @@ export class ProfileAttachmentClient {
      *
      * Operation deleteProfileAttachment.
      */
-    delete(iD: string, options?: CallOptions): Promise<void> {
-        return sendNoContent(this.#rt, {
-            name: "deleteProfileAttachment",
-            method: "DELETE",
-            path: `/profile-attachments/${pathValue(iD)}`,
-        }, options);
-    }
+    delete(iD: string, options?: CallOptions): Promise<void>;
 
     /**
      * Fetch one ProfileAttachment by identifier.
@@ -129,13 +90,7 @@ export class ProfileAttachmentClient {
      *
      * Operation getProfileAttachment.
      */
-    get(iD: string, options?: CallOptions): Promise<ProfileAttachment> {
-        return send<ProfileAttachment>(this.#rt, {
-            name: "getProfileAttachment",
-            method: "GET",
-            path: `/profile-attachments/${pathValue(iD)}`,
-        }, options);
-    }
+    get(iD: string, options?: CallOptions): Promise<ProfileAttachment>;
 
     /**
      * Only the fields present in the body are changed. A field set to null is
@@ -148,14 +103,7 @@ export class ProfileAttachmentClient {
      * A refusal is read back with `isProfileAttachmentUpdateError`, whose
      * `fields` say what was wrong with each member of the body.
      */
-    update(iD: string, input: ProfileAttachmentUpdateInput, options?: CallOptions): Promise<ProfileAttachment> {
-        return send<ProfileAttachment>(this.#rt, {
-            name: "updateProfileAttachment",
-            method: "PATCH",
-            path: `/profile-attachments/${pathValue(iD)}`,
-            body: input,
-        }, options);
-    }
+    update(iD: string, input: ProfileAttachmentUpdateInput, options?: CallOptions): Promise<ProfileAttachment>;
 
     /**
      * The form carries one part, named documentFile. Nothing else in it is
@@ -182,16 +130,7 @@ export class ProfileAttachmentClient {
      * comes back as it happened, and retrying is the caller's decision because
      * only the caller still has the bytes.
      */
-    uploadDocumentFile(iD: string, file: Upload, options?: CallOptions): Promise<RigFile> {
-        const form = multipart(undefined, [["documentFile", file]]);
-
-        return send<RigFile>(this.#rt, {
-            name: "uploadProfileAttachmentDocumentFile",
-            method: "POST",
-            path: `/profile-attachments/${pathValue(iD)}/document-file`,
-            form,
-        }, options);
-    }
+    uploadDocumentFile(iD: string, file: Upload, options?: CallOptions): Promise<RigFile>;
 
     /**
      * Answers range and conditional requests, so a resumed download does not
@@ -201,14 +140,7 @@ export class ProfileAttachmentClient {
      *
      * Operation downloadProfileAttachmentDocumentFile.
      */
-    downloadDocumentFile(iD: string, fileID: string, filename: string, options?: CallOptions): Promise<Response> {
-        return sendContent(this.#rt, {
-            name: "downloadProfileAttachmentDocumentFile",
-            method: "GET",
-            path: `/profile-attachments/${pathValue(iD)}/document-file/${pathValue(fileID)}/${pathValue(filename)}`,
-            accept: "*/*",
-        }, options);
-    }
+    downloadDocumentFile(iD: string, fileID: string, filename: string, options?: CallOptions): Promise<Response>;
 
     /**
      * Creates a ProfileAttachment and its files in one request.
@@ -228,16 +160,111 @@ export class ProfileAttachmentClient {
      * is not. **This call is never sent twice**, for the reason an upload is
      * not — a form is the one write no idempotency key names.
      */
-    createWithFiles(input: Omit<ProfileAttachmentCreateInput, "documentFileId">, files: ProfileAttachmentCreateFiles, options?: CallOptions): Promise<ProfileAttachment> {
-        const form = multipart(input, [["documentFile", files.documentFile]]);
+    createWithFiles(input: Omit<ProfileAttachmentCreateInput, "documentFileId">, files: ProfileAttachmentCreateFiles, options?: CallOptions): Promise<ProfileAttachment>;
+}
 
-        return send<ProfileAttachment>(this.#rt, {
-            name: "createProfileAttachment",
-            method: "POST",
-            path: "/profile-attachments",
-            form,
-        }, options);
-    }
+/**
+ * Builds the ProfileAttachment half of a client.
+ *
+ * Called by `createClient` and not usually by anything else: a resource reached
+ * through the client it belongs to shares that client's credential, and one
+ * built here would not.
+ */
+export function createProfileAttachmentClient(rt: Runtime): ProfileAttachmentClient {
+    return {
+        list(query: ProfileAttachmentListQuery = {}, options?: CallOptions): Promise<ProfileAttachmentListResponse> {
+            const search = new URLSearchParams();
+            setParam(search, "limit", query.limit);
+            setParam(search, "offset", query.offset);
+
+            return send<ProfileAttachmentListResponse>(rt, {
+                name: "listProfileAttachments",
+                method: "GET",
+                path: "/profile-attachments",
+                query: search,
+            }, options);
+        },
+
+        create(input: ProfileAttachmentCreateInput, options?: CallOptions): Promise<ProfileAttachment> {
+            return send<ProfileAttachment>(rt, {
+                name: "createProfileAttachment",
+                method: "POST",
+                path: "/profile-attachments",
+                body: input,
+            }, options);
+        },
+
+        search(filter: ProfileAttachmentFilter, query: ProfileAttachmentSearchQuery = {}, options?: CallOptions): Promise<ProfileAttachmentListResponse> {
+            const search = new URLSearchParams();
+            setParam(search, "limit", query.limit);
+            setParam(search, "offset", query.offset);
+
+            return send<ProfileAttachmentListResponse>(rt, {
+                name: "searchProfileAttachments",
+                method: METHOD_QUERY,
+                path: "/profile-attachments",
+                query: search,
+                body: { filter: filter },
+                fallback: "/profile-attachments/_search",
+            }, options);
+        },
+
+        delete(iD: string, options?: CallOptions): Promise<void> {
+            return sendNoContent(rt, {
+                name: "deleteProfileAttachment",
+                method: "DELETE",
+                path: `/profile-attachments/${pathValue(iD)}`,
+            }, options);
+        },
+
+        get(iD: string, options?: CallOptions): Promise<ProfileAttachment> {
+            return send<ProfileAttachment>(rt, {
+                name: "getProfileAttachment",
+                method: "GET",
+                path: `/profile-attachments/${pathValue(iD)}`,
+            }, options);
+        },
+
+        update(iD: string, input: ProfileAttachmentUpdateInput, options?: CallOptions): Promise<ProfileAttachment> {
+            return send<ProfileAttachment>(rt, {
+                name: "updateProfileAttachment",
+                method: "PATCH",
+                path: `/profile-attachments/${pathValue(iD)}`,
+                body: input,
+            }, options);
+        },
+
+        uploadDocumentFile(iD: string, file: Upload, options?: CallOptions): Promise<RigFile> {
+            const form = multipart(undefined, [["documentFile", file]]);
+
+            return send<RigFile>(rt, {
+                name: "uploadProfileAttachmentDocumentFile",
+                method: "POST",
+                path: `/profile-attachments/${pathValue(iD)}/document-file`,
+                form,
+            }, options);
+        },
+
+        downloadDocumentFile(iD: string, fileID: string, filename: string, options?: CallOptions): Promise<Response> {
+            return sendContent(rt, {
+                name: "downloadProfileAttachmentDocumentFile",
+                method: "GET",
+                path: `/profile-attachments/${pathValue(iD)}/document-file/${pathValue(fileID)}/${pathValue(filename)}`,
+                accept: "*/*",
+            }, options);
+        },
+
+        createWithFiles(input: Omit<ProfileAttachmentCreateInput, "documentFileId">, files: ProfileAttachmentCreateFiles, options?: CallOptions): Promise<ProfileAttachment> {
+            const form = multipart(input, [["documentFile", files.documentFile]]);
+
+            return send<ProfileAttachment>(rt, {
+                name: "createProfileAttachment",
+                method: "POST",
+                path: "/profile-attachments",
+                form,
+            }, options);
+        },
+    };
 }
 
 /**

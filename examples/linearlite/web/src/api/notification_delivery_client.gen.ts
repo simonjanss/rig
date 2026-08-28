@@ -14,16 +14,14 @@ import type { CallOptions, Runtime } from "@rig/client";
 import { pathValue, send, setParam } from "@rig/client";
 
 /**
- * NotificationDeliveryClient calls the NotificationDelivery endpoints. It is
- * reached as `client.notificationDeliveries` rather than built directly.
+ * NotificationDeliveryClient is what `client.notificationDeliveries` is, and
+ * what a test writes to stand in for it.
+ *
+ * The documentation for each call is here rather than on the object below,
+ * because this is the type the property resolves to and so this is what an
+ * editor shows.
  */
-export class NotificationDeliveryClient {
-    readonly #rt: Runtime;
-
-    constructor(rt: Runtime) {
-        this.#rt = rt;
-    }
-
+export interface NotificationDeliveryClient {
     /**
      * List NotificationDeliveries.
      *
@@ -31,18 +29,7 @@ export class NotificationDeliveryClient {
      *
      * Operation listNotificationDeliveries.
      */
-    list(query: NotificationDeliveryListQuery = {}, options?: CallOptions): Promise<NotificationDeliveryListResponse> {
-        const search = new URLSearchParams();
-        setParam(search, "limit", query.limit);
-        setParam(search, "offset", query.offset);
-
-        return send<NotificationDeliveryListResponse>(this.#rt, {
-            name: "listNotificationDeliveries",
-            method: "GET",
-            path: "/notification-deliveries",
-            query: search,
-        }, options);
-    }
+    list(query?: NotificationDeliveryListQuery, options?: CallOptions): Promise<NotificationDeliveryListResponse>;
 
     /**
      * Fetch one NotificationDelivery by identifier.
@@ -51,11 +38,37 @@ export class NotificationDeliveryClient {
      *
      * Operation getNotificationDelivery.
      */
-    get(iD: string, options?: CallOptions): Promise<NotificationDelivery> {
-        return send<NotificationDelivery>(this.#rt, {
-            name: "getNotificationDelivery",
-            method: "GET",
-            path: `/notification-deliveries/${pathValue(iD)}`,
-        }, options);
-    }
+    get(iD: string, options?: CallOptions): Promise<NotificationDelivery>;
+}
+
+/**
+ * Builds the NotificationDelivery half of a client.
+ *
+ * Called by `createClient` and not usually by anything else: a resource reached
+ * through the client it belongs to shares that client's credential, and one
+ * built here would not.
+ */
+export function createNotificationDeliveryClient(rt: Runtime): NotificationDeliveryClient {
+    return {
+        list(query: NotificationDeliveryListQuery = {}, options?: CallOptions): Promise<NotificationDeliveryListResponse> {
+            const search = new URLSearchParams();
+            setParam(search, "limit", query.limit);
+            setParam(search, "offset", query.offset);
+
+            return send<NotificationDeliveryListResponse>(rt, {
+                name: "listNotificationDeliveries",
+                method: "GET",
+                path: "/notification-deliveries",
+                query: search,
+            }, options);
+        },
+
+        get(iD: string, options?: CallOptions): Promise<NotificationDelivery> {
+            return send<NotificationDelivery>(rt, {
+                name: "getNotificationDelivery",
+                method: "GET",
+                path: `/notification-deliveries/${pathValue(iD)}`,
+            }, options);
+        },
+    };
 }

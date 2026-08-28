@@ -28,16 +28,14 @@ import {
 } from "@rig/client";
 
 /**
- * LessonClient calls the Lesson endpoints. It is reached as `client.lessons`
- * rather than built directly.
+ * LessonClient is what `client.lessons` is, and what a test writes to stand in
+ * for it.
+ *
+ * The documentation for each call is here rather than on the object below,
+ * because this is the type the property resolves to and so this is what an
+ * editor shows.
  */
-export class LessonClient {
-    readonly #rt: Runtime;
-
-    constructor(rt: Runtime) {
-        this.#rt = rt;
-    }
-
+export interface LessonClient {
     /**
      * List Lessons.
      *
@@ -45,18 +43,7 @@ export class LessonClient {
      *
      * Operation listLessons.
      */
-    list(query: LessonListQuery = {}, options?: CallOptions): Promise<LessonListResponse> {
-        const search = new URLSearchParams();
-        setParam(search, "limit", query.limit);
-        setParam(search, "offset", query.offset);
-
-        return send<LessonListResponse>(this.#rt, {
-            name: "listLessons",
-            method: "GET",
-            path: "/lessons",
-            query: search,
-        }, options);
-    }
+    list(query?: LessonListQuery, options?: CallOptions): Promise<LessonListResponse>;
 
     /**
      * Create a Lesson.
@@ -68,14 +55,7 @@ export class LessonClient {
      * A refusal is read back with `isLessonCreateError`, whose `fields` say
      * what was wrong with each member of the body.
      */
-    create(input: LessonCreateInput, options?: CallOptions): Promise<Lesson> {
-        return send<Lesson>(this.#rt, {
-            name: "createLesson",
-            method: "POST",
-            path: "/lessons",
-            body: input,
-        }, options);
-    }
+    create(input: LessonCreateInput, options?: CallOptions): Promise<Lesson>;
 
     /**
      * Search Lessons with filters.
@@ -86,20 +66,7 @@ export class LessonClient {
      *
      * Operation searchLessons.
      */
-    search(filter: LessonFilter, query: LessonSearchQuery = {}, options?: CallOptions): Promise<LessonListResponse> {
-        const search = new URLSearchParams();
-        setParam(search, "limit", query.limit);
-        setParam(search, "offset", query.offset);
-
-        return send<LessonListResponse>(this.#rt, {
-            name: "searchLessons",
-            method: METHOD_QUERY,
-            path: "/lessons",
-            query: search,
-            body: { filter: filter },
-            fallback: "/lessons/_search",
-        }, options);
-    }
+    search(filter: LessonFilter, query?: LessonSearchQuery, options?: CallOptions): Promise<LessonListResponse>;
 
     /**
      * A deletion stamps the row rather than removing it, so this is what was
@@ -111,18 +78,7 @@ export class LessonClient {
      *
      * Operation listDeletedLessons.
      */
-    listDeleted(query: LessonListDeletedQuery = {}, options?: CallOptions): Promise<LessonListResponse> {
-        const search = new URLSearchParams();
-        setParam(search, "limit", query.limit);
-        setParam(search, "offset", query.offset);
-
-        return send<LessonListResponse>(this.#rt, {
-            name: "listDeletedLessons",
-            method: "GET",
-            path: "/lessons/_deleted",
-            query: search,
-        }, options);
-    }
+    listDeleted(query?: LessonListDeletedQuery, options?: CallOptions): Promise<LessonListResponse>;
 
     /**
      * The row is retired by stamping a deletion time; it stops appearing in
@@ -132,13 +88,7 @@ export class LessonClient {
      *
      * Operation deleteLesson.
      */
-    delete(iD: string, options?: CallOptions): Promise<void> {
-        return sendNoContent(this.#rt, {
-            name: "deleteLesson",
-            method: "DELETE",
-            path: `/lessons/${pathValue(iD)}`,
-        }, options);
-    }
+    delete(iD: string, options?: CallOptions): Promise<void>;
 
     /**
      * Fetch one Lesson by identifier.
@@ -147,13 +97,7 @@ export class LessonClient {
      *
      * Operation getLesson.
      */
-    get(iD: string, options?: CallOptions): Promise<Lesson> {
-        return send<Lesson>(this.#rt, {
-            name: "getLesson",
-            method: "GET",
-            path: `/lessons/${pathValue(iD)}`,
-        }, options);
-    }
+    get(iD: string, options?: CallOptions): Promise<Lesson>;
 
     /**
      * Only the fields present in the body are changed. A field set to null is
@@ -166,14 +110,7 @@ export class LessonClient {
      * A refusal is read back with `isLessonUpdateError`, whose `fields` say
      * what was wrong with each member of the body.
      */
-    update(iD: string, input: LessonUpdateInput, options?: CallOptions): Promise<Lesson> {
-        return send<Lesson>(this.#rt, {
-            name: "updateLesson",
-            method: "PATCH",
-            path: `/lessons/${pathValue(iD)}`,
-            body: input,
-        }, options);
-    }
+    update(iD: string, input: LessonUpdateInput, options?: CallOptions): Promise<Lesson>;
 
     /**
      * Publish the lesson to its participants.
@@ -185,14 +122,7 @@ export class LessonClient {
      * A refusal is read back with `isLessonPublishError`, whose `fields` say
      * what was wrong with each member of the body.
      */
-    publish(iD: string, input: LessonPublishBody, options?: CallOptions): Promise<Lesson> {
-        return send<Lesson>(this.#rt, {
-            name: "publishLesson",
-            method: "POST",
-            path: `/lessons/${pathValue(iD)}/_publish`,
-            body: input,
-        }, options);
-    }
+    publish(iD: string, input: LessonPublishBody, options?: CallOptions): Promise<Lesson>;
 
     /**
      * The deletion stamp is cleared and the row appears in reads again. It
@@ -216,13 +146,7 @@ export class LessonClient {
      *
      * Operation restoreLesson.
      */
-    restore(iD: string, options?: CallOptions): Promise<Lesson> {
-        return send<Lesson>(this.#rt, {
-            name: "restoreLesson",
-            method: "POST",
-            path: `/lessons/${pathValue(iD)}/_restore`,
-        }, options);
-    }
+    restore(iD: string, options?: CallOptions): Promise<Lesson>;
 
     /**
      * The version is replayed through the ordinary update path rather than
@@ -234,14 +158,7 @@ export class LessonClient {
      *
      * Operation revertLesson.
      */
-    revert(iD: string, input: LessonRevertBody, options?: CallOptions): Promise<Lesson> {
-        return send<Lesson>(this.#rt, {
-            name: "revertLesson",
-            method: "POST",
-            path: `/lessons/${pathValue(iD)}/_revert`,
-            body: input,
-        }, options);
-    }
+    revert(iD: string, input: LessonRevertBody, options?: CallOptions): Promise<Lesson>;
 
     /**
      * Every update copies the row as it was before writing the change, so this
@@ -255,13 +172,127 @@ export class LessonClient {
      *
      * Operation versionsOfLesson.
      */
-    versions(iD: string, options?: CallOptions): Promise<LessonListResponse> {
-        return send<LessonListResponse>(this.#rt, {
-            name: "versionsOfLesson",
-            method: "GET",
-            path: `/lessons/${pathValue(iD)}/_versions`,
-        }, options);
-    }
+    versions(iD: string, options?: CallOptions): Promise<LessonListResponse>;
+}
+
+/**
+ * Builds the Lesson half of a client.
+ *
+ * Called by `createClient` and not usually by anything else: a resource reached
+ * through the client it belongs to shares that client's credential, and one
+ * built here would not.
+ */
+export function createLessonClient(rt: Runtime): LessonClient {
+    return {
+        list(query: LessonListQuery = {}, options?: CallOptions): Promise<LessonListResponse> {
+            const search = new URLSearchParams();
+            setParam(search, "limit", query.limit);
+            setParam(search, "offset", query.offset);
+
+            return send<LessonListResponse>(rt, {
+                name: "listLessons",
+                method: "GET",
+                path: "/lessons",
+                query: search,
+            }, options);
+        },
+
+        create(input: LessonCreateInput, options?: CallOptions): Promise<Lesson> {
+            return send<Lesson>(rt, {
+                name: "createLesson",
+                method: "POST",
+                path: "/lessons",
+                body: input,
+            }, options);
+        },
+
+        search(filter: LessonFilter, query: LessonSearchQuery = {}, options?: CallOptions): Promise<LessonListResponse> {
+            const search = new URLSearchParams();
+            setParam(search, "limit", query.limit);
+            setParam(search, "offset", query.offset);
+
+            return send<LessonListResponse>(rt, {
+                name: "searchLessons",
+                method: METHOD_QUERY,
+                path: "/lessons",
+                query: search,
+                body: { filter: filter },
+                fallback: "/lessons/_search",
+            }, options);
+        },
+
+        listDeleted(query: LessonListDeletedQuery = {}, options?: CallOptions): Promise<LessonListResponse> {
+            const search = new URLSearchParams();
+            setParam(search, "limit", query.limit);
+            setParam(search, "offset", query.offset);
+
+            return send<LessonListResponse>(rt, {
+                name: "listDeletedLessons",
+                method: "GET",
+                path: "/lessons/_deleted",
+                query: search,
+            }, options);
+        },
+
+        delete(iD: string, options?: CallOptions): Promise<void> {
+            return sendNoContent(rt, {
+                name: "deleteLesson",
+                method: "DELETE",
+                path: `/lessons/${pathValue(iD)}`,
+            }, options);
+        },
+
+        get(iD: string, options?: CallOptions): Promise<Lesson> {
+            return send<Lesson>(rt, {
+                name: "getLesson",
+                method: "GET",
+                path: `/lessons/${pathValue(iD)}`,
+            }, options);
+        },
+
+        update(iD: string, input: LessonUpdateInput, options?: CallOptions): Promise<Lesson> {
+            return send<Lesson>(rt, {
+                name: "updateLesson",
+                method: "PATCH",
+                path: `/lessons/${pathValue(iD)}`,
+                body: input,
+            }, options);
+        },
+
+        publish(iD: string, input: LessonPublishBody, options?: CallOptions): Promise<Lesson> {
+            return send<Lesson>(rt, {
+                name: "publishLesson",
+                method: "POST",
+                path: `/lessons/${pathValue(iD)}/_publish`,
+                body: input,
+            }, options);
+        },
+
+        restore(iD: string, options?: CallOptions): Promise<Lesson> {
+            return send<Lesson>(rt, {
+                name: "restoreLesson",
+                method: "POST",
+                path: `/lessons/${pathValue(iD)}/_restore`,
+            }, options);
+        },
+
+        revert(iD: string, input: LessonRevertBody, options?: CallOptions): Promise<Lesson> {
+            return send<Lesson>(rt, {
+                name: "revertLesson",
+                method: "POST",
+                path: `/lessons/${pathValue(iD)}/_revert`,
+                body: input,
+            }, options);
+        },
+
+        versions(iD: string, options?: CallOptions): Promise<LessonListResponse> {
+            return send<LessonListResponse>(rt, {
+                name: "versionsOfLesson",
+                method: "GET",
+                path: `/lessons/${pathValue(iD)}/_versions`,
+            }, options);
+        },
+    };
 }
 
 /**
