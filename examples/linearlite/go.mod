@@ -6,6 +6,7 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.10.0
 	github.com/simonjanss/rig/auth v0.0.0
+	github.com/simonjanss/rig/authmodel v0.0.0-00010101000000-000000000000
 	github.com/simonjanss/rig/files v0.0.0
 	github.com/simonjanss/rig/migrate v0.0.0-00010101000000-000000000000
 	github.com/simonjanss/rig/notify v0.0.0
@@ -49,6 +50,8 @@ require (
 )
 
 replace github.com/simonjanss/rig/auth => ../../auth
+
+replace github.com/simonjanss/rig/authmodel => ../../authmodel
 
 replace github.com/simonjanss/rig/files => ../../files
 

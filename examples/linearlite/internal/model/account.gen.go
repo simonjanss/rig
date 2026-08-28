@@ -5,87 +5,55 @@
 package model
 
 import (
-	"time"
-
-	"github.com/google/uuid"
+	"github.com/simonjanss/rig/authmodel"
 )
 
 // One person inside one tenant. The person is the identity; this is who they
 // are here.
 //
-// It is the one definition of a Account: the repository scans into it and the
-// API returns it, so there is no conversion between two shapes of the same
-// thing and no field that can go missing from one of them.
-type Account struct {
-	// Unique identifier for this row.
-	ID uuid.UUID `json:"id"`
-	// Tenant this row belongs to. Every query is scoped by it.
-	TenantID uuid.UUID `json:"tenantId"`
-	// The person this account belongs to, or null for a service account, which is
-	// nobody.
-	IdentityID *uuid.UUID `json:"identityId,omitempty"`
-	// When this row was created. Set automatically and never changes.
-	CreatedAt time.Time `json:"createdAt"`
-	// Account that created this row, taken from the request's claims.
-	CreatedByAccountID *uuid.UUID `json:"createdByAccountId,omitempty"`
-	// When this row was last updated. Set automatically on every update.
-	UpdatedAt *time.Time `json:"updatedAt,omitempty"`
-	// Account that last updated this row, taken from the request's claims.
-	UpdatedByAccountID *uuid.UUID `json:"updatedByAccountId,omitempty"`
-	// When this row was soft-deleted. Null while the row is live.
-	DeletedAt *time.Time `json:"deletedAt,omitempty"`
-	// Account that soft-deleted this row, taken from the request's claims.
-	DeletedByAccountID *uuid.UUID `json:"deletedByAccountId,omitempty"`
-	// Whether this is a person or a service account an integration acts as.
-	Kind AccountKind `json:"kind"`
-	// The coarse level in this tenant: Owner, Admin, or Basic. Somebody can be an
-	// Owner here and Basic elsewhere.
-	Role AccountRoleLevel `json:"role"`
-	// A copy of the identity's address, kept here so listing accounts is one
-	// query. For a service account it is a label nobody signs in with.
-	EmailAddress string `json:"emailAddress"`
-	// What to call the person in this tenant.
-	DisplayName string `json:"displayName"`
-	// IANA name, for example Europe/Stockholm. Null means UTC.
-	TimeZone *string `json:"timeZone,omitempty"`
-	// Whether the account may be used. A disabled account is refused with 403, not
-	// 401.
-	IsActive bool `json:"isActive"`
-	// API key this row was created through, when it was an integration rather than
-	// a person.
-	CreatedByAPIKeyID *uuid.UUID `json:"createdByApiKeyId,omitempty"`
-	// API key this row was last updated through, when it was an integration rather
-	// than a person.
-	UpdatedByAPIKeyID *uuid.UUID `json:"updatedByApiKeyId,omitempty"`
-	// API key this row was soft-deleted through, when it was an integration rather
-	// than a person.
-	DeletedByAPIKeyID *uuid.UUID `json:"deletedByApiKeyId,omitempty"`
-}
+// rig created this table, so the type is rig's: this is an alias for
+// [github.com/simonjanss/rig/authmodel.Account], not a second struct of the
+// same shape. What is generated here is the filter grammar beside it, because
+// that one carries a member per table of this project's that points at it.
+type Account = authmodel.Account
+
+// The write inputs, their per-field failures, and the validators a hook is
+// handed. Aliases for the same reason the row is.
+type (
+	AccountCreateInput      = authmodel.AccountCreateInput
+	AccountCreateInputError = authmodel.AccountCreateInputError
+	AccountCreateValidator  = authmodel.AccountCreateValidator
+	AccountUpdateInput      = authmodel.AccountUpdateInput
+	AccountUpdateInputError = authmodel.AccountUpdateInputError
+	AccountUpdateValidator  = authmodel.AccountUpdateValidator
+	AccountDeleteInput      = authmodel.AccountDeleteInput
+	AccountValidatorContext = authmodel.AccountValidatorContext
+)
 
 // TableAccount is the table this entity is stored in.
-const TableAccount = "rig_account"
+const TableAccount = authmodel.TableAccount
 
 // Column names for rig_account, so nothing has to spell one out.
 const (
-	ColumnAccountID                 = "id"
-	ColumnAccountTenantID           = "tenant_id"
-	ColumnAccountIdentityID         = "identity_id"
-	ColumnAccountCreatedAt          = "created_at"
-	ColumnAccountCreatedByAccountID = "created_by_account_id"
-	ColumnAccountUpdatedAt          = "updated_at"
-	ColumnAccountUpdatedByAccountID = "updated_by_account_id"
-	ColumnAccountDeletedAt          = "deleted_at"
-	ColumnAccountDeletedByAccountID = "deleted_by_account_id"
-	ColumnAccountKind               = "kind"
-	ColumnAccountRole               = "role"
-	ColumnAccountEmailAddress       = "email_address"
-	ColumnAccountDisplayName        = "display_name"
-	ColumnAccountTimeZone           = "time_zone"
-	ColumnAccountIsActive           = "is_active"
-	ColumnAccountCreatedByAPIKeyID  = "created_by_api_key_id"
-	ColumnAccountUpdatedByAPIKeyID  = "updated_by_api_key_id"
-	ColumnAccountDeletedByAPIKeyID  = "deleted_by_api_key_id"
+	ColumnAccountID                 = authmodel.ColumnAccountID
+	ColumnAccountTenantID           = authmodel.ColumnAccountTenantID
+	ColumnAccountIdentityID         = authmodel.ColumnAccountIdentityID
+	ColumnAccountCreatedAt          = authmodel.ColumnAccountCreatedAt
+	ColumnAccountCreatedByAccountID = authmodel.ColumnAccountCreatedByAccountID
+	ColumnAccountUpdatedAt          = authmodel.ColumnAccountUpdatedAt
+	ColumnAccountUpdatedByAccountID = authmodel.ColumnAccountUpdatedByAccountID
+	ColumnAccountDeletedAt          = authmodel.ColumnAccountDeletedAt
+	ColumnAccountDeletedByAccountID = authmodel.ColumnAccountDeletedByAccountID
+	ColumnAccountKind               = authmodel.ColumnAccountKind
+	ColumnAccountRole               = authmodel.ColumnAccountRole
+	ColumnAccountEmailAddress       = authmodel.ColumnAccountEmailAddress
+	ColumnAccountDisplayName        = authmodel.ColumnAccountDisplayName
+	ColumnAccountTimeZone           = authmodel.ColumnAccountTimeZone
+	ColumnAccountIsActive           = authmodel.ColumnAccountIsActive
+	ColumnAccountCreatedByAPIKeyID  = authmodel.ColumnAccountCreatedByAPIKeyID
+	ColumnAccountUpdatedByAPIKeyID  = authmodel.ColumnAccountUpdatedByAPIKeyID
+	ColumnAccountDeletedByAPIKeyID  = authmodel.ColumnAccountDeletedByAPIKeyID
 )
 
 // AccountColumns is every column, in the order the row is scanned.
-var AccountColumns = []string{"id", "tenant_id", "identity_id", "created_at", "created_by_account_id", "updated_at", "updated_by_account_id", "deleted_at", "deleted_by_account_id", "kind", "role", "email_address", "display_name", "time_zone", "is_active", "created_by_api_key_id", "updated_by_api_key_id", "deleted_by_api_key_id"}
+var AccountColumns = authmodel.AccountColumns

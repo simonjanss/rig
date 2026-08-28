@@ -204,10 +204,13 @@ go 1.25.0
 require (
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.10.0
+	github.com/simonjanss/rig/authmodel v0.0.0
 	github.com/simonjanss/rig/runtime v0.0.0
 )
 
 replace github.com/simonjanss/rig/runtime => `+runtimeDir(t)+`
+
+replace github.com/simonjanss/rig/authmodel => `+moduleDir(t, "authmodel")+`
 `)
 		env := append(os.Environ(), "GOWORK=off", "GOFLAGS=-mod=mod")
 		if out, err := goRun(root, env, "mod", "tidy"); err != nil {

@@ -8,6 +8,16 @@ package modelgo
 // what this generator needs from it is a path to write into an import block.
 const notifyModelImport = "github.com/simonjanss/rig/notify/notifymodel"
 
+// authModelImport is the same for rig_account.
+//
+// A module of its own rather than a package under rig/auth, because
+// `auth.expose: [rig_account]` does not require `auth.enabled`: a project may
+// read account rows without using rig's authentication, and an alias into the
+// auth module would put argon2, OAuth and x/crypto in its go.mod for the sake of
+// a struct. Notifications need no such care — a project with those tables
+// already calls notify.NewRegistry, so that module was there either way.
+const authModelImport = "github.com/simonjanss/rig/authmodel"
+
 // shippedModel names the package that already declares a table's row, its write
 // inputs and its enums, or reports false for a table this project has to
 // generate.
@@ -22,13 +32,6 @@ const notifyModelImport = "github.com/simonjanss/rig/notify/notifymodel"
 // filter grammar. A project's own table that points at rig_notification adds a
 // member to NotificationFilter, so that type is this project's and the
 // repository that renders its subqueries is too.
-//
-// rig_account is the obvious next candidate and is deliberately not here.
-// `auth.expose: [rig_account]` does not require `auth.enabled`, so a project may
-// read account rows without using rig's authentication at all — and an alias into
-// a package under the auth module would put argon2, OAuth and x/crypto in its
-// go.mod for the sake of a struct. Shipping that row needs a module of its own,
-// which is a decision rather than a side effect.
 //
 // Keyed by physical table name, which is the one thing a configuration file
 // cannot move.
@@ -49,6 +52,8 @@ func shippedModel(table string) (importPath, name string, ok bool) {
 		return notifyModelImport, "NotificationSetting", true
 	case "rig_notification_delivery":
 		return notifyModelImport, "NotificationDelivery", true
+	case "rig_account":
+		return authModelImport, "Account", true
 	}
 	return "", "", false
 }
@@ -70,6 +75,10 @@ func shippedEnum(pgType string) (importPath, name string, ok bool) {
 		return notifyModelImport, "NotificationDigest", true
 	case "rig_notification_delivery_state":
 		return notifyModelImport, "NotificationDeliveryState", true
+	case "rig_account_role_level":
+		return authModelImport, "AccountRoleLevel", true
+	case "rig_account_kind":
+		return authModelImport, "AccountKind", true
 	}
 	return "", "", false
 }

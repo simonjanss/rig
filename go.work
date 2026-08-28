@@ -3,6 +3,7 @@ go 1.26.6
 use (
 	.
 	./auth
+	./authmodel
 	./examples/auth
 	./examples/auth_oauth
 	./examples/fantasyfootball

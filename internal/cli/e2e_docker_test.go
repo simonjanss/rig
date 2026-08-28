@@ -313,15 +313,21 @@ replace github.com/simonjanss/rig/runtime => `+runtimeDir(t)+`
 
 // runtimeDir locates the runtime module so the generated project can replace
 // it, checking this working copy rather than whatever is published.
-func runtimeDir(t *testing.T) string {
+func runtimeDir(t *testing.T) string { return moduleDir(t, "runtime") }
+
+// moduleDir locates one of this repository's own modules, so a scaffolded
+// project under test can replace it with the checkout rather than the published
+// copy — which is the point of the exercise: what is being compiled is the code
+// in this branch.
+func moduleDir(t *testing.T, name string) string {
 	t.Helper()
 
 	_, file, _, ok := goruntime.Caller(0)
 	if !ok {
-		t.Fatal("cannot locate the runtime module")
+		t.Fatalf("cannot locate the %s module", name)
 	}
 	root := filepath.Dir(filepath.Dir(filepath.Dir(file)))
-	return filepath.Join(root, "runtime")
+	return filepath.Join(root, name)
 }
 
 func goRun(dir string, env []string, args ...string) (string, error) {
