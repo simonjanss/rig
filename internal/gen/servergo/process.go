@@ -30,6 +30,11 @@ const (
 	// server is still holding is a request in flight, so it has to end before
 	// the server stops accepting rather than after.
 	shapesDrain = 5 * time.Second
+	// authClose is the auth cache's invalidation channel. Short, because what
+	// it costs is a connection rather than correctness: a listener that has
+	// stopped reports itself as not live, and a cache that is not live reads
+	// through and holds nothing.
+	authClose = 5 * time.Second
 
 	// shutdownHeadroom is what is left for the requests still in flight once
 	// rig's own steps have had theirs.
@@ -48,6 +53,7 @@ const (
 	notificationsConst = "notificationsShutdown"
 	presenceConst      = "presenceShutdown"
 	shapesConst        = "shapesShutdown"
+	authConst          = "authShutdown"
 	headroomConst      = "shutdownHeadroom"
 )
 
@@ -79,6 +85,9 @@ func (e *emitter) shutdownSteps() []shutdownStep {
 	}
 	if e.hasShapes() {
 		steps = append(steps, shutdownStep{shapesConst, shapesDrain, "the live subscriptions"})
+	}
+	if e.hasAuth() {
+		steps = append(steps, shutdownStep{authConst, authClose, "the auth cache's invalidation channel"})
 	}
 	return steps
 }

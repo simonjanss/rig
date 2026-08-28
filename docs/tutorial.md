@@ -373,7 +373,11 @@ var migrations embed.FS
 const localDSN = "postgres://rig:rig@localhost:55450/rig?sslmode=disable"
 
 func main() {
-	serve.Main(serve.Config{
+	// api.Main is the whole of a main function: this project's configuration,
+	// and the one function only this application can write. The probes, the
+	// shutdown budget and the housekeeping subcommands come out of rig.yaml, so
+	// none of them is a line here.
+	api.Main(serve.Config{
 		DatabaseURL: cmp.Or(os.Getenv("DATABASE_URL"), localDSN),
 		Addr:        cmp.Or(os.Getenv("ADDR"), "127.0.0.1:8080"),
 		Hint:        "run `rig db up` to start a local Postgres for this project",
@@ -381,25 +385,29 @@ func main() {
 		// `todo migrate` applies the schema and exits: a job before the
 		// rollout, so one process migrates and the replicas only serve.
 		//
-		// api.Tasks adds the housekeeping this project's blocks already decided
-		// — `todo prune-idempotency` here, deleting the records of writes nobody
-		// will send again — and yours wins on a shared name.
-		Tasks: api.Tasks(map[string]serve.Task{
+		// api.Main merges in the housekeeping this project's blocks already
+		// decided — `todo prune-idempotency` here, deleting the records of
+		// writes nobody will send again — and yours wins on a shared name.
+		Tasks: map[string]serve.Task{
 			"migrate": migrate.Apply(migrations, migrate.Options{Log: os.Stdout}),
-		}),
+		},
 		// The server refuses to start when the database is behind, which is
 		// what catches a deploy that got ahead of its migration job.
 		Migrate: migrate.Require(migrations, migrate.Options{}),
-	}, func(_ context.Context, app *serve.App) (http.Handler, error) {
+	}, func(_ context.Context, app *serve.App) (api.Parts, error) {
 		repos := store.New(app.Pool, store.Config{})
 		svc := todo.New(repos.Todos)
 
-		return api.Register(api.Handlers{
+		// api.Parts is one field per thing whose lifetime is longer than a
+		// request's. This project has none yet, so it is the handler and
+		// nothing else — turning on `notifications:` or a table's `electric:`
+		// is what makes a second field appear.
+		return api.Parts{Handler: api.Register(api.Handlers{
 			// DB is where a write carrying an Idempotency-Key is recorded, so a
 			// client that had to send one twice gets one row and one answer.
 			Server: api.Server{GetClaims: headerClaims, DB: app.Pool},
 			Todo:   svc,
-		}), nil
+		})}, nil
 	})
 }
 

@@ -215,6 +215,16 @@ func (g *Generator) Generate(_ context.Context, doc *ir.Document, opts gen.Optio
 	}
 	artifacts = append(artifacts, process)
 
+	// The order those parts come to exist in, which is the one thing above that
+	// was still a main function's to write. It is generated last because it is
+	// generated out of the others: the struct it names has a field per lifetime
+	// the six conditional files register a shutdown for.
+	run, err := e.runFile()
+	if err != nil {
+		return nil, err
+	}
+	artifacts = append(artifacts, run)
+
 	return artifacts, nil
 }
 

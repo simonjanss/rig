@@ -114,11 +114,11 @@ the corrected request that follows.
   replays — and gives up after five seconds rather than holding a connection for
   as long as the first one takes.
 - **A key is remembered until it is pruned**, which is a day by default. The
-  subcommand is already wired: `api.Tasks(…)` carries `prune-idempotency` in
-  every project, because every project has the table.
+  subcommand is already wired: `api.Main` merges `prune-idempotency` into every
+  project's `Tasks`, because every project has the table.
 
   ```go
-  Tasks: api.Tasks(map[string]serve.Task{ /* yours */ }),
+  Tasks: map[string]serve.Task{ /* yours */ },
   ```
 
   **Nothing schedules it for you** — it is a subcommand of your binary, and what
@@ -176,8 +176,8 @@ served rather than refused. Both are deliberate; the reasoning, and the knob for
 the first, are in [rig-yaml.md](rig-yaml.md#throttle).
 
 **The counters want a cron entry.** `rig_throttle` gains a row per caller per
-window; `api.Tasks(…)` carries a `sweep-throttle` subcommand that deletes the
-dead ones, the way it carries `prune-idempotency` for keys, but nothing schedules
+window; `api.Main` merges in a `sweep-throttle` subcommand that deletes the
+dead ones, the way it merges `prune-idempotency` for keys, but nothing schedules
 it. See [rig-yaml.md](rig-yaml.md#throttle).
 
 The [auth endpoints](auth.md) have limits of their own, counted differently —

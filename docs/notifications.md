@@ -214,23 +214,32 @@ posts := blogpost.New(repos.BlogPosts, inbox, pool)
 reg.Register(api.NewBlogPostSubject(posts))
 
 engine := api.NewNotificationEngine(pool, reg)
-// Starts it, drains it, and registers its shutdown — all three, so the number
-// it is closed within and the number api.ShutdownBudget() counts for it cannot
-// drift apart.
-api.StartNotificationEngine(app, engine)
 ```
 
-and the guarantee behind it, as a subcommand rather than a goroutine:
+and then handed back rather than started: `Engine` is a field on `api.Parts`,
+and `api.Main` starts it, drains it and registers its shutdown — all three, so
+the number it is closed within and the number `api.ShutdownBudget()` counts for
+it cannot drift apart.
 
 ```go
-Tasks: api.Tasks(map[string]serve.Task{
-    "dispatch-notifications": dispatchNotifications,
-}),
+return api.Parts{Handler: mux, Engine: engine}, nil
 ```
 
-That one is yours rather than `api.Tasks`'s, and for the same reason the
-constructor above takes a registry: the audience is a method on a service, so a
-task that dispatches has to build one.
+`api.StartNotificationEngine(app, engine)` is the call behind that field, still
+exported for a project keeping the sequence itself.
+
+The guarantee behind the engine is a subcommand rather than a goroutine, and
+this one *is* yours to write:
+
+```go
+Tasks: map[string]serve.Task{
+    "dispatch-notifications": dispatchNotifications,
+},
+```
+
+It is not merged in for you, for the same reason the constructor above takes a
+registry: the audience is a method on a service, so a task that dispatches has to
+build one.
 
 The in-process engine is **latency and nothing else** — it turns a notification
 into an inbox line in milliseconds rather than by the next tick. Nothing is lost

@@ -14,7 +14,7 @@ Eight generators ship with rig. `rig init` scaffolds all but the two clients.
 | `model-go` | the shared entity, its enums, its query types, and its inputs |
 | `persist-go` | the repository interface and its pgx implementation |
 | `service-go` | API types, service interfaces, and a working default implementation |
-| `server-go` | net/http routing, request decoding, the handler registration struct, the `Link` that wires deletes to the tables they reach, and the process around the server — `Tasks`, `ShutdownBudget`, and the log sink, provider and page as one `Process` |
+| `server-go` | net/http routing, request decoding, the handler registration struct, the `Link` that wires deletes to the tables they reach, and the process around the server — `Main`, `Parts`, `Tasks`, `ShutdownBudget`, and the log sink, provider and page as one `Process` |
 | `electric` | live-sync shape endpoints, with the tenant and lifecycle filters built in |
 | `openapi` | an OpenAPI 3.1 document: every endpoint, schema and status the API answers with |
 | `go-client` | a typed Go client: the wire types and one method per endpoint |
@@ -38,11 +38,23 @@ the corresponding module out of the application's `go.mod`.
 `tracing:` and `monitoring:` give it a `Process` — the log sink, the provider and
 the page, built in the order they depend on each other; `files:`, `presence:` and
 `throttle:` give it housekeeping subcommands in `Tasks`; and whichever of
-`tracing:`, `notifications:` and `presence:` register a shutdown step give it a
-`ShutdownBudget` that adds them up. It is the one file `server-go` writes for
-every project, because every project has a task to merge into — but everything in
-it that names `rig/observe` is behind the same `tracing:` predicate, so the rule
-above holds.
+`tracing:`, `notifications:`, `presence:`, `auth:` and a table's `electric:`
+register a shutdown step give it a `ShutdownBudget` that adds them up.
+
+`run.gen.go` is the order those parts come to exist in, which used to be a
+sequence every `main.go` wrote out. `Parts` has one field per lifetime longer
+than a request's — the handler always, and an `Engine`, `Shapes` or `Auth` when
+the block that gives it one is on — and `Main` is a `serve.Config` and the one
+function only your application can write. Everything between the two is
+generated: the process built before the config it fills in and attached to the
+server it flushes for, the sweeper started before your wiring because it needs
+nothing from it, and each of the rest started, drained or closed after, with the
+numbers `ShutdownBudget` counted. A field left nil is said at startup rather than
+discovered under load.
+
+Both are written for every project, because every project has a task to merge
+into and routes to serve — but everything in either that names `rig/observe` is
+behind the same `tracing:` predicate, so the rule above holds.
 
 ## Options, briefly
 

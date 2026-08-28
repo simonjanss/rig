@@ -245,53 +245,57 @@ the authentication trail, and switching tenants. Those calls are hand-written in
 `web/src/auth/authApi.ts` because they are rig's endpoints rather than this
 schema's — the generated client covers the API and stops at `/auth`.
 
-`presence:` is on with nothing but `enabled`, which is why there are three
+`presence:` is on with nothing but `enabled`, which is why there are two
 lines for it — `Presence` on `api.Handlers` and `RigPresence` on
-`genelectric.Handlers`, both in `internal/app`, and
-`api.StartPresenceSweeper(srv)` in `main.go`'s mount closure.
+`genelectric.Handlers`, both in `internal/app`. The sweeper is `api.Main`'s: it
+runs before this application's wiring, because the service it sweeps through is
+its own over `app.Pool`.
 
-**Almost none of the shutdown arithmetic is in this directory.**
-`api.ShutdownBudget()` is forty seconds, and it is forty because
-`internal/api/process.gen.go` adds up the four steps rig registers for this
-project's blocks — fifteen for the engine, five for the live subscriptions, five
-for the trace flush, five for the sweeper — and leaves ten for the requests in
-flight. A fifth block would change the number without anything here being edited.
+**None of the shutdown arithmetic is in this directory.**
+`api.ShutdownBudget()` is forty-five seconds, and it is forty-five because
+`internal/api/process.gen.go` adds up the five steps rig registers for this
+project's blocks — fifteen for the engine, five each for the live subscriptions,
+the trace flush, the sweeper and the auth cache's channel — and leaves ten for
+the requests in flight. A sixth block would change the number without anything
+here being edited.
 
-`MaxShutdown` is nonetheless a literal — forty-seven seconds — and not that
-forty plus the two numbers rig cannot know: the five the auth closer takes and
-the two seconds of `DrainDelay`. It is written out because it is the one field
-here that leaves the program: whoever writes `terminationGracePeriodSeconds`
-should read it off the `serve.Config` rather than run the binary or add up three
-files.
+`main.go` states `DrainDelay` and nothing else: `api.Main` settles `MaxShutdown`
+to the budget plus that delay, forty-seven seconds. Writing it out is still
+allowed and still checked — it is the one field here that leaves the program,
+since it is what goes into `terminationGracePeriodSeconds` — and
+`ShutdownBudget`'s own documentation states the total in words for whoever writes
+that manifest.
 
-That is not a number waiting to drift. `serve.App` adds up every step actually
-registered, before the server listens, and refuses a budget that cannot hold them
-with the parts named — so a literal left stale by a new block is a process that
-will not start and says why. A wrong number that fails loudly at boot is worth
-more than a right one nobody can read.
+`serve.App` adds up every step actually registered, before the server listens,
+and refuses a budget that cannot hold them with the parts named — so a literal
+left stale by a new block is a process that will not start and says why. A wrong
+number that fails loudly at boot is worth more than a right one nobody can read.
 
-`api.AttachShapes(srv, parts.Shapes)` is the one that is easy to leave out and
-worst to. A live subscription is a request the server is deliberately not
-answering yet, so `http.Server.Shutdown` waits for it and nothing else can end
-it: one open board would otherwise spend the entire budget, and the three steps
-after it would each find a deadline that had already passed.
+`api.Parts` is what `app.New` returns, and its four fields are the whole of what
+outlives a request here: the handler, the engine, the shape proxy and the auth
+foundation. `Shapes` is the one that used to be easy to leave out and worst to.
+A live subscription is a request the server is deliberately not answering yet, so
+`http.Server.Shutdown` waits for it and nothing else can end it: one open board
+would otherwise spend the entire budget, and the three steps after it would each
+find a deadline that had already passed. It is a field rather than a call now,
+and a nil one is a line at startup.
 
-`tracing:` and `monitoring:` are on, which is why `main.go` calls
-`api.NewProcess()` *before* `serve.Main` rather than inside the mount closure:
-the log sink, the provider and the page have to exist before the `serve.Config`
-that two of its fields come out of, and the page listens on `127.0.0.1:9084`, its
-own port beside the API's 8084. `process.Configure` fills `Monitor`,
-`MonitorAddr` and `OnExit`; `process.Attach(srv)` registers the flush and says
-which half of the page is unarmed; `OnExit` is `process.Close`, the same flush for
-the path a `Tasks:` entry takes, which never reaches the closure at all — and for
-the three paths that end in `os.Exit`, where the `defer process.Close()` this file
-used to prescribe would not have run at all. `app.New` still
-takes a `*observe.Page` — `process.Page()` — but only so `/_demo/tour` can say
-where the page is; nil from a task, since a cron entry serving a page nobody can
-reach is not worth the wiring. The password and the two file paths are set by
-`make demo` into a gitignored `.run/`, never by rig.yaml, which is checked in —
-the address is the one part of it that *is* in rig.yaml, because who can reach
-the page is a decision worth reading off the file.
+`tracing:` and `monitoring:` are on, which is why `api.Main` builds a process at
+all: the log sink, the provider and the page have to exist before the
+`serve.Config` that two of its fields come out of, and the page listens on
+`127.0.0.1:9084`, its own port beside the API's 8084. That ordering is what used
+to make `api.NewProcess()` a line in `main.go` *before* `serve.Main`, holding a
+value across both ends of it. `Configure` fills `Monitor`, `MonitorAddr` and
+`OnExit`; `Process.Mount` registers the flush and says which half of the page is
+unarmed; `OnExit` is `Process.Close`, the same flush for the path a `Tasks:`
+entry takes, which never reaches the closure at all — and for the three paths
+that end in `os.Exit`, where a `defer` would not have run. `app.New` still
+takes a `*observe.Page` — the one `api.Main` hands the build function — but only
+so `/_demo/tour` can say where the page is; nil from a task, since a cron entry
+serving a page nobody can reach is not worth the wiring. The password and the two
+file paths are set by `make demo` into a gitignored `.run/`, never by rig.yaml,
+which is checked in — the address is the one part of it that *is* in rig.yaml,
+because who can reach the page is a decision worth reading off the file.
 
 The auth foundation's tables came from `rig setup-project` (migrations 1–7),
 and `rig_account` is exposed read-only as the `Account` resource — the board's

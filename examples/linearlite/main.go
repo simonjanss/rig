@@ -42,28 +42,28 @@
 // does not already decide: the embedded migrations, the two addresses, and the
 // three tasks that are this application's own.
 //
-// The rest of the process is generated from the blocks that describe it. The
-// log sink, the tracing provider and the monitoring page are api.NewProcess,
-// out of `tracing:` and `monitoring:`; the four steps a shutdown has to hold are
-// api.ShutdownBudget, out of the closers `tracing:`, `notifications:`,
-// `presence:` and the shapes between them register; the housekeeping subcommands
-// are api.Tasks, out of `files:` and `presence:`. None of those numbers is
-// written down twice, which is the whole reason they are not written down here.
-// MaxShutdown is the deliberate exception, and says why where it is set.
+// Everything else is api.Main, generated from the blocks that describe it. The
+// log sink, the tracing provider and the monitoring page come out of `tracing:`
+// and `monitoring:`; the four shutdown steps come out of the closers `tracing:`,
+// `notifications:`, `presence:` and `auth:` register, plus the drain the shapes
+// between them need; the housekeeping subcommands come out of `files:` and
+// `presence:`. None of those numbers is written down twice, which is the whole
+// reason they are not written down here — and none of those steps is a line
+// this file could forget, which is why api.Parts is a struct rather than a
+// paragraph in the documentation.
 package main
 
 import (
 	"cmp"
 	"context"
 	"embed"
-	"log/slog"
-	"net/http"
 	"os"
 	"time"
 
 	"github.com/simonjanss/rig/examples/linearlite/internal/api"
 	"github.com/simonjanss/rig/examples/linearlite/internal/app"
 	"github.com/simonjanss/rig/migrate"
+	"github.com/simonjanss/rig/observe"
 	"github.com/simonjanss/rig/runtime/serve"
 )
 
@@ -101,38 +101,9 @@ func migrationSources() []migrate.Source {
 const localDSN = "postgres://rig:rig@localhost:55444/rig?sslmode=disable&TimeZone=UTC"
 
 func main() {
-	// The log file rig's own monitoring page reads, the provider writing the
-	// spans it reads beside them, and the page over both. One call, because the
-	// three have an order — the sink before the logger built out of it, the
-	// provider before the page that reads its file — and rig.yaml is where every
-	// part of it was decided.
-	//
-	// Nothing is written and nothing exported unless the environment says where:
-	// $RIG_LOG_FILE, $RIG_TRACE_FILE, $OTEL_EXPORTER_OTLP_ENDPOINT. `make demo`
-	// points the first two at .run/ and sets a monitoring password, which is what
-	// gives the tour something to open. With none of them set the spans cost
-	// nothing, the trace ids are still real — which is what the request id in
-	// every error body is — and the page opens no port and says so once.
-	process, err := api.NewProcess()
-	if err != nil {
-		// There is no application logger yet: this is the thing that would have
-		// been half of one. slog.Default writes to stderr, which is where this
-		// went before it was a structured line.
-		slog.Error("cannot set this process up", "error", err)
-		os.Exit(1)
-	}
-	// No `defer process.Close()`, and that is the fix rather than the omission
-	// it looks like. Configure sets it as serve.Config.OnExit, so serve.Main runs
-	// it on every way out — including the three that end in os.Exit, where a
-	// deferred call runs not at all. A `migrate` that failed at three in the
-	// morning is exactly the run whose spans somebody wants, and it was the run
-	// that used to drop them.
-	serve.Main(process.Configure(serve.Config{
+	api.Main(serve.Config{
 		DatabaseURL: cmp.Or(os.Getenv("DATABASE_URL"), localDSN),
 		Addr:        cmp.Or(os.Getenv("ADDR"), "127.0.0.1:8084"),
-
-		LivenessPath:  "/livez",
-		ReadinessPath: "/readyz",
 
 		Hint: "run `rig db up` to start Postgres and the sync service for this project, " +
 			"or point $DATABASE_URL at a database you already have",
@@ -142,28 +113,19 @@ func main() {
 		// anything stops. Not padding: taking an instance out of a load balancer
 		// is not instant — the probe has to fail, and the change has to
 		// propagate — and requests sent during that window arrive at a server
-		// that has already stopped accepting them. It comes out of MaxShutdown,
-		// which is why it is stated beside it.
+		// that has already stopped accepting them.
+		//
+		// No MaxShutdown beside it, and that is the one number worth explaining
+		// by its absence. api.Main settles it to api.ShutdownBudget plus this
+		// delay — 45s of steps and headroom, 47s in total — because every step
+		// it counts is now one rig registers rather than one this file did.
+		// Whoever writes terminationGracePeriodSeconds reads the total off
+		// ShutdownBudget's own documentation, which states it in words; state it
+		// here instead and serve still checks it against what was registered
+		// before the server listens.
 		DrainDelay: 2 * time.Second,
-		// Written out, because this is the number that goes into Kubernetes'
-		// terminationGracePeriodSeconds and whoever writes that manifest should
-		// be able to read it off this struct rather than run the binary to
-		// learn it.
-		//
-		// Where it comes from: api.ShutdownBudget() is forty — the four steps
-		// rig registers declare thirty between them, and ten is left for the
-		// requests still in flight — plus the five the auth closer below takes
-		// and the two seconds of drain delay above. Its documentation states
-		// the breakdown in words.
-		//
-		// A literal rather than that sum, and it is not a number waiting to
-		// drift: serve.App adds up every step actually registered, before the
-		// server listens, and refuses a budget that cannot hold them with the
-		// parts named. So a stale number here is a process that will not start
-		// and says why, which is the one place a wrong number is safe.
-		MaxShutdown: 47 * time.Second,
 
-		Tasks: api.Tasks(map[string]serve.Task{
+		Tasks: map[string]serve.Task{
 			"migrate": migrate.ApplyAll(migrationSources(), migrate.Options{Log: os.Stdout}),
 			// The demo tenant, two people to sign in as, the level roles, and a
 			// board's worth of items. Idempotent, so running it twice is not an
@@ -175,54 +137,23 @@ func main() {
 			// because the audience for a notification is a method on a service,
 			// and a task that dispatches has to build one.
 			"dispatch-notifications": app.DispatchNotifications,
-			// sweep-files, sweep-presence and prune-idempotency are api.Tasks's:
-			// one generated call each, with every number from rig.yaml and
-			// nothing left in them for this file to decide.
-		}),
+			// sweep-files, sweep-presence and prune-idempotency are merged in by
+			// api.Main: one generated call each, with every number from rig.yaml
+			// and nothing left in them for this file to decide.
+		},
 		Migrate: migrate.RequireAll(migrationSources(), migrate.Options{}),
-	}), func(ctx context.Context, srv *serve.App) (http.Handler, error) {
-		// The trace flush with a limit of its own, and a line about either half
-		// of the page that is not armed. Here rather than in main because an App
-		// is the first thing there is to register a shutdown step with, and
-		// because this is where there is a logger writing to the file the page
-		// would have read.
-		process.Attach(srv)
-
-		// Housekeeping for rig_presence, and a goroutine rather than only the
-		// sweep-presence task above — which is a decision, not an inconsistency
-		// with the engine below. The dispatcher takes a lease because resolving
-		// an audience twice costs a read and sending twice costs somebody a
-		// duplicate mail; deleting rows that have already expired is idempotent,
-		// so two replicas sweeping at once agree and the loser deletes nothing.
-		api.StartPresenceSweeper(srv)
-
-		parts, err := app.New(ctx, srv.Pool, srv.Logger, process.Page())
-		if err != nil {
-			return nil, err
-		}
-
-		// The engine turns a committed notification into inbox lines within
-		// milliseconds; dispatch-notifications above is the guarantee behind it.
-		api.StartNotificationEngine(srv, parts.Engine)
-
-		// The live subscriptions, let go at the start of the shutdown rather
-		// than waited for at the end of it. Every open tab is holding a poll
-		// this server is deliberately not answering yet — an in-flight request
-		// as far as http.Server.Shutdown is concerned, and one nothing else can
-		// end, since a poll is never late and Shutdown does not cancel a
-		// request's context. Without this line one open board is a shutdown that
-		// spends its whole budget waiting for the sync service to have news, and
-		// the three steps after it each find a deadline that has already passed.
-		api.AttachShapes(srv, parts.Shapes)
-
-		// The auth package's invalidation channel, which is a connection and a
-		// goroutine of its own. This example configures no auth cache, so today
-		// this returns at once — it is here because it is the line rig's own
-		// documentation says to write, and an example that skipped it would be
-		// teaching the omission that costs a connection the day a cache is
-		// turned on.
-		srv.CloseWithin("auth", 5*time.Second, parts.Auth.Close)
-
-		return parts.Handler, nil
+	}, func(ctx context.Context, srv *serve.App, page *observe.Page) (api.Parts, error) {
+		// The whole of what this application is, and the whole of what a main
+		// function still writes. What comes back is api.Parts: the routes, and
+		// the three things rig starts or shuts down on the other side of this
+		// call — the notification engine, the live subscriptions and the auth
+		// cache's invalidation channel. The trace flush and the presence sweeper
+		// need nothing from here, so they are not fields; api.Main registers the
+		// one and starts the other before this even runs.
+		//
+		// A pool and a logger rather than the App itself, because
+		// dispatch-notifications above builds the same graph from a task, where
+		// there is no App to build it from.
+		return app.New(ctx, srv.Pool, srv.Logger, page)
 	})
 }

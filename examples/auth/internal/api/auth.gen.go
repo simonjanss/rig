@@ -153,6 +153,25 @@ func New(pool *pgxpool.Pool, h Hooks) (*auth.Auth, error) {
 	return auth.New(cfg)
 }
 
+// AttachAuth registers the shutdown for the authentication foundation, which
+// is the whole of what a main function does with it beyond mounting it:
+//
+//	api.AttachAuth(app, front)
+//
+// What is closed is the invalidation channel the caches listen on, which is a
+// connection and a goroutine of its own. A project with no cache configured
+// closes nothing, and that is exactly what makes this easy to leave out: it
+// costs a connection rather than correctness, on some later day, in a main
+// function nobody is reading any more.
+//
+// A close step rather than a drain, because nothing is in flight. A listener
+// that has stopped reports itself as not live, and a cache that is not live
+// reads through and holds nothing — so the requests still being answered are
+// answered correctly, from the database.
+func AttachAuth(app *serve.App, a *auth.Auth) {
+	app.CloseWithin("auth", authShutdown, a.Close)
+}
+
 // Config is the configuration rig.yaml describes, with the hooks folded in.
 //
 // Every value in it was resolved when the configuration was read, so this

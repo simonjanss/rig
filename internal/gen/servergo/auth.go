@@ -40,6 +40,7 @@ func (e *authEmitter) authFile() (gen.Artifact, error) {
 	e.constants(b)
 	e.hooks(b)
 	e.newFunc(b)
+	e.attachFunc(b)
 	e.configFunc(b)
 	e.tenantFunc(b)
 	e.limitsFunc(b)
@@ -385,6 +386,38 @@ func (e *authEmitter) newFunc(b *gobuf.Buf) {
 	b.L("return nil, err")
 	b.L("}")
 	b.L("return %s.New(cfg)", authPkg)
+	b.L("}")
+	b.NL()
+}
+
+// attachFunc emits the shutdown a main function used to be asked to remember.
+//
+// It is here rather than left to documentation because of what forgetting it
+// costs and when: nothing at all until a cache is configured, and a Postgres
+// connection held until the process exits from then on. That is the shape of
+// omission a compiler should be catching, which is what [Parts] now does — this
+// is the call the field is checked against.
+func (e *authEmitter) attachFunc(b *gobuf.Buf) {
+	var (
+		authPkg  = b.Import(authModule)
+		servePkg = b.Import(runtimeModule + "/serve")
+	)
+
+	b.Comment("AttachAuth registers the shutdown for the authentication " +
+		"foundation, which is the whole of what a main function does with it " +
+		"beyond mounting it:\n\n" +
+		"\tapi.AttachAuth(app, front)\n\n" +
+		"What is closed is the invalidation channel the caches listen on, which " +
+		"is a connection and a goroutine of its own. A project with no cache " +
+		"configured closes nothing, and that is exactly what makes this easy to " +
+		"leave out: it costs a connection rather than correctness, on some later " +
+		"day, in a main function nobody is reading any more.\n\n" +
+		"A close step rather than a drain, because nothing is in flight. A " +
+		"listener that has stopped reports itself as not live, and a cache that " +
+		"is not live reads through and holds nothing — so the requests still " +
+		"being answered are answered correctly, from the database.")
+	b.L("func AttachAuth(app *%s.App, a *%s.Auth) {", servePkg, authPkg)
+	b.L("app.CloseWithin(%s, %s, a.Close)", gobuf.Quote("auth"), authConst)
 	b.L("}")
 	b.NL()
 }

@@ -692,9 +692,10 @@ subscriber stops drawing a row at `ttl`; the sweeper deletes it at `ttl + grace`
 A row is therefore always invisible before it is gone, never the other way round
 — which would be a row that came back when a slow client caught up.
 
-`sweep` is how often the in-process sweeper ticks **when it is running**. Whether
-it runs at all is a line in your `main.go`, not a value here, the same way the
-notification engine is started rather than configured on. A sweep faster than
+`sweep` is how often the in-process sweeper ticks. `api.Main` starts it for a
+project with this block, and `sweep-presence` is a subcommand for an operator who
+would rather it were a cron entry — running both is not a mistake, since deleting
+an already-expired row is idempotent. A sweep faster than
 `ttl` is a warning rather than a refusal: it works, it just spends deletes on
 rows every subscriber had already stopped drawing.
 
@@ -802,12 +803,12 @@ refused. Both SDKs honour all three — see
 
 **The counters need sweeping.** They live in `rig_throttle`, which `rig
 setup-project` writes, and it gains a row per caller per window — for the address
-limit, a row per address per minute. `api.Tasks(…)` carries a `sweep-throttle`
+limit, a row per address per minute. `api.Main` merges in a `sweep-throttle`
 subcommand that deletes the dead ones — turning this block on is what puts it
 there, the same way `files:` puts `sweep-files` there:
 
 ```go
-Tasks: api.Tasks(map[string]serve.Task{ /* yours */ }),
+Tasks: map[string]serve.Task{ /* yours */ },
 ```
 
 Nothing schedules it for you. Zero means twice the longest window you configured,
@@ -874,12 +875,11 @@ key wrong.
 **There is nothing to wire.** No map to build, no publish to add, no hook to
 register. rig caches these three reads *because* it owns both halves — it makes
 the read and it makes every write that invalidates it — so there is no write
-path an application can forget. The one line this adds to a `main.go` is a
-shutdown, and it is safe to leave out: a listener that is not running reports
-itself as not live, and a cache that is not live reads through.
+path an application can forget. The shutdown is a field on `api.Parts` rather
+than a call, so it is not a line to remember either:
 
 ```go
-app.CloseWithin("auth", 5*time.Second, front.Close)
+return api.Parts{Handler: mux, Auth: front}, nil
 ```
 
 ### Holding one of your tables: `cache: true`
@@ -898,8 +898,11 @@ cache: true
 
 That is the whole of it. The generated repository grows a map, a listener and a
 withdrawal on every write it makes to the row, and `store.New` builds and starts
-all of it — so there is nothing to call and no order to get right. One line in a
-`main.go`, and safe to leave out for the reason the auth one is:
+all of it — so there is nothing to call and no order to get right. One line in
+your own wiring, and safe to leave out for the reason the auth one was: a
+listener that is not running reports itself as not live, and a cache that is not
+live reads through. It is a call rather than a field on `api.Parts` because the
+store is yours, not rig's:
 
 ```go
 app.CloseWithin("store", 5*time.Second, repos.Close)

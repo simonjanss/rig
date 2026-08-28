@@ -4,8 +4,11 @@
 // It is a package rather than a block in main so that the suite in
 // integration/ can build exactly what ships — a test cannot import a `main`,
 // and a second wiring written for the tests would be a second thing to keep
-// true. main.go is what is left once the server moved out: the log sink, the
-// tracing provider, the migrations, and the serve.Config that names them.
+// true. main.go is what is left once the server moved out: the migrations, the
+// two addresses, and the three subcommands that are this application's own.
+//
+// What it returns is api.Parts, which is generated: one field per thing rig has
+// to start, drain or close. api.Main takes it from here.
 package app
 
 import (
@@ -13,13 +16,11 @@ import (
 	"context"
 	"errors"
 	"log/slog"
-	"net/http"
 	"os"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/simonjanss/rig/auth"
 	"github.com/simonjanss/rig/auth/account"
 	"github.com/simonjanss/rig/examples/linearlite/internal/api"
 	genelectric "github.com/simonjanss/rig/examples/linearlite/internal/electric"
@@ -35,33 +36,6 @@ import (
 	"github.com/simonjanss/rig/runtime/electric"
 )
 
-// Parts is what New built, as far as the process around it has to care: the
-// routes to serve, and the three things whose lifetime is longer than a
-// request's.
-//
-// A struct rather than four return values because of what the last three are
-// for. Each is handed straight to a generated call in main that starts it or
-// registers its shutdown, and the day this example grows a fourth, adding a
-// field is a line rather than a signature every caller has to be edited for.
-type Parts struct {
-	// Handler is every route this server answers.
-	Handler *http.ServeMux
-
-	// Engine turns a committed notification into inbox lines. Started and
-	// drained by api.StartNotificationEngine.
-	Engine *notify.Engine
-
-	// Shapes is the live-sync proxy. Drained by api.AttachShapes, which is not
-	// optional here in the way the other two might look: a subscription is an
-	// in-flight request that nothing else can end.
-	Shapes *electric.Proxy
-
-	// Auth holds the invalidation channel for its own caches. Closing it costs a
-	// connection rather than correctness, which is exactly why it is easy to
-	// forget and worth having a field for.
-	Auth *auth.Auth
-}
-
 // New is everything this server is made of, as a function taking a pool so
 // the tasks and the tests can build exactly what ships.
 //
@@ -71,7 +45,7 @@ type Parts struct {
 // Everything else is identical either way, which is the reason this is a
 // function rather than a block inside the mount closure: the audience for a
 // notification is a method on a service, so a job has to be able to build one.
-func New(ctx context.Context, pool *pgxpool.Pool, log *slog.Logger, page *observe.Page) (*Parts, error) {
+func New(ctx context.Context, pool *pgxpool.Pool, log *slog.Logger, page *observe.Page) (api.Parts, error) {
 	// No Tracer: the generated store.New settles a nil one to observe.Tracer(),
 	// which is a package-level value the provider in main installed. A task that
 	// never called observe.Setup gets a no-op there and every query below runs
@@ -168,7 +142,7 @@ func New(ctx context.Context, pool *pgxpool.Pool, log *slog.Logger, page *observ
 		OnRegistered: autoInvite(),
 	})
 	if err != nil {
-		return nil, err
+		return api.Parts{}, err
 	}
 
 	mux := api.Register(api.Handlers{
@@ -243,7 +217,7 @@ func New(ctx context.Context, pool *pgxpool.Pool, log *slog.Logger, page *observ
 		},
 	})
 	if err != nil {
-		return nil, err
+		return api.Parts{}, err
 	}
 	// One scope, and nothing else. Surviving a sync outage is the proxy's DB
 	// field above rather than a line per shape here, which is most of what this
@@ -257,7 +231,7 @@ func New(ctx context.Context, pool *pgxpool.Pool, log *slog.Logger, page *observ
 	// the auth endpoints' own keys, because minting a personal API key is
 	// gated on one of them and this example's settings page does exactly that.
 	if err := authz.SyncPermissions(ctx, pool, api.PermissionKeys()); err != nil {
-		return nil, err
+		return api.Parts{}, err
 	}
 
 	// The demonstration's own routes: the outbox, what the tour can offer, and
@@ -274,7 +248,13 @@ func New(ctx context.Context, pool *pgxpool.Pool, log *slog.Logger, page *observ
 	// pnpm — can build and test this server without building the browser half.
 	mux.Handle("/", spaHandler(cmp.Or(os.Getenv("WEB_DIR"), "web/dist")))
 
-	return &Parts{Handler: mux, Engine: engine, Shapes: proxy, Auth: front}, nil
+	// api.Parts rather than a struct of this package's own, and that is the
+	// whole reason main.go is four fields and a closure. Every field is
+	// something rig starts, drains or closes; naming them in the generated
+	// package is what lets the sequence live there too, and what turns
+	// forgetting one from a shutdown that misbehaves under load into a build
+	// that does not finish.
+	return api.Parts{Handler: mux, Engine: engine, Shapes: proxy, Auth: front}, nil
 }
 
 // autoInvite is what happens when a stranger signs themselves up: an account

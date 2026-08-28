@@ -576,15 +576,21 @@ what stops costing a query is the integration that has never once got its key
 wrong. That is the opposite of a process-local tally, which would let each replica
 wave through an interval of traffic it could not see.
 
-Nothing here is yours to wire. There is no map to build and no invalidation to
-publish, because rig caches exactly the reads it owns on both sides — it makes
-the read and it makes every write that withdraws it. The only line it adds to
-your `main.go` is a shutdown, and forgetting it costs a connection rather than
-correctness:
+Nothing here is yours to wire, including the shutdown. There is no map to build
+and no invalidation to publish, because rig caches exactly the reads it owns on
+both sides — it makes the read and it makes every write that withdraws it. What
+holds a connection is the invalidation channel, and closing it is a field rather
+than a line to remember:
 
 ```go
-app.CloseWithin("auth", 5*time.Second, front.Close)
+return api.Parts{Handler: mux, Auth: front}, nil
 ```
+
+`api.Main` closes it, within the five seconds `api.ShutdownBudget` already counts
+for it. It used to be `app.CloseWithin("auth", 5*time.Second, front.Close)` in
+every `main.go`, which was exactly the wrong shape for something that costs a
+connection rather than correctness: leave it out with no cache configured and
+nothing happens at all, until the day somebody turns the cache on.
 
 The same block also covers one read per table that asks for it — `cache: true` in
 a table's configuration file holds its `Get`. That one *is* a promise you are

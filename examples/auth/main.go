@@ -71,31 +71,24 @@ var migrations embed.FS
 const localDSN = "postgres://rig:rig@localhost:55442/rig?sslmode=disable&TimeZone=UTC"
 
 func main() {
-	serve.Main(serve.Config{
+	api.Main(serve.Config{
 		DatabaseURL: cmp.Or(os.Getenv("DATABASE_URL"), localDSN),
 		Addr:        cmp.Or(os.Getenv("ADDR"), "127.0.0.1:8082"),
-
-		LivenessPath:  "/livez",
-		ReadinessPath: "/readyz",
 
 		Hint: "run `rig db up` to start a local Postgres for this project, " +
 			"or point $DATABASE_URL at one you already have",
 
 		MaxStartup: 30 * time.Second,
-		// Thirty-five seconds. api.ShutdownBudget is thirty of it — fifteen for
-		// the notification engine, five for the live subscriptions, and ten left
-		// for the requests still in flight — and the other five is this
-		// example's own: the cache listener behind `cache:`, closed in the mount
-		// closure below.
-		//
-		// Written out rather than summed, because this is the field that leaves
-		// the program: it is what goes into terminationGracePeriodSeconds, and
-		// whoever writes that manifest should read it off here rather than run
-		// the binary. serve refuses to start on a budget the registered steps do
-		// not fit into, so a stale number fails loudly rather than quietly.
-		MaxShutdown: 35 * time.Second,
+		// No MaxShutdown, and no probe paths: api.Main settles all three. The
+		// budget is thirty-five seconds — fifteen for the notification engine,
+		// five for the live subscriptions, five for the cache listener behind
+		// `cache:`, and ten left for the requests still in flight — and every
+		// one of those steps is now registered by generated code rather than by
+		// this file, so there is no sum here left to get wrong. Whoever writes
+		// terminationGracePeriodSeconds reads the total off api.ShutdownBudget,
+		// whose documentation states it in words.
 
-		Tasks: api.Tasks(map[string]serve.Task{
+		Tasks: map[string]serve.Task{
 			"migrate": migrate.Apply(migrations, migrate.Options{Log: os.Stdout}),
 			// The guarantee behind the inbox. The engine the server runs is
 			// latency — it turns a notification into an inbox line in
@@ -127,32 +120,30 @@ func main() {
 			// example: who may create an account is a product decision, and the
 			// foundation deliberately does not make it for you.
 			"seed": seed,
-		}),
+		},
 		Migrate: migrate.Require(migrations, migrate.Options{}),
-	}, func(ctx context.Context, app *serve.App) (http.Handler, error) {
+	}, func(ctx context.Context, app *serve.App) (api.Parts, error) {
 		mux, front, engine, err := newAPI(ctx, app.Pool, app.Logger)
 		if err != nil {
-			return nil, err
+			return api.Parts{}, err
 		}
 
-		// A dependency with a shutdown of its own, registered beside the line
-		// that built it — the drain and the close both, which is why it is one
-		// generated call rather than three lines this file has to keep in step
-		// with the budget above.
-		api.StartNotificationEngine(app, engine)
-
-		// The listener behind `cache:` in rig.yaml, which rig started when it
-		// built the foundation and nobody here has to think about again. This is
-		// the whole of the lifecycle an application owns, and it is registered
-		// unconditionally because a project with no cache configured has nothing
-		// to close and this returns at once.
+		// Three fields, and the two that are not the mux are the whole of this
+		// server's lifecycle. api.Main starts the engine and registers both its
+		// shutdown steps; it closes the listener behind `cache:` in rig.yaml,
+		// which rig started when it built the foundation and nobody here has to
+		// think about again.
 		//
-		// Forgetting it costs one connection until the process exits. It cannot
-		// cost correctness: a listener that is not running reports itself as not
-		// live, and a cache that is not live reads through and stores nothing.
-		app.CloseWithin("auth", 5*time.Second, front.Close)
-
-		return mux, nil
+		// Leaving that second one out used to cost one connection until the
+		// process exits, silently — it cannot cost correctness, since a listener
+		// that is not running reports itself as not live and a cache that is not
+		// live reads through and stores nothing, which is exactly what made it
+		// easy to forget. A field is not something to forget.
+		//
+		// No Shapes: `notifications:` gives this project a shape over
+		// rig_notification_recipient, and nothing here mounts it or runs a sync
+		// service to forward to. api.Main says so once at startup.
+		return api.Parts{Handler: mux, Engine: engine, Auth: front}, nil
 	})
 }
 

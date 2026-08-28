@@ -85,26 +85,33 @@ hooks and none of your children's.
 ## Running it
 
 `rig/runtime/serve` is the pool, the HTTP server, the probes, and the shutdown.
-`serve.Main` takes a config and a function that builds your handler:
+`api.Main` is that with everything `rig.yaml` already decided filled in: a config
+and a function that builds your handler.
 
 ```go
-serve.Main(serve.Config{
+api.Main(serve.Config{
     DatabaseURL: ...,
     Addr:        ...,
     Migrate:     migrate.Require(migrations, migrate.Options{}),
-    // The housekeeping subcommands this project's blocks already decided,
-    // merged with the ones only you can write. Yours wins on a shared name.
-    Tasks: api.Tasks(map[string]serve.Task{
+    // Only the ones you can write. The housekeeping this project's blocks
+    // already decided is merged in, and yours wins on a shared name.
+    Tasks: map[string]serve.Task{
         "migrate": migrate.Apply(migrations, migrate.Options{Log: os.Stdout}),
-    }),
-}, func(ctx context.Context, app *serve.App) (http.Handler, error) {
+    },
+}, func(ctx context.Context, app *serve.App) (api.Parts, error) {
     repos := store.New(app.Pool, store.Config{})
-    return api.Register(api.Handlers{
+    return api.Parts{Handler: api.Register(api.Handlers{
         Server: api.Server{GetClaims: yourClaimsFunc, DB: app.Pool, Logger: app.Logger},
         Todo:   todo.New(repos.Todos),
-    }), nil
+    })}, nil
 })
 ```
+
+`api.Parts` is one field per thing whose lifetime is longer than a request's.
+Above it is the handler and nothing else; turning a block on in `rig.yaml` adds a
+field, and `api.Main` starts, drains or closes whatever is in it. `serve.Main`
+is still there for a project that wants the sequence itself, and `api.Mount` is
+the same sequence as a `serve.Mount` for one running `serve.Run`.
 
 Migrations live in `rig/migrate` and are embedded in your binary, so the schema a
 build expects ships with that build. `migrate.Require` refuses to start when the
@@ -123,20 +130,21 @@ project already decided: the revision this build serves, the headers it names,
 its rate limiter, and where its spans go. What is left for you is the handful
 above.
 
-A project with `tracing:` on has two more lines here — `api.NewProcess()` and a
-`process.Attach(app)` in the mount function — and
-[observability.md](observability.md#wiring-it-up) has them in full. It also gets
+A project with `tracing:` on gets no more lines here: `api.Main` builds the
+process, and the `page` it hands your wiring is the other half of it —
+[observability.md](observability.md#wiring-it-up) has that in full. It also gets
 `api.ShutdownBudget()`, which adds up the closers rig registers so you do not
-have to — a number to read out of its documentation and write into
-`MaxShutdown`, not a call to leave in the `serve.Config`. `MaxShutdown` is the
-one field there that leaves the program, since it is what goes into
+have to. `api.Main` uses it as the default `MaxShutdown`, and writing the number
+out is still the better answer for anything that ships: `MaxShutdown` is the one
+field in that struct that leaves the program, since it is what goes into
 `terminationGracePeriodSeconds`, and whoever writes that manifest should be able
-to read it off the struct.
+to read it off the struct. `ShutdownBudget`'s own documentation states the total
+in words for exactly that.
 
 A literal is safe: `serve.App` sums every step actually registered before the
 server listens and refuses a budget that cannot hold them, naming the parts. A
-number left stale by a new block is a process that will not start and says why,
-rather than a shutdown that quietly truncates under load.
+number left stale by a closer of your own is a process that will not start and
+says why, rather than a shutdown that quietly truncates under load.
 
 **What stops, and in what order.** `MaxShutdown` covers the whole sequence:
 readiness turns false, `DrainDelay` gives a load balancer time to look away,
@@ -147,11 +155,11 @@ that will not finish spends what is left over and not their share of it —
 `serve.App` adds the parts up before the server listens and refuses a
 `MaxShutdown` that cannot hold them.
 
-A project with live sync has one more line, because a subscription is a request
+A project with live sync has one more field, because a subscription is a request
 the server is deliberately not answering yet and nothing else can end it:
 
 ```go
-api.AttachShapes(app, proxy)
+return api.Parts{Handler: mux, Shapes: proxy}, nil
 ```
 
 See [electric.md](electric.md) for what a drained proxy tells a subscriber.

@@ -77,6 +77,8 @@ const (
 	presenceShutdown = 5 * time.Second
 	// The live subscriptions.
 	shapesShutdown = 5 * time.Second
+	// The auth cache's invalidation channel.
+	authShutdown = 5 * time.Second
 
 	// What is left for the requests still in flight once the steps above have had
 	// theirs.
@@ -91,14 +93,15 @@ const (
 // ShutdownBudget is what this project's own shutdown needs of
 // [github.com/simonjanss/rig/runtime/serve.Config.MaxShutdown].
 //
-// For this project that is 40s: 5s for the trace flush, 15s for the
+// For this project that is 45s: 5s for the trace flush, 15s for the
 // notification engine, 5s for the presence sweeper, 5s for the live
-// subscriptions and 10s left over.
+// subscriptions, 5s for the auth cache's invalidation channel and 10s left
+// over.
 //
 // **Read it, then write it down.** This is a number to look up once, not a
 // call to leave in a serve.Config:
 //
-//	MaxShutdown: 40 * time.Second
+//	MaxShutdown: 45 * time.Second
 //
 // MaxShutdown is the one field in that struct that leaves the program — it
 // is what belongs in Kubernetes' terminationGracePeriodSeconds — and whoever
@@ -106,7 +109,7 @@ const (
 // the binary or add up a sum spread over three files. A project with closers
 // of its own adds theirs to the total above and writes that:
 //
-//	MaxShutdown: 45 * time.Second // 40s here, plus 5s for a closer of my own
+//	MaxShutdown: 50 * time.Second // 45s here, plus 5s for a closer of my own
 //
 // A literal is not a number waiting to drift. serve.App adds up every step
 // actually registered, before the server listens, and refuses a budget that
@@ -120,7 +123,7 @@ const (
 // mount closure, and serve.Config is built before it either way. It is a
 // maximum, so counting a step that is not there costs nothing but headroom.
 func ShutdownBudget() time.Duration {
-	return tracesShutdown + notificationsShutdown + presenceShutdown + shapesShutdown + shutdownHeadroom
+	return tracesShutdown + notificationsShutdown + presenceShutdown + shapesShutdown + authShutdown + shutdownHeadroom
 }
 
 // Process is what this application's rig.yaml says about the process around
