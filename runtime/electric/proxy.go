@@ -496,19 +496,16 @@ func (p *Proxy) Serve(w http.ResponseWriter, r *http.Request, s Shape) {
 	// request and the caller's shape is untouched.
 	s = p.resolve(s)
 
-	// Before anything is built: while the circuit is open there is nothing to
-	// learn from asking, and the point of not asking is that this request does
-	// not wait for the answer the last one already got.
-	if !p.breaker.allow() {
-		p.answer(w, r, s)
-		return
-	}
-
-	// And before that, whether this proxy is still in the business of holding
-	// polls open at all. Joining the group under the same lock that reads the
-	// flag is what makes Drain's wait mean something: a request that got past
-	// here is one Drain waits for, and a request that did not is one it never
-	// has to know about.
+	// Before anything is built, and before the circuit below: whether this proxy
+	// is still in the business of serving this shape at all. Joining the group
+	// under the same lock that reads the flag is what makes Drain's wait mean
+	// something: a request that got past here is one Drain waits for, and a
+	// request that did not is one it never has to know about.
+	//
+	// First of the two, because a drained proxy has nothing to offer an open
+	// circuit either. Answering from the fallback there would be a table read
+	// and a large body out of a process whose pool is about to close, and the
+	// subscriber would rather be told to come back — see [Proxy.stopping].
 	p.mu.RLock()
 	if p.draining {
 		p.mu.RUnlock()
@@ -518,6 +515,14 @@ func (p *Proxy) Serve(w http.ResponseWriter, r *http.Request, s Shape) {
 	p.polling.Add(1)
 	p.mu.RUnlock()
 	defer p.polling.Done()
+
+	// Then the circuit: while it is open there is nothing to learn from asking,
+	// and the point of not asking is that this request does not wait for the
+	// answer the last one already got.
+	if !p.breaker.allow() {
+		p.answer(w, r, s)
+		return
+	}
 
 	// The request's context, so a client that hangs up cancels the poll it left
 	// running upstream — bounded first for a read from the beginning, which is

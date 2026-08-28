@@ -550,13 +550,20 @@ func Run(ctx context.Context, cfg Config, mount Mount) (err error) {
 	// worst of those is a write. So the server is cut short instead, which loses
 	// the responses that were never going to arrive rather than the work that
 	// was.
-	inflight, stopServing := context.WithDeadline(stopping, serveUntil(app))
+	serving := serveUntil(app)
+	inflight, stopServing := context.WithDeadline(stopping, serving)
 	defer stopServing()
+
+	// Measured rather than derived from MaxShutdown, because the drain steps and
+	// the delay have already been spent out of the same budget: the difference
+	// between the two numbers is what this shutdown actually did, and naming a
+	// window nobody had is the wrong thing to hand somebody reading the line.
+	left := time.Until(serving).Round(time.Millisecond)
 
 	if err := srv.Shutdown(inflight); err != nil {
 		return &ShutdownError{Err: errors.Join(drained, fmt.Errorf(
 			"the server would not stop within the %s left for requests in flight: %w",
-			cfg.MaxShutdown-app.reserved(), err))}
+			left, err))}
 	}
 	// Everything registered with App.Close runs from the deferred teardown,
 	// after this, and before the pool closes.

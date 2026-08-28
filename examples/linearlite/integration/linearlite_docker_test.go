@@ -71,13 +71,19 @@ func newServer(t *testing.T) *server {
 	if err != nil {
 		t.Fatal(err)
 	}
+	srv := httptest.NewServer(parts.Handler)
+	t.Cleanup(srv.Close)
+
 	// The shape proxy holds connections to the sync service and a poll may be
 	// open when a test ends. Draining it is what a shutdown does, and doing it
 	// here is what keeps one test's subscription out of the next one.
+	//
+	// Registered after srv.Close so that it runs before it: cleanups run in
+	// reverse, and httptest.Server.Close blocks until every outstanding request
+	// has finished — including the poll that only this can release. The other
+	// order is the two of them waiting for each other.
 	t.Cleanup(func() { _ = parts.Shapes.Drain(context.Background()) })
 
-	srv := httptest.NewServer(parts.Handler)
-	t.Cleanup(srv.Close)
 	return &server{pool: pool, http: srv, engine: parts.Engine}
 }
 

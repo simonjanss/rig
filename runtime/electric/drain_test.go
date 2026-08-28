@@ -137,3 +137,50 @@ func TestDrainingIsSafeToRepeatAndToDoForNothing(t *testing.T) {
 		t.Fatal("draining a proxy with nothing open did not return")
 	}
 }
+
+// The circuit being open is not a way past the drain.
+//
+// A sync outage is exactly when a shutdown is likely to overlap one, and the
+// request that arrives then must not be answered from the database: a snapshot
+// is a table read and a large body out of a process whose pool is about to
+// close. Come back is the answer on both paths, which is why the drain is
+// checked before the circuit and not after it.
+func TestADrainedProxyDoesNotFallBackWhileTheCircuitIsOpen(t *testing.T) {
+	t.Parallel()
+
+	var read atomic.Bool
+	shape := electric.Shape{
+		Table:   "todo",
+		Key:     []string{"id"},
+		Columns: []string{"id"},
+		Fallback: func(context.Context) (electric.Snapshot, error) {
+			read.Store(true)
+			return electric.Snapshot{}, nil
+		},
+	}
+
+	// Nothing listening, and one failure is enough to open the circuit.
+	proxy, err := electric.New(electric.Config{URL: "http://127.0.0.1:1", BreakerThreshold: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	proxy.Serve(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/shape?offset=-1", nil), shape)
+	if proxy.SyncReachable() {
+		t.Fatal("the circuit did not open, so this test is asserting nothing")
+	}
+
+	if err := proxy.Drain(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	read.Store(false)
+
+	rec := httptest.NewRecorder()
+	proxy.Serve(rec, httptest.NewRequest(http.MethodGet, "/shape?offset=-1", nil), shape)
+
+	if read.Load() {
+		t.Error("a drained proxy answered from the database because the circuit was open")
+	}
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Errorf("code = %d, want 503", rec.Code)
+	}
+}
