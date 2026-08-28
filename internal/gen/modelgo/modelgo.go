@@ -76,7 +76,16 @@ func (g *Generator) Generate(_ context.Context, doc *ir.Document, opts gen.Optio
 		if !used[enum.Name] {
 			continue
 		}
-		art, err := e.enumFile(enum)
+
+		var (
+			art gen.Artifact
+			err error
+		)
+		if path, ok := shippedEnum(enum.PgType); ok {
+			art, err = e.enumAliasFile(enum, path)
+		} else {
+			art, err = e.enumFile(enum)
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -89,15 +98,29 @@ func (g *Generator) Generate(_ context.Context, doc *ir.Document, opts gen.Optio
 			continue
 		}
 
+		// The filter grammar is written for every table, rig's own included: a
+		// project's table that points at rig_notification puts a member on
+		// NotificationFilter, so that type is this project's even where the row
+		// it filters is not.
+		queries, err := e.queryFile(res)
+		if err != nil {
+			return nil, err
+		}
+
+		if path, ok := shippedModel(res.Storage.Table); ok {
+			aliases, err := e.aliasFile(res, path)
+			if err != nil {
+				return nil, err
+			}
+			artifacts = append(artifacts, aliases, queries)
+			continue
+		}
+
 		entity, err := e.entityFile(res)
 		if err != nil {
 			return nil, err
 		}
 		inputs, err := e.inputFile(res)
-		if err != nil {
-			return nil, err
-		}
-		queries, err := e.queryFile(res)
 		if err != nil {
 			return nil, err
 		}

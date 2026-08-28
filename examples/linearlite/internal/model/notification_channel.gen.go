@@ -5,56 +5,23 @@
 package model
 
 import (
-	"strings"
+	"github.com/simonjanss/rig/notify/notifymodel"
 )
 
 // Where a copy of an inbox line can be sent. The inbox itself is not one of
 // them.
-type NotificationChannel string
+//
+// An alias for
+// [github.com/simonjanss/rig/notify/notifymodel.NotificationChannel]: rig's
+// schema declared the type, so rig declares the Go for it.
+type NotificationChannel = notifymodel.NotificationChannel
 
 // The values of NotificationChannel.
 const (
-	// A browser or a desktop application, addressed by a device row.
-	NotificationChannelDesktop NotificationChannel = "Desktop"
-	// A phone, addressed by a device row.
-	NotificationChannelMobile NotificationChannel = "Mobile"
-	// The address on the account. No device row: there is nothing to register,
-	// because the address is on the account already.
-	NotificationChannelEmail NotificationChannel = "Email"
+	NotificationChannelDesktop = notifymodel.NotificationChannelDesktop
+	NotificationChannelMobile  = notifymodel.NotificationChannelMobile
+	NotificationChannelEmail   = notifymodel.NotificationChannelEmail
 )
 
 // AllNotificationChannel is every value, in declaration order.
-var AllNotificationChannel = []NotificationChannel{NotificationChannelDesktop, NotificationChannelMobile, NotificationChannelEmail}
-
-// Valid reports whether the value is one the database will accept.
-func (v NotificationChannel) Valid() bool {
-	switch v {
-	case NotificationChannelDesktop, NotificationChannelMobile, NotificationChannelEmail:
-		return true
-	default:
-		return false
-	}
-}
-
-// ParseNotificationChannel reads a value, accepting any casing and surrounding
-// space.
-//
-// Normalization uses it, so "IN_PROGRESS" from one client and "in_progress"
-// from another mean the same thing rather than one of them being a validation
-// failure nobody can explain. The spelling still has to be the label’s: a
-// value is a name the database knows, not a phrase.
-func ParseNotificationChannel(s string) (NotificationChannel, bool) {
-	switch strings.ToLower(strings.TrimSpace(s)) {
-	case "desktop":
-		return NotificationChannelDesktop, true
-	case "mobile":
-		return NotificationChannelMobile, true
-	case "email":
-		return NotificationChannelEmail, true
-	default:
-		return "", false
-	}
-}
-
-// String implements fmt.Stringer.
-func (v NotificationChannel) String() string { return string(v) }
+var AllNotificationChannel = notifymodel.AllNotificationChannel

@@ -569,11 +569,19 @@ func Resolve(s Server, w http.ResponseWriter, r *http.Request, required bool) (c
 	}
 
 	// After the claims, because a limit is per caller and the caller is who the
-	// credential says. A nil Gate allows, so a project with no `throttle:` block
-	// pays one nil check rather than carrying a limiter it never configured.
-	if err := s.Throttle.Check(r.Context(), throttleCaller(r, claims, s.TrustedProxies), r.Pattern, w.Header()); err != nil {
-		Fail(s, w, r, rc, err)
-		return nil, tenancy.Claims{}, rc, false
+	// credential says.
+	//
+	// The nil check is out here rather than left to the Gate, which allows on a
+	// nil receiver anyway: naming the caller is what costs something — two
+	// uuid.String allocations, or a parse of the peer address for somebody
+	// anonymous — and an argument is evaluated whether or not the call it is
+	// passed to does anything with it. So a project with no `throttle:` block
+	// pays one nil check per request rather than building a key nothing reads.
+	if s.Throttle != nil {
+		if err := s.Throttle.Check(r.Context(), throttleCaller(r, claims, s.TrustedProxies), r.Pattern, w.Header()); err != nil {
+			Fail(s, w, r, rc, err)
+			return nil, tenancy.Claims{}, rc, false
+		}
 	}
 
 	ctx := tenancy.NewContext(r.Context(), claims)
@@ -609,7 +617,7 @@ func serveRevision(s Server, w http.ResponseWriter, r *http.Request, rc RequestC
 // Fail writes an error response.
 //
 // OnError is the answer when it is set, and a generated Register sets it to
-// that project's own error mapper — which is where `api.json_case` is honoured,
+// that project's own error mapper — which is where `naming.json_case` is honoured,
 // and the reason this package cannot write that body itself. What is left here
 // is the answer rig's own routes give: the same envelope, camelCase, carrying
 // the request identifier so a failure from a shipped route lands in the log

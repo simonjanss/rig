@@ -326,6 +326,14 @@ naming:
     person: people
 ```
 
+**`json_case` reaches your tables and not rig's.** The Go for `rig_notification`
+and the four tables around it is compiled once, in `rig/notify`, so its struct
+tags are fixed — and a Go struct tag cannot be parameterised. A project that asks
+for `snake` gets it on its own resources and camelCase on rig's, which is the
+same trade `/auth/*` and `/presence` have always made. `rig check` reports it
+rather than leaving it to be found in a response body, and setting `camel` — the
+default — is what makes the question go away.
+
 | Key | Default | |
 |---|---|---|
 | `json_case` | `camel` | `camel`, `pascal`, or `snake`. The shape of generated JSON keys. It shapes the keys rig *generates*: the `/auth/*` endpoints come from a hand-written module shared by every project and answer camelCase whatever this says. |

@@ -5,70 +5,50 @@
 package model
 
 import (
-	"time"
-
-	"github.com/google/uuid"
+	"github.com/simonjanss/rig/notify/notifymodel"
 )
 
 // What somebody wants on a channel, and when. Resolved in three steps: this
 // kind, then this channel, then the project default.
 //
-// It is the one definition of a NotificationSetting: the repository scans into
-// it and the API returns it, so there is no conversion between two shapes of
-// the same thing and no field that can go missing from one of them.
-type NotificationSetting struct {
-	// Unique identifier for this row.
-	ID uuid.UUID `json:"id"`
-	// Tenant this row belongs to. Every query is scoped by it.
-	TenantID uuid.UUID `json:"tenantId"`
-	// Whose preference it is.
-	AccountID uuid.UUID `json:"accountId"`
-	// When this row was created. Set automatically and never changes.
-	CreatedAt time.Time `json:"createdAt"`
-	// When this row was last updated. Set automatically on every update.
-	UpdatedAt *time.Time `json:"updatedAt,omitempty"`
-	// Null is the default for the channel, which is the second step of the
-	// resolution.
-	Kind *string `json:"kind,omitempty"`
-	// Which channel it answers for.
-	Channel NotificationChannel `json:"channel"`
-	// False writes no delivery row at all. Not the same as digest Off, which is
-	// about preferring to look rather than be told.
-	IsEnabled bool `json:"isEnabled"`
-	// Immediate sends each on its own; anything else waits for the window and goes
-	// out as one message.
-	Digest NotificationDigest `json:"digest"`
-	// When to start delivering, in the account time zone. Null means all day. A
-	// window that wraps midnight is ordinary: 22:00 to 06:00 is how somebody says
-	// "not overnight".
-	ActiveFrom *time.Time `json:"activeFrom,omitempty"`
-	// When to stop. Outside the window a delivery is held, not dropped: the inbox
-	// line exists either way, and a discarded copy makes the badge and the mailbox
-	// disagree.
-	ActiveUntil *time.Time `json:"activeUntil,omitempty"`
-	// ISO weekdays, 1 being Monday. Empty means every day. An array rather than a
-	// bitmask because [1,2,3,4,5] is legible in a settings payload and 62 is not.
-	ActiveDays []int16 `json:"activeDays,omitempty"`
-}
+// rig created this table, so the type is rig's: this is an alias for
+// [github.com/simonjanss/rig/notify/notifymodel.NotificationSetting], not a
+// second struct of the same shape. What is generated here is the filter
+// grammar beside it, because that one carries a member per table of this
+// project's that points at it.
+type NotificationSetting = notifymodel.NotificationSetting
+
+// The write inputs, their per-field failures, and the validators a hook is
+// handed. Aliases for the same reason the row is.
+type (
+	NotificationSettingCreateInput      = notifymodel.NotificationSettingCreateInput
+	NotificationSettingCreateInputError = notifymodel.NotificationSettingCreateInputError
+	NotificationSettingCreateValidator  = notifymodel.NotificationSettingCreateValidator
+	NotificationSettingUpdateInput      = notifymodel.NotificationSettingUpdateInput
+	NotificationSettingUpdateInputError = notifymodel.NotificationSettingUpdateInputError
+	NotificationSettingUpdateValidator  = notifymodel.NotificationSettingUpdateValidator
+	NotificationSettingDeleteInput      = notifymodel.NotificationSettingDeleteInput
+	NotificationSettingValidatorContext = notifymodel.NotificationSettingValidatorContext
+)
 
 // TableNotificationSetting is the table this entity is stored in.
-const TableNotificationSetting = "rig_notification_setting"
+const TableNotificationSetting = notifymodel.TableNotificationSetting
 
 // Column names for rig_notification_setting, so nothing has to spell one out.
 const (
-	ColumnNotificationSettingID          = "id"
-	ColumnNotificationSettingTenantID    = "tenant_id"
-	ColumnNotificationSettingAccountID   = "account_id"
-	ColumnNotificationSettingCreatedAt   = "created_at"
-	ColumnNotificationSettingUpdatedAt   = "updated_at"
-	ColumnNotificationSettingKind        = "kind"
-	ColumnNotificationSettingChannel     = "channel"
-	ColumnNotificationSettingIsEnabled   = "is_enabled"
-	ColumnNotificationSettingDigest      = "digest"
-	ColumnNotificationSettingActiveFrom  = "active_from"
-	ColumnNotificationSettingActiveUntil = "active_until"
-	ColumnNotificationSettingActiveDays  = "active_days"
+	ColumnNotificationSettingID          = notifymodel.ColumnNotificationSettingID
+	ColumnNotificationSettingTenantID    = notifymodel.ColumnNotificationSettingTenantID
+	ColumnNotificationSettingAccountID   = notifymodel.ColumnNotificationSettingAccountID
+	ColumnNotificationSettingCreatedAt   = notifymodel.ColumnNotificationSettingCreatedAt
+	ColumnNotificationSettingUpdatedAt   = notifymodel.ColumnNotificationSettingUpdatedAt
+	ColumnNotificationSettingKind        = notifymodel.ColumnNotificationSettingKind
+	ColumnNotificationSettingChannel     = notifymodel.ColumnNotificationSettingChannel
+	ColumnNotificationSettingIsEnabled   = notifymodel.ColumnNotificationSettingIsEnabled
+	ColumnNotificationSettingDigest      = notifymodel.ColumnNotificationSettingDigest
+	ColumnNotificationSettingActiveFrom  = notifymodel.ColumnNotificationSettingActiveFrom
+	ColumnNotificationSettingActiveUntil = notifymodel.ColumnNotificationSettingActiveUntil
+	ColumnNotificationSettingActiveDays  = notifymodel.ColumnNotificationSettingActiveDays
 )
 
 // NotificationSettingColumns is every column, in the order the row is scanned.
-var NotificationSettingColumns = []string{"id", "tenant_id", "account_id", "created_at", "updated_at", "kind", "channel", "is_enabled", "digest", "active_from", "active_until", "active_days"}
+var NotificationSettingColumns = notifymodel.NotificationSettingColumns

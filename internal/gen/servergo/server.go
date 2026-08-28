@@ -211,8 +211,11 @@ func (e *emitter) handlersStruct(b *gobuf.Buf) {
 
 // resources are the ones the API layer knows about.
 //
-// A resource marked unexposed has a model and a repository and no endpoints, so
-// there is nothing here to route and no field to put in Handlers.
+// A resource marked unexposed has no endpoints, so there is nothing here to
+// route and no field to put in Handlers. What else it still gets is
+// [ir.Resource.Unreachable]'s question rather than this one's: a hidden table of
+// the project's own keeps its model and its repository, and one of rig's own
+// keeps neither.
 func (e *emitter) resources() []*ir.Resource {
 	out := make([]*ir.Resource, 0, len(e.doc.API.Resources))
 	for i := range e.doc.API.Resources {
