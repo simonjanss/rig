@@ -93,7 +93,7 @@ func (g *Generator) Generate(_ context.Context, doc *ir.Document, opts gen.Optio
 
 	for i := range doc.API.Resources {
 		res := &doc.API.Resources[i]
-		if res.Storage == nil {
+		if res.Storage == nil || res.Unreachable() {
 			continue
 		}
 

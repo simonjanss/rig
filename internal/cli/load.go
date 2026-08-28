@@ -240,7 +240,10 @@ func foundationTables(p *project.Project) (ignore, foundation []string, err erro
 		// project's `<subject>_notification` silently stops being a link table,
 		// every notifiable resource silently stops being one, and nothing says
 		// why. `notifications.expose` marks them unexposed instead, which keeps
-		// the model and the repository and generates no endpoints.
+		// them classified and generates nothing — no endpoints, and since
+		// [ir.Resource.Unreachable] no model or repository either. The resource
+		// exists so the link tables around it can be recognised; that is the
+		// whole of what it is for.
 		if slices.Contains(compile.NotificationTables(), table) {
 			if p.Config.Notifications.Enabled {
 				continue
@@ -255,8 +258,10 @@ func foundationTables(p *project.Project) (ignore, foundation []string, err erro
 		// no route. Presence would be a table nothing reads and a browser package
 		// with nowhere to subscribe, and the only symptom would be a 404.
 		//
-		// `presence.expose` marks it unexposed instead, which keeps the model, the
-		// repository and the shape and generates no endpoints.
+		// `presence.expose` marks it unexposed instead, which keeps the resource
+		// and its shape and generates no endpoints — and no model or repository,
+		// which is [ir.Resource.Unreachable]. The shape is built from the
+		// document rather than from the model, so it survives that.
 		if table == compile.PresenceTable {
 			if p.Config.Presence.Enabled {
 				continue

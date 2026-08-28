@@ -64,10 +64,16 @@ func (g *Generator) Generate(_ context.Context, doc *ir.Document, opts gen.Optio
 	}
 	artifacts := []gen.Artifact{base}
 
+	used := e.usedEnums()
 	for _, enum := range doc.API.Enums {
 		// ErrorCode belongs to the API layer. It is not a column's type and
 		// never reaches the model.
 		if enum.PgType == "" {
+			continue
+		}
+		// And an enum whose only columns are on tables this project generates
+		// nothing for is a type with no declaration to appear in.
+		if !used[enum.Name] {
 			continue
 		}
 		art, err := e.enumFile(enum)
@@ -79,7 +85,7 @@ func (g *Generator) Generate(_ context.Context, doc *ir.Document, opts gen.Optio
 
 	for i := range doc.API.Resources {
 		res := &doc.API.Resources[i]
-		if res.Storage == nil {
+		if res.Storage == nil || res.Unreachable() {
 			continue
 		}
 
@@ -99,6 +105,28 @@ func (g *Generator) Generate(_ context.Context, doc *ir.Document, opts gen.Optio
 	}
 
 	return artifacts, nil
+}
+
+// usedEnums are the enum names some resource in this package will name.
+//
+// Keyed by name rather than by Postgres type because that is what a field
+// carries. An enum reached only from a resource this package skips has no
+// declaration to appear in, and emitting it anyway leaves a file `rig check`
+// reports as a leftover the next time somebody looks.
+func (e *emitter) usedEnums() map[string]bool {
+	out := make(map[string]bool)
+	for i := range e.doc.API.Resources {
+		res := &e.doc.API.Resources[i]
+		if res.Storage == nil || res.Unreachable() {
+			continue
+		}
+		for _, f := range res.Fields {
+			if f.TypeKind == ir.TypeKindEnum {
+				out[f.Type] = true
+			}
+		}
+	}
+	return out
 }
 
 // someInput names an input, for the package documentation to point at.

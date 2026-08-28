@@ -119,6 +119,14 @@ interface for it is not.
 expose: false
 ```
 
+**On one of rig's own tables it generates nothing at all** — no endpoints, and
+no model or repository either. The difference is who writes the rows. A hidden
+table of yours is one your service layer still reaches, which is the whole
+reason to keep the data layer; `rig_notification` and `rig_presence` are read
+and written by the modules that own them, so a repository over one would be a
+second door into rows nothing in your project touches. Exposing the table is
+what asks for the model, the repository and the API together.
+
 ### `order_by`
 
 ```yaml

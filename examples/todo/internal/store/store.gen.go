@@ -166,13 +166,8 @@ type Store struct {
 	cacheBus  *cache.Bus
 	todoCache *cache.RowCache[*model.Todo]
 
-	Notifications          NotificationRepository
-	NotificationDeliveries NotificationDeliveryRepository
-	NotificationDevices    NotificationDeviceRepository
-	NotificationRecipients NotificationRecipientRepository
-	NotificationSettings   NotificationSettingRepository
-	Todos                  TodoRepository
-	TodoAttachments        TodoAttachmentRepository
+	Todos           TodoRepository
+	TodoAttachments TodoAttachmentRepository
 }
 
 // New builds a store over a connection pool.
@@ -202,11 +197,6 @@ func New(pool *pgxpool.Pool, cfg Config) *Store {
 	// for a topic that is not registered yet.
 	s.cacheBus.Start()
 
-	s.Notifications = &notificationRepo{db: s}
-	s.NotificationDeliveries = &notificationDeliveryRepo{db: s}
-	s.NotificationDevices = &notificationDeviceRepo{db: s}
-	s.NotificationRecipients = &notificationRecipientRepo{db: s}
-	s.NotificationSettings = &notificationSettingRepo{db: s}
 	s.Todos = &todoRepo{db: s}
 	s.TodoAttachments = &todoAttachmentRepo{db: s}
 	return s

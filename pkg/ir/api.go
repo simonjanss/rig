@@ -554,6 +554,9 @@ type Resource struct {
 	// generated while the API layer stays silent.
 	//
 	// It is negative so that the zero value is the ordinary case.
+	//
+	// It is not on its own a reason to generate nothing:
+	// [Resource.Unreachable] is that, and it asks about Foundation too.
 	Unexposed bool `json:"unexposed,omitempty"`
 
 	// Foundation says rig created this table: it is one of the `rig_` tables a
@@ -567,10 +570,13 @@ type Resource struct {
 	// this repository's own examples were byte-identical no-ops, and two of those
 	// were not imported by anything.
 	//
-	// It is not read anywhere the answer matters for correctness, and that is
-	// deliberate: it comes from the project's migrations or its configuration
-	// rather than from the `rig_` prefix, so a project with `auth.own` — which
-	// has taken the schema over — has none of these, and gets its stubs.
+	// It also decides, with Unexposed, whether any Go is written for the table
+	// at all — see [Resource.Unreachable]. That is a correctness question, and
+	// the answer is safe to lean on for the reason the flag is computed the way
+	// it is: it comes from the project's migrations or its configuration rather
+	// than from the `rig_` prefix, so a project with `auth.own` — which has
+	// taken the schema over — has none of these, and gets its stubs and its
+	// generated model both.
 	Foundation bool `json:"foundation,omitempty"`
 
 	Operations []string `json:"operations"`
@@ -670,6 +676,25 @@ type ChildLink struct {
 	// HomeTeam, matching the child's own [ParentLink.Name].
 	Hook string `json:"hook"`
 }
+
+// Unreachable reports whether this is one of rig's own tables that the project
+// does not expose: no endpoints, no service layer, and no rows the project's
+// own Go was ever going to touch.
+//
+// It is the bar for generating anything at all, and it is narrower than
+// [Resource.Unexposed] on purpose. An unexposed table of the project's own
+// keeps its model and its repository, because a service layer reaching a
+// hidden table is the shape that flag exists for. A table rig created and this
+// project did not ask for is not that shape: the module that owns it does its
+// own SQL, so a generated repository over it is a second way into rows nothing
+// here writes.
+//
+// Such a table is still projected rather than ignored, and the difference
+// matters. Dropping rig_notification would leave every project's
+// `<subject>_notification` silently unclassified as a link table, and nothing
+// would say why. So it stays a resource, carries its relations, and simply has
+// no Go written for it.
+func (r *Resource) Unreachable() bool { return r.Unexposed && r.Foundation }
 
 // Supports reports whether the resource has the given operation.
 func (r *Resource) Supports(op string) bool { return slices.Contains(r.Operations, op) }
