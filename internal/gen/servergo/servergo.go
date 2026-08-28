@@ -189,6 +189,17 @@ func (g *Generator) Generate(_ context.Context, doc *ir.Document, opts gen.Optio
 		artifacts = append(artifacts, presence)
 	}
 
+	// The live-sync shutdown, when any table asked for a shape. The routes
+	// themselves are another generator's; what belongs here is the number, since
+	// the drain's limit is a term of ShutdownBudget.
+	if e.hasShapes() {
+		shapes, err := e.electricFile()
+		if err != nil {
+			return nil, err
+		}
+		artifacts = append(artifacts, shapes)
+	}
+
 	// The process around the server, as far as this project's configuration
 	// decided it: the subcommands it can name itself, the shutdown its own steps
 	// add up to, and — for a project that traces — the log sink, the provider and

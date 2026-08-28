@@ -263,3 +263,67 @@ func TestUndeclaredStepsDoNotCountAgainstTheMaximum(t *testing.T) {
 }
 
 func noop(context.Context) error { return nil }
+
+// The leftover checkShutdown reasons about is real time, not a description.
+//
+// serveUntil is what makes it so: a handler that will not return spends what is
+// left after the close steps have been set aside, and not a second more. Without
+// it the steps that run after the server each meet a deadline that has already
+// passed, and the worst of them is a write.
+func TestTheCloseStepsAreReservedOutOfTheBudget(t *testing.T) {
+	app := &App{Logger: quiet()}
+	app.CloseWithin("engine", 15*time.Second, func(context.Context) error { return nil })
+	app.CloseWithin("sweeper", 5*time.Second, func(context.Context) error { return nil })
+	app.Close("no limit of its own", func(context.Context) error { return nil })
+
+	if got := app.reserved(); got != 20*time.Second {
+		t.Errorf("reserved = %s, want 20s: a step with no limit of its own reserves nothing", got)
+	}
+
+	// A budget of 35s, of which 20 belongs to the steps above.
+	app.until = time.Now().Add(35 * time.Second)
+	if left := time.Until(serveUntil(app)); left < 14*time.Second || left > 15*time.Second {
+		t.Errorf("the requests in flight got %s, want about 15s", left)
+	}
+}
+
+// A budget the steps have entirely spoken for is a warning checkShutdown has
+// already given, not a reason to hand http.Server a deadline in the past and
+// find out what it does with one.
+func TestAFullySpokenForBudgetStillStopsTheServerNow(t *testing.T) {
+	app := &App{Logger: quiet()}
+	app.CloseWithin("everything", 10*time.Second, func(context.Context) error { return nil })
+	app.until = time.Now().Add(5 * time.Second)
+
+	if got := serveUntil(app); got.Before(time.Now().Add(-time.Second)) {
+		t.Errorf("serveUntil = %s, want no earlier than now", got)
+	}
+}
+
+// A close step gets the whole of its own timeout even when the server before it
+// used every second it was allowed.
+func TestAHandlerThatWillNotReturnDoesNotStarveTheTeardown(t *testing.T) {
+	got := make(chan time.Duration, 1)
+
+	app := &App{Logger: quiet()}
+	app.CloseWithin("flush", 200*time.Millisecond, func(ctx context.Context) error {
+		deadline, ok := ctx.Deadline()
+		if !ok {
+			got <- 0
+			return nil
+		}
+		got <- time.Until(deadline)
+		return nil
+	})
+
+	// The whole budget, of which the step above reserved 200ms. Pretend the
+	// server spent the rest.
+	app.until = time.Now().Add(200 * time.Millisecond)
+
+	if err := app.runClose(t.Context(), 300*time.Millisecond); err != nil {
+		t.Fatal(err)
+	}
+	if left := <-got; left < 150*time.Millisecond {
+		t.Errorf("the flush was given %s of its 200ms", left)
+	}
+}

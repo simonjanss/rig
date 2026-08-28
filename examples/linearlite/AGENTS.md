@@ -250,22 +250,42 @@ lines for it — `Presence` on `api.Handlers` and `RigPresence` on
 `genelectric.Handlers`, both in `internal/app`, and
 `api.StartPresenceSweeper(srv)` in `main.go`'s mount closure.
 
-**None of the shutdown arithmetic is in this directory any more.**
-`MaxShutdown: api.ShutdownBudget()` is thirty-five seconds, and it is thirty-five
-because `internal/api/process.gen.go` adds up the three closers rig registers for
-this project's blocks — fifteen for the engine, five for the trace flush, five
-for the sweeper — and leaves ten for the requests in flight. A fourth block would
-change the number without anything here being edited. Adding a closer of this
-example's own means `api.ShutdownBudget() + n`, not restating the total.
+**Almost none of the shutdown arithmetic is in this directory.**
+`api.ShutdownBudget()` is forty seconds, and it is forty because
+`internal/api/process.gen.go` adds up the four steps rig registers for this
+project's blocks — fifteen for the engine, five for the live subscriptions, five
+for the trace flush, five for the sweeper — and leaves ten for the requests in
+flight. A fifth block would change the number without anything here being edited.
+
+`MaxShutdown` is nonetheless a literal — forty-seven seconds — and not that
+forty plus the two numbers rig cannot know: the five the auth closer takes and
+the two seconds of `DrainDelay`. It is written out because it is the one field
+here that leaves the program: whoever writes `terminationGracePeriodSeconds`
+should read it off the `serve.Config` rather than run the binary or add up three
+files.
+
+That is not a number waiting to drift. `serve.App` adds up every step actually
+registered, before the server listens, and refuses a budget that cannot hold them
+with the parts named — so a literal left stale by a new block is a process that
+will not start and says why. A wrong number that fails loudly at boot is worth
+more than a right one nobody can read.
+
+`api.AttachShapes(srv, parts.Shapes)` is the one that is easy to leave out and
+worst to. A live subscription is a request the server is deliberately not
+answering yet, so `http.Server.Shutdown` waits for it and nothing else can end
+it: one open board would otherwise spend the entire budget, and the three steps
+after it would each find a deadline that had already passed.
 
 `tracing:` and `monitoring:` are on, which is why `main.go` calls
 `api.NewProcess()` *before* `serve.Main` rather than inside the mount closure:
 the log sink, the provider and the page have to exist before the `serve.Config`
 that two of its fields come out of, and the page listens on `127.0.0.1:9084`, its
-own port beside the API's 8084. `process.Configure` fills `Monitor` and
-`MonitorAddr`; `process.Attach(srv)` registers the flush and says which half of
-the page is unarmed; `defer process.Close()` is the same flush for the path a
-`Tasks:` entry takes, which never reaches the closure at all. `app.New` still
+own port beside the API's 8084. `process.Configure` fills `Monitor`,
+`MonitorAddr` and `OnExit`; `process.Attach(srv)` registers the flush and says
+which half of the page is unarmed; `OnExit` is `process.Close`, the same flush for
+the path a `Tasks:` entry takes, which never reaches the closure at all — and for
+the three paths that end in `os.Exit`, where the `defer process.Close()` this file
+used to prescribe would not have run at all. `app.New` still
 takes a `*observe.Page` — `process.Page()` — but only so `/_demo/tour` can say
 where the page is; nil from a task, since a cron entry serving a page nobody can
 reach is not worth the wiring. The password and the two file paths are set by

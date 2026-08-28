@@ -368,3 +368,111 @@ func TestAStartupThatHangsIsRefused(t *testing.T) {
 		t.Errorf("took %s to give up", elapsed)
 	}
 }
+
+// A request that will not finish spends what is left over, and not the closers'
+// share of the budget.
+//
+// This is the failure the leftover in MaxShutdown was always described as
+// preventing and, until serveUntil, did not. A long poll or a client that
+// stopped reading is an in-flight request that http.Server.Shutdown waits for,
+// and Shutdown does not cancel a request's context — so without a deadline of
+// its own it waits until the whole budget is gone, and every step registered
+// with App.Close then meets one that has already passed. The worst of those is a
+// write: rig's own notification engine hands its claims back in exactly such a
+// step, and a pass that does not run leaves them held until the claim expires.
+func TestAHandlerThatWillNotReturnDoesNotStarveTheTeardown(t *testing.T) {
+	dsn := os.Getenv("DATABASE_URL")
+	if dsn == "" {
+		dsn = dsnFallback
+	}
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	listening := make(chan net.Addr, 1)
+	stopped := make(chan error, 1)
+	// The step that has to survive the handler, and how much of its own limit it
+	// was actually given.
+	left := make(chan time.Duration, 1)
+
+	hung := make(chan struct{})
+	t.Cleanup(func() { close(hung) })
+
+	go func() {
+		stopped <- serve.Run(ctx, serve.Config{
+			DatabaseURL: dsn,
+			Addr:        "127.0.0.1:0",
+			// Four seconds, of which two belong to the closer below. A handler
+			// that never returns should get the other two and no more.
+			MaxShutdown: 4 * time.Second,
+			Logger:      slog.New(slog.DiscardHandler),
+			OnListen:    func(a net.Addr) { listening <- a },
+		}, func(_ context.Context, app *serve.App) (http.Handler, error) {
+			app.CloseWithin("release the claims", 2*time.Second, func(c context.Context) error {
+				deadline, ok := c.Deadline()
+				if !ok {
+					left <- 0
+					return nil
+				}
+				left <- time.Until(deadline)
+				return nil
+			})
+
+			mux := http.NewServeMux()
+			mux.HandleFunc("/hang", func(w http.ResponseWriter, r *http.Request) {
+				// Deliberately not watching r.Context(): that is what a poll
+				// waiting on something upstream looks like, and it is the case
+				// Shutdown cannot do anything about on its own.
+				<-hung
+			})
+			return mux, nil
+		})
+	}()
+
+	var addr net.Addr
+	select {
+	case addr = <-listening:
+	case err := <-stopped:
+		t.Fatalf("the server stopped before it listened: %v", err)
+	case <-time.After(15 * time.Second):
+		t.Fatal("the server never listened")
+	}
+
+	// One request in flight, going nowhere.
+	polling := make(chan struct{})
+	go func() {
+		close(polling)
+		res, err := http.Get("http://" + addr.String() + "/hang")
+		if err == nil {
+			_, _ = io.Copy(io.Discard, res.Body)
+			res.Body.Close()
+		}
+	}()
+	<-polling
+	time.Sleep(200 * time.Millisecond)
+
+	began := time.Now()
+	cancel()
+
+	select {
+	case got := <-left:
+		// The whole two seconds, near enough: the point is that the closer did
+		// not inherit a deadline the handler had already spent.
+		if got < 1500*time.Millisecond {
+			t.Errorf("the closer was given %s of its 2s", got)
+		}
+	case <-time.After(15 * time.Second):
+		t.Fatal("the closer never ran: the handler took the whole budget")
+	}
+
+	select {
+	case <-stopped:
+	case <-time.After(15 * time.Second):
+		t.Fatal("the server did not stop")
+	}
+
+	// And the whole sequence still fits the budget it was given.
+	if took := time.Since(began); took > 6*time.Second {
+		t.Errorf("the shutdown took %s against a 4s budget", took)
+	}
+}

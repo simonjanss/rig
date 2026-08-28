@@ -152,6 +152,32 @@ read in `main.go`.
 What happens to a subscription while that service is unreachable is
 [its own section](#when-the-sync-service-is-down).
 
+**One more line in `main.go`, and it is not optional.**
+
+```go
+api.AttachShapes(app, proxy)
+```
+
+A live subscription is a request the server is deliberately not answering yet.
+That makes it an in-flight request, so `http.Server.Shutdown` waits for it — and
+waits, because nothing in the poll is late and `Shutdown` does not cancel a
+request's context. Without this line one open browser tab is a shutdown that
+spends its whole budget waiting for the sync service to have news, and a sync
+service that hangs rather than refuses is a shutdown that spends all of it. What
+goes without in either case is everything registered after: the trace flush, the
+presence sweep, and the notification engine's close, which is where its claims
+are handed back.
+
+`AttachShapes` registers `Proxy.Drain` as a drain step, so the polls end at the
+*start* of the shutdown, once readiness is already false and there is nothing
+left to gain from holding a subscription open. A subscriber gets a 503 with a
+`Retry-After` and resumes from the same offset against whichever replica is still
+serving — deliberately not a fallback snapshot, since this process is going away
+and the next attempt is somebody else's to answer. Nothing is lost, because a
+poll that had not answered had nothing in it yet.
+
+Its five seconds are already in `api.ShutdownBudget()`.
+
 In a deployment, run Electric as a service of its own against your real
 database and point the proxy's URL at it. Nothing else changes: the proxy is
 the only thing a browser ever talks to, so the sync service itself stays

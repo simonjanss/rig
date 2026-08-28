@@ -25,6 +25,11 @@ const (
 	notificationsStop = 15 * time.Second
 	// presenceStop is the sweeper's DELETE.
 	presenceStop = 5 * time.Second
+	// shapesDrain is the live subscriptions being let go. A drain step rather
+	// than a close one, and that is the whole point of the number: a poll the
+	// server is still holding is a request in flight, so it has to end before
+	// the server stops accepting rather than after.
+	shapesDrain = 5 * time.Second
 
 	// shutdownHeadroom is what is left for the requests still in flight once
 	// rig's own steps have had theirs.
@@ -42,6 +47,7 @@ const (
 	tracesConst        = "tracesShutdown"
 	notificationsConst = "notificationsShutdown"
 	presenceConst      = "presenceShutdown"
+	shapesConst        = "shapesShutdown"
 	headroomConst      = "shutdownHeadroom"
 )
 
@@ -70,6 +76,9 @@ func (e *emitter) shutdownSteps() []shutdownStep {
 	}
 	if e.hasPresence() {
 		steps = append(steps, shutdownStep{presenceConst, presenceStop, "the presence sweeper"})
+	}
+	if e.hasShapes() {
+		steps = append(steps, shutdownStep{shapesConst, shapesDrain, "the live subscriptions"})
 	}
 	return steps
 }
@@ -249,27 +258,31 @@ func (e *emitter) shutdownBudgetFunc(b *gobuf.Buf) {
 	parts = append(parts, shutdownHeadroom.String()+" left over")
 	terms = append(terms, headroomConst)
 
-	b.Comment("ShutdownBudget is [github.com/simonjanss/rig/runtime/serve.Config.MaxShutdown] " +
-		"for this project.\n\n" +
-		"\tMaxShutdown: api.ShutdownBudget()\n\n" +
-		"For this project that is " + total.String() + ": " + english(parts) + ". " +
-		"That is also the number that belongs in Kubernetes' " +
-		"terminationGracePeriodSeconds, which is why it is stated here in words " +
-		"as well as summed below — an operator reading a manifest should not have " +
-		"to run the binary to learn it.\n\n" +
-		"A project that registers closers of its own adds them rather than adding " +
-		"all of this up again:\n\n" +
-		"\tMaxShutdown: api.ShutdownBudget() + 5*time.Second\n\n" +
-		"It is not set for you, and serve.Config.MaxShutdown says why: it is a " +
-		"stated maximum rather than the sum of its parts, so that it can be read " +
-		"off and copied. A field filled in silently is a number nobody can find.\n\n" +
-		"Every step this project's configuration registers is counted, including " +
-		"one in a process that never starts it — a `Tasks:` entry never reaches " +
-		"the mount closure, and serve.Config is built before it either way. It is " +
-		"a maximum, so counting a step that is not there costs nothing but " +
-		"headroom, and serve.App is the backstop regardless: it adds up what was " +
-		"actually registered, before the server listens, and refuses a budget " +
-		"that cannot hold it with the parts named.")
+	b.Comment("ShutdownBudget is what this project's own shutdown needs of " +
+		"[github.com/simonjanss/rig/runtime/serve.Config.MaxShutdown].\n\n" +
+		"For this project that is " + total.String() + ": " + english(parts) + ".\n\n" +
+		"**Read it, then write it down.** This is a number to look up once, not a " +
+		"call to leave in a serve.Config:\n\n" +
+		"\tMaxShutdown: " + duration("time", total) + "\n\n" +
+		"MaxShutdown is the one field in that struct that leaves the program — it " +
+		"is what belongs in Kubernetes' terminationGracePeriodSeconds — and " +
+		"whoever writes the manifest should be able to read it off the struct " +
+		"rather than run the binary or add up a sum spread over three files. " +
+		"A project with closers of its own adds theirs to the total above and " +
+		"writes that:\n\n" +
+		"\tMaxShutdown: " + duration("time", total+5*time.Second) + " // " + total.String() +
+		" here, plus 5s for a closer of my own\n\n" +
+		"A literal is not a number waiting to drift. serve.App adds up every step " +
+		"actually registered, before the server listens, and refuses a budget that " +
+		"cannot hold them with the parts named — so a number left stale by a new " +
+		"block is a process that will not start and says which parts no longer " +
+		"fit. A wrong number that fails loudly at boot is worth more than a right " +
+		"one nobody can read.\n\n" +
+		"Every step this project's configuration registers is counted here, " +
+		"including one in a process that never starts it — a `Tasks:` entry never " +
+		"reaches the mount closure, and serve.Config is built before it either " +
+		"way. It is a maximum, so counting a step that is not there costs nothing " +
+		"but headroom.")
 	b.L("func ShutdownBudget() %s.Duration {", timePkg)
 	b.L("return %s", strings.Join(terms, " + "))
 	b.L("}")
@@ -303,8 +316,7 @@ func (e *emitter) processType(b *gobuf.Buf) {
 		"\tif err != nil {\n" +
 		"\t\tslog.Error(\"cannot set this process up\", \"error\", err)\n" +
 		"\t\tos.Exit(1)\n" +
-		"\t}\n" +
-		"\tdefer process.Close()\n\n" +
+		"\t}\n\n" +
 		"\tserve.Main(process.Configure(serve.Config{ /* ... */ }),\n" +
 		"\t\tfunc(ctx context.Context, app *serve.App) (http.Handler, error) {\n" +
 		"\t\t\tprocess.Attach(app)\n" +
@@ -492,6 +504,12 @@ func (e *emitter) configureMethod(b *gobuf.Buf) {
 	doc += "Pool is a span per statement, from the connection rather than from the " +
 		"generated code — so a tracer sees every query, including the ones rig's " +
 		"own background work runs and the ones no generator wrote.\n\n" +
+		"OnExit is [Process.Close], which is why a main function does not write " +
+		"one. serve.Main exits, and `defer` does not survive os.Exit: a flush " +
+		"deferred in main runs when the server stopped cleanly and is skipped on " +
+		"the three paths where something went wrong — a task that failed, a boot " +
+		"that failed, a subcommand that does not exist. Those are the runs whose " +
+		"spans somebody actually wants.\n\n" +
 		"MaxShutdown is deliberately not one of them, and [ShutdownBudget] says " +
 		"why: it is the number an operator copies into " +
 		"terminationGracePeriodSeconds, so it stays a field in a main function " +
@@ -510,6 +528,9 @@ func (e *emitter) configureMethod(b *gobuf.Buf) {
 	b.L("}")
 	b.L("if cfg.Pool == nil {")
 	b.L("cfg.Pool = %s.Pool", obsPkg)
+	b.L("}")
+	b.L("if cfg.OnExit == nil {")
+	b.L("cfg.OnExit = p.Close")
 	b.L("}")
 	b.L("return cfg")
 	b.L("}")
@@ -564,7 +585,9 @@ func (e *emitter) processCloseMethod(b *gobuf.Buf) {
 
 	b.Comment("Close flushes whatever tracing has buffered, and is the half of that " +
 		"a task run reaches.\n\n" +
-		"\tdefer process.Close()\n\n" +
+		"[Process.Configure] sets it as serve.Config.OnExit, so a main function " +
+		"does not call it: serve.Main runs it on every way out, including the ones " +
+		"that exit non-zero, where a deferred call would not have run at all.\n\n" +
 		"Both ways out of this process reach a provider built in [NewProcess], and " +
 		"only one of them reaches [Process.Attach]. A `Tasks:` entry never reaches " +
 		"the mount closure — serve.Main runs the task and returns — so without " +

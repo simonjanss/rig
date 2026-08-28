@@ -28,6 +28,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -313,6 +314,19 @@ type Proxy struct {
 	// One breaker for the proxy, because what it watches for is the one sync
 	// service being unreachable rather than anything about a shape.
 	breaker *breaker
+
+	// life is this proxy's own, cancelled by Drain. Every upstream call is
+	// derived from it as well as from its request, which is what makes a poll
+	// end when the process is stopping and not only when its subscriber gives
+	// up.
+	life   context.Context
+	retire context.CancelFunc
+
+	// mu guards draining against polling: a request may only join the group
+	// while the answer to "is this proxy still serving" is still no.
+	mu       sync.RWMutex
+	draining bool
+	polling  sync.WaitGroup
 }
 
 // New builds a proxy.
@@ -356,9 +370,13 @@ func New(cfg Config) (*Proxy, error) {
 		cooldown = DefaultBreakerCooldown
 	}
 
+	life, retire := context.WithCancel(context.Background())
+
 	return &Proxy{
 		base:    base,
 		client:  client,
+		life:    life,
+		retire:  retire,
 		extra:   cfg.Extra,
 		headers: cfg.Headers,
 		initial: initial,
@@ -381,6 +399,73 @@ func New(cfg Config) (*Proxy, error) {
 // True is also what it says when the circuit has been turned off with a negative
 // [Config.BreakerThreshold], because then nothing is counting.
 func (p *Proxy) SyncReachable() bool { return p.breaker.reachable() }
+
+// Drain ends the polls this proxy is holding open and stops it starting more.
+//
+// Register it as the first step of a shutdown, which is what the step is for:
+//
+//	app.DrainWithin("shapes", 5*time.Second, proxy.Drain)
+//
+// A live subscription is a request that is deliberately not answering yet. It is
+// still an in-flight request, so [http.Server.Shutdown] waits for it — and
+// waits, because nothing in the poll is late and Shutdown does not cancel a
+// request's context. One open browser tab is then a shutdown that spends its
+// budget waiting for the sync service to have news, and a sync service that
+// hangs rather than refuses is a shutdown that spends all of it. What goes
+// without in either case is everything registered after: the flush, the sweep,
+// and the pass of the notification engine whose claims are only handed back if
+// its close step runs.
+//
+// So they are ended from this side instead, at the point in the sequence where
+// readiness is already false and there is nothing to be gained from holding a
+// subscription open. A subscriber gets a 503 with a Retry-After and resumes from
+// the same offset against whichever replica is still serving; nothing is lost,
+// because a poll that had not answered had nothing in it yet.
+//
+// It returns when every poll has gone, or when ctx says to stop waiting. Calling
+// it twice is safe, and a proxy that never served anything returns at once.
+func (p *Proxy) Drain(ctx context.Context) error {
+	p.mu.Lock()
+	first := !p.draining
+	p.draining = true
+	p.mu.Unlock()
+
+	if first {
+		p.retire()
+	}
+
+	// The wait is for the handlers, not for the connections: a poll that has
+	// been cancelled is a handler about to return, and what Shutdown counts is
+	// the request rather than the socket under it.
+	gone := make(chan struct{})
+	go func() {
+		p.polling.Wait()
+		close(gone)
+	}()
+
+	select {
+	case <-gone:
+	case <-ctx.Done():
+		return fmt.Errorf("electric: polls were still open: %w", ctx.Err())
+	}
+
+	// Nothing is using them, and they are keep-alives to a service this process
+	// is finished with.
+	p.client.CloseIdleConnections()
+	return nil
+}
+
+// stopping is what a subscriber is told by a proxy that is going away.
+//
+// Deliberately not [Proxy.answer]: that offers a snapshot to a request reading
+// from the beginning, and a snapshot is a read and a large body from a process
+// whose budget is nearly spent. Come back is the honest answer, and the client
+// asks again in five seconds — by which time this replica is gone and another
+// one takes it.
+func (p *Proxy) stopping(w http.ResponseWriter) {
+	w.Header().Set("Retry-After", strconv.Itoa(retryAfterSeconds))
+	http.Error(w, "the sync service is unavailable", http.StatusServiceUnavailable)
+}
 
 // hopHeaders are per-connection and must not be forwarded in either direction.
 //
@@ -411,9 +496,29 @@ func (p *Proxy) Serve(w http.ResponseWriter, r *http.Request, s Shape) {
 	// request and the caller's shape is untouched.
 	s = p.resolve(s)
 
-	// Before anything is built: while the circuit is open there is nothing to
-	// learn from asking, and the point of not asking is that this request does
-	// not wait for the answer the last one already got.
+	// Before anything is built, and before the circuit below: whether this proxy
+	// is still in the business of serving this shape at all. Joining the group
+	// under the same lock that reads the flag is what makes Drain's wait mean
+	// something: a request that got past here is one Drain waits for, and a
+	// request that did not is one it never has to know about.
+	//
+	// First of the two, because a drained proxy has nothing to offer an open
+	// circuit either. Answering from the fallback there would be a table read
+	// and a large body out of a process whose pool is about to close, and the
+	// subscriber would rather be told to come back — see [Proxy.stopping].
+	p.mu.RLock()
+	if p.draining {
+		p.mu.RUnlock()
+		p.stopping(w)
+		return
+	}
+	p.polling.Add(1)
+	p.mu.RUnlock()
+	defer p.polling.Done()
+
+	// Then the circuit: while it is open there is nothing to learn from asking,
+	// and the point of not asking is that this request does not wait for the
+	// answer the last one already got.
 	if !p.breaker.allow() {
 		p.answer(w, r, s)
 		return
@@ -436,6 +541,18 @@ func (p *Proxy) Serve(w http.ResponseWriter, r *http.Request, s Shape) {
 		defer cancel()
 		answered = time.AfterFunc(p.initial, cancel).Stop
 	}
+
+	// And this proxy's own lifetime on top of whichever of the two that was.
+	//
+	// A live poll is a request that is deliberately not answering yet: nothing
+	// in it is late, so no timeout above applies to it, and http.Server.Shutdown
+	// does not cancel a request context. Without this the only thing that ends
+	// such a poll is the sync service finally having something to say — which
+	// is the whole of a shutdown budget spent waiting for news, and the rest of
+	// the teardown going without.
+	ctx, untie := context.WithCancel(ctx)
+	defer untie()
+	defer context.AfterFunc(p.life, untie)()
 
 	upstream, err := p.request(ctx, r, s)
 	if err != nil {
@@ -464,6 +581,14 @@ func (p *Proxy) Serve(w http.ResponseWriter, r *http.Request, s Shape) {
 		// not a failure of the sync service either, so the circuit is not told
 		// about it. A page being closed is not an outage.
 		if r.Context().Err() != nil {
+			return
+		}
+		// Neither is this process stopping. The poll was ended from this side,
+		// so the subscriber is told to come back rather than handed a snapshot:
+		// there is no server left to read one out of, and the next attempt
+		// belongs to whichever replica is still serving.
+		if p.life.Err() != nil {
+			p.stopping(w)
 			return
 		}
 		p.note(r, false)

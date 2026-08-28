@@ -161,13 +161,21 @@ start when they do not fit, so the stated maximum and the parts cannot drift
 apart. A step that ignores its context is abandoned rather than waited for: the
 process exits on time either way.
 
-This example states `api.ShutdownBudget() + 10*time.Second`, and the two halves
-are the point. `ShutdownBudget()` is generated: it adds up the closers rig itself
-registers for the blocks in `rig.yaml` — here just the notification engine's
-fifteen seconds, plus ten seconds of headroom for the requests in flight. The ten
-added to it is this example's own two closers, the recorder and the store's cache
-subscription, which no generator can know about. Adding rather than restating is
-what keeps a new block from silently eating the headroom.
+This example states `40 * time.Second`, and the two halves behind it are the
+point. `api.ShutdownBudget()` is generated and is thirty of it: it adds up the
+closers rig itself registers for the blocks in `rig.yaml` — the notification
+engine's fifteen seconds and the live subscriptions' five — plus ten seconds of
+headroom for the requests in flight. The other ten is this example's own two
+closers, the recorder and the store's cache subscription, which no generator can
+know about.
+
+Written out rather than summed, because this is the number somebody copies into
+a manifest and they should not have to run the binary to learn it. Read
+`ShutdownBudget`'s documentation, which states the total in words, add your own,
+and write the result down. A block added later changes what rig registers
+without changing this line — and that is caught at boot rather than under load,
+because rig adds up the declared limits before the server listens and refuses to
+start when they do not fit.
 
 `api.Register` makes the mux and hands it back, so adding a table is one field
 in `api.Handlers` and anything else this server answers is a `Handle` call on
