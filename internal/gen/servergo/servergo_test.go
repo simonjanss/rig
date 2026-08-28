@@ -219,14 +219,10 @@ func TestAuthWiresClaimsAndMountsItsRoutes(t *testing.T) {
 	if strings.Contains(imports, "simonjanss/rig/auth") {
 		t.Errorf("the generated server must not import the auth module:\n%s", imports)
 	}
-	iface, ok := between(src, "type Authenticator interface {", "\n}")
-	if !ok {
-		t.Fatal("no Authenticator interface")
-	}
-	for _, method := range []string{"Claims(*http.Request) (tenancy.Claims, error)", "Mount(*http.ServeMux)"} {
-		if !strings.Contains(collapse(iface), collapse(method)) {
-			t.Errorf("Authenticator is missing %s:\n%s", method, iface)
-		}
+	// The declaration moved to runtime/apibase; what matters here is unchanged
+	// and is the reason it was ever declared rather than imported.
+	if !strings.Contains(src, "type Authenticator = apibase.Authenticator") {
+		t.Errorf("no Authenticator:\n%s", src)
 	}
 
 	register, ok := between(src, "func Register(", "\n}")
@@ -353,56 +349,23 @@ func TestRevisionIsReadAndAnnounced(t *testing.T) {
 	doc.SetRevision("2026-08-01")
 	src := find(t, gentest.Run(t, servergo.New(), doc, opts()), "server.gen.go")
 
-	// Read where every request's metadata is collected, which is the function
-	// resolve and the inbox routes both go through.
-	build, ok := between(src, "func requestContext(", "\n}\n")
+	// Reading it off a request and announcing it on a response is
+	// runtime/apibase's, and the same in every project. What this generator owes
+	// is the two values that are not: which revision this build serves, and which
+	// header it travels in.
+	register, ok := between(src, "func Register(", "\n}\n")
 	if !ok {
-		t.Fatal("no requestContext function")
+		t.Fatal("no Register function")
 	}
-	if want := "ClientRevision: r.Header.Get(RevisionHeader)"; !strings.Contains(collapse(build), collapse(want)) {
-		t.Errorf("requestContext is missing %s:\n%s", want, build)
-	}
-
-	resolve, ok := between(src, "func resolve(", "\n}\n")
-	if !ok {
-		t.Fatal("no resolve function")
-	}
-	if want := `if Revision != "" { w.Header().Set(RevisionHeader, Revision) }`; !strings.Contains(collapse(resolve), collapse(want)) {
-		t.Errorf("resolve is missing %s:\n%s", want, resolve)
-	}
-}
-
-// The door only closes on callers that can be shown to be behind it. An unknown
-// client is not an old one, and a check that refused every curl the day somebody
-// set MinRevision would be an outage rather than a deprecation.
-func TestMinRevisionRefusesOnlyACallerThatSaidAndSaidOlder(t *testing.T) {
-	t.Parallel()
-
-	doc := gentest.LoadDocument(t, filepath.Join("testdata", fixture))
-	doc.SetRevision("2026-08-01")
-	src := find(t, gentest.Run(t, servergo.New(), doc, opts()), "server.gen.go")
-
-	check, ok := between(src, "func serveRevision(", "\n}\n")
-	if !ok {
-		t.Fatal("no serveRevision function")
-	}
-	// Both ways of not refusing are the one comparison: an unset MinRevision and
-	// a caller that said nothing each leave a side unknown, and nothing is
-	// before an unknown revision.
 	for _, want := range []string{
-		"if !rc.BuiltBefore(s.MinRevision) { return true }",
-		"rigerr.UpgradeRequired(",
+		"h.Server.Revision = serverRevision",
+		"h.Server.RevisionHeader = RevisionHeader",
 	} {
-		if !strings.Contains(collapse(check), collapse(want)) {
-			t.Errorf("serveRevision is missing %s:\n%s", want, check)
+		if !strings.Contains(collapse(register), collapse(want)) {
+			t.Errorf("Register is missing %s:\n%s", want, register)
 		}
 	}
 
-	// It refuses through the same path everything else does, so a project's
-	// OnError sees it like any other failure.
-	if !strings.Contains(collapse(check), "fail(s, w, r, rc,") {
-		t.Errorf("the refusal should go through fail:\n%s", check)
-	}
 }
 
 // A date that has to be parsed is a date that can be typed wrong. Typed, the
@@ -414,8 +377,8 @@ func TestMinRevisionIsATypeRatherThanAString(t *testing.T) {
 	doc := gentest.LoadDocument(t, filepath.Join("testdata", fixture))
 	src := find(t, gentest.Run(t, servergo.New(), doc, opts()), "server.gen.go")
 
-	if !strings.Contains(collapse(src), "MinRevision apirev.Revision") {
-		t.Error("Server.MinRevision should be an apirev.Revision")
+	if !strings.Contains(src, "type Server = apibase.Server") {
+		t.Errorf("Server should be the shared one, whose MinRevision is an apirev.Revision:\n%s", src)
 	}
 
 	register, ok := between(src, "func Register(", "\n}\n")
@@ -424,28 +387,6 @@ func TestMinRevisionIsATypeRatherThanAString(t *testing.T) {
 	}
 	if strings.Contains(register, "MinRevision") {
 		t.Errorf("Register still validates MinRevision, which the type now does:\n%s", register)
-	}
-}
-
-// What only the service method is handed has to reach the hooks under it, and
-// before the Context hook, so that hook can see it too.
-func TestTheRequestContextGoesOnTheContext(t *testing.T) {
-	t.Parallel()
-
-	doc := gentest.LoadDocument(t, filepath.Join("testdata", fixture))
-	src := find(t, gentest.Run(t, servergo.New(), doc, opts()), "server.gen.go")
-
-	resolve, ok := between(src, "func resolve(", "\n}\n")
-	if !ok {
-		t.Fatal("no resolve function")
-	}
-	stamped := strings.Index(resolve, "ctx = NewContext(ctx, rc)")
-	hook := strings.Index(resolve, "if s.Context != nil")
-	if stamped < 0 {
-		t.Fatalf("resolve does not put the request context on the context:\n%s", resolve)
-	}
-	if hook >= 0 && stamped > hook {
-		t.Errorf("the request context goes on after the Context hook, which cannot then see it:\n%s", resolve)
 	}
 }
 
@@ -509,19 +450,12 @@ func TestAPublicEndpointUsesTheOtherPrepare(t *testing.T) {
 		t.Errorf("everything else still does:\n%s", list)
 	}
 
-	// The lookup still runs: an application that resolves a tenant from the
-	// host gets one, and a caller who presents a credential is identified by
-	// it. Only the refusal is dropped.
+	// The other prepare exists only where something uses it, so that a project
+	// with no public endpoint carries no name it never calls. What the two
+	// actually do differently is runtime/apibase's, and is tested there.
 	server := find(t, artifacts, "server.gen.go")
-	body, ok := between(server, "func resolve(", "\n}\n")
-	if !ok {
-		t.Fatalf("no resolve helper:\n%s", server)
-	}
-	if !strings.Contains(body, "s.GetClaims(r)") {
-		t.Errorf("the claims lookup should still run:\n%s", body)
-	}
-	if !strings.Contains(collapse(body), "if required { fail(s, w, r, rc, err)") {
-		t.Errorf("only the refusal is conditional:\n%s", body)
+	if !strings.Contains(server, "var preparePublic = apibase.PreparePublic") {
+		t.Errorf("no preparePublic:\n%s", server)
 	}
 }
 
@@ -949,10 +883,13 @@ func TestThrottleIsWiredOnlyWhereItExists(t *testing.T) {
 	with := gentest.LoadDocument(t, filepath.Join("testdata", "throttle.ir.json"))
 	server := find(t, gentest.Run(t, servergo.New(), with, opts()), "server.gen.go")
 	for _, want := range []string{
-		"Throttle *throttle.Gate",
 		"func NewThrottle(",
 		"func ThrottleLimits()",
-		"s.Throttle.Check(r.Context(), throttleCaller(r, claims), r.Pattern, w.Header())",
+		// The limiter and the networks it may believe an address from reach the
+		// shared plumbing as fields, because the check itself is
+		// runtime/apibase's and is the same everywhere.
+		"h.Server.Throttle = NewThrottle(conn, h.Server.Logger)",
+		"h.Server.TrustedProxies = throttleTrustedProxies",
 		// The counters are the one runtime table with nothing else pruning it,
 		// so the task that empties it is part of the feature rather than an
 		// extra: without it rig_throttle gains a row per caller per window and
@@ -965,26 +902,6 @@ func TestThrottleIsWiredOnlyWhereItExists(t *testing.T) {
 	}
 }
 
-// The check has to run after the claims and before the handler, and the ordering
-// is the whole design: earlier and it cannot key on who is calling, later and the
-// work it exists to refuse has already been done.
-func TestTheThrottleCheckRunsAfterTheClaims(t *testing.T) {
-	t.Parallel()
-
-	doc := gentest.LoadDocument(t, filepath.Join("testdata", "throttle.ir.json"))
-	server := find(t, gentest.Run(t, servergo.New(), doc, opts()), "server.gen.go")
-
-	resolve, ok := between(server, "func resolve(", "\nfunc ")
-	if !ok {
-		t.Fatal("no resolve function")
-	}
-
-	claims := strings.Index(resolve, "claims, err := s.GetClaims(r)")
-	check := strings.Index(resolve, "s.Throttle.Check(")
-	if claims < 0 || check < 0 {
-		t.Fatalf("resolve is missing a step: claims=%d check=%d", claims, check)
-	}
-	if check < claims {
-		t.Error("the limit is checked before the caller is identified, so it cannot key on them")
-	}
-}
+// The limiter is built from the pool the server already has, so a project does
+// not have to remember to. Where in a request the check runs — after the claims,
+// so it can key on who is calling — is runtime/apibase's, and is tested there.

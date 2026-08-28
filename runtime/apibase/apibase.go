@@ -280,12 +280,12 @@ func ReadScope(s tenancy.Scope) []readopt.Option {
 	return nil
 }
 
-// RequestIDHeader is where a caller may name its own request, so that its logs
+// DefaultRequestIDHeader is where a caller may name its own request, so that its logs
 // and this API's can be lined up afterwards.
 //
 // It is read on every route, including the authentication ones. What is done
 // with it is [Server.RequestID]'s documentation.
-const RequestIDHeader = "X-Request-Id"
+const DefaultRequestIDHeader = "X-Request-Id"
 
 // maxRequestIDBytes bounds what a caller may name its own request.
 //
@@ -303,8 +303,11 @@ const maxRequestIDBytes = 128
 // not understand is not one it should half-quote into a log line. What a
 // Caller gets for sending nonsense is the identifier it would have got for
 // sending nothing.
-func CallerRequestID(r *http.Request) string {
-	id := r.Header.Get(RequestIDHeader)
+func CallerRequestID(r *http.Request, header string) string {
+	if header == "" {
+		header = DefaultRequestIDHeader
+	}
+	id := r.Header.Get(header)
 	if id == "" || len(id) > maxRequestIDBytes {
 		return ""
 	}
@@ -360,7 +363,7 @@ type Server struct {
 	// in.
 	//
 	// Nil is the ordinary case and does not mean nothing: it means
-	// [CallerRequestID] — the caller's own X-Request-Id, if it sent one worth
+	// [CallerRequestID] — the caller's own [Server.RequestIDHeader], if it sent one worth
 	// trusting, and this request's trace otherwise. Set this only to answer the
 	// question differently; the default is already the answer every route in this
 	// package gives, including the authentication ones.
@@ -435,6 +438,11 @@ type Server struct {
 	// means [DefaultRevisionHeader], which is what `api.revision_header` leaves
 	// it at.
 	RevisionHeader string
+
+	// RequestIDHeader is the header a caller may name its own request in. Empty
+	// means [DefaultRequestIDHeader], which is what `request_id_header` leaves it
+	// at.
+	RequestIDHeader string
 
 	// Tracer is where this API's spans come from. Nil is a project that does not
 	// trace, and then none of its methods is called.
@@ -516,7 +524,7 @@ func RequestContextOf(s Server, r *http.Request) RequestContext {
 		// Empty when neither is there, which is a request nothing can correlate —
 		// turning `tracing:` on in rig.yaml is what gives every request one whether
 		// or not the caller thought to.
-		rc.RequestID = CallerRequestID(r)
+		rc.RequestID = CallerRequestID(r, s.RequestIDHeader)
 		if rc.RequestID == "" && s.Tracer != nil {
 			rc.RequestID = s.Tracer.TraceID(r)
 		}

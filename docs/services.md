@@ -114,6 +114,15 @@ database is behind; `migrate.Apply` migrates on the way up instead.
 nil means `slog.Default()` rather than silence — see
 [observability.md](observability.md).
 
+**`api.Server` is an alias.** The struct itself is
+`rig/runtime/apibase.Server`, along with the request envelope, the request
+context and the plumbing every handler shares — none of it derived from your
+schema, so it is imported rather than written into your repository. Its godoc is
+where every field is documented. What `Register` sets for you is everything the
+project already decided: the revision this build serves, the headers it names,
+its rate limiter, and where its spans go. What is left for you is the handful
+above.
+
 A project with `tracing:` on has two more lines here — `api.NewProcess()` and a
 `process.Attach(app)` in the mount function — and
 [observability.md](observability.md#wiring-it-up) has them in full. It also gets

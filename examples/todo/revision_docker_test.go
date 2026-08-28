@@ -66,6 +66,11 @@ func TestTheRevisionTravelsBothWays(t *testing.T) {
 
 // Stale is the reading of the header, and it is deliberately quiet about the
 // two ways a caller can decline to say anything.
+//
+// Both sides of the comparison are on the context: the caller's revision from
+// the header, and this server's, which Register puts there. A context built by
+// hand — which is what this is — supplies the second itself, and one that does
+// not answers "not stale" rather than measuring a distance from the zero time.
 func TestStaleReportsTheGap(t *testing.T) {
 	server, err := time.Parse("2006-01-02", api.Revision)
 	if err != nil {
@@ -86,7 +91,10 @@ func TestStaleReportsTheGap(t *testing.T) {
 		{"said nonsense", "yesterday-ish", false, 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			rc := api.RequestContext{ClientRevision: tc.sent}
+			rc := api.RequestContext{
+				ClientRevision: tc.sent,
+				ServerRevision: apirev.MustParse(api.Revision),
+			}
 
 			gap, ok := rc.Stale()
 			if ok != tc.wantOK {

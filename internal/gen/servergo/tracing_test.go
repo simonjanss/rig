@@ -87,11 +87,12 @@ func TestTheRequestIDFallsBackToTheTrace(t *testing.T) {
 
 	src := artifactNamed(t, gentest.Run(t, servergo.New(), traced(t), opts()), "server.gen.go")
 
-	if !strings.Contains(src, "rc.RequestID = cmp.Or(callerRequestID(r), observe.TraceID(r))") {
-		t.Errorf("no fallback to the trace id:\n%s", src)
-	}
-	if !strings.Contains(src, "observe.Fail(r.Context(), code.HTTPStatus(), err)") {
-		t.Error("a failure is not recorded on the span")
+	// One field carries both: what to label a request nobody labelled, and which
+	// span to redden when one fails. The order between the caller's own header
+	// and the trace is runtime/apibase's, and is tested there — what a traced
+	// project owes is handing it somewhere to ask.
+	if !strings.Contains(src, "h.Server.Tracer = observe.APITracer{}") {
+		t.Errorf("no tracer for the shared plumbing to ask:\n%s", src)
 	}
 }
 

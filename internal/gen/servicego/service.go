@@ -834,31 +834,6 @@ func (e *emitter) anyOwnerScoped() bool {
 	return false
 }
 
-// scopeHelper emits the one function that turns a requested scope into a read
-// option.
-//
-// One function per package rather than three lines inlined into five reads: the
-// mapping from "all" to dropping the filter is the security-relevant half of this
-// feature, and it should be in one place where it can be read and tested.
-func (e *emitter) scopeHelper(b *gobuf.Buf) {
-	optPkg := b.Import(runtimeModule + "/readopt")
-	tenPkg := b.Import(runtimeModule + "/tenancy")
-
-	b.Comment("readScope turns a requested scope into the read options that " +
-		"produce it.\n\n" +
-		"Only \"all\" does anything. Every other value — including a zero value " +
-		"from a caller that never set the field — leaves the narrow default in " +
-		"place, so the failure mode of forgetting this is too few rows rather than " +
-		"too many.")
-	b.L("func readScope(s %s.Scope) []%s.Option {", tenPkg, optPkg)
-	b.L("if s == %s.ScopeAll {", tenPkg)
-	b.L("return []%s.Option{%s.WithoutOwnerScope()}", optPkg, optPkg)
-	b.L("}")
-	b.L("return nil")
-	b.L("}")
-	b.NL()
-}
-
 // readHelpers emit the two calls every generated read shares.
 //
 // Methods rather than inline blocks: five reads would otherwise carry the same
