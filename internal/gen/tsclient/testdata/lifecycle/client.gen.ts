@@ -12,9 +12,10 @@
  * which of them it was.
  */
 
+import type { LessonClient } from "./lesson_client.gen.js";
 import type { Config } from "@rig/client";
 
-import { LessonClient } from "./lesson_client.gen.js";
+import { createLessonClient } from "./lesson_client.gen.js";
 import { Runtime } from "@rig/client";
 
 /**
@@ -72,6 +73,6 @@ export function createClient(config: Config): Client {
 
     return {
         runtime,
-        lessons: new LessonClient(runtime),
+        lessons: createLessonClient(runtime),
     };
 }

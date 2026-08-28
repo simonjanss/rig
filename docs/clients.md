@@ -659,6 +659,116 @@ Without the second one the browser hides the cursor from the client and the
 subscription ends after one response, which looks like a stream that stopped
 rather than like a configuration problem. rig adds no CORS headers of its own.
 
+## Testing against a generated client
+
+Both SDKs take the same two things from a test, for the same reason they answer
+the same shape: the transport, and the clock.
+
+```go
+api, err := client.New(rigclient.Config{
+    BaseURL:    "https://api.example.com",
+    HTTPClient: &http.Client{Transport: recorded},
+    Now:        func() time.Time { return at },
+})
+```
+
+```ts
+const client = createClient({
+    baseUrl: "https://api.example.com",
+    fetch: recorded,
+    now: () => at,
+});
+```
+
+`Now` and `now` are there so a test can cross a token expiry without waiting for
+one, and `retry: { baseMs: 0, capMs: 0 }` is how the TypeScript one stops a
+backoff schedule from being spent for real.
+
+### Faking one call, rather than the whole server
+
+Swapping the transport tests the client. Most tests are not about the client:
+they are about the code that calls it, and what they want is one method answering
+something chosen.
+
+Go asks nothing of rig for this. Interfaces there are structural, so a caller
+declares the surface it actually uses and `*client.TodoClient` satisfies it
+without the generator being told:
+
+```go
+type todoLister interface {
+    List(ctx context.Context, q client.TodoListQuery,
+        opts ...rigclient.CallOption) (*client.TodoListResponse, error)
+}
+```
+
+The options are part of it. Every generated method ends with
+`opts ...rigclient.CallOption`, and an interface that leaves them off is one the
+client does not satisfy — which the compiler says at the assignment rather than
+at the declaration, so it reads as a problem with the wrong line.
+
+In TypeScript `client.todos` is an interface the generator emits — `TodoClient`,
+in `todo_client.gen.ts` — so an object satisfies it. Spread a real client and
+replace the call under test:
+
+```ts
+const real = createClient({ baseUrl: "" });
+
+const client: Client = {
+    ...real,
+    todos: { ...real.todos, list: async () => page },
+};
+```
+
+Nothing there is asserted, and that is the point of writing it this way. The
+inner spread is what supplies the dozen methods the test does not care about, and
+it works because a resource's methods are its own properties rather than a
+prototype's — so the compiler still checks the one method you did write, and
+still complains if you misspell it.
+
+**Build the real client rather than assembling one.** `createClient` opens no
+connection and sends nothing, so it costs nothing; the outer spread is there
+because `Client.runtime` is a real `Runtime`, which a test has no way to
+construct a stand-in for and no reason to.
+
+### Reading back a refusal
+
+`RigError` is exported so a double can raise one, which is what a test of the
+error path needs — the guards are ordinary functions over an ordinary error, so
+`isTodoCreateError` answers for a hand-built refusal exactly as it does for one
+that arrived:
+
+```ts
+import { ErrorCode, FieldCode, RigError } from "@rig/client";
+
+create: async () => {
+    throw new RigError({
+        status: 422,
+        code: ErrorCode.UnprocessableEntity,
+        fields: {
+            title: { code: FieldCode.CannotBeEmpty, message: "required" },
+        },
+    });
+};
+```
+
+**The `code` is what the guards read, not the status.** `isInvalid` — and so
+every generated guard over it — asks whether the code is
+`UnprocessableEntity`; a refusal built with a 422 and no code is a `RigError`
+that no guard answers for, which looks like a broken guard rather than an
+incomplete double.
+
+### What this does not make easy
+
+**A live-sync fake has to answer the sync protocol**, not just hand back rows. A
+collection reaches the network through `runtime.fetch` like everything else, so
+the same fake transport intercepts it — but what it has to send back is an
+offset, an `electric-handle`, an `electric-schema`, an `electric-up-to-date`, and
+then an answer to each `live=true` long poll that follows. rig ships no helper
+for this. `ts/packages/electric/src/fallback.test.ts` in the rig repository is a
+worked example, and it is long enough to be a fair warning: a test that only
+needs rows on screen is better served by faking the resource method above and
+leaving the stream alone.
+
 ## Presence
 
 A project with `presence: {enabled: true}` gets a third package,

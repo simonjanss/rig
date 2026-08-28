@@ -26,16 +26,14 @@ import {
 } from "@rig/client";
 
 /**
- * NotificationRecipientClient calls the NotificationRecipient endpoints. It is
- * reached as `client.notificationRecipients` rather than built directly.
+ * NotificationRecipientClient is what `client.notificationRecipients` is, and
+ * what a test writes to stand in for it.
+ *
+ * The documentation for each call is here rather than on the object below,
+ * because this is the type the property resolves to and so this is what an
+ * editor shows.
  */
-export class NotificationRecipientClient {
-    readonly #rt: Runtime;
-
-    constructor(rt: Runtime) {
-        this.#rt = rt;
-    }
-
+export interface NotificationRecipientClient {
     /**
      * List NotificationRecipients.
      *
@@ -43,19 +41,7 @@ export class NotificationRecipientClient {
      *
      * Operation listNotificationRecipients.
      */
-    list(query: NotificationRecipientListQuery = {}, options?: CallOptions): Promise<NotificationRecipientListResponse> {
-        const search = new URLSearchParams();
-        setParam(search, "limit", query.limit);
-        setParam(search, "offset", query.offset);
-        setParam(search, "scope", query.scope);
-
-        return send<NotificationRecipientListResponse>(this.#rt, {
-            name: "listNotificationRecipients",
-            method: "GET",
-            path: "/notification-recipients",
-            query: search,
-        }, options);
-    }
+    list(query?: NotificationRecipientListQuery, options?: CallOptions): Promise<NotificationRecipientListResponse>;
 
     /**
      * Search NotificationRecipients with filters.
@@ -67,21 +53,7 @@ export class NotificationRecipientClient {
      *
      * Operation searchNotificationRecipients.
      */
-    search(filter: NotificationRecipientFilter, query: NotificationRecipientSearchQuery = {}, options?: CallOptions): Promise<NotificationRecipientListResponse> {
-        const search = new URLSearchParams();
-        setParam(search, "limit", query.limit);
-        setParam(search, "offset", query.offset);
-        setParam(search, "scope", query.scope);
-
-        return send<NotificationRecipientListResponse>(this.#rt, {
-            name: "searchNotificationRecipients",
-            method: METHOD_QUERY,
-            path: "/notification-recipients",
-            query: search,
-            body: { filter: filter },
-            fallback: "/notification-recipients/_search",
-        }, options);
-    }
+    search(filter: NotificationRecipientFilter, query?: NotificationRecipientSearchQuery, options?: CallOptions): Promise<NotificationRecipientListResponse>;
 
     /**
      * A deletion stamps the row rather than removing it, so this is what was
@@ -93,19 +65,7 @@ export class NotificationRecipientClient {
      *
      * Operation listDeletedNotificationRecipients.
      */
-    listDeleted(query: NotificationRecipientListDeletedQuery = {}, options?: CallOptions): Promise<NotificationRecipientListResponse> {
-        const search = new URLSearchParams();
-        setParam(search, "limit", query.limit);
-        setParam(search, "offset", query.offset);
-        setParam(search, "scope", query.scope);
-
-        return send<NotificationRecipientListResponse>(this.#rt, {
-            name: "listDeletedNotificationRecipients",
-            method: "GET",
-            path: "/notification-recipients/_deleted",
-            query: search,
-        }, options);
-    }
+    listDeleted(query?: NotificationRecipientListDeletedQuery, options?: CallOptions): Promise<NotificationRecipientListResponse>;
 
     /**
      * The row is retired by stamping a deletion time; it stops appearing in
@@ -115,13 +75,7 @@ export class NotificationRecipientClient {
      *
      * Operation deleteNotificationRecipient.
      */
-    delete(iD: string, options?: CallOptions): Promise<void> {
-        return sendNoContent(this.#rt, {
-            name: "deleteNotificationRecipient",
-            method: "DELETE",
-            path: `/notification-recipients/${pathValue(iD)}`,
-        }, options);
-    }
+    delete(iD: string, options?: CallOptions): Promise<void>;
 
     /**
      * Fetch one NotificationRecipient by identifier.
@@ -130,15 +84,80 @@ export class NotificationRecipientClient {
      *
      * Operation getNotificationRecipient.
      */
-    get(iD: string, query: NotificationRecipientGetQuery = {}, options?: CallOptions): Promise<NotificationRecipient> {
-        const search = new URLSearchParams();
-        setParam(search, "scope", query.scope);
+    get(iD: string, query?: NotificationRecipientGetQuery, options?: CallOptions): Promise<NotificationRecipient>;
+}
 
-        return send<NotificationRecipient>(this.#rt, {
-            name: "getNotificationRecipient",
-            method: "GET",
-            path: `/notification-recipients/${pathValue(iD)}`,
-            query: search,
-        }, options);
-    }
+/**
+ * Builds the NotificationRecipient half of a client.
+ *
+ * Called by `createClient` and not usually by anything else: a resource reached
+ * through the client it belongs to shares that client's credential, and one
+ * built here would not.
+ */
+export function createNotificationRecipientClient(rt: Runtime): NotificationRecipientClient {
+    return {
+        list(query: NotificationRecipientListQuery = {}, options?: CallOptions): Promise<NotificationRecipientListResponse> {
+            const search = new URLSearchParams();
+            setParam(search, "limit", query.limit);
+            setParam(search, "offset", query.offset);
+            setParam(search, "scope", query.scope);
+
+            return send<NotificationRecipientListResponse>(rt, {
+                name: "listNotificationRecipients",
+                method: "GET",
+                path: "/notification-recipients",
+                query: search,
+            }, options);
+        },
+
+        search(filter: NotificationRecipientFilter, query: NotificationRecipientSearchQuery = {}, options?: CallOptions): Promise<NotificationRecipientListResponse> {
+            const search = new URLSearchParams();
+            setParam(search, "limit", query.limit);
+            setParam(search, "offset", query.offset);
+            setParam(search, "scope", query.scope);
+
+            return send<NotificationRecipientListResponse>(rt, {
+                name: "searchNotificationRecipients",
+                method: METHOD_QUERY,
+                path: "/notification-recipients",
+                query: search,
+                body: { filter: filter },
+                fallback: "/notification-recipients/_search",
+            }, options);
+        },
+
+        listDeleted(query: NotificationRecipientListDeletedQuery = {}, options?: CallOptions): Promise<NotificationRecipientListResponse> {
+            const search = new URLSearchParams();
+            setParam(search, "limit", query.limit);
+            setParam(search, "offset", query.offset);
+            setParam(search, "scope", query.scope);
+
+            return send<NotificationRecipientListResponse>(rt, {
+                name: "listDeletedNotificationRecipients",
+                method: "GET",
+                path: "/notification-recipients/_deleted",
+                query: search,
+            }, options);
+        },
+
+        delete(iD: string, options?: CallOptions): Promise<void> {
+            return sendNoContent(rt, {
+                name: "deleteNotificationRecipient",
+                method: "DELETE",
+                path: `/notification-recipients/${pathValue(iD)}`,
+            }, options);
+        },
+
+        get(iD: string, query: NotificationRecipientGetQuery = {}, options?: CallOptions): Promise<NotificationRecipient> {
+            const search = new URLSearchParams();
+            setParam(search, "scope", query.scope);
+
+            return send<NotificationRecipient>(rt, {
+                name: "getNotificationRecipient",
+                method: "GET",
+                path: `/notification-recipients/${pathValue(iD)}`,
+                query: search,
+            }, options);
+        },
+    };
 }

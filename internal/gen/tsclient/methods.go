@@ -10,39 +10,81 @@ import (
 	"github.com/simonjanss/rig/pkg/ir"
 )
 
-// methodFile emits a resource's client: one method per endpoint, and one guard
-// per method that can be refused field by field.
+// methodFile emits a resource's client: the interface that `client.<resource>`
+// is typed as, the factory that builds one, and one guard per method that can be
+// refused field by field.
+//
+// **The interface is the surface; the object behind it is an implementation
+// detail.** That is what lets a caller write a stand-in, which is most of why
+// this file is shaped the way it is: a class with a private field is nominally
+// typed, so no object literal can satisfy one, and a test would have no way to
+// fake a resource at all.
+//
+// The object is a literal rather than an instance for a second reason, and it is
+// the one that decides whether faking is pleasant or merely possible. Methods on
+// a literal are its own properties, so `{ ...client.todos, list }` carries the
+// ones it did not name; methods on a class live on the prototype, where a spread
+// cannot see them, and replacing one call would mean writing out every other.
 func (e *emitter) methodFile(res *ir.Resource) (gen.Artifact, error) {
 	b := e.open(snake(res.Name) + "_client.gen")
 
 	runtime := b.ImportType(e.cfg.ClientImport, "Runtime")
 	b.ImportType(e.cfg.ClientImport, "CallOptions")
 
-	b.Comment(res.Name + "Client calls the " + res.Name + " endpoints. It is " +
-		"reached as `client." + clientProperty(res) + "` rather than built directly.")
-	b.L("export class %sClient {", res.Name)
-	b.Indent()
-	b.L("readonly #rt: %s;", runtime)
-	b.NL()
-	b.L("constructor(rt: %s) {", runtime)
-	b.Indent()
-	b.L("this.#rt = rt;")
-	b.Outdent()
-	b.L("}")
+	// One list, walked once per half. A declaration and the method that
+	// satisfies it are emitted from the same endpoint and the same signature, so
+	// the two halves cannot describe different calls.
+	type call struct {
+		ep      *ir.Endpoint
+		variant methodVariant
+	}
 
+	calls := make([]call, 0, len(res.Endpoints)+1)
 	for i := range res.Endpoints {
 		ep := &res.Endpoints[i]
-		b.NL()
-		e.method(b, res, ep, variantFor(ep))
+		calls = append(calls, call{ep: ep, variant: variantFor(ep)})
 	}
 
 	// Beside the JSON create rather than instead of it, so nothing breaks the
 	// day somebody adds a file column to a table they already had.
 	if ep := createWithFiles(res); ep != nil {
-		b.NL()
-		e.method(b, res, ep, variantCreateWithFiles)
+		calls = append(calls, call{ep: ep, variant: variantCreateWithFiles})
 	}
 
+	b.Comment(res.Name + "Client is what `client." + clientProperty(res) +
+		"` is, and what a test writes to stand in for it.\n\n" +
+		"The documentation for each call is here rather than on the object " +
+		"below, because this is the type the property resolves to and so this " +
+		"is what an editor shows.")
+	b.L("export interface %sClient {", res.Name)
+	b.Indent()
+	for i, c := range calls {
+		if i > 0 {
+			b.NL()
+		}
+		e.declaration(b, res, c.ep, c.variant)
+	}
+	b.Outdent()
+	b.L("}")
+	b.NL()
+
+	b.Comment("Builds the " + res.Name + " half of a client.\n\n" +
+		"Called by `createClient` and not usually by anything else: a resource " +
+		"reached through the client it belongs to shares that client's " +
+		"credential, and one built here would not.")
+	b.L("export function create%sClient(rt: %s): %sClient {",
+		res.Name, runtime, res.Name)
+	b.Indent()
+	b.L("return {")
+	b.Indent()
+	for i, c := range calls {
+		if i > 0 {
+			b.NL()
+		}
+		e.method(b, res, c.ep, c.variant)
+	}
+	b.Outdent()
+	b.L("};")
 	b.Outdent()
 	b.L("}")
 
@@ -58,11 +100,21 @@ func (e *emitter) methodFile(res *ir.Resource) (gen.Artifact, error) {
 	return e.close(b)
 }
 
-// method emits one call.
-func (e *emitter) method(b *tsbuf.Buf, res *ir.Resource, ep *ir.Endpoint, variant methodVariant) {
+// declaration emits one member of the interface: the signature, and the
+// documentation, which lives here for the reason [emitter.methodFile] gives.
+func (e *emitter) declaration(
+	b *tsbuf.Buf, res *ir.Resource, ep *ir.Endpoint, variant methodVariant,
+) {
 	sig := e.signature(b, res, ep, variant)
 
 	b.Comment(e.methodDoc(res, ep, variant))
+	b.L("%s(%s): %s;", methodNameFor(ep, variant), sig.paramsDecl, sig.result)
+}
+
+// method emits one call, as a member of the object the factory returns.
+func (e *emitter) method(b *tsbuf.Buf, res *ir.Resource, ep *ir.Endpoint, variant methodVariant) {
+	sig := e.signature(b, res, ep, variant)
+
 	b.L("%s(%s): %s {", methodNameFor(ep, variant), sig.params, sig.result)
 	b.Indent()
 
@@ -83,7 +135,7 @@ func (e *emitter) method(b *tsbuf.Buf, res *ir.Resource, ep *ir.Endpoint, varian
 		e.formPreamble(b, sig.form)
 	}
 
-	b.L("return %s%s(this.#rt, {", sig.call, sig.generic)
+	b.L("return %s%s(rt, {", sig.call, sig.generic)
 	b.Indent()
 	b.L("name: %s,", tsbuf.Quote(ep.OperationID))
 	b.L("method: %s,", e.methodLiteral(b, ep))
@@ -107,7 +159,7 @@ func (e *emitter) method(b *tsbuf.Buf, res *ir.Resource, ep *ir.Endpoint, varian
 	b.L("}, options);")
 
 	b.Outdent()
-	b.L("}")
+	b.L("},")
 }
 
 // methodDoc is what one method says about itself.
@@ -159,7 +211,11 @@ func methodNameFor(ep *ir.Endpoint, variant methodVariant) string {
 // signature is what one method takes and gives back.
 type signature struct {
 	params string
-	result string
+	// paramsDecl is the same list as params, in the form an interface member may
+	// state it: identical but for the query, which carries a default that only a
+	// declaration with a body is allowed to.
+	paramsDecl string
+	result     string
 	// call is the runtime function this method is one line on top of.
 	call string
 	// generic is the type argument to that function, angle brackets included, or
@@ -233,16 +289,29 @@ func (e *emitter) signature(
 		sig.body = "input"
 	}
 
+	// Every parameter so far reads the same in both forms, so the two lists
+	// diverge from here and not before. A copy rather than the same slice:
+	// appending to both would otherwise write twice to one backing array, and
+	// the second write would take the first one's element back.
+	decl := append([]string(nil), params...)
+
 	if len(ep.Request.QueryParams) > 0 {
 		sig.query = "query"
+		query := e.ref(b, genutil.QueryTypeName(res, ep))
 		// Defaulted to an empty object: every member of it is optional, so a
-		// caller with nothing to say should not have to write `{}`.
-		params = append(params, "query: "+e.ref(b, genutil.QueryTypeName(res, ep))+" = {}")
+		// caller with nothing to say should not have to write `{}`. An interface
+		// member may not state a default, so the declaration says the same thing
+		// the one other way there is — which is why these two lines exist rather
+		// than one.
+		params = append(params, "query: "+query+" = {}")
+		decl = append(decl, "query?: "+query)
 	}
 
 	options := b.ImportType(e.cfg.ClientImport, "CallOptions")
 	params = append(params, "options?: "+options)
+	decl = append(decl, "options?: "+options)
 	sig.params = strings.Join(params, ", ")
+	sig.paramsDecl = strings.Join(decl, ", ")
 
 	sig.path = e.pathExpr(b, ep)
 

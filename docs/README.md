@@ -31,7 +31,7 @@ file per table.
 | [Generators](generators.md) | The six built-ins, their options, and what each one puts on disk. |
 | [The HTTP API](api.md) | The endpoints you get: CRUD, filtering, pagination, PATCH semantics, error codes. |
 | [Your service layer](services.md) | The part rig will not write: business rules, lifecycle hooks, and running the server. |
-| [Clients](clients.md) | The generated Go client. |
+| [Clients](clients.md) | The generated Go and TypeScript SDKs, and how to fake one in a test. |
 | [Live sync](electric.md) | Shape endpoints, for a client that subscribes instead of polling. |
 | [Notifications](notifications.md) | An inbox: who is told what happened, worked out when it is sent rather than when it was written. |
 | [Presence](presence.md) | Who is here, and what they are looking at: a row per browser tab, read over a live shape. |

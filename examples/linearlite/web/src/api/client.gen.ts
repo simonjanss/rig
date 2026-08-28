@@ -12,22 +12,40 @@
  * which of them it was.
  */
 
-import type { Config } from "@rig/client";
-
-import { AccountClient } from "./account_client.gen.js";
-import { NotificationClient } from "./notification_client.gen.js";
-import {
+import type { AccountClient } from "./account_client.gen.js";
+import type { NotificationClient } from "./notification_client.gen.js";
+import type {
     NotificationDeliveryClient,
 } from "./notification_delivery_client.gen.js";
-import { NotificationDeviceClient } from "./notification_device_client.gen.js";
-import {
+import type {
+    NotificationDeviceClient,
+} from "./notification_device_client.gen.js";
+import type {
     NotificationRecipientClient,
 } from "./notification_recipient_client.gen.js";
-import {
+import type {
     NotificationSettingClient,
 } from "./notification_setting_client.gen.js";
-import { TodoAttachmentClient } from "./todo_attachment_client.gen.js";
-import { TodoClient } from "./todo_client.gen.js";
+import type { TodoAttachmentClient } from "./todo_attachment_client.gen.js";
+import type { TodoClient } from "./todo_client.gen.js";
+import type { Config } from "@rig/client";
+
+import { createAccountClient } from "./account_client.gen.js";
+import { createNotificationClient } from "./notification_client.gen.js";
+import {
+    createNotificationDeliveryClient,
+} from "./notification_delivery_client.gen.js";
+import {
+    createNotificationDeviceClient,
+} from "./notification_device_client.gen.js";
+import {
+    createNotificationRecipientClient,
+} from "./notification_recipient_client.gen.js";
+import {
+    createNotificationSettingClient,
+} from "./notification_setting_client.gen.js";
+import { createTodoAttachmentClient } from "./todo_attachment_client.gen.js";
+import { createTodoClient } from "./todo_client.gen.js";
 import { Runtime } from "@rig/client";
 
 /**
@@ -126,13 +144,13 @@ export function createClient(config: Config): Client {
 
     return {
         runtime,
-        accounts: new AccountClient(runtime),
-        notifications: new NotificationClient(runtime),
-        notificationDeliveries: new NotificationDeliveryClient(runtime),
-        notificationDevices: new NotificationDeviceClient(runtime),
-        notificationRecipients: new NotificationRecipientClient(runtime),
-        notificationSettings: new NotificationSettingClient(runtime),
-        todos: new TodoClient(runtime),
-        todoAttachments: new TodoAttachmentClient(runtime),
+        accounts: createAccountClient(runtime),
+        notifications: createNotificationClient(runtime),
+        notificationDeliveries: createNotificationDeliveryClient(runtime),
+        notificationDevices: createNotificationDeviceClient(runtime),
+        notificationRecipients: createNotificationRecipientClient(runtime),
+        notificationSettings: createNotificationSettingClient(runtime),
+        todos: createTodoClient(runtime),
+        todoAttachments: createTodoAttachmentClient(runtime),
     };
 }

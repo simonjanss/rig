@@ -64,7 +64,7 @@ func (e *emitter) clientFile() (gen.Artifact, error) {
 	b.L("readonly runtime: %s;", runtime)
 	for _, res := range resources {
 		b.Comment(describe(e.resourceDoc(res), res.Name+"."))
-		b.L("readonly %s: %s;", clientProperty(res), e.refValue(b, res.Name+"Client"))
+		b.L("readonly %s: %s;", clientProperty(res), e.ref(b, res.Name+"Client"))
 	}
 	b.Outdent()
 	b.L("};")
@@ -98,7 +98,8 @@ func (e *emitter) clientFile() (gen.Artifact, error) {
 	b.Indent()
 	b.L("runtime,")
 	for _, res := range resources {
-		b.L("%s: new %s(runtime),", clientProperty(res), e.refValue(b, res.Name+"Client"))
+		b.L("%s: %s(runtime),", clientProperty(res),
+			e.refValue(b, "create"+res.Name+"Client"))
 	}
 	b.Outdent()
 	b.L("};")

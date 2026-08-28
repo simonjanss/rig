@@ -12,10 +12,12 @@
  * which of them it was.
  */
 
+import type { TodoAttachmentClient } from "./todo_attachment_client.gen.js";
+import type { TodoClient } from "./todo_client.gen.js";
 import type { Config } from "@rig/client";
 
-import { TodoAttachmentClient } from "./todo_attachment_client.gen.js";
-import { TodoClient } from "./todo_client.gen.js";
+import { createTodoAttachmentClient } from "./todo_attachment_client.gen.js";
+import { createTodoClient } from "./todo_client.gen.js";
 import { Runtime } from "@rig/client";
 
 /**
@@ -81,7 +83,7 @@ export function createClient(config: Config): Client {
 
     return {
         runtime,
-        todos: new TodoClient(runtime),
-        todoAttachments: new TodoAttachmentClient(runtime),
+        todos: createTodoClient(runtime),
+        todoAttachments: createTodoAttachmentClient(runtime),
     };
 }

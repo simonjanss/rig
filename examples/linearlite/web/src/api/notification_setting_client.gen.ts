@@ -25,16 +25,14 @@ import {
 } from "@rig/client";
 
 /**
- * NotificationSettingClient calls the NotificationSetting endpoints. It is
- * reached as `client.notificationSettings` rather than built directly.
+ * NotificationSettingClient is what `client.notificationSettings` is, and what
+ * a test writes to stand in for it.
+ *
+ * The documentation for each call is here rather than on the object below,
+ * because this is the type the property resolves to and so this is what an
+ * editor shows.
  */
-export class NotificationSettingClient {
-    readonly #rt: Runtime;
-
-    constructor(rt: Runtime) {
-        this.#rt = rt;
-    }
-
+export interface NotificationSettingClient {
     /**
      * List NotificationSettings.
      *
@@ -42,19 +40,7 @@ export class NotificationSettingClient {
      *
      * Operation listNotificationSettings.
      */
-    list(query: NotificationSettingListQuery = {}, options?: CallOptions): Promise<NotificationSettingListResponse> {
-        const search = new URLSearchParams();
-        setParam(search, "limit", query.limit);
-        setParam(search, "offset", query.offset);
-        setParam(search, "scope", query.scope);
-
-        return send<NotificationSettingListResponse>(this.#rt, {
-            name: "listNotificationSettings",
-            method: "GET",
-            path: "/notification-settings",
-            query: search,
-        }, options);
-    }
+    list(query?: NotificationSettingListQuery, options?: CallOptions): Promise<NotificationSettingListResponse>;
 
     /**
      * Create a NotificationSetting.
@@ -66,14 +52,7 @@ export class NotificationSettingClient {
      * A refusal is read back with `isNotificationSettingCreateError`, whose
      * `fields` say what was wrong with each member of the body.
      */
-    create(input: NotificationSettingCreateInput, options?: CallOptions): Promise<NotificationSetting> {
-        return send<NotificationSetting>(this.#rt, {
-            name: "createNotificationSetting",
-            method: "POST",
-            path: "/notification-settings",
-            body: input,
-        }, options);
-    }
+    create(input: NotificationSettingCreateInput, options?: CallOptions): Promise<NotificationSetting>;
 
     /**
      * Delete a NotificationSetting.
@@ -82,13 +61,7 @@ export class NotificationSettingClient {
      *
      * Operation deleteNotificationSetting.
      */
-    delete(iD: string, options?: CallOptions): Promise<void> {
-        return sendNoContent(this.#rt, {
-            name: "deleteNotificationSetting",
-            method: "DELETE",
-            path: `/notification-settings/${pathValue(iD)}`,
-        }, options);
-    }
+    delete(iD: string, options?: CallOptions): Promise<void>;
 
     /**
      * Fetch one NotificationSetting by identifier.
@@ -97,17 +70,7 @@ export class NotificationSettingClient {
      *
      * Operation getNotificationSetting.
      */
-    get(iD: string, query: NotificationSettingGetQuery = {}, options?: CallOptions): Promise<NotificationSetting> {
-        const search = new URLSearchParams();
-        setParam(search, "scope", query.scope);
-
-        return send<NotificationSetting>(this.#rt, {
-            name: "getNotificationSetting",
-            method: "GET",
-            path: `/notification-settings/${pathValue(iD)}`,
-            query: search,
-        }, options);
-    }
+    get(iD: string, query?: NotificationSettingGetQuery, options?: CallOptions): Promise<NotificationSetting>;
 
     /**
      * Only the fields present in the body are changed. A field set to null is
@@ -120,14 +83,70 @@ export class NotificationSettingClient {
      * A refusal is read back with `isNotificationSettingUpdateError`, whose
      * `fields` say what was wrong with each member of the body.
      */
-    update(iD: string, input: NotificationSettingUpdateInput, options?: CallOptions): Promise<NotificationSetting> {
-        return send<NotificationSetting>(this.#rt, {
-            name: "updateNotificationSetting",
-            method: "PATCH",
-            path: `/notification-settings/${pathValue(iD)}`,
-            body: input,
-        }, options);
-    }
+    update(iD: string, input: NotificationSettingUpdateInput, options?: CallOptions): Promise<NotificationSetting>;
+}
+
+/**
+ * Builds the NotificationSetting half of a client.
+ *
+ * Called by `createClient` and not usually by anything else: a resource reached
+ * through the client it belongs to shares that client's credential, and one
+ * built here would not.
+ */
+export function createNotificationSettingClient(rt: Runtime): NotificationSettingClient {
+    return {
+        list(query: NotificationSettingListQuery = {}, options?: CallOptions): Promise<NotificationSettingListResponse> {
+            const search = new URLSearchParams();
+            setParam(search, "limit", query.limit);
+            setParam(search, "offset", query.offset);
+            setParam(search, "scope", query.scope);
+
+            return send<NotificationSettingListResponse>(rt, {
+                name: "listNotificationSettings",
+                method: "GET",
+                path: "/notification-settings",
+                query: search,
+            }, options);
+        },
+
+        create(input: NotificationSettingCreateInput, options?: CallOptions): Promise<NotificationSetting> {
+            return send<NotificationSetting>(rt, {
+                name: "createNotificationSetting",
+                method: "POST",
+                path: "/notification-settings",
+                body: input,
+            }, options);
+        },
+
+        delete(iD: string, options?: CallOptions): Promise<void> {
+            return sendNoContent(rt, {
+                name: "deleteNotificationSetting",
+                method: "DELETE",
+                path: `/notification-settings/${pathValue(iD)}`,
+            }, options);
+        },
+
+        get(iD: string, query: NotificationSettingGetQuery = {}, options?: CallOptions): Promise<NotificationSetting> {
+            const search = new URLSearchParams();
+            setParam(search, "scope", query.scope);
+
+            return send<NotificationSetting>(rt, {
+                name: "getNotificationSetting",
+                method: "GET",
+                path: `/notification-settings/${pathValue(iD)}`,
+                query: search,
+            }, options);
+        },
+
+        update(iD: string, input: NotificationSettingUpdateInput, options?: CallOptions): Promise<NotificationSetting> {
+            return send<NotificationSetting>(rt, {
+                name: "updateNotificationSetting",
+                method: "PATCH",
+                path: `/notification-settings/${pathValue(iD)}`,
+                body: input,
+            }, options);
+        },
+    };
 }
 
 /**

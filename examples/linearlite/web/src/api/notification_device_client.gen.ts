@@ -23,16 +23,14 @@ import {
 } from "@rig/client";
 
 /**
- * NotificationDeviceClient calls the NotificationDevice endpoints. It is
- * reached as `client.notificationDevices` rather than built directly.
+ * NotificationDeviceClient is what `client.notificationDevices` is, and what a
+ * test writes to stand in for it.
+ *
+ * The documentation for each call is here rather than on the object below,
+ * because this is the type the property resolves to and so this is what an
+ * editor shows.
  */
-export class NotificationDeviceClient {
-    readonly #rt: Runtime;
-
-    constructor(rt: Runtime) {
-        this.#rt = rt;
-    }
-
+export interface NotificationDeviceClient {
     /**
      * List NotificationDevices.
      *
@@ -40,19 +38,7 @@ export class NotificationDeviceClient {
      *
      * Operation listNotificationDevices.
      */
-    list(query: NotificationDeviceListQuery = {}, options?: CallOptions): Promise<NotificationDeviceListResponse> {
-        const search = new URLSearchParams();
-        setParam(search, "limit", query.limit);
-        setParam(search, "offset", query.offset);
-        setParam(search, "scope", query.scope);
-
-        return send<NotificationDeviceListResponse>(this.#rt, {
-            name: "listNotificationDevices",
-            method: "GET",
-            path: "/notification-devices",
-            query: search,
-        }, options);
-    }
+    list(query?: NotificationDeviceListQuery, options?: CallOptions): Promise<NotificationDeviceListResponse>;
 
     /**
      * Create a NotificationDevice.
@@ -64,14 +50,7 @@ export class NotificationDeviceClient {
      * A refusal is read back with `isNotificationDeviceCreateError`, whose
      * `fields` say what was wrong with each member of the body.
      */
-    create(input: NotificationDeviceCreateInput, options?: CallOptions): Promise<NotificationDevice> {
-        return send<NotificationDevice>(this.#rt, {
-            name: "createNotificationDevice",
-            method: "POST",
-            path: "/notification-devices",
-            body: input,
-        }, options);
-    }
+    create(input: NotificationDeviceCreateInput, options?: CallOptions): Promise<NotificationDevice>;
 
     /**
      * Delete a NotificationDevice.
@@ -80,13 +59,7 @@ export class NotificationDeviceClient {
      *
      * Operation deleteNotificationDevice.
      */
-    delete(iD: string, options?: CallOptions): Promise<void> {
-        return sendNoContent(this.#rt, {
-            name: "deleteNotificationDevice",
-            method: "DELETE",
-            path: `/notification-devices/${pathValue(iD)}`,
-        }, options);
-    }
+    delete(iD: string, options?: CallOptions): Promise<void>;
 
     /**
      * Fetch one NotificationDevice by identifier.
@@ -95,17 +68,61 @@ export class NotificationDeviceClient {
      *
      * Operation getNotificationDevice.
      */
-    get(iD: string, query: NotificationDeviceGetQuery = {}, options?: CallOptions): Promise<NotificationDevice> {
-        const search = new URLSearchParams();
-        setParam(search, "scope", query.scope);
+    get(iD: string, query?: NotificationDeviceGetQuery, options?: CallOptions): Promise<NotificationDevice>;
+}
 
-        return send<NotificationDevice>(this.#rt, {
-            name: "getNotificationDevice",
-            method: "GET",
-            path: `/notification-devices/${pathValue(iD)}`,
-            query: search,
-        }, options);
-    }
+/**
+ * Builds the NotificationDevice half of a client.
+ *
+ * Called by `createClient` and not usually by anything else: a resource reached
+ * through the client it belongs to shares that client's credential, and one
+ * built here would not.
+ */
+export function createNotificationDeviceClient(rt: Runtime): NotificationDeviceClient {
+    return {
+        list(query: NotificationDeviceListQuery = {}, options?: CallOptions): Promise<NotificationDeviceListResponse> {
+            const search = new URLSearchParams();
+            setParam(search, "limit", query.limit);
+            setParam(search, "offset", query.offset);
+            setParam(search, "scope", query.scope);
+
+            return send<NotificationDeviceListResponse>(rt, {
+                name: "listNotificationDevices",
+                method: "GET",
+                path: "/notification-devices",
+                query: search,
+            }, options);
+        },
+
+        create(input: NotificationDeviceCreateInput, options?: CallOptions): Promise<NotificationDevice> {
+            return send<NotificationDevice>(rt, {
+                name: "createNotificationDevice",
+                method: "POST",
+                path: "/notification-devices",
+                body: input,
+            }, options);
+        },
+
+        delete(iD: string, options?: CallOptions): Promise<void> {
+            return sendNoContent(rt, {
+                name: "deleteNotificationDevice",
+                method: "DELETE",
+                path: `/notification-devices/${pathValue(iD)}`,
+            }, options);
+        },
+
+        get(iD: string, query: NotificationDeviceGetQuery = {}, options?: CallOptions): Promise<NotificationDevice> {
+            const search = new URLSearchParams();
+            setParam(search, "scope", query.scope);
+
+            return send<NotificationDevice>(rt, {
+                name: "getNotificationDevice",
+                method: "GET",
+                path: `/notification-devices/${pathValue(iD)}`,
+                query: search,
+            }, options);
+        },
+    };
 }
 
 /**

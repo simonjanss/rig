@@ -12,16 +12,14 @@ import type { CallOptions, Runtime } from "@rig/client";
 import { pathValue, send, setParam } from "@rig/client";
 
 /**
- * NotificationClient calls the Notification endpoints. It is reached as
- * `client.notifications` rather than built directly.
+ * NotificationClient is what `client.notifications` is, and what a test writes
+ * to stand in for it.
+ *
+ * The documentation for each call is here rather than on the object below,
+ * because this is the type the property resolves to and so this is what an
+ * editor shows.
  */
-export class NotificationClient {
-    readonly #rt: Runtime;
-
-    constructor(rt: Runtime) {
-        this.#rt = rt;
-    }
-
+export interface NotificationClient {
     /**
      * List Notifications.
      *
@@ -29,18 +27,7 @@ export class NotificationClient {
      *
      * Operation listNotifications.
      */
-    list(query: NotificationListQuery = {}, options?: CallOptions): Promise<NotificationListResponse> {
-        const search = new URLSearchParams();
-        setParam(search, "limit", query.limit);
-        setParam(search, "offset", query.offset);
-
-        return send<NotificationListResponse>(this.#rt, {
-            name: "listNotifications",
-            method: "GET",
-            path: "/notifications",
-            query: search,
-        }, options);
-    }
+    list(query?: NotificationListQuery, options?: CallOptions): Promise<NotificationListResponse>;
 
     /**
      * Fetch one Notification by identifier.
@@ -49,11 +36,37 @@ export class NotificationClient {
      *
      * Operation getNotification.
      */
-    get(iD: string, options?: CallOptions): Promise<Notification> {
-        return send<Notification>(this.#rt, {
-            name: "getNotification",
-            method: "GET",
-            path: `/notifications/${pathValue(iD)}`,
-        }, options);
-    }
+    get(iD: string, options?: CallOptions): Promise<Notification>;
+}
+
+/**
+ * Builds the Notification half of a client.
+ *
+ * Called by `createClient` and not usually by anything else: a resource reached
+ * through the client it belongs to shares that client's credential, and one
+ * built here would not.
+ */
+export function createNotificationClient(rt: Runtime): NotificationClient {
+    return {
+        list(query: NotificationListQuery = {}, options?: CallOptions): Promise<NotificationListResponse> {
+            const search = new URLSearchParams();
+            setParam(search, "limit", query.limit);
+            setParam(search, "offset", query.offset);
+
+            return send<NotificationListResponse>(rt, {
+                name: "listNotifications",
+                method: "GET",
+                path: "/notifications",
+                query: search,
+            }, options);
+        },
+
+        get(iD: string, options?: CallOptions): Promise<Notification> {
+            return send<Notification>(rt, {
+                name: "getNotification",
+                method: "GET",
+                path: `/notifications/${pathValue(iD)}`,
+            }, options);
+        },
+    };
 }

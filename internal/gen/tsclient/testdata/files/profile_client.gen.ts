@@ -28,16 +28,14 @@ import {
 } from "@rig/client";
 
 /**
- * ProfileClient calls the Profile endpoints. It is reached as `client.profiles`
- * rather than built directly.
+ * ProfileClient is what `client.profiles` is, and what a test writes to stand
+ * in for it.
+ *
+ * The documentation for each call is here rather than on the object below,
+ * because this is the type the property resolves to and so this is what an
+ * editor shows.
  */
-export class ProfileClient {
-    readonly #rt: Runtime;
-
-    constructor(rt: Runtime) {
-        this.#rt = rt;
-    }
-
+export interface ProfileClient {
     /**
      * List Profiles.
      *
@@ -45,18 +43,7 @@ export class ProfileClient {
      *
      * Operation listProfiles.
      */
-    list(query: ProfileListQuery = {}, options?: CallOptions): Promise<ProfileListResponse> {
-        const search = new URLSearchParams();
-        setParam(search, "limit", query.limit);
-        setParam(search, "offset", query.offset);
-
-        return send<ProfileListResponse>(this.#rt, {
-            name: "listProfiles",
-            method: "GET",
-            path: "/profiles",
-            query: search,
-        }, options);
-    }
+    list(query?: ProfileListQuery, options?: CallOptions): Promise<ProfileListResponse>;
 
     /**
      * Create a Profile.
@@ -68,14 +55,7 @@ export class ProfileClient {
      * A refusal is read back with `isProfileCreateError`, whose `fields` say
      * what was wrong with each member of the body.
      */
-    create(input: ProfileCreateInput, options?: CallOptions): Promise<Profile> {
-        return send<Profile>(this.#rt, {
-            name: "createProfile",
-            method: "POST",
-            path: "/profiles",
-            body: input,
-        }, options);
-    }
+    create(input: ProfileCreateInput, options?: CallOptions): Promise<Profile>;
 
     /**
      * Search Profiles with filters.
@@ -86,20 +66,7 @@ export class ProfileClient {
      *
      * Operation searchProfiles.
      */
-    search(filter: ProfileFilter, query: ProfileSearchQuery = {}, options?: CallOptions): Promise<ProfileListResponse> {
-        const search = new URLSearchParams();
-        setParam(search, "limit", query.limit);
-        setParam(search, "offset", query.offset);
-
-        return send<ProfileListResponse>(this.#rt, {
-            name: "searchProfiles",
-            method: METHOD_QUERY,
-            path: "/profiles",
-            query: search,
-            body: { filter: filter },
-            fallback: "/profiles/_search",
-        }, options);
-    }
+    search(filter: ProfileFilter, query?: ProfileSearchQuery, options?: CallOptions): Promise<ProfileListResponse>;
 
     /**
      * Delete a Profile.
@@ -108,13 +75,7 @@ export class ProfileClient {
      *
      * Operation deleteProfile.
      */
-    delete(iD: string, options?: CallOptions): Promise<void> {
-        return sendNoContent(this.#rt, {
-            name: "deleteProfile",
-            method: "DELETE",
-            path: `/profiles/${pathValue(iD)}`,
-        }, options);
-    }
+    delete(iD: string, options?: CallOptions): Promise<void>;
 
     /**
      * Fetch one Profile by identifier.
@@ -123,13 +84,7 @@ export class ProfileClient {
      *
      * Operation getProfile.
      */
-    get(iD: string, options?: CallOptions): Promise<Profile> {
-        return send<Profile>(this.#rt, {
-            name: "getProfile",
-            method: "GET",
-            path: `/profiles/${pathValue(iD)}`,
-        }, options);
-    }
+    get(iD: string, options?: CallOptions): Promise<Profile>;
 
     /**
      * Only the fields present in the body are changed. A field set to null is
@@ -142,14 +97,7 @@ export class ProfileClient {
      * A refusal is read back with `isProfileUpdateError`, whose `fields` say
      * what was wrong with each member of the body.
      */
-    update(iD: string, input: ProfileUpdateInput, options?: CallOptions): Promise<Profile> {
-        return send<Profile>(this.#rt, {
-            name: "updateProfile",
-            method: "PATCH",
-            path: `/profiles/${pathValue(iD)}`,
-            body: input,
-        }, options);
-    }
+    update(iD: string, input: ProfileUpdateInput, options?: CallOptions): Promise<Profile>;
 
     /**
      * The column is cleared and the file is retired. Its bytes outlive the
@@ -160,13 +108,7 @@ export class ProfileClient {
      *
      * Operation deleteProfileBannerFile.
      */
-    deleteBannerFile(iD: string, options?: CallOptions): Promise<void> {
-        return sendNoContent(this.#rt, {
-            name: "deleteProfileBannerFile",
-            method: "DELETE",
-            path: `/profiles/${pathValue(iD)}/banner-file`,
-        }, options);
-    }
+    deleteBannerFile(iD: string, options?: CallOptions): Promise<void>;
 
     /**
      * The form carries one part, named bannerFile. Nothing else in it is
@@ -193,16 +135,7 @@ export class ProfileClient {
      * comes back as it happened, and retrying is the caller's decision because
      * only the caller still has the bytes.
      */
-    uploadBannerFile(iD: string, file: Upload, options?: CallOptions): Promise<RigFile> {
-        const form = multipart(undefined, [["bannerFile", file]]);
-
-        return send<RigFile>(this.#rt, {
-            name: "uploadProfileBannerFile",
-            method: "POST",
-            path: `/profiles/${pathValue(iD)}/banner-file`,
-            form,
-        }, options);
-    }
+    uploadBannerFile(iD: string, file: Upload, options?: CallOptions): Promise<RigFile>;
 
     /**
      * Answers range and conditional requests, so a resumed download does not
@@ -212,14 +145,7 @@ export class ProfileClient {
      *
      * Operation downloadProfileBannerFile.
      */
-    downloadBannerFile(iD: string, fileID: string, filename: string, options?: CallOptions): Promise<Response> {
-        return sendContent(this.#rt, {
-            name: "downloadProfileBannerFile",
-            method: "GET",
-            path: `/profiles/${pathValue(iD)}/banner-file/${pathValue(fileID)}/${pathValue(filename)}`,
-            accept: "*/*",
-        }, options);
-    }
+    downloadBannerFile(iD: string, fileID: string, filename: string, options?: CallOptions): Promise<Response>;
 
     /**
      * The column is cleared and the file is retired. Its bytes outlive the
@@ -230,13 +156,7 @@ export class ProfileClient {
      *
      * Operation deleteProfileProfileImageFile.
      */
-    deleteProfileImageFile(iD: string, options?: CallOptions): Promise<void> {
-        return sendNoContent(this.#rt, {
-            name: "deleteProfileProfileImageFile",
-            method: "DELETE",
-            path: `/profiles/${pathValue(iD)}/profile-image-file`,
-        }, options);
-    }
+    deleteProfileImageFile(iD: string, options?: CallOptions): Promise<void>;
 
     /**
      * The form carries one part, named profileImageFile. Nothing else in it is
@@ -263,16 +183,7 @@ export class ProfileClient {
      * comes back as it happened, and retrying is the caller's decision because
      * only the caller still has the bytes.
      */
-    uploadProfileImageFile(iD: string, file: Upload, options?: CallOptions): Promise<RigFile> {
-        const form = multipart(undefined, [["profileImageFile", file]]);
-
-        return send<RigFile>(this.#rt, {
-            name: "uploadProfileProfileImageFile",
-            method: "POST",
-            path: `/profiles/${pathValue(iD)}/profile-image-file`,
-            form,
-        }, options);
-    }
+    uploadProfileImageFile(iD: string, file: Upload, options?: CallOptions): Promise<RigFile>;
 
     /**
      * Answers range and conditional requests, so a resumed download does not
@@ -282,14 +193,7 @@ export class ProfileClient {
      *
      * Operation downloadProfileProfileImageFile.
      */
-    downloadProfileImageFile(iD: string, fileID: string, filename: string, options?: CallOptions): Promise<Response> {
-        return sendContent(this.#rt, {
-            name: "downloadProfileProfileImageFile",
-            method: "GET",
-            path: `/profiles/${pathValue(iD)}/profile-image-file/${pathValue(fileID)}/${pathValue(filename)}`,
-            accept: "*/*",
-        }, options);
-    }
+    downloadProfileImageFile(iD: string, fileID: string, filename: string, options?: CallOptions): Promise<Response>;
 
     /**
      * Creates a Profile and its files in one request.
@@ -308,19 +212,150 @@ export class ProfileClient {
      * is not. **This call is never sent twice**, for the reason an upload is
      * not — a form is the one write no idempotency key names.
      */
-    createWithFiles(input: ProfileCreateInput, files: ProfileCreateFiles, options?: CallOptions): Promise<Profile> {
-        const form = multipart(input, [
-            ["profileImageFile", files.profileImageFile],
-            ["bannerFile", files.bannerFile],
-        ]);
+    createWithFiles(input: ProfileCreateInput, files: ProfileCreateFiles, options?: CallOptions): Promise<Profile>;
+}
 
-        return send<Profile>(this.#rt, {
-            name: "createProfile",
-            method: "POST",
-            path: "/profiles",
-            form,
-        }, options);
-    }
+/**
+ * Builds the Profile half of a client.
+ *
+ * Called by `createClient` and not usually by anything else: a resource reached
+ * through the client it belongs to shares that client's credential, and one
+ * built here would not.
+ */
+export function createProfileClient(rt: Runtime): ProfileClient {
+    return {
+        list(query: ProfileListQuery = {}, options?: CallOptions): Promise<ProfileListResponse> {
+            const search = new URLSearchParams();
+            setParam(search, "limit", query.limit);
+            setParam(search, "offset", query.offset);
+
+            return send<ProfileListResponse>(rt, {
+                name: "listProfiles",
+                method: "GET",
+                path: "/profiles",
+                query: search,
+            }, options);
+        },
+
+        create(input: ProfileCreateInput, options?: CallOptions): Promise<Profile> {
+            return send<Profile>(rt, {
+                name: "createProfile",
+                method: "POST",
+                path: "/profiles",
+                body: input,
+            }, options);
+        },
+
+        search(filter: ProfileFilter, query: ProfileSearchQuery = {}, options?: CallOptions): Promise<ProfileListResponse> {
+            const search = new URLSearchParams();
+            setParam(search, "limit", query.limit);
+            setParam(search, "offset", query.offset);
+
+            return send<ProfileListResponse>(rt, {
+                name: "searchProfiles",
+                method: METHOD_QUERY,
+                path: "/profiles",
+                query: search,
+                body: { filter: filter },
+                fallback: "/profiles/_search",
+            }, options);
+        },
+
+        delete(iD: string, options?: CallOptions): Promise<void> {
+            return sendNoContent(rt, {
+                name: "deleteProfile",
+                method: "DELETE",
+                path: `/profiles/${pathValue(iD)}`,
+            }, options);
+        },
+
+        get(iD: string, options?: CallOptions): Promise<Profile> {
+            return send<Profile>(rt, {
+                name: "getProfile",
+                method: "GET",
+                path: `/profiles/${pathValue(iD)}`,
+            }, options);
+        },
+
+        update(iD: string, input: ProfileUpdateInput, options?: CallOptions): Promise<Profile> {
+            return send<Profile>(rt, {
+                name: "updateProfile",
+                method: "PATCH",
+                path: `/profiles/${pathValue(iD)}`,
+                body: input,
+            }, options);
+        },
+
+        deleteBannerFile(iD: string, options?: CallOptions): Promise<void> {
+            return sendNoContent(rt, {
+                name: "deleteProfileBannerFile",
+                method: "DELETE",
+                path: `/profiles/${pathValue(iD)}/banner-file`,
+            }, options);
+        },
+
+        uploadBannerFile(iD: string, file: Upload, options?: CallOptions): Promise<RigFile> {
+            const form = multipart(undefined, [["bannerFile", file]]);
+
+            return send<RigFile>(rt, {
+                name: "uploadProfileBannerFile",
+                method: "POST",
+                path: `/profiles/${pathValue(iD)}/banner-file`,
+                form,
+            }, options);
+        },
+
+        downloadBannerFile(iD: string, fileID: string, filename: string, options?: CallOptions): Promise<Response> {
+            return sendContent(rt, {
+                name: "downloadProfileBannerFile",
+                method: "GET",
+                path: `/profiles/${pathValue(iD)}/banner-file/${pathValue(fileID)}/${pathValue(filename)}`,
+                accept: "*/*",
+            }, options);
+        },
+
+        deleteProfileImageFile(iD: string, options?: CallOptions): Promise<void> {
+            return sendNoContent(rt, {
+                name: "deleteProfileProfileImageFile",
+                method: "DELETE",
+                path: `/profiles/${pathValue(iD)}/profile-image-file`,
+            }, options);
+        },
+
+        uploadProfileImageFile(iD: string, file: Upload, options?: CallOptions): Promise<RigFile> {
+            const form = multipart(undefined, [["profileImageFile", file]]);
+
+            return send<RigFile>(rt, {
+                name: "uploadProfileProfileImageFile",
+                method: "POST",
+                path: `/profiles/${pathValue(iD)}/profile-image-file`,
+                form,
+            }, options);
+        },
+
+        downloadProfileImageFile(iD: string, fileID: string, filename: string, options?: CallOptions): Promise<Response> {
+            return sendContent(rt, {
+                name: "downloadProfileProfileImageFile",
+                method: "GET",
+                path: `/profiles/${pathValue(iD)}/profile-image-file/${pathValue(fileID)}/${pathValue(filename)}`,
+                accept: "*/*",
+            }, options);
+        },
+
+        createWithFiles(input: ProfileCreateInput, files: ProfileCreateFiles, options?: CallOptions): Promise<Profile> {
+            const form = multipart(input, [
+                ["profileImageFile", files.profileImageFile],
+                ["bannerFile", files.bannerFile],
+            ]);
+
+            return send<Profile>(rt, {
+                name: "createProfile",
+                method: "POST",
+                path: "/profiles",
+                form,
+            }, options);
+        },
+    };
 }
 
 /**
