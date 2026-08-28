@@ -19,12 +19,12 @@ import (
 // the live subscriptions — the things whose lifetime is longer than a
 // request's.
 //
-// Each field is something rig starts, drains or closes on the other side of
-// the one call that returns this, and each used to be a line in a main
-// function — with no compiler, no test and usually no symptom until a deploy
-// under load. Naming them here is what makes them slots to fill rather than
-// calls to remember, and what makes turning a block on in rig.yaml show up as
-// a field in the one function that has to know about it.
+// Every field beside the handler is something rig starts, drains or closes on
+// the other side of the one call that returns this, and each used to be a line
+// in a main function — with no compiler, no test and usually no symptom
+// until a deploy under load. Naming them here is what makes them slots to fill
+// rather than calls to remember, and what makes turning a block on in rig.yaml
+// show up as a field in the one function that has to know about it.
 //
 // Handler is required. The rest may be nil, because rig cannot tell a project
 // that meant it from one that forgot: an engine is latency and the

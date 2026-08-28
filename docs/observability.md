@@ -267,8 +267,10 @@ armed, and why, on the logger that writes to the file the page would have read.
 The `page` argument your wiring is handed is that page, for an application with
 somewhere else to name it: a link to it from a page of its own, most likely,
 since the page is on an origin of its own and a relative href does not reach it.
-It is nil when there is none to reach — a task, or a `Mount` built without a
-process — and `Process.Page()` is the accessor behind it.
+It is nil when there is no process to take one from — a task, or a `Mount` built
+without one — and `Process.Page()` is the accessor behind it. A page nobody armed
+is *not* nil: it is a real page whose `Addr()` is empty, so that, or `Unarmed()`,
+is what says whether there is anywhere to send somebody.
 
 **A `Tasks:` entry never reaches the mount function.** `serve.Main` runs the
 task and returns, so `Attach` is not the only path out of the process:

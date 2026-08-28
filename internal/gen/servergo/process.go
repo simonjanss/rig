@@ -270,8 +270,9 @@ func (e *emitter) shutdownBudgetFunc(b *gobuf.Buf) {
 	b.Comment("ShutdownBudget is what this project's own shutdown needs of " +
 		"[github.com/simonjanss/rig/runtime/serve.Config.MaxShutdown].\n\n" +
 		"For this project that is " + total.String() + ": " + english(parts) + ".\n\n" +
-		"**Read it, then write it down.** This is a number to look up once, not a " +
-		"call to leave in a serve.Config:\n\n" +
+		"**Read it, then write it down.** [Main] leaves this call in a serve.Config " +
+		"for a project that states nothing, so the two ends cannot disagree by " +
+		"default — but the number is one to look up once and write out:\n\n" +
 		"\tMaxShutdown: " + duration("time", total) + "\n\n" +
 		"MaxShutdown is the one field in that struct that leaves the program — it " +
 		"is what belongs in Kubernetes' terminationGracePeriodSeconds — and " +
@@ -519,10 +520,13 @@ func (e *emitter) configureMethod(b *gobuf.Buf) {
 		"the three paths where something went wrong — a task that failed, a boot " +
 		"that failed, a subcommand that does not exist. Those are the runs whose " +
 		"spans somebody actually wants.\n\n" +
-		"MaxShutdown is deliberately not one of them, and [ShutdownBudget] says " +
-		"why: it is the number an operator copies into " +
-		"terminationGracePeriodSeconds, so it stays a field in a main function " +
-		"where it can be read off and added to."
+		"MaxShutdown is deliberately not one of them. [settle] defaults it to " +
+		"[ShutdownBudget] plus the drain delay, so a project that states neither " +
+		"still holds together — but it stays a field, and setting it is how a " +
+		"project disagrees. Writing it out is the better answer for anything that " +
+		"ships: it is the number an operator copies into " +
+		"terminationGracePeriodSeconds, and it should be readable off the struct " +
+		"rather than out of a call."
 	b.Comment(doc)
 
 	b.L("func (p *Process) Configure(cfg %s.Config) %s.Config {", servePkg, servePkg)

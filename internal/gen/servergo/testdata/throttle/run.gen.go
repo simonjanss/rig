@@ -18,19 +18,16 @@ import (
 // invalidation channel — the things whose lifetime is longer than a
 // request's.
 //
-// Each field is something rig starts, drains or closes on the other side of
-// the one call that returns this, and each used to be a line in a main
-// function — with no compiler, no test and usually no symptom until a deploy
-// under load. Naming them here is what makes them slots to fill rather than
-// calls to remember, and what makes turning a block on in rig.yaml show up as
-// a field in the one function that has to know about it.
+// Every field beside the handler is something rig starts, drains or closes on
+// the other side of the one call that returns this, and each used to be a line
+// in a main function — with no compiler, no test and usually no symptom
+// until a deploy under load. Naming them here is what makes them slots to fill
+// rather than calls to remember, and what makes turning a block on in rig.yaml
+// show up as a field in the one function that has to know about it.
 //
 // Handler is required. The rest may be nil, because rig cannot tell a project
-// that meant it from one that forgot: an engine is latency and the
-// `dispatch-notifications` task is the guarantee behind it, and every project
-// with an inbox gets a shape over rig_notification_recipient whether or not it
-// runs a sync service at all. What a nil one gets instead is a line at startup
-// naming what is not running and what that costs.
+// that meant it from one that forgot. What a nil one gets instead is a line at
+// startup naming what is not running and what that costs.
 type Parts struct {
 	// Handler is every route this server answers: the generated API, and anything
 	// else this application mounts beside it.

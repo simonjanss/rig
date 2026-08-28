@@ -18,19 +18,11 @@ import (
 // Parts is what this application's own wiring built, as far as the process
 // around it has to care: the routes to serve.
 //
-// Each field is something rig starts, drains or closes on the other side of
-// the one call that returns this, and each used to be a line in a main
-// function — with no compiler, no test and usually no symptom until a deploy
-// under load. Naming them here is what makes them slots to fill rather than
-// calls to remember, and what makes turning a block on in rig.yaml show up as
-// a field in the one function that has to know about it.
-//
-// Handler is required. The rest may be nil, because rig cannot tell a project
-// that meant it from one that forgot: an engine is latency and the
-// `dispatch-notifications` task is the guarantee behind it, and every project
-// with an inbox gets a shape over rig_notification_recipient whether or not it
-// runs a sync service at all. What a nil one gets instead is a line at startup
-// naming what is not running and what that costs.
+// One field, because this project's configuration gives the server nothing
+// whose lifetime outlasts a request. Turning a block on in rig.yaml adds one
+// — something rig starts, drains or closes on the other side of the one call
+// that returns this, and something that used to be a line in a main function
+// with no compiler, no test and usually no symptom until a deploy under load.
 type Parts struct {
 	// Handler is every route this server answers: the generated API, and anything
 	// else this application mounts beside it.
@@ -51,8 +43,15 @@ type Parts struct {
 // below.
 //
 // page is rig's monitoring page, for an application with somewhere to link to
-// it from. It is nil when there is no page to reach: an unarmed one, or a
-// [Mount] built without a process.
+// it from. It is nil when there is no process to take one from — a [Mount]
+// built without one, or a task, which never reaches this function at all.
+//
+// A page nobody armed is not nil, and a link is not what to build out of the
+// pointer. An environment that set no address and no password gets a real page
+// whose [github.com/simonjanss/rig/observe.Page.Addr] is empty, which is the
+// half a link needs — so that, or
+// [github.com/simonjanss/rig/observe.Page.Unarmed], is what says whether there
+// is anywhere to send somebody.
 //
 // A function rather than a value, because a task builds the same object graph
 // the server does and has no App to build it from. Keeping the application's
