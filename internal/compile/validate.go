@@ -67,6 +67,7 @@ func Validate(doc *ir.Document, set *tableconf.Set, p *project.Project) diag.Lis
 
 	diags.Append(checkEnumConsistency(doc))
 	diags.Append(checkCustomEndpoints(doc, set))
+	diags.Append(checkFoundationJSONCase(doc, p))
 	diags.Append(checkCacheHasReaders(doc, p))
 
 	return diags
@@ -639,6 +640,40 @@ func checkEnumConsistency(doc *ir.Document) diag.List {
 					c.EnumType, prev.table, prev.column, t.Name, c.Name)
 			}
 		}
+	}
+
+	return diags
+}
+
+// checkFoundationJSONCase reports an exposed table of rig's whose JSON keys will
+// not follow this project's `naming.json_case`.
+//
+// The Go for rig's notification tables and for rig_account is compiled once, in
+// a module that ships rather than in this project, so its struct tags are fixed
+// — and Go struct tags cannot be parameterised. A project that asked for
+// snake_case therefore gets it on its own tables and camelCase on rig's.
+//
+// A warning rather than a refusal, because the project has done nothing wrong and
+// the mixture is not new: rig's hand-written routes have answered camelCase since
+// they existed, so /auth/login already disagrees with a snake_case API. What is
+// new is that the disagreement now reaches a resource with a filter grammar and a
+// typed client, which is worth saying out loud rather than leaving to be found in
+// a response body.
+func checkFoundationJSONCase(doc *ir.Document, p *project.Project) diag.List {
+	var diags diag.List
+
+	if c := p.Config.Naming.JSONCase; c == "" || c == "camel" {
+		return diags
+	}
+
+	for i := range doc.API.Resources {
+		r := &doc.API.Resources[i]
+		if r.Unexposed || r.Storage == nil || !isShippedModel(r.Storage.Table) {
+			continue
+		}
+		diags.Add(diag.CodeFoundationJSONCase, diag.At(r.Storage.Table),
+			"%s is rig's own table and its Go is compiled with camelCase keys, so it will not "+
+				"follow naming.json_case: %s", r.Storage.Table, p.Config.Naming.JSONCase)
 	}
 
 	return diags

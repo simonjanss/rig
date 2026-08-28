@@ -326,6 +326,15 @@ naming:
     person: people
 ```
 
+**`json_case` reaches your tables and not rig's.** The Go for `rig_notification`
+and the four tables around it is compiled once, in `rig/notify`, and the Go for
+`rig_account` in `rig/authmodel`, so their struct tags are fixed — and a Go
+struct tag cannot be parameterised. A project that asks for `snake` gets it on
+its own resources and camelCase on rig's, which is the same trade `/auth/*` and
+`/presence` have always made. `rig check` reports it — RIG3260, once per exposed
+table — rather than leaving it to be found in a response body, and setting
+`camel`, the default, is what makes the question go away.
+
 | Key | Default | |
 |---|---|---|
 | `json_case` | `camel` | `camel`, `pascal`, or `snake`. The shape of generated JSON keys. It shapes the keys rig *generates*: the `/auth/*` endpoints come from a hand-written module shared by every project and answer camelCase whatever this says. |
@@ -576,7 +585,9 @@ The block does nothing on its own. A table becomes notifiable by being joined to
 served by the hand-written routes under `/notifications`, which is what most
 applications show in a bell icon; with it, `rig_notification_recipient` is also
 projected as a resource and gets the filter grammar, the sort keys and a typed
-client. Both stay, and the difference between them is the point.
+client — and a generated model and repository with them. Both stay, and the
+difference between them is the point. Without `expose` there is no generated Go
+over these tables at all: `rig/notify` reads and writes them itself.
 
 `claim_ttl` and `send_timeout` are the two numbers here worth understanding
 before deploying, and they are one decision. A dispatcher claims a delivery,
@@ -689,8 +700,9 @@ rows every subscriber had already stopped drawing.
 
 `expose` is the second answer again. Without it presence is written through the
 hand-written routes under `/presence` and read over its live shape, which is all
-a front end needs; with it, `rig_presence` is also projected as a read-only
-`Get`/`List` resource.
+a front end needs — and no model or repository is generated for it, because
+`rig/presence` is what writes the rows. With it, `rig_presence` is also
+projected as a read-only `Get`/`List` resource, model and repository included.
 
 ## `throttle`
 

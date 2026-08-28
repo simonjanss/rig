@@ -221,6 +221,10 @@ var (
 	CodeUnexposedConflict = newCode("RIG3250", SeverityError,
 		"A table that is not exposed also asks for something only the API layer provides.",
 		"Remove `expose: false`, or remove the endpoints and live-sync configuration it cannot serve.")
+
+	CodeFoundationJSONCase = newCode("RIG3260", SeverityWarning,
+		"An exposed table of rig's answers camelCase, which is not this project's `naming.json_case`.",
+		"Set `naming.json_case: camel`, stop exposing the table, or expect two spellings on one API.")
 )
 
 // Expanding CRUD, filters, and defaults: RIG4xxx.

@@ -5,51 +5,25 @@
 package model
 
 import (
-	"strings"
+	"github.com/simonjanss/rig/authmodel"
 )
 
 // What an account is.
-type AccountKind string
+//
+// An alias for [github.com/simonjanss/rig/authmodel.AccountKind]: rig's schema
+// declared the type, so rig declares the Go for it.
+type AccountKind = authmodel.AccountKind
 
 // The values of AccountKind.
 const (
-	// Somebody who signs in. They have an identity, and the identity has the
-	// password.
-	AccountKindPerson AccountKind = "Person"
-	// What an integration's key acts as. It has no identity, so there is nothing
-	// to sign in with.
-	AccountKindService AccountKind = "Service"
+	AccountKindPerson  = authmodel.AccountKindPerson
+	AccountKindService = authmodel.AccountKindService
 )
 
 // AllAccountKind is every value, in declaration order.
-var AllAccountKind = []AccountKind{AccountKindPerson, AccountKindService}
-
-// Valid reports whether the value is one the database will accept.
-func (v AccountKind) Valid() bool {
-	switch v {
-	case AccountKindPerson, AccountKindService:
-		return true
-	default:
-		return false
-	}
-}
+var AllAccountKind = authmodel.AllAccountKind
 
 // ParseAccountKind reads a value, accepting any casing and surrounding space.
-//
-// Normalization uses it, so "IN_PROGRESS" from one client and "in_progress"
-// from another mean the same thing rather than one of them being a validation
-// failure nobody can explain. The spelling still has to be the label’s: a
-// value is a name the database knows, not a phrase.
-func ParseAccountKind(s string) (AccountKind, bool) {
-	switch strings.ToLower(strings.TrimSpace(s)) {
-	case "person":
-		return AccountKindPerson, true
-	case "service":
-		return AccountKindService, true
-	default:
-		return "", false
-	}
-}
-
-// String implements fmt.Stringer.
-func (v AccountKind) String() string { return string(v) }
+// A name rather than a method, so unlike Valid and String it does not come
+// with the type.
+var ParseAccountKind = authmodel.ParseAccountKind

@@ -272,13 +272,22 @@ func (e *emitter) storeType(b *gobuf.Buf) {
 	e.storeCacheClose(b)
 }
 
-// resources are the resources with storage, in document order.
+// resources are the resources this package writes a repository for, in
+// document order.
+//
+// Unreachable ones are left out along with the storage-less ones, and for the
+// same reason: there is nothing here to write. A table rig created and this
+// project did not expose is read and written by the module that owns it, so a
+// repository over it would be a second door into rows nothing in this project
+// touches — and a field on Repositories that no caller can have a use for.
 func (e *emitter) resources() []*ir.Resource {
 	var out []*ir.Resource
 	for i := range e.doc.API.Resources {
-		if e.doc.API.Resources[i].Storage != nil {
-			out = append(out, &e.doc.API.Resources[i])
+		res := &e.doc.API.Resources[i]
+		if res.Storage == nil || res.Unreachable() {
+			continue
 		}
+		out = append(out, res)
 	}
 	return out
 }

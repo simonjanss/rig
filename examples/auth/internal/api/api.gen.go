@@ -9,12 +9,8 @@
 package api
 
 import (
-	"context"
-	"log/slog"
-	"time"
-
+	"github.com/simonjanss/rig/runtime/apibase"
 	"github.com/simonjanss/rig/runtime/apirev"
-	"github.com/simonjanss/rig/runtime/readopt"
 	"github.com/simonjanss/rig/runtime/rigerr"
 	"github.com/simonjanss/rig/runtime/tenancy"
 )
@@ -45,187 +41,33 @@ var serverRevision, _ = apirev.Parse(Revision)
 // parameters uses struct{} for that slot. That is deliberate: the signature
 // says what an endpoint takes, so reaching for something it does not have is a
 // compile error rather than a nil check.
-type Request[Path, Query, Body any] struct {
-	// Claims describe the caller. They are always present: a handler does
-	// not run without them.
-	Claims tenancy.Claims
+type Request[Path, Query, Body any] = apibase.Request[Path, Query, Body]
 
-	Path  Path
-	Query Query
-	Body  Body
-
-	ctx RequestContext
-}
-
-// Context returns what is known about the request itself, as opposed to what
-// it carries.
-func (r Request[Path, Query, Body]) Context() RequestContext { return r.ctx }
-
-// BuiltBefore reports whether the client that sent this request was built
-// before rev.
-//
-// It is [RequestContext.BuiltBefore] with the request already in hand, which
-// is where a compatibility shim usually is:
-//
-//	var notesAdded = apirev.MustParse("2026-04-30")
-//
-//	if r.BuiltBefore(notesAdded) {
-//		r.Body.Title = "Unknown"
-//	}
-//
-// A shim belongs here rather than in a hook. This is the one place that has
-// the request as it arrived, and on a create the generated validation runs
-// after the service method and before every hook — so a hook that filled in
-// a missing NOT NULL column would only ever see requests that already passed
-// the check it was written for.
-func (r Request[Path, Query, Body]) BuiltBefore(rev apirev.Revision) bool {
-	return r.ctx.BuiltBefore(rev)
-}
-
-// RequestContext is the request's own metadata.
-type RequestContext struct {
-	// RequestID correlates this request with the server's logs.
-	RequestID string
-	Method    string
-	Path      string
-	// Route is the pattern that matched, so a metric can be labelled by
-	// endpoint rather than by every distinct identifier.
-	Route      string
-	RemoteAddr string
-	UserAgent  string
-	// ClientRevision is the raw header, kept for a log line that wants to
-	// count what callers are sending. Empty when the caller said nothing, and
-	// unparseable prose when it said something that is not a revision — a
-	// hand-rolled client and a curl will not say, and that is a normal thing
-	// for a caller to be. Compare with [RequestContext.BuiltBefore] rather
-	// than with this.
-	ClientRevision string
-}
-
-// LogValue is how a request appears in a log line.
-//
-// A group, so one attribute carries the lot:
-//
-//	logger.ErrorContext(ctx, "that failed", slog.Any("request", rc))
-//
-// Only the fields that have something in them. An empty attribute on every
-// line is the same width in a terminal and a key in a structured backend, and
-// it says a field was collected when it was not — a project that set no
-// RequestID gets lines with no request_id rather than lines with an empty one.
-func (rc RequestContext) LogValue() slog.Value {
-	attrs := make([]slog.Attr, 0, 6)
-	if rc.RequestID != "" {
-		attrs = append(attrs, slog.String("request_id", rc.RequestID))
-	}
-	if rc.Method != "" {
-		attrs = append(attrs, slog.String("method", rc.Method))
-	}
-	if rc.Route != "" {
-		attrs = append(attrs, slog.String("route", rc.Route))
-	}
-	if rc.Path != "" {
-		attrs = append(attrs, slog.String("path", rc.Path))
-	}
-	if rc.RemoteAddr != "" {
-		attrs = append(attrs, slog.String("remote_addr", rc.RemoteAddr))
-	}
-	if rc.UserAgent != "" {
-		attrs = append(attrs, slog.String("user_agent", rc.UserAgent))
-	}
-	return slog.GroupValue(attrs...)
-}
-
-// Client is what the caller was built against.
-//
-// Unknown — the zero [apirev.Revision] — when the caller said nothing and
-// equally when what it said is not a revision. The two are the same answer on
-// purpose: both mean this caller cannot be placed on the timeline.
-func (rc RequestContext) Client() apirev.Revision {
-	rev, _ := apirev.Parse(rc.ClientRevision)
-	return rev
-}
-
-// BuiltBefore reports whether the caller was built before rev, which is the
-// question a compatibility shim is written in terms of.
-//
-// False for a caller that sent no revision. That is a decision rather than a
-// fallback: revisions describe what rig's own generated clients were built
-// against, so a caller rig cannot place is served the current behavior. An
-// application that would rather treat an unknown caller as ancient has
-// [RequestContext.ClientRevision] and can say so itself.
-func (rc RequestContext) BuiltBefore(rev apirev.Revision) bool { return rc.Client().Before(rev) }
-
-// Stale reports how far behind this server's revision the caller is.
-//
-// ok is false when the caller did not say, said something unparseable, or is
-// not behind at all — including the case of a caller newer than this server,
-// which is somebody halfway through a deploy rather than somebody to warn
-// about.
-func (rc RequestContext) Stale() (time.Duration, bool) {
-	client := rc.Client()
-	if !client.Before(serverRevision) {
-		return 0, false
-	}
-	return serverRevision.Sub(client), true
-}
+// RequestContext is the request's own metadata: how it was labelled, what
+// matched it, and what the caller was built against.
+type RequestContext = apibase.RequestContext
 
 // NewRequest builds a request. The server calls it; it is exported so a test
 // can call a service method directly without going through HTTP.
 func NewRequest[Path, Query, Body any](claims tenancy.Claims, path Path, query Query, body Body, rc RequestContext) Request[Path, Query, Body] {
-	return Request[Path, Query, Body]{Claims: claims, Path: path, Query: query, Body: body, ctx: rc}
+	return apibase.NewRequest(claims, path, query, body, rc)
 }
 
-type requestContextKey struct{}
+// NewContext carries a request's metadata down to everything the service
+// method calls, so a validator or a hook — which are handed a context and
+// nothing else — can ask what the caller was built against.
+var NewContext = apibase.NewContext
 
-// NewContext returns a context carrying the request's metadata.
-//
-// The server calls it on every request, before the [Server.Context] hook runs,
-// so anything that hook adds can already see it. It is exported for the same
-// reason [NewRequest] is: a test that calls a service method directly still
-// has to put one there, or the hooks underneath will find nothing.
-func NewContext(ctx context.Context, rc RequestContext) context.Context {
-	return context.WithValue(ctx, requestContextKey{}, rc)
-}
-
-// RequestContextFrom returns the request metadata on a context.
-//
-// This is how a validator or a hook reaches what only the service method is
-// handed — the revision the caller was built against, the request
-// identifier, the route that matched.
-//
-// ok is false rather than an error, and the zero value is usable: work that
-// did not come from a request at all — a migration, a background job — has
-// no metadata to find, and that is not a failure.
-func RequestContextFrom(ctx context.Context) (RequestContext, bool) {
-	rc, ok := ctx.Value(requestContextKey{}).(RequestContext)
-	return rc, ok
-}
+// RequestContextFrom reads back what [NewContext] carried, and reports false
+// for a context that never went through a handler.
+var RequestContextFrom = apibase.RequestContextFrom
 
 // caller is the claims a read hook is handed, or nil when the request carried
 // none.
-//
-// Only a public endpoint can reach a hook with none: everything else is
-// refused before a handler runs, and every write is refused again by the
-// repository. That is why the write hooks take a value and these take a
-// pointer.
-func caller(claims tenancy.Claims) *tenancy.Claims {
-	if !claims.Valid() {
-		return nil
-	}
-	return &claims
-}
+var caller = apibase.Caller
 
 // readScope turns a requested scope into the read options that produce it.
-//
-// Only "all" does anything. Every other value — including a zero value from
-// a caller that never set the field — leaves the narrow default in place, so
-// the failure mode of forgetting this is too few rows rather than too many.
-func readScope(s tenancy.Scope) []readopt.Option {
-	if s == tenancy.ScopeAll {
-		return []readopt.Option{readopt.WithoutOwnerScope()}
-	}
-	return nil
-}
+var readScope = apibase.ReadScope
 
 // ErrorCode is the machine-readable reason a request failed. Clients switch on
 // this rather than on the status, because three unrelated failures share a

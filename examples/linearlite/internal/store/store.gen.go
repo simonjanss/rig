@@ -172,7 +172,6 @@ type Store struct {
 	NotificationRecipients NotificationRecipientRepository
 	NotificationSettings   NotificationSettingRepository
 	Permissions            PermissionRepository
-	Presences              PresenceRepository
 	Roles                  RoleRepository
 	Todos                  TodoRepository
 	TodoAttachments        TodoAttachmentRepository
@@ -193,7 +192,6 @@ func New(pool *pgxpool.Pool, cfg Config) *Store {
 	s.NotificationRecipients = &notificationRecipientRepo{db: s}
 	s.NotificationSettings = &notificationSettingRepo{db: s}
 	s.Permissions = &permissionRepo{db: s}
-	s.Presences = &presenceRepo{db: s}
 	s.Roles = &roleRepo{db: s}
 	s.Todos = &todoRepo{db: s}
 	s.TodoAttachments = &todoAttachmentRepo{db: s}

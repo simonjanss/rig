@@ -18,12 +18,7 @@ func (e *emitter) baseFile() (gen.Artifact, error) {
 		"schema changes.")
 
 	e.revision(b)
-	e.requestEnvelope(b)
-	e.requestContextPlumbing(b)
-	e.callerHelper(b)
-	if e.anyOwnerScoped() {
-		e.scopeHelper(b)
-	}
+	e.baseAliases(b)
 	e.errorShape(b)
 	e.paginationShape(b)
 	e.fileShapeType(b)
@@ -60,225 +55,65 @@ func (e *emitter) revision(b *gobuf.Buf) {
 	b.NL()
 }
 
-func (e *emitter) requestEnvelope(b *gobuf.Buf) {
-	tenPkg := b.Import(runtimeModule + "/tenancy")
+// baseAliases point this package's shared names at
+// [github.com/simonjanss/rig/runtime/apibase], which is where they live now.
+//
+// Aliases rather than a changed spelling everywhere, and that is the whole
+// reason they are here: `api.Request`, `api.RequestContext` and
+// `api.NewRequest` are what a service signature says and what the
+// documentation quotes, and none of that should have to know which module the
+// declaration came from. An alias is not a wrapper either — it is the same
+// type — so a handler in one of rig's own modules and a service method in this
+// one are talking about one struct.
+func (e *emitter) baseAliases(b *gobuf.Buf) {
+	var (
+		basePkg = b.Import(runtimeModule + "/apibase")
+		tenPkg  = b.Import(runtimeModule + "/tenancy")
+	)
 
 	b.Comment("Request is everything a handler received.\n\n" +
 		"Each part is a separate type parameter, and an operation that has no " +
 		"path parameters uses struct{} for that slot. That is deliberate: the " +
-		"signature says what an endpoint takes, so reaching for something it " +
-		"does not have is a compile error rather than a nil check.")
-	b.L("type Request[Path, Query, Body any] struct {")
-	b.L("// Claims describe the caller. They are always present: a handler does")
-	b.L("// not run without them.")
-	b.L("Claims %s.Claims", tenPkg)
+		"signature says what an endpoint takes, so reaching for something it does " +
+		"not have is a compile error rather than a nil check.")
+	b.L("type Request[Path, Query, Body any] = %s.Request[Path, Query, Body]", basePkg)
 	b.NL()
-	b.L("Path  Path")
-	b.L("Query Query")
-	b.L("Body  Body")
+
+	b.Comment("RequestContext is the request's own metadata: how it was " +
+		"labelled, what matched it, and what the caller was built against.")
+	b.L("type RequestContext = %s.RequestContext", basePkg)
 	b.NL()
-	b.L("ctx RequestContext")
+
+	b.Comment("NewRequest builds a request. The server calls it; it is exported " +
+		"so a test can call a service method directly without going through HTTP.")
+	b.L("func NewRequest[Path, Query, Body any](claims %s.Claims, path Path, query Query, body Body, rc RequestContext) Request[Path, Query, Body] {",
+		tenPkg)
+	b.L("return %s.NewRequest(claims, path, query, body, rc)", basePkg)
 	b.L("}")
 	b.NL()
 
-	b.Comment("Context returns what is known about the request itself, as opposed to " +
-		"what it carries.")
-	b.L("func (r Request[Path, Query, Body]) Context() RequestContext { return r.ctx }")
+	b.Comment("NewContext carries a request's metadata down to everything the " +
+		"service method calls, so a validator or a hook — which are handed a " +
+		"context and nothing else — can ask what the caller was built against.")
+	b.L("var NewContext = %s.NewContext", basePkg)
 	b.NL()
 
-	b.Comment("BuiltBefore reports whether the client that sent this request was " +
-		"built before rev.\n\n" +
-		"It is [RequestContext.BuiltBefore] with the request already in hand, which " +
-		"is where a compatibility shim usually is:\n\n" +
-		"\tvar notesAdded = apirev.MustParse(\"2026-04-30\")\n\n" +
-		"\tif r.BuiltBefore(notesAdded) {\n" +
-		"\t\tr.Body.Title = \"Unknown\"\n" +
-		"\t}\n\n" +
-		"A shim belongs here rather than in a hook. This is the one place that has " +
-		"the request as it arrived, and on a create the generated validation runs " +
-		"after the service method and before every hook — so a hook that filled in " +
-		"a missing NOT NULL column would only ever see requests that already " +
-		"passed the check it was written for.")
-	b.L("func (r Request[Path, Query, Body]) BuiltBefore(rev %s.Revision) bool { return r.ctx.BuiltBefore(rev) }",
-		b.Import(runtimeModule+"/apirev"))
+	b.Comment("RequestContextFrom reads back what [NewContext] carried, and " +
+		"reports false for a context that never went through a handler.")
+	b.L("var RequestContextFrom = %s.RequestContextFrom", basePkg)
 	b.NL()
-
-	b.Comment("RequestContext is the request's own metadata.")
-	b.L("type RequestContext struct {")
-	b.L("// RequestID correlates this request with the server's logs.")
-	b.L("RequestID string")
-	b.L("Method    string")
-	b.L("Path      string")
-	b.L("// Route is the pattern that matched, so a metric can be labelled by")
-	b.L("// endpoint rather than by every distinct identifier.")
-	b.L("Route     string")
-	b.L("RemoteAddr string")
-	b.L("UserAgent  string")
-	b.L("// ClientRevision is the raw header, kept for a log line that wants to")
-	b.L("// count what callers are sending. Empty when the caller said nothing, and")
-	b.L("// unparseable prose when it said something that is not a revision — a")
-	b.L("// hand-rolled client and a curl will not say, and that is a normal thing")
-	b.L("// for a caller to be. Compare with [RequestContext.BuiltBefore] rather")
-	b.L("// than with this.")
-	b.L("ClientRevision string")
-	b.L("}")
-	b.NL()
-
-	e.requestContextLogValue(b)
-	e.revisionMethods(b)
-
-	b.Comment("NewRequest builds a request. The server calls it; it is exported so a " +
-		"test can call a service method directly without going through HTTP.")
-	b.L("func NewRequest[Path, Query, Body any](claims %s.Claims, path Path, query Query, body Body, rc RequestContext) Request[Path, Query, Body] {", tenPkg)
-	b.L("return Request[Path, Query, Body]{Claims: claims, Path: path, Query: query, Body: body, ctx: rc}")
-	b.L("}")
-	b.NL()
-}
-
-// requestContextLogValue emits how a request appears in a log line.
-//
-// One attribute rather than five loose ones, because these fields travel
-// together: every line about a request wants all of them, and a caller spelling
-// them out is a caller who will eventually spell one differently.
-//
-// It is a [log/slog.LogValuer] rather than struct tags because a log line is not
-// JSON — a text handler would print Go syntax for a tagged struct, and the same
-// server writes both depending on where it is running. This is also what lets an
-// empty field be absent rather than empty.
-func (e *emitter) requestContextLogValue(b *gobuf.Buf) {
-	slogPkg := b.Import("log/slog")
-
-	b.Comment("LogValue is how a request appears in a log line.\n\n" +
-		"A group, so one attribute carries the lot:\n\n" +
-		"\tlogger.ErrorContext(ctx, \"that failed\", slog.Any(\"request\", rc))\n\n" +
-		"Only the fields that have something in them. An empty attribute on every " +
-		"line is the same width in a terminal and a key in a structured backend, " +
-		"and it says a field was collected when it was not — a project that set no " +
-		"RequestID gets lines with no request_id rather than lines with an empty " +
-		"one.")
-	b.L("func (rc RequestContext) LogValue() %s.Value {", slogPkg)
-	b.L("attrs := make([]%s.Attr, 0, 6)", slogPkg)
-	for _, f := range []struct{ key, field string }{
-		{"request_id", "RequestID"},
-		{"method", "Method"},
-		{"route", "Route"},
-		{"path", "Path"},
-		{"remote_addr", "RemoteAddr"},
-		{"user_agent", "UserAgent"},
-	} {
-		b.L("if rc.%s != \"\" { attrs = append(attrs, %s.String(%s, rc.%s)) }",
-			f.field, slogPkg, gobuf.Quote(f.key), f.field)
-	}
-	b.L("return %s.GroupValue(attrs...)", slogPkg)
-	b.L("}")
-	b.NL()
-}
-
-// revisionMethods emit the one place a revision string becomes a value.
-//
-// Two failures share an answer here, deliberately: a caller that sent nothing
-// and a caller that sent nonsense are both simply not something to compare
-// against, and giving them separate fields would invite a logging hook to treat
-// "unknown" as an event when it is the ordinary state of a curl.
-func (e *emitter) revisionMethods(b *gobuf.Buf) {
-	var (
-		timePkg = b.Import("time")
-		revPkg  = b.Import(runtimeModule + "/apirev")
-	)
-
-	b.Comment("Client is what the caller was built against.\n\n" +
-		"Unknown — the zero [" + revPkg + ".Revision] — when the caller said nothing " +
-		"and equally when what it said is not a revision. The two are the same " +
-		"answer on purpose: both mean this caller cannot be placed on the " +
-		"timeline.")
-	b.L("func (rc RequestContext) Client() %s.Revision {", revPkg)
-	b.L("rev, _ := %s.Parse(rc.ClientRevision)", revPkg)
-	b.L("return rev")
-	b.L("}")
-	b.NL()
-
-	b.Comment("BuiltBefore reports whether the caller was built before rev, which " +
-		"is the question a compatibility shim is written in terms of.\n\n" +
-		"False for a caller that sent no revision. That is a decision rather than " +
-		"a fallback: revisions describe what rig's own generated clients were " +
-		"built against, so a caller rig cannot place is served the current " +
-		"behavior. An application that would rather treat an unknown caller as " +
-		"ancient has [RequestContext.ClientRevision] and can say so itself.")
-	b.L("func (rc RequestContext) BuiltBefore(rev %s.Revision) bool { return rc.Client().Before(rev) }", revPkg)
-	b.NL()
-
-	b.Comment("Stale reports how far behind this server's revision the caller " +
-		"is.\n\n" +
-		"ok is false when the caller did not say, said something unparseable, or " +
-		"is not behind at all — including the case of a caller newer than this " +
-		"server, which is somebody halfway through a deploy rather than somebody " +
-		"to warn about.")
-	b.L("func (rc RequestContext) Stale() (%s.Duration, bool) {", timePkg)
-	b.L("client := rc.Client()")
-	b.L("if !client.Before(serverRevision) { return 0, false }")
-	b.L("return serverRevision.Sub(client), true")
-	b.L("}")
-	b.NL()
-}
-
-// requestContextPlumbing emits the context carriage.
-//
-// The service method is handed a RequestContext; everything below it — a
-// validator, a dbhook, a repository — is handed only a context.Context, and
-// until this existed the revision simply stopped at the service layer. It is
-// the same value either way, reached two ways, rather than a second copy that
-// can drift from the first.
-func (e *emitter) requestContextPlumbing(b *gobuf.Buf) {
-	ctxPkg := b.Import("context")
-
-	b.L("type requestContextKey struct{}")
-	b.NL()
-
-	b.Comment("NewContext returns a context carrying the request's metadata.\n\n" +
-		"The server calls it on every request, before the [Server.Context] hook " +
-		"runs, so anything that hook adds can already see it. It is exported for " +
-		"the same reason [NewRequest] is: a test that calls a service method " +
-		"directly still has to put one there, or the hooks underneath will find " +
-		"nothing.")
-	b.L("func NewContext(ctx %s.Context, rc RequestContext) %s.Context {", ctxPkg, ctxPkg)
-	b.L("return %s.WithValue(ctx, requestContextKey{}, rc)", ctxPkg)
-	b.L("}")
-	b.NL()
-
-	b.Comment("RequestContextFrom returns the request metadata on a context.\n\n" +
-		"This is how a validator or a hook reaches what only the service method is " +
-		"handed — the revision the caller was built against, the request " +
-		"identifier, the route that matched.\n\n" +
-		"ok is false rather than an error, and the zero value is usable: work that " +
-		"did not come from a request at all — a migration, a background job — has " +
-		"no metadata to find, and that is not a failure.")
-	b.L("func RequestContextFrom(ctx %s.Context) (RequestContext, bool) {", ctxPkg)
-	b.L("rc, ok := ctx.Value(requestContextKey{}).(RequestContext)")
-	b.L("return rc, ok")
-	b.L("}")
-	b.NL()
-}
-
-// callerHelper emits the one place "was there a caller" is decided.
-//
-// A read hook takes the claims as a pointer because a read the table
-// configuration marked public is reached by somebody who presented nothing.
-// Nil is that somebody. The zero value would be a tenant of all zeroes that
-// reads like a real one, which is the mistake worth making impossible.
-func (e *emitter) callerHelper(b *gobuf.Buf) {
-	tenPkg := b.Import(runtimeModule + "/tenancy")
 
 	b.Comment("caller is the claims a read hook is handed, or nil when the " +
-		"request carried none.\n\n" +
-		"Only a public endpoint can reach a hook with none: everything else is " +
-		"refused before a handler runs, and every write is refused again by the " +
-		"repository. That is why the write hooks take a value and these take a " +
-		"pointer.")
-	b.L("func caller(claims %s.Claims) *%s.Claims {", tenPkg, tenPkg)
-	b.L("if !claims.Valid() { return nil }")
-	b.L("return &claims")
-	b.L("}")
+		"request carried none.")
+	b.L("var caller = %s.Caller", basePkg)
 	b.NL()
+
+	if e.anyOwnerScoped() {
+		b.Comment("readScope turns a requested scope into the read options that " +
+			"produce it.")
+		b.L("var readScope = %s.ReadScope", basePkg)
+		b.NL()
+	}
 }
 
 func (e *emitter) errorShape(b *gobuf.Buf) {

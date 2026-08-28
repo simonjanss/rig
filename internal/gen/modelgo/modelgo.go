@@ -64,13 +64,28 @@ func (g *Generator) Generate(_ context.Context, doc *ir.Document, opts gen.Optio
 	}
 	artifacts := []gen.Artifact{base}
 
+	used := e.usedEnums()
 	for _, enum := range doc.API.Enums {
 		// ErrorCode belongs to the API layer. It is not a column's type and
 		// never reaches the model.
 		if enum.PgType == "" {
 			continue
 		}
-		art, err := e.enumFile(enum)
+		// And an enum whose only columns are on tables this project generates
+		// nothing for is a type with no declaration to appear in.
+		if !used[enum.Name] {
+			continue
+		}
+
+		var (
+			art gen.Artifact
+			err error
+		)
+		if path, shipped, ok := shippedEnum(enum.PgType); ok {
+			art, err = e.enumAliasFile(enum, path, shipped)
+		} else {
+			art, err = e.enumFile(enum)
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -79,7 +94,25 @@ func (g *Generator) Generate(_ context.Context, doc *ir.Document, opts gen.Optio
 
 	for i := range doc.API.Resources {
 		res := &doc.API.Resources[i]
-		if res.Storage == nil {
+		if res.Storage == nil || res.Unreachable() {
+			continue
+		}
+
+		// The filter grammar is written for every table, rig's own included: a
+		// project's table that points at rig_notification puts a member on
+		// NotificationFilter, so that type is this project's even where the row
+		// it filters is not.
+		queries, err := e.queryFile(res)
+		if err != nil {
+			return nil, err
+		}
+
+		if path, shipped, ok := shippedModel(res.Storage.Table); ok {
+			aliases, err := e.aliasFile(res, path, shipped)
+			if err != nil {
+				return nil, err
+			}
+			artifacts = append(artifacts, aliases, queries)
 			continue
 		}
 
@@ -91,14 +124,32 @@ func (g *Generator) Generate(_ context.Context, doc *ir.Document, opts gen.Optio
 		if err != nil {
 			return nil, err
 		}
-		queries, err := e.queryFile(res)
-		if err != nil {
-			return nil, err
-		}
 		artifacts = append(artifacts, entity, inputs, queries)
 	}
 
 	return artifacts, nil
+}
+
+// usedEnums are the enum names some resource in this package will name.
+//
+// Keyed by name rather than by Postgres type because that is what a field
+// carries. An enum reached only from a resource this package skips has no
+// declaration to appear in, and emitting it anyway leaves a file `rig check`
+// reports as a leftover the next time somebody looks.
+func (e *emitter) usedEnums() map[string]bool {
+	out := make(map[string]bool)
+	for i := range e.doc.API.Resources {
+		res := &e.doc.API.Resources[i]
+		if res.Storage == nil || res.Unreachable() {
+			continue
+		}
+		for _, f := range res.Fields {
+			if f.TypeKind == ir.TypeKindEnum {
+				out[f.Type] = true
+			}
+		}
+	}
+	return out
 }
 
 // someInput names an input, for the package documentation to point at.

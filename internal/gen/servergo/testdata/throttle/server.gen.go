@@ -6,24 +6,16 @@ package api
 
 import (
 	"context"
-	"encoding/json"
-	"io"
 	"log/slog"
 	"net/http"
 	"net/netip"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/simonjanss/rig/runtime/apirev"
-	"github.com/simonjanss/rig/runtime/clientip"
+	"github.com/simonjanss/rig/runtime/apibase"
 	"github.com/simonjanss/rig/runtime/dbx"
 	"github.com/simonjanss/rig/runtime/httpx"
-	"github.com/simonjanss/rig/runtime/idempotency"
-	"github.com/simonjanss/rig/runtime/reqlog"
-	"github.com/simonjanss/rig/runtime/rigerr"
 	"github.com/simonjanss/rig/runtime/serve"
-	"github.com/simonjanss/rig/runtime/tenancy"
 	"github.com/simonjanss/rig/runtime/throttle"
 )
 
@@ -34,156 +26,51 @@ import (
 // with it is [Server.RequestID]'s documentation.
 const RequestIDHeader = "X-Request-Id"
 
-// maxRequestIDBytes bounds what a caller may name its own request.
-//
-// The value reaches an error body and every log line the request writes, so it
-// is client-controlled text in two places that are read by machines. A bound
-// and a character class are what keep a header from being a way to write
-// whatever it likes into a log file. The number is generous: every identifier
-// anybody actually uses — a UUID, a trace id — is well under it.
-const maxRequestIDBytes = 128
-
-// callerRequestID is the identifier the caller asked this request to be known
-// by, or empty when it did not ask or asked for something not worth repeating.
-//
-// Refusing rather than truncating or escaping, because a header this API does
-// not understand is not one it should half-quote into a log line. What a
-// caller gets for sending nonsense is the identifier it would have got for
-// sending nothing.
-func callerRequestID(r *http.Request) string {
-	id := r.Header.Get(RequestIDHeader)
-	if id == "" || len(id) > maxRequestIDBytes {
-		return ""
-	}
-	// Printable ASCII, which is what every identifier format in use is and what a
-	// log line can carry without an escape.
-	for i := 0; i < len(id); i++ {
-		if id[i] < 0x20 || id[i] > 0x7e {
-			return ""
-		}
-	}
-	return id
-}
-
 // Authenticator identifies a caller and serves its own routes.
 //
-// It is declared here rather than imported, and that is the whole trick:
 // [github.com/simonjanss/rig/auth.Auth] satisfies it without either side
-// knowing the other exists. A field typed as the auth package's own would make
-// every project depend on it — argon2, OAuth and all — including the ones
-// with no authentication at all.
+// knowing the other exists, which is what keeps a project with no
+// authentication from depending on argon2 and OAuth. Anything else with these
+// two methods works just as well: a wrapper that adds a header check, a stub
+// in a test, an entirely different implementation.
+type Authenticator = apibase.Authenticator
+
+// Server is the behavior every handler shares: who the caller is, where the
+// log lines go, what a failure is answered with.
 //
-// Anything else with these two methods works just as well: a wrapper that adds
-// a header check, a stub in a test, an entirely different implementation.
-type Authenticator interface {
-	// Claims identifies the caller behind a request.
-	Claims(*http.Request) (tenancy.Claims, error)
-	// Mount registers the authentication routes — signing in, refreshing, keys
-	// — on the same mux the resource routes are on.
-	Mount(*http.ServeMux)
-}
+// [Register] fills in what this project already decided — its revision, the
+// headers it names, its rate limiter and, when `tracing:` is on, where its
+// spans go — so what is left to set is the handful of fields only an
+// application can answer. See the package documentation of
+// [github.com/simonjanss/rig/runtime/apibase] for every field.
+type Server = apibase.Server
 
-// Server is the behavior every handler shares.
-type Server struct {
-	// Auth wires the whole authentication foundation in one field.
-	//
-	// Setting it does two things that otherwise have to be remembered separately:
-	// GetClaims comes from it, and its routes are mounted on the mux Register
-	// returns. Wiring the claims from one thing and mounting another is a mistake
-	// this makes unavailable.
-	//
-	// Nil for a project with no authentication, which then has to supply GetClaims
-	// itself.
-	Auth Authenticator
+// IdempotencyPruner deletes the records of writes past their retention, and so
+// decides how long after a write its Idempotency-Key still replays.
+//
+// Zero takes idempotency.DefaultRetention, a day: long enough to cover any
+// retry, short enough that a key reused a week later is a new request rather
+// than a write that silently does nothing.
+//
+// A task rather than a goroutine, for the reason FileSweeper is one — a cron
+// job is one thing running, and a goroutine in every replica is as many as
+// there are replicas, all racing to delete the same rows. Register it in
+// serve.Config.Tasks and run `<binary> prune-idempotency`:
+//
+//	Tasks: map[string]serve.Task{"prune-idempotency": api.IdempotencyPruner(0)},
+//
+// Nothing schedules it for you. Without it rig_idempotency keeps every record
+// ever written, and the retention above is a sentence rather than a behaviour.
+var IdempotencyPruner = apibase.IdempotencyPruner
 
-	// GetClaims establishes who is calling. A handler does not run without it, so
-	// a route cannot accidentally be left unauthenticated.
-	//
-	// Auth supplies it. Set this instead for a project that authenticates its own
-	// way, or has no auth routes to mount.
-	GetClaims func(*http.Request) (tenancy.Claims, error)
-
-	// RequestID labels a request for the logs and for the error body it may end
-	// in.
-	//
-	// Nil is the ordinary case and does not mean nothing: it means
-	// [callerRequestID] — the caller's own X-Request-Id, if it sent one worth
-	// trusting. Set this only to answer the question differently; the default is
-	// already the answer every route in this package gives, including the
-	// authentication ones.
-	RequestID func(*http.Request) string
-
-	// Logger is where this server says what it did and why a request failed. Nil
-	// uses [log/slog.Default].
-	//
-	// Nil means the default logger and not silence, which is the whole point: the
-	// one line worth having is the cause of a 500, and a server that drops it
-	// because nobody configured logging is a server whose error bodies say
-	// "something went wrong" and mean it literally. Set this to route the lines
-	// somewhere, not to turn them on.
-	//
-	// What comes out: an error line per failed request carrying the whole error,
-	// and, at [log/slog.LevelDebug], a line per request with its status and size.
-	//
-	// There is no logger on the context and no way to reach this one from a
-	// service. A service is constructed by the application, so it is handed a
-	// logger there — the same one this field gets — and puts the request on
-	// its own lines with [RequestContextFrom].
-	Logger *slog.Logger
-
-	// MinRevision refuses a caller built against an API revision older than this
-	// one. The zero value, the default, refuses nothing.
-	//
-	//	MinRevision: apirev.MustParse("2026-04-30"),
-	//
-	// This is the end of the story [Revision] starts: you removed a field, you
-	// waited, the logs said nobody old was left, and now you close the door. Until
-	// somebody decides to, the revision is telemetry and nothing else.
-	//
-	// Only a caller that sends a revision older than this is refused. One that
-	// sends none is served — an unknown client is not the same as an old one,
-	// and turning every curl and every hand-written integration into a 426 is not
-	// a door closing, it is an outage.
-	MinRevision apirev.Revision
-
-	// OnError turns a service error into a response. Nil uses DefaultErrorMapper,
-	// which is the right behavior for almost everyone.
-	OnError func(w http.ResponseWriter, r *http.Request, rc RequestContext, err error)
-
-	// PreHooks run before anything else, in order. A hook that writes a response
-	// stops the request.
-	PreHooks []func(w http.ResponseWriter, r *http.Request) bool
-
-	// Context lets a hook attach values a service will read.
-	Context func(ctx context.Context, r *http.Request) context.Context
-
-	// Throttle limits how many calls one caller may make.
-	//
-	// Register builds it from DB when it is nil, which is the ordinary case: the
-	// numbers come from rig.yaml and the counters live in rig_throttle, so there
-	// is nothing for an application to decide. Set it to something built by hand
-	// to change the reconciliation interval or to point the counters somewhere
-	// else, and leave it nil in a test that should not be limited.
-	//
-	// It is fair-use limiting and not a defence against a flood — see
-	// docs/api.md. A request that reaches here has already cost a connection and a
-	// goroutine.
-	Throttle *throttle.Gate
-
-	// DB is what a write carrying an Idempotency-Key is recorded in, so that a
-	// client which had to send the same write twice gets one row and the same
-	// answer both times. Pass the pool: `DB: app.Pool`.
-	//
-	// Required, and Register panics without it. A nil one would mean the header
-	// was quietly ignored, and a client that thinks its retry is safe when it is
-	// not is worse off than one that knows it is not — this is the one failure
-	// mode worth a startup panic rather than a runtime surprise.
-	//
-	// It costs nothing until a caller sends the header: a write without one takes
-	// the path it always took, with no transaction and no extra round trip. See
-	// [github.com/simonjanss/rig/runtime/idempotency].
-	DB dbx.Beginner
-}
+var prepare = apibase.Prepare
+var requestContext = apibase.RequestContextOf
+var fail = apibase.Fail
+var logRequest = apibase.LogRequest
+var writeJSON = apibase.WriteJSON
+var writeResult = apibase.WriteResult
+var decodeBody = apibase.DecodeBody
+var decodeReader = apibase.DecodeReader
 
 // Handlers is every resource's service, plus the shared behavior.
 //
@@ -247,6 +134,20 @@ func Register(h Handlers) *http.ServeMux {
 			panic("api.Register: throttle is configured but Server.DB cannot run queries, so there is nowhere to count; set Server.Throttle yourself, or set DB to the pool")
 		}
 		h.Server.Throttle = NewThrottle(conn, h.Server.Logger)
+	}
+
+	// What this project already decided. An application sets who is calling and
+	// where the log lines go; the rest is the document's, and restating it in a
+	// main function would be somewhere for the two to disagree.
+	h.Server.Revision = serverRevision
+	h.Server.RevisionHeader = RevisionHeader
+	h.Server.RequestIDHeader = RequestIDHeader
+	h.Server.TrustedProxies = throttleTrustedProxies
+
+	// Only when it is empty: a project that replaced how a failure is answered has
+	// said so, and this is not the place to undo it.
+	if h.Server.OnError == nil {
+		h.Server.OnError = DefaultErrorMapper
 	}
 
 	Link(h)
@@ -347,32 +248,6 @@ func ThrottleSweeper(olderThan time.Duration) serve.Task {
 	}
 }
 
-// throttleCaller is who a request is from, as the limits key on them.
-//
-// An identity when there is one, and the address only when there is not. An
-// address is a poor name for a person — an office behind one NAT is one
-// address, and a phone is a different one every few minutes — so once a
-// request says who it is, that is the better key.
-func throttleCaller(r *http.Request, claims tenancy.Claims) throttle.Caller {
-	c := throttle.Caller{}
-	if claims.APIKeyID != nil {
-		c.APIKey = claims.APIKeyID.String()
-	}
-	if claims.AccountID != uuid.Nil {
-		c.Account = claims.AccountID.String()
-	}
-	if claims.TenantID != uuid.Nil {
-		c.Tenant = claims.TenantID.String()
-	}
-	if !c.Identified() {
-		// Only for an anonymous caller, and only through the trusted-proxy rule: an
-		// address read from a header the client controls is an address the client
-		// chooses, and a limit keyed on one of those is decorative.
-		c.IP = clientip.String(r, throttleTrustedProxies)
-	}
-	return c
-}
-
 // throttleTrustedProxies are the networks whose X-Forwarded-For may be
 // believed, from auth.trusted_proxies. Empty trusts none of them.
 // Parsed once at startup rather than per request. The strings were validated
@@ -381,29 +256,6 @@ func throttleCaller(r *http.Request, claims tenancy.Claims) throttle.Caller {
 var throttleTrustedProxies = []netip.Prefix{
 	netip.MustParsePrefix("10.0.0.0/8"),
 	netip.MustParsePrefix("192.168.0.0/16"),
-}
-
-// IdempotencyPruner deletes the records of writes past their retention, and so
-// decides how long after a write its Idempotency-Key still replays.
-//
-// Zero takes idempotency.DefaultRetention, a day: long enough to cover any
-// retry, short enough that a key reused a week later is a new request rather
-// than a write that silently does nothing.
-//
-// A task rather than a goroutine, for the reason FileSweeper is one — a cron
-// job is one thing running, and a goroutine in every replica is as many as
-// there are replicas, all racing to delete the same rows. Register it in
-// serve.Config.Tasks and run `<binary> prune-idempotency`:
-//
-//	Tasks: map[string]serve.Task{"prune-idempotency": api.IdempotencyPruner(0)},
-//
-// Nothing schedules it for you. Without it rig_idempotency keeps every record
-// ever written, and the retention above is a sentence rather than a behaviour.
-func IdempotencyPruner(retention time.Duration) serve.Task {
-	return func(ctx context.Context, pool *pgxpool.Pool) error {
-		_, err := idempotency.Prune(ctx, pool, retention)
-		return err
-	}
 }
 
 // Link hands every resource the hooks of the tables that reference it, so a
@@ -422,197 +274,6 @@ func Link(h Handlers) {
 	// No table here references another one rig writes a service for, so there is
 	// nothing to propagate.
 	_ = h
-}
-
-// maxBodyBytes bounds a request body. Without a limit, one client can exhaust
-// the server's memory by streaming forever.
-const maxBodyBytes = 1 << 20
-
-// prepare runs the shared front half of every handler: the hooks, the claims,
-// and the request metadata.
-func prepare(s Server, w http.ResponseWriter, r *http.Request) (context.Context, tenancy.Claims, RequestContext, bool) {
-	return resolve(s, w, r, true)
-}
-
-// requestContext is what one request looks like to an error body and to a log
-// line.
-//
-// A function rather than a literal per call site, because a route that builds
-// a blank one still answers correctly and still logs a failure — it just
-// logs one that names no method, no path and no request identifier, which is
-// the one thing the line exists for.
-func requestContext(s Server, r *http.Request) RequestContext {
-	rc := RequestContext{
-		Method:         r.Method,
-		Path:           r.URL.Path,
-		Route:          r.Pattern,
-		RemoteAddr:     r.RemoteAddr,
-		UserAgent:      r.UserAgent(),
-		ClientRevision: r.Header.Get(RevisionHeader),
-	}
-	if s.RequestID != nil {
-		rc.RequestID = s.RequestID(r)
-	} else {
-		// This project does not trace, so the caller's own is the only identifier
-		// there is. Empty when it sent none, which is a request nothing can correlate
-		// — turning `tracing:` on in rig.yaml is what gives every request one
-		// whether or not the caller thought to.
-		rc.RequestID = callerRequestID(r)
-	}
-	return rc
-}
-
-// resolve is the body of both, differing only in whether a caller who cannot
-// be identified is refused.
-func resolve(s Server, w http.ResponseWriter, r *http.Request, required bool) (context.Context, tenancy.Claims, RequestContext, bool) {
-	rc := requestContext(s, r)
-
-	// Announced on the way out of every response, including the failed ones: a
-	// client that is behind should not have to make a successful request to find
-	// out.
-	if Revision != "" {
-		w.Header().Set(RevisionHeader, Revision)
-	}
-
-	for _, hook := range s.PreHooks {
-		if !hook(w, r) {
-			return nil, tenancy.Claims{}, rc, false
-		}
-	}
-
-	// Before the claims, because being too old to be served is not a question
-	// about who you are.
-	if !serveRevision(s, w, r, rc) {
-		return nil, tenancy.Claims{}, rc, false
-	}
-
-	claims, err := s.GetClaims(r)
-	if err != nil {
-		if required {
-			fail(s, w, r, rc, err)
-			return nil, tenancy.Claims{}, rc, false
-		}
-		// Public, so the caller is nobody rather than nobody yet. The claims go on the
-		// context all the same: what needs a tenant refuses there, where the reason is
-		// about the thing being asked for.
-		claims = tenancy.Claims{}
-	}
-
-	// After the claims, because the limits key on who is calling, and inside the
-	// handler rather than around the mux, because that is where the matched route
-	// is known — net/http sets the pattern on the request it dispatches, so a
-	// wrapper in front has one that has matched nothing.
-	if err := s.Throttle.Check(r.Context(), throttleCaller(r, claims), r.Pattern, w.Header()); err != nil {
-		fail(s, w, r, rc, err)
-		return nil, tenancy.Claims{}, rc, false
-	}
-
-	ctx := tenancy.NewContext(r.Context(), claims)
-	// So that what only the service method is handed reaches everything under it:
-	// a validator and a hook are given a context and nothing else, and the
-	// revision the caller was built against is exactly the kind of thing they have
-	// to ask about. Before the Context hook, so that hook can see it too.
-	ctx = NewContext(ctx, rc)
-	if s.Context != nil {
-		ctx = s.Context(ctx, r)
-	}
-	return ctx, claims, rc, true
-}
-
-// serveRevision reports whether this caller is new enough to be served, and
-// writes the refusal when it is not.
-//
-// Both ways of not refusing are the one comparison: an unset MinRevision and a
-// caller that sent no revision each leave one side unknown, and nothing is
-// before an unknown revision. A caller that cannot be shown to be old is
-// served.
-func serveRevision(s Server, w http.ResponseWriter, r *http.Request, rc RequestContext) bool {
-	if !rc.BuiltBefore(s.MinRevision) {
-		return true
-	}
-
-	fail(s, w, r, rc, rigerr.UpgradeRequired(
-		"this client was built against API revision %s; this server serves %s and newer",
-		rc.ClientRevision, s.MinRevision))
-	return false
-}
-
-// fail writes an error response.
-func fail(s Server, w http.ResponseWriter, r *http.Request, rc RequestContext, err error) {
-	// Before the mapper and not inside it. A project that set OnError replaced how
-	// a failure is *answered*; it did not ask to stop being told what the failure
-	// was.
-	logFailure(s, r, rc, err)
-
-	if s.OnError != nil {
-		s.OnError(w, r, rc, err)
-		return
-	}
-	DefaultErrorMapper(w, r, rc, err)
-}
-
-// logFailure records why this request is about to fail.
-//
-// It is the only place that ever sees the whole error. DefaultErrorMapper
-// rewrites an internal message to "something went wrong" before it reaches the
-// client — deliberately, because the original is exactly the kind of thing
-// that leaks a table name or a connection string — so without this line the
-// cause of a 500 exists nowhere. The request identifier goes out in the body
-// and comes out here, and that pair is the whole mechanism for answering "what
-// happened to my request".
-//
-// Two levels, because they are two different events. An internal failure is
-// the server's fault and is an error. A 404, a 422, a refused permission —
-// the server worked, and logging those at anything but debug is how a log
-// becomes a thing nobody reads.
-func logFailure(s Server, r *http.Request, rc RequestContext, err error) {
-	code := rigerr.CodeOf(err)
-	attrs := []any{
-		slog.Any("request", rc),
-		slog.Int("status", code.HTTPStatus()),
-		slog.Any("code", code),
-		slog.Any("error", err),
-	}
-
-	if code == rigerr.CodeInternal {
-		s.logger().ErrorContext(r.Context(), "request failed", attrs...)
-		return
-	}
-	s.logger().DebugContext(r.Context(), "request refused", attrs...)
-}
-
-// logRequest writes the request line, once every handler has finished.
-//
-// Deferred from the handler rather than wrapped around the mux, because the
-// route is only known inside: net/http sets the matched pattern on the request
-// the mux dispatches, and a middleware in front of it has an earlier request
-// that has matched nothing. A line labelled by path instead would be one line
-// per identifier that ever appeared in a URL.
-func logRequest(s Server, r *http.Request, rec *reqlog.Writer, rc RequestContext) {
-	l := s.logger()
-	// Asked before the attributes are built. This runs on every request, including
-	// the ones nobody is watching.
-	if !l.Enabled(r.Context(), slog.LevelDebug) {
-		return
-	}
-
-	l.DebugContext(r.Context(), "request served",
-		slog.Any("request", rc),
-		slog.Int("status", rec.Status()),
-		slog.Int64("bytes", rec.Bytes()),
-	)
-}
-
-// logger is the server's, or the default one.
-//
-// Nil is a server nobody configured logging for, not a server that asked for
-// silence, and the difference matters on the one line that says why a 500
-// happened.
-func (s Server) logger() *slog.Logger {
-	if s.Logger != nil {
-		return s.Logger
-	}
-	return slog.Default()
 }
 
 // DefaultErrorMapper turns an error into a response.
@@ -637,64 +298,4 @@ func DefaultErrorMapper(w http.ResponseWriter, _ *http.Request, rc RequestContex
 		RequestID: rc.RequestID,
 		Fields:    answer.Fields,
 	})
-}
-
-func writeJSON(w http.ResponseWriter, status int, body any) {
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	w.WriteHeader(status)
-	if body == nil {
-		return
-	}
-	_ = json.NewEncoder(w).Encode(body)
-}
-
-// writeResult answers with what a write produced, or with what it produced the
-// first time somebody sent it.
-//
-// The bytes are written rather than re-encoded, because a replay that
-// round-tripped through a decoder would come back with its keys in whatever
-// order that decoder chose — and a client that hashes or signs what it
-// received would see two different answers to one request.
-func writeResult(w http.ResponseWriter, res idempotency.Result) {
-	if res.Replayed {
-		// Nothing a client must act on, and worth saying: it is the difference between
-		// a write that happened just now and one that happened the first time this key
-		// was seen.
-		w.Header().Set("Idempotency-Replayed", "true")
-	}
-	if len(res.Body) == 0 {
-		w.WriteHeader(res.Status)
-		return
-	}
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	w.WriteHeader(res.Status)
-	_, _ = w.Write(res.Body)
-}
-
-// decodeBody reads a JSON request body.
-//
-// Unknown fields are rejected. A client that misspells a field name is asking
-// for something it will not get, and telling it so beats silently ignoring
-// half the request.
-func decodeBody(r *http.Request, into any) error {
-	return decodeReader(r.Body, into)
-}
-
-// decodeReader is the decode itself, separated from the request so that a body
-// arriving as one part of a form goes through exactly the same one.
-//
-// That sharing is the point rather than a tidiness: a multipart create and a
-// JSON create have to refuse the same keys and produce the same field errors,
-// and two decoders would eventually differ about one of them.
-func decodeReader(r io.Reader, into any) error {
-	dec := json.NewDecoder(io.LimitReader(r, maxBodyBytes))
-	dec.DisallowUnknownFields()
-
-	if err := dec.Decode(into); err != nil {
-		if err == io.EOF {
-			return rigerr.BadRequest("the request body is empty")
-		}
-		return rigerr.BadRequest("cannot read the request body: %v", err)
-	}
-	return nil
 }

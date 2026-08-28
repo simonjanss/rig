@@ -13,30 +13,6 @@ func (e *emitter) throttleEnabled() bool {
 	return e.doc.API.Throttle != nil && e.doc.API.Throttle.Enabled
 }
 
-// throttleField emits the one field a server holds.
-//
-// A pointer, and nil is usable — [throttle.Gate.Check] on nil allows — so the
-// field can exist unconditionally in a server built by hand while Register
-// fills it for everybody else.
-func (e *emitter) throttleField(b *gobuf.Buf) {
-	if !e.throttleEnabled() {
-		return
-	}
-	thr := b.Import(runtimeModule + "/throttle")
-
-	b.Comment("Throttle limits how many calls one caller may make.\n\n" +
-		"Register builds it from DB when it is nil, which is the ordinary case: " +
-		"the numbers come from rig.yaml and the counters live in rig_throttle, so " +
-		"there is nothing for an application to decide. Set it to something built " +
-		"by hand to change the reconciliation interval or to point the counters " +
-		"somewhere else, and leave it nil in a test that should not be limited.\n\n" +
-		"It is fair-use limiting and not a defence against a flood — see " +
-		"docs/api.md. A request that reaches here has already cost a connection " +
-		"and a goroutine.")
-	b.L("Throttle *%s.Gate", thr)
-	b.NL()
-}
-
 // throttleWiring emits the constructor Register calls.
 func (e *emitter) throttleWiring(b *gobuf.Buf) {
 	if !e.throttleEnabled() {
@@ -123,27 +99,6 @@ func (e *emitter) throttleWiring(b *gobuf.Buf) {
 	b.NL()
 
 	e.throttleSweeper(b)
-
-	b.Comment("throttleCaller is who a request is from, as the limits key on them.\n\n" +
-		"An identity when there is one, and the address only when there is not. " +
-		"An address is a poor name for a person — an office behind one NAT is one " +
-		"address, and a phone is a different one every few minutes — so once a " +
-		"request says who it is, that is the better key.")
-	b.L("func throttleCaller(r *%s.Request, claims %s.Claims) %s.Caller {",
-		b.Import("net/http"), b.Import(runtimeModule+"/tenancy"), thr)
-	b.L("c := %s.Caller{}", thr)
-	b.L("if claims.APIKeyID != nil { c.APIKey = claims.APIKeyID.String() }")
-	b.L("if claims.AccountID != %s.Nil { c.Account = claims.AccountID.String() }", b.Import("github.com/google/uuid"))
-	b.L("if claims.TenantID != %s.Nil { c.Tenant = claims.TenantID.String() }", b.Import("github.com/google/uuid"))
-	b.L("if !c.Identified() {")
-	b.Comment("Only for an anonymous caller, and only through the trusted-proxy " +
-		"rule: an address read from a header the client controls is an address " +
-		"the client chooses, and a limit keyed on one of those is decorative.")
-	b.L("c.IP = %s.String(r, throttleTrustedProxies)", b.Import(runtimeModule+"/clientip"))
-	b.L("}")
-	b.L("return c")
-	b.L("}")
-	b.NL()
 
 	e.throttleProxies(b)
 }
@@ -247,23 +202,6 @@ func (e *emitter) throttleProxies(b *gobuf.Buf) {
 	for _, c := range cidrs {
 		b.L("%s.MustParsePrefix(%s),", netipPkg, gobuf.Quote(c))
 	}
-	b.L("}")
-	b.NL()
-}
-
-// throttleCheck emits the check itself, inside resolve.
-func (e *emitter) throttleCheck(b *gobuf.Buf, tenPkg string) {
-	if !e.throttleEnabled() {
-		return
-	}
-
-	b.Comment("After the claims, because the limits key on who is calling, and " +
-		"inside the handler rather than around the mux, because that is where the " +
-		"matched route is known — net/http sets the pattern on the request it " +
-		"dispatches, so a wrapper in front has one that has matched nothing.")
-	b.L("if err := s.Throttle.Check(r.Context(), throttleCaller(r, claims), r.Pattern, w.Header()); err != nil {")
-	b.L("fail(s, w, r, rc, err)")
-	b.L("return nil, %s.Claims{}, rc, false", tenPkg)
 	b.L("}")
 	b.NL()
 }

@@ -420,10 +420,11 @@ func TestRevisionComesFromTheDocument(t *testing.T) {
 	for _, want := range []string{
 		`const Revision = "2026-08-01"`,
 		`const RevisionHeader = "X-Demo-Revision"`,
-		"ClientRevision string",
-		"func (rc RequestContext) Client() apirev.Revision",
-		"func (rc RequestContext) BuiltBefore(rev apirev.Revision) bool",
-		"func (rc RequestContext) Stale() (time.Duration, bool)",
+		// Client, BuiltBefore and Stale are runtime/apibase's and are tested
+		// there; this is the type they hang off, and it has to be the shared one
+		// or a service signature and a shipped handler would be talking about two
+		// different structs.
+		"type RequestContext = apibase.RequestContext",
 	} {
 		if !strings.Contains(collapse(src), collapse(want)) {
 			t.Errorf("api.gen.go is missing %s", want)
@@ -440,11 +441,8 @@ func TestTheRequestContextTravelsOnTheContext(t *testing.T) {
 	src := collapse(find(t, gentest.Run(t, servicego.New(), doc, opts()), "api.gen.go"))
 
 	for _, want := range []string{
-		"type requestContextKey struct{}",
-		"func NewContext(ctx context.Context, rc RequestContext) context.Context",
-		"return context.WithValue(ctx, requestContextKey{}, rc)",
-		"func RequestContextFrom(ctx context.Context) (RequestContext, bool)",
-		"rc, ok := ctx.Value(requestContextKey{}).(RequestContext)",
+		"var NewContext = apibase.NewContext",
+		"var RequestContextFrom = apibase.RequestContextFrom",
 	} {
 		if !strings.Contains(src, collapse(want)) {
 			t.Errorf("api.gen.go is missing %s", want)
@@ -460,8 +458,10 @@ func TestARequestAnswersWhatItWasBuiltBefore(t *testing.T) {
 	doc := gentest.LoadDocument(t, filepath.Join("testdata", fixture))
 	src := collapse(find(t, gentest.Run(t, servicego.New(), doc, opts()), "api.gen.go"))
 
-	want := "func (r Request[Path, Query, Body]) BuiltBefore(rev apirev.Revision) bool " +
-		"{ return r.ctx.BuiltBefore(rev) }"
+	// The method is runtime/apibase's. What has to be true here is that the type
+	// a service method takes is the one carrying it — an alias rather than a
+	// second struct of the same shape.
+	want := "type Request[Path, Query, Body any] = apibase.Request[Path, Query, Body]"
 	if !strings.Contains(src, collapse(want)) {
 		t.Errorf("api.gen.go is missing %s", want)
 	}
@@ -786,12 +786,10 @@ func TestReadHooksTakeTheirCallerAsAPointer(t *testing.T) {
 		t.Errorf("the generated service should not fish claims out of the context:\n%s", src)
 	}
 
-	base, ok := between(find(t, artifacts, "api.gen.go"), "func caller(", "\n}")
-	if !ok {
-		t.Fatal("no caller helper")
-	}
-	if !strings.Contains(collapse(base), "if !claims.Valid() { return nil }") {
-		t.Errorf("nil is how a public read says there was nobody:\n%s", base)
+	// Nil is how a public read says there was nobody, and the helper that decides
+	// it is runtime/apibase's.
+	if !strings.Contains(find(t, artifacts, "api.gen.go"), "var caller = apibase.Caller") {
+		t.Error("no caller helper")
 	}
 }
 
@@ -889,11 +887,11 @@ func TestTheDefaultServicePassesTheScopeOn(t *testing.T) {
 	doc := gentest.LoadDocument(t, filepath.Join("testdata", "ownerscope.ir.json"))
 	artifacts := gentest.Run(t, servicego.New(), doc, opts())
 
+	// Emitted only where something narrows, so a project with no owner-scoped
+	// table carries no name it never calls.
 	base := collapse(find(t, artifacts, "api.gen.go"))
-	want := "func readScope(s tenancy.Scope) []readopt.Option { " +
-		"if s == tenancy.ScopeAll { return []readopt.Option{readopt.WithoutOwnerScope()} } return nil }"
-	if !strings.Contains(base, want) {
-		t.Errorf("the scope helper is missing or changed shape:\n%s", want)
+	if want := "var readScope = apibase.ReadScope"; !strings.Contains(base, want) {
+		t.Errorf("the scope helper is missing:\n%s", base)
 	}
 
 	svc := collapse(find(t, artifacts, "memo_service.gen.go"))

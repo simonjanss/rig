@@ -230,22 +230,22 @@ func TestTheCallersRequestIDIsBounded(t *testing.T) {
 	doc := gentest.LoadDocument(t, filepath.Join("testdata", fixture))
 	src := artifactNamed(t, gentest.Run(t, servergo.New(), doc, opts()), "server.gen.go")
 
+	// The bound itself is runtime/apibase's and is tested there. What this
+	// generator owes is the header this project names, handed over so the shared
+	// plumbing reads the right one.
 	for _, want := range []string{
 		`const RequestIDHeader = "X-Request-Id"`,
-		"const maxRequestIDBytes = 128",
-		"func callerRequestID(r *http.Request) string {",
-		"if id == \"\" || len(id) > maxRequestIDBytes {",
-		"if id[i] < 0x20 || id[i] > 0x7e {",
+		"h.Server.RequestIDHeader = RequestIDHeader",
 	} {
 		if !strings.Contains(src, want) {
-			t.Errorf("the request identifier is taken on trust: no %q", want)
+			t.Errorf("the request identifier header is not wired: no %q", want)
 		}
 	}
 
-	// Untraced, so the caller's own is the only identifier there is — and it is
-	// still the default rather than something a main has to wire.
-	if !strings.Contains(src, "rc.RequestID = callerRequestID(r)") {
-		t.Errorf("a project with no RequestID of its own reads no header:\n%s", src)
+	// Untraced, so nothing hands the plumbing a trace to fall back to and the
+	// caller's own is the only identifier there is.
+	if strings.Contains(src, "h.Server.Tracer") {
+		t.Errorf("an untraced project should wire no tracer:\n%s", src)
 	}
 }
 

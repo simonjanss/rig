@@ -5,59 +5,48 @@
 package model
 
 import (
-	"time"
-
-	"github.com/google/uuid"
+	"github.com/simonjanss/rig/notify/notifymodel"
 )
 
 // Where a push can reach somebody. Email is refused: the address is on the
 // account already.
 //
-// It is the one definition of a NotificationDevice: the repository scans into
-// it and the API returns it, so there is no conversion between two shapes of
-// the same thing and no field that can go missing from one of them.
-type NotificationDevice struct {
-	// Unique identifier for this row.
-	ID uuid.UUID `json:"id"`
-	// Tenant this row belongs to. Every query is scoped by it.
-	TenantID uuid.UUID `json:"tenantId"`
-	// Whose device it is.
-	AccountID uuid.UUID `json:"accountId"`
-	// When this row was created. Set automatically and never changes.
-	CreatedAt time.Time `json:"createdAt"`
-	// When this row was last updated. Set automatically on every update.
-	UpdatedAt *time.Time `json:"updatedAt,omitempty"`
-	// Desktop or Mobile. Email is refused by the CHECK above.
-	Channel NotificationChannel `json:"channel"`
-	// What the provider was given to address this device. Opaque to rig.
-	Token string `json:"token"`
-	// What a person sees in a list of their devices, and the column that makes
-	// revoking one possible for somebody who has four.
-	Label *string `json:"label,omitempty"`
-	// When this device last checked in, so a stale one can be told apart from a
-	// revoked one.
-	LastSeenAt *time.Time `json:"lastSeenAt,omitempty"`
-	// When it stopped being a place to send to. Kept rather than deleted, so a
-	// token that comes back can be recognised.
-	RevokedAt *time.Time `json:"revokedAt,omitempty"`
-}
+// rig created this table, so the type is rig's: this is an alias for
+// [github.com/simonjanss/rig/notify/notifymodel.NotificationDevice], not a
+// second struct of the same shape. What is generated here is the filter
+// grammar beside it, because that one carries a member per table of this
+// project's that points at it.
+type NotificationDevice = notifymodel.NotificationDevice
+
+// The write inputs, their per-field failures, and the validators a hook is
+// handed. Aliases for the same reason the row is.
+type (
+	NotificationDeviceCreateInput      = notifymodel.NotificationDeviceCreateInput
+	NotificationDeviceCreateInputError = notifymodel.NotificationDeviceCreateInputError
+	NotificationDeviceCreateValidator  = notifymodel.NotificationDeviceCreateValidator
+	NotificationDeviceUpdateInput      = notifymodel.NotificationDeviceUpdateInput
+	NotificationDeviceUpdateInputError = notifymodel.NotificationDeviceUpdateInputError
+	NotificationDeviceUpdateValidator  = notifymodel.NotificationDeviceUpdateValidator
+	NotificationDeviceDeleteInput      = notifymodel.NotificationDeviceDeleteInput
+	NotificationDeviceValidatorContext = notifymodel.NotificationDeviceValidatorContext
+)
 
 // TableNotificationDevice is the table this entity is stored in.
-const TableNotificationDevice = "rig_notification_device"
+const TableNotificationDevice = notifymodel.TableNotificationDevice
 
 // Column names for rig_notification_device, so nothing has to spell one out.
 const (
-	ColumnNotificationDeviceID         = "id"
-	ColumnNotificationDeviceTenantID   = "tenant_id"
-	ColumnNotificationDeviceAccountID  = "account_id"
-	ColumnNotificationDeviceCreatedAt  = "created_at"
-	ColumnNotificationDeviceUpdatedAt  = "updated_at"
-	ColumnNotificationDeviceChannel    = "channel"
-	ColumnNotificationDeviceToken      = "token"
-	ColumnNotificationDeviceLabel      = "label"
-	ColumnNotificationDeviceLastSeenAt = "last_seen_at"
-	ColumnNotificationDeviceRevokedAt  = "revoked_at"
+	ColumnNotificationDeviceID         = notifymodel.ColumnNotificationDeviceID
+	ColumnNotificationDeviceTenantID   = notifymodel.ColumnNotificationDeviceTenantID
+	ColumnNotificationDeviceAccountID  = notifymodel.ColumnNotificationDeviceAccountID
+	ColumnNotificationDeviceCreatedAt  = notifymodel.ColumnNotificationDeviceCreatedAt
+	ColumnNotificationDeviceUpdatedAt  = notifymodel.ColumnNotificationDeviceUpdatedAt
+	ColumnNotificationDeviceChannel    = notifymodel.ColumnNotificationDeviceChannel
+	ColumnNotificationDeviceToken      = notifymodel.ColumnNotificationDeviceToken
+	ColumnNotificationDeviceLabel      = notifymodel.ColumnNotificationDeviceLabel
+	ColumnNotificationDeviceLastSeenAt = notifymodel.ColumnNotificationDeviceLastSeenAt
+	ColumnNotificationDeviceRevokedAt  = notifymodel.ColumnNotificationDeviceRevokedAt
 )
 
 // NotificationDeviceColumns is every column, in the order the row is scanned.
-var NotificationDeviceColumns = []string{"id", "tenant_id", "account_id", "created_at", "updated_at", "channel", "token", "label", "last_seen_at", "revoked_at"}
+var NotificationDeviceColumns = notifymodel.NotificationDeviceColumns
