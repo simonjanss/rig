@@ -152,16 +152,21 @@ read in `main.go`.
 What happens to a subscription while that service is unreachable is
 [its own section](#when-the-sync-service-is-down).
 
-**One more line in `main.go`, and it is not optional.**
+**One field on `api.Parts`, and it is not optional.**
 
 ```go
-api.AttachShapes(app, proxy)
+return api.Parts{Handler: mux, Shapes: proxy}, nil
 ```
+
+`api.Main` drains it for you — the field is generated the moment any table asks
+for a shape, and a nil one gets a line at startup naming what is not running.
+The call behind it, `api.AttachShapes(app, proxy)`, stays exported for a project
+that keeps the sequence itself.
 
 A live subscription is a request the server is deliberately not answering yet.
 That makes it an in-flight request, so `http.Server.Shutdown` waits for it — and
 waits, because nothing in the poll is late and `Shutdown` does not cancel a
-request's context. Without this line one open browser tab is a shutdown that
+request's context. Without that field one open browser tab is a shutdown that
 spends its whole budget waiting for the sync service to have news, and a sync
 service that hangs rather than refuses is a shutdown that spends all of it. What
 goes without in either case is everything registered after: the trace flush, the

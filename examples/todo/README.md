@@ -66,11 +66,14 @@ curl -H "X-Tenant-Id: $T" -H content-type:application/json \
 curl -H "X-Tenant-Id: $T" http://127.0.0.1:8080/api/v1/todos
 ```
 
-The pool, the HTTP server and the shutdown are `serve.Main`, so `main.go` is
+The pool, the HTTP server and the shutdown are `api.Main`, so `main.go` is
 the wiring and nothing else — all of it in that one call: what the server is
 configured with, then what it is made of. The parts are not independent, so the
 order is the code: the notifier before the service that reports to it, the
-service before the handler that routes to it. It also answers two probes:
+service before the handler that routes to it. What comes back is `api.Parts`,
+one field per thing whose lifetime is longer than a request's — here the handler
+and the notification engine, which `api.Main` starts and shuts down. It also
+answers two probes, neither of which is a line in this file:
 
 ```bash
 curl -i http://127.0.0.1:8080/livez    # is the process running
@@ -167,7 +170,9 @@ closers rig itself registers for the blocks in `rig.yaml` — the notification
 engine's fifteen seconds and the live subscriptions' five — plus ten seconds of
 headroom for the requests in flight. The other ten is this example's own two
 closers, the recorder and the store's cache subscription, which no generator can
-know about.
+know about — and that is why this one is still written out. A project whose
+closers are all rig's leaves the field alone and `api.Main` settles it to the
+budget plus the drain delay.
 
 Written out rather than summed, because this is the number somebody copies into
 a manifest and they should not have to run the binary to learn it. Read

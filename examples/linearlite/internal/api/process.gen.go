@@ -77,6 +77,8 @@ const (
 	presenceShutdown = 5 * time.Second
 	// The live subscriptions.
 	shapesShutdown = 5 * time.Second
+	// The auth cache's invalidation channel.
+	authShutdown = 5 * time.Second
 
 	// What is left for the requests still in flight once the steps above have had
 	// theirs.
@@ -91,14 +93,16 @@ const (
 // ShutdownBudget is what this project's own shutdown needs of
 // [github.com/simonjanss/rig/runtime/serve.Config.MaxShutdown].
 //
-// For this project that is 40s: 5s for the trace flush, 15s for the
+// For this project that is 45s: 5s for the trace flush, 15s for the
 // notification engine, 5s for the presence sweeper, 5s for the live
-// subscriptions and 10s left over.
+// subscriptions, 5s for the auth cache's invalidation channel and 10s left
+// over.
 //
-// **Read it, then write it down.** This is a number to look up once, not a
-// call to leave in a serve.Config:
+// **Read it, then write it down.** [Main] leaves this call in a serve.Config
+// for a project that states nothing, so the two ends cannot disagree by
+// default — but the number is one to look up once and write out:
 //
-//	MaxShutdown: 40 * time.Second
+//	MaxShutdown: 45 * time.Second
 //
 // MaxShutdown is the one field in that struct that leaves the program — it
 // is what belongs in Kubernetes' terminationGracePeriodSeconds — and whoever
@@ -106,7 +110,7 @@ const (
 // the binary or add up a sum spread over three files. A project with closers
 // of its own adds theirs to the total above and writes that:
 //
-//	MaxShutdown: 45 * time.Second // 40s here, plus 5s for a closer of my own
+//	MaxShutdown: 50 * time.Second // 45s here, plus 5s for a closer of my own
 //
 // A literal is not a number waiting to drift. serve.App adds up every step
 // actually registered, before the server listens, and refuses a budget that
@@ -120,7 +124,7 @@ const (
 // mount closure, and serve.Config is built before it either way. It is a
 // maximum, so counting a step that is not there costs nothing but headroom.
 func ShutdownBudget() time.Duration {
-	return tracesShutdown + notificationsShutdown + presenceShutdown + shapesShutdown + shutdownHeadroom
+	return tracesShutdown + notificationsShutdown + presenceShutdown + shapesShutdown + authShutdown + shutdownHeadroom
 }
 
 // Process is what this application's rig.yaml says about the process around
@@ -262,9 +266,13 @@ func (p *Process) LogHandler() slog.Handler { return p.logs.Handler() }
 // subcommand that does not exist. Those are the runs whose spans somebody
 // actually wants.
 //
-// MaxShutdown is deliberately not one of them, and [ShutdownBudget] says why:
-// it is the number an operator copies into terminationGracePeriodSeconds, so
-// it stays a field in a main function where it can be read off and added to.
+// MaxShutdown is deliberately not one of them. [settle] defaults it to
+// [ShutdownBudget] plus the drain delay, so a project that states neither
+// still holds together — but it stays a field, and setting it is how a
+// project disagrees. Writing it out is the better answer for anything that
+// ships: it is the number an operator copies into
+// terminationGracePeriodSeconds, and it should be readable off the struct
+// rather than out of a call.
 func (p *Process) Configure(cfg serve.Config) serve.Config {
 	if cfg.Monitor == nil && cfg.MonitorAddr == "" {
 		cfg.Monitor = p.page.Handler()

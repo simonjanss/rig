@@ -345,11 +345,11 @@ func newBrowserAt(t *testing.T, primary string) *browser {
 		t.Fatal(err)
 	}
 
-	handler, err := newAPI(ctx, pool, "http://"+primary+":"+port, slog.Default())
+	parts, err := newAPI(ctx, pool, "http://"+primary+":"+port, slog.Default())
 	if err != nil {
 		t.Fatal(err)
 	}
-	srv.Config.Handler = onOneListener(handler, srv.Listener.Addr().String())
+	srv.Config.Handler = onOneListener(parts.Handler, srv.Listener.Addr().String())
 	srv.Start()
 	t.Cleanup(srv.Close)
 

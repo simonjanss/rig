@@ -96,15 +96,12 @@ could not. Without it a tab open for eight hours would hold a thousand dead rows
 Two ways to run it, and unlike the notification dispatcher **neither of them is
 the guarantee**:
 
-```go
-// In the mount closure: a ticker, for latency. It builds the sweeper over
-// app.Pool, starts it, and registers its shutdown.
-api.StartPresenceSweeper(app)
-```
-
-The other way is already wired: `api.Tasks(…)` carries a `sweep-presence` entry
-for an operator who would rather it were a cron job than a goroutine. Running
-both is not a mistake — see below.
+Both are already wired, and neither is a line you write. `api.Main` starts a
+ticker before your own wiring runs — it builds the sweeper over `app.Pool`,
+starts it, and registers its shutdown — and merges a `sweep-presence` subcommand
+into `Tasks` for an operator who would rather it were a cron job than a
+goroutine. Running both is not a mistake; see below. `api.StartPresenceSweeper`
+is the call behind the first, exported for a project keeping the sequence itself.
 
 Skipping both costs space and a slower first fetch, and nothing else — who is
 present is still right.
@@ -237,16 +234,20 @@ visitor to be present in, and the heartbeat has no credential to send.
 
 ## Wiring it up
 
-`presence.enabled` makes `server-go` write `internal/api/presence.gen.go`. Three
-lines join your `main.go`: `Presence` on `api.Handlers`, the sweeper in the mount
-closure, and `sweep-presence` in `Tasks`.
+`presence.enabled` makes `server-go` write `internal/api/presence.gen.go`. One
+line joins your wiring: `Presence` on `api.Handlers`.
 
 ```go
 api.Register(mux, api.Handlers{ /* ... */ Presence: api.NewPresence(pool)})
 ```
 
-[`examples/linearlite`](../examples/linearlite) is the worked one: three lines
-across `internal/app` and `main.go`, a filled-in scope stub in
+The other two are `api.Main`'s. It starts the sweeper before your own wiring runs
+— the service it sweeps through is its own, over `app.Pool`, so it needs nothing
+from you — and merges `sweep-presence` into `Tasks`. `api.StartPresenceSweeper`
+stays exported for a project that keeps the sequence itself.
+
+[`examples/linearlite`](../examples/linearlite) is the worked one: one line in
+`internal/app`, a filled-in scope stub in
 `services/rig_presence`, and
 `web/src/presence` — which is where the parts a package cannot own for you live,
 and [the section above](#three-things-the-package-deliberately-does-not-do-for-you)

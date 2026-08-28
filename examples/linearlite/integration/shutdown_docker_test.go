@@ -13,6 +13,7 @@ import (
 
 	"github.com/simonjanss/rig/examples/linearlite/internal/api"
 	"github.com/simonjanss/rig/examples/linearlite/internal/app"
+	"github.com/simonjanss/rig/observe"
 	"github.com/simonjanss/rig/runtime/serve"
 )
 
@@ -64,20 +65,23 @@ func TestTheServerStopsWithASubscriptionOpen(t *testing.T) {
 			ReadinessPath: "/readyz",
 			MaxStartup:    30 * time.Second,
 			DrainDelay:    time.Second,
-			MaxShutdown:   api.ShutdownBudget() + 5*time.Second + time.Second,
+			MaxShutdown:   api.ShutdownBudget() + time.Second,
 			Logger:        slog.New(slog.DiscardHandler),
 			OnListen:      func(a net.Addr) { listening <- a },
 		}, func(c context.Context, srv *serve.App) (http.Handler, error) {
-			parts, err := app.New(c, srv.Pool, srv.Logger, nil)
+			// The generated sequence itself, not a copy of it. api.Main is this
+			// and a serve.Config; serve.Run is what a test that wants the
+			// process needs, and api.Mount is the half they share — so what is
+			// under test here is the order that ships rather than one written
+			// out again beside it. No page, the way a task has none.
+			handler, err := api.Mount(func(c context.Context, srv *serve.App, _ *observe.Page) (api.Parts, error) {
+				return app.New(c, srv.Pool, srv.Logger, nil)
+			})(c, srv)
 			if err != nil {
 				return nil, err
 			}
-			api.StartPresenceSweeper(srv)
-			api.StartNotificationEngine(srv, parts.Engine)
-			api.AttachShapes(srv, parts.Shapes)
-			srv.CloseWithin("auth", 5*time.Second, parts.Auth.Close)
 
-			// Registered last, so it closes first — before every step above,
+			// Registered after that, so it closes before every step in it —
 			// and therefore with the whole of whatever the server left behind.
 			srv.CloseWithin("what is left", 2*time.Second, func(c context.Context) error {
 				deadline, ok := c.Deadline()
@@ -88,7 +92,7 @@ func TestTheServerStopsWithASubscriptionOpen(t *testing.T) {
 				budget <- time.Until(deadline)
 				return nil
 			})
-			return parts.Handler, nil
+			return handler, nil
 		})
 	}()
 

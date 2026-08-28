@@ -9,7 +9,6 @@ import (
 	"cmp"
 	"context"
 	"embed"
-	"log/slog"
 	"net/http"
 	"os"
 	"time"
@@ -22,6 +21,7 @@ import (
 	"github.com/simonjanss/rig/examples/fantasyfootball/services/player"
 	"github.com/simonjanss/rig/examples/fantasyfootball/services/team"
 	"github.com/simonjanss/rig/migrate"
+	"github.com/simonjanss/rig/observe"
 	"github.com/simonjanss/rig/runtime/rigerr"
 	"github.com/simonjanss/rig/runtime/serve"
 	"github.com/simonjanss/rig/runtime/tenancy"
@@ -38,34 +38,25 @@ var migrations embed.FS
 const localDSN = "postgres://rig:rig@localhost:55441/rig?sslmode=disable"
 
 func main() {
-	// The log file rig's own monitoring page reads, the provider writing the
-	// spans it reads beside them, and the page over both. One call, because the
-	// three have an order — the sink before the logger built out of it, the
-	// provider before the page that reads its file — and `tracing:` and
-	// `monitoring:` in rig.yaml are where every part of it was decided.
+	// api.Main is the process this project's rig.yaml describes: the log file
+	// the monitoring page reads, the provider writing the spans it reads beside
+	// them, the page over both, and the flush on every way out — including the
+	// ones that end in os.Exit, where a deferred call would not run at all.
 	//
 	// Nothing is written and nothing exported unless the environment says where:
 	// $RIG_LOG_FILE, $RIG_TRACE_FILE, $OTEL_EXPORTER_OTLP_ENDPOINT — none of
 	// which is the ordinary case on a laptop, and then this costs one branch per
 	// log call, the spans cost nothing, and the trace ids are still real.
-	process, err := api.NewProcess()
-	if err != nil {
-		// There is no application logger yet: this is the thing that would have
-		// been half of one. slog.Default writes to stderr, which is where this
-		// went before it was a structured line.
-		slog.Error("cannot set this process up", "error", err)
-		os.Exit(1)
-	}
-	// No `defer process.Close()`: Configure sets it as serve.Config.OnExit, so
-	// serve.Main runs it on every way out — including the ones that end in
-	// os.Exit, where a deferred call would not run at all. A `Tasks:` entry
-	// never reaches the mount closure, and this is the flush it gets instead.
-	serve.Main(process.Configure(serve.Config{
+	//
+	// No MaxShutdown, because there is no arithmetic left to state: fifteen
+	// seconds is api.ShutdownBudget — five for the trace flush, which is the one
+	// closer rig registers for this project, and ten left for the requests still
+	// in flight — and this example registers no closer of its own. Whoever
+	// writes terminationGracePeriodSeconds reads the total off that function's
+	// documentation, which states it in words.
+	api.Main(serve.Config{
 		DatabaseURL: cmp.Or(os.Getenv("DATABASE_URL"), localDSN),
 		Addr:        cmp.Or(os.Getenv("ADDR"), "127.0.0.1:8081"),
-
-		LivenessPath:  "/livez",
-		ReadinessPath: "/readyz",
 
 		// What to say when the database is not there, which is the first thing
 		// to go wrong for somebody who has just cloned this. It is said within a
@@ -74,37 +65,25 @@ func main() {
 			"or point $DATABASE_URL at one you already have",
 
 		MaxStartup: 30 * time.Second,
-		// Fifteen seconds: five for the trace flush, which is the one closer rig
-		// registers for this project, and ten left for the requests still in
-		// flight. That is api.ShutdownBudget, whose documentation breaks it
-		// down — written out here rather than called, because this is the number
-		// to copy into Kubernetes' terminationGracePeriodSeconds and it should
-		// be readable off this struct. serve refuses to start on a budget the
-		// registered steps do not fit into, so a stale number fails loudly.
-		MaxShutdown: 15 * time.Second,
 
-		Tasks: api.Tasks(map[string]serve.Task{
+		Tasks: map[string]serve.Task{
 			"migrate": migrate.Apply(migrations, migrate.Options{Log: os.Stdout}),
-			// prune-idempotency is api.Tasks's: records of writes nobody is going
-			// to send again, as a cron entry rather than a goroutine — one thing
-			// running rather than one per replica.
-		}),
+			// prune-idempotency is merged in by api.Main: records of writes
+			// nobody is going to send again, as a cron entry rather than a
+			// goroutine — one thing running rather than one per replica.
+		},
 		Migrate: migrate.Require(migrations, migrate.Options{}),
-	}), func(ctx context.Context, app *serve.App) (http.Handler, error) {
-		// The trace flush with a limit of its own, and a line about either half
-		// of the page that is not armed. Here rather than in main because an App
-		// is the first thing there is to register a shutdown step with, and
-		// because this is where there is a logger writing to the file the page
-		// would have read.
-		process.Attach(app)
-
+	}, func(ctx context.Context, app *serve.App, _ *observe.Page) (api.Parts, error) {
 		// No Tracer: the generated store.New settles a nil one to
 		// observe.Tracer(), which is the value the provider above installed.
 		repos := store.New(app.Pool, store.Config{})
 
 		// One field per resource is the whole registration surface: adding a
-		// table and forgetting to wire it up does not compile.
-		return api.Register(api.Handlers{
+		// table and forgetting to wire it up does not compile. api.Parts is the
+		// same bargain for what outlives a request, and for this project it has
+		// one field: there is nothing here to start, drain or close but the
+		// trace flush api.Main already registered.
+		return api.Parts{Handler: api.Register(api.Handlers{
 			Server: api.Server{
 				GetClaims: headerClaims,
 				// Where a write that carried an Idempotency-Key is recorded,
@@ -122,7 +101,7 @@ func main() {
 			Team:    team.New(repos.Teams),
 			Player:  player.New(repos.Players),
 			Fixture: fixture.New(repos.Fixtures),
-		}), nil
+		})}, nil
 	})
 }
 

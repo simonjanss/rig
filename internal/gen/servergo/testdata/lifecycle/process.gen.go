@@ -68,8 +68,9 @@ const (
 // For this project that is 15s: 5s for the live subscriptions and 10s left
 // over.
 //
-// **Read it, then write it down.** This is a number to look up once, not a
-// call to leave in a serve.Config:
+// **Read it, then write it down.** [Main] leaves this call in a serve.Config
+// for a project that states nothing, so the two ends cannot disagree by
+// default — but the number is one to look up once and write out:
 //
 //	MaxShutdown: 15 * time.Second
 //

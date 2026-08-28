@@ -88,8 +88,10 @@ func TestTheShutdownBudgetIsTheSumOfItsSteps(t *testing.T) {
 	}
 
 	// 5s for the flush, 15s for the engine, 5s for the shapes this fixture
-	// syncs live, 10s left over.
-	for _, want := range []string{"tracesShutdown", "notificationsShutdown", "shapesShutdown", "shutdownHeadroom"} {
+	// syncs live, 5s for the auth cache it authenticates through, 10s left over.
+	for _, want := range []string{
+		"tracesShutdown", "notificationsShutdown", "shapesShutdown", "authShutdown", "shutdownHeadroom",
+	} {
 		if strings.Count(body[1], want) != 1 {
 			t.Errorf("the budget does not count %s exactly once: %q", want, body[1])
 		}
@@ -97,7 +99,7 @@ func TestTheShutdownBudgetIsTheSumOfItsSteps(t *testing.T) {
 	if strings.Contains(body[1], "presenceShutdown") {
 		t.Error("the budget counts a step this project does not register")
 	}
-	if !strings.Contains(src, "For this project that is 35s:") {
+	if !strings.Contains(src, "For this project that is 40s:") {
 		t.Errorf("the stated total is not the one the body sums:\n%s", src)
 	}
 }

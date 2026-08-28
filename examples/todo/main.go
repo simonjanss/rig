@@ -50,21 +50,16 @@ var migrations embed.FS
 const localDSN = "postgres://rig:rig@localhost:55440/rig?sslmode=disable"
 
 func main() {
-	serve.Main(serve.Config{
+	api.Main(serve.Config{
 		DatabaseURL: cmp.Or(os.Getenv("DATABASE_URL"), localDSN),
 		Addr:        cmp.Or(os.Getenv("ADDR"), "127.0.0.1:8080"),
 
-		// Two probes, two questions. Liveness asks whether to restart this
+		// Two probes, two questions, and neither is written here: api.Main
+		// settles /livez and /readyz. Liveness asks whether to restart this
 		// process; readiness asks whether to send it work. One check for both
 		// means either a wedged process nobody restarts, or the whole fleet
 		// restarted because the database was slow.
-		LivenessPath:  "/livez",
-		ReadinessPath: "/readyz",
 
-		// The two ends, both stated rather than worked out from the parts.
-		// MaxShutdown is the number to copy into
-		// terminationGracePeriodSeconds; MaxStartup is the one a startup probe
-		// has to outlast. rig checks the parts fit inside each.
 		// What to say when the database is not there, which is the first thing
 		// to go wrong for somebody who has just cloned this. It is said within a
 		// second rather than at the end of the connect timeout.
@@ -72,18 +67,18 @@ func main() {
 			"or point $DATABASE_URL at one you already have",
 
 		MaxStartup: 30 * time.Second,
-		// Forty seconds. api.ShutdownBudget is thirty of it — fifteen for the
-		// notification engine, five for the live subscriptions, and ten left for
-		// the requests still in flight — and the other ten is this example's own
-		// two closers: five for the recorder and five for the store's cache
-		// subscription, both registered in the mount closure below.
+		// Forty seconds, and the ten that are not api.ShutdownBudget's thirty
+		// are why this one is still written out. rig's own steps are counted for
+		// us; the recorder and the store's cache subscription below are this
+		// example's own, five seconds each, and nothing generated can know about
+		// them.
 		//
-		// Written out rather than summed, because this is the field that leaves
-		// the program: it is what goes into terminationGracePeriodSeconds, and
-		// whoever writes that manifest should read it off here rather than run
-		// the binary. serve adds up what it was actually given before the server
-		// listens, so a number this arithmetic got wrong is a refusal to start
-		// rather than a truncated shutdown under load.
+		// It is also the field that leaves the program: it is what goes into
+		// terminationGracePeriodSeconds, and whoever writes that manifest should
+		// read it off here rather than run the binary. serve adds up what it was
+		// actually given before the server listens, so a number this arithmetic
+		// got wrong is a refusal to start rather than a truncated shutdown under
+		// load.
 		MaxShutdown: 40 * time.Second,
 
 		// `todo migrate` applies the schema and exits: a job before the
@@ -95,7 +90,7 @@ func main() {
 		// records of writes nobody is going to send again. Subcommands rather
 		// than goroutines, so each is a cron job rather than something racing
 		// itself in every replica.
-		Tasks: api.Tasks(map[string]serve.Task{
+		Tasks: map[string]serve.Task{
 			"migrate": migrate.Apply(migrations, migrate.Options{Log: os.Stdout}),
 			// The guarantee behind the inbox, for everything the in-process
 			// engine did not get to. It builds its own object graph because it
@@ -103,7 +98,7 @@ func main() {
 			// service, which is the honest cost of computing it late — and the
 			// reason this one is not api.Tasks's.
 			"dispatch-notifications": dispatchNotifications,
-		}),
+		},
 
 		// The server does not apply them. It refuses to start without them,
 		// which is what catches a deploy that got ahead of its migration job.
@@ -111,7 +106,7 @@ func main() {
 		// single instance, and rig/migrate's package documentation says what
 		// that costs when there is more than one.
 		Migrate: migrate.Require(migrations, migrate.Options{}),
-	}, func(_ context.Context, app *serve.App) (http.Handler, error) {
+	}, func(_ context.Context, app *serve.App) (api.Parts, error) {
 		// Everything the server is made of, in the order it comes to exist:
 		// the notifier before the service that reports to it, the service
 		// before the handler that routes to it.
@@ -173,8 +168,10 @@ func main() {
 		// No channels, deliberately. This example has no mail and no push, and
 		// the inbox works anyway — it is not a channel, which is the whole
 		// reason it cannot be turned off. examples/auth has the other half.
+		// Handed back as api.Parts.Engine rather than started here: api.Main
+		// starts it and registers both its shutdown steps, with the numbers the
+		// budget above counted for them.
 		engine := api.NewNotificationEngine(app.Pool, reg, nil)
-		api.StartNotificationEngine(app, engine)
 
 		mux := api.Register(api.Handlers{
 			Server: api.Server{
@@ -217,7 +214,7 @@ func main() {
 		// a curl transcript.
 		ui, err := web.New(svc, web.DemoClaims)
 		if err != nil {
-			return nil, err
+			return api.Parts{}, err
 		}
 		ui.Mount(mux)
 
@@ -232,7 +229,13 @@ func main() {
 		//
 		// rig answers /livez and /readyz outside whatever is returned here, so
 		// a probe every second is not a traced request.
-		return mux, nil
+		//
+		// No Shapes, and that is a decision rather than an omission: this table
+		// says `electric: enabled`, so the routes exist in internal/electric,
+		// but nothing here mounts them and there is no sync service in this
+		// example's `rig db up`. api.Main says so once at startup — which is the
+		// point of the field being there to leave empty.
+		return api.Parts{Handler: mux, Engine: engine}, nil
 	})
 }
 

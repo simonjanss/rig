@@ -118,23 +118,25 @@ last of those has a collector.
 
 ### Wiring it up
 
-Two lines in your `main`, and the generated `api.NewProcess()` is all of it:
+No lines in your `main`. Turning the block on is what makes `api.Main` build a
+process at all:
 
 ```go
-process, err := api.NewProcess()
-if err != nil {
-    slog.Error("cannot set this process up", "error", err)
-    os.Exit(1)
-}
-
-serve.Main(process.Configure(serve.Config{
+api.Main(serve.Config{
     ...
-}), func(ctx context.Context, app *serve.App) (http.Handler, error) {
-    process.Attach(app)
-
+}, func(ctx context.Context, app *serve.App) (api.Parts, error) {
     repos := store.New(app.Pool, store.Config{})
     ...
 ```
+
+Turning `monitoring:` on as well adds a third argument, `page *observe.Page`,
+which is [the page](#the-monitoring-page) for an application with somewhere to
+link to it from.
+
+`api.NewProcess`, `Process.Configure` and `Process.Attach` are all still
+exported — `api.Main` is the three of them in the order they have to happen in,
+and a project keeping the sequence itself calls them directly. What follows is
+what each does, because it is what `api.Main` is doing on your behalf.
 
 `NewProcess` installs the provider from `api.Tracing()`, which carries the
 service name out of `rig.yaml`. `Configure` sets `serve.Config.Pool` to
@@ -244,9 +246,9 @@ process, on a listener that is not your API's. See
 [its own port](#its-own-port) for why that is not a route, and
 [restricting it](#restricting-it-to-an-address) for what to put in it.
 
-**Serving it is nothing extra.** The same `api.NewProcess()` that installed the
-provider builds the page over it, and `process.Configure` fills in the two
-`serve.Config` fields that serve it:
+**Serving it is nothing extra.** The same process that installed the provider
+builds the page over it, and `Configure` fills in the two `serve.Config` fields
+that serve it:
 
 ```go
 serve.Config{
@@ -259,12 +261,16 @@ The page hangs off the provider because it reads the file that provider is
 writing: naming the path twice is one place too many to get it wrong, and that
 is why the constructor that installs the one builds the other. Both fields are
 zero when the page is unarmed, so a laptop with no password set opens no second
-port rather than one that refuses — and `process.Attach` says which half is not
+port rather than one that refuses — and `Attach` says which half is not
 armed, and why, on the logger that writes to the file the page would have read.
 
-`process.Page()` is there for an application with somewhere else to name the
-page: a link to it from a page of its own, most likely, since the page is on an
-origin of its own and a relative href does not reach it.
+The `page` argument your wiring is handed is that page, for an application with
+somewhere else to name it: a link to it from a page of its own, most likely,
+since the page is on an origin of its own and a relative href does not reach it.
+It is nil when there is no process to take one from — a task, or a `Mount` built
+without one — and `Process.Page()` is the accessor behind it. A page nobody armed
+is *not* nil: it is a real page whose `Addr()` is empty, so that, or `Unarmed()`,
+is what says whether there is anywhere to send somebody.
 
 **A `Tasks:` entry never reaches the mount function.** `serve.Main` runs the
 task and returns, so `Attach` is not the only path out of the process:
@@ -276,8 +282,8 @@ subcommand, a task that failed, a boot that failed. A `defer process.Close()` in
 somebody actually wants. The server path runs both halves and finds the second
 already done, because `Provider.Shutdown` is idempotent.
 
-`api.Monitoring()` is still exported, for the one thing `NewProcess` does not
-let you choose — a log sink at a level of its own:
+`api.Monitoring()` is still exported too, for the one thing `NewProcess` does
+not let you choose — a log sink at a level of its own:
 
 ```go
 cfg := api.Monitoring()
@@ -409,13 +415,13 @@ neither is a file rig can open.
 
 So `observe` has a sink — and `api.NewProcess()` is what opens it, tees its
 handler into the logger `Configure` hands the server, and gives the same object
-to the page. That is the reason the three are one call: the sink has to exist
-before the logger built out of it, and the page has to read the sink the logger
-is writing rather than a second one opened from the same path.
+to the page. That is the reason the three are one call, and the reason `api.Main`
+makes it for you: the sink has to exist before the logger built out of it, and
+the page has to read the sink the logger is writing rather than a second one
+opened from the same path.
 
 ```go
-process, err := api.NewProcess()
-// ... process.Configure(serve.Config{...}) sets:
+// api.Main does this, then Configure(serve.Config{...}), which sets:
 //     Logger:      stderr and the file, both, each at its own level
 //     Monitor:     the page, on its own port
 //     MonitorAddr: zero with it when the page is unarmed
@@ -426,8 +432,9 @@ set to; the file keeps debug — which is where rig's request line is, so the pa
 has requests to list without the process printing one per request to a terminal
 nobody is watching.
 
-For an application with a handler of its own, set `Logger` yourself and tee
-`process.LogHandler()` into it — otherwise the page has nothing to list:
+For an application with a handler of its own, build the process yourself, set
+`Logger`, and tee `Process.LogHandler()` into it — otherwise the page has
+nothing to list:
 
 ```go
 Logger: slog.New(observe.Tee(myHandler, process.LogHandler()))
@@ -438,7 +445,7 @@ RIG_LOG_FILE=/var/log/myapp/rig.jsonl
 ```
 
 **With nothing in it nothing is written**, the same as `$RIG_TRACE_FILE`, and
-the page says so instead of showing an empty list. `process.Attach` already
+the page says so instead of showing an empty list. `Attach` already
 writes that line at startup, with the reason `logs.Unarmed()` gave.
 
 It is the same store as the spans and makes the same promise: one JSON object

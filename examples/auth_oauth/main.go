@@ -92,36 +92,33 @@ const (
 )
 
 func main() {
-	serve.Main(serve.Config{
+	api.Main(serve.Config{
 		DatabaseURL: cmp.Or(os.Getenv("DATABASE_URL"), localDSN),
 		Addr:        cmp.Or(os.Getenv("ADDR"), "127.0.0.1:8083"),
-
-		LivenessPath:  "/livez",
-		ReadinessPath: "/readyz",
 
 		Hint: "run `rig db up` to start a local Postgres for this project, " +
 			"then open http://acme.localhost:8083",
 
 		MaxStartup: 30 * time.Second,
-		// Stated rather than api.ShutdownBudget()'s, because there is no budget
-		// to state: this project has none of `tracing:`, `notifications:` or
-		// `presence:`, so rig registers no closer of its own and generates no
-		// ShutdownBudget to add to. Twenty is serve's own default, written out
-		// so it is a number somebody chose.
-		MaxShutdown: 20 * time.Second,
+		// No MaxShutdown and no probe paths: api.Main settles all three. The
+		// budget is fifteen seconds — five for the auth cache's invalidation
+		// channel, which is the one closer this project's configuration
+		// registers, and ten left for the requests still in flight — and
+		// api.ShutdownBudget's documentation states it in words for whoever
+		// writes terminationGracePeriodSeconds.
 
-		Tasks: api.Tasks(map[string]serve.Task{
+		Tasks: map[string]serve.Task{
 			"migrate": migrate.ApplyAll(migrationSources(), migrate.Options{Log: os.Stdout}),
 			// Two tenants and one person with a password, so both interesting
 			// sign-ins are reachable: a stranger joining, and an existing account
 			// being linked.
 			"seed": seed,
-			// prune-idempotency is api.Tasks's: records of writes nobody is going
-			// to send again, as a cron entry rather than a goroutine — one thing
-			// running rather than one per replica.
-		}),
+			// prune-idempotency is merged in by api.Main: records of writes
+			// nobody is going to send again, as a cron entry rather than a
+			// goroutine — one thing running rather than one per replica.
+		},
 		Migrate: migrate.RequireAll(migrationSources(), migrate.Options{}),
-	}, func(ctx context.Context, app *serve.App) (http.Handler, error) {
+	}, func(ctx context.Context, app *serve.App) (api.Parts, error) {
 		return newAPI(ctx, app.Pool, baseURL(), app.Logger)
 	})
 }
@@ -131,14 +128,14 @@ func main() {
 // base is the origin a provider redirects back to. It is a parameter rather than
 // read from the environment in here because a test serves on an ephemeral port and
 // has to be able to say so.
-func newAPI(ctx context.Context, pool *pgxpool.Pool, base string, log *slog.Logger) (http.Handler, error) {
+func newAPI(ctx context.Context, pool *pgxpool.Pool, base string, log *slog.Logger) (api.Parts, error) {
 	repos := store.New(pool, store.Config{})
 
 	// The origin this run answers at. It reaches the generated wiring through the
 	// environment, because that is what rig.yaml says reads it: `base_url_env`.
 	// One place decides, and a test on an ephemeral port can still say where it is.
 	if err := os.Setenv("BASE_URL", base); err != nil {
-		return nil, err
+		return api.Parts{}, err
 	}
 
 	// Every address this application answers at: one per tenant. Two different
@@ -156,7 +153,7 @@ func newAPI(ctx context.Context, pool *pgxpool.Pool, base string, log *slog.Logg
 	// the address is verified.
 	live, err := api.ConfiguredProviders(api.OAuthHooks{})
 	if err != nil {
-		return nil, err
+		return api.Parts{}, err
 	}
 	var (
 		demo  *idp.Server
@@ -223,7 +220,7 @@ func newAPI(ctx context.Context, pool *pgxpool.Pool, base string, log *slog.Logg
 		},
 	})
 	if err != nil {
-		return nil, err
+		return api.Parts{}, err
 	}
 
 	mux := api.Register(api.Handlers{
@@ -250,7 +247,12 @@ func newAPI(ctx context.Context, pool *pgxpool.Pool, base string, log *slog.Logg
 	page := &pages{pool: pool, api: mux, providers: front.Providers(), demo: demo != nil}
 	page.Mount(mux)
 
-	return mux, nil
+	// Auth is the field this example did not have before there was a struct to
+	// put it in, and its absence was the exact shape of omission that motivated
+	// one: `cache:` is off here, so front.Close returns at once and forgetting
+	// it cost nothing — until the day somebody turned the cache on, by which
+	// time nobody was reading this function.
+	return api.Parts{Handler: mux, Auth: front}, nil
 }
 
 // baseURL is this application's own origin.
