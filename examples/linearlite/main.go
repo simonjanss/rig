@@ -44,11 +44,12 @@
 //
 // The rest of the process is generated from the blocks that describe it. The
 // log sink, the tracing provider and the monitoring page are api.NewProcess,
-// out of `tracing:` and `monitoring:`; the shutdown budget is
-// api.ShutdownBudget, out of the closers `tracing:`, `notifications:` and
-// `presence:` between them register; the housekeeping subcommands are
-// api.Tasks, out of `files:` and `presence:`. None of those numbers is written
-// down twice, which is the whole reason they are not written down here.
+// out of `tracing:` and `monitoring:`; the four steps a shutdown has to hold are
+// api.ShutdownBudget, out of the closers `tracing:`, `notifications:`,
+// `presence:` and the shapes between them register; the housekeeping subcommands
+// are api.Tasks, out of `files:` and `presence:`. None of those numbers is
+// written down twice, which is the whole reason they are not written down here.
+// MaxShutdown is the deliberate exception, and says why where it is set.
 package main
 
 import (
@@ -120,13 +121,12 @@ func main() {
 		slog.Error("cannot set this process up", "error", err)
 		os.Exit(1)
 	}
-	// The flush, here as well as in the CloseWithin that Attach registers below,
-	// because a provider built out here is reached by both ways out of this
-	// process. A `Tasks:` entry — `migrate`, `seed`, the cron ones — never
-	// reaches the mount closure: serve.Main runs the task and returns. Shutdown
-	// is idempotent, so the server path running both finds nothing to do twice.
-	defer process.Close()
-
+	// No `defer process.Close()`, and that is the fix rather than the omission
+	// it looks like. Configure sets it as serve.Config.OnExit, so serve.Main runs
+	// it on every way out — including the three that end in os.Exit, where a
+	// deferred call runs not at all. A `migrate` that failed at three in the
+	// morning is exactly the run whose spans somebody wants, and it was the run
+	// that used to drop them.
 	serve.Main(process.Configure(serve.Config{
 		DatabaseURL: cmp.Or(os.Getenv("DATABASE_URL"), localDSN),
 		Addr:        cmp.Or(os.Getenv("ADDR"), "127.0.0.1:8084"),
@@ -138,15 +138,30 @@ func main() {
 			"or point $DATABASE_URL at a database you already have",
 
 		MaxStartup: 30 * time.Second,
-		// Thirty-five seconds, and not written here as one: the three closers
-		// rig registers declare twenty-five between them — fifteen for the
-		// notification engine, five for a trace flush, five for the presence
-		// sweeper — and ten is what is left for the requests still in flight.
-		// This example registers no closer of its own, so the generated budget
-		// is the whole of it. It is also the number to copy into Kubernetes'
-		// terminationGracePeriodSeconds, and api.ShutdownBudget's documentation
-		// states it in words for somebody reading a manifest rather than this.
-		MaxShutdown: api.ShutdownBudget(),
+		// Two seconds of still serving after readiness turns false, before
+		// anything stops. Not padding: taking an instance out of a load balancer
+		// is not instant — the probe has to fail, and the change has to
+		// propagate — and requests sent during that window arrive at a server
+		// that has already stopped accepting them. It comes out of MaxShutdown,
+		// which is why it is stated beside it.
+		DrainDelay: 2 * time.Second,
+		// Written out, because this is the number that goes into Kubernetes'
+		// terminationGracePeriodSeconds and whoever writes that manifest should
+		// be able to read it off this struct rather than run the binary to
+		// learn it.
+		//
+		// Where it comes from: api.ShutdownBudget() is forty — the four steps
+		// rig registers declare thirty between them, and ten is left for the
+		// requests still in flight — plus the five the auth closer below takes
+		// and the two seconds of drain delay above. Its documentation states
+		// the breakdown in words.
+		//
+		// A literal rather than that sum, and it is not a number waiting to
+		// drift: serve.App adds up every step actually registered, before the
+		// server listens, and refuses a budget that cannot hold them with the
+		// parts named. So a stale number here is a process that will not start
+		// and says why, which is the one place a wrong number is safe.
+		MaxShutdown: 47 * time.Second,
 
 		Tasks: api.Tasks(map[string]serve.Task{
 			"migrate": migrate.ApplyAll(migrationSources(), migrate.Options{Log: os.Stdout}),
@@ -181,15 +196,33 @@ func main() {
 		// so two replicas sweeping at once agree and the loser deletes nothing.
 		api.StartPresenceSweeper(srv)
 
-		mux, engine, err := app.New(ctx, srv.Pool, srv.Logger, process.Page())
+		parts, err := app.New(ctx, srv.Pool, srv.Logger, process.Page())
 		if err != nil {
 			return nil, err
 		}
 
 		// The engine turns a committed notification into inbox lines within
 		// milliseconds; dispatch-notifications above is the guarantee behind it.
-		api.StartNotificationEngine(srv, engine)
+		api.StartNotificationEngine(srv, parts.Engine)
 
-		return mux, nil
+		// The live subscriptions, let go at the start of the shutdown rather
+		// than waited for at the end of it. Every open tab is holding a poll
+		// this server is deliberately not answering yet — an in-flight request
+		// as far as http.Server.Shutdown is concerned, and one nothing else can
+		// end, since a poll is never late and Shutdown does not cancel a
+		// request's context. Without this line one open board is a shutdown that
+		// spends its whole budget waiting for the sync service to have news, and
+		// the three steps after it each find a deadline that has already passed.
+		api.AttachShapes(srv, parts.Shapes)
+
+		// The auth package's invalidation channel, which is a connection and a
+		// goroutine of its own. This example configures no auth cache, so today
+		// this returns at once — it is here because it is the line rig's own
+		// documentation says to write, and an example that skipped it would be
+		// teaching the omission that costs a connection the day a cache is
+		// turned on.
+		srv.CloseWithin("auth", 5*time.Second, parts.Auth.Close)
+
+		return parts.Handler, nil
 	})
 }

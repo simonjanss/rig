@@ -118,7 +118,7 @@ last of those has a collector.
 
 ### Wiring it up
 
-Three lines in your `main`, and the generated `api.NewProcess()` is all of it:
+Two lines in your `main`, and the generated `api.NewProcess()` is all of it:
 
 ```go
 process, err := api.NewProcess()
@@ -126,7 +126,6 @@ if err != nil {
     slog.Error("cannot set this process up", "error", err)
     os.Exit(1)
 }
-defer process.Close()
 
 serve.Main(process.Configure(serve.Config{
     ...
@@ -142,10 +141,11 @@ service name out of `rig.yaml`. `Configure` sets `serve.Config.Pool` to
 `observe.Pool` — a span per statement, from the connection, so it sees every
 query including the ones your hooks and tasks run — and `Attach` registers the
 flush with a limit of its own, because a flush to a collector that is not
-answering must not spend the whole shutdown budget. `Close` is the same flush
-for the other way out: a `Tasks:` entry never reaches the mount closure, so a
-cron run would otherwise drop everything it buffered. `Provider.Shutdown` is
-idempotent, so the server path running both halves costs nothing.
+answering must not spend the whole shutdown budget. `Configure` also sets
+`serve.Config.OnExit` to `process.Close`, which is the same flush for every other
+way out: a `Tasks:` entry never reaches the mount closure, and the three paths
+that end in `os.Exit` reach no `defer` at all. `Provider.Shutdown` is idempotent,
+so the server path running both halves costs nothing.
 
 `store.Config` needs no `Tracer`: the generated `store.New` settles a nil one to
 `observe.Tracer()`, which is the value the provider installed. A task that never
@@ -268,9 +268,13 @@ origin of its own and a relative href does not reach it.
 
 **A `Tasks:` entry never reaches the mount function.** `serve.Main` runs the
 task and returns, so `Attach` is not the only path out of the process:
-`process.Close()`, deferred in `main`, is the flush a cron run reaches. The
-server path runs both halves and finds the second already done, because
-`Provider.Shutdown` is idempotent.
+`process.Close()` is the flush a cron run reaches. You do not write it —
+`process.Configure` sets it as `serve.Config.OnExit`, and `serve.Main` runs it on
+every way out. That includes the three that end in `os.Exit`: an unknown
+subcommand, a task that failed, a boot that failed. A `defer process.Close()` in
+`main` would have run on none of them, and those are the runs whose spans
+somebody actually wants. The server path runs both halves and finds the second
+already done, because `Provider.Shutdown` is idempotent.
 
 `api.Monitoring()` is still exported, for the one thing `NewProcess` does not
 let you choose — a log sink at a level of its own:

@@ -67,14 +67,18 @@ func newServer(t *testing.T) *server {
 	// monitoring page: mounting one would need a password in the environment
 	// and a span file to read, and what it serves is covered on its own in
 	// monitor_test.go without a database.
-	handler, engine, err := app.New(ctx, pool, slog.Default(), nil)
+	parts, err := app.New(ctx, pool, slog.Default(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The shape proxy holds connections to the sync service and a poll may be
+	// open when a test ends. Draining it is what a shutdown does, and doing it
+	// here is what keeps one test's subscription out of the next one.
+	t.Cleanup(func() { _ = parts.Shapes.Drain(context.Background()) })
 
-	srv := httptest.NewServer(handler)
+	srv := httptest.NewServer(parts.Handler)
 	t.Cleanup(srv.Close)
-	return &server{pool: pool, http: srv, engine: engine}
+	return &server{pool: pool, http: srv, engine: parts.Engine}
 }
 
 // dispatch runs one whole notification pass on this server's engine: resolve,

@@ -87,8 +87,9 @@ func TestTheShutdownBudgetIsTheSumOfItsSteps(t *testing.T) {
 		t.Fatalf("no ShutdownBudget to read:\n%s", src)
 	}
 
-	// 5s for the flush, 15s for the engine, 10s left over.
-	for _, want := range []string{"tracesShutdown", "notificationsShutdown", "shutdownHeadroom"} {
+	// 5s for the flush, 15s for the engine, 5s for the shapes this fixture
+	// syncs live, 10s left over.
+	for _, want := range []string{"tracesShutdown", "notificationsShutdown", "shapesShutdown", "shutdownHeadroom"} {
 		if strings.Count(body[1], want) != 1 {
 			t.Errorf("the budget does not count %s exactly once: %q", want, body[1])
 		}
@@ -96,7 +97,7 @@ func TestTheShutdownBudgetIsTheSumOfItsSteps(t *testing.T) {
 	if strings.Contains(body[1], "presenceShutdown") {
 		t.Error("the budget counts a step this project does not register")
 	}
-	if !strings.Contains(src, "For this project that is 30s:") {
+	if !strings.Contains(src, "For this project that is 35s:") {
 		t.Errorf("the stated total is not the one the body sums:\n%s", src)
 	}
 }
@@ -111,12 +112,59 @@ func TestAProjectWithNoRigStepGetsNoBudget(t *testing.T) {
 	t.Parallel()
 
 	doc := gentest.LoadDocument(t, filepath.Join("testdata", fixture))
+	// The fixture syncs a table live, and that is now a step: what this test is
+	// about is a project with none at all, so the one it has is taken away.
+	for i := range doc.API.Resources {
+		doc.API.Resources[i].Electric = nil
+	}
 	src := artifactNamed(t, gentest.Run(t, servergo.New(), doc, opts()), "process.gen.go")
 
 	for _, absent := range []string{"ShutdownBudget", "shutdownHeadroom"} {
 		if strings.Contains(src, absent) {
 			t.Errorf("a project that registers no closer of rig's got %q", absent)
 		}
+	}
+}
+
+// A live subscription is drained rather than closed, and with the number the
+// budget counted for it.
+//
+// The order is the whole of it. A poll the server is still holding is an
+// in-flight request, so it has to end before the server stops accepting rather
+// than after — a close step would run once http.Server.Shutdown had already
+// spent the budget waiting for the very polls it was supposed to release.
+func TestTheShapeDrainIsRegisteredWithTheNumberTheBudgetCounts(t *testing.T) {
+	t.Parallel()
+
+	doc := gentest.LoadDocument(t, filepath.Join("testdata", fixture))
+	artifacts := gentest.Run(t, servergo.New(), doc, opts())
+
+	if want := `app.DrainWithin("shapes", shapesShutdown, proxy.Drain)`; !strings.Contains(
+		artifactNamed(t, artifacts, "electric.gen.go"), want) {
+		t.Errorf("the shape drain is not registered as %s", want)
+	}
+	if body := artifactNamed(t, artifacts, "process.gen.go"); !strings.Contains(body, "shapesShutdown = 5 * time.Second") {
+		t.Error("the constant the drain names is not the one the process file declares")
+	}
+}
+
+// A project with no table synced live gets no shape file and no shape constant.
+func TestNoLiveSyncMeansNoShapeShutdown(t *testing.T) {
+	t.Parallel()
+
+	doc := gentest.LoadDocument(t, filepath.Join("testdata", "notify.ir.json"))
+	for i := range doc.API.Resources {
+		doc.API.Resources[i].Electric = nil
+	}
+	artifacts := gentest.Run(t, servergo.New(), doc, opts())
+
+	for _, a := range artifacts {
+		if a.Path == "electric.gen.go" {
+			t.Error("a project that syncs nothing live got a shape shutdown to register")
+		}
+	}
+	if strings.Contains(artifactNamed(t, artifacts, "process.gen.go"), "shapesShutdown") {
+		t.Error("the budget counts a drain this project does not register")
 	}
 }
 

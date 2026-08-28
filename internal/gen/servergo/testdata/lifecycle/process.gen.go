@@ -5,6 +5,8 @@
 package api
 
 import (
+	"time"
+
 	"github.com/simonjanss/rig/runtime/serve"
 )
 
@@ -37,4 +39,59 @@ func Tasks(own map[string]serve.Task) map[string]serve.Task {
 		out[name] = task
 	}
 	return out
+}
+
+// How long each shutdown step rig registers may take.
+//
+// Each has a limit of its own rather than a share of the whole, because a step
+// that cannot finish must not be able to spend the budget the steps after it
+// will need. They are also what [ShutdownBudget] is made of, which is why they
+// are constants rather than literals at the call sites: the number a step is
+// registered with and the number the budget counts for it are one number.
+const (
+	// The live subscriptions.
+	shapesShutdown = 5 * time.Second
+
+	// What is left for the requests still in flight once the steps above have had
+	// theirs.
+	//
+	// serve refuses a budget its parts do not fit inside, and warns about one that
+	// is exactly spoken for. That warning is the failure this exists to prevent: a
+	// shutdown that finishes rig's housekeeping and drops whatever was being
+	// answered is a rolling deploy with dropped requests.
+	shutdownHeadroom = 10 * time.Second
+)
+
+// ShutdownBudget is what this project's own shutdown needs of
+// [github.com/simonjanss/rig/runtime/serve.Config.MaxShutdown].
+//
+// For this project that is 15s: 5s for the live subscriptions and 10s left
+// over.
+//
+// **Read it, then write it down.** This is a number to look up once, not a
+// call to leave in a serve.Config:
+//
+//	MaxShutdown: 15 * time.Second
+//
+// MaxShutdown is the one field in that struct that leaves the program — it
+// is what belongs in Kubernetes' terminationGracePeriodSeconds — and whoever
+// writes the manifest should be able to read it off the struct rather than run
+// the binary or add up a sum spread over three files. A project with closers
+// of its own adds theirs to the total above and writes that:
+//
+//	MaxShutdown: 20 * time.Second // 15s here, plus 5s for a closer of my own
+//
+// A literal is not a number waiting to drift. serve.App adds up every step
+// actually registered, before the server listens, and refuses a budget that
+// cannot hold them with the parts named — so a number left stale by a new
+// block is a process that will not start and says which parts no longer fit. A
+// wrong number that fails loudly at boot is worth more than a right one nobody
+// can read.
+//
+// Every step this project's configuration registers is counted here, including
+// one in a process that never starts it — a `Tasks:` entry never reaches the
+// mount closure, and serve.Config is built before it either way. It is a
+// maximum, so counting a step that is not there costs nothing but headroom.
+func ShutdownBudget() time.Duration {
+	return shapesShutdown + shutdownHeadroom
 }

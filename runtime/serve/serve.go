@@ -241,6 +241,20 @@ type Config struct {
 	// test waiting for one port cannot be handed the other and block until it
 	// times out.
 	OnMonitorListen func(net.Addr)
+
+	// OnExit runs last, on every way out of Main, including the ones that exit
+	// non-zero.
+	//
+	// It exists because `defer` does not survive os.Exit, and Main exits: a
+	// flush written as a deferred call in a main function runs when the server
+	// stopped cleanly and is skipped on the three paths where something went
+	// wrong — a task that failed, a boot that failed, a subcommand that does
+	// not exist. Those are the runs whose spans and logs somebody actually
+	// wants.
+	//
+	// Only Main calls it. Run returns, so a caller using Run directly still has
+	// its own defers.
+	OnExit func()
 }
 
 // Main runs a server until it is asked to stop, then exits.
@@ -252,19 +266,47 @@ func Main(cfg Config, mount Mount) {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	// The first signal starts the shutdown; the second one should end it.
+	//
+	// Until stop is called the handler is still installed, so a second SIGTERM
+	// goes into a channel nobody is reading and does nothing at all. That is
+	// the wrong answer for the case it arrives in: somebody watching a drain
+	// that is not progressing, whose only remaining move would otherwise be to
+	// find the pid and send SIGKILL. Giving the signal back to the default
+	// disposition here means the second one is the one that kills.
+	go func() {
+		<-ctx.Done()
+		stop()
+	}()
+
+	// Every exit below goes through this, because a deferred call would not:
+	// os.Exit runs no defers, and the paths that exit are the ones worth having
+	// a trace of.
+	exit := func(code int) {
+		if cfg.OnExit != nil {
+			cfg.OnExit()
+		}
+		stop()
+		os.Exit(code)
+	}
+	done := func() {
+		if cfg.OnExit != nil {
+			cfg.OnExit()
+		}
+	}
+
 	name, err := taskName(os.Args[1:], cfg.Tasks)
 	if err != nil {
 		logger(cfg).ErrorContext(ctx, "cannot run that", "error", err)
-		stop()
-		os.Exit(2)
+		exit(2)
 	}
 
 	if name != "" {
 		if err := Once(ctx, cfg, cfg.Tasks[name]); err != nil {
 			logger(cfg).ErrorContext(ctx, name+" failed", "error", err)
-			stop()
-			os.Exit(1)
+			exit(1)
 		}
+		done()
 		return
 	}
 
@@ -275,13 +317,14 @@ func Main(cfg Config, mount Mount) {
 		// that the process crashed.
 		if Unclean(err) {
 			logger(cfg).ErrorContext(ctx, "stopped, but not cleanly")
+			done()
 			return
 		}
 
 		logger(cfg).ErrorContext(ctx, "server stopped", "error", err)
-		stop()
-		os.Exit(1)
+		exit(1)
 	}
+	done()
 }
 
 // taskName picks the task the arguments ask for, if they ask for one.
@@ -496,8 +539,24 @@ func Run(ctx context.Context, cfg Config, mount Mount) (err error) {
 		}
 	}
 
-	if err := srv.Shutdown(stopping); err != nil {
-		return &ShutdownError{Err: errors.Join(drained, fmt.Errorf("the server would not stop: %w", err))}
+	// The requests in flight get what is left once the teardown has been set
+	// aside, rather than the whole budget.
+	//
+	// checkShutdown has already said this is what the leftover is for. Without a
+	// deadline of its own here it was only a description: one handler that will
+	// not return — a long poll, a client that stopped reading — spends the whole
+	// of MaxShutdown, and then every step registered with Close runs against a
+	// deadline that has already passed and reports having given up waiting. The
+	// worst of those is a write. So the server is cut short instead, which loses
+	// the responses that were never going to arrive rather than the work that
+	// was.
+	inflight, stopServing := context.WithDeadline(stopping, serveUntil(app))
+	defer stopServing()
+
+	if err := srv.Shutdown(inflight); err != nil {
+		return &ShutdownError{Err: errors.Join(drained, fmt.Errorf(
+			"the server would not stop within the %s left for requests in flight: %w",
+			cfg.MaxShutdown-app.reserved(), err))}
 	}
 	// Everything registered with App.Close runs from the deferred teardown,
 	// after this, and before the pool closes.
@@ -517,6 +576,22 @@ func Run(ctx context.Context, cfg Config, mount Mount) (err error) {
 // this listener is stopped after all of it precisely so that the drain can be
 // watched while it happens.
 const monitorGrace = 2 * time.Second
+
+// serveUntil is when the server has to stop answering so that the teardown
+// still fits.
+//
+// Never in the past: a budget the steps have entirely spoken for is a warning
+// checkShutdown has already given, not a reason to shut down a server that is
+// still holding requests without letting http.Server look at them at all.
+// Shutdown with a deadline of now still closes the listeners and still returns
+// immediately for a server with nothing in flight.
+func serveUntil(app *App) time.Time {
+	deadline := app.until.Add(-app.reserved())
+	if now := time.Now(); deadline.Before(now) {
+		return now
+	}
+	return deadline
+}
 
 // serveMonitor opens the second listener and returns the function that closes
 // it, which does nothing when there is no second listener.

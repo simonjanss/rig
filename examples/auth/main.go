@@ -82,13 +82,18 @@ func main() {
 			"or point $DATABASE_URL at one you already have",
 
 		MaxStartup: 30 * time.Second,
-		// api.ShutdownBudget is twenty-five — fifteen for the notification
-		// engine, which is the one closer `notifications:` registers, and ten
-		// left for the requests still in flight — and the five added to it is
-		// this example's own: the cache listener behind `cache:`, closed in the
-		// mount closure below. Written as a sum rather than as thirty because
-		// only one of the two halves is this file's to know.
-		MaxShutdown: api.ShutdownBudget() + 5*time.Second,
+		// Thirty-five seconds. api.ShutdownBudget is thirty of it — fifteen for
+		// the notification engine, five for the live subscriptions, and ten left
+		// for the requests still in flight — and the other five is this
+		// example's own: the cache listener behind `cache:`, closed in the mount
+		// closure below.
+		//
+		// Written out rather than summed, because this is the field that leaves
+		// the program: it is what goes into terminationGracePeriodSeconds, and
+		// whoever writes that manifest should read it off here rather than run
+		// the binary. serve refuses to start on a budget the registered steps do
+		// not fit into, so a stale number fails loudly rather than quietly.
+		MaxShutdown: 35 * time.Second,
 
 		Tasks: api.Tasks(map[string]serve.Task{
 			"migrate": migrate.Apply(migrations, migrate.Options{Log: os.Stdout}),

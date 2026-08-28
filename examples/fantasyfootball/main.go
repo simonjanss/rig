@@ -56,11 +56,10 @@ func main() {
 		slog.Error("cannot set this process up", "error", err)
 		os.Exit(1)
 	}
-	// The flush, here as well as in the CloseWithin that Attach registers below,
-	// because a provider built out here is reached by both ways out of this
-	// process: a `Tasks:` entry never reaches the mount closure at all.
-	defer process.Close()
-
+	// No `defer process.Close()`: Configure sets it as serve.Config.OnExit, so
+	// serve.Main runs it on every way out — including the ones that end in
+	// os.Exit, where a deferred call would not run at all. A `Tasks:` entry
+	// never reaches the mount closure, and this is the flush it gets instead.
 	serve.Main(process.Configure(serve.Config{
 		DatabaseURL: cmp.Or(os.Getenv("DATABASE_URL"), localDSN),
 		Addr:        cmp.Or(os.Getenv("ADDR"), "127.0.0.1:8081"),
@@ -77,9 +76,12 @@ func main() {
 		MaxStartup: 30 * time.Second,
 		// Fifteen seconds: five for the trace flush, which is the one closer rig
 		// registers for this project, and ten left for the requests still in
-		// flight. It is also the number to copy into Kubernetes'
-		// terminationGracePeriodSeconds.
-		MaxShutdown: api.ShutdownBudget(),
+		// flight. That is api.ShutdownBudget, whose documentation breaks it
+		// down — written out here rather than called, because this is the number
+		// to copy into Kubernetes' terminationGracePeriodSeconds and it should
+		// be readable off this struct. serve refuses to start on a budget the
+		// registered steps do not fit into, so a stale number fails loudly.
+		MaxShutdown: 15 * time.Second,
 
 		Tasks: api.Tasks(map[string]serve.Task{
 			"migrate": migrate.Apply(migrations, migrate.Options{Log: os.Stdout}),

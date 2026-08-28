@@ -72,15 +72,19 @@ func main() {
 			"or point $DATABASE_URL at one you already have",
 
 		MaxStartup: 30 * time.Second,
-		// api.ShutdownBudget is twenty-five — fifteen for the notification
-		// engine, which is the one closer `notifications:` registers, and ten
-		// left for the requests still in flight — and the ten added to it is
-		// this example's own two: five for the recorder and five for the store's
-		// cache subscription. Both are registered in the mount closure below,
-		// and serve adds up what it was actually given before the server
-		// listens, so a budget this arithmetic got wrong is a refusal to start
+		// Forty seconds. api.ShutdownBudget is thirty of it — fifteen for the
+		// notification engine, five for the live subscriptions, and ten left for
+		// the requests still in flight — and the other ten is this example's own
+		// two closers: five for the recorder and five for the store's cache
+		// subscription, both registered in the mount closure below.
+		//
+		// Written out rather than summed, because this is the field that leaves
+		// the program: it is what goes into terminationGracePeriodSeconds, and
+		// whoever writes that manifest should read it off here rather than run
+		// the binary. serve adds up what it was actually given before the server
+		// listens, so a number this arithmetic got wrong is a refusal to start
 		// rather than a truncated shutdown under load.
-		MaxShutdown: api.ShutdownBudget() + 10*time.Second,
+		MaxShutdown: 40 * time.Second,
 
 		// `todo migrate` applies the schema and exits: a job before the
 		// rollout, so one process migrates and the replicas only serve.

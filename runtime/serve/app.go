@@ -208,6 +208,24 @@ func (a *App) declared(drainDelay time.Duration) (time.Duration, []string) {
 	return total, parts
 }
 
+// reserved is what the teardown will need once the server has stopped answering.
+//
+// It is the close half of [App.declared], separately, because the two halves are
+// spent at different times: the drain steps run before the server stops
+// accepting and are already over by the time this matters, and these run after
+// it. What is left between them is the requests in flight.
+//
+// A step with no limit of its own reserves nothing. That is the same rule
+// declared uses and it means the same thing here: such a step takes whatever
+// remains, so there is nothing to hold back on its behalf.
+func (a *App) reserved() time.Duration {
+	var total time.Duration
+	for _, s := range a.stop {
+		total += s.timeout
+	}
+	return total
+}
+
 // checkShutdown refuses a shutdown whose parts do not fit inside its whole.
 //
 // It runs before the server listens, because that is the only time the answer

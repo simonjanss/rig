@@ -19,6 +19,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/simonjanss/rig/auth"
 	"github.com/simonjanss/rig/auth/account"
 	"github.com/simonjanss/rig/examples/linearlite/internal/api"
 	genelectric "github.com/simonjanss/rig/examples/linearlite/internal/electric"
@@ -34,6 +35,33 @@ import (
 	"github.com/simonjanss/rig/runtime/electric"
 )
 
+// Parts is what New built, as far as the process around it has to care: the
+// routes to serve, and the three things whose lifetime is longer than a
+// request's.
+//
+// A struct rather than four return values because of what the last three are
+// for. Each is handed straight to a generated call in main that starts it or
+// registers its shutdown, and the day this example grows a fourth, adding a
+// field is a line rather than a signature every caller has to be edited for.
+type Parts struct {
+	// Handler is every route this server answers.
+	Handler *http.ServeMux
+
+	// Engine turns a committed notification into inbox lines. Started and
+	// drained by api.StartNotificationEngine.
+	Engine *notify.Engine
+
+	// Shapes is the live-sync proxy. Drained by api.AttachShapes, which is not
+	// optional here in the way the other two might look: a subscription is an
+	// in-flight request that nothing else can end.
+	Shapes *electric.Proxy
+
+	// Auth holds the invalidation channel for its own caches. Closing it costs a
+	// connection rather than correctness, which is exactly why it is easy to
+	// forget and worth having a field for.
+	Auth *auth.Auth
+}
+
 // New is everything this server is made of, as a function taking a pool so
 // the tasks and the tests can build exactly what ships.
 //
@@ -43,7 +71,7 @@ import (
 // Everything else is identical either way, which is the reason this is a
 // function rather than a block inside the mount closure: the audience for a
 // notification is a method on a service, so a job has to be able to build one.
-func New(ctx context.Context, pool *pgxpool.Pool, log *slog.Logger, page *observe.Page) (*http.ServeMux, *notify.Engine, error) {
+func New(ctx context.Context, pool *pgxpool.Pool, log *slog.Logger, page *observe.Page) (*Parts, error) {
 	// No Tracer: the generated store.New settles a nil one to observe.Tracer(),
 	// which is a package-level value the provider in main installed. A task that
 	// never called observe.Setup gets a no-op there and every query below runs
@@ -140,7 +168,7 @@ func New(ctx context.Context, pool *pgxpool.Pool, log *slog.Logger, page *observ
 		OnRegistered: autoInvite(),
 	})
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
 	mux := api.Register(api.Handlers{
@@ -215,7 +243,7 @@ func New(ctx context.Context, pool *pgxpool.Pool, log *slog.Logger, page *observ
 		},
 	})
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	// One scope, and nothing else. Surviving a sync outage is the proxy's DB
 	// field above rather than a line per shape here, which is most of what this
@@ -229,7 +257,7 @@ func New(ctx context.Context, pool *pgxpool.Pool, log *slog.Logger, page *observ
 	// the auth endpoints' own keys, because minting a personal API key is
 	// gated on one of them and this example's settings page does exactly that.
 	if err := authz.SyncPermissions(ctx, pool, api.PermissionKeys()); err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
 	// The demonstration's own routes: the outbox, what the tour can offer, and
@@ -246,7 +274,7 @@ func New(ctx context.Context, pool *pgxpool.Pool, log *slog.Logger, page *observ
 	// pnpm — can build and test this server without building the browser half.
 	mux.Handle("/", spaHandler(cmp.Or(os.Getenv("WEB_DIR"), "web/dist")))
 
-	return mux, engine, nil
+	return &Parts{Handler: mux, Engine: engine, Shapes: proxy, Auth: front}, nil
 }
 
 // autoInvite is what happens when a stranger signs themselves up: an account
@@ -307,14 +335,14 @@ func autoInvite() func(context.Context, *account.Service, account.Registered) er
 func DispatchNotifications(ctx context.Context, pool *pgxpool.Pool) error {
 	// No page: this is a cron entry, and its sends land in its own outbox —
 	// which is exactly what a separately deployed dispatcher has.
-	_, engine, err := New(ctx, pool, slog.Default(), nil)
+	parts, err := New(ctx, pool, slog.Default(), nil)
 	if err != nil {
 		return err
 	}
 	// The generated task rather than its steps written out again. It resolves,
 	// dispatches and prunes; this function used to do only the first, so the mail
 	// it was resolving was never actually sent from the cron path.
-	return api.NotificationDispatcher(engine, os.Stdout)(ctx, pool)
+	return api.NotificationDispatcher(parts.Engine, os.Stdout)(ctx, pool)
 }
 
 // accountService builds the account service on its own, for the seed: a

@@ -62,6 +62,8 @@ func Tasks(own map[string]serve.Task) map[string]serve.Task {
 const (
 	// The presence sweeper.
 	presenceShutdown = 5 * time.Second
+	// The live subscriptions.
+	shapesShutdown = 5 * time.Second
 
 	// What is left for the requests still in flight once the steps above have had
 	// theirs.
@@ -73,34 +75,36 @@ const (
 	shutdownHeadroom = 10 * time.Second
 )
 
-// ShutdownBudget is
-// [github.com/simonjanss/rig/runtime/serve.Config.MaxShutdown] for this
-// project.
+// ShutdownBudget is what this project's own shutdown needs of
+// [github.com/simonjanss/rig/runtime/serve.Config.MaxShutdown].
 //
-//	MaxShutdown: api.ShutdownBudget()
+// For this project that is 20s: 5s for the presence sweeper, 5s for the live
+// subscriptions and 10s left over.
 //
-// For this project that is 15s: 5s for the presence sweeper and 10s left over.
-// That is also the number that belongs in Kubernetes'
-// terminationGracePeriodSeconds, which is why it is stated here in words as
-// well as summed below — an operator reading a manifest should not have to
-// run the binary to learn it.
+// **Read it, then write it down.** This is a number to look up once, not a
+// call to leave in a serve.Config:
 //
-// A project that registers closers of its own adds them rather than adding all
-// of this up again:
+//	MaxShutdown: 20 * time.Second
 //
-//	MaxShutdown: api.ShutdownBudget() + 5*time.Second
+// MaxShutdown is the one field in that struct that leaves the program — it
+// is what belongs in Kubernetes' terminationGracePeriodSeconds — and whoever
+// writes the manifest should be able to read it off the struct rather than run
+// the binary or add up a sum spread over three files. A project with closers
+// of its own adds theirs to the total above and writes that:
 //
-// It is not set for you, and serve.Config.MaxShutdown says why: it is a stated
-// maximum rather than the sum of its parts, so that it can be read off and
-// copied. A field filled in silently is a number nobody can find.
+//	MaxShutdown: 25 * time.Second // 20s here, plus 5s for a closer of my own
 //
-// Every step this project's configuration registers is counted, including one
-// in a process that never starts it — a `Tasks:` entry never reaches the
+// A literal is not a number waiting to drift. serve.App adds up every step
+// actually registered, before the server listens, and refuses a budget that
+// cannot hold them with the parts named — so a number left stale by a new
+// block is a process that will not start and says which parts no longer fit. A
+// wrong number that fails loudly at boot is worth more than a right one nobody
+// can read.
+//
+// Every step this project's configuration registers is counted here, including
+// one in a process that never starts it — a `Tasks:` entry never reaches the
 // mount closure, and serve.Config is built before it either way. It is a
-// maximum, so counting a step that is not there costs nothing but headroom,
-// and serve.App is the backstop regardless: it adds up what was actually
-// registered, before the server listens, and refuses a budget that cannot hold
-// it with the parts named.
+// maximum, so counting a step that is not there costs nothing but headroom.
 func ShutdownBudget() time.Duration {
-	return presenceShutdown + shutdownHeadroom
+	return presenceShutdown + shapesShutdown + shutdownHeadroom
 }

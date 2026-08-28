@@ -114,11 +114,38 @@ database is behind; `migrate.Apply` migrates on the way up instead.
 nil means `slog.Default()` rather than silence — see
 [observability.md](observability.md).
 
-A project with `tracing:` on has three more lines here — `api.NewProcess()`, a
-`defer process.Close()`, and a `process.Attach(app)` in the mount function — and
+A project with `tracing:` on has two more lines here — `api.NewProcess()` and a
+`process.Attach(app)` in the mount function — and
 [observability.md](observability.md#wiring-it-up) has them in full. It also gets
-`api.ShutdownBudget()` for `MaxShutdown`, which adds up the closers rig
-registers so you do not have to.
+`api.ShutdownBudget()`, which adds up the closers rig registers so you do not
+have to — a number to read out of its documentation and write into
+`MaxShutdown`, not a call to leave in the `serve.Config`. `MaxShutdown` is the
+one field there that leaves the program, since it is what goes into
+`terminationGracePeriodSeconds`, and whoever writes that manifest should be able
+to read it off the struct.
+
+A literal is safe: `serve.App` sums every step actually registered before the
+server listens and refuses a budget that cannot hold them, naming the parts. A
+number left stale by a new block is a process that will not start and says why,
+rather than a shutdown that quietly truncates under load.
+
+**What stops, and in what order.** `MaxShutdown` covers the whole sequence:
+readiness turns false, `DrainDelay` gives a load balancer time to look away,
+`app.Drain` steps stop whatever fetches its own work, the server finishes the
+requests it has, and only then do the `app.Close` steps run and the pool shut.
+The steps that declared a timeout are reserved out of the budget, so a request
+that will not finish spends what is left over and not their share of it —
+`serve.App` adds the parts up before the server listens and refuses a
+`MaxShutdown` that cannot hold them.
+
+A project with live sync has one more line, because a subscription is a request
+the server is deliberately not answering yet and nothing else can end it:
+
+```go
+api.AttachShapes(app, proxy)
+```
+
+See [electric.md](electric.md) for what a drained proxy tells a subscriber.
 
 ## See also
 
