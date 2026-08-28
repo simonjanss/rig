@@ -23,18 +23,34 @@ const notifyModelImport = "github.com/simonjanss/rig/notify/notifymodel"
 // member to NotificationFilter, so that type is this project's and the
 // repository that renders its subqueries is too.
 //
+// rig_account is the obvious next candidate and is deliberately not here.
+// `auth.expose: [rig_account]` does not require `auth.enabled`, so a project may
+// read account rows without using rig's authentication at all — and an alias into
+// a package under the auth module would put argon2, OAuth and x/crypto in its
+// go.mod for the sake of a struct. Shipping that row needs a module of its own,
+// which is a decision rather than a side effect.
+//
 // Keyed by physical table name, which is the one thing a configuration file
 // cannot move.
-func shippedModel(table string) (importPath string, ok bool) {
+// The name is returned as well as the path, and that is not redundant: a
+// project may rename the resource its table projects to, and rig's own
+// configuration is only the default. The shipped package was compiled against
+// one spelling, so the alias has to name both sides — the project's on the left,
+// rig's on the right.
+func shippedModel(table string) (importPath, name string, ok bool) {
 	switch table {
-	case "rig_notification",
-		"rig_notification_recipient",
-		"rig_notification_device",
-		"rig_notification_setting",
-		"rig_notification_delivery":
-		return notifyModelImport, true
+	case "rig_notification":
+		return notifyModelImport, "Notification", true
+	case "rig_notification_recipient":
+		return notifyModelImport, "NotificationRecipient", true
+	case "rig_notification_device":
+		return notifyModelImport, "NotificationDevice", true
+	case "rig_notification_setting":
+		return notifyModelImport, "NotificationSetting", true
+	case "rig_notification_delivery":
+		return notifyModelImport, "NotificationDelivery", true
 	}
-	return "", false
+	return "", "", false
 }
 
 // shippedEnum is [shippedModel] for a Postgres enum type.
@@ -44,13 +60,16 @@ func shippedModel(table string) (importPath string, ok bool) {
 // Postgres type name is the key for the same reason the table name is: rig's
 // own configuration fixes the Go name, but the type is what the migration
 // created.
-func shippedEnum(pgType string) (importPath string, ok bool) {
+func shippedEnum(pgType string) (importPath, name string, ok bool) {
 	switch pgType {
-	case "rig_notification_state",
-		"rig_notification_channel",
-		"rig_notification_digest",
-		"rig_notification_delivery_state":
-		return notifyModelImport, true
+	case "rig_notification_state":
+		return notifyModelImport, "NotificationState", true
+	case "rig_notification_channel":
+		return notifyModelImport, "NotificationChannel", true
+	case "rig_notification_digest":
+		return notifyModelImport, "NotificationDigest", true
+	case "rig_notification_delivery_state":
+		return notifyModelImport, "NotificationDeliveryState", true
 	}
-	return "", false
+	return "", "", false
 }

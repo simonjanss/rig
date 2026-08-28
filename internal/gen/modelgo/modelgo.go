@@ -81,8 +81,8 @@ func (g *Generator) Generate(_ context.Context, doc *ir.Document, opts gen.Optio
 			art gen.Artifact
 			err error
 		)
-		if path, ok := shippedEnum(enum.PgType); ok {
-			art, err = e.enumAliasFile(enum, path)
+		if path, shipped, ok := shippedEnum(enum.PgType); ok {
+			art, err = e.enumAliasFile(enum, path, shipped)
 		} else {
 			art, err = e.enumFile(enum)
 		}
@@ -107,8 +107,8 @@ func (g *Generator) Generate(_ context.Context, doc *ir.Document, opts gen.Optio
 			return nil, err
 		}
 
-		if path, ok := shippedModel(res.Storage.Table); ok {
-			aliases, err := e.aliasFile(res, path)
+		if path, shipped, ok := shippedModel(res.Storage.Table); ok {
+			aliases, err := e.aliasFile(res, path, shipped)
 			if err != nil {
 				return nil, err
 			}
