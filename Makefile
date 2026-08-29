@@ -24,7 +24,12 @@ export RIG_DB_ISOLATE := $(CURDIR)
 # the examples are mostly generated output, and their Docker tests are already
 # run by `make examples`, which brings each example's own database up first.
 CORE_MODULES    := . ./runtime ./auth ./authmodel ./files ./notify ./observe ./presence ./migrate ./rigclient
-EXAMPLE_MODULES := ./examples/todo ./examples/fantasyfootball ./examples/auth ./examples/auth_oauth ./examples/linearlite ./examples/sdk
+
+# linearlite names api/ rather than its own directory: it is the one example
+# with two halves, so rig.yaml sits above a Go module in api/ and a front end in
+# web/. Getting this wrong is quiet rather than loud — see the note on the
+# `examples` target below.
+EXAMPLE_MODULES := ./examples/todo ./examples/fantasyfootball ./examples/auth ./examples/auth_oauth ./examples/linearlite/api ./examples/sdk
 
 # The core modules less the root: the ones a generated application imports, so
 # their godoc is the documentation for a Go surface somebody depends on rather
@@ -105,12 +110,24 @@ test-docker:
 ##           the fallback compiled into them: under RIG_DB_ISOLATE the port is
 ##           the kernel's to choose, so `rig db url` is the only thing that
 ##           knows it.
+##
+##           The package pattern is computed rather than fixed at `./...`,
+##           because linearlite keeps its go.mod in `api/` and a directory
+##           inside the workspace that is not a module root matches nothing.
+##           A hardcoded `./...` would half-fail there: `go build` prints
+##           "matched no packages" and **exits 0**, so only the `go test` after
+##           it stops the run — and it stops it complaining about the pattern
+##           rather than about the example. The silent one is EXAMPLE_MODULES
+##           above, which is why it names `linearlite/api`: the `each` loop's
+##           `go list` guard skips a module on a match of none rather than
+##           failing on it.
 examples: build
 	@for e in $(EXAMPLES); do \
 		(cd examples/$$e && ../../bin/rig check) || exit 1; \
+		pkgs=./...; [ -f examples/$$e/go.mod ] || pkgs=./api/...; \
 		(cd examples/$$e && DATABASE_URL=$$(../../bin/rig db url) \
-			$(GO) build ./... && DATABASE_URL=$$(../../bin/rig db url) \
-			$(GO) test -tags docker ./...) || exit 1; \
+			$(GO) build $$pkgs && DATABASE_URL=$$(../../bin/rig db url) \
+			$(GO) test -tags docker $$pkgs) || exit 1; \
 	done
 
 ## db-down: stop every example's database

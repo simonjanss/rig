@@ -272,7 +272,7 @@ engine := api.NewNotificationEngine(pool, reg, map[notify.Channel]notify.Sender{
 A channel with nothing registered has no delivery rows written for it at all,
 which is the right answer: the alternative is a table of copies nobody will take.
 
-`examples/linearlite/services/outbox` is a worked one — the shape a real sender
+`examples/linearlite/api/services/outbox` is a worked one — the shape a real sender
 has and none of the substance, recording what it was handed instead of sending
 it, so the example can show the mail beside the bell. It is the same type that
 implements `account.Notifier` for the auth package's links, which is worth

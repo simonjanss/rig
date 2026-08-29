@@ -2,11 +2,18 @@
 // table, with everything the other examples demonstrate one piece at a time
 // wired together.
 //
+// It is the one example with two halves, so it is laid out like one: this
+// module is api/, the React application is web/, and rig.yaml sits above both
+// because it is the one document that describes them together. Every path in
+// this comment is relative to that directory rather than to this one — web/ is
+// a sibling of the module, not a directory in it, which is why the front end is
+// served from ../web/dist and could not be embedded even if it should be.
+//
 // The pieces, and where each is decided:
 //
 //   - Accounts, tenants, sessions and API keys are the auth foundation —
 //     everything fixed is the `auth:` block in rig.yaml, and what is code is
-//     the Hooks literal in internal/app's New. The one hook the other
+//     the Hooks literal in api/internal/app's New. The one hook the other
 //     examples do not have is OnRegistered: a stranger who signs up is
 //     provisioned into the seeded tenant inside the registration transaction,
 //     so the picker they land in already lists an invitation.
@@ -14,20 +21,20 @@
 //     routes on this same mux, proxying the sync service `rig db up` runs;
 //     the browser subscribes through the generated TypeScript client in
 //     web/src/api and never talks to Electric directly.
-//   - A status change notifies the item's stakeholders — services/todo
+//   - A status change notifies the item's stakeholders — api/services/todo
 //     announces it inside the update's transaction, and the inbox reaches the
 //     browser over the rig_notification_recipient shape.
 //   - Who is here, and what they are looking at. `presence:` in rig.yaml is the
 //     whole configuration; a heartbeat is a write to rig_presence and the shape
 //     over it is how everybody else hears. web/src/presence owns the one
-//     heartbeat this application runs, and services/rig_presence is the scope
+//     heartbeat this application runs, and api/services/rig_presence is the scope
 //     stub that keeps the fan-out to a board rather than a tenant.
 //   - web/ is a React application served from web/dist by this binary, same
 //     origin as the API, which is what keeps CORS and cookie stories out of a
 //     demonstration that is not about them.
-//   - import/ is a separate program driving the generated Go client with a
+//   - api/import/ is a separate program driving the generated Go client with a
 //     personal API key, slowly, so the board visibly fills while it runs.
-//   - services/outbox is the mail this example would have sent: the links the
+//   - api/services/outbox is the mail this example would have sent: the links the
 //     auth package mints, and the email copy of an inbox line. rig ships no
 //     transport for either, so this is the shape a real one has with none of
 //     the substance, and /_demo/outbox is where the front end reads it.
@@ -36,8 +43,8 @@
 //     notification engine and the Electric proxy all running, which is the
 //     only arrangement where a trace tells you something you did not know.
 //
-// Every route above is mounted by internal/app's New, which is a package
-// rather than a function here so that the suite in integration/ builds exactly
+// Every route above is mounted by api/internal/app's New, which is a package
+// rather than a function here so that the suite in api/integration/ builds exactly
 // what ships. What is left in this file is the part of the process rig.yaml
 // does not already decide: the embedded migrations, the three addresses, and the
 // three tasks that are this application's own.
@@ -67,6 +74,11 @@ import (
 	"github.com/simonjanss/rig/runtime/serve"
 )
 
+// migrations/ is inside this module rather than beside rig.yaml, and this line
+// is the reason: go:embed reads relative to the package directory and cannot
+// reach outside it. rig.yaml's `migrations.dir` is what points `rig db up` at
+// the same files, so the binary and the CLI apply one set rather than two.
+//
 //go:embed migrations/*.sql
 var migrations embed.FS
 
@@ -76,7 +88,7 @@ var migrations embed.FS
 // `migrations.foundation: embedded` in rig.yaml is what makes this a list rather
 // than the one embed above: rig's dozen tables are carried by the modules that own
 // them — rig/auth, rig/files, rig/notify, rig/presence, rig/runtime — rather than
-// vendored into migrations/, and api.MigrationSources is the wiring `rig generate`
+// vendored into api/migrations/, and api.MigrationSources is the wiring `rig generate`
 // writes for that. It returns the module sets first and this example's last, which
 // is the order that matters: 00001_create_todo.sql references rig_tenant, and
 // 00003_roles_and_permissions.sql references rig_account.

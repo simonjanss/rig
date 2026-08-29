@@ -5,7 +5,17 @@ version: 1
 # time, together. Accounts and tenants (examples/auth), files and the inbox
 # (examples/todo), live sync wired all the way to a browser — a React front end
 # in web/ consuming the generated TypeScript client — and a Go import job in
-# import/ driving the generated Go client with a personal API key.
+# api/import/ driving the generated Go client with a personal API key.
+#
+# It is the one example with two halves, and it is laid out like one: api/ is
+# the server and everything Go, web/ is the browser, and this file sits above
+# both because it is the one document that describes them together. Every path
+# below is relative to it, which is what lets the Go module root be api/ rather
+# than here — the paths on the generators are the whole of that arrangement.
+#
+# The module path does not mention api/, deliberately: api/go.mod is where the
+# module begins, so api/internal/model is the package this names. A project that
+# would rather the two agree renames both, and nothing here objects.
 project:
   name: linearlite
   module: github.com/simonjanss/rig/examples/linearlite
@@ -143,22 +153,32 @@ database:
     enabled: true
     port: 55445
 
-# rig's own tables stay in the modules that own them, so migrations/ below holds
-# only this example's five migrations rather than the twelve hundred lines of DDL
-# nobody here wrote. examples/auth and examples/todo vendor theirs, which is the
-# default — between them all three readings are generated and run on every check.
+# rig's own tables stay in the modules that own them, so api/migrations/ below
+# holds only this example's five migrations rather than the twelve hundred lines
+# of DDL nobody here wrote. examples/auth and examples/todo vendor theirs, which
+# is the default — between them all three readings are generated and run on every
+# check.
 #
-# The cost is admitted rather than argued away: this directory no longer says what
+# The cost is admitted rather than argued away: that directory no longer says what
 # is in the database. What is in it is these five files plus whatever rig/auth,
 # rig/files, rig/notify, rig/presence and rig/runtime ship, and `rig db up`
-# applies their sets first. main.go names both halves in one list, which is the
-# only place the order is written down.
+# applies their sets first. api/main.go names both halves in one list, which is
+# the only place the order is written down.
+#
+# `dir:` is under api/ rather than beside this file, and that is not a taste
+# question. api/main.go carries `//go:embed migrations/*.sql`, and go:embed
+# cannot reach outside its own package's directory — so the SQL has to live
+# inside the Go module that ships it. Anything else would mean the binary and
+# `rig db up` reading two different sets.
 migrations:
+  dir: api/migrations
   foundation: embedded
 
 # Every table gets a configuration file. `rig sync` creates and updates them.
+# Under api/ with the service layer it describes, because a table's YAML and the
+# Go beside it are read together and neither is any use to web/.
 layout:
-  table_dir: services/{table}
+  table_dir: api/services/{table}
   config_file: "{table_dir}/{table}.yaml"
 
 # Convention rules. Each is off, warn, or error.
@@ -174,13 +194,19 @@ generators:
   # layers below import this one, so there is one definition of a row
   # rather than a copy on each side and a conversion between them.
   - name: model-go
-    out_dir: internal/model
+    out_dir: api/internal/model
     options:
       package: model
 
   # The repository interface and its pgx implementation.
+  #
+  # The import path below has no `api` in it while the directory above does, and
+  # that is the two-half layout showing through rather than a mistake: `out_dir`
+  # is a path from this file, `model_import` is a Go import path from the module
+  # root, and the module root is api/. Every `*_import` on the blocks that
+  # follow reads the same way.
   - name: persist-go
-    out_dir: internal/store
+    out_dir: api/internal/store
     options:
       package: store
       model_import: github.com/simonjanss/rig/examples/linearlite/internal/model
@@ -188,19 +214,19 @@ generators:
   # Wire types, the interface your service layer implements, and a
   # working default implementation of every operation.
   - name: service-go
-    out_dir: internal/api
+    out_dir: api/internal/api
     options:
       package: api
       model_import: github.com/simonjanss/rig/examples/linearlite/internal/model
       store_import: github.com/simonjanss/rig/examples/linearlite/internal/store
       api_import: github.com/simonjanss/rig/examples/linearlite/internal/api
       # Where your service layer goes. Written once, then yours.
-      stub_dir: services/{table}
+      stub_dir: api/services/{table}
 
   # Routing and handlers — and, because the auth block above is enabled, the
   # authentication wiring beside them.
   - name: server-go
-    out_dir: internal/api
+    out_dir: api/internal/api
     options:
       package: api
       model_import: github.com/simonjanss/rig/examples/linearlite/internal/model
@@ -212,12 +238,12 @@ generators:
       electric_url: http://localhost:55445
       # Where your extra shape scoping goes, beside the service layer for the
       # same table. Written once, then yours.
-      stub_dir: services/{table}
+      stub_dir: api/services/{table}
 
-  # A typed Go client for this API. import/ is the consumer: a batch job
+  # A typed Go client for this API. api/import/ is the consumer: a batch job
   # that signs in with a personal API key and creates a todo per CSV row.
   - name: go-client
-    out_dir: client
+    out_dir: api/client
     options:
       package: client
       # Where this example runs, so the import job can build a client

@@ -4,7 +4,16 @@
 
 # The repository's own build of the CLI, the same one every check uses. Built
 # on demand, so a fresh clone needs nothing installed but Go and Docker.
-RIG := ../../bin/rig
+#
+# Absolute, because the Go half is a directory down: every recipe that runs Go
+# runs it in api/, where a relative ../../ would point one level short. rig
+# itself does not care where it is run from — it walks up to the first rig.yaml,
+# which is this directory either way.
+RIG := $(CURDIR)/../../bin/rig
+
+# The Go module. rig.yaml stays here, above both halves; everything Go lives
+# under this, including the migrations, because api/main.go embeds them.
+API := $(CURDIR)/api
 
 # What the demonstration needs at run time and the build cannot know.
 #
@@ -18,8 +27,10 @@ RIG := ../../bin/rig
 # API's 8084 — because that is a decision worth being able to read off the file
 # rather than one buried in a Makefile.
 #
-# .run/ is throwaway and gitignored, like the database.
-RUN_DIR ?= .run
+# .run/ is throwaway and gitignored, like the database. Absolute for the same
+# reason RIG is: the process that writes into it starts in api/, and this is the
+# path the repository's .gitignore names.
+RUN_DIR ?= $(CURDIR)/.run
 # Twelve characters is rig's floor, and it refuses a shorter one at startup
 # rather than serving the page behind something guessable. Overridden by
 # anything already in the environment.
@@ -53,7 +64,7 @@ demo: up seed front
 	@echo "traces and logs at http://localhost:9084/_rig/monitor — its own port, password \"$${RIG_MONITOR_PASSWORD:-$(DEMO_MONITOR_PASSWORD)}\""
 	@echo "the pill in the header stops $(DEMO_SYNC_CONTAINER); the board keeps working without it"
 	@echo
-	@DATABASE_URL=$$($(RIG) db url) $(DEMO_ENV) go run .
+	@cd $(API) && DATABASE_URL=$$($(RIG) db url) $(DEMO_ENV) go run .
 
 ## up: start Postgres and the ElectricSQL sync service, apply migrations
 up:
@@ -62,7 +73,7 @@ up:
 
 ## seed: the demo tenant, two people, the roles, and a board's worth of items
 seed: up
-	@DATABASE_URL=$$($(RIG) db url) go run . seed
+	@cd $(API) && DATABASE_URL=$$($(RIG) db url) go run . seed
 
 ## front: build the React app the server serves from web/dist
 ##        Skipped with a note when pnpm is not installed: the server runs
@@ -77,7 +88,7 @@ front:
 ## run: just the server, when everything above is already in place
 run:
 	@mkdir -p $(RUN_DIR)
-	@DATABASE_URL=$$($(RIG) db url) $(DEMO_ENV) go run .
+	@cd $(API) && DATABASE_URL=$$($(RIG) db url) $(DEMO_ENV) go run .
 
 ## down: stop this example's containers (the data is throwaway)
 down:
