@@ -119,6 +119,11 @@ type Config struct {
 	// cut every subscription at the same interval. Cancellation comes from the
 	// request's context instead, so a client that goes away takes its upstream
 	// request with it.
+	//
+	// This is not the only clock a poll runs under, and it is the only one this
+	// field decides. The server's own WriteTimeout would cut the answer on the
+	// way out however patient this client was; [Proxy.Serve] replaces that one
+	// per request with [PollDeadline].
 	Client *http.Client
 
 	// Extra are query parameters added to every upstream request, for the
@@ -169,11 +174,12 @@ type Config struct {
 	// It exists so that a sync service which is running and not answering is
 	// treated as unreachable rather than waited on, which is the outage a
 	// [Shape.Fallback] is most useful for and the one a transport error does not
-	// catch. A live poll is deliberately left unbounded — see Client.
+	// catch. A live poll's wait is deliberately left unbounded — see Client;
+	// what bounds its answer on the way out is [PollDeadline].
 	//
 	// The wait only: once the answer has started arriving it is copied out
-	// whole, however long that takes. A large shape read over a slow connection
-	// is a transfer rather than an outage, and half of one is worse than either.
+	// whole, up to [PollDeadline]. A large shape read over a slow connection is
+	// a transfer rather than an outage, and half of one is worse than either.
 	//
 	// Zero is [DefaultInitialTimeout]. A negative value is no timeout, which is
 	// what a project whose sync service legitimately takes a while to begin
@@ -235,9 +241,11 @@ type Config struct {
 	BreakerCooldown time.Duration
 
 	// OnError is told about a failure that was answered rather than returned:
-	// the sync service being unreachable, and a Fallback that refused.
+	// the sync service being unreachable, and a Fallback that refused. And one
+	// that could not be answered at all, because the answer had already begun —
+	// a response cut short on its way out.
 	//
-	// It exists because those are the two failures a shape endpoint hides. The
+	// It exists because those are the failures a shape endpoint hides. The
 	// proxy writes a status and a short line, and without this the cause reaches
 	// nobody — there is no logger in this package, for the reason there is none
 	// anywhere else in runtime.
@@ -265,6 +273,26 @@ type Config struct {
 // DefaultInitialTimeout is how long a shape read from the beginning waits for
 // the sync service when [Config.InitialTimeout] says nothing.
 const DefaultInitialTimeout = 10 * time.Second
+
+// PollDeadline is how long [Proxy.Serve] gives itself to write a response,
+// replacing the one deadline the server set for every route at once.
+//
+// The other end of [DefaultInitialTimeout]: that one bounds the wait for an
+// answer, this one bounds the sending of it. A shape route needs both because
+// it is the one route in an application that is slow on purpose.
+//
+// Five minutes is past every legitimate case rather than tuned to one, which is
+// why it is a constant and not a [Config] field. Note what it does not bound: a
+// sync service that hangs forever leaves this handler blocked in the upstream
+// call, and no write deadline unblocks that — what ends such a poll is the
+// client hanging up or [Proxy.Drain]. So being generous here costs one stalled
+// reader's socket for as long as this, per request, never accumulating.
+//
+// Not "no deadline at all", though the wait above is deliberately unbounded. A
+// write blocked on a reader that stopped reading is unblocked by nothing else:
+// cancelling the request's context does not abort a write already in flight.
+// Finite and generous is the honest form of unbounded.
+const PollDeadline = 5 * time.Minute
 
 // DefaultMaxSnapshotRows is how large a fallback snapshot may be when
 // [Config.MaxSnapshotRows] says nothing.
@@ -496,6 +524,10 @@ func (p *Proxy) Serve(w http.ResponseWriter, r *http.Request, s Shape) {
 	// request and the caller's shape is untouched.
 	s = p.resolve(s)
 
+	// Second, and before any of the paths below can write: the server's
+	// WriteTimeout is not this route's to obey. See [extendWrite].
+	extendWrite(w)
+
 	// Before anything is built, and before the circuit below: whether this proxy
 	// is still in the business of serving this shape at all. Joining the group
 	// under the same lock that reads the flag is what makes Drain's wait mean
@@ -533,6 +565,11 @@ func (p *Proxy) Serve(w http.ResponseWriter, r *http.Request, s Shape) {
 	// would still be running while the body copied, and a body cut in half goes
 	// out under a 200 already written: a subscriber cannot tell it from a whole
 	// one, and no fallback can rescue it because the status has been sent.
+	//
+	// Which is exactly the failure [extendWrite] above prevents from the other
+	// direction. The two are not in tension: that one is a deadline on the
+	// connection, and it is set generously enough that only a stalled reader
+	// reaches it, where this one is a bound on a wait that is supposed to end.
 	ctx := r.Context()
 	answered := func() bool { return true }
 	if p.initial > 0 && initial(r) {
@@ -637,8 +674,74 @@ func (p *Proxy) Serve(w http.ResponseWriter, r *http.Request, s Shape) {
 	// middleware that wraps the writer — the request log's does — is not an
 	// http.Flusher itself, and an assertion would quietly find nothing and skip
 	// the flush. The controller follows Unwrap to the writer that can.
-	_, _ = io.Copy(w, res.Body)
-	_ = http.NewResponseController(w).Flush()
+	if _, err := io.Copy(w, res.Body); err != nil {
+		p.cutShort(r, s, err)
+		return
+	}
+	if err := http.NewResponseController(w).Flush(); err != nil && !errors.Is(err, http.ErrNotSupported) {
+		p.cutShort(r, s, err)
+	}
+}
+
+// cutShort reports a response that began and did not finish.
+//
+// The one failure on this path that is otherwise invisible. A 200 and the
+// electric-* headers have been written, [Proxy.note] has already recorded the
+// attempt as a success, and what fails after that reaches nobody — the
+// subscriber sees a torn connection and retries from the same offset, which
+// during a truncation that repeats is every subscriber stalling with nothing in
+// the log to say so.
+//
+// Which of the two calls above notices is not fixed: a long poll answers all at
+// once and its body is small enough to fit the server's buffer, so the copy
+// succeeds and the flush is where the write actually happens. That is why both
+// report rather than only the copy.
+//
+// Not the circuit. The sync service answered; what failed was the sending, and
+// counting it against the service would open the circuit because a reader went
+// away.
+//
+// Not a client that hung up either, which is the same rule [Proxy.trySnapshot]
+// follows and for the same reason: during an outage that is one line per closed
+// tab, burying the error that caused it.
+func (p *Proxy) cutShort(r *http.Request, s Shape, cause error) {
+	if p.onError == nil || r.Context().Err() != nil {
+		return
+	}
+	p.onError(r.Context(), fmt.Errorf("electric: the response was cut short: %w, for shape %s", cause, s.Table))
+}
+
+// extendWrite replaces the server's write deadline for this one request.
+//
+// [github.com/simonjanss/rig/runtime/serve.Config.WriteTimeout] is set once on
+// the one http.Server — thirty seconds — and its clock starts when the request's
+// headers were read, not when the body starts going out. A poll the sync service
+// holds for longer than that has its answer killed on the way out: a 200 the
+// subscriber never receives, and a connection torn down under it. Raising the
+// server's field instead would weaken every other route in the application,
+// which is why there is no PollTimeout on serve.Config and should not be one.
+// The file transfers do the same thing for the same reason.
+//
+// For every request rather than only a live poll. The long poll is the loud
+// case, but [Config.InitialTimeout] promises that an answer which has started
+// arriving is copied out whole however long that takes, and a large snapshot
+// over a slow connection breaks that promise under a thirty-second deadline
+// just as quietly.
+//
+// The write deadline only. A shape request is a GET with no body, and net/http
+// has already cleared the read deadline for the length of the handler because
+// that pending read is how it notices a client going away. A read deadline set
+// here lands on that watch instead: when it expires the request's context is
+// cancelled, and the branch below reads a cancelled context as the client
+// hanging up — so a poll that outlived it would be abandoned silently and
+// counted as a closed tab. Mirroring the file transfers, which set both, is the
+// obvious improvement here and it is a bug.
+//
+// A writer that does not support the control keeps the server's deadlines,
+// which is the right failure: the response stays bounded by something rather
+// than by nothing.
+func extendWrite(w http.ResponseWriter) {
+	_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(PollDeadline))
 }
 
 // initial reports whether this request is a subscriber reading the shape from

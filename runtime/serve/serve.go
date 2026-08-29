@@ -212,7 +212,16 @@ type Config struct {
 	ReadHeaderTimeout time.Duration
 	// ReadTimeout bounds the whole request. Default 30s.
 	ReadTimeout time.Duration
-	// WriteTimeout bounds the response. Default 30s.
+	// WriteTimeout bounds the response. Default 30s, and its clock starts when
+	// the request's headers were read rather than when the body starts going
+	// out.
+	//
+	// It is the bound for an ordinary route. A route that legitimately outlives
+	// it lifts it for its own request through http.NewResponseController — the
+	// file transfers and the shape proxy both do — rather than this field being
+	// raised to suit the slowest thing in the application, which would weaken
+	// every other route to do it. That is why there is no per-route timeout
+	// here and should not be one.
 	WriteTimeout time.Duration
 	// IdleTimeout bounds a kept-alive connection between requests. Default 2m.
 	IdleTimeout time.Duration
