@@ -1,0 +1,159 @@
+name: rig
+
+on:
+  push:
+    branches: [main]
+
+# A branch is covered before it gets here, by the pre-push hook `make hooks`
+# installs. What is left is main, and no run of it is ever superseded: every
+# commit on main is a commit somebody may later bisect to.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  # Everything that needs nothing but a Go toolchain. One job per check so a
+  # failure names itself in the checks list, and fail-fast is off so one
+  # failure does not hide the others.
+  quality-checks:
+    name: ${{ matrix.check.name }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+
+    strategy:
+      fail-fast: false
+      matrix:
+        check:
+          - name: "Dependency Management"
+            description: "Every go.mod and go.sum is what go mod tidy produces"
+            command: "make deps"
+
+          - name: "Formatting"
+            description: "Every file is gofmt-clean"
+            command: "make fmt-check"
+
+          - name: "Vet"
+            description: "go vet over every module"
+            command: "make vet"
+
+          - name: "Build"
+            description: "The rig binary compiles"
+            command: "make build"
+
+          - name: "Unit Tests"
+            description: "The suite that needs no container"
+            command: "make test"
+
+          - name: "Security Scan"
+            description: "Known vulnerabilities, via govulncheck"
+            command: "make vulncheck"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+          cache-dependency-path: "**/go.sum"
+
+      - name: ${{ matrix.check.name }}
+        run: ${{ matrix.check.command }}
+
+  # golangci-lint is its own job because the action runs in one directory at a
+  # time, and in a workspace `./...` names the packages of one module. Only the
+  # modules rig is written in: the examples are mostly generated output.
+  lint:
+    name: Code Quality (${{ matrix.module }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+
+    strategy:
+      fail-fast: false
+      matrix:
+        module: [".", "runtime", "auth", "migrate", "rigclient"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+          cache-dependency-path: "**/go.sum"
+
+      # Keep the version in step with GOLANGCI_VERSION in the Makefile, which is
+      # what `make lint` runs locally.
+      - uses: golangci/golangci-lint-action@v8
+        with:
+          version: v2.12.2
+          install-mode: binary
+          working-directory: ${{ matrix.module }}
+
+  # The suite tagged `docker`. Most of it starts its own Postgres on a port of
+  # its own; the migrate module expects one to already be there, and skips
+  # itself when it is not — hence the service container, so the check is about
+  # the code rather than about what was reachable.
+  docker-tests:
+    name: Docker Tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: rig
+          POSTGRES_PASSWORD: rig
+          POSTGRES_DB: rig
+        ports:
+          - 55440:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgres://rig:rig@localhost:55440/rig?sslmode=disable
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+          cache-dependency-path: "**/go.sum"
+
+      - name: Docker Tests
+        run: make test-docker
+
+  # Regenerate every example and run it against a real database. No service
+  # container here: `rig generate` starts and migrates the database each example
+  # names in its own rig.yaml, and one already listening on that port would be
+  # in the way.
+  examples:
+    name: Examples
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+          cache-dependency-path: "**/go.sum"
+
+      - name: Examples
+        run: make examples
+
+      # After the examples, because that is what rewrites the documents it
+      # reads. Same target the pre-push hook runs, in the same order.
+      - name: OpenAPI lint
+        run: make openapi-lint

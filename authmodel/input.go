@@ -1,0 +1,503 @@
+package authmodel
+
+import (
+	"context"
+	"strings"
+
+	"github.com/google/uuid"
+	"github.com/simonjanss/rig/runtime/patch"
+	"github.com/simonjanss/rig/runtime/rigerr"
+	"github.com/simonjanss/rig/runtime/tenancy"
+)
+
+// AccountCreateInput is what creating a Account takes.
+//
+// The identifier, the tenant, and the audit columns are absent: those are
+// stamped by the repository from the request's claims.
+type AccountCreateInput struct {
+	// What to call the person in this tenant.
+	DisplayName string `json:"displayName"`
+	// IANA name, for example Europe/Stockholm. Null means UTC.
+	TimeZone *string `json:"timeZone"`
+}
+
+// Normalize tidies what was given before anything checks it.
+//
+// It runs first so that validation sees the value that will actually be
+// stored: a title with a trailing space and one without are the same title,
+// and rejecting the second for a length rule the first passes would be
+// indefensible.
+func (i *AccountCreateInput) Normalize() {
+	i.DisplayName = strings.TrimSpace(i.DisplayName)
+	if i.TimeZone != nil {
+		*i.TimeZone = strings.TrimSpace(*i.TimeZone)
+	}
+}
+
+// AccountCreateInputError says what was wrong with each field of a
+// AccountCreateInput.
+//
+// Its shape is the input's shape, so a client can attach every message to the
+// field it is about without matching on strings. A member is nil when that
+// field was fine, and the whole value is nil when the input was. It is what
+// the 422 carries.
+type AccountCreateInputError struct {
+	// What to call the person in this tenant.
+	DisplayName *rigerr.FieldError `json:"displayName,omitempty"`
+	// IANA name, for example Europe/Stockholm. Null means UTC.
+	TimeZone *rigerr.FieldError `json:"timeZone,omitempty"`
+
+	// Entity is a problem with the row as a whole rather than with one field: what
+	// the Entity rule said.
+	Entity *rigerr.FieldError `json:"entity,omitempty"`
+}
+
+// Empty reports whether anything went wrong. A validator that found nothing
+// returns nil rather than one of these.
+func (e *AccountCreateInputError) Empty() bool {
+	if e == nil {
+		return true
+	}
+
+	return e.DisplayName == nil && e.TimeZone == nil && e.Entity == nil
+}
+
+// Error implements error. The sentence is for logs and for a person; the
+// structure above is what a client acts on.
+func (e *AccountCreateInputError) Error() string {
+	var parts []string
+	if e.DisplayName != nil {
+		parts = append(parts, "displayName "+e.DisplayName.Error())
+	}
+	if e.TimeZone != nil {
+		parts = append(parts, "timeZone "+e.TimeZone.Error())
+	}
+	if e.Entity != nil {
+		parts = append(parts, e.Entity.Error())
+	}
+
+	return "rig_account is not valid: " + strings.Join(parts, "; ")
+}
+
+// ErrorCode implements [rigerr.Coder]: the request was understood and its
+// content is what is wrong, which is 422 and not 400.
+func (e *AccountCreateInputError) ErrorCode() rigerr.Code { return rigerr.CodeUnprocessableEntity }
+
+// ErrorFields implements [rigerr.FieldReporter], which is how the HTTP layer
+// finds this and answers with it rather than with prose.
+func (e *AccountCreateInputError) ErrorFields() any { return e }
+
+// Validate checks what the schema can decide on its own.
+//
+// Everything a column declares — NOT NULL, a length, an enumeration's values
+// — is checked here, so a service only writes the rules that are actually
+// about the business. Every field is checked before returning, because a form
+// that reports one problem per round trip is a form people give up on.
+//
+// What comes back is a *AccountCreateInputError, shaped like the input itself.
+func (i *AccountCreateInput) Validate() error {
+	var failed AccountCreateInputError
+
+	if strings.TrimSpace(i.DisplayName) == "" {
+		failed.DisplayName = rigerr.NewFieldError(rigerr.FieldCodeCannotBeEmpty, "cannot be empty")
+	}
+
+	if failed.Empty() {
+		return nil
+	}
+	return &failed
+}
+
+// AccountUpdateInput is what changing a Account takes.
+//
+// A field left out is untouched. A nullable field set to null is cleared —
+// which is why the two wrappers differ: a column that cannot hold null has no
+// way to be given one, so clearing it is a compile error rather than a
+// rejection at runtime. Immutable fields are not here at all.
+type AccountUpdateInput struct {
+	// What to call the person in this tenant.
+	DisplayName patch.Optional[string] `json:"displayName"`
+	// IANA name, for example Europe/Stockholm. Null means UTC.
+	TimeZone patch.Nullable[string] `json:"timeZone"`
+}
+
+// Normalize tidies the fields this request actually carries.
+//
+// It does not fill in the ones it does not: the repository writes exactly the
+// columns that were sent, and filling them here would turn every update into a
+// write of every column — so two requests changing different fields of one
+// row would start overwriting each other instead of composing.
+func (i *AccountUpdateInput) Normalize() {
+	if v, ok := i.DisplayName.Get(); ok {
+		v = strings.TrimSpace(v)
+		i.DisplayName = patch.NewOptional(v)
+	}
+	if v, ok := i.TimeZone.Get(); ok {
+		v = strings.TrimSpace(v)
+		i.TimeZone = patch.NewNullable(v)
+	}
+}
+
+// Merged is the row as it will be once this update is applied.
+//
+// It is what validation runs against, and the reason it exists: a rule
+// spanning two fields cannot be checked from a partial request. "Ends after
+// starts" is unanswerable when only one of them was sent.
+//
+// It returns a copy. The input keeps its patches, so the repository still
+// writes only the columns that were actually given.
+func (i AccountUpdateInput) Merged(prev *Account) Account {
+	out := *prev
+
+	if v, ok := i.DisplayName.Get(); ok {
+		out.DisplayName = v
+	}
+	if i.TimeZone.Touched() {
+		out.TimeZone = i.TimeZone.Ptr()
+	}
+
+	return out
+}
+
+// AccountUpdateInputError says what was wrong with each field of a
+// AccountUpdateInput.
+//
+// Its shape is the input's shape, so a client can attach every message to the
+// field it is about without matching on strings. A member is nil when that
+// field was fine, and the whole value is nil when the input was. It is what
+// the 422 carries.
+type AccountUpdateInputError struct {
+	// What to call the person in this tenant.
+	DisplayName *rigerr.FieldError `json:"displayName,omitempty"`
+	// IANA name, for example Europe/Stockholm. Null means UTC.
+	TimeZone *rigerr.FieldError `json:"timeZone,omitempty"`
+
+	// Entity is a problem with the row as a whole rather than with one field: what
+	// the Entity rule said.
+	Entity *rigerr.FieldError `json:"entity,omitempty"`
+}
+
+// Empty reports whether anything went wrong. A validator that found nothing
+// returns nil rather than one of these.
+func (e *AccountUpdateInputError) Empty() bool {
+	if e == nil {
+		return true
+	}
+
+	return e.DisplayName == nil && e.TimeZone == nil && e.Entity == nil
+}
+
+// Error implements error. The sentence is for logs and for a person; the
+// structure above is what a client acts on.
+func (e *AccountUpdateInputError) Error() string {
+	var parts []string
+	if e.DisplayName != nil {
+		parts = append(parts, "displayName "+e.DisplayName.Error())
+	}
+	if e.TimeZone != nil {
+		parts = append(parts, "timeZone "+e.TimeZone.Error())
+	}
+	if e.Entity != nil {
+		parts = append(parts, e.Entity.Error())
+	}
+
+	return "rig_account is not valid: " + strings.Join(parts, "; ")
+}
+
+// ErrorCode implements [rigerr.Coder]: the request was understood and its
+// content is what is wrong, which is 422 and not 400.
+func (e *AccountUpdateInputError) ErrorCode() rigerr.Code { return rigerr.CodeUnprocessableEntity }
+
+// ErrorFields implements [rigerr.FieldReporter], which is how the HTTP layer
+// finds this and answers with it rather than with prose.
+func (e *AccountUpdateInputError) ErrorFields() any { return e }
+
+// Validate checks the row this update would produce.
+//
+// Against the merged state, not the request: a length rule on a field nobody
+// sent still has to hold, and a rule about two fields needs both.
+//
+// What comes back is a *AccountUpdateInputError, shaped like the input itself.
+func (i *AccountUpdateInput) Validate(prev *Account) error {
+	var failed AccountUpdateInputError
+
+	merged := i.Merged(prev)
+
+	if strings.TrimSpace(merged.DisplayName) == "" {
+		failed.DisplayName = rigerr.NewFieldError(rigerr.FieldCodeCannotBeEmpty, "cannot be empty")
+	}
+
+	if failed.Empty() {
+		return nil
+	}
+	return &failed
+}
+
+// AccountDeleteInput is what deleting a Account takes.
+type AccountDeleteInput struct {
+	// ID is the row to delete.
+	ID uuid.UUID `json:"id"`
+	// Hard removes the row outright instead of retiring it. A hard delete cannot
+	// be undone and takes the row's snapshots with it.
+	Hard bool `json:"hard,omitempty"`
+}
+
+// AccountValidatorContext is what a rule sees.
+//
+// Values is the row as it will be if this goes through — merged from the
+// previous state on an update, so every field is set whether or not the
+// request mentioned it. That is the point: "ends after starts" cannot be
+// answered from a request that only carried one of them.
+type AccountValidatorContext struct {
+	// Values is the intended end state.
+	Values Account
+
+	// Claims are who is asking. They are a value rather than something to fetch
+	// from the context because a rule that has to look them up is a rule that can
+	// forget to, and because there is no case where they are absent: a write
+	// without a caller is refused by the repository before any rule runs.
+	Claims tenancy.Claims
+
+	// previous is the row before this change, and is the zero value on a
+	// create — there was nothing before.
+	previous Account
+	isUpdate bool
+	changed  map[string]bool
+}
+
+// IsUpdate reports whether there was a row before this.
+func (c *AccountValidatorContext) IsUpdate() bool { return c.isUpdate }
+
+// Previous is the row as it was, and the zero value on a create. Check
+// IsUpdate before reading it.
+func (c *AccountValidatorContext) Previous() Account { return c.previous }
+
+// Changed reports whether this request carried a new value for a column.
+//
+// It is what keeps an expensive rule from running on every update: a check
+// that reaches another service to confirm a reference only needs to run when
+// the reference actually moved. On a create everything is changed, because
+// everything is new.
+func (c *AccountValidatorContext) Changed(column string) bool { return c.changed[column] }
+
+// DisplayNameChanged reports whether this request set display_name.
+func (c *AccountValidatorContext) DisplayNameChanged() bool {
+	return c.changed[ColumnAccountDisplayName]
+}
+
+// TimeZoneChanged reports whether this request set time_zone.
+func (c *AccountValidatorContext) TimeZoneChanged() bool { return c.changed[ColumnAccountTimeZone] }
+
+// AccountCreateValidator is the rules for bringing a Account into existence:
+// what the schema cannot express.
+//
+// One optional function per field this operation can set, so the set of fields
+// is the set of rules that could apply — a column an update cannot touch has
+// no hook here to write by mistake. A nil one is skipped. Every configured
+// hook runs, because a rule that fails should not hide the next one, so a
+// request reports everything wrong with it.
+//
+// A hook returns a FieldError to attach the message to a specific field, or
+// any other error to fail the request outright.
+type AccountCreateValidator struct {
+	// What to call the person in this tenant.
+	DisplayName func(ctx context.Context, c *AccountValidatorContext, value string) error
+	// IANA name, for example Europe/Stockholm. Null means UTC.
+	TimeZone func(ctx context.Context, c *AccountValidatorContext, value *string) error
+
+	// Entity runs after the per-field hooks, for a rule that is about the row
+	// rather than about one column.
+	Entity func(ctx context.Context, c *AccountValidatorContext) error
+}
+
+// RunCreate implements [dbhook.CreateValidator]: it runs the service's rules
+// against the row this input would produce.
+//
+// The generated checks are not repeated here. The repository runs Normalize
+// and Validate first, so by the time a hook sees the input it is tidy and the
+// schema is satisfied — which is what lets a hook be about the business
+// rather than about NOT NULL.
+func (v AccountCreateValidator) RunCreate(ctx context.Context, claims tenancy.Claims, i *AccountCreateInput) error {
+	// Everything is new, so everything counts as changed.
+	c := &AccountValidatorContext{Claims: claims, changed: map[string]bool{}}
+	c.Values.DisplayName = i.DisplayName
+	c.changed[ColumnAccountDisplayName] = true
+	c.Values.TimeZone = i.TimeZone
+	c.changed[ColumnAccountTimeZone] = true
+
+	failed, err := v.run(ctx, c)
+	if err != nil {
+		return err
+	}
+	if failed != nil {
+		return failed
+	}
+	return nil
+}
+
+// run calls every configured hook and puts what each one said under the field
+// it was about.
+//
+// Two kinds of answer. A [rigerr.FieldError] is about the input: it lands on
+// the field and the others still run, so one request reports everything wrong
+// with it. Anything else is the rule itself failing — a lookup that could
+// not reach another service — and there is nothing to tell the caller about
+// their input, so it comes back wrapped with the rule that could not be run,
+// keeping whatever code it carried and becoming Internal if it carried none.
+func (v AccountCreateValidator) run(ctx context.Context, c *AccountValidatorContext) (*AccountCreateInputError, error) {
+	var failed AccountCreateInputError
+
+	if v.DisplayName != nil {
+		if err := v.DisplayName(ctx, c, c.Values.DisplayName); err != nil {
+			field, ok := rigerr.AsFieldError(err)
+			if !ok {
+				return nil, rigerr.Wrap(err, "validate display_name")
+			}
+			failed.DisplayName = field
+		}
+	}
+	if v.TimeZone != nil {
+		if err := v.TimeZone(ctx, c, c.Values.TimeZone); err != nil {
+			field, ok := rigerr.AsFieldError(err)
+			if !ok {
+				return nil, rigerr.Wrap(err, "validate time_zone")
+			}
+			failed.TimeZone = field
+		}
+	}
+
+	if v.Entity != nil {
+		if err := v.Entity(ctx, c); err != nil {
+			field, ok := rigerr.AsFieldError(err)
+			if !ok {
+				return nil, rigerr.Wrap(err, "validate rig_account")
+			}
+			failed.Entity = field
+		}
+	}
+
+	if failed.Empty() {
+		return nil, nil
+	}
+	return &failed, nil
+}
+
+// AccountUpdateValidator is the rules for changing one that already exists:
+// what the schema cannot express.
+//
+// One optional function per field this operation can set, so the set of fields
+// is the set of rules that could apply — a column an update cannot touch has
+// no hook here to write by mistake. A nil one is skipped. Every configured
+// hook runs, because a rule that fails should not hide the next one, so a
+// request reports everything wrong with it.
+//
+// A hook returns a FieldError to attach the message to a specific field, or
+// any other error to fail the request outright.
+type AccountUpdateValidator struct {
+	// What to call the person in this tenant.
+	DisplayName func(ctx context.Context, c *AccountValidatorContext, value string) error
+	// IANA name, for example Europe/Stockholm. Null means UTC.
+	TimeZone func(ctx context.Context, c *AccountValidatorContext, value *string) error
+
+	// Entity runs after the per-field hooks, for a rule that is about the row
+	// rather than about one column.
+	Entity func(ctx context.Context, c *AccountValidatorContext) error
+}
+
+// RunUpdate implements [dbhook.UpdateValidator]: it runs the service's rules
+// against the row this update would produce, with the row as it was available
+// for a rule about the change itself.
+func (v AccountUpdateValidator) RunUpdate(ctx context.Context, claims tenancy.Claims, i *AccountUpdateInput, prev *Account) error {
+	c := &AccountValidatorContext{
+		Values:   i.Merged(prev),
+		Claims:   claims,
+		previous: *prev,
+		isUpdate: true,
+		changed:  map[string]bool{},
+	}
+	c.changed[ColumnAccountDisplayName] = i.DisplayName.IsSet()
+	c.changed[ColumnAccountTimeZone] = i.TimeZone.Touched()
+
+	failed, err := v.run(ctx, c)
+	if err != nil {
+		return err
+	}
+	if failed != nil {
+		return failed
+	}
+	return nil
+}
+
+// RunRestore implements [dbhook.RestoreValidator]: it runs the service's rules
+// against the row this restore would bring back.
+//
+// Every rule runs, not only the ones whose field the request mentioned. The
+// row was not live, so nothing about it has been checked against the world it
+// is returning to.
+func (v AccountUpdateValidator) RunRestore(ctx context.Context, claims tenancy.Claims, i *AccountUpdateInput, prev *Account) error {
+	c := &AccountValidatorContext{
+		Values:   i.Merged(prev),
+		Claims:   claims,
+		previous: *prev,
+		isUpdate: true,
+		changed:  map[string]bool{},
+	}
+	c.changed[ColumnAccountDisplayName] = true
+	c.changed[ColumnAccountTimeZone] = true
+
+	failed, err := v.run(ctx, c)
+	if err != nil {
+		return err
+	}
+	if failed != nil {
+		return failed
+	}
+	return nil
+}
+
+// run calls every configured hook and puts what each one said under the field
+// it was about.
+//
+// Two kinds of answer. A [rigerr.FieldError] is about the input: it lands on
+// the field and the others still run, so one request reports everything wrong
+// with it. Anything else is the rule itself failing — a lookup that could
+// not reach another service — and there is nothing to tell the caller about
+// their input, so it comes back wrapped with the rule that could not be run,
+// keeping whatever code it carried and becoming Internal if it carried none.
+func (v AccountUpdateValidator) run(ctx context.Context, c *AccountValidatorContext) (*AccountUpdateInputError, error) {
+	var failed AccountUpdateInputError
+
+	if v.DisplayName != nil {
+		if err := v.DisplayName(ctx, c, c.Values.DisplayName); err != nil {
+			field, ok := rigerr.AsFieldError(err)
+			if !ok {
+				return nil, rigerr.Wrap(err, "validate display_name")
+			}
+			failed.DisplayName = field
+		}
+	}
+	if v.TimeZone != nil {
+		if err := v.TimeZone(ctx, c, c.Values.TimeZone); err != nil {
+			field, ok := rigerr.AsFieldError(err)
+			if !ok {
+				return nil, rigerr.Wrap(err, "validate time_zone")
+			}
+			failed.TimeZone = field
+		}
+	}
+
+	if v.Entity != nil {
+		if err := v.Entity(ctx, c); err != nil {
+			field, ok := rigerr.AsFieldError(err)
+			if !ok {
+				return nil, rigerr.Wrap(err, "validate rig_account")
+			}
+			failed.Entity = field
+		}
+	}
+
+	if failed.Empty() {
+		return nil, nil
+	}
+	return &failed, nil
+}

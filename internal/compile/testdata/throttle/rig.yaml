@@ -1,0 +1,106 @@
+project:
+  name: authwired
+  module: example.com/authwired
+
+# Everything the auth block can say, so the compiled document carries every field
+# and the generator's golden output exercises every branch. A real project sets a
+# handful of these and inherits the rest.
+auth:
+  enabled: true
+  base_path: /auth
+
+  # A tenant per subdomain, with the application's own resolver behind it. The
+  # host is the only source that survives a provider redirect.
+  tenant:
+    from: [host, header, hook]
+    header: X-Tenant-Id
+    default_slug_env: DEFAULT_TENANT
+
+  session:
+    access_ttl: 5m
+    refresh_ttl: 8h
+    remember_ttl: 14d
+    rotation_leeway: 45s
+    identity_ttl: 20m
+
+  password:
+    min_length: 14
+    max_length: 512
+    breach_check: true
+
+  allow_registration: true
+  allow_tenant_creation: true
+  require_verified_email: true
+
+  limits:
+    login_by_email: {max: 3, window: 10m}
+    login_by_ip: {max: 40, window: 15m}
+    password_reset: {max: 2, window: 1h}
+    refresh: {max: 30, window: 1m}
+
+  trusted_proxies: [10.0.0.0/8, 192.168.0.0/16]
+
+  # Comfortably above the longest limit window above, which is what the
+  # configuration check insists on: the limits are counted from rig_auth_log, so
+  # a shorter window would prune away the failures a lockout adds up to.
+  log_retention: 90d
+
+  oauth:
+    base_url: https://app.example.com
+    base_url_env: BASE_URL
+    origin_from_host: true
+    signing_key_env: OAUTH_SIGNING_KEY
+    state_ttl: 8m
+    allow_provisioning: true
+    allowed_return_to: [https://app.example.com, https://beta.example.com]
+    providers:
+      - name: google
+        required: true
+      - name: microsoft
+        tenant_env: WORK_DIRECTORY
+      - name: github
+        client_id_env: GH_APP_ID
+        client_secret_env: GH_APP_SECRET
+
+# How many calls one caller may make.
+#
+# The ladder is machines, then people, then strangers — an integration is allowed
+# the most because that is what an integration is for, and an unauthenticated
+# address the least because addresses are the cheapest identity there is. The
+# tenant ceiling sits above all of them: it is what stops one customer crowding
+# out every other customer, not what stops any one of their users.
+#
+# This is fair-use limiting. It bounds a client stuck in a retry loop, a scraper
+# and a runaway batch job. It is not a defence against a flood, because a request
+# that reaches the handler has already cost a connection and a goroutine.
+throttle:
+  enabled: true
+  api_key: {max: 5000, window: 1m}
+  account: {max: 1000, window: 1m}
+  tenant: {max: 10000, window: 1m}
+  ip: {max: 300, window: 1m}
+
+  # How long a replica counts locally before publishing what it has seen. This is
+  # the accuracy of every number above, stated as time: shorter costs writes,
+  # longer lets the replicas disagree for longer.
+  interval: 500ms
+
+  # One route with a budget of its own, on top of the per-caller ones. Written the
+  # way the router registers it, because that is what net/http reports for the
+  # route it dispatched — a bare path would never match.
+  routes:
+    - pattern: POST /api/v1/lessons
+      max: 60
+      window: 1m
+
+  # And one nothing applies to at all.
+  exempt:
+    - GET /api/v1/lessons
+
+# The counterpart to the block above, and the opposite trade: the limiter fails
+# open because refusing traffic is worse than allowing a little too much, and
+# this fails closed because serving permissions nobody can withdraw is worse than
+# serving them slowly.
+cache:
+  enabled: true
+  ttl: 30s

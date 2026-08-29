@@ -1,0 +1,240 @@
+# yaml-language-server: $schema=.rig/rig.schema.json
+version: 1
+
+# The full-stack example: everything the others demonstrate one piece at a
+# time, together. Accounts and tenants (examples/auth), files and the inbox
+# (examples/todo), live sync wired all the way to a browser — a React front end
+# in web/ consuming the generated TypeScript client — and a Go import job in
+# import/ driving the generated Go client with a personal API key.
+project:
+  name: linearlite
+  module: github.com/simonjanss/rig/examples/linearlite
+
+api:
+  version: v1
+  base_path: /api/v1
+  # Permissions are left at the default, `derived`: every endpoint checks a key
+  # taken from its resource and operation, and services/authz decides who holds
+  # which. examples/todo turns this off and says why.
+
+# The authentication foundation. Registration and tenant creation are both on,
+# because this example's front door is a sign-up form: a stranger registers,
+# lands in the picker, and finds an invitation to the seeded tenant already
+# waiting — the OnRegistered hook in main.go is what put it there.
+auth:
+  enabled: true
+  allow_registration: true
+  allow_tenant_creation: true
+  # The people in a tenant, as an ordinary read-only resource. The board needs
+  # names to put on assignees, and this is the documented way to get them: the
+  # foundation table keeps its own authentication queries, and a generated
+  # model, repository and API appear beside them.
+  #
+  # There is no services/rig_account/ to say which operations exist, and that is
+  # the point of this line being all of it: rig ships the configuration for its
+  # own tables, so Get, List and Search is what this projects. No write path —
+  # provisioning, changing an address and deactivating an account are the auth
+  # endpoints' business, and a generated PATCH here would be a second door into
+  # rows the foundation owns. A project that wants one writes the file, and the
+  # rule about who may raise somebody to Owner along with it.
+  expose: [rig_account]
+
+# Uploads, for a todo's attachments. Memory because this example is a
+# `go run .`: uploads do not survive a restart, which is exactly right here and
+# exactly wrong in production.
+files:
+  enabled: true
+  backend: memory
+  max_bytes: 5242880
+
+# The inbox. A todo announces a status change from its update hook, NotifyWho
+# names the stakeholders, and the browser hears about it over the
+# rig_notification_recipient live shape — no socket, no polling.
+#
+# The digest is spelled out rather than left to the default, because this
+# example registers an email channel and the demonstration depends on the mail
+# going out with the drag rather than at the top of the hour. An account with a
+# setting of its own wins over this; an account with none gets this.
+notifications:
+  enabled: true
+  default_digest: Immediate
+  # Project the notification tables as resources, so the two a person actually
+  # owns — their devices and their preferences — come with a generated client, a
+  # filter grammar and an OpenAPI entry rather than a hand-written route each.
+  #
+  # It projects all five, and there is no file anywhere here saying otherwise:
+  # rig ships the configuration for its own tables, and what it says is read and
+  # delete on the inbox — beside rig's own routes rather than instead of them —
+  # and read on the engine's two. Those two are the ones nobody owns a row of, so
+  # a read of either is a read of the whole tenant's; services/authz is where
+  # this example decides that is the Owner's and the Admin's rather than
+  # everybody's.
+  #
+  # It is the settings table that makes this worth doing. Everything above
+  # reaches a person because they were a stakeholder; this is the row where they
+  # say how, and until somebody can write one, `default_digest` is the only
+  # answer anybody gets.
+  expose: true
+
+# Who is here, and what they are looking at. The board draws a ring on a card
+# somebody else has open and on the control they are typing into, and the header
+# lists everybody in the workspace — over the rig_presence live shape, with no
+# socket to run and no service to add.
+#
+# The four durations are left at their defaults (ttl 1m, heartbeat 20s, sweep
+# 1m, grace 5m). The one to read docs/presence.md before touching is
+# `heartbeat`: every beat is one row changed and every subscriber to the shape
+# hears about it, so it is the write rate and the fan-out rate multiplied by
+# tabs rather than a latency knob.
+#
+# No `expose:`, unlike the notification block above, and the difference is what
+# a person writes. A preference is a row somebody owns and edits, which is why
+# it wants a resource, a filter grammar and a typed client; presence is written
+# by the three routes under /presence — which take the account from the
+# credential and have nowhere to name anybody else — and read over the shape. A
+# read-only Get/List beside them would be a model, a repository, a client and an
+# OpenAPI entry for a question nothing in web/ asks.
+presence:
+  enabled: true
+
+# Spans, from the connection and from every generated handler, repository and
+# hook. The other examples that show observability show it over a schema with
+# nothing else going on; here it is on with authentication, uploads, the
+# notification engine and the Electric proxy all running, which is the only
+# arrangement where the page is worth looking at — a request that signs in, a
+# request that uploads and a shape subscription do not cost the same thing, and
+# that is the fact a trace is for.
+#
+# Where the spans go is not here. It is $OTEL_EXPORTER_OTLP_ENDPOINT or
+# $RIG_TRACE_FILE at run time, because the same binary runs on a laptop, in CI
+# and in production and only the last of those has anywhere to send them. The
+# Makefile points the demo at a file so the page below has something to read.
+tracing:
+  enabled: true
+
+# rig's own page over those spans and the log lines they wrote. It is a reader
+# and stores nothing, which is why it cannot be turned on without `tracing:`
+# above.
+#
+# `addr:` is required and rig defaults no part of it. The page gets a listener
+# of its own in this same binary — not a route on the API's mux — because which
+# interface it is bound to is the only thing in front of it that a client
+# cannot talk its way around. 127.0.0.1 here means this machine and nothing
+# else, which is what an example that runs wherever it is cloned should say;
+# $RIG_MONITOR_ADDR moves it without a regenerate.
+#
+# The password is not here — it is read from $RIG_MONITOR_PASSWORD at run time,
+# and with nothing in it the page does not listen at all. `make demo` sets one,
+# so the tour has something to open; a deployment sets a real one, and narrows
+# it further with `allow:`.
+monitoring:
+  enabled: true
+  addr: 127.0.0.1:9084
+
+# A throwaway Postgres with the sync service beside it: `rig db up` starts
+# both, waits for Electric's replication stream to report active, and
+# `rig db down` stops both. The ports are explicit so this example can run
+# alongside the others; both numbers are also listed in
+# internal/dockerdb/ports.go, where a test keeps the suites off them.
+database:
+  image: postgres:17-alpine
+  port: 55444
+  electric:
+    enabled: true
+    port: 55445
+
+# rig's own tables stay in the modules that own them, so migrations/ below holds
+# only this example's five migrations rather than the twelve hundred lines of DDL
+# nobody here wrote. examples/auth and examples/todo vendor theirs, which is the
+# default — between them all three readings are generated and run on every check.
+#
+# The cost is admitted rather than argued away: this directory no longer says what
+# is in the database. What is in it is these five files plus whatever rig/auth,
+# rig/files, rig/notify, rig/presence and rig/runtime ship, and `rig db up`
+# applies their sets first. main.go names both halves in one list, which is the
+# only place the order is written down.
+migrations:
+  foundation: embedded
+
+# Every table gets a configuration file. `rig sync` creates and updates them.
+layout:
+  table_dir: services/{table}
+  config_file: "{table_dir}/{table}.yaml"
+
+# Convention rules. Each is off, warn, or error.
+validate:
+  unmentioned_column: warn
+  missing_comment: error
+  fk_needs_index: error
+  tenant_id_leading_index: error
+  boolean_prefix: warn
+
+generators:
+  # The entity, its enums, its query types, and its inputs. Both of the
+  # layers below import this one, so there is one definition of a row
+  # rather than a copy on each side and a conversion between them.
+  - name: model-go
+    out_dir: internal/model
+    options:
+      package: model
+
+  # The repository interface and its pgx implementation.
+  - name: persist-go
+    out_dir: internal/store
+    options:
+      package: store
+      model_import: github.com/simonjanss/rig/examples/linearlite/internal/model
+
+  # Wire types, the interface your service layer implements, and a
+  # working default implementation of every operation.
+  - name: service-go
+    out_dir: internal/api
+    options:
+      package: api
+      model_import: github.com/simonjanss/rig/examples/linearlite/internal/model
+      store_import: github.com/simonjanss/rig/examples/linearlite/internal/store
+      api_import: github.com/simonjanss/rig/examples/linearlite/internal/api
+      # Where your service layer goes. Written once, then yours.
+      stub_dir: services/{table}
+
+  # Routing and handlers — and, because the auth block above is enabled, the
+  # authentication wiring beside them.
+  - name: server-go
+    out_dir: internal/api
+    options:
+      package: api
+      model_import: github.com/simonjanss/rig/examples/linearlite/internal/model
+      api_import: github.com/simonjanss/rig/examples/linearlite/internal/api
+      # Live sync. A table asks for a stream with `electric: {enabled: true}`,
+      # and the routes are mounted beside the rest of its API — same mux, same
+      # claims lookup, same error mapper. Until one asks, none of this writes
+      # anything.
+      electric_url: http://localhost:55445
+      # Where your extra shape scoping goes, beside the service layer for the
+      # same table. Written once, then yours.
+      stub_dir: services/{table}
+
+  # A typed Go client for this API. import/ is the consumer: a batch job
+  # that signs in with a personal API key and creates a todo per CSV row.
+  - name: go-client
+    out_dir: client
+    options:
+      package: client
+      # Where this example runs, so the import job can build a client
+      # without naming the server. A real project leaves it out.
+      default_base_url: http://localhost:8084
+
+  # The same client for a browser, from the same document — generated
+  # straight into the front end's source tree, which is the layout
+  # docs/clients.md recommends. web/ imports it like any of its own code.
+  - name: ts-client
+    out_dir: web/src/api
+    options:
+      default_base_url: http://localhost:8084
+
+  # The OpenAPI document, written from the same compiled document the routes
+  # above are, so it cannot describe an endpoint that does not exist.
+  - name: openapi
+    out_dir: docs
+    options:
+      formats: [json, yaml]

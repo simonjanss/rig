@@ -1,0 +1,59 @@
+package notifymodel
+
+import (
+	"strings"
+)
+
+// Where a notification is in its life. Nothing here says anything was sent:
+// that is the delivery table's business.
+type NotificationState string
+
+// The values of NotificationState.
+const (
+	// The audience has not been computed yet. Every notification starts here, and
+	// a scheduled one waits here until it is due.
+	NotificationStatePending NotificationState = "Pending"
+	// The audience was computed and the inbox lines exist. It does not mean
+	// anything was sent — a notification with an inbox line and no mail is a
+	// working notification.
+	NotificationStateResolved NotificationState = "Resolved"
+	// It never will be resolved: the row it was about was retired before its time
+	// came.
+	NotificationStateCancelled NotificationState = "Cancelled"
+)
+
+// AllNotificationState is every value, in declaration order.
+var AllNotificationState = []NotificationState{NotificationStatePending, NotificationStateResolved, NotificationStateCancelled}
+
+// Valid reports whether the value is one the database will accept.
+func (v NotificationState) Valid() bool {
+	switch v {
+	case NotificationStatePending, NotificationStateResolved, NotificationStateCancelled:
+		return true
+	default:
+		return false
+	}
+}
+
+// ParseNotificationState reads a value, accepting any casing and surrounding
+// space.
+//
+// Normalization uses it, so "IN_PROGRESS" from one client and "in_progress"
+// from another mean the same thing rather than one of them being a validation
+// failure nobody can explain. The spelling still has to be the label’s: a
+// value is a name the database knows, not a phrase.
+func ParseNotificationState(s string) (NotificationState, bool) {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "pending":
+		return NotificationStatePending, true
+	case "resolved":
+		return NotificationStateResolved, true
+	case "cancelled":
+		return NotificationStateCancelled, true
+	default:
+		return "", false
+	}
+}
+
+// String implements fmt.Stringer.
+func (v NotificationState) String() string { return string(v) }

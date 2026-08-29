@@ -1,0 +1,34 @@
+# Binaries
+/bin/
+/dist/
+# The built binary at the repository root. Anchored: an unanchored "rig" also
+# matches cmd/rig, which is how the command's own main went untracked.
+/rig
+
+# A module whose only package is a main builds its binary into its own
+# directory, which `go build ./...` in examples/sdk does.
+/examples/sdk/sdk
+
+# Where linearlite's demo writes the span file and the log file its monitoring
+# page reads. Throwaway, like the database `rig db up` starts.
+/examples/linearlite/.run/
+
+# Go
+*.test
+*.out
+coverage.*
+
+# Editors / OS
+.DS_Store
+.idea/
+.vscode/
+
+# Workspace sum file is machine-specific noise; the per-module go.sum files are authoritative.
+go.work.sum
+
+# The TypeScript workspace: installed dependencies and built packages. The
+# lockfile is committed; everything it produces is not.
+/ts/node_modules/
+/ts/packages/*/node_modules/
+/ts/packages/*/dist/
+/ts/typecheck-fixture/node_modules/

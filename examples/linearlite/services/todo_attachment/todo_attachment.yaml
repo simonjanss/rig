@@ -1,0 +1,14 @@
+# yaml-language-server: $schema=../../.rig/table.schema.json
+table: todo_attachment
+comment: A file attached to a todo.
+
+# Days a soft-deleted row stays restorable.
+restore_window_days: 30
+
+columns:
+  todo_id:
+    comment: The todo this is attached to.
+  attachment_file_id:
+    comment: 'The file itself. Required: an attachment with no file is nothing.'
+  caption:
+    comment: What the attachment is, in a few words.

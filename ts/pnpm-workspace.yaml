@@ -1,0 +1,10 @@
+packages:
+    - packages/*
+    - typecheck-fixture
+
+# Packages allowed to run install scripts. pnpm blocks them by default, and once
+# a blocked script exists the block fails the install rather than warning — so
+# the answer is checked in rather than approved once per clone. esbuild's script
+# fetches its platform binary; it arrives through vite, under vitest.
+allowBuilds:
+    esbuild: true

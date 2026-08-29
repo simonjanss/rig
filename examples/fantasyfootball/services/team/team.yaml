@@ -1,0 +1,12 @@
+# yaml-language-server: $schema=../../.rig/table.schema.json
+table: team
+comment: A squad somebody manages.
+
+# Days a soft-deleted row stays restorable.
+restore_window_days: 30
+
+columns:
+  name:
+    comment: What the manager calls their squad.
+  is_active:
+    comment: Whether the squad is playing this season.

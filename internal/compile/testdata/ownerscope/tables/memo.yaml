@@ -1,0 +1,28 @@
+table: memo
+comment: A private note one person writes for themselves.
+
+# The whole point of the case: reads default to the caller's own rows, and
+# ?scope=all widens them for anybody holding memo.read.all.
+access:
+  scope: own
+
+# So the case covers the trash as well: a wide caller sees every deleted memo in
+# the workspace, a narrow one sees the ones it deleted itself.
+restore_window_days: 30
+
+columns:
+  body:
+    comment: What the memo says.
+  created_by_account_id:
+    comment: Who wrote it.
+  updated_by_account_id:
+    comment: Who last changed it.
+  deleted_by_account_id:
+    comment: Who retired it.
+
+# A live-sync shape over an owner-scoped table, which is the case the shape
+# builder ignored until the inbox needed it: without the owner predicate this
+# streams the whole tenant to every subscriber, and the scope stub below is the
+# one narrowing an application should never have been responsible for.
+electric:
+  enabled: true

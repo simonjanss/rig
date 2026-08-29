@@ -1,0 +1,35 @@
+{
+    "extends": "../../../ts/tsconfig.base.json",
+    "compilerOptions": {
+        "noEmit": true,
+        "declaration": false,
+        "jsx": "react-jsx",
+        "types": ["vite/client"],
+        "baseUrl": ".",
+        // The three rig packages point at their sources in ts/, and everything
+        // else here exists because those sources are outside this directory:
+        // TypeScript resolves their imports by walking up from where the file
+        // is, which leaves the workspace. So every dependency of an aliased
+        // source is named, the same rule vite.config.ts states at length —
+        // "react" is here because @rig/presence/react imports it and `make
+        // linearlite-web` never installs ts/, so there would be nothing there
+        // to find.
+        "paths": {
+            "@rig/client": ["../../../ts/packages/client/src/index.ts"],
+            "@rig/electric": ["../../../ts/packages/electric/src/index.ts"],
+            "@rig/presence": ["../../../ts/packages/presence/src/index.ts"],
+            "@rig/presence/react": [
+                "../../../ts/packages/presence/src/react.ts"
+            ],
+            "react": ["./node_modules/@types/react"],
+            "@electric-sql/client": [
+                "./node_modules/@electric-sql/client/dist/index.d.ts"
+            ],
+            "@tanstack/db": ["./node_modules/@tanstack/db/dist/esm/index.d.ts"],
+            "@tanstack/electric-db-collection": [
+                "./node_modules/@tanstack/electric-db-collection/dist/esm/index.d.ts"
+            ]
+        }
+    },
+    "include": ["src", "vite.config.ts"]
+}

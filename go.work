@@ -1,0 +1,20 @@
+go 1.26.6
+
+use (
+	.
+	./auth
+	./authmodel
+	./examples/auth
+	./examples/auth_oauth
+	./examples/fantasyfootball
+	./examples/linearlite
+	./examples/sdk
+	./examples/todo
+	./files
+	./migrate
+	./notify
+	./observe
+	./presence
+	./rigclient
+	./runtime
+)

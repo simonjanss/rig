@@ -1,0 +1,942 @@
+package notifymodel
+
+import (
+	"context"
+	"encoding/json"
+	"strings"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/simonjanss/rig/runtime/patch"
+	"github.com/simonjanss/rig/runtime/rigerr"
+	"github.com/simonjanss/rig/runtime/tenancy"
+)
+
+// NotificationCreateInput is what creating a Notification takes.
+//
+// The identifier, the tenant, and the audit columns are absent: those are
+// stamped by the repository from the request's claims.
+type NotificationCreateInput struct {
+	// What happened, as the application names it. Narrow it to an enum of your own
+	// to get a switch the compiler can see.
+	Kind string `json:"kind"`
+	// Resolved means the audience was determined and the inbox lines exist. It
+	// does not mean anything was sent.
+	State NotificationState `json:"state"`
+	// When this is due. now() is the ordinary case; a scheduled notification is
+	// the same row with a later time, which is the only difference between the
+	// two.
+	DeliverAt time.Time `json:"deliverAt"`
+	// When the audience was computed. Null while the notification is still pending
+	// or was cancelled.
+	ResolvedAt *time.Time `json:"resolvedAt"`
+	// What a template needs beyond the linked row. Give it a Go type with the
+	// go_type key if it has a shape.
+	Payload json.RawMessage `json:"payload"`
+	// What collapses several of these into one inbox line, decided when the
+	// announcement was written and copied onto the line when the audience is
+	// resolved.
+	GroupKey *string `json:"groupKey"`
+	// A recipient list captured at write time, and the one exception to computing
+	// the audience late. Null is the ordinary case; a list here skips the question
+	// entirely, for an audience that genuinely cannot be re-derived.
+	AccountIds []uuid.UUID `json:"accountIds"`
+	// When a dispatcher took this to resolve. Past notifications.claim_ttl another
+	// may, which is what makes a crashed process recoverable.
+	ClaimedAt *time.Time `json:"claimedAt"`
+	// Which process holds the lease, so a stuck one traces to a pod rather than to
+	// a mystery.
+	ClaimedBy *uuid.UUID `json:"claimedBy"`
+	// How many times resolving this has been attempted.
+	Attempts int `json:"attempts"`
+}
+
+// Normalize tidies what was given before anything checks it.
+//
+// It runs first so that validation sees the value that will actually be
+// stored: a title with a trailing space and one without are the same title,
+// and rejecting the second for a length rule the first passes would be
+// indefensible.
+func (i *NotificationCreateInput) Normalize() {
+	i.Kind = strings.TrimSpace(i.Kind)
+	if v, ok := ParseNotificationState(string(i.State)); ok {
+		i.State = v
+	}
+	if i.State == "" {
+		i.State = NotificationStatePending
+	}
+	if i.GroupKey != nil {
+		*i.GroupKey = strings.TrimSpace(*i.GroupKey)
+	}
+}
+
+// NotificationCreateInputError says what was wrong with each field of a
+// NotificationCreateInput.
+//
+// Its shape is the input's shape, so a client can attach every message to the
+// field it is about without matching on strings. A member is nil when that
+// field was fine, and the whole value is nil when the input was. It is what
+// the 422 carries.
+type NotificationCreateInputError struct {
+	// What happened, as the application names it. Narrow it to an enum of your own
+	// to get a switch the compiler can see.
+	Kind *rigerr.FieldError `json:"kind,omitempty"`
+	// Resolved means the audience was determined and the inbox lines exist. It
+	// does not mean anything was sent.
+	State *rigerr.FieldError `json:"state,omitempty"`
+	// When this is due. now() is the ordinary case; a scheduled notification is
+	// the same row with a later time, which is the only difference between the
+	// two.
+	DeliverAt *rigerr.FieldError `json:"deliverAt,omitempty"`
+	// When the audience was computed. Null while the notification is still pending
+	// or was cancelled.
+	ResolvedAt *rigerr.FieldError `json:"resolvedAt,omitempty"`
+	// What a template needs beyond the linked row. Give it a Go type with the
+	// go_type key if it has a shape.
+	Payload *rigerr.FieldError `json:"payload,omitempty"`
+	// What collapses several of these into one inbox line, decided when the
+	// announcement was written and copied onto the line when the audience is
+	// resolved.
+	GroupKey *rigerr.FieldError `json:"groupKey,omitempty"`
+	// A recipient list captured at write time, and the one exception to computing
+	// the audience late. Null is the ordinary case; a list here skips the question
+	// entirely, for an audience that genuinely cannot be re-derived.
+	AccountIds *rigerr.FieldError `json:"accountIds,omitempty"`
+	// When a dispatcher took this to resolve. Past notifications.claim_ttl another
+	// may, which is what makes a crashed process recoverable.
+	ClaimedAt *rigerr.FieldError `json:"claimedAt,omitempty"`
+	// Which process holds the lease, so a stuck one traces to a pod rather than to
+	// a mystery.
+	ClaimedBy *rigerr.FieldError `json:"claimedBy,omitempty"`
+	// How many times resolving this has been attempted.
+	Attempts *rigerr.FieldError `json:"attempts,omitempty"`
+
+	// Entity is a problem with the row as a whole rather than with one field: what
+	// the Entity rule said.
+	Entity *rigerr.FieldError `json:"entity,omitempty"`
+}
+
+// Empty reports whether anything went wrong. A validator that found nothing
+// returns nil rather than one of these.
+func (e *NotificationCreateInputError) Empty() bool {
+	if e == nil {
+		return true
+	}
+
+	return e.Kind == nil && e.State == nil && e.DeliverAt == nil && e.ResolvedAt == nil && e.Payload == nil && e.GroupKey == nil && e.AccountIds == nil && e.ClaimedAt == nil && e.ClaimedBy == nil && e.Attempts == nil && e.Entity == nil
+}
+
+// Error implements error. The sentence is for logs and for a person; the
+// structure above is what a client acts on.
+func (e *NotificationCreateInputError) Error() string {
+	var parts []string
+	if e.Kind != nil {
+		parts = append(parts, "kind "+e.Kind.Error())
+	}
+	if e.State != nil {
+		parts = append(parts, "state "+e.State.Error())
+	}
+	if e.DeliverAt != nil {
+		parts = append(parts, "deliverAt "+e.DeliverAt.Error())
+	}
+	if e.ResolvedAt != nil {
+		parts = append(parts, "resolvedAt "+e.ResolvedAt.Error())
+	}
+	if e.Payload != nil {
+		parts = append(parts, "payload "+e.Payload.Error())
+	}
+	if e.GroupKey != nil {
+		parts = append(parts, "groupKey "+e.GroupKey.Error())
+	}
+	if e.AccountIds != nil {
+		parts = append(parts, "accountIds "+e.AccountIds.Error())
+	}
+	if e.ClaimedAt != nil {
+		parts = append(parts, "claimedAt "+e.ClaimedAt.Error())
+	}
+	if e.ClaimedBy != nil {
+		parts = append(parts, "claimedBy "+e.ClaimedBy.Error())
+	}
+	if e.Attempts != nil {
+		parts = append(parts, "attempts "+e.Attempts.Error())
+	}
+	if e.Entity != nil {
+		parts = append(parts, e.Entity.Error())
+	}
+
+	return "rig_notification is not valid: " + strings.Join(parts, "; ")
+}
+
+// ErrorCode implements [rigerr.Coder]: the request was understood and its
+// content is what is wrong, which is 422 and not 400.
+func (e *NotificationCreateInputError) ErrorCode() rigerr.Code { return rigerr.CodeUnprocessableEntity }
+
+// ErrorFields implements [rigerr.FieldReporter], which is how the HTTP layer
+// finds this and answers with it rather than with prose.
+func (e *NotificationCreateInputError) ErrorFields() any { return e }
+
+// Validate checks what the schema can decide on its own.
+//
+// Everything a column declares — NOT NULL, a length, an enumeration's values
+// — is checked here, so a service only writes the rules that are actually
+// about the business. Every field is checked before returning, because a form
+// that reports one problem per round trip is a form people give up on.
+//
+// What comes back is a *NotificationCreateInputError, shaped like the input
+// itself.
+func (i *NotificationCreateInput) Validate() error {
+	var failed NotificationCreateInputError
+
+	if strings.TrimSpace(i.Kind) == "" {
+		failed.Kind = rigerr.NewFieldError(rigerr.FieldCodeCannotBeEmpty, "cannot be empty")
+	}
+	if !i.State.Valid() {
+		failed.State = rigerr.NewFieldError(rigerr.FieldCodeInvalidValue, "%q is not one of the allowed values", i.State)
+	}
+
+	if failed.Empty() {
+		return nil
+	}
+	return &failed
+}
+
+// NotificationUpdateInput is what changing a Notification takes.
+//
+// A field left out is untouched. A nullable field set to null is cleared —
+// which is why the two wrappers differ: a column that cannot hold null has no
+// way to be given one, so clearing it is a compile error rather than a
+// rejection at runtime. Immutable fields are not here at all.
+type NotificationUpdateInput struct {
+	// What happened, as the application names it. Narrow it to an enum of your own
+	// to get a switch the compiler can see.
+	Kind patch.Optional[string] `json:"kind"`
+	// Resolved means the audience was determined and the inbox lines exist. It
+	// does not mean anything was sent.
+	State patch.Optional[NotificationState] `json:"state"`
+	// When this is due. now() is the ordinary case; a scheduled notification is
+	// the same row with a later time, which is the only difference between the
+	// two.
+	DeliverAt patch.Optional[time.Time] `json:"deliverAt"`
+	// When the audience was computed. Null while the notification is still pending
+	// or was cancelled.
+	ResolvedAt patch.Nullable[time.Time] `json:"resolvedAt"`
+	// What a template needs beyond the linked row. Give it a Go type with the
+	// go_type key if it has a shape.
+	Payload patch.Optional[json.RawMessage] `json:"payload"`
+	// What collapses several of these into one inbox line, decided when the
+	// announcement was written and copied onto the line when the audience is
+	// resolved.
+	GroupKey patch.Nullable[string] `json:"groupKey"`
+	// A recipient list captured at write time, and the one exception to computing
+	// the audience late. Null is the ordinary case; a list here skips the question
+	// entirely, for an audience that genuinely cannot be re-derived.
+	AccountIds patch.Nullable[[]uuid.UUID] `json:"accountIds"`
+	// When a dispatcher took this to resolve. Past notifications.claim_ttl another
+	// may, which is what makes a crashed process recoverable.
+	ClaimedAt patch.Nullable[time.Time] `json:"claimedAt"`
+	// Which process holds the lease, so a stuck one traces to a pod rather than to
+	// a mystery.
+	ClaimedBy patch.Nullable[uuid.UUID] `json:"claimedBy"`
+	// How many times resolving this has been attempted.
+	Attempts patch.Optional[int] `json:"attempts"`
+}
+
+// Normalize tidies the fields this request actually carries.
+//
+// It does not fill in the ones it does not: the repository writes exactly the
+// columns that were sent, and filling them here would turn every update into a
+// write of every column — so two requests changing different fields of one
+// row would start overwriting each other instead of composing.
+func (i *NotificationUpdateInput) Normalize() {
+	if v, ok := i.Kind.Get(); ok {
+		v = strings.TrimSpace(v)
+		i.Kind = patch.NewOptional(v)
+	}
+	if v, ok := i.State.Get(); ok {
+		if parsed, ok := ParseNotificationState(string(v)); ok {
+			v = parsed
+		}
+		i.State = patch.NewOptional(v)
+	}
+	if v, ok := i.GroupKey.Get(); ok {
+		v = strings.TrimSpace(v)
+		i.GroupKey = patch.NewNullable(v)
+	}
+}
+
+// Merged is the row as it will be once this update is applied.
+//
+// It is what validation runs against, and the reason it exists: a rule
+// spanning two fields cannot be checked from a partial request. "Ends after
+// starts" is unanswerable when only one of them was sent.
+//
+// It returns a copy. The input keeps its patches, so the repository still
+// writes only the columns that were actually given.
+func (i NotificationUpdateInput) Merged(prev *Notification) Notification {
+	out := *prev
+
+	if v, ok := i.Kind.Get(); ok {
+		out.Kind = v
+	}
+	if v, ok := i.State.Get(); ok {
+		out.State = v
+	}
+	if v, ok := i.DeliverAt.Get(); ok {
+		out.DeliverAt = v
+	}
+	if i.ResolvedAt.Touched() {
+		out.ResolvedAt = i.ResolvedAt.Ptr()
+	}
+	if v, ok := i.Payload.Get(); ok {
+		out.Payload = v
+	}
+	if i.GroupKey.Touched() {
+		out.GroupKey = i.GroupKey.Ptr()
+	}
+	if i.AccountIds.Touched() {
+		v, _ := i.AccountIds.Get()
+		out.AccountIds = v
+	}
+	if i.ClaimedAt.Touched() {
+		out.ClaimedAt = i.ClaimedAt.Ptr()
+	}
+	if i.ClaimedBy.Touched() {
+		out.ClaimedBy = i.ClaimedBy.Ptr()
+	}
+	if v, ok := i.Attempts.Get(); ok {
+		out.Attempts = v
+	}
+
+	return out
+}
+
+// NotificationUpdateInputError says what was wrong with each field of a
+// NotificationUpdateInput.
+//
+// Its shape is the input's shape, so a client can attach every message to the
+// field it is about without matching on strings. A member is nil when that
+// field was fine, and the whole value is nil when the input was. It is what
+// the 422 carries.
+type NotificationUpdateInputError struct {
+	// What happened, as the application names it. Narrow it to an enum of your own
+	// to get a switch the compiler can see.
+	Kind *rigerr.FieldError `json:"kind,omitempty"`
+	// Resolved means the audience was determined and the inbox lines exist. It
+	// does not mean anything was sent.
+	State *rigerr.FieldError `json:"state,omitempty"`
+	// When this is due. now() is the ordinary case; a scheduled notification is
+	// the same row with a later time, which is the only difference between the
+	// two.
+	DeliverAt *rigerr.FieldError `json:"deliverAt,omitempty"`
+	// When the audience was computed. Null while the notification is still pending
+	// or was cancelled.
+	ResolvedAt *rigerr.FieldError `json:"resolvedAt,omitempty"`
+	// What a template needs beyond the linked row. Give it a Go type with the
+	// go_type key if it has a shape.
+	Payload *rigerr.FieldError `json:"payload,omitempty"`
+	// What collapses several of these into one inbox line, decided when the
+	// announcement was written and copied onto the line when the audience is
+	// resolved.
+	GroupKey *rigerr.FieldError `json:"groupKey,omitempty"`
+	// A recipient list captured at write time, and the one exception to computing
+	// the audience late. Null is the ordinary case; a list here skips the question
+	// entirely, for an audience that genuinely cannot be re-derived.
+	AccountIds *rigerr.FieldError `json:"accountIds,omitempty"`
+	// When a dispatcher took this to resolve. Past notifications.claim_ttl another
+	// may, which is what makes a crashed process recoverable.
+	ClaimedAt *rigerr.FieldError `json:"claimedAt,omitempty"`
+	// Which process holds the lease, so a stuck one traces to a pod rather than to
+	// a mystery.
+	ClaimedBy *rigerr.FieldError `json:"claimedBy,omitempty"`
+	// How many times resolving this has been attempted.
+	Attempts *rigerr.FieldError `json:"attempts,omitempty"`
+
+	// Entity is a problem with the row as a whole rather than with one field: what
+	// the Entity rule said.
+	Entity *rigerr.FieldError `json:"entity,omitempty"`
+}
+
+// Empty reports whether anything went wrong. A validator that found nothing
+// returns nil rather than one of these.
+func (e *NotificationUpdateInputError) Empty() bool {
+	if e == nil {
+		return true
+	}
+
+	return e.Kind == nil && e.State == nil && e.DeliverAt == nil && e.ResolvedAt == nil && e.Payload == nil && e.GroupKey == nil && e.AccountIds == nil && e.ClaimedAt == nil && e.ClaimedBy == nil && e.Attempts == nil && e.Entity == nil
+}
+
+// Error implements error. The sentence is for logs and for a person; the
+// structure above is what a client acts on.
+func (e *NotificationUpdateInputError) Error() string {
+	var parts []string
+	if e.Kind != nil {
+		parts = append(parts, "kind "+e.Kind.Error())
+	}
+	if e.State != nil {
+		parts = append(parts, "state "+e.State.Error())
+	}
+	if e.DeliverAt != nil {
+		parts = append(parts, "deliverAt "+e.DeliverAt.Error())
+	}
+	if e.ResolvedAt != nil {
+		parts = append(parts, "resolvedAt "+e.ResolvedAt.Error())
+	}
+	if e.Payload != nil {
+		parts = append(parts, "payload "+e.Payload.Error())
+	}
+	if e.GroupKey != nil {
+		parts = append(parts, "groupKey "+e.GroupKey.Error())
+	}
+	if e.AccountIds != nil {
+		parts = append(parts, "accountIds "+e.AccountIds.Error())
+	}
+	if e.ClaimedAt != nil {
+		parts = append(parts, "claimedAt "+e.ClaimedAt.Error())
+	}
+	if e.ClaimedBy != nil {
+		parts = append(parts, "claimedBy "+e.ClaimedBy.Error())
+	}
+	if e.Attempts != nil {
+		parts = append(parts, "attempts "+e.Attempts.Error())
+	}
+	if e.Entity != nil {
+		parts = append(parts, e.Entity.Error())
+	}
+
+	return "rig_notification is not valid: " + strings.Join(parts, "; ")
+}
+
+// ErrorCode implements [rigerr.Coder]: the request was understood and its
+// content is what is wrong, which is 422 and not 400.
+func (e *NotificationUpdateInputError) ErrorCode() rigerr.Code { return rigerr.CodeUnprocessableEntity }
+
+// ErrorFields implements [rigerr.FieldReporter], which is how the HTTP layer
+// finds this and answers with it rather than with prose.
+func (e *NotificationUpdateInputError) ErrorFields() any { return e }
+
+// Validate checks the row this update would produce.
+//
+// Against the merged state, not the request: a length rule on a field nobody
+// sent still has to hold, and a rule about two fields needs both.
+//
+// What comes back is a *NotificationUpdateInputError, shaped like the input
+// itself.
+func (i *NotificationUpdateInput) Validate(prev *Notification) error {
+	var failed NotificationUpdateInputError
+
+	merged := i.Merged(prev)
+
+	if strings.TrimSpace(merged.Kind) == "" {
+		failed.Kind = rigerr.NewFieldError(rigerr.FieldCodeCannotBeEmpty, "cannot be empty")
+	}
+	if !merged.State.Valid() {
+		failed.State = rigerr.NewFieldError(rigerr.FieldCodeInvalidValue, "%q is not one of the allowed values", merged.State)
+	}
+
+	if failed.Empty() {
+		return nil
+	}
+	return &failed
+}
+
+// NotificationDeleteInput is what deleting a Notification takes.
+type NotificationDeleteInput struct {
+	// ID is the row to delete.
+	ID uuid.UUID `json:"id"`
+}
+
+// NotificationValidatorContext is what a rule sees.
+//
+// Values is the row as it will be if this goes through — merged from the
+// previous state on an update, so every field is set whether or not the
+// request mentioned it. That is the point: "ends after starts" cannot be
+// answered from a request that only carried one of them.
+type NotificationValidatorContext struct {
+	// Values is the intended end state.
+	Values Notification
+
+	// Claims are who is asking. They are a value rather than something to fetch
+	// from the context because a rule that has to look them up is a rule that can
+	// forget to, and because there is no case where they are absent: a write
+	// without a caller is refused by the repository before any rule runs.
+	Claims tenancy.Claims
+
+	// previous is the row before this change, and is the zero value on a
+	// create — there was nothing before.
+	previous Notification
+	isUpdate bool
+	changed  map[string]bool
+}
+
+// IsUpdate reports whether there was a row before this.
+func (c *NotificationValidatorContext) IsUpdate() bool { return c.isUpdate }
+
+// Previous is the row as it was, and the zero value on a create. Check
+// IsUpdate before reading it.
+func (c *NotificationValidatorContext) Previous() Notification { return c.previous }
+
+// Changed reports whether this request carried a new value for a column.
+//
+// It is what keeps an expensive rule from running on every update: a check
+// that reaches another service to confirm a reference only needs to run when
+// the reference actually moved. On a create everything is changed, because
+// everything is new.
+func (c *NotificationValidatorContext) Changed(column string) bool { return c.changed[column] }
+
+// KindChanged reports whether this request set kind.
+func (c *NotificationValidatorContext) KindChanged() bool { return c.changed[ColumnNotificationKind] }
+
+// StateChanged reports whether this request set state.
+func (c *NotificationValidatorContext) StateChanged() bool { return c.changed[ColumnNotificationState] }
+
+// DeliverAtChanged reports whether this request set deliver_at.
+func (c *NotificationValidatorContext) DeliverAtChanged() bool {
+	return c.changed[ColumnNotificationDeliverAt]
+}
+
+// ResolvedAtChanged reports whether this request set resolved_at.
+func (c *NotificationValidatorContext) ResolvedAtChanged() bool {
+	return c.changed[ColumnNotificationResolvedAt]
+}
+
+// PayloadChanged reports whether this request set payload.
+func (c *NotificationValidatorContext) PayloadChanged() bool {
+	return c.changed[ColumnNotificationPayload]
+}
+
+// GroupKeyChanged reports whether this request set group_key.
+func (c *NotificationValidatorContext) GroupKeyChanged() bool {
+	return c.changed[ColumnNotificationGroupKey]
+}
+
+// AccountIdsChanged reports whether this request set account_ids.
+func (c *NotificationValidatorContext) AccountIdsChanged() bool {
+	return c.changed[ColumnNotificationAccountIds]
+}
+
+// ClaimedAtChanged reports whether this request set claimed_at.
+func (c *NotificationValidatorContext) ClaimedAtChanged() bool {
+	return c.changed[ColumnNotificationClaimedAt]
+}
+
+// ClaimedByChanged reports whether this request set claimed_by.
+func (c *NotificationValidatorContext) ClaimedByChanged() bool {
+	return c.changed[ColumnNotificationClaimedBy]
+}
+
+// AttemptsChanged reports whether this request set attempts.
+func (c *NotificationValidatorContext) AttemptsChanged() bool {
+	return c.changed[ColumnNotificationAttempts]
+}
+
+// NotificationCreateValidator is the rules for bringing a Notification into
+// existence: what the schema cannot express.
+//
+// One optional function per field this operation can set, so the set of fields
+// is the set of rules that could apply — a column an update cannot touch has
+// no hook here to write by mistake. A nil one is skipped. Every configured
+// hook runs, because a rule that fails should not hide the next one, so a
+// request reports everything wrong with it.
+//
+// A hook returns a FieldError to attach the message to a specific field, or
+// any other error to fail the request outright.
+type NotificationCreateValidator struct {
+	// What happened, as the application names it. Narrow it to an enum of your own
+	// to get a switch the compiler can see.
+	Kind func(ctx context.Context, c *NotificationValidatorContext, value string) error
+	// Resolved means the audience was determined and the inbox lines exist. It
+	// does not mean anything was sent.
+	State func(ctx context.Context, c *NotificationValidatorContext, value NotificationState) error
+	// When this is due. now() is the ordinary case; a scheduled notification is
+	// the same row with a later time, which is the only difference between the
+	// two.
+	DeliverAt func(ctx context.Context, c *NotificationValidatorContext, value time.Time) error
+	// When the audience was computed. Null while the notification is still pending
+	// or was cancelled.
+	ResolvedAt func(ctx context.Context, c *NotificationValidatorContext, value *time.Time) error
+	// What a template needs beyond the linked row. Give it a Go type with the
+	// go_type key if it has a shape.
+	Payload func(ctx context.Context, c *NotificationValidatorContext, value json.RawMessage) error
+	// What collapses several of these into one inbox line, decided when the
+	// announcement was written and copied onto the line when the audience is
+	// resolved.
+	GroupKey func(ctx context.Context, c *NotificationValidatorContext, value *string) error
+	// A recipient list captured at write time, and the one exception to computing
+	// the audience late. Null is the ordinary case; a list here skips the question
+	// entirely, for an audience that genuinely cannot be re-derived.
+	AccountIds func(ctx context.Context, c *NotificationValidatorContext, value []uuid.UUID) error
+	// When a dispatcher took this to resolve. Past notifications.claim_ttl another
+	// may, which is what makes a crashed process recoverable.
+	ClaimedAt func(ctx context.Context, c *NotificationValidatorContext, value *time.Time) error
+	// Which process holds the lease, so a stuck one traces to a pod rather than to
+	// a mystery.
+	ClaimedBy func(ctx context.Context, c *NotificationValidatorContext, value *uuid.UUID) error
+	// How many times resolving this has been attempted.
+	Attempts func(ctx context.Context, c *NotificationValidatorContext, value int) error
+
+	// Entity runs after the per-field hooks, for a rule that is about the row
+	// rather than about one column.
+	Entity func(ctx context.Context, c *NotificationValidatorContext) error
+}
+
+// RunCreate implements [dbhook.CreateValidator]: it runs the service's rules
+// against the row this input would produce.
+//
+// The generated checks are not repeated here. The repository runs Normalize
+// and Validate first, so by the time a hook sees the input it is tidy and the
+// schema is satisfied — which is what lets a hook be about the business
+// rather than about NOT NULL.
+func (v NotificationCreateValidator) RunCreate(ctx context.Context, claims tenancy.Claims, i *NotificationCreateInput) error {
+	// Everything is new, so everything counts as changed.
+	c := &NotificationValidatorContext{Claims: claims, changed: map[string]bool{}}
+	c.Values.Kind = i.Kind
+	c.changed[ColumnNotificationKind] = true
+	c.Values.State = i.State
+	c.changed[ColumnNotificationState] = true
+	c.Values.DeliverAt = i.DeliverAt
+	c.changed[ColumnNotificationDeliverAt] = true
+	c.Values.ResolvedAt = i.ResolvedAt
+	c.changed[ColumnNotificationResolvedAt] = true
+	c.Values.Payload = i.Payload
+	c.changed[ColumnNotificationPayload] = true
+	c.Values.GroupKey = i.GroupKey
+	c.changed[ColumnNotificationGroupKey] = true
+	c.Values.AccountIds = i.AccountIds
+	c.changed[ColumnNotificationAccountIds] = true
+	c.Values.ClaimedAt = i.ClaimedAt
+	c.changed[ColumnNotificationClaimedAt] = true
+	c.Values.ClaimedBy = i.ClaimedBy
+	c.changed[ColumnNotificationClaimedBy] = true
+	c.Values.Attempts = i.Attempts
+	c.changed[ColumnNotificationAttempts] = true
+
+	failed, err := v.run(ctx, c)
+	if err != nil {
+		return err
+	}
+	if failed != nil {
+		return failed
+	}
+	return nil
+}
+
+// run calls every configured hook and puts what each one said under the field
+// it was about.
+//
+// Two kinds of answer. A [rigerr.FieldError] is about the input: it lands on
+// the field and the others still run, so one request reports everything wrong
+// with it. Anything else is the rule itself failing — a lookup that could
+// not reach another service — and there is nothing to tell the caller about
+// their input, so it comes back wrapped with the rule that could not be run,
+// keeping whatever code it carried and becoming Internal if it carried none.
+func (v NotificationCreateValidator) run(ctx context.Context, c *NotificationValidatorContext) (*NotificationCreateInputError, error) {
+	var failed NotificationCreateInputError
+
+	if v.Kind != nil {
+		if err := v.Kind(ctx, c, c.Values.Kind); err != nil {
+			field, ok := rigerr.AsFieldError(err)
+			if !ok {
+				return nil, rigerr.Wrap(err, "validate kind")
+			}
+			failed.Kind = field
+		}
+	}
+	if v.State != nil {
+		if err := v.State(ctx, c, c.Values.State); err != nil {
+			field, ok := rigerr.AsFieldError(err)
+			if !ok {
+				return nil, rigerr.Wrap(err, "validate state")
+			}
+			failed.State = field
+		}
+	}
+	if v.DeliverAt != nil {
+		if err := v.DeliverAt(ctx, c, c.Values.DeliverAt); err != nil {
+			field, ok := rigerr.AsFieldError(err)
+			if !ok {
+				return nil, rigerr.Wrap(err, "validate deliver_at")
+			}
+			failed.DeliverAt = field
+		}
+	}
+	if v.ResolvedAt != nil {
+		if err := v.ResolvedAt(ctx, c, c.Values.ResolvedAt); err != nil {
+			field, ok := rigerr.AsFieldError(err)
+			if !ok {
+				return nil, rigerr.Wrap(err, "validate resolved_at")
+			}
+			failed.ResolvedAt = field
+		}
+	}
+	if v.Payload != nil {
+		if err := v.Payload(ctx, c, c.Values.Payload); err != nil {
+			field, ok := rigerr.AsFieldError(err)
+			if !ok {
+				return nil, rigerr.Wrap(err, "validate payload")
+			}
+			failed.Payload = field
+		}
+	}
+	if v.GroupKey != nil {
+		if err := v.GroupKey(ctx, c, c.Values.GroupKey); err != nil {
+			field, ok := rigerr.AsFieldError(err)
+			if !ok {
+				return nil, rigerr.Wrap(err, "validate group_key")
+			}
+			failed.GroupKey = field
+		}
+	}
+	if v.AccountIds != nil {
+		if err := v.AccountIds(ctx, c, c.Values.AccountIds); err != nil {
+			field, ok := rigerr.AsFieldError(err)
+			if !ok {
+				return nil, rigerr.Wrap(err, "validate account_ids")
+			}
+			failed.AccountIds = field
+		}
+	}
+	if v.ClaimedAt != nil {
+		if err := v.ClaimedAt(ctx, c, c.Values.ClaimedAt); err != nil {
+			field, ok := rigerr.AsFieldError(err)
+			if !ok {
+				return nil, rigerr.Wrap(err, "validate claimed_at")
+			}
+			failed.ClaimedAt = field
+		}
+	}
+	if v.ClaimedBy != nil {
+		if err := v.ClaimedBy(ctx, c, c.Values.ClaimedBy); err != nil {
+			field, ok := rigerr.AsFieldError(err)
+			if !ok {
+				return nil, rigerr.Wrap(err, "validate claimed_by")
+			}
+			failed.ClaimedBy = field
+		}
+	}
+	if v.Attempts != nil {
+		if err := v.Attempts(ctx, c, c.Values.Attempts); err != nil {
+			field, ok := rigerr.AsFieldError(err)
+			if !ok {
+				return nil, rigerr.Wrap(err, "validate attempts")
+			}
+			failed.Attempts = field
+		}
+	}
+
+	if v.Entity != nil {
+		if err := v.Entity(ctx, c); err != nil {
+			field, ok := rigerr.AsFieldError(err)
+			if !ok {
+				return nil, rigerr.Wrap(err, "validate rig_notification")
+			}
+			failed.Entity = field
+		}
+	}
+
+	if failed.Empty() {
+		return nil, nil
+	}
+	return &failed, nil
+}
+
+// NotificationUpdateValidator is the rules for changing one that already
+// exists: what the schema cannot express.
+//
+// One optional function per field this operation can set, so the set of fields
+// is the set of rules that could apply — a column an update cannot touch has
+// no hook here to write by mistake. A nil one is skipped. Every configured
+// hook runs, because a rule that fails should not hide the next one, so a
+// request reports everything wrong with it.
+//
+// A hook returns a FieldError to attach the message to a specific field, or
+// any other error to fail the request outright.
+type NotificationUpdateValidator struct {
+	// What happened, as the application names it. Narrow it to an enum of your own
+	// to get a switch the compiler can see.
+	Kind func(ctx context.Context, c *NotificationValidatorContext, value string) error
+	// Resolved means the audience was determined and the inbox lines exist. It
+	// does not mean anything was sent.
+	State func(ctx context.Context, c *NotificationValidatorContext, value NotificationState) error
+	// When this is due. now() is the ordinary case; a scheduled notification is
+	// the same row with a later time, which is the only difference between the
+	// two.
+	DeliverAt func(ctx context.Context, c *NotificationValidatorContext, value time.Time) error
+	// When the audience was computed. Null while the notification is still pending
+	// or was cancelled.
+	ResolvedAt func(ctx context.Context, c *NotificationValidatorContext, value *time.Time) error
+	// What a template needs beyond the linked row. Give it a Go type with the
+	// go_type key if it has a shape.
+	Payload func(ctx context.Context, c *NotificationValidatorContext, value json.RawMessage) error
+	// What collapses several of these into one inbox line, decided when the
+	// announcement was written and copied onto the line when the audience is
+	// resolved.
+	GroupKey func(ctx context.Context, c *NotificationValidatorContext, value *string) error
+	// A recipient list captured at write time, and the one exception to computing
+	// the audience late. Null is the ordinary case; a list here skips the question
+	// entirely, for an audience that genuinely cannot be re-derived.
+	AccountIds func(ctx context.Context, c *NotificationValidatorContext, value []uuid.UUID) error
+	// When a dispatcher took this to resolve. Past notifications.claim_ttl another
+	// may, which is what makes a crashed process recoverable.
+	ClaimedAt func(ctx context.Context, c *NotificationValidatorContext, value *time.Time) error
+	// Which process holds the lease, so a stuck one traces to a pod rather than to
+	// a mystery.
+	ClaimedBy func(ctx context.Context, c *NotificationValidatorContext, value *uuid.UUID) error
+	// How many times resolving this has been attempted.
+	Attempts func(ctx context.Context, c *NotificationValidatorContext, value int) error
+
+	// Entity runs after the per-field hooks, for a rule that is about the row
+	// rather than about one column.
+	Entity func(ctx context.Context, c *NotificationValidatorContext) error
+}
+
+// RunUpdate implements [dbhook.UpdateValidator]: it runs the service's rules
+// against the row this update would produce, with the row as it was available
+// for a rule about the change itself.
+func (v NotificationUpdateValidator) RunUpdate(ctx context.Context, claims tenancy.Claims, i *NotificationUpdateInput, prev *Notification) error {
+	c := &NotificationValidatorContext{
+		Values:   i.Merged(prev),
+		Claims:   claims,
+		previous: *prev,
+		isUpdate: true,
+		changed:  map[string]bool{},
+	}
+	c.changed[ColumnNotificationKind] = i.Kind.IsSet()
+	c.changed[ColumnNotificationState] = i.State.IsSet()
+	c.changed[ColumnNotificationDeliverAt] = i.DeliverAt.IsSet()
+	c.changed[ColumnNotificationResolvedAt] = i.ResolvedAt.Touched()
+	c.changed[ColumnNotificationPayload] = i.Payload.IsSet()
+	c.changed[ColumnNotificationGroupKey] = i.GroupKey.Touched()
+	c.changed[ColumnNotificationAccountIds] = i.AccountIds.Touched()
+	c.changed[ColumnNotificationClaimedAt] = i.ClaimedAt.Touched()
+	c.changed[ColumnNotificationClaimedBy] = i.ClaimedBy.Touched()
+	c.changed[ColumnNotificationAttempts] = i.Attempts.IsSet()
+
+	failed, err := v.run(ctx, c)
+	if err != nil {
+		return err
+	}
+	if failed != nil {
+		return failed
+	}
+	return nil
+}
+
+// run calls every configured hook and puts what each one said under the field
+// it was about.
+//
+// Two kinds of answer. A [rigerr.FieldError] is about the input: it lands on
+// the field and the others still run, so one request reports everything wrong
+// with it. Anything else is the rule itself failing — a lookup that could
+// not reach another service — and there is nothing to tell the caller about
+// their input, so it comes back wrapped with the rule that could not be run,
+// keeping whatever code it carried and becoming Internal if it carried none.
+func (v NotificationUpdateValidator) run(ctx context.Context, c *NotificationValidatorContext) (*NotificationUpdateInputError, error) {
+	var failed NotificationUpdateInputError
+
+	if v.Kind != nil {
+		if err := v.Kind(ctx, c, c.Values.Kind); err != nil {
+			field, ok := rigerr.AsFieldError(err)
+			if !ok {
+				return nil, rigerr.Wrap(err, "validate kind")
+			}
+			failed.Kind = field
+		}
+	}
+	if v.State != nil {
+		if err := v.State(ctx, c, c.Values.State); err != nil {
+			field, ok := rigerr.AsFieldError(err)
+			if !ok {
+				return nil, rigerr.Wrap(err, "validate state")
+			}
+			failed.State = field
+		}
+	}
+	if v.DeliverAt != nil {
+		if err := v.DeliverAt(ctx, c, c.Values.DeliverAt); err != nil {
+			field, ok := rigerr.AsFieldError(err)
+			if !ok {
+				return nil, rigerr.Wrap(err, "validate deliver_at")
+			}
+			failed.DeliverAt = field
+		}
+	}
+	if v.ResolvedAt != nil {
+		if err := v.ResolvedAt(ctx, c, c.Values.ResolvedAt); err != nil {
+			field, ok := rigerr.AsFieldError(err)
+			if !ok {
+				return nil, rigerr.Wrap(err, "validate resolved_at")
+			}
+			failed.ResolvedAt = field
+		}
+	}
+	if v.Payload != nil {
+		if err := v.Payload(ctx, c, c.Values.Payload); err != nil {
+			field, ok := rigerr.AsFieldError(err)
+			if !ok {
+				return nil, rigerr.Wrap(err, "validate payload")
+			}
+			failed.Payload = field
+		}
+	}
+	if v.GroupKey != nil {
+		if err := v.GroupKey(ctx, c, c.Values.GroupKey); err != nil {
+			field, ok := rigerr.AsFieldError(err)
+			if !ok {
+				return nil, rigerr.Wrap(err, "validate group_key")
+			}
+			failed.GroupKey = field
+		}
+	}
+	if v.AccountIds != nil {
+		if err := v.AccountIds(ctx, c, c.Values.AccountIds); err != nil {
+			field, ok := rigerr.AsFieldError(err)
+			if !ok {
+				return nil, rigerr.Wrap(err, "validate account_ids")
+			}
+			failed.AccountIds = field
+		}
+	}
+	if v.ClaimedAt != nil {
+		if err := v.ClaimedAt(ctx, c, c.Values.ClaimedAt); err != nil {
+			field, ok := rigerr.AsFieldError(err)
+			if !ok {
+				return nil, rigerr.Wrap(err, "validate claimed_at")
+			}
+			failed.ClaimedAt = field
+		}
+	}
+	if v.ClaimedBy != nil {
+		if err := v.ClaimedBy(ctx, c, c.Values.ClaimedBy); err != nil {
+			field, ok := rigerr.AsFieldError(err)
+			if !ok {
+				return nil, rigerr.Wrap(err, "validate claimed_by")
+			}
+			failed.ClaimedBy = field
+		}
+	}
+	if v.Attempts != nil {
+		if err := v.Attempts(ctx, c, c.Values.Attempts); err != nil {
+			field, ok := rigerr.AsFieldError(err)
+			if !ok {
+				return nil, rigerr.Wrap(err, "validate attempts")
+			}
+			failed.Attempts = field
+		}
+	}
+
+	if v.Entity != nil {
+		if err := v.Entity(ctx, c); err != nil {
+			field, ok := rigerr.AsFieldError(err)
+			if !ok {
+				return nil, rigerr.Wrap(err, "validate rig_notification")
+			}
+			failed.Entity = field
+		}
+	}
+
+	if failed.Empty() {
+		return nil, nil
+	}
+	return &failed, nil
+}

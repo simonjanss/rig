@@ -1,0 +1,347 @@
+{
+ "name": "public",
+ "tables": [
+  {
+   "name": "rig_file",
+   "kind": "Base",
+   "columns": [
+    {
+     "name": "id",
+     "sql_type": "uuid",
+     "udt_name": "uuid",
+     "nullable": false,
+     "ordinal": 1,
+     "is_primary_key": true
+    },
+    {
+     "name": "tenant_id",
+     "sql_type": "uuid",
+     "udt_name": "uuid",
+     "nullable": false,
+     "ordinal": 2
+    },
+    {
+     "name": "storage_key",
+     "sql_type": "text",
+     "udt_name": "text",
+     "nullable": false,
+     "ordinal": 3
+    },
+    {
+     "name": "url",
+     "sql_type": "text",
+     "udt_name": "text",
+     "nullable": false,
+     "ordinal": 4
+    },
+    {
+     "name": "file_name",
+     "sql_type": "text",
+     "udt_name": "text",
+     "nullable": false,
+     "ordinal": 5
+    },
+    {
+     "name": "content_type",
+     "sql_type": "text",
+     "udt_name": "text",
+     "nullable": false,
+     "ordinal": 6
+    },
+    {
+     "name": "size_bytes",
+     "sql_type": "bigint",
+     "udt_name": "bigint",
+     "nullable": false,
+     "ordinal": 7
+    },
+    {
+     "name": "uploaded_at",
+     "sql_type": "timestamptz",
+     "udt_name": "timestamptz",
+     "nullable": true,
+     "ordinal": 8
+    },
+    {
+     "name": "created_at",
+     "sql_type": "timestamptz",
+     "udt_name": "timestamptz",
+     "nullable": false,
+     "ordinal": 9
+    },
+    {
+     "name": "deleted_at",
+     "sql_type": "timestamptz",
+     "udt_name": "timestamptz",
+     "nullable": true,
+     "ordinal": 10
+    }
+   ],
+   "primary_key": [
+    "id"
+   ],
+   "uniques": [
+    [
+     "tenant_id",
+     "id"
+    ]
+   ],
+   "indexes": [
+    {
+     "name": "rig_file_pkey",
+     "columns": [
+      "id"
+     ],
+     "method": "btree",
+     "unique": true
+    },
+    {
+     "name": "rig_file_tenant_id_key",
+     "columns": [
+      "tenant_id",
+      "id"
+     ],
+     "method": "btree",
+     "unique": true
+    }
+   ]
+  },
+  {
+   "name": "profile",
+   "kind": "Base",
+   "columns": [
+    {
+     "name": "id",
+     "sql_type": "uuid",
+     "udt_name": "uuid",
+     "nullable": false,
+     "ordinal": 1,
+     "is_primary_key": true
+    },
+    {
+     "name": "tenant_id",
+     "sql_type": "uuid",
+     "udt_name": "uuid",
+     "nullable": false,
+     "ordinal": 2
+    },
+    {
+     "name": "created_at",
+     "sql_type": "timestamptz",
+     "udt_name": "timestamptz",
+     "nullable": false,
+     "ordinal": 3
+    },
+    {
+     "name": "display_name",
+     "sql_type": "text",
+     "udt_name": "text",
+     "nullable": false,
+     "ordinal": 4
+    },
+    {
+     "name": "profile_image_file_id",
+     "sql_type": "uuid",
+     "udt_name": "uuid",
+     "nullable": true,
+     "ordinal": 5,
+     "foreign_key": {
+      "table": "rig_file",
+      "column": "id"
+     }
+    },
+    {
+     "name": "banner_file_id",
+     "sql_type": "uuid",
+     "udt_name": "uuid",
+     "nullable": true,
+     "ordinal": 6,
+     "foreign_key": {
+      "table": "rig_file",
+      "column": "id"
+     }
+    }
+   ],
+   "primary_key": [
+    "id"
+   ],
+   "foreign_keys": [
+    {
+     "name": "profile_image_fk",
+     "columns": [
+      "profile_image_file_id"
+     ],
+     "foreign_table": "rig_file",
+     "foreign_columns": [
+      "id"
+     ]
+    },
+    {
+     "name": "profile_banner_fk",
+     "columns": [
+      "banner_file_id"
+     ],
+     "foreign_table": "rig_file",
+     "foreign_columns": [
+      "id"
+     ]
+    }
+   ],
+   "indexes": [
+    {
+     "name": "profile_pkey",
+     "columns": [
+      "id"
+     ],
+     "method": "btree",
+     "unique": true
+    },
+    {
+     "name": "profile_tenant_idx",
+     "columns": [
+      "tenant_id"
+     ],
+     "method": "btree"
+    },
+    {
+     "name": "profile_image_idx",
+     "columns": [
+      "profile_image_file_id"
+     ],
+     "method": "btree"
+    },
+    {
+     "name": "profile_banner_idx",
+     "columns": [
+      "banner_file_id"
+     ],
+     "method": "btree"
+    }
+   ]
+  },
+  {
+   "name": "profile_attachment",
+   "kind": "Base",
+   "columns": [
+    {
+     "name": "id",
+     "sql_type": "uuid",
+     "udt_name": "uuid",
+     "nullable": false,
+     "ordinal": 1,
+     "is_primary_key": true
+    },
+    {
+     "name": "tenant_id",
+     "sql_type": "uuid",
+     "udt_name": "uuid",
+     "nullable": false,
+     "ordinal": 2
+    },
+    {
+     "name": "created_at",
+     "sql_type": "timestamptz",
+     "udt_name": "timestamptz",
+     "nullable": false,
+     "ordinal": 3
+    },
+    {
+     "name": "profile_id",
+     "sql_type": "uuid",
+     "udt_name": "uuid",
+     "nullable": false,
+     "ordinal": 4
+    },
+    {
+     "name": "document_file_id",
+     "sql_type": "uuid",
+     "udt_name": "uuid",
+     "nullable": false,
+     "ordinal": 5
+    },
+    {
+     "name": "thumbnail_file_id",
+     "sql_type": "uuid",
+     "udt_name": "uuid",
+     "nullable": true,
+     "ordinal": 6,
+     "foreign_key": {
+      "table": "profile",
+      "column": "id"
+     }
+    },
+    {
+     "name": "caption",
+     "sql_type": "text",
+     "udt_name": "text",
+     "nullable": true,
+     "ordinal": 7
+    }
+   ],
+   "primary_key": [
+    "id"
+   ],
+   "foreign_keys": [
+    {
+     "name": "attachment_profile_fk",
+     "columns": [
+      "tenant_id",
+      "profile_id"
+     ],
+     "foreign_table": "profile",
+     "foreign_columns": [
+      "tenant_id",
+      "id"
+     ]
+    },
+    {
+     "name": "attachment_file_fk",
+     "columns": [
+      "tenant_id",
+      "document_file_id"
+     ],
+     "foreign_table": "rig_file",
+     "foreign_columns": [
+      "tenant_id",
+      "id"
+     ]
+    },
+    {
+     "name": "attachment_thumb_fk",
+     "columns": [
+      "thumbnail_file_id"
+     ],
+     "foreign_table": "profile",
+     "foreign_columns": [
+      "id"
+     ]
+    }
+   ],
+   "indexes": [
+    {
+     "name": "profile_attachment_pkey",
+     "columns": [
+      "id"
+     ],
+     "method": "btree",
+     "unique": true
+    },
+    {
+     "name": "profile_attachment_profile_idx",
+     "columns": [
+      "tenant_id",
+      "profile_id"
+     ],
+     "method": "btree"
+    },
+    {
+     "name": "profile_attachment_thumb_idx",
+     "columns": [
+      "thumbnail_file_id"
+     ],
+     "method": "btree"
+    }
+   ]
+  }
+ ]
+}

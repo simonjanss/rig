@@ -1,0 +1,92 @@
+{{define "page"}}<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>todo — rig</title>
+<script src="https://unpkg.com/htmx.org@2.0.4"></script>
+<style>
+  :root { color-scheme: light dark; --line: color-mix(in srgb, currentColor 15%, transparent); }
+  * { box-sizing: border-box; }
+  body { font: 15px/1.5 ui-sans-serif, system-ui, sans-serif; margin: 0; padding: 2rem 1rem; }
+  main { max-width: 62rem; margin: 0 auto; }
+  h1 { font-size: 1.4rem; margin: 0 0 .25rem; }
+  h2 { font-size: .8rem; text-transform: uppercase; letter-spacing: .08em; opacity: .6; margin: 2rem 0 .5rem; }
+  p.lede { opacity: .7; margin: 0 0 2rem; }
+  form.new { display: flex; gap: .5rem; flex-wrap: wrap; }
+  form.new input[type=text] { flex: 1 1 16rem; }
+  input, select, button { font: inherit; padding: .35rem .5rem; border: 1px solid var(--line); border-radius: 6px; background: transparent; color: inherit; }
+  button { cursor: pointer; }
+  button.link { border: 0; padding: .35rem .25rem; opacity: .75; text-decoration: underline; }
+  ul { list-style: none; margin: 0; padding: 0; }
+  li { display: flex; align-items: center; gap: .5rem; padding: .5rem 0; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+  li form { display: contents; }
+  .grow { flex: 1 1 12rem; }
+  .muted { opacity: .55; font-size: .85em; }
+  .done .title { text-decoration: line-through; opacity: .5; }
+  .flash { padding: .6rem .8rem; border-radius: 6px; border: 1px solid var(--line); margin: 0 0 1rem; }
+  .flash.error { border-color: #d9534f; }
+  .cols { display: grid; grid-template-columns: 1fr; gap: 1rem; }
+  @media (min-width: 60rem) { .cols.split { grid-template-columns: 1.4fr 1fr; } }
+  .panel { border: 1px solid var(--line); border-radius: 8px; padding: .25rem 1rem 1rem; }
+  .panel-head { display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; }
+  .panel-head h2 { margin-bottom: 0; }
+  .lede-sm { font-size: .85em; margin: .5rem 0 1.25rem; }
+  .empty { opacity: .5; padding: .75rem 0; }
+
+  /* The trash heading is a button, because expanding it is a request. It is
+     styled as the heading it replaces rather than as a control. */
+  button.disclose {
+    display: flex; align-items: center; gap: .4rem;
+    margin: 2rem 0 .5rem; padding: .2rem 0; border: 0; background: transparent;
+    font-size: .8rem; text-transform: uppercase; letter-spacing: .08em;
+    opacity: .6; cursor: pointer;
+  }
+  button.disclose:hover { opacity: 1; }
+  button.disclose .chevron { font-size: 1.1em; width: .9em; line-height: 1; }
+  button.disclose .count {
+    border: 1px solid var(--line); border-radius: 999px; padding: 0 .4rem;
+    letter-spacing: 0; font-size: .95em;
+  }
+  button.disclose .muted { text-transform: none; letter-spacing: 0; }
+  code { font-size: .85em; opacity: .7; }
+
+  /* The history is a timeline: a rule down the left, a dot per state, newest
+     at the top. The dot for the current state is filled, so "where the row is
+     now" is findable without reading anything. */
+  ol.timeline { list-style: none; margin: 0; padding: 0 0 0 1.25rem; border-left: 1px solid var(--line); }
+  ol.timeline > li { position: relative; padding: 0 0 1.5rem; border: 0; display: block; }
+  ol.timeline > li:last-child { padding-bottom: 0; }
+  ol.timeline > li::before {
+    content: ""; position: absolute; left: -1.75rem; top: .45rem;
+    width: .5rem; height: .5rem; border-radius: 50%;
+    border: 1px solid currentColor; background: Canvas; opacity: .5;
+  }
+  ol.timeline > li.now::before { background: currentColor; opacity: 1; }
+  .stamp { display: flex; align-items: center; gap: .5rem; font-size: .8rem; opacity: .6; }
+  .stamp time { cursor: help; }
+  .badge { border: 1px solid var(--line); border-radius: 999px; padding: 0 .45rem; font-size: .7rem;
+           text-transform: uppercase; letter-spacing: .06em; opacity: .9; }
+  .state { display: flex; align-items: baseline; gap: .5rem; flex-wrap: wrap; margin: .15rem 0 .4rem; }
+  .state .title { font-weight: 500; }
+  ul.changes { list-style: none; margin: 0 0 .5rem; padding: 0; display: flex; flex-direction: column; gap: .15rem; }
+  ul.changes li { display: flex; align-items: baseline; gap: .4rem; padding: 0; border: 0; font-size: .85rem; }
+  .field { min-width: 4.5rem; opacity: .55; }
+  .was { text-decoration: line-through; opacity: .6; }
+  .arrow { opacity: .4; }
+  p.changes { font-size: .85rem; margin: 0 0 .5rem; }
+</style>
+</head>
+<body>
+<main>
+  <h1>todo</h1>
+  <p class="lede">
+    Every row is soft-deleted, every update keeps the previous version, and both
+    can be undone. This page is here to make that visible — it calls the same
+    service the JSON API calls.
+  </p>
+
+  <div id="board">{{template "board" .}}</div>
+</main>
+</body>
+</html>{{end}}

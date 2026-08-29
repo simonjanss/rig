@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>rig monitor</title>
+<!-- Relative, and safe to be: the page is only ever served at the base path
+     with its trailing slash, because the one without redirects there. That
+     redirect exists for this line — the asset paths cannot be written by hand
+     without knowing what monitoring.base_path was set to. -->
+<link rel="stylesheet" href="page.css">
+</head>
+<body data-tab="requests">
+
+<header>
+  <div class="bar">
+    <h1>rig monitor <span class="service" id="service"></span></h1>
+    <div class="live">
+      <span class="pulse" id="pulse"></span>
+      <span class="updated" id="updated" aria-live="polite"></span>
+    </div>
+    <div class="tabs" role="tablist" aria-label="View">
+      <button type="button" role="tab" id="tab-requests" aria-controls="panel-requests" aria-selected="true">Requests</button>
+      <button type="button" role="tab" id="tab-logs" aria-controls="panel-logs" aria-selected="false">Logs</button>
+    </div>
+  </div>
+
+  <div class="filters">
+    <div class="field">
+      <input id="q" type="search" placeholder="route, message, error, trace id" aria-label="Search">
+      <kbd>/</kbd>
+    </div>
+    <div class="seg" id="status-seg" role="group" aria-label="Status">
+      <button type="button" data-status="" aria-pressed="true">All</button>
+      <button type="button" data-status="error" aria-pressed="false">Errors</button>
+    </div>
+    <div class="seg" id="level-seg" role="group" aria-label="Level">
+      <button type="button" data-level="" aria-pressed="true">All</button>
+      <button type="button" data-level="DEBUG" aria-pressed="false">Debug</button>
+      <button type="button" data-level="INFO" aria-pressed="false">Info</button>
+      <button type="button" data-level="WARN" aria-pressed="false">Warn</button>
+      <button type="button" data-level="ERROR" aria-pressed="false">Error</button>
+    </div>
+    <label class="check"><input type="checkbox" id="auto" checked> Live</label>
+    <button type="button" class="ghost" id="refresh">Refresh</button>
+    <button type="button" class="ghost" id="help" aria-label="Keyboard shortcuts">?</button>
+  </div>
+</header>
+
+<main>
+  <section id="panel-requests" role="tabpanel" aria-labelledby="tab-requests">
+    <div class="tiles" id="tiles"></div>
+    <p class="note" id="note-requests"></p>
+    <div class="split">
+      <div class="pane">
+        <table class="rows">
+          <caption class="sr-only">Requests, newest first. Enter opens one.</caption>
+          <thead>
+            <tr>
+              <th class="c-when">When</th>
+              <th class="c-method">Verb</th>
+              <th class="c-route">Route</th>
+              <th class="c-status">Status</th>
+              <th class="c-ms num">Took</th>
+              <th class="c-id">Trace</th>
+            </tr>
+          </thead>
+          <tbody id="traces-body"></tbody>
+        </table>
+      </div>
+      <aside class="detail" id="detail" aria-label="Request detail" hidden></aside>
+    </div>
+  </section>
+
+  <section id="panel-logs" role="tabpanel" aria-labelledby="tab-logs" hidden>
+    <p class="note" id="note-logs"></p>
+    <div class="pane">
+      <table class="rows">
+        <caption class="sr-only">Log lines, newest first. Enter expands one.</caption>
+        <thead>
+          <tr>
+            <th class="c-when">When</th>
+            <th class="c-level">Level</th>
+            <th>Message</th>
+            <th class="c-route">Route</th>
+            <th class="c-id">Trace</th>
+          </tr>
+        </thead>
+        <tbody id="logs-body"></tbody>
+      </table>
+    </div>
+  </section>
+</main>
+
+<dialog id="shortcuts">
+  <h2>Keyboard</h2>
+  <dl>
+    <dt><kbd>/</kbd></dt><dd>search</dd>
+    <dt><kbd>j</kbd> <kbd>k</kbd></dt><dd>move down, up</dd>
+    <dt><kbd>Enter</kbd></dt><dd>open the row</dd>
+    <dt><kbd>Esc</kbd></dt><dd>close it, or leave the search box</dd>
+    <dt><kbd>e</kbd></dt><dd>errors only</dd>
+    <dt><kbd>g</kbd> <kbd>l</kbd></dt><dd>requests, logs</dd>
+    <dt><kbd>r</kbd></dt><dd>refresh now</dd>
+    <dt><kbd>?</kbd></dt><dd>this</dd>
+  </dl>
+</dialog>
+
+<script src="page.js"></script>
+</body>
+</html>

@@ -1,0 +1,1 @@
+error[RIG2003] testdata/reservedscope/tables/todo.yaml:28:11: "scope" is reserved: it is how a caller widens a read past its own rows, so an endpoint cannot mean something else by it

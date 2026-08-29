@@ -1,0 +1,79 @@
+table: lesson
+resource: Lesson
+plural: Lessons
+path_segment: lessons
+comment: A single scheduled match slot for one fixture.
+
+operations: [Create, Get, List, Search, Update, Delete]
+order_by: [-starts_at, id]
+restore_window_days: 30
+
+columns:
+  title:
+    comment: Human-readable name shown in the fixture list.
+  fixture_id:
+    field: FixtureID
+    comment: The fixture this slot belongs to.
+    immutable: true
+  status:
+    comment: Lifecycle state of the slot.
+    operations: [Read, Update]
+  manager_email:
+    field: ManagerEmailAddress
+    comment: Address that notifications are sent to.
+    format: EmailAddress
+  internal_revision:
+    exclude: true
+  notes:
+    comment: Free-text notes.
+    snapshot_ignore: true
+
+enums:
+  lesson_status:
+    name: LessonStatus
+    description: Lifecycle state of a lesson.
+    values:
+      planned:
+        name: Planned
+        description: Created but not yet started.
+      in_progress:
+        name: InProgress
+        description: Currently being played.
+
+relations:
+  lesson_player:
+    name: Players
+    embed: true
+
+electric:
+  enabled: true
+  auth: tenant
+  params:
+    matchday:
+      type: Int
+      optional: true
+      description: Restrict the shape to one matchday.
+
+endpoints:
+  - name: Publish
+    method: POST
+    path: /{id}/_publish
+    summary: Publish the slot to participants.
+    permission: lesson.publish
+    request:
+      path_params:
+        - name: ID
+          type: UUID
+          description: The slot to publish.
+      body:
+        - name: NotifyManagers
+          type: Bool
+          default: "true"
+          description: Also notify managers.
+    responses:
+      - status: 200
+        body_object: Lesson
+        description: The published slot.
+      - status: 409
+        body_object: Error
+        description: The slot was not Planned.

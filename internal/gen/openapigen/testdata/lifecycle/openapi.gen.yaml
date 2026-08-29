@@ -1,0 +1,1752 @@
+openapi: 3.1.0
+info:
+    title: demo
+    description: The demo HTTP API.
+    version: v1
+servers:
+    - url: https://api.example.test
+paths:
+    /api/v1/lesson/_deleted/_stream:
+        get:
+            tags:
+                - Lessons
+            summary: Subscribe to retired Lessons.
+            description: |-
+                The rows a delete stamped rather than removed, kept up to date.
+
+                A shape is a filtered view of one table that a client subscribes to. This route is a proxy in front of the sync service: which rows exist in the shape — the tenant, the lifecycle predicate, and the application's own scoping — is decided by the server and cannot be influenced from here. Where the client is in the stream is forwarded untouched.
+
+                With `live=true` the request is a long poll: it does not answer until something changes, so a client timeout set for an ordinary request will cut it short.
+
+                The response body is the sync protocol's own and is not described here. The `electric-*` response headers carry the cursor: send `handle` and `offset` back on the next request, or the subscription starts over.
+
+                Requires a session scoped to a tenant, and the shape is filtered to it.
+            operationId: streamDeletedLessons
+            parameters:
+                - name: offset
+                  in: query
+                  description: Where in the stream to resume, from the previous response's electric-offset.
+                  required: false
+                  schema:
+                    type: string
+                - name: handle
+                  in: query
+                  description: The shape handle from a previous response. Omit it to start a new subscription.
+                  required: false
+                  schema:
+                    type: string
+                - name: live
+                  in: query
+                  description: Long-poll until something changes, rather than answering with what is there now.
+                  required: false
+                  schema:
+                    type: boolean
+                - name: cursor
+                  in: query
+                  description: The sync service's own cache-busting cursor, echoed back from the last response.
+                  required: false
+                  schema:
+                    type: string
+                - name: replica
+                  in: query
+                  description: Whether updates carry the whole row or only the columns that changed.
+                  required: false
+                  schema:
+                    type: string
+                - name: matchday
+                  in: query
+                  description: Restrict the shape to one matchday.
+                  required: false
+                  schema:
+                    type: integer
+                    format: int32
+                - name: status
+                  in: query
+                  description: Only lessons in this state.
+                  required: true
+                  schema:
+                    type: string
+                - $ref: '#/components/parameters/ApiRevision'
+            responses:
+                "200":
+                    description: A chunk of the shape, in the sync protocol's own format.
+                    headers:
+                        electric-handle:
+                            description: The shape handle. Send it back to continue this subscription.
+                            schema:
+                                type: string
+                        electric-offset:
+                            description: Where this chunk ended. Send it back to resume from here.
+                            schema:
+                                type: string
+                        electric-schema:
+                            description: The shape's column types.
+                            schema:
+                                type: string
+                        electric-cursor:
+                            description: The cursor to echo on the next request.
+                            schema:
+                                type: string
+                        electric-up-to-date:
+                            description: Present when the client has caught up with the shape.
+                            schema:
+                                type: string
+                        X-Rig-Sync-Fallback:
+                            description: Present when this response is a snapshot served because the sync service could not be reached, rather than a chunk of a live subscription. The rows are correct as of the moment they were read and are not updated until the subscription resumes.
+                            schema:
+                                type: string
+                    content:
+                        application/json: {}
+                "401":
+                    $ref: '#/components/responses/Unauthorized'
+                "403":
+                    $ref: '#/components/responses/Forbidden'
+                "502":
+                    description: 'The sync service could not be reached, and this shape had nothing to answer with instead: no database was configured, this shape asked not to be answered from one, or the read failed or was larger than a snapshot may be.'
+                    content:
+                        text/plain: {}
+                "503":
+                    description: The sync service could not be reached, and this subscription already holds a snapshot. Keep it and retry after Retry-After.
+                    headers:
+                        Retry-After:
+                            description: Seconds to wait before polling again.
+                            schema:
+                                type: integer
+                    content:
+                        text/plain: {}
+    /api/v1/lesson/_stream:
+        get:
+            tags:
+                - Lessons
+            summary: Subscribe to the live Lesson shape.
+            description: |-
+                Every Lesson the caller may read, kept up to date.
+
+                A shape is a filtered view of one table that a client subscribes to. This route is a proxy in front of the sync service: which rows exist in the shape — the tenant, the lifecycle predicate, and the application's own scoping — is decided by the server and cannot be influenced from here. Where the client is in the stream is forwarded untouched.
+
+                With `live=true` the request is a long poll: it does not answer until something changes, so a client timeout set for an ordinary request will cut it short.
+
+                The response body is the sync protocol's own and is not described here. The `electric-*` response headers carry the cursor: send `handle` and `offset` back on the next request, or the subscription starts over.
+
+                Requires a session scoped to a tenant, and the shape is filtered to it.
+            operationId: streamLessons
+            parameters:
+                - name: offset
+                  in: query
+                  description: Where in the stream to resume, from the previous response's electric-offset.
+                  required: false
+                  schema:
+                    type: string
+                - name: handle
+                  in: query
+                  description: The shape handle from a previous response. Omit it to start a new subscription.
+                  required: false
+                  schema:
+                    type: string
+                - name: live
+                  in: query
+                  description: Long-poll until something changes, rather than answering with what is there now.
+                  required: false
+                  schema:
+                    type: boolean
+                - name: cursor
+                  in: query
+                  description: The sync service's own cache-busting cursor, echoed back from the last response.
+                  required: false
+                  schema:
+                    type: string
+                - name: replica
+                  in: query
+                  description: Whether updates carry the whole row or only the columns that changed.
+                  required: false
+                  schema:
+                    type: string
+                - name: matchday
+                  in: query
+                  description: Restrict the shape to one matchday.
+                  required: false
+                  schema:
+                    type: integer
+                    format: int32
+                - name: status
+                  in: query
+                  description: Only lessons in this state.
+                  required: true
+                  schema:
+                    type: string
+                - $ref: '#/components/parameters/ApiRevision'
+            responses:
+                "200":
+                    description: A chunk of the shape, in the sync protocol's own format.
+                    headers:
+                        electric-handle:
+                            description: The shape handle. Send it back to continue this subscription.
+                            schema:
+                                type: string
+                        electric-offset:
+                            description: Where this chunk ended. Send it back to resume from here.
+                            schema:
+                                type: string
+                        electric-schema:
+                            description: The shape's column types.
+                            schema:
+                                type: string
+                        electric-cursor:
+                            description: The cursor to echo on the next request.
+                            schema:
+                                type: string
+                        electric-up-to-date:
+                            description: Present when the client has caught up with the shape.
+                            schema:
+                                type: string
+                        X-Rig-Sync-Fallback:
+                            description: Present when this response is a snapshot served because the sync service could not be reached, rather than a chunk of a live subscription. The rows are correct as of the moment they were read and are not updated until the subscription resumes.
+                            schema:
+                                type: string
+                    content:
+                        application/json: {}
+                "401":
+                    $ref: '#/components/responses/Unauthorized'
+                "403":
+                    $ref: '#/components/responses/Forbidden'
+                "502":
+                    description: 'The sync service could not be reached, and this shape had nothing to answer with instead: no database was configured, this shape asked not to be answered from one, or the read failed or was larger than a snapshot may be.'
+                    content:
+                        text/plain: {}
+                "503":
+                    description: The sync service could not be reached, and this subscription already holds a snapshot. Keep it and retry after Retry-After.
+                    headers:
+                        Retry-After:
+                            description: Seconds to wait before polling again.
+                            schema:
+                                type: integer
+                    content:
+                        text/plain: {}
+    /api/v1/lesson/{id}/_versions/_stream:
+        get:
+            tags:
+                - Lessons
+            summary: Subscribe to one Lesson's history.
+            description: |-
+                The previous versions of a single Lesson, kept up to date.
+
+                A shape is a filtered view of one table that a client subscribes to. This route is a proxy in front of the sync service: which rows exist in the shape — the tenant, the lifecycle predicate, and the application's own scoping — is decided by the server and cannot be influenced from here. Where the client is in the stream is forwarded untouched.
+
+                With `live=true` the request is a long poll: it does not answer until something changes, so a client timeout set for an ordinary request will cut it short.
+
+                The response body is the sync protocol's own and is not described here. The `electric-*` response headers carry the cursor: send `handle` and `offset` back on the next request, or the subscription starts over.
+
+                Requires a session scoped to a tenant, and the shape is filtered to it.
+            operationId: streamLessonVersions
+            parameters:
+                - name: id
+                  in: path
+                  description: Identifier of the Lesson whose history to stream.
+                  required: true
+                  schema:
+                    type: string
+                    format: uuid
+                - name: offset
+                  in: query
+                  description: Where in the stream to resume, from the previous response's electric-offset.
+                  required: false
+                  schema:
+                    type: string
+                - name: handle
+                  in: query
+                  description: The shape handle from a previous response. Omit it to start a new subscription.
+                  required: false
+                  schema:
+                    type: string
+                - name: live
+                  in: query
+                  description: Long-poll until something changes, rather than answering with what is there now.
+                  required: false
+                  schema:
+                    type: boolean
+                - name: cursor
+                  in: query
+                  description: The sync service's own cache-busting cursor, echoed back from the last response.
+                  required: false
+                  schema:
+                    type: string
+                - name: replica
+                  in: query
+                  description: Whether updates carry the whole row or only the columns that changed.
+                  required: false
+                  schema:
+                    type: string
+                - name: matchday
+                  in: query
+                  description: Restrict the shape to one matchday.
+                  required: false
+                  schema:
+                    type: integer
+                    format: int32
+                - name: status
+                  in: query
+                  description: Only lessons in this state.
+                  required: true
+                  schema:
+                    type: string
+                - $ref: '#/components/parameters/ApiRevision'
+            responses:
+                "200":
+                    description: A chunk of the shape, in the sync protocol's own format.
+                    headers:
+                        electric-handle:
+                            description: The shape handle. Send it back to continue this subscription.
+                            schema:
+                                type: string
+                        electric-offset:
+                            description: Where this chunk ended. Send it back to resume from here.
+                            schema:
+                                type: string
+                        electric-schema:
+                            description: The shape's column types.
+                            schema:
+                                type: string
+                        electric-cursor:
+                            description: The cursor to echo on the next request.
+                            schema:
+                                type: string
+                        electric-up-to-date:
+                            description: Present when the client has caught up with the shape.
+                            schema:
+                                type: string
+                        X-Rig-Sync-Fallback:
+                            description: Present when this response is a snapshot served because the sync service could not be reached, rather than a chunk of a live subscription. The rows are correct as of the moment they were read and are not updated until the subscription resumes.
+                            schema:
+                                type: string
+                    content:
+                        application/json: {}
+                "401":
+                    $ref: '#/components/responses/Unauthorized'
+                "403":
+                    $ref: '#/components/responses/Forbidden'
+                "502":
+                    description: 'The sync service could not be reached, and this shape had nothing to answer with instead: no database was configured, this shape asked not to be answered from one, or the read failed or was larger than a snapshot may be.'
+                    content:
+                        text/plain: {}
+                "503":
+                    description: The sync service could not be reached, and this subscription already holds a snapshot. Keep it and retry after Retry-After.
+                    headers:
+                        Retry-After:
+                            description: Seconds to wait before polling again.
+                            schema:
+                                type: integer
+                    content:
+                        text/plain: {}
+    /api/v1/lessons:
+        get:
+            tags:
+                - Lessons
+            summary: List Lessons.
+            description: |-
+                List Lessons.
+
+                Requires the `lesson.read` permission.
+            operationId: listLessons
+            parameters:
+                - name: limit
+                  in: query
+                  description: Maximum rows to return.
+                  required: false
+                  schema:
+                    type: integer
+                    format: int32
+                    default: 50
+                - name: offset
+                  in: query
+                  description: Rows to skip before the first returned row.
+                  required: false
+                  schema:
+                    type: integer
+                    format: int32
+                    default: 0
+                - $ref: '#/components/parameters/ApiRevision'
+            responses:
+                "200":
+                    description: A page of Lessons.
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/LessonListResponse'
+                "400":
+                    $ref: '#/components/responses/BadRequest'
+                "401":
+                    $ref: '#/components/responses/Unauthorized'
+                "403":
+                    $ref: '#/components/responses/Forbidden'
+                "429":
+                    $ref: '#/components/responses/RateLimited'
+                "500":
+                    $ref: '#/components/responses/Internal'
+            x-rig-permission: lesson.read
+        post:
+            tags:
+                - Lessons
+            summary: Create a Lesson.
+            description: |-
+                Create a Lesson.
+
+                Requires the `lesson.write` permission.
+            operationId: createLesson
+            parameters:
+                - $ref: '#/components/parameters/ApiRevision'
+                - $ref: '#/components/parameters/IdempotencyKey'
+            requestBody:
+                description: The fields a new Lesson is created with. A field the database cannot supply for itself is required.
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/LessonCreateInput'
+                required: true
+            responses:
+                "201":
+                    description: The created Lesson.
+                    headers:
+                        Idempotency-Replayed:
+                            $ref: '#/components/headers/IdempotencyReplayed'
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Lesson'
+                "400":
+                    $ref: '#/components/responses/BadRequest'
+                "401":
+                    $ref: '#/components/responses/Unauthorized'
+                "403":
+                    $ref: '#/components/responses/Forbidden'
+                "409":
+                    $ref: '#/components/responses/Conflict'
+                "422":
+                    $ref: '#/components/responses/UnprocessableEntity'
+                "429":
+                    $ref: '#/components/responses/RateLimited'
+                "500":
+                    $ref: '#/components/responses/Internal'
+            x-rig-permission: lesson.write
+    /api/v1/lessons/_deleted:
+        get:
+            tags:
+                - Lessons
+            summary: List retired Lessons.
+            description: |-
+                A deletion stamps the row rather than removing it, so this is what was deleted and can still be brought back. Only rows inside the 30-day restore window appear: past it a row is gone as far as anyone is concerned, so it is not in the trash either.
+
+                Requires the `lesson.read` permission.
+            operationId: listDeletedLessons
+            parameters:
+                - name: limit
+                  in: query
+                  description: Maximum rows to return.
+                  required: false
+                  schema:
+                    type: integer
+                    format: int32
+                    default: 50
+                - name: offset
+                  in: query
+                  description: Rows to skip before the first returned row.
+                  required: false
+                  schema:
+                    type: integer
+                    format: int32
+                    default: 0
+                - $ref: '#/components/parameters/ApiRevision'
+            responses:
+                "200":
+                    description: A page of retired Lessons.
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/LessonListResponse'
+                "400":
+                    $ref: '#/components/responses/BadRequest'
+                "401":
+                    $ref: '#/components/responses/Unauthorized'
+                "403":
+                    $ref: '#/components/responses/Forbidden'
+                "429":
+                    $ref: '#/components/responses/RateLimited'
+                "500":
+                    $ref: '#/components/responses/Internal'
+            x-rig-permission: lesson.read
+    /api/v1/lessons/_search:
+        post:
+            tags:
+                - Lessons
+            summary: Search Lessons with filters.
+            description: |-
+                Search Lessons with filters.
+
+                The primary form of this operation is `QUERY /api/v1/lessons` — a read that carries a body, and so safe and idempotent in a way POST is not. OpenAPI 3.1 cannot describe an operation on the QUERY method, so it is documented here as the POST alias that exists for intermediaries which reject unfamiliar methods. One handler serves both routes and they answer identically.
+
+                Requires the `lesson.read` permission.
+            operationId: searchLessons
+            parameters:
+                - name: limit
+                  in: query
+                  description: Maximum rows to return.
+                  required: false
+                  schema:
+                    type: integer
+                    format: int32
+                    default: 50
+                - name: offset
+                  in: query
+                  description: Rows to skip before the first returned row.
+                  required: false
+                  schema:
+                    type: integer
+                    format: int32
+                    default: 0
+                - $ref: '#/components/parameters/ApiRevision'
+            requestBody:
+                description: The request body for Lesson.Search.
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/LessonSearchBody'
+                required: true
+            responses:
+                "200":
+                    description: A page of matching Lessons.
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/LessonListResponse'
+                "400":
+                    $ref: '#/components/responses/BadRequest'
+                "401":
+                    $ref: '#/components/responses/Unauthorized'
+                "403":
+                    $ref: '#/components/responses/Forbidden'
+                "422":
+                    $ref: '#/components/responses/UnprocessableEntity'
+                "429":
+                    $ref: '#/components/responses/RateLimited'
+                "500":
+                    $ref: '#/components/responses/Internal'
+            x-rig-permission: lesson.read
+    /api/v1/lessons/{id}:
+        get:
+            tags:
+                - Lessons
+            summary: Fetch one Lesson by identifier.
+            description: |-
+                Fetch one Lesson by identifier.
+
+                Requires the `lesson.read` permission.
+            operationId: getLesson
+            parameters:
+                - name: id
+                  in: path
+                  description: Identifier of the Lesson.
+                  required: true
+                  schema:
+                    type: string
+                    format: uuid
+                - $ref: '#/components/parameters/ApiRevision'
+            responses:
+                "200":
+                    description: The requested Lesson.
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Lesson'
+                "400":
+                    $ref: '#/components/responses/BadRequest'
+                "401":
+                    $ref: '#/components/responses/Unauthorized'
+                "403":
+                    $ref: '#/components/responses/Forbidden'
+                "404":
+                    $ref: '#/components/responses/NotFound'
+                "429":
+                    $ref: '#/components/responses/RateLimited'
+                "500":
+                    $ref: '#/components/responses/Internal'
+            x-rig-permission: lesson.read
+        delete:
+            tags:
+                - Lessons
+            summary: Delete a Lesson.
+            description: |-
+                The row is retired by stamping a deletion time; it stops appearing in reads but can be restored within the retention window.
+
+                Requires the `lesson.delete` permission.
+            operationId: deleteLesson
+            parameters:
+                - name: id
+                  in: path
+                  description: Identifier of the Lesson.
+                  required: true
+                  schema:
+                    type: string
+                    format: uuid
+                - $ref: '#/components/parameters/ApiRevision'
+            responses:
+                "204":
+                    description: The Lesson was deleted.
+                "400":
+                    $ref: '#/components/responses/BadRequest'
+                "401":
+                    $ref: '#/components/responses/Unauthorized'
+                "403":
+                    $ref: '#/components/responses/Forbidden'
+                "404":
+                    $ref: '#/components/responses/NotFound'
+                "409":
+                    $ref: '#/components/responses/Conflict'
+                "429":
+                    $ref: '#/components/responses/RateLimited'
+                "500":
+                    $ref: '#/components/responses/Internal'
+            x-rig-permission: lesson.delete
+        patch:
+            tags:
+                - Lessons
+            summary: Update a Lesson.
+            description: |-
+                Only the fields present in the body are changed. A field set to null is cleared; a field left out is left alone.
+
+                Requires the `lesson.write` permission.
+            operationId: updateLesson
+            parameters:
+                - name: id
+                  in: path
+                  description: Identifier of the Lesson.
+                  required: true
+                  schema:
+                    type: string
+                    format: uuid
+                - $ref: '#/components/parameters/ApiRevision'
+                - $ref: '#/components/parameters/IdempotencyKey'
+            requestBody:
+                description: 'The fields of a Lesson to change. Every member is optional: one left out is left alone, and an explicit null clears it.'
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/LessonUpdateInput'
+                required: true
+            responses:
+                "200":
+                    description: The updated Lesson.
+                    headers:
+                        Idempotency-Replayed:
+                            $ref: '#/components/headers/IdempotencyReplayed'
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Lesson'
+                "400":
+                    $ref: '#/components/responses/BadRequest'
+                "401":
+                    $ref: '#/components/responses/Unauthorized'
+                "403":
+                    $ref: '#/components/responses/Forbidden'
+                "404":
+                    $ref: '#/components/responses/NotFound'
+                "409":
+                    $ref: '#/components/responses/Conflict'
+                "422":
+                    $ref: '#/components/responses/UnprocessableEntity'
+                "429":
+                    $ref: '#/components/responses/RateLimited'
+                "500":
+                    $ref: '#/components/responses/Internal'
+            x-rig-permission: lesson.write
+    /api/v1/lessons/{id}/_publish:
+        post:
+            tags:
+                - Lessons
+            summary: Publish the lesson to its participants.
+            description: |-
+                Publish the lesson to its participants.
+
+                Requires the `lesson.publish` permission.
+            operationId: publishLesson
+            parameters:
+                - name: id
+                  in: path
+                  description: The lesson to publish.
+                  required: true
+                  schema:
+                    type: string
+                    format: uuid
+                - $ref: '#/components/parameters/ApiRevision'
+                - $ref: '#/components/parameters/IdempotencyKey'
+            requestBody:
+                description: The request body for Lesson.Publish.
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/LessonPublishBody'
+                required: true
+            responses:
+                "200":
+                    description: The published lesson.
+                    headers:
+                        Idempotency-Replayed:
+                            $ref: '#/components/headers/IdempotencyReplayed'
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Lesson'
+                "400":
+                    $ref: '#/components/responses/BadRequest'
+                "401":
+                    $ref: '#/components/responses/Unauthorized'
+                "403":
+                    $ref: '#/components/responses/Forbidden'
+                "404":
+                    $ref: '#/components/responses/NotFound'
+                "409":
+                    description: The lesson was not in the Planned state.
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Error'
+                "429":
+                    $ref: '#/components/responses/RateLimited'
+                "500":
+                    $ref: '#/components/responses/Internal'
+            x-rig-permission: lesson.publish
+    /api/v1/lessons/{id}/_restore:
+        post:
+            tags:
+                - Lessons
+            summary: Bring a retired Lesson back.
+            description: |-
+                The deletion stamp is cleared and the row appears in reads again. It works for 30 days after the deletion; past that the row is no longer eligible and this answers 409.
+
+                Restoring a row that was never deleted is not an error. It is already in the state the caller asked for, and answering otherwise would make a retry of a request whose response went missing look like a failure.
+
+                The request carries no fields. What to do when the world has moved on while the row was retired — a unique value taken by something created since — is the application's decision, and it is made in the restore hook: refuse, or change the row so that it fits.
+
+                Every rule then runs against whatever the hook settled on, not only the ones for fields it touched. The row was not live, so nothing about it has been checked against the world it is returning to.
+
+                Requires the `lesson.write` permission.
+            operationId: restoreLesson
+            parameters:
+                - name: id
+                  in: path
+                  description: Identifier of the Lesson.
+                  required: true
+                  schema:
+                    type: string
+                    format: uuid
+                - $ref: '#/components/parameters/ApiRevision'
+                - $ref: '#/components/parameters/IdempotencyKey'
+            responses:
+                "200":
+                    description: The restored Lesson.
+                    headers:
+                        Idempotency-Replayed:
+                            $ref: '#/components/headers/IdempotencyReplayed'
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Lesson'
+                "400":
+                    $ref: '#/components/responses/BadRequest'
+                "401":
+                    $ref: '#/components/responses/Unauthorized'
+                "403":
+                    $ref: '#/components/responses/Forbidden'
+                "404":
+                    $ref: '#/components/responses/NotFound'
+                "409":
+                    $ref: '#/components/responses/Conflict'
+                "422":
+                    $ref: '#/components/responses/UnprocessableEntity'
+                "429":
+                    $ref: '#/components/responses/RateLimited'
+                "500":
+                    $ref: '#/components/responses/Internal'
+            x-rig-permission: lesson.write
+    /api/v1/lessons/{id}/_revert:
+        post:
+            tags:
+                - Lessons
+            summary: Put a Lesson back to one of its previous versions.
+            description: |-
+                The version is replayed through the ordinary update path rather than written over the row, so the state being replaced is itself snapshotted first and every rule an update runs still runs. Reverting is undoable, and a value that would be refused now is still refused.
+
+                Requires the `lesson.write` permission.
+            operationId: revertLesson
+            parameters:
+                - name: id
+                  in: path
+                  description: Identifier of the Lesson.
+                  required: true
+                  schema:
+                    type: string
+                    format: uuid
+                - $ref: '#/components/parameters/ApiRevision'
+                - $ref: '#/components/parameters/IdempotencyKey'
+            requestBody:
+                description: The request body for Lesson.Revert.
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/LessonRevertBody'
+                required: true
+            responses:
+                "200":
+                    description: The Lesson, as of the version replayed.
+                    headers:
+                        Idempotency-Replayed:
+                            $ref: '#/components/headers/IdempotencyReplayed'
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Lesson'
+                "400":
+                    $ref: '#/components/responses/BadRequest'
+                "401":
+                    $ref: '#/components/responses/Unauthorized'
+                "403":
+                    $ref: '#/components/responses/Forbidden'
+                "404":
+                    $ref: '#/components/responses/NotFound'
+                "409":
+                    $ref: '#/components/responses/Conflict'
+                "422":
+                    $ref: '#/components/responses/UnprocessableEntity'
+                "429":
+                    $ref: '#/components/responses/RateLimited'
+                "500":
+                    $ref: '#/components/responses/Internal'
+            x-rig-permission: lesson.write
+    /api/v1/lessons/{id}/_versions:
+        get:
+            tags:
+                - Lessons
+            summary: List a Lesson's previous versions.
+            description: |-
+                Every update copies the row as it was before writing the change, so this is the row's history: newest first, and never the live row itself.
+
+                These do not appear in ordinary reads. A version answers Get by its own identifier, but it is filtered out of List and Search, so history does not turn up in a listing.
+
+                Requires the `lesson.read` permission.
+            operationId: versionsOfLesson
+            parameters:
+                - name: id
+                  in: path
+                  description: Identifier of the Lesson.
+                  required: true
+                  schema:
+                    type: string
+                    format: uuid
+                - $ref: '#/components/parameters/ApiRevision'
+            responses:
+                "200":
+                    description: The versions of the Lesson, newest first.
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/LessonListResponse'
+                "400":
+                    $ref: '#/components/responses/BadRequest'
+                "401":
+                    $ref: '#/components/responses/Unauthorized'
+                "403":
+                    $ref: '#/components/responses/Forbidden'
+                "404":
+                    $ref: '#/components/responses/NotFound'
+                "429":
+                    $ref: '#/components/responses/RateLimited'
+                "500":
+                    $ref: '#/components/responses/Internal'
+            x-rig-permission: lesson.read
+components:
+    schemas:
+        Error:
+            type: object
+            properties:
+                code:
+                    $ref: '#/components/schemas/ErrorCode'
+                    description: Machine-readable reason the request failed.
+                message:
+                    type: string
+                    description: Human-readable explanation. Not intended for clients to parse.
+                requestId:
+                    type:
+                        - string
+                        - "null"
+                    description: Identifier of this request, for correlating with server logs.
+                fields:
+                    description: Present when the failure was validation. It is shaped like the request body that failed — one member per field, holding the problem with that field — so a client can put each message beside the control it belongs to.
+            description: Returned whenever a request fails.
+        ErrorCode:
+            type: string
+            enum:
+                - BadRequest
+                - Unauthorized
+                - Forbidden
+                - NotFound
+                - Conflict
+                - UnprocessableEntity
+                - RateLimited
+                - TooLarge
+                - UnsupportedMediaType
+                - UpgradeRequired
+                - Internal
+            description: Machine-readable reason a request failed.
+            x-enum-varnames:
+                - BadRequest
+                - Unauthorized
+                - Forbidden
+                - NotFound
+                - Conflict
+                - UnprocessableEntity
+                - RateLimited
+                - TooLarge
+                - UnsupportedMediaType
+                - UpgradeRequired
+                - Internal
+        Lesson:
+            type: object
+            properties:
+                id:
+                    type: string
+                    format: uuid
+                    description: Unique identifier for this row.
+                    readOnly: true
+                tenantId:
+                    type: string
+                    format: uuid
+                    description: Tenant this row belongs to. Every query is scoped by it.
+                    readOnly: true
+                createdAt:
+                    type: string
+                    format: date-time
+                    description: When this row was created. Set automatically and never changes.
+                    readOnly: true
+                createdByAccountId:
+                    type:
+                        - string
+                        - "null"
+                    format: uuid
+                    description: Account that created this row, taken from the request's claims.
+                    readOnly: true
+                updatedAt:
+                    type:
+                        - string
+                        - "null"
+                    format: date-time
+                    description: When this row was last updated. Set automatically on every update.
+                    readOnly: true
+                updatedByAccountId:
+                    type:
+                        - string
+                        - "null"
+                    format: uuid
+                    description: Account that last updated this row, taken from the request's claims.
+                    readOnly: true
+                deletedAt:
+                    type:
+                        - string
+                        - "null"
+                    format: date-time
+                    description: When this row was soft-deleted. Null while the row is live.
+                    readOnly: true
+                deletedByAccountId:
+                    type:
+                        - string
+                        - "null"
+                    format: uuid
+                    description: Account that soft-deleted this row, taken from the request's claims.
+                    readOnly: true
+                versionType:
+                    $ref: '#/components/schemas/LessonVersionType'
+                    description: Whether this row is the live version or an immutable snapshot of a previous one.
+                    readOnly: true
+                snapshotFromLessonId:
+                    type:
+                        - string
+                        - "null"
+                    format: uuid
+                    description: The row this snapshot was copied from. Null on live rows.
+                    readOnly: true
+                snapshotFromLessonAt:
+                    type:
+                        - string
+                        - "null"
+                    format: date-time
+                    description: The source row's last-updated time at the moment this snapshot was taken. This identifies the version captured, not when the copy was made.
+                    readOnly: true
+                title:
+                    type: string
+                    description: Human-readable name shown in the timetable.
+                notes:
+                    type:
+                        - string
+                        - "null"
+                    description: Free-text notes kept alongside the lesson.
+                status:
+                    $ref: '#/components/schemas/LessonStatus'
+                    description: Lifecycle state of the lesson.
+                managerEmailAddress:
+                    type: string
+                    format: email
+                    description: Address that notifications about this lesson are sent to.
+                startsAt:
+                    type: string
+                    format: date-time
+                    description: When the lesson begins.
+                capacity:
+                    type:
+                        - integer
+                        - "null"
+                    format: int32
+                    description: Maximum number of participants, or null for no limit.
+                price:
+                    type:
+                        - number
+                        - "null"
+                    format: decimal
+                    description: |-
+                        Amount charged per participant.
+
+                        Sent as a JSON number. A not-a-number value arrives as the string "NaN" instead, and a value with more than about fifteen significant digits is subject to the precision of the reader's own number type.
+                tags:
+                    type:
+                        - array
+                        - "null"
+                    items:
+                        type: string
+                    description: Free-form labels used for grouping.
+                searchVector:
+                    type:
+                        - string
+                        - "null"
+                    description: Denormalized text used by full-text search.
+                    readOnly: true
+            description: A single scheduled teaching occasion.
+        LessonCreateInput:
+            type: object
+            properties:
+                title:
+                    type: string
+                    description: Human-readable name shown in the timetable.
+                notes:
+                    type:
+                        - string
+                        - "null"
+                    description: Free-text notes kept alongside the lesson.
+                managerEmailAddress:
+                    type: string
+                    format: email
+                    description: Address that notifications about this lesson are sent to.
+                startsAt:
+                    type: string
+                    format: date-time
+                    description: |-
+                        When the lesson begins.
+
+                        Set when the Lesson is created and never changed afterwards.
+                capacity:
+                    type:
+                        - integer
+                        - "null"
+                    format: int32
+                    description: Maximum number of participants, or null for no limit.
+                price:
+                    type:
+                        - number
+                        - "null"
+                    format: decimal
+                    description: |-
+                        Amount charged per participant.
+
+                        Sent as a JSON number. A not-a-number value arrives as the string "NaN" instead, and a value with more than about fifteen significant digits is subject to the precision of the reader's own number type.
+                tags:
+                    type:
+                        - array
+                        - "null"
+                    items:
+                        type: string
+                    description: Free-form labels used for grouping.
+            required:
+                - title
+                - managerEmailAddress
+                - startsAt
+            description: The fields a new Lesson is created with. A field the database cannot supply for itself is required.
+        LessonFilter:
+            type: object
+            properties:
+                equals:
+                    oneOf:
+                        - $ref: '#/components/schemas/LessonFilterEquals'
+                        - type: "null"
+                    description: Fields that must equal the given value.
+                notEquals:
+                    oneOf:
+                        - $ref: '#/components/schemas/LessonFilterEquals'
+                        - type: "null"
+                    description: Fields that must not equal the given value.
+                greaterThan:
+                    oneOf:
+                        - $ref: '#/components/schemas/LessonFilterRange'
+                        - type: "null"
+                    description: Fields that must be greater than the given value.
+                smallerThan:
+                    oneOf:
+                        - $ref: '#/components/schemas/LessonFilterRange'
+                        - type: "null"
+                    description: Fields that must be less than the given value.
+                greaterOrEqual:
+                    oneOf:
+                        - $ref: '#/components/schemas/LessonFilterRange'
+                        - type: "null"
+                    description: Fields that must be greater than or equal to the given value.
+                smallerOrEqual:
+                    oneOf:
+                        - $ref: '#/components/schemas/LessonFilterRange'
+                        - type: "null"
+                    description: Fields that must be less than or equal to the given value.
+                contains:
+                    oneOf:
+                        - $ref: '#/components/schemas/LessonFilterContains'
+                        - type: "null"
+                    description: Fields that must be one of the given values.
+                notContains:
+                    oneOf:
+                        - $ref: '#/components/schemas/LessonFilterContains'
+                        - type: "null"
+                    description: Fields that must not be one of the given values.
+                like:
+                    oneOf:
+                        - $ref: '#/components/schemas/LessonFilterLike'
+                        - type: "null"
+                    description: Text fields that must match the given pattern.
+                notLike:
+                    oneOf:
+                        - $ref: '#/components/schemas/LessonFilterLike'
+                        - type: "null"
+                    description: Text fields that must not match the given pattern.
+                "null":
+                    oneOf:
+                        - $ref: '#/components/schemas/LessonFilterNull'
+                        - type: "null"
+                    description: Fields that must be null.
+                notNull:
+                    oneOf:
+                        - $ref: '#/components/schemas/LessonFilterNull'
+                        - type: "null"
+                    description: Fields that must not be null.
+                orCondition:
+                    type: boolean
+                    description: Combine this filter's conditions with OR instead of AND.
+                nestedFilters:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/LessonFilter'
+                    description: Sub-filters combined with this one, so that AND and OR can be mixed to any depth.
+            description: Conditions a Lesson must satisfy to match a search.
+        LessonFilterContains:
+            type: object
+            properties:
+                id:
+                    type: array
+                    items:
+                        type: string
+                        format: uuid
+                    description: Unique identifier for this row.
+                createdAt:
+                    type: array
+                    items:
+                        type: string
+                        format: date-time
+                    description: When this row was created. Set automatically and never changes.
+                createdByAccountId:
+                    type: array
+                    items:
+                        type: string
+                        format: uuid
+                    description: Account that created this row, taken from the request's claims.
+                updatedAt:
+                    type: array
+                    items:
+                        type: string
+                        format: date-time
+                    description: When this row was last updated. Set automatically on every update.
+                updatedByAccountId:
+                    type: array
+                    items:
+                        type: string
+                        format: uuid
+                    description: Account that last updated this row, taken from the request's claims.
+                deletedAt:
+                    type: array
+                    items:
+                        type: string
+                        format: date-time
+                    description: When this row was soft-deleted. Null while the row is live.
+                deletedByAccountId:
+                    type: array
+                    items:
+                        type: string
+                        format: uuid
+                    description: Account that soft-deleted this row, taken from the request's claims.
+                versionType:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/LessonVersionType'
+                    description: Whether this row is the live version or an immutable snapshot of a previous one.
+                snapshotFromLessonId:
+                    type: array
+                    items:
+                        type: string
+                        format: uuid
+                    description: The row this snapshot was copied from. Null on live rows.
+                snapshotFromLessonAt:
+                    type: array
+                    items:
+                        type: string
+                        format: date-time
+                    description: The source row's last-updated time at the moment this snapshot was taken. This identifies the version captured, not when the copy was made.
+                title:
+                    type: array
+                    items:
+                        type: string
+                    description: Human-readable name shown in the timetable.
+                notes:
+                    type: array
+                    items:
+                        type: string
+                    description: Free-text notes kept alongside the lesson.
+                status:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/LessonStatus'
+                    description: Lifecycle state of the lesson.
+                managerEmailAddress:
+                    type: array
+                    items:
+                        type: string
+                    format: email
+                    description: Address that notifications about this lesson are sent to.
+                startsAt:
+                    type: array
+                    items:
+                        type: string
+                        format: date-time
+                    description: When the lesson begins.
+                capacity:
+                    type: array
+                    items:
+                        type: integer
+                        format: int32
+                    description: Maximum number of participants, or null for no limit.
+                price:
+                    type: array
+                    items:
+                        type: number
+                        format: decimal
+                    description: |-
+                        Amount charged per participant.
+
+                        Sent as a JSON number. A not-a-number value arrives as the string "NaN" instead, and a value with more than about fifteen significant digits is subject to the precision of the reader's own number type.
+                searchVector:
+                    type: array
+                    items:
+                        type: string
+                    description: Denormalized text used by full-text search.
+            description: Set-membership conditions on Lesson fields.
+        LessonFilterEquals:
+            type: object
+            properties:
+                id:
+                    type:
+                        - string
+                        - "null"
+                    format: uuid
+                    description: Unique identifier for this row.
+                createdAt:
+                    type:
+                        - string
+                        - "null"
+                    format: date-time
+                    description: When this row was created. Set automatically and never changes.
+                createdByAccountId:
+                    type:
+                        - string
+                        - "null"
+                    format: uuid
+                    description: Account that created this row, taken from the request's claims.
+                updatedAt:
+                    type:
+                        - string
+                        - "null"
+                    format: date-time
+                    description: When this row was last updated. Set automatically on every update.
+                updatedByAccountId:
+                    type:
+                        - string
+                        - "null"
+                    format: uuid
+                    description: Account that last updated this row, taken from the request's claims.
+                deletedAt:
+                    type:
+                        - string
+                        - "null"
+                    format: date-time
+                    description: When this row was soft-deleted. Null while the row is live.
+                deletedByAccountId:
+                    type:
+                        - string
+                        - "null"
+                    format: uuid
+                    description: Account that soft-deleted this row, taken from the request's claims.
+                versionType:
+                    oneOf:
+                        - $ref: '#/components/schemas/LessonVersionType'
+                        - type: "null"
+                    description: Whether this row is the live version or an immutable snapshot of a previous one.
+                snapshotFromLessonId:
+                    type:
+                        - string
+                        - "null"
+                    format: uuid
+                    description: The row this snapshot was copied from. Null on live rows.
+                snapshotFromLessonAt:
+                    type:
+                        - string
+                        - "null"
+                    format: date-time
+                    description: The source row's last-updated time at the moment this snapshot was taken. This identifies the version captured, not when the copy was made.
+                title:
+                    type:
+                        - string
+                        - "null"
+                    description: Human-readable name shown in the timetable.
+                notes:
+                    type:
+                        - string
+                        - "null"
+                    description: Free-text notes kept alongside the lesson.
+                status:
+                    oneOf:
+                        - $ref: '#/components/schemas/LessonStatus'
+                        - type: "null"
+                    description: Lifecycle state of the lesson.
+                managerEmailAddress:
+                    type:
+                        - string
+                        - "null"
+                    format: email
+                    description: Address that notifications about this lesson are sent to.
+                startsAt:
+                    type:
+                        - string
+                        - "null"
+                    format: date-time
+                    description: When the lesson begins.
+                capacity:
+                    type:
+                        - integer
+                        - "null"
+                    format: int32
+                    description: Maximum number of participants, or null for no limit.
+                price:
+                    type:
+                        - number
+                        - "null"
+                    format: decimal
+                    description: |-
+                        Amount charged per participant.
+
+                        Sent as a JSON number. A not-a-number value arrives as the string "NaN" instead, and a value with more than about fifteen significant digits is subject to the precision of the reader's own number type.
+                tags:
+                    type:
+                        - array
+                        - "null"
+                    items:
+                        type: string
+                    description: Free-form labels used for grouping.
+                searchVector:
+                    type:
+                        - string
+                        - "null"
+                    description: Denormalized text used by full-text search.
+            description: Exact-match conditions on Lesson fields.
+        LessonFilterLike:
+            type: object
+            properties:
+                title:
+                    type:
+                        - string
+                        - "null"
+                    description: Human-readable name shown in the timetable.
+                notes:
+                    type:
+                        - string
+                        - "null"
+                    description: Free-text notes kept alongside the lesson.
+                managerEmailAddress:
+                    type:
+                        - string
+                        - "null"
+                    format: email
+                    description: Address that notifications about this lesson are sent to.
+                searchVector:
+                    type:
+                        - string
+                        - "null"
+                    description: Denormalized text used by full-text search.
+            description: Pattern conditions on Lesson text fields.
+        LessonFilterNull:
+            type: object
+            properties:
+                createdByAccountId:
+                    type:
+                        - boolean
+                        - "null"
+                    description: Account that created this row, taken from the request's claims.
+                updatedAt:
+                    type:
+                        - boolean
+                        - "null"
+                    description: When this row was last updated. Set automatically on every update.
+                updatedByAccountId:
+                    type:
+                        - boolean
+                        - "null"
+                    description: Account that last updated this row, taken from the request's claims.
+                deletedAt:
+                    type:
+                        - boolean
+                        - "null"
+                    description: When this row was soft-deleted. Null while the row is live.
+                deletedByAccountId:
+                    type:
+                        - boolean
+                        - "null"
+                    description: Account that soft-deleted this row, taken from the request's claims.
+                snapshotFromLessonId:
+                    type:
+                        - boolean
+                        - "null"
+                    description: The row this snapshot was copied from. Null on live rows.
+                snapshotFromLessonAt:
+                    type:
+                        - boolean
+                        - "null"
+                    description: The source row's last-updated time at the moment this snapshot was taken. This identifies the version captured, not when the copy was made.
+                notes:
+                    type:
+                        - boolean
+                        - "null"
+                    description: Free-text notes kept alongside the lesson.
+                capacity:
+                    type:
+                        - boolean
+                        - "null"
+                    description: Maximum number of participants, or null for no limit.
+                price:
+                    type:
+                        - boolean
+                        - "null"
+                    description: Amount charged per participant.
+                tags:
+                    type:
+                        - boolean
+                        - "null"
+                    description: Free-form labels used for grouping.
+                searchVector:
+                    type:
+                        - boolean
+                        - "null"
+                    description: Denormalized text used by full-text search.
+            description: Presence conditions on nullable Lesson fields.
+        LessonFilterRange:
+            type: object
+            properties:
+                createdAt:
+                    type:
+                        - string
+                        - "null"
+                    format: date-time
+                    description: When this row was created. Set automatically and never changes.
+                updatedAt:
+                    type:
+                        - string
+                        - "null"
+                    format: date-time
+                    description: When this row was last updated. Set automatically on every update.
+                deletedAt:
+                    type:
+                        - string
+                        - "null"
+                    format: date-time
+                    description: When this row was soft-deleted. Null while the row is live.
+                snapshotFromLessonAt:
+                    type:
+                        - string
+                        - "null"
+                    format: date-time
+                    description: The source row's last-updated time at the moment this snapshot was taken. This identifies the version captured, not when the copy was made.
+                startsAt:
+                    type:
+                        - string
+                        - "null"
+                    format: date-time
+                    description: When the lesson begins.
+                capacity:
+                    type:
+                        - integer
+                        - "null"
+                    format: int32
+                    description: Maximum number of participants, or null for no limit.
+                price:
+                    type:
+                        - number
+                        - "null"
+                    format: decimal
+                    description: |-
+                        Amount charged per participant.
+
+                        Sent as a JSON number. A not-a-number value arrives as the string "NaN" instead, and a value with more than about fifteen significant digits is subject to the precision of the reader's own number type.
+            description: Ordering conditions on Lesson fields that can be compared.
+        LessonListResponse:
+            type: object
+            properties:
+                data:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/Lesson'
+                    description: The rows in this page.
+                pagination:
+                    $ref: '#/components/schemas/Pagination'
+                    description: Where this page sits in the full result set.
+            description: A page of Lessons.
+        LessonPublishBody:
+            type: object
+            properties:
+                notifyGuardians:
+                    type: boolean
+                    description: Whether guardians are notified as well.
+                    default: true
+            description: The request body for Lesson.Publish.
+        LessonRevertBody:
+            type: object
+            properties:
+                versionId:
+                    type: string
+                    format: uuid
+                    description: The version to put back, from the Lesson's history.
+            required:
+                - versionId
+            description: The request body for Lesson.Revert.
+        LessonSearchBody:
+            type: object
+            properties:
+                filter:
+                    $ref: '#/components/schemas/LessonFilter'
+                    description: Conditions rows must satisfy.
+            required:
+                - filter
+            description: The request body for Lesson.Search.
+        LessonStatus:
+            type: string
+            enum:
+                - planned
+                - in_progress
+                - completed
+            description: Lifecycle state of a lesson.
+            x-enum-varnames:
+                - Planned
+                - InProgress
+                - Completed
+        LessonUpdateInput:
+            type: object
+            properties:
+                title:
+                    type: string
+                    description: Human-readable name shown in the timetable.
+                notes:
+                    type:
+                        - string
+                        - "null"
+                    description: Free-text notes kept alongside the lesson.
+                status:
+                    $ref: '#/components/schemas/LessonStatus'
+                    description: Lifecycle state of the lesson.
+                managerEmailAddress:
+                    type: string
+                    format: email
+                    description: Address that notifications about this lesson are sent to.
+                capacity:
+                    type:
+                        - integer
+                        - "null"
+                    format: int32
+                    description: Maximum number of participants, or null for no limit.
+                price:
+                    type:
+                        - number
+                        - "null"
+                    format: decimal
+                    description: |-
+                        Amount charged per participant.
+
+                        Sent as a JSON number. A not-a-number value arrives as the string "NaN" instead, and a value with more than about fifteen significant digits is subject to the precision of the reader's own number type.
+                tags:
+                    type:
+                        - array
+                        - "null"
+                    items:
+                        type: string
+                    description: Free-form labels used for grouping.
+            description: 'The fields of a Lesson to change. Every member is optional: one left out is left alone, and an explicit null clears it.'
+        LessonVersionType:
+            type: string
+            enum:
+                - Original
+                - Snapshot
+            description: Whether a row is the live lesson or a snapshot of a previous version.
+            x-enum-varnames:
+                - Original
+                - Snapshot
+        Pagination:
+            type: object
+            properties:
+                offset:
+                    type: integer
+                    format: int32
+                    description: Number of rows skipped before this page.
+                limit:
+                    type: integer
+                    format: int32
+                    description: Maximum number of rows in this page.
+                total:
+                    type: integer
+                    format: int64
+                    description: Total number of rows matching the query, ignoring pagination.
+            description: Where the returned page sits within the full result set.
+    responses:
+        BadRequest:
+            description: |-
+                The request was malformed or a parameter could not be parsed.
+
+                The body's `code` is `BadRequest`.
+            content:
+                application/json:
+                    schema:
+                        $ref: '#/components/schemas/Error'
+        Unauthorized:
+            description: |-
+                No valid session or API key was presented.
+
+                The body's `code` is `Unauthorized`.
+            content:
+                application/json:
+                    schema:
+                        $ref: '#/components/schemas/Error'
+        Forbidden:
+            description: |-
+                The caller is known but not permitted to do this.
+
+                The body's `code` is `Forbidden`.
+            content:
+                application/json:
+                    schema:
+                        $ref: '#/components/schemas/Error'
+        NotFound:
+            description: |-
+                No such resource, or it belongs to another tenant.
+
+                The body's `code` is `NotFound`.
+            content:
+                application/json:
+                    schema:
+                        $ref: '#/components/schemas/Error'
+        Conflict:
+            description: |-
+                The request conflicts with the current state of the resource.
+
+                The body's `code` is `Conflict`.
+            content:
+                application/json:
+                    schema:
+                        $ref: '#/components/schemas/Error'
+        UnprocessableEntity:
+            description: |-
+                The request was well-formed but failed validation.
+
+                The body's `code` is `UnprocessableEntity`.
+            content:
+                application/json:
+                    schema:
+                        $ref: '#/components/schemas/Error'
+        RateLimited:
+            description: |-
+                Too many requests. Retry after the interval in the Retry-After header.
+
+                The body's `code` is `RateLimited`.
+            headers:
+                Retry-After:
+                    $ref: '#/components/headers/RetryAfter'
+                RateLimit-Limit:
+                    $ref: '#/components/headers/RateLimitLimit'
+                RateLimit-Remaining:
+                    $ref: '#/components/headers/RateLimitRemaining'
+                RateLimit-Reset:
+                    $ref: '#/components/headers/RateLimitReset'
+            content:
+                application/json:
+                    schema:
+                        $ref: '#/components/schemas/Error'
+        Internal:
+            description: |-
+                Something went wrong on the server.
+
+                The body's `code` is `Internal`.
+            content:
+                application/json:
+                    schema:
+                        $ref: '#/components/schemas/Error'
+    parameters:
+        ApiRevision:
+            name: API-Revision
+            in: header
+            description: The API revision this client was built against. A server generated from an older document than the caller expects answers 426 rather than guessing.
+            required: false
+            schema:
+                type: string
+        IdempotencyKey:
+            name: Idempotency-Key
+            in: header
+            description: A key of the caller's choosing, so a retried write happens once. Sending the same key with the same body replays the first answer and sets Idempotency-Replayed; with a different body it is refused with 422, and while the first is still in flight, with 409.
+            required: false
+            schema:
+                type: string
+    headers:
+        IdempotencyReplayed:
+            description: Present and true when this answer is a replay of an earlier request carrying the same Idempotency-Key, rather than work done again.
+            schema:
+                type: boolean
+        RateLimitLimit:
+            description: Requests permitted in the current window.
+            schema:
+                type: integer
+        RateLimitRemaining:
+            description: Requests left in the current window.
+            schema:
+                type: integer
+        RateLimitReset:
+            description: Seconds until the current window resets.
+            schema:
+                type: integer
+        RetryAfter:
+            description: Seconds to wait before retrying.
+            schema:
+                type: integer
+tags:
+    - name: Lessons
+      description: A single scheduled teaching occasion.

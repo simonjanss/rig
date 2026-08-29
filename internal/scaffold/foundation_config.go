@@ -1,0 +1,599 @@
+package scaffold
+
+// The foundation's table configuration.
+//
+// Column comments are absent on purpose: the migrations carry COMMENT ON for
+// every column, so they arrive through introspection and there is one place to
+// edit them. What is here is the intent Postgres cannot express — whether a
+// table belongs in the API, how long a deleted row stays restorable, what a read
+// is narrowed to, and what each enum value means.
+//
+// This is not only what `rig setup-project --expose` writes. The compiler reads
+// it too, through [TableConfig] and addFoundationConfigs, for every table of
+// rig's a project did not write a file for — which is the ordinary case and now
+// the recommended one. So a stanza left out here is not a stanza a project can
+// discover and add: it is one every project silently goes without.
+//
+// And a stanza present here is one every project's API gets. That cuts the other
+// way and it is the sharper direction, which is why there is a rule about the
+// `operations:` lines below and [TestNoFoundationTableGetsATenantWideWrite] is
+// what holds it: **a generated write on a table rig owns is either narrowed to
+// the caller or it does not exist.** The three that are written to — a device, a
+// preference, an inbox line — are somebody's own rows, and the compiler narrows
+// every read and every write over them to the caller. Everything else here is
+// read-only, rig_account included, and that one is read-only despite a write
+// path over it being the most obviously useful thing in this file: the rule that
+// would have to come with it is one rig cannot invent. A project that wants the
+// write writes the file and the rule together, which is a thing a default cannot
+// do — so a default does not offer the write.
+
+func tenancyConfigs() []tableConfig {
+	return []tableConfig{
+		config("rig_tenant", "Tenant",
+			`# Tenants are not tenant-scoped, so the generated queries have nothing to
+# filter by and a generated CRUD interface would be an administrative
+# back door. Manage them from a service you write.
+expose: false`,
+			`restore_window_days: 30`,
+		),
+		config("rig_identity", "Identity",
+			`# An identity is global, so it has no tenant_id and the generated queries
+# have nothing to scope by. Reaching one over HTTP would mean reading a
+# person who works at another customer, so nothing here is exposed: the
+# account is what a client sees, and it is tenant-scoped.
+expose: false`,
+			`restore_window_days: 30`,
+		),
+		config("rig_identity_credential", "IdentityCredential", notExposed),
+		config("rig_identity_verification", "IdentityVerification", notExposed,
+			`enums:
+  rig_identity_verification_kind:
+    name: IdentityVerificationKind
+    description: What a single-use link is for.
+    values:
+      EmailVerification:
+        name: EmailVerification
+        description: Confirms that an address belongs to the person who gave it.
+      PasswordReset:
+        name: PasswordReset
+        description: Lets somebody set a new password without knowing the old one.
+      Invitation:
+        name: Invitation
+        description: Brings a person into a tenant, whether or not they already have an identity.`,
+		),
+		config("rig_account", "Account",
+			`# Read-only from the outside. The reason to expose this table is an
+# administration screen that needs names to put beside things, and reading
+# is the whole of that.
+#
+# No generated write, and it is the sharpest case of the rule this file is
+# written to: the auth module reaches these rows through its own queries, so
+# a generated write path is a second door into them — one where nothing
+# hashes a password, sends an invitation, or ends the sessions of somebody
+# who has just been deactivated. Joining a tenant, changing an address and
+# deactivating an account are auth endpoints for that reason.
+#
+# It is a default and not a ceiling. A project that wants an admin screen
+# to raise somebody to Owner writes this file — start it with
+# `+"`"+`rig setup-project --expose rig_account`+"`"+` — adds the operation, and writes
+# the hook that says who may do it. rig does not generate that endpoint by
+# default precisely because it cannot invent the rule that has to come with
+# it: a PATCH over `+"`"+`role`+"`"+` with no such rule is every member of the tenant
+# one request away from owning it.
+operations: [Get, List, Search]`,
+			`restore_window_days: 30`,
+			`order_by: [-created_at, id]`,
+			`columns:
+  identity_id:
+    # Which person this is. Decided when the account is created and never
+    # afterwards: moving an account to another person would hand over
+    # everything they have ever written.
+    operations: [Read]
+  email_address:
+    # A copy of the identity's address. Changing it is a verification flow on
+    # the identity, not a field edit here.
+    operations: [Read]
+    format: EmailAddress
+  kind:
+    # A person does not become a service account, and a service account has no
+    # password to make it a person. Which it is, is decided when it is created.
+    operations: [Read]
+  role:
+    # The coarse level. Read here and written by the auth endpoints, because
+    # who may raise somebody to Owner is a rule rig will not invent.
+    operations: [Read]
+  is_active:
+    # Whether the account may be used. Deactivation is an auth endpoint: it
+    # ends the sessions as well as setting the column, and a bare UPDATE here
+    # would leave somebody locked out of the front door and signed in
+    # everywhere else.
+    operations: [Read]`,
+			`enums:
+  rig_account_kind:
+    name: AccountKind
+    description: What an account is.
+    values:
+      Person:
+        name: Person
+        description: Somebody who signs in. They have an identity, and the identity has the password.
+      Service:
+        name: Service
+        description: What an integration's key acts as. It has no identity, so there is nothing to sign in with.
+  rig_account_role_level:
+    name: AccountRoleLevel
+    description: The coarse level an account holds in one tenant.
+    values:
+      Owner:
+        name: Owner
+        description: May do anything, including the things that end the tenant.
+      Admin:
+        name: Admin
+        description: Administers the tenant without the decisions that are the owner's to make.
+      Basic:
+        name: Basic
+        description: Gets on with the work.`,
+		),
+	}
+}
+
+func sessionConfigs() []tableConfig {
+	return []tableConfig{
+		config("rig_account_token", "AccountToken", notExposed,
+			`enums:
+  rig_account_token_kind:
+    name: AccountTokenKind
+    description: What a token is for.
+    values:
+      Refresh:
+        name: Refresh
+        description: Exchanged for a new pair. It never authenticates a request.
+      Access:
+        name: Access
+        description: Authenticates a request, and is short-lived because it travels.
+  rig_account_token_client:
+    name: AccountTokenClient
+    description: What kind of thing holds a session.
+    values:
+      Web:
+        name: Web
+        description: A browser.
+      Mobile:
+        name: Mobile
+        description: An application on a phone or tablet.
+      Machine:
+        name: Machine
+        description: An integration acting through an API key.`,
+		),
+		config("rig_identity_session", "IdentitySession", notExposed),
+		config("rig_auth_log", "AuthLog",
+			`# Read-only. Entries are written by the auth package as things happen; an
+# audit trail anybody can post to is not an audit trail.
+operations: [Get, List, Search]`,
+			`order_by: [-created_at, id]`,
+			`enums:
+  rig_auth_event:
+    name: AuthEvent
+    description: What happened.
+    values:
+      LoginAttempted:
+        name: LoginAttempted
+        description: A sign-in was tried. Recorded before the password is checked.
+      LoginSucceeded:
+        name: LoginSucceeded
+        description: A sign-in worked. It clears the failure window for that address.
+      LoginFailed:
+        name: LoginFailed
+        description: A sign-in did not work. This is what the lockout counts.
+      AccountLocked:
+        name: AccountLocked
+        description: Too many failures, so further attempts are refused for a while.
+      Logout:
+        name: Logout
+        description: A session was ended deliberately.
+      TokenRefreshed:
+        name: TokenRefreshed
+        description: A refresh token was exchanged for a new pair.
+      TokenReuseDetected:
+        name: TokenReuseDetected
+        description: A consumed refresh token was presented again, so its family was revoked.
+      PasswordResetRequested:
+        name: PasswordResetRequested
+        description: Somebody asked for a reset link.
+      PasswordResetCompleted:
+        name: PasswordResetCompleted
+        description: A reset link was used to set a new password.
+      PasswordChanged:
+        name: PasswordChanged
+        description: Somebody who knew their password set a new one.
+      EmailVerified:
+        name: EmailVerified
+        description: An address was confirmed.
+      VerificationResent:
+        name: VerificationResent
+        description: A verification link was sent again.
+      ApiKeyAuthSucceeded:
+        name: APIKeyAuthSucceeded
+        description: A machine authenticated with a key.
+      ApiKeyAuthFailed:
+        name: APIKeyAuthFailed
+        description: A key was presented that could not be used.
+      ImpersonationStarted:
+        name: ImpersonationStarted
+        description: An administrator began acting as somebody else.
+      ImpersonationEnded:
+        name: ImpersonationEnded
+        description: An administrator stopped acting as somebody else.
+      OAuthSignIn:
+        name: OAuthSignIn
+        description: Somebody signed in through an external provider.
+      AccountProvisioned:
+        name: AccountProvisioned
+        description: An account was created in a tenant, by a person or by an integration's key.
+      InvitationSent:
+        name: InvitationSent
+        description: Somebody was invited into a tenant and a single-use link was minted.
+      InvitationAccepted:
+        name: InvitationAccepted
+        description: An invitation was redeemed. It confirms the address and, for a first account, sets the password.
+      InvitationRevoked:
+        name: InvitationRevoked
+        description: An invitation was withdrawn before it was used, so the link stopped working and the account it was for was removed.
+      TenantSwitched:
+        name: TenantSwitched
+        description: Somebody moved to another tenant they belong to, which issues a session for that tenant's account.
+  rig_auth_outcome:
+    name: AuthOutcome
+    description: Whether an attempt worked.
+    values:
+      Succeeded:
+        name: Succeeded
+        description: It worked.
+      Failed:
+        name: Failed
+        description: It did not.`,
+		),
+	}
+}
+
+func apiKeyConfigs() []tableConfig {
+	return []tableConfig{
+		config("rig_api_key", "APIKey",
+			`# Keys are minted and revoked through /auth/api-keys, not through CRUD.
+# The secret exists only in the response that created it, and a generic
+# POST could not return it.
+expose: false`,
+			`enums:
+  rig_api_key_kind:
+    name: APIKeyKind
+    description: Who a key acts as.
+    values:
+      Integration:
+        name: Integration
+        description: A key with a service account of its own, so what it writes is attributed to the integration rather than to whoever set it up.
+      Personal:
+        name: Personal
+        description: A key that acts as the person who made it, for somebody automating their own work.`,
+		),
+	}
+}
+
+func oauthConfigs() []tableConfig {
+	return []tableConfig{
+		config("rig_identity_oauth", "IdentityOAuth",
+			`# Linking and unlinking go through the OAuth flow, which has to talk to the
+# provider. A row created directly would claim an identity nobody verified.
+expose: false`,
+			`enums:
+  rig_oauth_provider:
+    name: OAuthProvider
+    description: An external identity provider.
+    values:
+      Google:
+        name: Google
+        description: Google, including Tenant accounts.
+      Microsoft:
+        name: Microsoft
+        description: Microsoft, including Entra ID accounts.
+      GitHub:
+        name: GitHub
+        description: GitHub.`,
+		),
+	}
+}
+
+// fileConfigs is rig_file's, and it is the one foundation table whose
+// configuration is written for a project that wants it read rather than for one
+// that wants CRUD.
+//
+// Read-only and narrow. A client needs the url to render a file and the name,
+// type and size to describe it; the storage key, the checksum, the declared type
+// and the tenant are the server's bookkeeping and never leave it. The storage
+// key is the one that would actually matter — it is the thing a signed URL is
+// built from, and syncing it is the same class of mistake as syncing a password
+// hash.
+//
+// There is no write path to generate. The endpoints that put a file anywhere are
+// the upload and the delete rig synthesizes against the row that owns it, and a
+// client that could POST a rig_file row with an arbitrary key and no bytes has
+// found a way around all of it.
+func fileConfigs() []tableConfig {
+	return []tableConfig{
+		config("rig_file", "File",
+			`# Read-only. Uploading is the nested endpoint on the row that owns the
+# file, which is what makes the upload permissioned and tenant-scoped; a
+# generic POST here would be a way around both.
+operations: [Get, List]`,
+			`# There is no restore_window_days here, and rig refuses one. How long a
+# deleted file stays restorable is files.restore_window in rig.yaml: that
+# number is how long the bytes are kept as well as how long the row can be
+# brought back, and a second copy of it here could only disagree with it.
+columns:
+  storage_key:
+    exclude: true
+  checksum:
+    exclude: true
+  declared_content_type:
+    exclude: true`,
+		),
+	}
+}
+
+// idempotencyConfigs is rig_idempotency's, and it is the shortest one here
+// because the table is the least like a resource of anything the foundation
+// creates.
+//
+// It exists to reserve the name. A project that exposed this table would be
+// serving other people's stored responses over HTTP, so there is no
+// configuration worth writing beyond saying no — but the resource name still has
+// to be taken, or somebody's own `idempotency` table would project to it and the
+// collision would surface as a generated method that overwrote another.
+func idempotencyConfigs() []tableConfig {
+	return []tableConfig{
+		config("rig_idempotency", "Idempotency",
+			`# Never exposed, and not the usual expose: false. The rows here are the
+# stored responses of writes that carried an Idempotency-Key — somebody
+# else's answers, kept only to be replayed to the caller that earned them.
+# An endpoint over this table would serve them to anybody who could list it.
+expose: false`,
+		),
+	}
+}
+
+// throttleConfigs is rig_throttle's, and it is the other one that exists only to
+// reserve a name.
+//
+// The table holds one integer per caller per window and nothing a person would
+// ever want a page of. Exposing it would also be a small privacy leak in its own
+// right: the rows are a list of which addresses and which accounts have been
+// calling and how hard, which is not a question a client should be able to ask.
+func throttleConfigs() []tableConfig {
+	return []tableConfig{
+		config("rig_throttle", "Throttle",
+			`# Never exposed. The rows are rate-limit counters — one integer per
+# caller per window — so there is nothing here to serve, and a listing
+# would answer "which accounts and addresses have been calling, and how
+# much" to anybody who could read it.
+expose: false`,
+		),
+	}
+}
+
+// verificationDeliveryConfigs is the mail queue's, and it is the third table here
+// that exists only to reserve a name.
+//
+// Never exposed, and the reason is stronger than rig_throttle's. A row here is
+// one owed mail, keyed to the single-use link it will carry — so a listing would
+// answer "who has asked to reset their password, and whose invitation has not
+// gone out yet" to anybody who could read it, and a write would let somebody
+// re-queue a link they do not hold. The queue's only doors are the flows that
+// mint links and the dispatcher that sends them.
+func verificationDeliveryConfigs() []tableConfig {
+	return []tableConfig{
+		config("rig_identity_verification_delivery", "IdentityVerificationDelivery",
+			`# Never exposed. A row is one owed mail, keyed to a single-use link:
+# a listing would say who has asked to reset their password and whose
+# invitation has not gone out, and a write would let somebody re-queue a
+# link they never held. The flows that mint links and the dispatcher that
+# sends them are the only doors.
+expose: false`,
+			`enums:
+  rig_identity_verification_delivery_state:
+    name: VerificationDeliveryState
+    description: Where one queued link is in its life.
+    values:
+      Pending:
+        name: Pending
+        description: Owed, and not yet sent.
+      Sent:
+        name: Sent
+        description: The notifier accepted it, which is not the same as it arriving.
+      Failed:
+        name: Failed
+        description: Past max_attempts, or refused permanently. It stops being claimed.
+      Skipped:
+        name: Skipped
+        description: The link was consumed or withdrawn before the mail went out.`,
+		),
+	}
+}
+
+// notificationConfigs are the two notification tables', and like rig_file's they
+// are written for a project that wants them read rather than for one that wants
+// CRUD.
+//
+// Neither needs a file for the inbox to work. The owner scope and the live-sync
+// shape on rig_notification_recipient come from the `notifications:` block in
+// rig.yaml, the way rig_file's restore window does, because they are one
+// decision and a second copy of them here could only disagree. What a file adds
+// is the rest of what a configuration asks for — the filter grammar, the sort
+// keys, the generated client — for a project that turned `expose` on because the
+// hand-written inbox routes were not enough.
+//
+// The owner scope on the devices and the settings is not here either, and it is
+// the same reason twice over. It is the same answer in every project, so a key
+// here could only disagree with the compiler's — and an `access: owner:` key is
+// refused unless rig_account is a projected resource, which a project with
+// `notifications:` and no `auth.expose` does not have. See
+// ownerScopedNotificationTables in internal/compile.
+func notificationConfigs() []tableConfig {
+	return []tableConfig{
+		config("rig_notification", "Notification",
+			`# Read-only, and narrow. A notification is written by the engine and by
+# nothing else: a client that could POST one could announce anything to
+# anybody, and a client that could PATCH one could move a delivery date.
+#
+# What it is not is the inbox. This table holds rows that are pending for
+# people who are not recipients yet and may never be, which is also why it
+# has no live-sync shape.
+operations: [Get, List]`,
+			`enums:
+  rig_notification_state:
+    name: NotificationState
+    description: 'Where a notification is in its life. Nothing here says anything was sent: that is the delivery table''s business.'
+    values:
+      Pending:
+        name: Pending
+        description: The audience has not been computed yet. Every notification starts here, and a scheduled one waits here until it is due.
+      Resolved:
+        name: Resolved
+        description: The audience was computed and the inbox lines exist. It does not mean anything was sent — a notification with an inbox line and no mail is a working notification.
+      Cancelled:
+        name: Cancelled
+        description: 'It never will be resolved: the row it was about was retired before its time came.'`,
+		),
+		config("rig_notification_device", "NotificationDevice",
+			`# Where a push can reach somebody, and the one notification table a
+# client genuinely writes to: registering a device is something the
+# application it runs on does, and revoking one is something a person does
+# from a list of their own devices.
+operations: [Create, Get, List, Delete]`,
+		),
+		config("rig_notification_setting", "NotificationSetting",
+			`# What somebody wants told to them, and when. A settings screen is a
+# CRUD surface over exactly this, which is why it has one — and it is the
+# only table here where a full one is the right answer.
+operations: [Create, Get, List, Update, Delete]`,
+			`# The two enums a person meets, described here because this is the table
+# where they meet both of them. Postgres cannot comment an enum label — a
+# COMMENT ON TYPE is the whole type and there is nothing to hang on a value —
+# so unlike every column above, this prose cannot arrive through
+# introspection and has to be here or nowhere. Nowhere means every project
+# that exposes this table ships `+"`"+`TODO: describe this`+"`"+` in its OpenAPI document
+# and its generated clients.
+enums:
+  rig_notification_channel:
+    name: NotificationChannel
+    description: Where a copy of an inbox line can be sent. The inbox itself is not one of them.
+    values:
+      Desktop:
+        name: Desktop
+        description: A browser or a desktop application, addressed by a device row.
+      Mobile:
+        name: Mobile
+        description: A phone, addressed by a device row.
+      Email:
+        name: Email
+        description: 'The address on the account. No device row: there is nothing to register, because the address is on the account already.'
+  rig_notification_digest:
+    name: NotificationDigest
+    description: How often somebody wants to be told, on one channel.
+    values:
+      Immediate:
+        name: Immediate
+        description: Each notification on its own, as soon as it is due.
+      Hourly:
+        name: Hourly
+        description: Whatever accumulated in an hour, as one message.
+      Daily:
+        name: Daily
+        description: The same, a day at a time.
+      Weekly:
+        name: Weekly
+        description: The widest window, and the one notifications.retention has to outlive — a weekly digest is assembled from rows a shorter retention would have pruned.
+      Off:
+        name: Off
+        description: 'Nothing on this channel, and the inbox line is written anyway: this is somebody preferring to look rather than be told. is_enabled false is the other thing, and says the channel is not available to them at all.'`,
+		),
+		config("rig_notification_delivery", "NotificationDelivery",
+			`# Read-only, and narrow. A delivery row is the dispatcher's bookkeeping:
+# retry counts, claim leases and provider errors. A client that could write
+# one could send anything to anybody, and a client that could read them all
+# would be reading a table that says who was told what.
+#
+# It is exposed at all because "why did I not get that mail" is a question
+# support has to be able to answer.
+operations: [Get, List]`,
+			`enums:
+  rig_notification_delivery_state:
+    name: NotificationDeliveryState
+    description: What happened to one copy of an inbox line on its way to a channel.
+    values:
+      Pending:
+        name: Pending
+        description: Owed and not yet claimed, or claimed by a dispatcher that has not marked it.
+      Sent:
+        name: Sent
+        description: A channel accepted it, which is not the same as it arriving — rig does not pretend to know the difference.
+      Failed:
+        name: Failed
+        description: Past notifications.max_attempts, and no longer claimed. Without the cap a permanently broken address would consume a lease forever.
+      Skipped:
+        name: Skipped
+        description: 'A setting refused it, or the row it was a copy of was retired before it went. Worth telling apart from Failed in a report: it is ''we decided against this'' rather than ''this did not work''.'`,
+		),
+		config("rig_notification_recipient", "NotificationRecipient",
+			`# The inbox. Read and delete, and nothing else: what a person may change
+# about one of these is whether they have read it, and that is the
+# _read endpoint rather than a PATCH that could rewrite the kind.
+#
+# The owner scope and the live-sync shape are not here. They come from the
+# notifications block in rig.yaml, because they are the same decision for
+# every project and a copy here could only disagree with it.
+operations: [Get, List, Search, Delete]`,
+		),
+	}
+}
+
+// presenceConfigs is rig's presence table, as a project would configure it.
+//
+// One table, and the interesting half of this file is what is *not* here.
+//
+// There is no `access:` key. An owner scope is what a reader would reach for —
+// presence is about a person, after all — and it would break the feature: on an
+// owner-scoped table the generated shape carries `account_id = the caller's`
+// before any application scope runs, and there is no `?scope=all` for a stream.
+// A presence table with an owner streams every subscriber nothing but itself.
+// The compiler settles that rather than this file, because it is the same answer
+// in every project and a copy here could only ever disagree with it.
+//
+// There is no `electric:` key either, for the same reason and with the same
+// consequence if it disagreed.
+func presenceConfigs() []tableConfig {
+	return []tableConfig{
+		config("rig_presence", "Presence",
+			`# Read-only, and only barely. The live shape is how a browser actually
+# reads this table; Get and List are here because "who is here" is a question
+# a server-side caller and a diagnostic page also ask, and because an empty
+# operations list does not mean what it looks like — it reads as
+# "unspecified" and falls back to the full CRUD set.
+#
+# Not Create, not Update, not Delete. The routes under /presence are the
+# whole write surface: they take the account from the credential rather than
+# from a body, so "you may only write your own presence" is a sentence a
+# client cannot phrase rather than a rule somebody enforces. A generated
+# Create would take a body, and a body is somewhere to name somebody else.
+operations: [Get, List]`,
+			`enums:
+  rig_presence_activity:
+    name: PresenceActivity
+    description: What somebody is doing with the thing they are on, as far as their own client can tell.
+    values:
+      viewing:
+        name: Viewing
+        description: Looking at it. The default, and what a heartbeat says when nothing else was claimed.
+      editing:
+        name: Editing
+        description: Typing into it. What draws the ring on a control somebody else has open, and the only reason this column exists rather than presence being a row per person.`,
+		),
+	}
+}

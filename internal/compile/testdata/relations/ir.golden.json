@@ -1,0 +1,3820 @@
+{
+  "ir_version": 1,
+  "generated_by": "rig (test)",
+  "api": {
+    "name": "demo",
+    "version": "v1",
+    "base_path": "/api/v1",
+    "revision_header": "API-Revision",
+    "enums": [
+      {
+        "name": "ErrorCode",
+        "description": "Machine-readable reason a request failed.",
+        "values": [
+          {
+            "name": "BadRequest",
+            "wire": "BadRequest",
+            "description": "The request was malformed or a parameter could not be parsed."
+          },
+          {
+            "name": "Unauthorized",
+            "wire": "Unauthorized",
+            "description": "No valid session or API key was presented."
+          },
+          {
+            "name": "Forbidden",
+            "wire": "Forbidden",
+            "description": "The caller is known but not permitted to do this."
+          },
+          {
+            "name": "NotFound",
+            "wire": "NotFound",
+            "description": "No such resource, or it belongs to another tenant."
+          },
+          {
+            "name": "Conflict",
+            "wire": "Conflict",
+            "description": "The request conflicts with the current state of the resource."
+          },
+          {
+            "name": "UnprocessableEntity",
+            "wire": "UnprocessableEntity",
+            "description": "The request was well-formed but failed validation."
+          },
+          {
+            "name": "RateLimited",
+            "wire": "RateLimited",
+            "description": "Too many requests. Retry after the interval in the Retry-After header."
+          },
+          {
+            "name": "TooLarge",
+            "wire": "TooLarge",
+            "description": "The request body is larger than this endpoint accepts."
+          },
+          {
+            "name": "UnsupportedMediaType",
+            "wire": "UnsupportedMediaType",
+            "description": "The body's content type is not one this endpoint accepts."
+          },
+          {
+            "name": "UpgradeRequired",
+            "wire": "UpgradeRequired",
+            "description": "The client was built against an API revision this server no longer serves."
+          },
+          {
+            "name": "Internal",
+            "wire": "Internal",
+            "description": "Something went wrong on the server."
+          }
+        ]
+      }
+    ],
+    "objects": [
+      {
+        "name": "Error",
+        "description": "Returned whenever a request fails.",
+        "fields": [
+          {
+            "name": "Code",
+            "wire": "code",
+            "description": "Machine-readable reason the request failed.",
+            "type": "ErrorCode",
+            "type_kind": "Enum",
+            "go_type": "ErrorCode"
+          },
+          {
+            "name": "Message",
+            "wire": "message",
+            "description": "Human-readable explanation. Not intended for clients to parse.",
+            "type": "String",
+            "type_kind": "Primitive",
+            "go_type": "string"
+          },
+          {
+            "name": "RequestID",
+            "wire": "requestId",
+            "description": "Identifier of this request, for correlating with server logs.",
+            "type": "String",
+            "type_kind": "Primitive",
+            "go_type": "string",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "Fields",
+            "wire": "fields",
+            "description": "Present when the failure was validation. It is shaped like the request body that failed — one member per field, holding the problem with that field — so a client can put each message beside the control it belongs to.",
+            "type": "JSON",
+            "type_kind": "Primitive",
+            "go_type": "any",
+            "modifiers": [
+              "Nullable"
+            ]
+          }
+        ],
+        "origin": "Builtin"
+      },
+      {
+        "name": "Fixture",
+        "description": "A scheduled contest between two teams.",
+        "fields": [
+          {
+            "name": "ID",
+            "wire": "id",
+            "description": "Unique identifier for this row.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "uuid.UUID",
+            "read_only": true,
+            "column": {
+              "table": "fixture",
+              "name": "id",
+              "sql_type": "uuid",
+              "nullable": false,
+              "scan": "UUID"
+            }
+          },
+          {
+            "name": "TenantID",
+            "wire": "tenantId",
+            "description": "Tenant this row belongs to. Every query is scoped by it.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "uuid.UUID",
+            "read_only": true,
+            "column": {
+              "table": "fixture",
+              "name": "tenant_id",
+              "sql_type": "uuid",
+              "nullable": false,
+              "scan": "UUID"
+            }
+          },
+          {
+            "name": "CreatedAt",
+            "wire": "createdAt",
+            "description": "When this row was created. Set automatically and never changes.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "time.Time",
+            "read_only": true,
+            "column": {
+              "table": "fixture",
+              "name": "created_at",
+              "sql_type": "timestamptz",
+              "nullable": false,
+              "scan": "Timestamptz"
+            }
+          },
+          {
+            "name": "HomeTeamID",
+            "wire": "homeTeamId",
+            "description": "The team playing at home.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "uuid.UUID",
+            "immutable": true,
+            "column": {
+              "table": "fixture",
+              "name": "home_team_id",
+              "sql_type": "uuid",
+              "nullable": false,
+              "scan": "UUID"
+            }
+          },
+          {
+            "name": "AwayTeamID",
+            "wire": "awayTeamId",
+            "description": "The team playing away.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "uuid.UUID",
+            "immutable": true,
+            "column": {
+              "table": "fixture",
+              "name": "away_team_id",
+              "sql_type": "uuid",
+              "nullable": false,
+              "scan": "UUID"
+            }
+          },
+          {
+            "name": "KickoffAt",
+            "wire": "kickoffAt",
+            "description": "When the contest starts.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "time.Time",
+            "column": {
+              "table": "fixture",
+              "name": "kickoff_at",
+              "sql_type": "timestamptz",
+              "nullable": false,
+              "scan": "Timestamptz"
+            }
+          }
+        ],
+        "origin": "Projected"
+      },
+      {
+        "name": "FixtureFilter",
+        "description": "Conditions a Fixture must satisfy to match a search.",
+        "fields": [
+          {
+            "name": "Equals",
+            "wire": "equals",
+            "description": "Fields that must equal the given value.",
+            "type": "FixtureFilterEquals",
+            "type_kind": "Object",
+            "go_type": "*FixtureFilterEquals",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "NotEquals",
+            "wire": "notEquals",
+            "description": "Fields that must not equal the given value.",
+            "type": "FixtureFilterEquals",
+            "type_kind": "Object",
+            "go_type": "*FixtureFilterEquals",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "GreaterThan",
+            "wire": "greaterThan",
+            "description": "Fields that must be greater than the given value.",
+            "type": "FixtureFilterRange",
+            "type_kind": "Object",
+            "go_type": "*FixtureFilterRange",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "SmallerThan",
+            "wire": "smallerThan",
+            "description": "Fields that must be less than the given value.",
+            "type": "FixtureFilterRange",
+            "type_kind": "Object",
+            "go_type": "*FixtureFilterRange",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "GreaterOrEqual",
+            "wire": "greaterOrEqual",
+            "description": "Fields that must be greater than or equal to the given value.",
+            "type": "FixtureFilterRange",
+            "type_kind": "Object",
+            "go_type": "*FixtureFilterRange",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "SmallerOrEqual",
+            "wire": "smallerOrEqual",
+            "description": "Fields that must be less than or equal to the given value.",
+            "type": "FixtureFilterRange",
+            "type_kind": "Object",
+            "go_type": "*FixtureFilterRange",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "Contains",
+            "wire": "contains",
+            "description": "Fields that must be one of the given values.",
+            "type": "FixtureFilterContains",
+            "type_kind": "Object",
+            "go_type": "*FixtureFilterContains",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "NotContains",
+            "wire": "notContains",
+            "description": "Fields that must not be one of the given values.",
+            "type": "FixtureFilterContains",
+            "type_kind": "Object",
+            "go_type": "*FixtureFilterContains",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "Like",
+            "wire": "like",
+            "description": "Text fields that must match the given pattern.",
+            "type": "FixtureFilterLike",
+            "type_kind": "Object",
+            "go_type": "*FixtureFilterLike",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "NotLike",
+            "wire": "notLike",
+            "description": "Text fields that must not match the given pattern.",
+            "type": "FixtureFilterLike",
+            "type_kind": "Object",
+            "go_type": "*FixtureFilterLike",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "Null",
+            "wire": "null",
+            "description": "Fields that must be null.",
+            "type": "FixtureFilterNull",
+            "type_kind": "Object",
+            "go_type": "*FixtureFilterNull",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "NotNull",
+            "wire": "notNull",
+            "description": "Fields that must not be null.",
+            "type": "FixtureFilterNull",
+            "type_kind": "Object",
+            "go_type": "*FixtureFilterNull",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "OrCondition",
+            "wire": "orCondition",
+            "description": "Combine this filter's conditions with OR instead of AND.",
+            "type": "Bool",
+            "type_kind": "Primitive",
+            "go_type": "bool"
+          },
+          {
+            "name": "NestedFilters",
+            "wire": "nestedFilters",
+            "description": "Sub-filters combined with this one, so that AND and OR can be mixed to any depth.",
+            "type": "FixtureFilter",
+            "type_kind": "Object",
+            "go_type": "[]FixtureFilter",
+            "modifiers": [
+              "Array"
+            ]
+          },
+          {
+            "name": "Without",
+            "wire": "without",
+            "description": "Relations with no row matching the given conditions. An empty one asks for no related row at all.\n\nThis is where a negation belongs when what you mean is \"not\": it negates whether a matching related row exists, so a row with no related row at all satisfies it. The negative operators above negate the comparison instead and still require the related row to be there — \"no related row called X\" is here, \"a related row not called X\" is NotEquals.",
+            "type": "FixtureFilterWithout",
+            "type_kind": "Object",
+            "go_type": "*FixtureFilterWithout",
+            "modifiers": [
+              "Nullable"
+            ]
+          }
+        ],
+        "origin": "Filter"
+      },
+      {
+        "name": "FixtureFilterContains",
+        "description": "Set-membership conditions on Fixture fields.",
+        "fields": [
+          {
+            "name": "ID",
+            "wire": "id",
+            "description": "Unique identifier for this row.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "[]uuid.UUID",
+            "modifiers": [
+              "Array"
+            ]
+          },
+          {
+            "name": "CreatedAt",
+            "wire": "createdAt",
+            "description": "When this row was created. Set automatically and never changes.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "[]time.Time",
+            "modifiers": [
+              "Array"
+            ]
+          },
+          {
+            "name": "HomeTeamID",
+            "wire": "homeTeamId",
+            "description": "The team playing at home.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "[]uuid.UUID",
+            "modifiers": [
+              "Array"
+            ]
+          },
+          {
+            "name": "AwayTeamID",
+            "wire": "awayTeamId",
+            "description": "The team playing away.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "[]uuid.UUID",
+            "modifiers": [
+              "Array"
+            ]
+          },
+          {
+            "name": "KickoffAt",
+            "wire": "kickoffAt",
+            "description": "When the contest starts.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "[]time.Time",
+            "modifiers": [
+              "Array"
+            ]
+          },
+          {
+            "name": "AwayTeam",
+            "wire": "awayTeam",
+            "description": "Conditions on this row's AwayTeam.\n\nA row with no AwayTeam never matches, and that holds for the negative operators too: under NotEquals this asks whether the AwayTeam is there and differs, so a row without one fails that as well. To ask the other question — no matching AwayTeam, which a row with none satisfies — use Without.AwayTeam.",
+            "type": "TeamFilterContains",
+            "type_kind": "Object",
+            "go_type": "*TeamFilterContains",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "HomeTeam",
+            "wire": "homeTeam",
+            "description": "Conditions on this row's HomeTeam.\n\nA row with no HomeTeam never matches, and that holds for the negative operators too: under NotEquals this asks whether the HomeTeam is there and differs, so a row without one fails that as well. To ask the other question — no matching HomeTeam, which a row with none satisfies — use Without.HomeTeam.",
+            "type": "TeamFilterContains",
+            "type_kind": "Object",
+            "go_type": "*TeamFilterContains",
+            "modifiers": [
+              "Nullable"
+            ]
+          }
+        ],
+        "origin": "Filter"
+      },
+      {
+        "name": "FixtureFilterEquals",
+        "description": "Exact-match conditions on Fixture fields.",
+        "fields": [
+          {
+            "name": "ID",
+            "wire": "id",
+            "description": "Unique identifier for this row.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "*uuid.UUID",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "CreatedAt",
+            "wire": "createdAt",
+            "description": "When this row was created. Set automatically and never changes.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "*time.Time",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "HomeTeamID",
+            "wire": "homeTeamId",
+            "description": "The team playing at home.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "*uuid.UUID",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "AwayTeamID",
+            "wire": "awayTeamId",
+            "description": "The team playing away.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "*uuid.UUID",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "KickoffAt",
+            "wire": "kickoffAt",
+            "description": "When the contest starts.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "*time.Time",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "AwayTeam",
+            "wire": "awayTeam",
+            "description": "Conditions on this row's AwayTeam.\n\nA row with no AwayTeam never matches, and that holds for the negative operators too: under NotEquals this asks whether the AwayTeam is there and differs, so a row without one fails that as well. To ask the other question — no matching AwayTeam, which a row with none satisfies — use Without.AwayTeam.",
+            "type": "TeamFilterEquals",
+            "type_kind": "Object",
+            "go_type": "*TeamFilterEquals",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "HomeTeam",
+            "wire": "homeTeam",
+            "description": "Conditions on this row's HomeTeam.\n\nA row with no HomeTeam never matches, and that holds for the negative operators too: under NotEquals this asks whether the HomeTeam is there and differs, so a row without one fails that as well. To ask the other question — no matching HomeTeam, which a row with none satisfies — use Without.HomeTeam.",
+            "type": "TeamFilterEquals",
+            "type_kind": "Object",
+            "go_type": "*TeamFilterEquals",
+            "modifiers": [
+              "Nullable"
+            ]
+          }
+        ],
+        "origin": "Filter"
+      },
+      {
+        "name": "FixtureFilterLike",
+        "description": "Pattern conditions on Fixture text fields.",
+        "fields": [
+          {
+            "name": "AwayTeam",
+            "wire": "awayTeam",
+            "description": "Conditions on this row's AwayTeam.\n\nA row with no AwayTeam never matches, and that holds for the negative operators too: under NotEquals this asks whether the AwayTeam is there and differs, so a row without one fails that as well. To ask the other question — no matching AwayTeam, which a row with none satisfies — use Without.AwayTeam.",
+            "type": "TeamFilterLike",
+            "type_kind": "Object",
+            "go_type": "*TeamFilterLike",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "HomeTeam",
+            "wire": "homeTeam",
+            "description": "Conditions on this row's HomeTeam.\n\nA row with no HomeTeam never matches, and that holds for the negative operators too: under NotEquals this asks whether the HomeTeam is there and differs, so a row without one fails that as well. To ask the other question — no matching HomeTeam, which a row with none satisfies — use Without.HomeTeam.",
+            "type": "TeamFilterLike",
+            "type_kind": "Object",
+            "go_type": "*TeamFilterLike",
+            "modifiers": [
+              "Nullable"
+            ]
+          }
+        ],
+        "origin": "Filter"
+      },
+      {
+        "name": "FixtureFilterNull",
+        "description": "Presence conditions on nullable Fixture fields.",
+        "fields": [
+          {
+            "name": "AwayTeam",
+            "wire": "awayTeam",
+            "description": "Conditions on this row's AwayTeam.\n\nA row with no AwayTeam never matches, and that holds for the negative operators too: under NotEquals this asks whether the AwayTeam is there and differs, so a row without one fails that as well. To ask the other question — no matching AwayTeam, which a row with none satisfies — use Without.AwayTeam.",
+            "type": "TeamFilterNull",
+            "type_kind": "Object",
+            "go_type": "*TeamFilterNull",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "HomeTeam",
+            "wire": "homeTeam",
+            "description": "Conditions on this row's HomeTeam.\n\nA row with no HomeTeam never matches, and that holds for the negative operators too: under NotEquals this asks whether the HomeTeam is there and differs, so a row without one fails that as well. To ask the other question — no matching HomeTeam, which a row with none satisfies — use Without.HomeTeam.",
+            "type": "TeamFilterNull",
+            "type_kind": "Object",
+            "go_type": "*TeamFilterNull",
+            "modifiers": [
+              "Nullable"
+            ]
+          }
+        ],
+        "origin": "Filter"
+      },
+      {
+        "name": "FixtureFilterRange",
+        "description": "Ordering conditions on Fixture fields that can be compared.",
+        "fields": [
+          {
+            "name": "CreatedAt",
+            "wire": "createdAt",
+            "description": "When this row was created. Set automatically and never changes.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "*time.Time",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "KickoffAt",
+            "wire": "kickoffAt",
+            "description": "When the contest starts.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "*time.Time",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "AwayTeam",
+            "wire": "awayTeam",
+            "description": "Conditions on this row's AwayTeam.\n\nA row with no AwayTeam never matches, and that holds for the negative operators too: under NotEquals this asks whether the AwayTeam is there and differs, so a row without one fails that as well. To ask the other question — no matching AwayTeam, which a row with none satisfies — use Without.AwayTeam.",
+            "type": "TeamFilterRange",
+            "type_kind": "Object",
+            "go_type": "*TeamFilterRange",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "HomeTeam",
+            "wire": "homeTeam",
+            "description": "Conditions on this row's HomeTeam.\n\nA row with no HomeTeam never matches, and that holds for the negative operators too: under NotEquals this asks whether the HomeTeam is there and differs, so a row without one fails that as well. To ask the other question — no matching HomeTeam, which a row with none satisfies — use Without.HomeTeam.",
+            "type": "TeamFilterRange",
+            "type_kind": "Object",
+            "go_type": "*TeamFilterRange",
+            "modifiers": [
+              "Nullable"
+            ]
+          }
+        ],
+        "origin": "Filter"
+      },
+      {
+        "name": "FixtureFilterWithout",
+        "description": "Relations a Fixture must have no matching row for.",
+        "fields": [
+          {
+            "name": "AwayTeam",
+            "wire": "awayTeam",
+            "description": "Match rows with no AwayTeam satisfying these conditions, including rows that have none at all.\n\nThis negates the existence of the related row rather than the comparison, which is the whole difference from NotEquals.AwayTeam: that one needs the AwayTeam to be there and to differ, so a row without one fails it and satisfies this. An empty object asks for rows with no AwayTeam at all.",
+            "type": "TeamFilter",
+            "type_kind": "Object",
+            "go_type": "*TeamFilter",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "HomeTeam",
+            "wire": "homeTeam",
+            "description": "Match rows with no HomeTeam satisfying these conditions, including rows that have none at all.\n\nThis negates the existence of the related row rather than the comparison, which is the whole difference from NotEquals.HomeTeam: that one needs the HomeTeam to be there and to differ, so a row without one fails it and satisfies this. An empty object asks for rows with no HomeTeam at all.",
+            "type": "TeamFilter",
+            "type_kind": "Object",
+            "go_type": "*TeamFilter",
+            "modifiers": [
+              "Nullable"
+            ]
+          }
+        ],
+        "origin": "Filter"
+      },
+      {
+        "name": "FixtureListResponse",
+        "description": "A page of Fixtures.",
+        "fields": [
+          {
+            "name": "Data",
+            "wire": "data",
+            "description": "The rows in this page.",
+            "type": "Fixture",
+            "type_kind": "Resource",
+            "go_type": "[]Fixture",
+            "modifiers": [
+              "Array"
+            ]
+          },
+          {
+            "name": "Pagination",
+            "wire": "pagination",
+            "description": "Where this page sits in the full result set.",
+            "type": "Pagination",
+            "type_kind": "Object",
+            "go_type": "Pagination"
+          }
+        ],
+        "origin": "Projected"
+      },
+      {
+        "name": "Pagination",
+        "description": "Where the returned page sits within the full result set.",
+        "fields": [
+          {
+            "name": "Offset",
+            "wire": "offset",
+            "description": "Number of rows skipped before this page.",
+            "type": "Int",
+            "type_kind": "Primitive",
+            "go_type": "int"
+          },
+          {
+            "name": "Limit",
+            "wire": "limit",
+            "description": "Maximum number of rows in this page.",
+            "type": "Int",
+            "type_kind": "Primitive",
+            "go_type": "int"
+          },
+          {
+            "name": "Total",
+            "wire": "total",
+            "description": "Total number of rows matching the query, ignoring pagination.",
+            "type": "Int64",
+            "type_kind": "Primitive",
+            "go_type": "int64"
+          }
+        ],
+        "origin": "Builtin"
+      },
+      {
+        "name": "Player",
+        "description": "A person who plays for one or more teams.",
+        "fields": [
+          {
+            "name": "ID",
+            "wire": "id",
+            "description": "Unique identifier for this row.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "uuid.UUID",
+            "read_only": true,
+            "column": {
+              "table": "player",
+              "name": "id",
+              "sql_type": "uuid",
+              "nullable": false,
+              "scan": "UUID"
+            }
+          },
+          {
+            "name": "TenantID",
+            "wire": "tenantId",
+            "description": "Tenant this row belongs to. Every query is scoped by it.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "uuid.UUID",
+            "read_only": true,
+            "column": {
+              "table": "player",
+              "name": "tenant_id",
+              "sql_type": "uuid",
+              "nullable": false,
+              "scan": "UUID"
+            }
+          },
+          {
+            "name": "CreatedAt",
+            "wire": "createdAt",
+            "description": "When this row was created. Set automatically and never changes.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "time.Time",
+            "read_only": true,
+            "column": {
+              "table": "player",
+              "name": "created_at",
+              "sql_type": "timestamptz",
+              "nullable": false,
+              "scan": "Timestamptz"
+            }
+          },
+          {
+            "name": "FullName",
+            "wire": "fullName",
+            "description": "The player's full name.",
+            "type": "String",
+            "type_kind": "Primitive",
+            "go_type": "string",
+            "column": {
+              "table": "player",
+              "name": "full_name",
+              "sql_type": "text",
+              "nullable": false,
+              "scan": "Direct"
+            }
+          }
+        ],
+        "origin": "Projected"
+      },
+      {
+        "name": "PlayerFilter",
+        "description": "Conditions a Player must satisfy to match a search.",
+        "fields": [
+          {
+            "name": "Equals",
+            "wire": "equals",
+            "description": "Fields that must equal the given value.",
+            "type": "PlayerFilterEquals",
+            "type_kind": "Object",
+            "go_type": "*PlayerFilterEquals",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "NotEquals",
+            "wire": "notEquals",
+            "description": "Fields that must not equal the given value.",
+            "type": "PlayerFilterEquals",
+            "type_kind": "Object",
+            "go_type": "*PlayerFilterEquals",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "GreaterThan",
+            "wire": "greaterThan",
+            "description": "Fields that must be greater than the given value.",
+            "type": "PlayerFilterRange",
+            "type_kind": "Object",
+            "go_type": "*PlayerFilterRange",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "SmallerThan",
+            "wire": "smallerThan",
+            "description": "Fields that must be less than the given value.",
+            "type": "PlayerFilterRange",
+            "type_kind": "Object",
+            "go_type": "*PlayerFilterRange",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "GreaterOrEqual",
+            "wire": "greaterOrEqual",
+            "description": "Fields that must be greater than or equal to the given value.",
+            "type": "PlayerFilterRange",
+            "type_kind": "Object",
+            "go_type": "*PlayerFilterRange",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "SmallerOrEqual",
+            "wire": "smallerOrEqual",
+            "description": "Fields that must be less than or equal to the given value.",
+            "type": "PlayerFilterRange",
+            "type_kind": "Object",
+            "go_type": "*PlayerFilterRange",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "Contains",
+            "wire": "contains",
+            "description": "Fields that must be one of the given values.",
+            "type": "PlayerFilterContains",
+            "type_kind": "Object",
+            "go_type": "*PlayerFilterContains",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "NotContains",
+            "wire": "notContains",
+            "description": "Fields that must not be one of the given values.",
+            "type": "PlayerFilterContains",
+            "type_kind": "Object",
+            "go_type": "*PlayerFilterContains",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "Like",
+            "wire": "like",
+            "description": "Text fields that must match the given pattern.",
+            "type": "PlayerFilterLike",
+            "type_kind": "Object",
+            "go_type": "*PlayerFilterLike",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "NotLike",
+            "wire": "notLike",
+            "description": "Text fields that must not match the given pattern.",
+            "type": "PlayerFilterLike",
+            "type_kind": "Object",
+            "go_type": "*PlayerFilterLike",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "Null",
+            "wire": "null",
+            "description": "Fields that must be null.",
+            "type": "PlayerFilterNull",
+            "type_kind": "Object",
+            "go_type": "*PlayerFilterNull",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "NotNull",
+            "wire": "notNull",
+            "description": "Fields that must not be null.",
+            "type": "PlayerFilterNull",
+            "type_kind": "Object",
+            "go_type": "*PlayerFilterNull",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "OrCondition",
+            "wire": "orCondition",
+            "description": "Combine this filter's conditions with OR instead of AND.",
+            "type": "Bool",
+            "type_kind": "Primitive",
+            "go_type": "bool"
+          },
+          {
+            "name": "NestedFilters",
+            "wire": "nestedFilters",
+            "description": "Sub-filters combined with this one, so that AND and OR can be mixed to any depth.",
+            "type": "PlayerFilter",
+            "type_kind": "Object",
+            "go_type": "[]PlayerFilter",
+            "modifiers": [
+              "Array"
+            ]
+          },
+          {
+            "name": "Without",
+            "wire": "without",
+            "description": "Relations with no row matching the given conditions. An empty one asks for no related row at all.\n\nThis is where a negation belongs when what you mean is \"not\": it negates whether a matching related row exists, so a row with no related row at all satisfies it. The negative operators above negate the comparison instead and still require the related row to be there — \"no related row called X\" is here, \"a related row not called X\" is NotEquals.",
+            "type": "PlayerFilterWithout",
+            "type_kind": "Object",
+            "go_type": "*PlayerFilterWithout",
+            "modifiers": [
+              "Nullable"
+            ]
+          }
+        ],
+        "origin": "Filter"
+      },
+      {
+        "name": "PlayerFilterContains",
+        "description": "Set-membership conditions on Player fields.",
+        "fields": [
+          {
+            "name": "ID",
+            "wire": "id",
+            "description": "Unique identifier for this row.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "[]uuid.UUID",
+            "modifiers": [
+              "Array"
+            ]
+          },
+          {
+            "name": "CreatedAt",
+            "wire": "createdAt",
+            "description": "When this row was created. Set automatically and never changes.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "[]time.Time",
+            "modifiers": [
+              "Array"
+            ]
+          },
+          {
+            "name": "FullName",
+            "wire": "fullName",
+            "description": "The player's full name.",
+            "type": "String",
+            "type_kind": "Primitive",
+            "go_type": "[]string",
+            "modifiers": [
+              "Array"
+            ]
+          },
+          {
+            "name": "Teams",
+            "wire": "teams",
+            "description": "Conditions on one of this row's Teams.\n\nEvery condition has to hold of the same one, not of the set between them.\n\nUnder the negative operators this asks whether one of them differs, which is not the same as none of them matching: a row can have one that matches and one that does not, satisfying the first and failing the second. Without.Teams asks the second.",
+            "type": "TeamFilterContains",
+            "type_kind": "Object",
+            "go_type": "*TeamFilterContains",
+            "modifiers": [
+              "Nullable"
+            ]
+          }
+        ],
+        "origin": "Filter"
+      },
+      {
+        "name": "PlayerFilterEquals",
+        "description": "Exact-match conditions on Player fields.",
+        "fields": [
+          {
+            "name": "ID",
+            "wire": "id",
+            "description": "Unique identifier for this row.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "*uuid.UUID",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "CreatedAt",
+            "wire": "createdAt",
+            "description": "When this row was created. Set automatically and never changes.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "*time.Time",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "FullName",
+            "wire": "fullName",
+            "description": "The player's full name.",
+            "type": "String",
+            "type_kind": "Primitive",
+            "go_type": "*string",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "Teams",
+            "wire": "teams",
+            "description": "Conditions on one of this row's Teams.\n\nEvery condition has to hold of the same one, not of the set between them.\n\nUnder the negative operators this asks whether one of them differs, which is not the same as none of them matching: a row can have one that matches and one that does not, satisfying the first and failing the second. Without.Teams asks the second.",
+            "type": "TeamFilterEquals",
+            "type_kind": "Object",
+            "go_type": "*TeamFilterEquals",
+            "modifiers": [
+              "Nullable"
+            ]
+          }
+        ],
+        "origin": "Filter"
+      },
+      {
+        "name": "PlayerFilterLike",
+        "description": "Pattern conditions on Player text fields.",
+        "fields": [
+          {
+            "name": "FullName",
+            "wire": "fullName",
+            "description": "The player's full name.",
+            "type": "String",
+            "type_kind": "Primitive",
+            "go_type": "*string",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "Teams",
+            "wire": "teams",
+            "description": "Conditions on one of this row's Teams.\n\nEvery condition has to hold of the same one, not of the set between them.\n\nUnder the negative operators this asks whether one of them differs, which is not the same as none of them matching: a row can have one that matches and one that does not, satisfying the first and failing the second. Without.Teams asks the second.",
+            "type": "TeamFilterLike",
+            "type_kind": "Object",
+            "go_type": "*TeamFilterLike",
+            "modifiers": [
+              "Nullable"
+            ]
+          }
+        ],
+        "origin": "Filter"
+      },
+      {
+        "name": "PlayerFilterNull",
+        "description": "Presence conditions on nullable Player fields.",
+        "fields": [
+          {
+            "name": "Teams",
+            "wire": "teams",
+            "description": "Conditions on one of this row's Teams.\n\nEvery condition has to hold of the same one, not of the set between them.\n\nUnder the negative operators this asks whether one of them differs, which is not the same as none of them matching: a row can have one that matches and one that does not, satisfying the first and failing the second. Without.Teams asks the second.",
+            "type": "TeamFilterNull",
+            "type_kind": "Object",
+            "go_type": "*TeamFilterNull",
+            "modifiers": [
+              "Nullable"
+            ]
+          }
+        ],
+        "origin": "Filter"
+      },
+      {
+        "name": "PlayerFilterRange",
+        "description": "Ordering conditions on Player fields that can be compared.",
+        "fields": [
+          {
+            "name": "CreatedAt",
+            "wire": "createdAt",
+            "description": "When this row was created. Set automatically and never changes.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "*time.Time",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "Teams",
+            "wire": "teams",
+            "description": "Conditions on one of this row's Teams.\n\nEvery condition has to hold of the same one, not of the set between them.\n\nUnder the negative operators this asks whether one of them differs, which is not the same as none of them matching: a row can have one that matches and one that does not, satisfying the first and failing the second. Without.Teams asks the second.",
+            "type": "TeamFilterRange",
+            "type_kind": "Object",
+            "go_type": "*TeamFilterRange",
+            "modifiers": [
+              "Nullable"
+            ]
+          }
+        ],
+        "origin": "Filter"
+      },
+      {
+        "name": "PlayerFilterWithout",
+        "description": "Relations a Player must have no matching row for.",
+        "fields": [
+          {
+            "name": "Teams",
+            "wire": "teams",
+            "description": "Match rows with no Teams satisfying these conditions, including rows with none at all.\n\nThis negates the existence of a matching row rather than the comparison, which is the whole difference from NotEquals.Teams: that one is satisfied by one of them differing, and a row can have one that differs and one that matches at the same time. An empty object asks for rows with no Teams at all.",
+            "type": "TeamFilter",
+            "type_kind": "Object",
+            "go_type": "*TeamFilter",
+            "modifiers": [
+              "Nullable"
+            ]
+          }
+        ],
+        "origin": "Filter"
+      },
+      {
+        "name": "PlayerListResponse",
+        "description": "A page of Players.",
+        "fields": [
+          {
+            "name": "Data",
+            "wire": "data",
+            "description": "The rows in this page.",
+            "type": "Player",
+            "type_kind": "Resource",
+            "go_type": "[]Player",
+            "modifiers": [
+              "Array"
+            ]
+          },
+          {
+            "name": "Pagination",
+            "wire": "pagination",
+            "description": "Where this page sits in the full result set.",
+            "type": "Pagination",
+            "type_kind": "Object",
+            "go_type": "Pagination"
+          }
+        ],
+        "origin": "Projected"
+      },
+      {
+        "name": "Team",
+        "description": "A group of players that competes as a unit.",
+        "fields": [
+          {
+            "name": "ID",
+            "wire": "id",
+            "description": "Unique identifier for this row.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "uuid.UUID",
+            "read_only": true,
+            "column": {
+              "table": "team",
+              "name": "id",
+              "sql_type": "uuid",
+              "nullable": false,
+              "scan": "UUID"
+            }
+          },
+          {
+            "name": "TenantID",
+            "wire": "tenantId",
+            "description": "Tenant this row belongs to. Every query is scoped by it.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "uuid.UUID",
+            "read_only": true,
+            "column": {
+              "table": "team",
+              "name": "tenant_id",
+              "sql_type": "uuid",
+              "nullable": false,
+              "scan": "UUID"
+            }
+          },
+          {
+            "name": "CreatedAt",
+            "wire": "createdAt",
+            "description": "When this row was created. Set automatically and never changes.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "time.Time",
+            "read_only": true,
+            "column": {
+              "table": "team",
+              "name": "created_at",
+              "sql_type": "timestamptz",
+              "nullable": false,
+              "scan": "Timestamptz"
+            }
+          },
+          {
+            "name": "Name",
+            "wire": "name",
+            "description": "Display name of the team.",
+            "type": "String",
+            "type_kind": "Primitive",
+            "go_type": "string",
+            "column": {
+              "table": "team",
+              "name": "name",
+              "sql_type": "text",
+              "nullable": false,
+              "scan": "Direct"
+            }
+          }
+        ],
+        "origin": "Projected"
+      },
+      {
+        "name": "TeamFilter",
+        "description": "Conditions a Team must satisfy to match a search.",
+        "fields": [
+          {
+            "name": "Equals",
+            "wire": "equals",
+            "description": "Fields that must equal the given value.",
+            "type": "TeamFilterEquals",
+            "type_kind": "Object",
+            "go_type": "*TeamFilterEquals",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "NotEquals",
+            "wire": "notEquals",
+            "description": "Fields that must not equal the given value.",
+            "type": "TeamFilterEquals",
+            "type_kind": "Object",
+            "go_type": "*TeamFilterEquals",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "GreaterThan",
+            "wire": "greaterThan",
+            "description": "Fields that must be greater than the given value.",
+            "type": "TeamFilterRange",
+            "type_kind": "Object",
+            "go_type": "*TeamFilterRange",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "SmallerThan",
+            "wire": "smallerThan",
+            "description": "Fields that must be less than the given value.",
+            "type": "TeamFilterRange",
+            "type_kind": "Object",
+            "go_type": "*TeamFilterRange",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "GreaterOrEqual",
+            "wire": "greaterOrEqual",
+            "description": "Fields that must be greater than or equal to the given value.",
+            "type": "TeamFilterRange",
+            "type_kind": "Object",
+            "go_type": "*TeamFilterRange",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "SmallerOrEqual",
+            "wire": "smallerOrEqual",
+            "description": "Fields that must be less than or equal to the given value.",
+            "type": "TeamFilterRange",
+            "type_kind": "Object",
+            "go_type": "*TeamFilterRange",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "Contains",
+            "wire": "contains",
+            "description": "Fields that must be one of the given values.",
+            "type": "TeamFilterContains",
+            "type_kind": "Object",
+            "go_type": "*TeamFilterContains",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "NotContains",
+            "wire": "notContains",
+            "description": "Fields that must not be one of the given values.",
+            "type": "TeamFilterContains",
+            "type_kind": "Object",
+            "go_type": "*TeamFilterContains",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "Like",
+            "wire": "like",
+            "description": "Text fields that must match the given pattern.",
+            "type": "TeamFilterLike",
+            "type_kind": "Object",
+            "go_type": "*TeamFilterLike",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "NotLike",
+            "wire": "notLike",
+            "description": "Text fields that must not match the given pattern.",
+            "type": "TeamFilterLike",
+            "type_kind": "Object",
+            "go_type": "*TeamFilterLike",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "Null",
+            "wire": "null",
+            "description": "Fields that must be null.",
+            "type": "TeamFilterNull",
+            "type_kind": "Object",
+            "go_type": "*TeamFilterNull",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "NotNull",
+            "wire": "notNull",
+            "description": "Fields that must not be null.",
+            "type": "TeamFilterNull",
+            "type_kind": "Object",
+            "go_type": "*TeamFilterNull",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "OrCondition",
+            "wire": "orCondition",
+            "description": "Combine this filter's conditions with OR instead of AND.",
+            "type": "Bool",
+            "type_kind": "Primitive",
+            "go_type": "bool"
+          },
+          {
+            "name": "NestedFilters",
+            "wire": "nestedFilters",
+            "description": "Sub-filters combined with this one, so that AND and OR can be mixed to any depth.",
+            "type": "TeamFilter",
+            "type_kind": "Object",
+            "go_type": "[]TeamFilter",
+            "modifiers": [
+              "Array"
+            ]
+          },
+          {
+            "name": "Without",
+            "wire": "without",
+            "description": "Relations with no row matching the given conditions. An empty one asks for no related row at all.\n\nThis is where a negation belongs when what you mean is \"not\": it negates whether a matching related row exists, so a row with no related row at all satisfies it. The negative operators above negate the comparison instead and still require the related row to be there — \"no related row called X\" is here, \"a related row not called X\" is NotEquals.",
+            "type": "TeamFilterWithout",
+            "type_kind": "Object",
+            "go_type": "*TeamFilterWithout",
+            "modifiers": [
+              "Nullable"
+            ]
+          }
+        ],
+        "origin": "Filter"
+      },
+      {
+        "name": "TeamFilterContains",
+        "description": "Set-membership conditions on Team fields.",
+        "fields": [
+          {
+            "name": "ID",
+            "wire": "id",
+            "description": "Unique identifier for this row.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "[]uuid.UUID",
+            "modifiers": [
+              "Array"
+            ]
+          },
+          {
+            "name": "CreatedAt",
+            "wire": "createdAt",
+            "description": "When this row was created. Set automatically and never changes.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "[]time.Time",
+            "modifiers": [
+              "Array"
+            ]
+          },
+          {
+            "name": "Name",
+            "wire": "name",
+            "description": "Display name of the team.",
+            "type": "String",
+            "type_kind": "Primitive",
+            "go_type": "[]string",
+            "modifiers": [
+              "Array"
+            ]
+          },
+          {
+            "name": "AwayFixtures",
+            "wire": "awayFixtures",
+            "description": "Conditions on one of this row's AwayFixtures.\n\nEvery condition has to hold of the same one, not of the set between them.\n\nUnder the negative operators this asks whether one of them differs, which is not the same as none of them matching: a row can have one that matches and one that does not, satisfying the first and failing the second. Without.AwayFixtures asks the second.",
+            "type": "FixtureFilterContains",
+            "type_kind": "Object",
+            "go_type": "*FixtureFilterContains",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "HomeFixtures",
+            "wire": "homeFixtures",
+            "description": "Conditions on one of this row's HomeFixtures.\n\nEvery condition has to hold of the same one, not of the set between them.\n\nUnder the negative operators this asks whether one of them differs, which is not the same as none of them matching: a row can have one that matches and one that does not, satisfying the first and failing the second. Without.HomeFixtures asks the second.",
+            "type": "FixtureFilterContains",
+            "type_kind": "Object",
+            "go_type": "*FixtureFilterContains",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "Players",
+            "wire": "players",
+            "description": "Conditions on one of this row's Players.\n\nEvery condition has to hold of the same one, not of the set between them.\n\nUnder the negative operators this asks whether one of them differs, which is not the same as none of them matching: a row can have one that matches and one that does not, satisfying the first and failing the second. Without.Players asks the second.",
+            "type": "PlayerFilterContains",
+            "type_kind": "Object",
+            "go_type": "*PlayerFilterContains",
+            "modifiers": [
+              "Nullable"
+            ]
+          }
+        ],
+        "origin": "Filter"
+      },
+      {
+        "name": "TeamFilterEquals",
+        "description": "Exact-match conditions on Team fields.",
+        "fields": [
+          {
+            "name": "ID",
+            "wire": "id",
+            "description": "Unique identifier for this row.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "*uuid.UUID",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "CreatedAt",
+            "wire": "createdAt",
+            "description": "When this row was created. Set automatically and never changes.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "*time.Time",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "Name",
+            "wire": "name",
+            "description": "Display name of the team.",
+            "type": "String",
+            "type_kind": "Primitive",
+            "go_type": "*string",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "AwayFixtures",
+            "wire": "awayFixtures",
+            "description": "Conditions on one of this row's AwayFixtures.\n\nEvery condition has to hold of the same one, not of the set between them.\n\nUnder the negative operators this asks whether one of them differs, which is not the same as none of them matching: a row can have one that matches and one that does not, satisfying the first and failing the second. Without.AwayFixtures asks the second.",
+            "type": "FixtureFilterEquals",
+            "type_kind": "Object",
+            "go_type": "*FixtureFilterEquals",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "HomeFixtures",
+            "wire": "homeFixtures",
+            "description": "Conditions on one of this row's HomeFixtures.\n\nEvery condition has to hold of the same one, not of the set between them.\n\nUnder the negative operators this asks whether one of them differs, which is not the same as none of them matching: a row can have one that matches and one that does not, satisfying the first and failing the second. Without.HomeFixtures asks the second.",
+            "type": "FixtureFilterEquals",
+            "type_kind": "Object",
+            "go_type": "*FixtureFilterEquals",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "Players",
+            "wire": "players",
+            "description": "Conditions on one of this row's Players.\n\nEvery condition has to hold of the same one, not of the set between them.\n\nUnder the negative operators this asks whether one of them differs, which is not the same as none of them matching: a row can have one that matches and one that does not, satisfying the first and failing the second. Without.Players asks the second.",
+            "type": "PlayerFilterEquals",
+            "type_kind": "Object",
+            "go_type": "*PlayerFilterEquals",
+            "modifiers": [
+              "Nullable"
+            ]
+          }
+        ],
+        "origin": "Filter"
+      },
+      {
+        "name": "TeamFilterLike",
+        "description": "Pattern conditions on Team text fields.",
+        "fields": [
+          {
+            "name": "Name",
+            "wire": "name",
+            "description": "Display name of the team.",
+            "type": "String",
+            "type_kind": "Primitive",
+            "go_type": "*string",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "AwayFixtures",
+            "wire": "awayFixtures",
+            "description": "Conditions on one of this row's AwayFixtures.\n\nEvery condition has to hold of the same one, not of the set between them.\n\nUnder the negative operators this asks whether one of them differs, which is not the same as none of them matching: a row can have one that matches and one that does not, satisfying the first and failing the second. Without.AwayFixtures asks the second.",
+            "type": "FixtureFilterLike",
+            "type_kind": "Object",
+            "go_type": "*FixtureFilterLike",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "HomeFixtures",
+            "wire": "homeFixtures",
+            "description": "Conditions on one of this row's HomeFixtures.\n\nEvery condition has to hold of the same one, not of the set between them.\n\nUnder the negative operators this asks whether one of them differs, which is not the same as none of them matching: a row can have one that matches and one that does not, satisfying the first and failing the second. Without.HomeFixtures asks the second.",
+            "type": "FixtureFilterLike",
+            "type_kind": "Object",
+            "go_type": "*FixtureFilterLike",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "Players",
+            "wire": "players",
+            "description": "Conditions on one of this row's Players.\n\nEvery condition has to hold of the same one, not of the set between them.\n\nUnder the negative operators this asks whether one of them differs, which is not the same as none of them matching: a row can have one that matches and one that does not, satisfying the first and failing the second. Without.Players asks the second.",
+            "type": "PlayerFilterLike",
+            "type_kind": "Object",
+            "go_type": "*PlayerFilterLike",
+            "modifiers": [
+              "Nullable"
+            ]
+          }
+        ],
+        "origin": "Filter"
+      },
+      {
+        "name": "TeamFilterNull",
+        "description": "Presence conditions on nullable Team fields.",
+        "fields": [
+          {
+            "name": "AwayFixtures",
+            "wire": "awayFixtures",
+            "description": "Conditions on one of this row's AwayFixtures.\n\nEvery condition has to hold of the same one, not of the set between them.\n\nUnder the negative operators this asks whether one of them differs, which is not the same as none of them matching: a row can have one that matches and one that does not, satisfying the first and failing the second. Without.AwayFixtures asks the second.",
+            "type": "FixtureFilterNull",
+            "type_kind": "Object",
+            "go_type": "*FixtureFilterNull",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "HomeFixtures",
+            "wire": "homeFixtures",
+            "description": "Conditions on one of this row's HomeFixtures.\n\nEvery condition has to hold of the same one, not of the set between them.\n\nUnder the negative operators this asks whether one of them differs, which is not the same as none of them matching: a row can have one that matches and one that does not, satisfying the first and failing the second. Without.HomeFixtures asks the second.",
+            "type": "FixtureFilterNull",
+            "type_kind": "Object",
+            "go_type": "*FixtureFilterNull",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "Players",
+            "wire": "players",
+            "description": "Conditions on one of this row's Players.\n\nEvery condition has to hold of the same one, not of the set between them.\n\nUnder the negative operators this asks whether one of them differs, which is not the same as none of them matching: a row can have one that matches and one that does not, satisfying the first and failing the second. Without.Players asks the second.",
+            "type": "PlayerFilterNull",
+            "type_kind": "Object",
+            "go_type": "*PlayerFilterNull",
+            "modifiers": [
+              "Nullable"
+            ]
+          }
+        ],
+        "origin": "Filter"
+      },
+      {
+        "name": "TeamFilterRange",
+        "description": "Ordering conditions on Team fields that can be compared.",
+        "fields": [
+          {
+            "name": "CreatedAt",
+            "wire": "createdAt",
+            "description": "When this row was created. Set automatically and never changes.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "*time.Time",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "AwayFixtures",
+            "wire": "awayFixtures",
+            "description": "Conditions on one of this row's AwayFixtures.\n\nEvery condition has to hold of the same one, not of the set between them.\n\nUnder the negative operators this asks whether one of them differs, which is not the same as none of them matching: a row can have one that matches and one that does not, satisfying the first and failing the second. Without.AwayFixtures asks the second.",
+            "type": "FixtureFilterRange",
+            "type_kind": "Object",
+            "go_type": "*FixtureFilterRange",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "HomeFixtures",
+            "wire": "homeFixtures",
+            "description": "Conditions on one of this row's HomeFixtures.\n\nEvery condition has to hold of the same one, not of the set between them.\n\nUnder the negative operators this asks whether one of them differs, which is not the same as none of them matching: a row can have one that matches and one that does not, satisfying the first and failing the second. Without.HomeFixtures asks the second.",
+            "type": "FixtureFilterRange",
+            "type_kind": "Object",
+            "go_type": "*FixtureFilterRange",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "Players",
+            "wire": "players",
+            "description": "Conditions on one of this row's Players.\n\nEvery condition has to hold of the same one, not of the set between them.\n\nUnder the negative operators this asks whether one of them differs, which is not the same as none of them matching: a row can have one that matches and one that does not, satisfying the first and failing the second. Without.Players asks the second.",
+            "type": "PlayerFilterRange",
+            "type_kind": "Object",
+            "go_type": "*PlayerFilterRange",
+            "modifiers": [
+              "Nullable"
+            ]
+          }
+        ],
+        "origin": "Filter"
+      },
+      {
+        "name": "TeamFilterWithout",
+        "description": "Relations a Team must have no matching row for.",
+        "fields": [
+          {
+            "name": "AwayFixtures",
+            "wire": "awayFixtures",
+            "description": "Match rows with no AwayFixtures satisfying these conditions, including rows with none at all.\n\nThis negates the existence of a matching row rather than the comparison, which is the whole difference from NotEquals.AwayFixtures: that one is satisfied by one of them differing, and a row can have one that differs and one that matches at the same time. An empty object asks for rows with no AwayFixtures at all.",
+            "type": "FixtureFilter",
+            "type_kind": "Object",
+            "go_type": "*FixtureFilter",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "HomeFixtures",
+            "wire": "homeFixtures",
+            "description": "Match rows with no HomeFixtures satisfying these conditions, including rows with none at all.\n\nThis negates the existence of a matching row rather than the comparison, which is the whole difference from NotEquals.HomeFixtures: that one is satisfied by one of them differing, and a row can have one that differs and one that matches at the same time. An empty object asks for rows with no HomeFixtures at all.",
+            "type": "FixtureFilter",
+            "type_kind": "Object",
+            "go_type": "*FixtureFilter",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "Players",
+            "wire": "players",
+            "description": "Match rows with no Players satisfying these conditions, including rows with none at all.\n\nThis negates the existence of a matching row rather than the comparison, which is the whole difference from NotEquals.Players: that one is satisfied by one of them differing, and a row can have one that differs and one that matches at the same time. An empty object asks for rows with no Players at all.",
+            "type": "PlayerFilter",
+            "type_kind": "Object",
+            "go_type": "*PlayerFilter",
+            "modifiers": [
+              "Nullable"
+            ]
+          }
+        ],
+        "origin": "Filter"
+      },
+      {
+        "name": "TeamListResponse",
+        "description": "A page of Teams.",
+        "fields": [
+          {
+            "name": "Data",
+            "wire": "data",
+            "description": "The rows in this page.",
+            "type": "Team",
+            "type_kind": "Resource",
+            "go_type": "[]Team",
+            "modifiers": [
+              "Array"
+            ]
+          },
+          {
+            "name": "Pagination",
+            "wire": "pagination",
+            "description": "Where this page sits in the full result set.",
+            "type": "Pagination",
+            "type_kind": "Object",
+            "go_type": "Pagination"
+          }
+        ],
+        "origin": "Projected"
+      }
+    ],
+    "resources": [
+      {
+        "name": "Fixture",
+        "plural": "Fixtures",
+        "path_segment": "fixtures",
+        "description": "A scheduled contest between two teams.",
+        "operations": [
+          "Create",
+          "Get",
+          "List",
+          "Search",
+          "Update",
+          "Delete"
+        ],
+        "fields": [
+          {
+            "name": "ID",
+            "wire": "id",
+            "description": "Unique identifier for this row.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "uuid.UUID",
+            "read_only": true,
+            "column": {
+              "table": "fixture",
+              "name": "id",
+              "sql_type": "uuid",
+              "nullable": false,
+              "scan": "UUID"
+            },
+            "operations": [
+              "Read"
+            ]
+          },
+          {
+            "name": "TenantID",
+            "wire": "tenantId",
+            "description": "Tenant this row belongs to. Every query is scoped by it.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "uuid.UUID",
+            "read_only": true,
+            "column": {
+              "table": "fixture",
+              "name": "tenant_id",
+              "sql_type": "uuid",
+              "nullable": false,
+              "scan": "UUID"
+            },
+            "operations": [
+              "Read"
+            ]
+          },
+          {
+            "name": "CreatedAt",
+            "wire": "createdAt",
+            "description": "When this row was created. Set automatically and never changes.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "time.Time",
+            "read_only": true,
+            "column": {
+              "table": "fixture",
+              "name": "created_at",
+              "sql_type": "timestamptz",
+              "nullable": false,
+              "scan": "Timestamptz"
+            },
+            "operations": [
+              "Read"
+            ]
+          },
+          {
+            "name": "HomeTeamID",
+            "wire": "homeTeamId",
+            "description": "The team playing at home.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "uuid.UUID",
+            "immutable": true,
+            "column": {
+              "table": "fixture",
+              "name": "home_team_id",
+              "sql_type": "uuid",
+              "nullable": false,
+              "scan": "UUID"
+            },
+            "operations": [
+              "Read",
+              "Create"
+            ]
+          },
+          {
+            "name": "AwayTeamID",
+            "wire": "awayTeamId",
+            "description": "The team playing away.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "uuid.UUID",
+            "immutable": true,
+            "column": {
+              "table": "fixture",
+              "name": "away_team_id",
+              "sql_type": "uuid",
+              "nullable": false,
+              "scan": "UUID"
+            },
+            "operations": [
+              "Read",
+              "Create"
+            ]
+          },
+          {
+            "name": "KickoffAt",
+            "wire": "kickoffAt",
+            "description": "When the contest starts.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "time.Time",
+            "column": {
+              "table": "fixture",
+              "name": "kickoff_at",
+              "sql_type": "timestamptz",
+              "nullable": false,
+              "scan": "Timestamptz"
+            },
+            "operations": [
+              "Read",
+              "Create",
+              "Update"
+            ]
+          }
+        ],
+        "endpoints": [
+          {
+            "name": "List",
+            "summary": "List Fixtures.",
+            "method": "GET",
+            "path": "",
+            "pattern": "GET /api/v1/fixtures",
+            "operation_id": "listFixtures",
+            "permission": "fixture.read",
+            "request": {
+              "query_params": [
+                {
+                  "name": "Limit",
+                  "wire": "limit",
+                  "description": "Maximum rows to return.",
+                  "type": "Int",
+                  "type_kind": "Primitive",
+                  "go_type": "int",
+                  "default": "50"
+                },
+                {
+                  "name": "Offset",
+                  "wire": "offset",
+                  "description": "Rows to skip before the first returned row.",
+                  "type": "Int",
+                  "type_kind": "Primitive",
+                  "go_type": "int",
+                  "default": "0"
+                }
+              ]
+            },
+            "responses": [
+              {
+                "status_code": 200,
+                "description": "A page of Fixtures.",
+                "content_types": [
+                  "application/json"
+                ],
+                "body_object": "FixtureListResponse"
+              }
+            ],
+            "errors": [
+              400,
+              401,
+              403,
+              429,
+              500
+            ],
+            "impl": {
+              "kind": "Generated",
+              "repo_method": "List",
+              "service_method": "List",
+              "handler_name": "ListFixtures"
+            }
+          },
+          {
+            "name": "Create",
+            "summary": "Create a Fixture.",
+            "method": "POST",
+            "path": "",
+            "pattern": "POST /api/v1/fixtures",
+            "operation_id": "createFixture",
+            "permission": "fixture.write",
+            "request": {
+              "content_types": [
+                "application/json"
+              ],
+              "body_params": [
+                {
+                  "name": "HomeTeamID",
+                  "wire": "homeTeamId",
+                  "description": "The team playing at home.",
+                  "type": "UUID",
+                  "type_kind": "Primitive",
+                  "go_type": "uuid.UUID",
+                  "immutable": true,
+                  "column": {
+                    "table": "fixture",
+                    "name": "home_team_id",
+                    "sql_type": "uuid",
+                    "nullable": false,
+                    "scan": "UUID"
+                  }
+                },
+                {
+                  "name": "AwayTeamID",
+                  "wire": "awayTeamId",
+                  "description": "The team playing away.",
+                  "type": "UUID",
+                  "type_kind": "Primitive",
+                  "go_type": "uuid.UUID",
+                  "immutable": true,
+                  "column": {
+                    "table": "fixture",
+                    "name": "away_team_id",
+                    "sql_type": "uuid",
+                    "nullable": false,
+                    "scan": "UUID"
+                  }
+                },
+                {
+                  "name": "KickoffAt",
+                  "wire": "kickoffAt",
+                  "description": "When the contest starts.",
+                  "type": "Timestamp",
+                  "type_kind": "Primitive",
+                  "go_type": "time.Time",
+                  "column": {
+                    "table": "fixture",
+                    "name": "kickoff_at",
+                    "sql_type": "timestamptz",
+                    "nullable": false,
+                    "scan": "Timestamptz"
+                  }
+                }
+              ]
+            },
+            "responses": [
+              {
+                "status_code": 201,
+                "description": "The created Fixture.",
+                "content_types": [
+                  "application/json"
+                ],
+                "body_object": "Fixture"
+              }
+            ],
+            "errors": [
+              400,
+              401,
+              403,
+              409,
+              422,
+              429,
+              500
+            ],
+            "impl": {
+              "kind": "Generated",
+              "repo_method": "Create",
+              "service_method": "Create",
+              "handler_name": "CreateFixture"
+            }
+          },
+          {
+            "name": "Search",
+            "summary": "Search Fixtures with filters.",
+            "method": "QUERY",
+            "path": "",
+            "pattern": "QUERY /api/v1/fixtures",
+            "alias_patterns": [
+              "POST /api/v1/fixtures/_search"
+            ],
+            "operation_id": "searchFixtures",
+            "permission": "fixture.read",
+            "request": {
+              "content_types": [
+                "application/json"
+              ],
+              "query_params": [
+                {
+                  "name": "Limit",
+                  "wire": "limit",
+                  "description": "Maximum rows to return.",
+                  "type": "Int",
+                  "type_kind": "Primitive",
+                  "go_type": "int",
+                  "default": "50"
+                },
+                {
+                  "name": "Offset",
+                  "wire": "offset",
+                  "description": "Rows to skip before the first returned row.",
+                  "type": "Int",
+                  "type_kind": "Primitive",
+                  "go_type": "int",
+                  "default": "0"
+                }
+              ],
+              "body_params": [
+                {
+                  "name": "Filter",
+                  "wire": "filter",
+                  "description": "Conditions rows must satisfy.",
+                  "type": "FixtureFilter",
+                  "type_kind": "Object",
+                  "go_type": "FixtureFilter"
+                }
+              ]
+            },
+            "responses": [
+              {
+                "status_code": 200,
+                "description": "A page of matching Fixtures.",
+                "content_types": [
+                  "application/json"
+                ],
+                "body_object": "FixtureListResponse"
+              }
+            ],
+            "errors": [
+              400,
+              401,
+              403,
+              422,
+              429,
+              500
+            ],
+            "impl": {
+              "kind": "Generated",
+              "repo_method": "List",
+              "service_method": "Search",
+              "handler_name": "SearchFixtures"
+            }
+          },
+          {
+            "name": "Delete",
+            "summary": "Delete a Fixture.",
+            "method": "DELETE",
+            "path": "/{id}",
+            "pattern": "DELETE /api/v1/fixtures/{id}",
+            "operation_id": "deleteFixture",
+            "permission": "fixture.delete",
+            "request": {
+              "path_params": [
+                {
+                  "name": "ID",
+                  "wire": "id",
+                  "description": "Identifier of the Fixture.",
+                  "type": "UUID",
+                  "type_kind": "Primitive",
+                  "go_type": "uuid.UUID"
+                }
+              ]
+            },
+            "responses": [
+              {
+                "status_code": 204,
+                "description": "The Fixture was deleted."
+              }
+            ],
+            "errors": [
+              400,
+              401,
+              403,
+              404,
+              409,
+              429,
+              500
+            ],
+            "impl": {
+              "kind": "Generated",
+              "repo_method": "Delete",
+              "service_method": "Delete",
+              "handler_name": "DeleteFixture"
+            }
+          },
+          {
+            "name": "Get",
+            "summary": "Fetch one Fixture by identifier.",
+            "method": "GET",
+            "path": "/{id}",
+            "pattern": "GET /api/v1/fixtures/{id}",
+            "operation_id": "getFixture",
+            "permission": "fixture.read",
+            "request": {
+              "path_params": [
+                {
+                  "name": "ID",
+                  "wire": "id",
+                  "description": "Identifier of the Fixture.",
+                  "type": "UUID",
+                  "type_kind": "Primitive",
+                  "go_type": "uuid.UUID"
+                }
+              ]
+            },
+            "responses": [
+              {
+                "status_code": 200,
+                "description": "The requested Fixture.",
+                "content_types": [
+                  "application/json"
+                ],
+                "body_object": "Fixture"
+              }
+            ],
+            "errors": [
+              400,
+              401,
+              403,
+              404,
+              429,
+              500
+            ],
+            "impl": {
+              "kind": "Generated",
+              "repo_method": "Get",
+              "service_method": "Get",
+              "handler_name": "GetFixture"
+            }
+          },
+          {
+            "name": "Update",
+            "summary": "Update a Fixture.",
+            "description": "Only the fields present in the body are changed. A field set to null is cleared; a field left out is left alone.",
+            "method": "PATCH",
+            "path": "/{id}",
+            "pattern": "PATCH /api/v1/fixtures/{id}",
+            "operation_id": "updateFixture",
+            "permission": "fixture.write",
+            "request": {
+              "content_types": [
+                "application/json"
+              ],
+              "path_params": [
+                {
+                  "name": "ID",
+                  "wire": "id",
+                  "description": "Identifier of the Fixture.",
+                  "type": "UUID",
+                  "type_kind": "Primitive",
+                  "go_type": "uuid.UUID"
+                }
+              ],
+              "body_params": [
+                {
+                  "name": "KickoffAt",
+                  "wire": "kickoffAt",
+                  "description": "When the contest starts.",
+                  "type": "Timestamp",
+                  "type_kind": "Primitive",
+                  "go_type": "time.Time",
+                  "column": {
+                    "table": "fixture",
+                    "name": "kickoff_at",
+                    "sql_type": "timestamptz",
+                    "nullable": false,
+                    "scan": "Timestamptz"
+                  }
+                }
+              ]
+            },
+            "responses": [
+              {
+                "status_code": 200,
+                "description": "The updated Fixture.",
+                "content_types": [
+                  "application/json"
+                ],
+                "body_object": "Fixture"
+              }
+            ],
+            "errors": [
+              400,
+              401,
+              403,
+              404,
+              409,
+              422,
+              429,
+              500
+            ],
+            "impl": {
+              "kind": "Generated",
+              "repo_method": "Update",
+              "service_method": "Update",
+              "handler_name": "UpdateFixture"
+            }
+          }
+        ],
+        "parents": [
+          {
+            "name": "HomeTeam",
+            "parent": "Team",
+            "table": "team",
+            "column": "home_team_id"
+          },
+          {
+            "name": "AwayTeam",
+            "parent": "Team",
+            "table": "team",
+            "column": "away_team_id"
+          }
+        ],
+        "storage": {
+          "table": "fixture",
+          "primary_key": [
+            "id"
+          ],
+          "tenant": {
+            "table": "fixture",
+            "name": "tenant_id",
+            "sql_type": "uuid",
+            "nullable": false,
+            "scan": "UUID"
+          },
+          "audit": {
+            "created_at": {
+              "table": "fixture",
+              "name": "created_at",
+              "sql_type": "timestamptz",
+              "nullable": false,
+              "scan": "Timestamptz"
+            }
+          },
+          "default_order": [
+            {
+              "column": "created_at",
+              "desc": true
+            },
+            {
+              "column": "id"
+            }
+          ],
+          "relations": [
+            {
+              "name": "AwayTeam",
+              "kind": "BelongsTo",
+              "target": "Team",
+              "local_column": "away_team_id",
+              "foreign_table": "team",
+              "foreign_column": "id"
+            },
+            {
+              "name": "HomeTeam",
+              "kind": "BelongsTo",
+              "target": "Team",
+              "local_column": "home_team_id",
+              "foreign_table": "team",
+              "foreign_column": "id"
+            }
+          ],
+          "sortable": [
+            "id",
+            "tenant_id",
+            "created_at",
+            "home_team_id",
+            "away_team_id",
+            "kickoff_at"
+          ],
+          "filterable": [
+            "id",
+            "tenant_id",
+            "created_at",
+            "home_team_id",
+            "away_team_id",
+            "kickoff_at"
+          ]
+        }
+      },
+      {
+        "name": "Player",
+        "plural": "Players",
+        "path_segment": "players",
+        "description": "A person who plays for one or more teams.",
+        "operations": [
+          "Create",
+          "Get",
+          "List",
+          "Search",
+          "Update",
+          "Delete"
+        ],
+        "fields": [
+          {
+            "name": "ID",
+            "wire": "id",
+            "description": "Unique identifier for this row.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "uuid.UUID",
+            "read_only": true,
+            "column": {
+              "table": "player",
+              "name": "id",
+              "sql_type": "uuid",
+              "nullable": false,
+              "scan": "UUID"
+            },
+            "operations": [
+              "Read"
+            ]
+          },
+          {
+            "name": "TenantID",
+            "wire": "tenantId",
+            "description": "Tenant this row belongs to. Every query is scoped by it.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "uuid.UUID",
+            "read_only": true,
+            "column": {
+              "table": "player",
+              "name": "tenant_id",
+              "sql_type": "uuid",
+              "nullable": false,
+              "scan": "UUID"
+            },
+            "operations": [
+              "Read"
+            ]
+          },
+          {
+            "name": "CreatedAt",
+            "wire": "createdAt",
+            "description": "When this row was created. Set automatically and never changes.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "time.Time",
+            "read_only": true,
+            "column": {
+              "table": "player",
+              "name": "created_at",
+              "sql_type": "timestamptz",
+              "nullable": false,
+              "scan": "Timestamptz"
+            },
+            "operations": [
+              "Read"
+            ]
+          },
+          {
+            "name": "FullName",
+            "wire": "fullName",
+            "description": "The player's full name.",
+            "type": "String",
+            "type_kind": "Primitive",
+            "go_type": "string",
+            "column": {
+              "table": "player",
+              "name": "full_name",
+              "sql_type": "text",
+              "nullable": false,
+              "scan": "Direct"
+            },
+            "operations": [
+              "Read",
+              "Create",
+              "Update"
+            ]
+          }
+        ],
+        "endpoints": [
+          {
+            "name": "List",
+            "summary": "List Players.",
+            "method": "GET",
+            "path": "",
+            "pattern": "GET /api/v1/players",
+            "operation_id": "listPlayers",
+            "permission": "player.read",
+            "request": {
+              "query_params": [
+                {
+                  "name": "Limit",
+                  "wire": "limit",
+                  "description": "Maximum rows to return.",
+                  "type": "Int",
+                  "type_kind": "Primitive",
+                  "go_type": "int",
+                  "default": "50"
+                },
+                {
+                  "name": "Offset",
+                  "wire": "offset",
+                  "description": "Rows to skip before the first returned row.",
+                  "type": "Int",
+                  "type_kind": "Primitive",
+                  "go_type": "int",
+                  "default": "0"
+                }
+              ]
+            },
+            "responses": [
+              {
+                "status_code": 200,
+                "description": "A page of Players.",
+                "content_types": [
+                  "application/json"
+                ],
+                "body_object": "PlayerListResponse"
+              }
+            ],
+            "errors": [
+              400,
+              401,
+              403,
+              429,
+              500
+            ],
+            "impl": {
+              "kind": "Generated",
+              "repo_method": "List",
+              "service_method": "List",
+              "handler_name": "ListPlayers"
+            }
+          },
+          {
+            "name": "Create",
+            "summary": "Create a Player.",
+            "method": "POST",
+            "path": "",
+            "pattern": "POST /api/v1/players",
+            "operation_id": "createPlayer",
+            "permission": "player.write",
+            "request": {
+              "content_types": [
+                "application/json"
+              ],
+              "body_params": [
+                {
+                  "name": "FullName",
+                  "wire": "fullName",
+                  "description": "The player's full name.",
+                  "type": "String",
+                  "type_kind": "Primitive",
+                  "go_type": "string",
+                  "column": {
+                    "table": "player",
+                    "name": "full_name",
+                    "sql_type": "text",
+                    "nullable": false,
+                    "scan": "Direct"
+                  }
+                }
+              ]
+            },
+            "responses": [
+              {
+                "status_code": 201,
+                "description": "The created Player.",
+                "content_types": [
+                  "application/json"
+                ],
+                "body_object": "Player"
+              }
+            ],
+            "errors": [
+              400,
+              401,
+              403,
+              409,
+              422,
+              429,
+              500
+            ],
+            "impl": {
+              "kind": "Generated",
+              "repo_method": "Create",
+              "service_method": "Create",
+              "handler_name": "CreatePlayer"
+            }
+          },
+          {
+            "name": "Search",
+            "summary": "Search Players with filters.",
+            "method": "QUERY",
+            "path": "",
+            "pattern": "QUERY /api/v1/players",
+            "alias_patterns": [
+              "POST /api/v1/players/_search"
+            ],
+            "operation_id": "searchPlayers",
+            "permission": "player.read",
+            "request": {
+              "content_types": [
+                "application/json"
+              ],
+              "query_params": [
+                {
+                  "name": "Limit",
+                  "wire": "limit",
+                  "description": "Maximum rows to return.",
+                  "type": "Int",
+                  "type_kind": "Primitive",
+                  "go_type": "int",
+                  "default": "50"
+                },
+                {
+                  "name": "Offset",
+                  "wire": "offset",
+                  "description": "Rows to skip before the first returned row.",
+                  "type": "Int",
+                  "type_kind": "Primitive",
+                  "go_type": "int",
+                  "default": "0"
+                }
+              ],
+              "body_params": [
+                {
+                  "name": "Filter",
+                  "wire": "filter",
+                  "description": "Conditions rows must satisfy.",
+                  "type": "PlayerFilter",
+                  "type_kind": "Object",
+                  "go_type": "PlayerFilter"
+                }
+              ]
+            },
+            "responses": [
+              {
+                "status_code": 200,
+                "description": "A page of matching Players.",
+                "content_types": [
+                  "application/json"
+                ],
+                "body_object": "PlayerListResponse"
+              }
+            ],
+            "errors": [
+              400,
+              401,
+              403,
+              422,
+              429,
+              500
+            ],
+            "impl": {
+              "kind": "Generated",
+              "repo_method": "List",
+              "service_method": "Search",
+              "handler_name": "SearchPlayers"
+            }
+          },
+          {
+            "name": "Delete",
+            "summary": "Delete a Player.",
+            "method": "DELETE",
+            "path": "/{id}",
+            "pattern": "DELETE /api/v1/players/{id}",
+            "operation_id": "deletePlayer",
+            "permission": "player.delete",
+            "request": {
+              "path_params": [
+                {
+                  "name": "ID",
+                  "wire": "id",
+                  "description": "Identifier of the Player.",
+                  "type": "UUID",
+                  "type_kind": "Primitive",
+                  "go_type": "uuid.UUID"
+                }
+              ]
+            },
+            "responses": [
+              {
+                "status_code": 204,
+                "description": "The Player was deleted."
+              }
+            ],
+            "errors": [
+              400,
+              401,
+              403,
+              404,
+              409,
+              429,
+              500
+            ],
+            "impl": {
+              "kind": "Generated",
+              "repo_method": "Delete",
+              "service_method": "Delete",
+              "handler_name": "DeletePlayer"
+            }
+          },
+          {
+            "name": "Get",
+            "summary": "Fetch one Player by identifier.",
+            "method": "GET",
+            "path": "/{id}",
+            "pattern": "GET /api/v1/players/{id}",
+            "operation_id": "getPlayer",
+            "permission": "player.read",
+            "request": {
+              "path_params": [
+                {
+                  "name": "ID",
+                  "wire": "id",
+                  "description": "Identifier of the Player.",
+                  "type": "UUID",
+                  "type_kind": "Primitive",
+                  "go_type": "uuid.UUID"
+                }
+              ]
+            },
+            "responses": [
+              {
+                "status_code": 200,
+                "description": "The requested Player.",
+                "content_types": [
+                  "application/json"
+                ],
+                "body_object": "Player"
+              }
+            ],
+            "errors": [
+              400,
+              401,
+              403,
+              404,
+              429,
+              500
+            ],
+            "impl": {
+              "kind": "Generated",
+              "repo_method": "Get",
+              "service_method": "Get",
+              "handler_name": "GetPlayer"
+            }
+          },
+          {
+            "name": "Update",
+            "summary": "Update a Player.",
+            "description": "Only the fields present in the body are changed. A field set to null is cleared; a field left out is left alone.",
+            "method": "PATCH",
+            "path": "/{id}",
+            "pattern": "PATCH /api/v1/players/{id}",
+            "operation_id": "updatePlayer",
+            "permission": "player.write",
+            "request": {
+              "content_types": [
+                "application/json"
+              ],
+              "path_params": [
+                {
+                  "name": "ID",
+                  "wire": "id",
+                  "description": "Identifier of the Player.",
+                  "type": "UUID",
+                  "type_kind": "Primitive",
+                  "go_type": "uuid.UUID"
+                }
+              ],
+              "body_params": [
+                {
+                  "name": "FullName",
+                  "wire": "fullName",
+                  "description": "The player's full name.",
+                  "type": "String",
+                  "type_kind": "Primitive",
+                  "go_type": "string",
+                  "column": {
+                    "table": "player",
+                    "name": "full_name",
+                    "sql_type": "text",
+                    "nullable": false,
+                    "scan": "Direct"
+                  }
+                }
+              ]
+            },
+            "responses": [
+              {
+                "status_code": 200,
+                "description": "The updated Player.",
+                "content_types": [
+                  "application/json"
+                ],
+                "body_object": "Player"
+              }
+            ],
+            "errors": [
+              400,
+              401,
+              403,
+              404,
+              409,
+              422,
+              429,
+              500
+            ],
+            "impl": {
+              "kind": "Generated",
+              "repo_method": "Update",
+              "service_method": "Update",
+              "handler_name": "UpdatePlayer"
+            }
+          }
+        ],
+        "storage": {
+          "table": "player",
+          "primary_key": [
+            "id"
+          ],
+          "tenant": {
+            "table": "player",
+            "name": "tenant_id",
+            "sql_type": "uuid",
+            "nullable": false,
+            "scan": "UUID"
+          },
+          "audit": {
+            "created_at": {
+              "table": "player",
+              "name": "created_at",
+              "sql_type": "timestamptz",
+              "nullable": false,
+              "scan": "Timestamptz"
+            }
+          },
+          "default_order": [
+            {
+              "column": "created_at",
+              "desc": true
+            },
+            {
+              "column": "id"
+            }
+          ],
+          "relations": [
+            {
+              "name": "Teams",
+              "kind": "ManyToMany",
+              "target": "Team",
+              "foreign_table": "team",
+              "link_table": {
+                "table": "team_player",
+                "left_table": "team",
+                "left_column": "team_id",
+                "right_table": "player",
+                "right_column": "player_id"
+              }
+            }
+          ],
+          "sortable": [
+            "id",
+            "tenant_id",
+            "created_at",
+            "full_name"
+          ],
+          "filterable": [
+            "id",
+            "tenant_id",
+            "created_at",
+            "full_name"
+          ]
+        }
+      },
+      {
+        "name": "Team",
+        "plural": "Teams",
+        "path_segment": "teams",
+        "description": "A group of players that competes as a unit.",
+        "operations": [
+          "Create",
+          "Get",
+          "List",
+          "Search",
+          "Update",
+          "Delete"
+        ],
+        "fields": [
+          {
+            "name": "ID",
+            "wire": "id",
+            "description": "Unique identifier for this row.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "uuid.UUID",
+            "read_only": true,
+            "column": {
+              "table": "team",
+              "name": "id",
+              "sql_type": "uuid",
+              "nullable": false,
+              "scan": "UUID"
+            },
+            "operations": [
+              "Read"
+            ]
+          },
+          {
+            "name": "TenantID",
+            "wire": "tenantId",
+            "description": "Tenant this row belongs to. Every query is scoped by it.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "uuid.UUID",
+            "read_only": true,
+            "column": {
+              "table": "team",
+              "name": "tenant_id",
+              "sql_type": "uuid",
+              "nullable": false,
+              "scan": "UUID"
+            },
+            "operations": [
+              "Read"
+            ]
+          },
+          {
+            "name": "CreatedAt",
+            "wire": "createdAt",
+            "description": "When this row was created. Set automatically and never changes.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "time.Time",
+            "read_only": true,
+            "column": {
+              "table": "team",
+              "name": "created_at",
+              "sql_type": "timestamptz",
+              "nullable": false,
+              "scan": "Timestamptz"
+            },
+            "operations": [
+              "Read"
+            ]
+          },
+          {
+            "name": "Name",
+            "wire": "name",
+            "description": "Display name of the team.",
+            "type": "String",
+            "type_kind": "Primitive",
+            "go_type": "string",
+            "column": {
+              "table": "team",
+              "name": "name",
+              "sql_type": "text",
+              "nullable": false,
+              "scan": "Direct"
+            },
+            "operations": [
+              "Read",
+              "Create",
+              "Update"
+            ]
+          }
+        ],
+        "endpoints": [
+          {
+            "name": "List",
+            "summary": "List Teams.",
+            "method": "GET",
+            "path": "",
+            "pattern": "GET /api/v1/teams",
+            "operation_id": "listTeams",
+            "permission": "team.read",
+            "request": {
+              "query_params": [
+                {
+                  "name": "Limit",
+                  "wire": "limit",
+                  "description": "Maximum rows to return.",
+                  "type": "Int",
+                  "type_kind": "Primitive",
+                  "go_type": "int",
+                  "default": "50"
+                },
+                {
+                  "name": "Offset",
+                  "wire": "offset",
+                  "description": "Rows to skip before the first returned row.",
+                  "type": "Int",
+                  "type_kind": "Primitive",
+                  "go_type": "int",
+                  "default": "0"
+                }
+              ]
+            },
+            "responses": [
+              {
+                "status_code": 200,
+                "description": "A page of Teams.",
+                "content_types": [
+                  "application/json"
+                ],
+                "body_object": "TeamListResponse"
+              }
+            ],
+            "errors": [
+              400,
+              401,
+              403,
+              429,
+              500
+            ],
+            "impl": {
+              "kind": "Generated",
+              "repo_method": "List",
+              "service_method": "List",
+              "handler_name": "ListTeams"
+            }
+          },
+          {
+            "name": "Create",
+            "summary": "Create a Team.",
+            "method": "POST",
+            "path": "",
+            "pattern": "POST /api/v1/teams",
+            "operation_id": "createTeam",
+            "permission": "team.write",
+            "request": {
+              "content_types": [
+                "application/json"
+              ],
+              "body_params": [
+                {
+                  "name": "Name",
+                  "wire": "name",
+                  "description": "Display name of the team.",
+                  "type": "String",
+                  "type_kind": "Primitive",
+                  "go_type": "string",
+                  "column": {
+                    "table": "team",
+                    "name": "name",
+                    "sql_type": "text",
+                    "nullable": false,
+                    "scan": "Direct"
+                  }
+                }
+              ]
+            },
+            "responses": [
+              {
+                "status_code": 201,
+                "description": "The created Team.",
+                "content_types": [
+                  "application/json"
+                ],
+                "body_object": "Team"
+              }
+            ],
+            "errors": [
+              400,
+              401,
+              403,
+              409,
+              422,
+              429,
+              500
+            ],
+            "impl": {
+              "kind": "Generated",
+              "repo_method": "Create",
+              "service_method": "Create",
+              "handler_name": "CreateTeam"
+            }
+          },
+          {
+            "name": "Search",
+            "summary": "Search Teams with filters.",
+            "method": "QUERY",
+            "path": "",
+            "pattern": "QUERY /api/v1/teams",
+            "alias_patterns": [
+              "POST /api/v1/teams/_search"
+            ],
+            "operation_id": "searchTeams",
+            "permission": "team.read",
+            "request": {
+              "content_types": [
+                "application/json"
+              ],
+              "query_params": [
+                {
+                  "name": "Limit",
+                  "wire": "limit",
+                  "description": "Maximum rows to return.",
+                  "type": "Int",
+                  "type_kind": "Primitive",
+                  "go_type": "int",
+                  "default": "50"
+                },
+                {
+                  "name": "Offset",
+                  "wire": "offset",
+                  "description": "Rows to skip before the first returned row.",
+                  "type": "Int",
+                  "type_kind": "Primitive",
+                  "go_type": "int",
+                  "default": "0"
+                }
+              ],
+              "body_params": [
+                {
+                  "name": "Filter",
+                  "wire": "filter",
+                  "description": "Conditions rows must satisfy.",
+                  "type": "TeamFilter",
+                  "type_kind": "Object",
+                  "go_type": "TeamFilter"
+                }
+              ]
+            },
+            "responses": [
+              {
+                "status_code": 200,
+                "description": "A page of matching Teams.",
+                "content_types": [
+                  "application/json"
+                ],
+                "body_object": "TeamListResponse"
+              }
+            ],
+            "errors": [
+              400,
+              401,
+              403,
+              422,
+              429,
+              500
+            ],
+            "impl": {
+              "kind": "Generated",
+              "repo_method": "List",
+              "service_method": "Search",
+              "handler_name": "SearchTeams"
+            }
+          },
+          {
+            "name": "Delete",
+            "summary": "Delete a Team.",
+            "method": "DELETE",
+            "path": "/{id}",
+            "pattern": "DELETE /api/v1/teams/{id}",
+            "operation_id": "deleteTeam",
+            "permission": "team.delete",
+            "request": {
+              "path_params": [
+                {
+                  "name": "ID",
+                  "wire": "id",
+                  "description": "Identifier of the Team.",
+                  "type": "UUID",
+                  "type_kind": "Primitive",
+                  "go_type": "uuid.UUID"
+                }
+              ]
+            },
+            "responses": [
+              {
+                "status_code": 204,
+                "description": "The Team was deleted."
+              }
+            ],
+            "errors": [
+              400,
+              401,
+              403,
+              404,
+              409,
+              429,
+              500
+            ],
+            "impl": {
+              "kind": "Generated",
+              "repo_method": "Delete",
+              "service_method": "Delete",
+              "handler_name": "DeleteTeam"
+            }
+          },
+          {
+            "name": "Get",
+            "summary": "Fetch one Team by identifier.",
+            "method": "GET",
+            "path": "/{id}",
+            "pattern": "GET /api/v1/teams/{id}",
+            "operation_id": "getTeam",
+            "permission": "team.read",
+            "request": {
+              "path_params": [
+                {
+                  "name": "ID",
+                  "wire": "id",
+                  "description": "Identifier of the Team.",
+                  "type": "UUID",
+                  "type_kind": "Primitive",
+                  "go_type": "uuid.UUID"
+                }
+              ]
+            },
+            "responses": [
+              {
+                "status_code": 200,
+                "description": "The requested Team.",
+                "content_types": [
+                  "application/json"
+                ],
+                "body_object": "Team"
+              }
+            ],
+            "errors": [
+              400,
+              401,
+              403,
+              404,
+              429,
+              500
+            ],
+            "impl": {
+              "kind": "Generated",
+              "repo_method": "Get",
+              "service_method": "Get",
+              "handler_name": "GetTeam"
+            }
+          },
+          {
+            "name": "Update",
+            "summary": "Update a Team.",
+            "description": "Only the fields present in the body are changed. A field set to null is cleared; a field left out is left alone.",
+            "method": "PATCH",
+            "path": "/{id}",
+            "pattern": "PATCH /api/v1/teams/{id}",
+            "operation_id": "updateTeam",
+            "permission": "team.write",
+            "request": {
+              "content_types": [
+                "application/json"
+              ],
+              "path_params": [
+                {
+                  "name": "ID",
+                  "wire": "id",
+                  "description": "Identifier of the Team.",
+                  "type": "UUID",
+                  "type_kind": "Primitive",
+                  "go_type": "uuid.UUID"
+                }
+              ],
+              "body_params": [
+                {
+                  "name": "Name",
+                  "wire": "name",
+                  "description": "Display name of the team.",
+                  "type": "String",
+                  "type_kind": "Primitive",
+                  "go_type": "string",
+                  "column": {
+                    "table": "team",
+                    "name": "name",
+                    "sql_type": "text",
+                    "nullable": false,
+                    "scan": "Direct"
+                  }
+                }
+              ]
+            },
+            "responses": [
+              {
+                "status_code": 200,
+                "description": "The updated Team.",
+                "content_types": [
+                  "application/json"
+                ],
+                "body_object": "Team"
+              }
+            ],
+            "errors": [
+              400,
+              401,
+              403,
+              404,
+              409,
+              422,
+              429,
+              500
+            ],
+            "impl": {
+              "kind": "Generated",
+              "repo_method": "Update",
+              "service_method": "Update",
+              "handler_name": "UpdateTeam"
+            }
+          }
+        ],
+        "children": [
+          {
+            "name": "HomeFixtures",
+            "child": "Fixture",
+            "table": "fixture",
+            "column": "home_team_id",
+            "hook": "HomeTeam"
+          },
+          {
+            "name": "AwayFixtures",
+            "child": "Fixture",
+            "table": "fixture",
+            "column": "away_team_id",
+            "hook": "AwayTeam"
+          }
+        ],
+        "storage": {
+          "table": "team",
+          "primary_key": [
+            "id"
+          ],
+          "tenant": {
+            "table": "team",
+            "name": "tenant_id",
+            "sql_type": "uuid",
+            "nullable": false,
+            "scan": "UUID"
+          },
+          "audit": {
+            "created_at": {
+              "table": "team",
+              "name": "created_at",
+              "sql_type": "timestamptz",
+              "nullable": false,
+              "scan": "Timestamptz"
+            }
+          },
+          "default_order": [
+            {
+              "column": "created_at",
+              "desc": true
+            },
+            {
+              "column": "id"
+            }
+          ],
+          "relations": [
+            {
+              "name": "AwayFixtures",
+              "kind": "HasMany",
+              "target": "Fixture",
+              "foreign_table": "fixture",
+              "foreign_column": "away_team_id"
+            },
+            {
+              "name": "HomeFixtures",
+              "kind": "HasMany",
+              "target": "Fixture",
+              "foreign_table": "fixture",
+              "foreign_column": "home_team_id"
+            },
+            {
+              "name": "Players",
+              "kind": "ManyToMany",
+              "target": "Player",
+              "foreign_table": "player",
+              "link_table": {
+                "table": "team_player",
+                "left_table": "team",
+                "left_column": "team_id",
+                "right_table": "player",
+                "right_column": "player_id"
+              },
+              "embed": true
+            }
+          ],
+          "sortable": [
+            "id",
+            "tenant_id",
+            "created_at",
+            "name"
+          ],
+          "filterable": [
+            "id",
+            "tenant_id",
+            "created_at",
+            "name"
+          ]
+        }
+      }
+    ],
+    "permissions": [
+      {
+        "key": "fixture.delete",
+        "name": "Delete fixtures",
+        "description": "Delete fixtures — A scheduled contest between two teams.",
+        "resource": "Fixture",
+        "action": "delete"
+      },
+      {
+        "key": "fixture.read",
+        "name": "Read fixtures",
+        "description": "Read fixtures — A scheduled contest between two teams.",
+        "resource": "Fixture",
+        "action": "read"
+      },
+      {
+        "key": "fixture.write",
+        "name": "Write fixtures",
+        "description": "Create and change fixtures — A scheduled contest between two teams.",
+        "resource": "Fixture",
+        "action": "write"
+      },
+      {
+        "key": "player.delete",
+        "name": "Delete players",
+        "description": "Delete players — A person who plays for one or more teams.",
+        "resource": "Player",
+        "action": "delete"
+      },
+      {
+        "key": "player.read",
+        "name": "Read players",
+        "description": "Read players — A person who plays for one or more teams.",
+        "resource": "Player",
+        "action": "read"
+      },
+      {
+        "key": "player.write",
+        "name": "Write players",
+        "description": "Create and change players — A person who plays for one or more teams.",
+        "resource": "Player",
+        "action": "write"
+      },
+      {
+        "key": "team.delete",
+        "name": "Delete teams",
+        "description": "Delete teams — A group of players that competes as a unit.",
+        "resource": "Team",
+        "action": "delete"
+      },
+      {
+        "key": "team.read",
+        "name": "Read teams",
+        "description": "Read teams — A group of players that competes as a unit.",
+        "resource": "Team",
+        "action": "read"
+      },
+      {
+        "key": "team.write",
+        "name": "Write teams",
+        "description": "Create and change teams — A group of players that competes as a unit.",
+        "resource": "Team",
+        "action": "write"
+      }
+    ]
+  },
+  "schema": {
+    "name": "public",
+    "tables": [
+      {
+        "name": "fixture",
+        "comment": "A scheduled contest between two teams.",
+        "kind": "Base",
+        "columns": [
+          {
+            "name": "id",
+            "comment": "Unique identifier for this row.",
+            "comment_source": "auto",
+            "sql_type": "uuid",
+            "udt_name": "uuid",
+            "nullable": false,
+            "ordinal": 1,
+            "is_primary_key": true
+          },
+          {
+            "name": "tenant_id",
+            "comment": "Tenant this row belongs to. Every query is scoped by it.",
+            "comment_source": "auto",
+            "sql_type": "uuid",
+            "udt_name": "uuid",
+            "nullable": false,
+            "ordinal": 2
+          },
+          {
+            "name": "created_at",
+            "comment": "When this row was created. Set automatically and never changes.",
+            "comment_source": "auto",
+            "sql_type": "timestamptz",
+            "udt_name": "timestamptz",
+            "nullable": false,
+            "ordinal": 3
+          },
+          {
+            "name": "home_team_id",
+            "comment": "The team playing at home.",
+            "comment_source": "config",
+            "sql_type": "uuid",
+            "udt_name": "uuid",
+            "nullable": false,
+            "ordinal": 4,
+            "foreign_key": {
+              "table": "team",
+              "column": "id"
+            }
+          },
+          {
+            "name": "away_team_id",
+            "comment": "The team playing away.",
+            "comment_source": "config",
+            "sql_type": "uuid",
+            "udt_name": "uuid",
+            "nullable": false,
+            "ordinal": 5,
+            "foreign_key": {
+              "table": "team",
+              "column": "id"
+            }
+          },
+          {
+            "name": "kickoff_at",
+            "comment": "When the contest starts.",
+            "comment_source": "config",
+            "sql_type": "timestamptz",
+            "udt_name": "timestamptz",
+            "nullable": false,
+            "ordinal": 6
+          }
+        ],
+        "primary_key": [
+          "id"
+        ],
+        "indexes": [
+          {
+            "name": "fixture_away_idx",
+            "columns": [
+              "away_team_id"
+            ],
+            "method": "btree"
+          },
+          {
+            "name": "fixture_home_idx",
+            "columns": [
+              "home_team_id"
+            ],
+            "method": "btree"
+          },
+          {
+            "name": "fixture_pkey",
+            "columns": [
+              "id"
+            ],
+            "unique": true,
+            "method": "btree"
+          },
+          {
+            "name": "fixture_tenant_idx",
+            "columns": [
+              "tenant_id",
+              "kickoff_at"
+            ],
+            "method": "btree"
+          }
+        ],
+        "foreign_keys": [
+          {
+            "name": "fixture_away_fk",
+            "columns": [
+              "away_team_id"
+            ],
+            "foreign_table": "team",
+            "foreign_columns": [
+              "id"
+            ]
+          },
+          {
+            "name": "fixture_home_fk",
+            "columns": [
+              "home_team_id"
+            ],
+            "foreign_table": "team",
+            "foreign_columns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "name": "player",
+        "comment": "A person who plays for one or more teams.",
+        "kind": "Base",
+        "columns": [
+          {
+            "name": "id",
+            "comment": "Unique identifier for this row.",
+            "comment_source": "auto",
+            "sql_type": "uuid",
+            "udt_name": "uuid",
+            "nullable": false,
+            "ordinal": 1,
+            "is_primary_key": true
+          },
+          {
+            "name": "tenant_id",
+            "comment": "Tenant this row belongs to. Every query is scoped by it.",
+            "comment_source": "auto",
+            "sql_type": "uuid",
+            "udt_name": "uuid",
+            "nullable": false,
+            "ordinal": 2
+          },
+          {
+            "name": "created_at",
+            "comment": "When this row was created. Set automatically and never changes.",
+            "comment_source": "auto",
+            "sql_type": "timestamptz",
+            "udt_name": "timestamptz",
+            "nullable": false,
+            "ordinal": 3
+          },
+          {
+            "name": "full_name",
+            "comment": "The player's full name.",
+            "comment_source": "config",
+            "sql_type": "text",
+            "udt_name": "text",
+            "nullable": false,
+            "ordinal": 4
+          }
+        ],
+        "primary_key": [
+          "id"
+        ],
+        "indexes": [
+          {
+            "name": "player_pkey",
+            "columns": [
+              "id"
+            ],
+            "unique": true,
+            "method": "btree"
+          },
+          {
+            "name": "player_tenant_idx",
+            "columns": [
+              "tenant_id"
+            ],
+            "method": "btree"
+          }
+        ]
+      },
+      {
+        "name": "team",
+        "comment": "A group of players that competes as a unit.",
+        "kind": "Base",
+        "columns": [
+          {
+            "name": "id",
+            "comment": "Unique identifier for this row.",
+            "comment_source": "auto",
+            "sql_type": "uuid",
+            "udt_name": "uuid",
+            "nullable": false,
+            "ordinal": 1,
+            "is_primary_key": true
+          },
+          {
+            "name": "tenant_id",
+            "comment": "Tenant this row belongs to. Every query is scoped by it.",
+            "comment_source": "auto",
+            "sql_type": "uuid",
+            "udt_name": "uuid",
+            "nullable": false,
+            "ordinal": 2
+          },
+          {
+            "name": "created_at",
+            "comment": "When this row was created. Set automatically and never changes.",
+            "comment_source": "auto",
+            "sql_type": "timestamptz",
+            "udt_name": "timestamptz",
+            "nullable": false,
+            "ordinal": 3
+          },
+          {
+            "name": "name",
+            "comment": "Display name of the team.",
+            "comment_source": "config",
+            "sql_type": "text",
+            "udt_name": "text",
+            "nullable": false,
+            "ordinal": 4
+          }
+        ],
+        "primary_key": [
+          "id"
+        ],
+        "indexes": [
+          {
+            "name": "team_pkey",
+            "columns": [
+              "id"
+            ],
+            "unique": true,
+            "method": "btree"
+          },
+          {
+            "name": "team_tenant_idx",
+            "columns": [
+              "tenant_id"
+            ],
+            "method": "btree"
+          }
+        ]
+      },
+      {
+        "name": "team_player",
+        "kind": "Base",
+        "columns": [
+          {
+            "name": "team_id",
+            "comment_source": "none",
+            "sql_type": "uuid",
+            "udt_name": "uuid",
+            "nullable": false,
+            "ordinal": 1,
+            "is_primary_key": true,
+            "foreign_key": {
+              "table": "team",
+              "column": "id"
+            }
+          },
+          {
+            "name": "player_id",
+            "comment_source": "none",
+            "sql_type": "uuid",
+            "udt_name": "uuid",
+            "nullable": false,
+            "ordinal": 2,
+            "is_primary_key": true,
+            "foreign_key": {
+              "table": "player",
+              "column": "id"
+            }
+          },
+          {
+            "name": "created_at",
+            "comment": "When this row was created. Set automatically and never changes.",
+            "comment_source": "auto",
+            "sql_type": "timestamptz",
+            "udt_name": "timestamptz",
+            "nullable": false,
+            "ordinal": 3
+          }
+        ],
+        "primary_key": [
+          "team_id",
+          "player_id"
+        ],
+        "indexes": [
+          {
+            "name": "team_player_pkey",
+            "columns": [
+              "team_id",
+              "player_id"
+            ],
+            "unique": true,
+            "method": "btree"
+          },
+          {
+            "name": "team_player_player_idx",
+            "columns": [
+              "player_id"
+            ],
+            "method": "btree"
+          }
+        ],
+        "foreign_keys": [
+          {
+            "name": "team_player_player_fk",
+            "columns": [
+              "player_id"
+            ],
+            "foreign_table": "player",
+            "foreign_columns": [
+              "id"
+            ]
+          },
+          {
+            "name": "team_player_team_fk",
+            "columns": [
+              "team_id"
+            ],
+            "foreign_table": "team",
+            "foreign_columns": [
+              "id"
+            ]
+          }
+        ],
+        "link_table": {
+          "table": "team_player",
+          "left_table": "team",
+          "left_column": "team_id",
+          "right_table": "player",
+          "right_column": "player_id"
+        }
+      }
+    ],
+    "enums": []
+  },
+  "valid": true
+}

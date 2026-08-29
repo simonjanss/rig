@@ -1,0 +1,21 @@
+# yaml-language-server: $schema=../../.rig/table.schema.json
+table: permission
+
+# The application's own authorization model, not rig's — see
+# migrations/00004. rig derives the permission keys from the schema and
+# generates the check that reads them off a caller's claims; these tables are
+# one answer to "who holds which", and services/tenant is the code that
+# reads them.
+#
+# Nothing generated, because nothing would use it: the resolver is one query in
+# services/tenant/grants.go, and a REST resource over a lookup table would be
+# a few thousand lines nobody calls. An administration screen for handing out
+# roles is a fine reason to turn this back on.
+expose: false
+columns:
+  key:
+    comment: What code checks for, such as lesson.publish.
+  name:
+    comment: A short label for an administration screen.
+  description:
+    comment: What holding this permission lets somebody do.

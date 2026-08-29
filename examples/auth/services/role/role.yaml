@@ -1,0 +1,23 @@
+# yaml-language-server: $schema=../../.rig/table.schema.json
+table: role
+
+# The application's own authorization model, not rig's — see
+# migrations/00004. rig derives the permission keys from the schema and
+# generates the check that reads them off a caller's claims; these tables are
+# one answer to "who holds which", and services/tenant is the code that
+# reads them.
+#
+# Nothing generated, because nothing would use it: the resolver is one query in
+# services/tenant/grants.go, and a REST resource over a lookup table would be
+# a few thousand lines nobody calls. An administration screen for handing out
+# roles is a fine reason to turn this back on.
+expose: false
+columns:
+  key:
+    comment: Stable identifier, such as editor.
+  name:
+    comment: What to call the role in the interface.
+  description:
+    comment: What the role is for.
+  is_system:
+    comment: Whether rig created the role. A system role should not be editable.

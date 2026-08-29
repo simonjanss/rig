@@ -1,0 +1,9 @@
+project:
+  name: rowcacheowned
+  module: example.com/rowcacheowned
+
+# An owner-scoped table's rows are held under a key naming the account as well as
+# the tenant, because the read that stored one compared both. The default numbers,
+# so this case is about the key rather than the lifetime.
+cache:
+  enabled: true

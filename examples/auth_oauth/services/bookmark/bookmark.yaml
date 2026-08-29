@@ -1,0 +1,9 @@
+# yaml-language-server: $schema=../../.rig/table.schema.json
+table: bookmark
+comment: A link somebody saved.
+
+columns:
+  title:
+    comment: What to call it in a list.
+  url:
+    comment: Where it points.

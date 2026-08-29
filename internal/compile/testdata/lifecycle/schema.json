@@ -1,0 +1,72 @@
+{
+  "name": "public",
+  "tables": [
+    {
+      "name": "lesson",
+      "kind": "Base",
+      "columns": [
+        { "name": "id", "sql_type": "uuid", "udt_name": "uuid", "nullable": false, "ordinal": 1, "is_primary_key": true },
+        { "name": "tenant_id", "sql_type": "uuid", "udt_name": "uuid", "nullable": false, "ordinal": 2 },
+        { "name": "created_at", "sql_type": "timestamptz", "udt_name": "timestamptz", "nullable": false, "ordinal": 3 },
+        { "name": "created_by_account_id", "sql_type": "uuid", "udt_name": "uuid", "nullable": true, "ordinal": 4 },
+        { "name": "updated_at", "sql_type": "timestamptz", "udt_name": "timestamptz", "nullable": true, "ordinal": 5 },
+        { "name": "updated_by_account_id", "sql_type": "uuid", "udt_name": "uuid", "nullable": true, "ordinal": 6 },
+        { "name": "deleted_at", "sql_type": "timestamptz", "udt_name": "timestamptz", "nullable": true, "ordinal": 7 },
+        { "name": "deleted_by_account_id", "sql_type": "uuid", "udt_name": "uuid", "nullable": true, "ordinal": 8 },
+        { "name": "version_type", "sql_type": "lesson_version_type", "udt_name": "lesson_version_type", "nullable": false, "ordinal": 9, "enum_type": "lesson_version_type" },
+        {
+          "name": "snapshot_from_lesson_id", "sql_type": "uuid", "udt_name": "uuid", "nullable": true, "ordinal": 10,
+          "foreign_key": { "table": "lesson", "column": "id" }
+        },
+        { "name": "snapshot_from_lesson_at", "sql_type": "timestamptz", "udt_name": "timestamptz", "nullable": true, "ordinal": 11 },
+        { "name": "title", "sql_type": "text", "udt_name": "text", "nullable": false, "ordinal": 12 },
+        { "name": "notes", "sql_type": "text", "udt_name": "text", "nullable": true, "ordinal": 13 },
+        { "name": "status", "sql_type": "lesson_status", "udt_name": "lesson_status", "nullable": false, "ordinal": 14, "enum_type": "lesson_status" },
+        { "name": "manager_email", "sql_type": "text", "udt_name": "text", "nullable": false, "ordinal": 15 },
+        { "name": "starts_at", "sql_type": "timestamptz", "udt_name": "timestamptz", "nullable": false, "ordinal": 16 },
+        { "name": "capacity", "sql_type": "int4", "udt_name": "int4", "nullable": true, "ordinal": 17 },
+        { "name": "price", "sql_type": "numeric", "udt_name": "numeric", "nullable": true, "ordinal": 18, "numeric_precision": 10, "numeric_scale": 2 },
+        { "name": "tags", "sql_type": "text[]", "udt_name": "_text", "nullable": true, "ordinal": 19, "array_elem": "text" },
+        { "name": "row_version", "sql_type": "int8", "udt_name": "int8", "nullable": false, "ordinal": 20, "has_default": true, "default": "1" },
+        { "name": "search_vector", "sql_type": "text", "udt_name": "text", "nullable": true, "ordinal": 21, "generated": true }
+      ],
+      "primary_key": ["id"],
+      "foreign_keys": [
+        {
+          "name": "lesson_snapshot_fk",
+          "columns": ["snapshot_from_lesson_id"],
+          "foreign_table": "lesson",
+          "foreign_columns": ["id"]
+        }
+      ],
+      "indexes": [
+        { "name": "lesson_pkey", "columns": ["id"], "unique": true, "method": "btree" },
+        { "name": "lesson_tenant_starts_idx", "columns": ["tenant_id", "starts_at"], "method": "btree" },
+        { "name": "lesson_snapshot_idx", "columns": ["snapshot_from_lesson_id"], "method": "btree" }
+      ],
+      "checks": [
+        {
+          "name": "lesson_version_type_check",
+          "expression": "((version_type = 'Original' AND snapshot_from_lesson_id IS NULL) OR (version_type = 'Snapshot' AND snapshot_from_lesson_id IS NOT NULL))"
+        }
+      ]
+    }
+  ],
+  "enums": [
+    {
+      "name": "lesson_status",
+      "values": [
+        { "value": "planned" },
+        { "value": "in_progress" },
+        { "value": "completed" }
+      ]
+    },
+    {
+      "name": "lesson_version_type",
+      "values": [
+        { "value": "Original" },
+        { "value": "Snapshot" }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,25 @@
+/* The palette, in one place. Dark, quiet, Linear-ish. */
+:root {
+    --bg: #0e1013;
+    --bg-raised: #16191e;
+    --bg-hover: #1d2127;
+    --border: #262b33;
+    --border-strong: #343b46;
+    --text: #e6e9ee;
+    --text-dim: #8b93a1;
+    --text-faint: #5b6472;
+    --accent: #5e6ad2;
+    --accent-hover: #6f7ae0;
+    --danger: #e5484d;
+    --ok: #30a46c;
+
+    --radius: 8px;
+    --radius-small: 5px;
+    --shadow: 0 8px 32px rgba(0, 0, 0, 0.45);
+
+    --status-backlog: #8b93a1;
+    --status-todo: #5e6ad2;
+    --status-in_progress: #d4a72c;
+    --status-done: #30a46c;
+    --status-canceled: #5b6472;
+}

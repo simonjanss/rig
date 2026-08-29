@@ -1,0 +1,54 @@
+{
+  "name": "public",
+  "tables": [
+    {
+      "name": "account",
+      "comment": "A project's own table, under a name rig's rig_account takes.",
+      "kind": "Base",
+      "columns": [
+        { "name": "id", "sql_type": "uuid", "udt_name": "uuid", "nullable": false, "ordinal": 1, "is_primary_key": true, "comment": "Identifier." },
+        { "name": "tenant_id", "sql_type": "uuid", "udt_name": "uuid", "nullable": false, "ordinal": 2, "comment": "Who it belongs to." },
+        { "name": "created_at", "sql_type": "timestamptz", "udt_name": "timestamptz", "nullable": false, "ordinal": 3, "comment": "When it was written." },
+        { "name": "updated_at", "sql_type": "timestamptz", "udt_name": "timestamptz", "nullable": true, "ordinal": 4, "comment": "When it last changed." }
+      ],
+      "primary_key": ["id"],
+      "indexes": [
+        { "name": "account_pkey", "columns": ["id"], "unique": true, "method": "btree" },
+        { "name": "account_tenant_created_idx", "columns": ["tenant_id", "created_at"], "method": "btree" }
+      ]
+    },
+    {
+      "name": "bookmark",
+      "comment": "An ordinary table whose configuration reaches for a reserved name.",
+      "kind": "Base",
+      "columns": [
+        { "name": "id", "sql_type": "uuid", "udt_name": "uuid", "nullable": false, "ordinal": 1, "is_primary_key": true, "comment": "Identifier." },
+        { "name": "tenant_id", "sql_type": "uuid", "udt_name": "uuid", "nullable": false, "ordinal": 2, "comment": "Who it belongs to." },
+        { "name": "created_at", "sql_type": "timestamptz", "udt_name": "timestamptz", "nullable": false, "ordinal": 3, "comment": "When it was written." },
+        { "name": "updated_at", "sql_type": "timestamptz", "udt_name": "timestamptz", "nullable": true, "ordinal": 4, "comment": "When it last changed." }
+      ],
+      "primary_key": ["id"],
+      "indexes": [
+        { "name": "bookmark_pkey", "columns": ["id"], "unique": true, "method": "btree" },
+        { "name": "bookmark_tenant_created_idx", "columns": ["tenant_id", "created_at"], "method": "btree" }
+      ]
+    },
+    {
+      "name": "rig_leaderboard",
+      "comment": "A table under a prefix rig keeps, by a name rig does not use.",
+      "kind": "Base",
+      "columns": [
+        { "name": "id", "sql_type": "uuid", "udt_name": "uuid", "nullable": false, "ordinal": 1, "is_primary_key": true, "comment": "Identifier." },
+        { "name": "tenant_id", "sql_type": "uuid", "udt_name": "uuid", "nullable": false, "ordinal": 2, "comment": "Who it belongs to." },
+        { "name": "created_at", "sql_type": "timestamptz", "udt_name": "timestamptz", "nullable": false, "ordinal": 3, "comment": "When it was written." },
+        { "name": "updated_at", "sql_type": "timestamptz", "udt_name": "timestamptz", "nullable": true, "ordinal": 4, "comment": "When it last changed." }
+      ],
+      "primary_key": ["id"],
+      "indexes": [
+        { "name": "rig_leaderboard_pkey", "columns": ["id"], "unique": true, "method": "btree" },
+        { "name": "rig_leaderboard_tenant_created_idx", "columns": ["tenant_id", "created_at"], "method": "btree" }
+      ]
+    }
+  ],
+  "enums": []
+}

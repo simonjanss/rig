@@ -1,0 +1,114 @@
+# yaml-language-server: $schema=../../.rig/table.schema.json
+table: todo
+comment: One item on the board.
+
+# Days a soft-deleted row stays restorable — the trash view's window.
+restore_window_days: 30
+
+# Newest first, then by identifier so the order is total and paging is stable.
+# The board sorts its own columns client-side; this is the API's order.
+order_by: [-created_at, id]
+
+# Live sync. Turning it on is the whole configuration: which shapes exist is
+# decided by the columns, so this table gets the live one, a trash one because
+# it has deleted_at, and a per-row history one because it keeps snapshots. The
+# front end subscribes to all three.
+electric:
+  enabled: true
+
+columns:
+  title:
+    comment: What needs doing, in a few words.
+  description:
+    comment: The longer story, or null while the title says it all.
+  status:
+    comment: Which column of the board the item is in.
+  priority:
+    comment: How urgently the item wants attention.
+  assignee_account_id:
+    comment: Who has taken the item, or null while nobody has.
+
+enums:
+  todo_priority:
+    name: TodoPriority
+    description: How urgently an item wants attention.
+    values:
+      low:
+        name: Low
+        description: Worth doing eventually.
+      normal:
+        name: Normal
+        description: Worth doing soon. This is the default.
+      high:
+        name: High
+        description: Worth doing before anything else.
+  todo_status:
+    name: TodoStatus
+    description: Which column of the board an item is in.
+    values:
+      backlog:
+        name: Backlog
+        description: Noted, and not yet planned.
+      todo:
+        name: Todo
+        description: Planned and waiting to be started. This is the default.
+      in_progress:
+        name: InProgress
+        description: Somebody is working on it.
+      done:
+        name: Done
+        description: Finished.
+      canceled:
+        name: Canceled
+        description: Decided against, which is not the same as finished.
+  todo_version_type:
+    name: TodoVersionType
+    description: Whether a row is the live item or a copy of a previous version of it.
+    values:
+      Original:
+        name: Original
+        description: The live item. This is the only kind a read returns by default.
+      Snapshot:
+        name: Snapshot
+        description: An immutable copy of the item as it was before an update.
+
+# Endpoints beyond the generated CRUD set. rig has no default for one — that is
+# the point of declaring it — so the service layer implements it, and the build
+# fails until it does.
+#
+# Claiming is the case that earns a custom endpoint rather than a PATCH. The
+# rule is about the value already in the column, so a client doing it with a
+# PATCH has to read, decide and write, and two people reading at the same moment
+# both decide yes. Here the decision happens once, next to the write.
+endpoints:
+  - name: Claim
+    method: POST
+    path: /{id}/_claim
+    summary: Take the item.
+    description: |
+      Taking an item somebody else holds is a conflict rather than a
+      reassignment: two people picking up the same thing should not both be
+      told they have it. Taking one nobody holds is the ordinary case, and
+      taking one you already hold is not an error — a button pressed twice is
+      not a disagreement.
+
+      `steal` is the deliberate override, for the person who means it. It goes
+      through the same update as everything else, so the previous holder hears
+      about it the way they hear about any other change to their item.
+    request:
+      path_params:
+        - name: ID
+          type: UUID
+          description: The item to take.
+      body:
+        - name: Steal
+          type: Bool
+          optional: true
+          description: Take it even if somebody else holds it.
+    responses:
+      - status: 200
+        body_object: Todo
+        description: The item, now yours.
+      - status: 409
+        body_object: Error
+        description: Somebody else holds it, and steal was not set.

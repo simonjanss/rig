@@ -1,0 +1,48 @@
+{
+  "name": "public",
+  "tables": [
+    {
+      "name": "article",
+      "kind": "Base",
+      "columns": [
+        { "name": "id", "sql_type": "uuid", "udt_name": "uuid", "nullable": false, "ordinal": 1, "is_primary_key": true },
+        { "name": "tenant_id", "sql_type": "text", "udt_name": "text", "nullable": false, "ordinal": 2 },
+        { "name": "created_at", "sql_type": "timestamptz", "udt_name": "timestamptz", "nullable": false, "ordinal": 3 },
+        { "name": "created_by_account_id", "sql_type": "uuid", "udt_name": "uuid", "nullable": false, "ordinal": 4 },
+        { "name": "deleted_at", "sql_type": "timestamptz", "udt_name": "timestamptz", "nullable": true, "ordinal": 5 },
+        { "name": "version_type", "sql_type": "text", "udt_name": "text", "nullable": false, "ordinal": 6 },
+        { "name": "headline", "sql_type": "text", "udt_name": "text", "nullable": false, "ordinal": 7 },
+        { "name": "published", "sql_type": "bool", "udt_name": "bool", "nullable": false, "ordinal": 8 },
+        { "name": "review_deadline", "sql_type": "timestamptz", "udt_name": "timestamptz", "nullable": true, "ordinal": 9 },
+        { "name": "body", "sql_type": "text", "udt_name": "text", "nullable": false, "ordinal": 10 },
+        {
+          "name": "writer", "sql_type": "uuid", "udt_name": "uuid", "nullable": true, "ordinal": 11,
+          "foreign_key": { "table": "author", "column": "id" }
+        }
+      ],
+      "primary_key": ["id"],
+      "foreign_keys": [
+        { "name": "article_writer_fk", "columns": ["writer"], "foreign_table": "author", "foreign_columns": ["id"], "on_delete": "CASCADE" }
+      ],
+      "indexes": [
+        { "name": "article_pkey", "columns": ["id"], "unique": true, "method": "btree" }
+      ]
+    },
+    {
+      "name": "author",
+      "kind": "Base",
+      "columns": [
+        { "name": "id", "sql_type": "uuid", "udt_name": "uuid", "nullable": false, "ordinal": 1, "is_primary_key": true },
+        { "name": "tenant_id", "sql_type": "uuid", "udt_name": "uuid", "nullable": false, "ordinal": 2 },
+        { "name": "created_at", "sql_type": "timestamptz", "udt_name": "timestamptz", "nullable": false, "ordinal": 3 },
+        { "name": "name", "sql_type": "text", "udt_name": "text", "nullable": false, "ordinal": 4 }
+      ],
+      "primary_key": ["id"],
+      "indexes": [
+        { "name": "author_pkey", "columns": ["id"], "unique": true, "method": "btree" },
+        { "name": "author_tenant_idx", "columns": ["tenant_id"], "method": "btree" }
+      ]
+    }
+  ],
+  "enums": []
+}

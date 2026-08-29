@@ -1,0 +1,5 @@
+table: player
+comment: A person who plays for one or more teams.
+columns:
+  full_name:
+    comment: The player's full name.

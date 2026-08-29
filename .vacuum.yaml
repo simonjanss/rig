@@ -1,0 +1,42 @@
+# The OpenAPI ruleset `make openapi-lint` runs, over the documents the `openapi`
+# generator emits.
+#
+# vacuum's recommended set, less the rules rig deliberately does not satisfy.
+# Each one is off with the reason, in the register .golangci.yml uses for its
+# staticcheck exclusions: a disabled rule with no explanation is one nobody can
+# reconsider later.
+#
+# The list is short on purpose. The value of a linter is the findings nobody
+# predicted, and a ruleset trimmed until it is quiet is a ruleset that has
+# stopped reporting.
+extends: [[spectral:oas, recommended]]
+
+rules:
+  # rig marks a route that is not a row with a leading underscore — /_search,
+  # /_deleted, /{id}/_restore, /{id}/_versions/_stream. The convention is what
+  # keeps a reserved segment from ever colliding with an identifier, and it is
+  # documented as part of the API. Kebab-case would give that up to satisfy a
+  # style rule.
+  paths-kebab-case: off
+
+  # rig emits an example where a column configured one and nowhere else. It has
+  # no way to invent a plausible value for a column it knows only the type of,
+  # and an invented example in a specification is a lie a reader will copy.
+  oas3-missing-example: off
+
+  # rig has no contact or licence to put in `info`, and adding two rig.yaml keys
+  # whose only purpose is to satisfy a linter would be the linter deciding the
+  # shape of the configuration.
+  info-contact: off
+  info-license: off
+
+  # One field's description reaches every shape that field appears in — the
+  # entity, the create body, the update body — because ir.Field.Description is
+  # the single copy of it and every generator emits that one. The repetition is
+  # the design working, not a document repeating itself.
+  description-duplication: off
+
+  # /lessons/{id} against /lessons/_deleted. A UUID cannot be `_deleted`, so the
+  # mux is not ambiguous, but no linter can know that and none of them reads a
+  # pattern on {id} to find out.
+  no-ambiguous-paths: off

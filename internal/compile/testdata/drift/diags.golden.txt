@@ -1,0 +1,20 @@
+warning[RIG3100] author.columns: column author.name is not mentioned in its table configuration
+error[RIG6001] author: table "author" has no comment; describe what it is for in its `comment:` key
+error[RIG6002] author: column author.name has no comment
+error[RIG5010] testdata/drift/tables/article.yaml:1:1: table "article" has some snapshot columns but is missing snapshot_from_article_id and snapshot_from_article_at; a table keeps versions or it does not
+error[RIG5020] testdata/drift/tables/article.yaml:1:1: column article.created_by_account_id is uuid (nullable false); audit actor columns must be `uuid` and nullable
+error[RIG5030] testdata/drift/tables/article.yaml:1:1: table "article" is soft-deletable, so it must declare how long a deleted row stays restorable: add `restore_window_days:`
+error[RIG5070] testdata/drift/tables/article.yaml:1:1: column article.tenant_id is text (nullable false); the tenant column must be `uuid not null` because every generated query filters by it
+error[RIG6011] testdata/drift/tables/article.yaml:1:1: no index on "article" leads with tenant_id; every generated query filters by it, so this is the difference between a seek and a full scan
+error[RIG6040] testdata/drift/tables/article.yaml:1:1: foreign key "article_writer_fk" on article declares ON DELETE CASCADE; delete through the service layer instead, so hooks, audit entries and snapshots are not bypassed
+warning[RIG3100] testdata/drift/tables/article.yaml:4:1: column article.review_deadline is not mentioned in its table configuration
+warning[RIG3100] testdata/drift/tables/article.yaml:4:1: column article.writer is not mentioned in its table configuration
+error[RIG6002] testdata/drift/tables/article.yaml:4:1: column article.review_deadline has no comment
+error[RIG6002] testdata/drift/tables/article.yaml:4:1: column article.writer has no comment
+error[RIG6010] testdata/drift/tables/article.yaml:4:1: foreign key article.writer is not covered by an index
+warning[RIG6021] testdata/drift/tables/article.yaml:4:1: timestamp column article.review_deadline should end in _at
+warning[RIG6030] testdata/drift/tables/article.yaml:4:1: column article.writer references author, so it should be named author_id or <qualifier>_author_id
+error[RIG3101] testdata/drift/tables/article.yaml:8:3: table "article" has no column named "content"
+warning[RIG6020] testdata/drift/tables/article.yaml:10:3: boolean column article.published does not read as a question; prefix it with is_, has_, can_, should_, was_, allow_
+error[RIG5013] testdata/drift/tables/article.yaml:14:5: table "article" keeps no snapshots, so there is nothing for "body" to be excluded from
+error[RIG3102] testdata/drift/tables/comment.yaml:1:1: no table named "comment" exists in the database

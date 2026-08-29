@@ -1,0 +1,110 @@
+# yaml-language-server: $schema=.rig/rig.schema.json
+version: 1
+
+project:
+  name: "fantasyfootball"
+  module: "github.com/simonjanss/rig/examples/fantasyfootball"
+
+api:
+  version: v1
+  base_path: /api/v1
+  # This example is about relations and filtering, not about who may read what,
+  # and it has no accounts to grant anything to. The default is `derived`.
+  permissions: none
+
+# Spans, in the one example that turns them on. The generated handlers,
+# repositories and hooks open them; where they go is a runtime decision and is
+# in main.go, not here — see docs/observability.md.
+tracing:
+  enabled: true
+
+# rig's own page over those spans, for the deployment too small to be worth a
+# collector and a Grafana in front of it. It is a reader over the span file and
+# stores nothing, which is why it cannot be turned on without `tracing:` above.
+# The password is not here — it is read from $RIG_MONITOR_PASSWORD at run time,
+# and with nothing in it the page does not listen at all.
+monitoring:
+  enabled: true
+  # Its own listener, in this same binary, beside the API's 8081. Required, and
+  # rig picks neither half for you: the port is a thing to collide over, and
+  # the interface decides who can reach a page that lists every path, request
+  # id and error cause this server has seen. $RIG_MONITOR_ADDR moves it.
+  addr: 127.0.0.1:9081
+  # And optionally the networks that may reach it, which narrows the password
+  # rather than replacing it — anything else is answered 404 before the
+  # password is compared. Left out here because this example runs wherever it
+  # is cloned.
+  #
+  # allow:
+  #   - 10.0.0.0/8
+  #   - 127.0.0.1
+
+# A throwaway Postgres, created on demand. The port is explicit so this example
+# can run alongside the todo one without fighting over a port.
+database:
+  image: postgres:17-alpine
+  port: 55441
+
+# Every table gets a configuration file. `rig sync` creates and updates them.
+layout:
+  table_dir: services/{table}
+  config_file: "{table_dir}/{table}.yaml"
+
+# Convention rules. Each is off, warn, or error.
+validate:
+  unmentioned_column: warn
+  missing_comment: error
+  fk_needs_index: error
+  tenant_id_leading_index: error
+  boolean_prefix: warn
+
+generators:
+  # The entity, its enums, its query types, and its inputs. Both of the
+  # layers below import this one, so there is one definition of a row
+  # rather than a copy on each side and a conversion between them.
+  - name: model-go
+    out_dir: internal/model
+    options:
+      package: model
+
+  # The repository interface and its pgx implementation.
+  - name: persist-go
+    out_dir: internal/store
+    options:
+      package: store
+      model_import: github.com/simonjanss/rig/examples/fantasyfootball/internal/model
+
+  # Wire types, the interface your service layer implements, and a
+  # working default implementation of every operation.
+  - name: service-go
+    out_dir: internal/api
+    options:
+      package: api
+      model_import: github.com/simonjanss/rig/examples/fantasyfootball/internal/model
+      store_import: github.com/simonjanss/rig/examples/fantasyfootball/internal/store
+      api_import: github.com/simonjanss/rig/examples/fantasyfootball/internal/api
+      # Where your service layer goes. Written once, then yours.
+      stub_dir: services/{table}
+
+  # Routing and handlers.
+  - name: server-go
+    out_dir: internal/api
+    options:
+      package: api
+      model_import: github.com/simonjanss/rig/examples/fantasyfootball/internal/model
+      api_import: github.com/simonjanss/rig/examples/fantasyfootball/internal/api
+      # Live sync. A table asks for a stream with `electric: {enabled: true}`,
+      # and the routes are mounted beside the rest of its API — same mux, same
+      # claims lookup, same error mapper. Until one asks, none of this writes
+      # anything.
+      electric_url: http://localhost:3000
+      # Where your extra shape scoping goes, beside the service layer for the
+      # same table. Written once, then yours.
+      stub_dir: services/{table}
+
+  # The OpenAPI document, written from the same compiled document the routes
+  # above are, so it cannot describe an endpoint that does not exist.
+  - name: openapi
+    out_dir: docs
+    options:
+      formats: [json, yaml]
