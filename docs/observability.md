@@ -291,7 +291,7 @@ cfg.Logs = logs
 page, err := provider.Page(cfg)
 ```
 
-`examples/linearlite/main.go` is the arrangement in full.
+`examples/linearlite/api/main.go` is the arrangement in full.
 
 ### Its own port
 

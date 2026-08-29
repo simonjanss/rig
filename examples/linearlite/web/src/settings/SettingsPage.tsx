@@ -198,7 +198,7 @@ export function SettingsPage() {
                         Then watch the board fill, card by card, live:
                     </p>
                     <pre className="settings-cmd">
-                        {`cd examples/linearlite\ngo run ./import -key ${minted.secret}`}
+                        {`cd examples/linearlite/api\ngo run ./import -key ${minted.secret}`}
                     </pre>
                 </div>
             )}

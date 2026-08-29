@@ -12,7 +12,8 @@ import (
 //
 // From disk, deliberately: `make examples` builds and tests this server with
 // Go and Docker and no pnpm, and a go:embed of web/dist would make the Go
-// build depend on a JavaScript one. The cost is that `go run .` serves
+// build depend on a JavaScript one — and could not reach it anyway, since
+// web/ is outside this module. The cost is that `go run .` serves
 // whatever was last built, which for a development loop is the point —
 // `pnpm build` and reload, or run `pnpm dev` and let Vite proxy to this
 // server instead.
@@ -57,7 +58,9 @@ func spaHandler(dir string) http.Handler {
 }
 
 // notBuilt answers when web/dist does not exist yet: the server is fine, the
-// front end has not been built, and the fix is one command.
+// front end has not been built, and the fix is one command. The paths it names
+// are from the project root — the directory holding rig.yaml, api/ and web/ —
+// rather than from this process's own, which is api/.
 func notBuilt(w http.ResponseWriter) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
@@ -66,7 +69,8 @@ func notBuilt(w http.ResponseWriter) {
 <title>linearlite</title>
 <style>body{font:16px/1.6 system-ui;max-width:38rem;margin:6rem auto;padding:0 1rem;color:#333}code{background:#f4f4f4;padding:.1rem .35rem;border-radius:4px}</style>
 <h1>The API is up. The front end is not built yet.</h1>
-<p>This server looks for <code>web/dist</code> and serves it as-is. Build it once:</p>
+<p>This server looks for <code>web/dist</code> and serves it as-is. From the project
+root — the directory with <code>rig.yaml</code> in it — build it once:</p>
 <p><code>cd web &amp;&amp; pnpm install &amp;&amp; pnpm build</code></p>
 <p>— then reload. For a development loop, run <code>pnpm dev</code> in <code>web/</code>
 instead and open the Vite server, which proxies API calls back here.</p>

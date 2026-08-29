@@ -49,20 +49,20 @@ require (
 	google.golang.org/protobuf v1.36.11 // indirect
 )
 
-replace github.com/simonjanss/rig/auth => ../../auth
+replace github.com/simonjanss/rig/auth => ../../../auth
 
-replace github.com/simonjanss/rig/authmodel => ../../authmodel
+replace github.com/simonjanss/rig/authmodel => ../../../authmodel
 
-replace github.com/simonjanss/rig/files => ../../files
+replace github.com/simonjanss/rig/files => ../../../files
 
-replace github.com/simonjanss/rig/migrate => ../../migrate
+replace github.com/simonjanss/rig/migrate => ../../../migrate
 
-replace github.com/simonjanss/rig/notify => ../../notify
+replace github.com/simonjanss/rig/notify => ../../../notify
 
-replace github.com/simonjanss/rig/observe => ../../observe
+replace github.com/simonjanss/rig/observe => ../../../observe
 
-replace github.com/simonjanss/rig/presence => ../../presence
+replace github.com/simonjanss/rig/presence => ../../../presence
 
-replace github.com/simonjanss/rig/rigclient => ../../rigclient
+replace github.com/simonjanss/rig/rigclient => ../../../rigclient
 
-replace github.com/simonjanss/rig/runtime => ../../runtime
+replace github.com/simonjanss/rig/runtime => ../../../runtime

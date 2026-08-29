@@ -314,7 +314,12 @@ func New(ctx context.Context, cfg Config) (api.Parts, error) {
 	// The front end, same origin as everything above. web/dist is read from
 	// disk so `make examples` — which has Go and Docker and deliberately not
 	// pnpm — can build and test this server without building the browser half.
-	mux.Handle("/", spaHandler(cmp.Or(os.Getenv("WEB_DIR"), "web/dist")))
+	//
+	// The `../` is this example's two-half layout showing through: rig.yaml sits
+	// above api/ and web/, this binary is built and run from api/, and the other
+	// half's output is therefore one directory up. $WEB_DIR is what a deployment
+	// sets, where the two halves arrive wherever the image put them.
+	mux.Handle("/", spaHandler(cmp.Or(os.Getenv("WEB_DIR"), "../web/dist")))
 
 	// api.Parts rather than a struct of this package's own, and that is the
 	// whole reason main.go is four fields and a closure. Every field is

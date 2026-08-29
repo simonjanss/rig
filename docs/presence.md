@@ -247,8 +247,8 @@ from you — and merges `sweep-presence` into `Tasks`. `api.StartPresenceSweeper
 stays exported for a project that keeps the sequence itself.
 
 [`examples/linearlite`](../examples/linearlite) is the worked one: one line in
-`internal/app`, a filled-in scope stub in
-`services/rig_presence`, and
+`api/internal/app`, a filled-in scope stub in
+`api/services/rig_presence`, and
 `web/src/presence` — which is where the parts a package cannot own for you live,
 and [the section above](#three-things-the-package-deliberately-does-not-do-for-you)
 is about those.
