@@ -34,7 +34,7 @@ func TestDrainEndsAPollThatIsStillWaiting(t *testing.T) {
 	defer upstream.Close()
 	defer close(held)
 
-	proxy, err := electric.New(electric.Config{URL: upstream.URL})
+	proxy, err := newProxy(electric.Config{URL: upstream.URL})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -85,7 +85,7 @@ func TestADrainedProxyStartsNoNewPoll(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	proxy, err := electric.New(electric.Config{URL: upstream.URL})
+	proxy, err := newProxy(electric.Config{URL: upstream.URL})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -113,7 +113,7 @@ func TestADrainedProxyStartsNoNewPoll(t *testing.T) {
 func TestDrainingIsSafeToRepeatAndToDoForNothing(t *testing.T) {
 	t.Parallel()
 
-	proxy, err := electric.New(electric.Config{URL: "http://127.0.0.1:1"})
+	proxy, err := newProxy(electric.Config{URL: "http://127.0.0.1:1"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -160,7 +160,7 @@ func TestADrainedProxyDoesNotFallBackWhileTheCircuitIsOpen(t *testing.T) {
 	}
 
 	// Nothing listening, and one failure is enough to open the circuit.
-	proxy, err := electric.New(electric.Config{URL: "http://127.0.0.1:1", BreakerThreshold: 1})
+	proxy, err := newProxy(electric.Config{URL: "http://127.0.0.1:1", BreakerThreshold: 1})
 	if err != nil {
 		t.Fatal(err)
 	}

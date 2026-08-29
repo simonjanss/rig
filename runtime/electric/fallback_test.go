@@ -53,7 +53,7 @@ func messages(t *testing.T, res *http.Response) []map[string]any {
 func TestAFallbackAnswersWhenTheSyncServiceIsGone(t *testing.T) {
 	t.Parallel()
 
-	p, _ := electric.New(electric.Config{URL: nowhere})
+	p, _ := newProxy(electric.Config{URL: nowhere})
 	res := serve(t, p, electric.Shape{
 		Table:    "lesson",
 		Fallback: snapshotOf("one", "two"),
@@ -94,7 +94,7 @@ func TestAFallbackAnswersWhenTheSyncServiceIsGone(t *testing.T) {
 func TestASnapshotCarriesTheCursorAndTheSchema(t *testing.T) {
 	t.Parallel()
 
-	p, _ := electric.New(electric.Config{URL: nowhere})
+	p, _ := newProxy(electric.Config{URL: nowhere})
 	res := serve(t, p, electric.Shape{Table: "lesson", Fallback: snapshotOf("one")}, "")
 
 	if got := res.Header.Get("electric-schema"); !strings.Contains(got, `"title"`) {
@@ -125,7 +125,7 @@ func TestASnapshotCarriesTheCursorAndTheSchema(t *testing.T) {
 func TestEachSnapshotGetsItsOwnHandle(t *testing.T) {
 	t.Parallel()
 
-	p, _ := electric.New(electric.Config{URL: nowhere})
+	p, _ := newProxy(electric.Config{URL: nowhere})
 	shape := electric.Shape{Table: "lesson", Fallback: snapshotOf("one")}
 
 	first := serve(t, p, shape, "").Header.Get("electric-handle")
@@ -142,7 +142,7 @@ func TestAFiveHundredFallsBackToo(t *testing.T) {
 
 	up := newUpstream(t)
 	up.status = http.StatusInternalServerError
-	p, _ := electric.New(electric.Config{URL: up.srv.URL})
+	p, _ := newProxy(electric.Config{URL: up.srv.URL})
 
 	res := serve(t, p, electric.Shape{Table: "lesson", Fallback: snapshotOf("one")}, "")
 	if res.StatusCode != http.StatusOK {
@@ -160,7 +160,7 @@ func TestAFourHundredIsForwardedRatherThanAnswered(t *testing.T) {
 
 	up := newUpstream(t)
 	up.status = http.StatusForbidden
-	p, _ := electric.New(electric.Config{URL: up.srv.URL})
+	p, _ := newProxy(electric.Config{URL: up.srv.URL})
 
 	res := serve(t, p, electric.Shape{Table: "lesson", Fallback: snapshotOf("one")}, "")
 	if res.StatusCode != http.StatusForbidden {
@@ -180,7 +180,7 @@ func TestAFourHundredIsForwardedRatherThanAnswered(t *testing.T) {
 func TestAResumedSubscriptionIsToldToStartAgain(t *testing.T) {
 	t.Parallel()
 
-	p, _ := electric.New(electric.Config{URL: nowhere})
+	p, _ := newProxy(electric.Config{URL: nowhere})
 	for _, query := range []string{
 		"offset=0_inf&handle=the-handle&live=true",
 		"offset=0_inf&handle=the-handle",
@@ -214,7 +214,7 @@ func TestAResumedSubscriptionIsToldToStartAgain(t *testing.T) {
 func TestAResumedSubscriptionWithNoFallbackIsRefused(t *testing.T) {
 	t.Parallel()
 
-	p, _ := electric.New(electric.Config{URL: nowhere})
+	p, _ := newProxy(electric.Config{URL: nowhere})
 	res := serve(t, p, electric.Shape{Table: "lesson"}, "offset=0_inf&handle=the-handle&live=true")
 	if res.StatusCode != http.StatusBadGateway {
 		t.Errorf("status = %d, want 502", res.StatusCode)
@@ -236,7 +236,7 @@ func TestAResumedSubscriptionIsNotSentToAFallbackThatRefuses(t *testing.T) {
 	t.Run("a fallback that fails", func(t *testing.T) {
 		t.Parallel()
 
-		p, _ := electric.New(electric.Config{URL: nowhere})
+		p, _ := newProxy(electric.Config{URL: nowhere})
 		res := serve(t, p, electric.Shape{
 			Table: "lesson",
 			Fallback: func(context.Context) (electric.Snapshot, error) {
@@ -252,7 +252,7 @@ func TestAResumedSubscriptionIsNotSentToAFallbackThatRefuses(t *testing.T) {
 	t.Run("a snapshot past the bound", func(t *testing.T) {
 		t.Parallel()
 
-		p, _ := electric.New(electric.Config{URL: nowhere, MaxSnapshotRows: 2})
+		p, _ := newProxy(electric.Config{URL: nowhere, MaxSnapshotRows: 2})
 		res := serve(t, p, electric.Shape{
 			Table:    "lesson",
 			Fallback: snapshotOf("one", "two", "three"),
@@ -270,7 +270,7 @@ func TestAResumedSubscriptionIsNotSentToAFallbackThatRefuses(t *testing.T) {
 func TestASubscriberHoldingASnapshotIsAskedToWait(t *testing.T) {
 	t.Parallel()
 
-	p, _ := electric.New(electric.Config{URL: nowhere})
+	p, _ := newProxy(electric.Config{URL: nowhere})
 	shape := electric.Shape{Table: "lesson", Fallback: snapshotOf("one")}
 
 	handle := serve(t, p, shape, "").Header.Get("electric-handle")
@@ -293,7 +293,7 @@ func TestARecoveredSyncServiceRefusesTheFallbackHandleItself(t *testing.T) {
 	up := newUpstream(t)
 	up.status = http.StatusConflict
 	up.body = `[{"headers":{"control":"must-refetch"}}]`
-	p, _ := electric.New(electric.Config{URL: up.srv.URL})
+	p, _ := newProxy(electric.Config{URL: up.srv.URL})
 
 	res := serve(t, p, electric.Shape{Table: "lesson", Fallback: snapshotOf("one")},
 		"offset=0_inf&handle=rig-fallback-1&live=true")
@@ -319,7 +319,7 @@ func TestAHungSyncServiceFallsBack(t *testing.T) {
 	up.block = make(chan struct{})
 	t.Cleanup(func() { close(up.block) })
 
-	p, _ := electric.New(electric.Config{URL: up.srv.URL, InitialTimeout: 50 * time.Millisecond})
+	p, _ := newProxy(electric.Config{URL: up.srv.URL, InitialTimeout: 50 * time.Millisecond})
 	res := serve(t, p, electric.Shape{Table: "lesson", Fallback: snapshotOf("one")}, "")
 
 	if res.StatusCode != http.StatusOK {
@@ -349,7 +349,7 @@ func TestASlowInitialBodyIsNotCutInHalf(t *testing.T) {
 	}))
 	t.Cleanup(up.Close)
 
-	p, _ := electric.New(electric.Config{URL: up.URL, InitialTimeout: 100 * time.Millisecond})
+	p, _ := newProxy(electric.Config{URL: up.URL, InitialTimeout: 100 * time.Millisecond})
 	res := serve(t, p, electric.Shape{Table: "lesson", Fallback: snapshotOf("one")}, "offset=-1")
 
 	if got := res.Header.Get("X-Rig-Sync-Fallback"); got != "" {
@@ -372,7 +372,7 @@ func TestTheDeadlineDoesNotReachALivePoll(t *testing.T) {
 	up := newUpstream(t)
 	up.block = make(chan struct{})
 
-	p, _ := electric.New(electric.Config{URL: up.srv.URL, InitialTimeout: 50 * time.Millisecond})
+	p, _ := newProxy(electric.Config{URL: up.srv.URL, InitialTimeout: 50 * time.Millisecond})
 
 	done := make(chan int, 1)
 	go func() {
@@ -396,7 +396,7 @@ func TestTheDeadlineDoesNotReachALivePoll(t *testing.T) {
 func TestARefusedFallbackIsABadGateway(t *testing.T) {
 	t.Parallel()
 
-	p, _ := electric.New(electric.Config{URL: nowhere})
+	p, _ := newProxy(electric.Config{URL: nowhere})
 	res := serve(t, p, electric.Shape{
 		Table: "lesson",
 		Fallback: func(context.Context) (electric.Snapshot, error) {
@@ -414,7 +414,7 @@ func TestOnErrorSeesWhyTheAnswerWasNotTheSyncServices(t *testing.T) {
 	t.Parallel()
 
 	var seen []string
-	p, _ := electric.New(electric.Config{
+	p, _ := newProxy(electric.Config{
 		URL:     nowhere,
 		OnError: func(_ context.Context, err error) { seen = append(seen, err.Error()) },
 	})
@@ -448,7 +448,7 @@ func TestTheFallbackIsNotConsultedWhileTheSyncServiceAnswers(t *testing.T) {
 	t.Parallel()
 
 	up := newUpstream(t)
-	p, _ := electric.New(electric.Config{URL: up.srv.URL})
+	p, _ := newProxy(electric.Config{URL: up.srv.URL})
 
 	called := false
 	res := serve(t, p, electric.Shape{
@@ -469,7 +469,7 @@ func TestTheFallbackIsNotConsultedWhileTheSyncServiceAnswers(t *testing.T) {
 func TestAnEmptySnapshotIsStillAnAnswer(t *testing.T) {
 	t.Parallel()
 
-	p, _ := electric.New(electric.Config{URL: nowhere})
+	p, _ := newProxy(electric.Config{URL: nowhere})
 	res := serve(t, p, electric.Shape{Table: "lesson", Fallback: snapshotOf()}, "")
 
 	if res.StatusCode != http.StatusOK {
@@ -511,7 +511,7 @@ func TestASnapshotPastItsBoundIsRefusedRatherThanTruncated(t *testing.T) {
 	t.Parallel()
 
 	var seen []string
-	p, _ := electric.New(electric.Config{
+	p, _ := newProxy(electric.Config{
 		URL:             nowhere,
 		MaxSnapshotRows: 2,
 		OnError:         func(_ context.Context, err error) { seen = append(seen, err.Error()) },
@@ -542,7 +542,7 @@ func TestASnapshotPastItsBoundIsRefusedRatherThanTruncated(t *testing.T) {
 func TestTheBoundCanBeTurnedOff(t *testing.T) {
 	t.Parallel()
 
-	p, _ := electric.New(electric.Config{URL: nowhere, MaxSnapshotRows: -1})
+	p, _ := newProxy(electric.Config{URL: nowhere, MaxSnapshotRows: -1})
 	res := serve(t, p, electric.Shape{Table: "lesson", Fallback: snapshotOf("one", "two", "three")}, "")
 
 	if res.StatusCode != http.StatusOK {
@@ -558,7 +558,7 @@ func TestWithNothingToFallBackToTheSyncServicesOwnFailureIsForwarded(t *testing.
 
 	up := newUpstream(t)
 	up.status = http.StatusServiceUnavailable
-	p, _ := electric.New(electric.Config{URL: up.srv.URL})
+	p, _ := newProxy(electric.Config{URL: up.srv.URL})
 
 	if got := serve(t, p, electric.Shape{Table: "lesson"}, "").StatusCode; got != http.StatusServiceUnavailable {
 		t.Errorf("status = %d, want the 503 forwarded", got)
@@ -585,7 +585,7 @@ func TestAClientThatHangsUpDuringTheFallbackIsNotRefused(t *testing.T) {
 
 	var mu sync.Mutex
 	var seen []string
-	p, _ := electric.New(electric.Config{
+	p, _ := newProxy(electric.Config{
 		URL: nowhere,
 		OnError: func(_ context.Context, err error) {
 			mu.Lock()

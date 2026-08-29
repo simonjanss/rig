@@ -228,7 +228,11 @@ logs have one. `snapshot` on the rows themselves, and `must-refetch` on the 409
 that sends a resuming subscriber to fetch them, which is what tells that 409
 apart from the sync service's own.
 
-Settings on the proxy, all with defaults. `electric.Config.InitialTimeout` (10s)
+Settings on the proxy, none of them with defaults — `electric.New` refuses a
+config that left one empty, because each governs what a subscriber sees while the
+sync service is away and a value the package chose would be one nobody chose. The
+`Default…` constants beside each field are what to write.
+`electric.Config.InitialTimeout` (10s)
 is how long a first read waits for the sync service to *begin* answering before it
 counts as unreachable — the answer itself is then copied out however long it
 takes. `MaxSnapshotRows` (20,000) is how large a snapshot may be, applied as a

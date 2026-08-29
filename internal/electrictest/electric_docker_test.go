@@ -32,6 +32,29 @@ import (
 	"github.com/simonjanss/rig/runtime/electric"
 )
 
+// newProxy is electric.New with every value it refuses to invent filled in from
+// the constants the package documents as the answer to write, leaving anything
+// the case set alone. Five fields per case that are not what the case is about
+// would bury the one that is.
+func newProxy(cfg electric.Config) (*electric.Proxy, error) {
+	if cfg.InitialTimeout == 0 {
+		cfg.InitialTimeout = electric.DefaultInitialTimeout
+	}
+	if cfg.MaxSnapshotRows == 0 {
+		cfg.MaxSnapshotRows = electric.DefaultMaxSnapshotRows
+	}
+	if cfg.SnapshotTimeout == 0 {
+		cfg.SnapshotTimeout = electric.DefaultSnapshotTimeout
+	}
+	if cfg.BreakerThreshold == 0 {
+		cfg.BreakerThreshold = electric.DefaultBreakerThreshold
+	}
+	if cfg.BreakerCooldown == 0 {
+		cfg.BreakerCooldown = electric.DefaultBreakerCooldown
+	}
+	return electric.New(cfg)
+}
+
 const (
 	pgName    = "rigElectric-db"
 	pgPort    = dockerdb.PortElectricDB
@@ -322,7 +345,7 @@ func snapshot(t *testing.T, p *pgxpool.Pool, tenant uuid.UUID, title string, of 
 func TestAShapeStreamsOnlyTheCallersLiveRows(t *testing.T) {
 	p, url := environment(t)
 
-	proxy, err := electric.New(electric.Config{URL: url})
+	proxy, err := newProxy(electric.Config{URL: url})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -354,7 +377,7 @@ func TestAShapeStreamsOnlyTheCallersLiveRows(t *testing.T) {
 func TestATrashShapeStreamsOnlyRetiredRows(t *testing.T) {
 	p, url := environment(t)
 
-	proxy, err := electric.New(electric.Config{URL: url})
+	proxy, err := newProxy(electric.Config{URL: url})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -380,7 +403,7 @@ func TestATrashShapeStreamsOnlyRetiredRows(t *testing.T) {
 func TestAHistoryShapeStreamsOneRowsVersions(t *testing.T) {
 	p, url := environment(t)
 
-	proxy, err := electric.New(electric.Config{URL: url})
+	proxy, err := newProxy(electric.Config{URL: url})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -416,7 +439,7 @@ func TestAHistoryShapeStreamsOneRowsVersions(t *testing.T) {
 func TestAHistoryShapeRefusesAnotherTenantsRow(t *testing.T) {
 	p, url := environment(t)
 
-	proxy, err := electric.New(electric.Config{URL: url})
+	proxy, err := newProxy(electric.Config{URL: url})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -435,7 +458,7 @@ func TestAHistoryShapeRefusesAnotherTenantsRow(t *testing.T) {
 func TestAClientCannotWidenTheShape(t *testing.T) {
 	p, url := environment(t)
 
-	proxy, err := electric.New(electric.Config{URL: url})
+	proxy, err := newProxy(electric.Config{URL: url})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -479,7 +502,7 @@ func TestAClientCannotWidenTheShape(t *testing.T) {
 func TestAScopeNarrows(t *testing.T) {
 	p, url := environment(t)
 
-	proxy, err := electric.New(electric.Config{URL: url})
+	proxy, err := newProxy(electric.Config{URL: url})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -504,7 +527,7 @@ func TestAScopeNarrows(t *testing.T) {
 func TestTheCursorComesBack(t *testing.T) {
 	p, url := environment(t)
 
-	proxy, err := electric.New(electric.Config{URL: url})
+	proxy, err := newProxy(electric.Config{URL: url})
 	if err != nil {
 		t.Fatal(err)
 	}

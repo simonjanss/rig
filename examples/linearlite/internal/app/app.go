@@ -181,6 +181,18 @@ func New(ctx context.Context, pool *pgxpool.Pool, log *slog.Logger, page *observ
 	upstream := cmp.Or(os.Getenv("ELECTRIC_URL"), genelectric.DefaultElectricURL)
 	proxy, err := electric.New(electric.Config{
 		URL: upstream,
+
+		// Nothing below has a default. Each governs what a subscriber sees
+		// while the sync service is away — how long it waits before that counts
+		// as an outage, how many rows a snapshot may hand it, when this proxy
+		// stops asking — and a value the package chose would be one nobody
+		// chose, found the first time a sync service goes away. The Default
+		// constants beside them in electric are what these are.
+		InitialTimeout:   electric.DefaultInitialTimeout,
+		MaxSnapshotRows:  electric.DefaultMaxSnapshotRows,
+		SnapshotTimeout:  electric.DefaultSnapshotTimeout,
+		BreakerThreshold: electric.DefaultBreakerThreshold,
+		BreakerCooldown:  electric.DefaultBreakerCooldown,
 		// And what answers a shape when that sync service cannot be reached.
 		// One field, and every shape survives an outage on a snapshot of its
 		// own rows — the board, the trash, one row's history and the bell, each

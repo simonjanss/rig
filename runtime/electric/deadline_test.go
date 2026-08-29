@@ -47,7 +47,7 @@ func TestAPollOutlastsTheServersWriteTimeout(t *testing.T) {
 	}))
 	defer sync.Close()
 
-	proxy, err := electric.New(electric.Config{URL: sync.URL})
+	proxy, err := newProxy(electric.Config{URL: sync.URL})
 	if err != nil {
 		t.Fatal(err)
 	}

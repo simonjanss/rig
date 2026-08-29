@@ -19,7 +19,6 @@
 package electric
 
 import (
-	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -181,7 +180,8 @@ type Config struct {
 	// whole, up to [PollDeadline]. A large shape read over a slow connection is
 	// a transfer rather than an outage, and half of one is worse than either.
 	//
-	// Zero is [DefaultInitialTimeout]. A negative value is no timeout, which is
+	// Required; [DefaultInitialTimeout] is what to write. A negative value is no
+	// timeout, which is
 	// what a project whose sync service legitimately takes a while to begin
 	// answering should set.
 	InitialTimeout time.Duration
@@ -195,7 +195,8 @@ type Config struct {
 	// cannot tell a short answer from a complete one, so a collection quietly
 	// missing half its rows would look like a table that had lost them.
 	//
-	// Zero is [DefaultMaxSnapshotRows]. A negative value is no bound.
+	// Required; [DefaultMaxSnapshotRows] is what to write. A negative value is no
+	// bound.
 	MaxSnapshotRows int
 
 	// SnapshotTimeout bounds one read of [Config.DB].
@@ -206,7 +207,8 @@ type Config struct {
 	// become slow because of that queue is a request that waits rather than one
 	// that gives up and lets the next through.
 	//
-	// Zero is [DefaultSnapshotTimeout]. A negative value is no timeout, and the
+	// Required; [DefaultSnapshotTimeout] is what to write. A negative value is no
+	// timeout, and the
 	// request's own context is then the only bound.
 	SnapshotTimeout time.Duration
 
@@ -225,7 +227,8 @@ type Config struct {
 	// cooldown — where before it would have waited and then usually succeeded. In
 	// a row rather than a rate, so a single failure among successes never counts.
 	//
-	// Zero is [DefaultBreakerThreshold]. A negative value never opens the
+	// Required; [DefaultBreakerThreshold] is what to write. A negative value
+	// never opens the
 	// circuit, which is every request asking however long the outage lasts.
 	BreakerThreshold int
 
@@ -237,7 +240,8 @@ type Config struct {
 	// noticed by the next subscriber through the door rather than a moment
 	// earlier by a goroutine of this package's own.
 	//
-	// Zero is [DefaultBreakerCooldown].
+	// Required; [DefaultBreakerCooldown] is what to write. There is no negative
+	// answer here to carry, so zero and below are refused alike.
 	BreakerCooldown time.Duration
 
 	// OnError is told about a failure that was answered rather than returned:
@@ -380,22 +384,44 @@ func New(cfg Config) (*Proxy, error) {
 			},
 		}
 	}
-	// Zero is "say nothing" and takes the default. A negative value is a
-	// deliberate answer and is carried through untouched — see
-	// [Config.InitialTimeout], [Config.MaxSnapshotRows] and
-	// [Config.BreakerThreshold], each of which documents what its negative
-	// means, and the guards that read them back.
-	initial := cmp.Or(cfg.InitialTimeout, DefaultInitialTimeout)
-	maxRows := cmp.Or(cfg.MaxSnapshotRows, DefaultMaxSnapshotRows)
-	snapTTL := cmp.Or(cfg.SnapshotTimeout, DefaultSnapshotTimeout)
-	threshold := cmp.Or(cfg.BreakerThreshold, DefaultBreakerThreshold)
+	// Zero is "said nothing", and nothing here fills it in. Each of these
+	// governs what a subscriber sees during an outage — how long it waits, how
+	// many rows it may be handed, when this proxy stops asking — and a value
+	// this package chose would be one nobody chose, found only by what it costs
+	// the first time a sync service goes away. The Default constants below are
+	// what to write; they are the documented answer rather than the applied one.
+	//
+	// A negative value is a deliberate answer and is carried through untouched:
+	// see [Config.InitialTimeout], [Config.MaxSnapshotRows],
+	// [Config.SnapshotTimeout] and [Config.BreakerThreshold], each of which
+	// documents what its negative means, and the guards that read them back.
+	var missing []string
+	if cfg.InitialTimeout == 0 {
+		missing = append(missing, "InitialTimeout")
+	}
+	if cfg.MaxSnapshotRows == 0 {
+		missing = append(missing, "MaxSnapshotRows")
+	}
+	if cfg.SnapshotTimeout == 0 {
+		missing = append(missing, "SnapshotTimeout")
+	}
+	if cfg.BreakerThreshold == 0 {
+		missing = append(missing, "BreakerThreshold")
+	}
 
-	// Not cmp.Or, and this is the one place the difference shows: a cooldown
-	// below zero has no meaning to carry through, so it is a mistake to correct
-	// rather than a setting to honour.
-	cooldown := cfg.BreakerCooldown
-	if cooldown <= 0 {
-		cooldown = DefaultBreakerCooldown
+	// The one with no negative to carry. A cooldown below zero has no meaning —
+	// there is no "never wait" that differs from waiting nothing — so it is
+	// refused with the unstated ones rather than corrected into a value the
+	// caller did not ask for.
+	if cfg.BreakerCooldown <= 0 {
+		missing = append(missing, "BreakerCooldown")
+	}
+	if len(missing) > 0 {
+		return nil, fmt.Errorf(
+			"electric: these have no value and this package will not invent one: %s. "+
+				"State each in the electric.Config; the Default constants in this "+
+				"package are what to write",
+			strings.Join(missing, ", "))
 	}
 
 	life, retire := context.WithCancel(context.Background())
@@ -407,13 +433,13 @@ func New(cfg Config) (*Proxy, error) {
 		retire:  retire,
 		extra:   cfg.Extra,
 		headers: cfg.Headers,
-		initial: initial,
-		maxRows: maxRows,
+		initial: cfg.InitialTimeout,
+		maxRows: cfg.MaxSnapshotRows,
 		db:      cfg.DB,
-		snapTTL: snapTTL,
+		snapTTL: cfg.SnapshotTimeout,
 		onError: cfg.OnError,
 		onState: cfg.OnSyncState,
-		breaker: &breaker{threshold: threshold, cooldown: cooldown},
+		breaker: &breaker{threshold: cfg.BreakerThreshold, cooldown: cfg.BreakerCooldown},
 	}, nil
 }
 

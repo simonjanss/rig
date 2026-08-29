@@ -246,13 +246,13 @@ func TestAFallbackSnapshotAgreesWithTheSyncService(t *testing.T) {
 	tenant := uuid.New()
 	insertWide(t, p, tenant)
 
-	live, err := electric.New(electric.Config{URL: url})
+	live, err := newProxy(electric.Config{URL: url})
 	if err != nil {
 		t.Fatal(err)
 	}
 	// Nothing answers on this address, which is what the sync service being
 	// down looks like from inside the proxy.
-	gone, err := electric.New(electric.Config{URL: "http://127.0.0.1:1"})
+	gone, err := newProxy(electric.Config{URL: "http://127.0.0.1:1"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -263,7 +263,7 @@ func TestAFallbackSnapshotAgreesWithTheSyncService(t *testing.T) {
 	// A proxy given the database. Nothing on the shape but the key and the schema
 	// — the filter it reads with is the one it would have sent upstream, which is
 	// the whole claim.
-	read, err := electric.New(electric.Config{URL: "http://127.0.0.1:1", DB: p})
+	read, err := newProxy(electric.Config{URL: "http://127.0.0.1:1", DB: p})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -333,7 +333,7 @@ func TestAShapeThatOptedOutIsStillABadGateway(t *testing.T) {
 	tenant := uuid.New()
 	insertWide(t, p, tenant)
 
-	proxy, err := electric.New(electric.Config{URL: "http://127.0.0.1:1", DB: p})
+	proxy, err := newProxy(electric.Config{URL: "http://127.0.0.1:1", DB: p})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -365,7 +365,7 @@ func TestAShapePastItsBoundIsRefusedByTheRead(t *testing.T) {
 	insertWide(t, p, tenant)
 
 	// Two rows, and room for one.
-	proxy, err := electric.New(electric.Config{URL: "http://127.0.0.1:1", DB: p, MaxSnapshotRows: 1})
+	proxy, err := newProxy(electric.Config{URL: "http://127.0.0.1:1", DB: p, MaxSnapshotRows: 1})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -447,8 +447,8 @@ func TestASubscriberRecoversOntoRealSyncAfterAFallback(t *testing.T) {
 	tenant := uuid.New()
 	insertWide(t, p, tenant)
 
-	gone, _ := electric.New(electric.Config{URL: "http://127.0.0.1:1"})
-	live, _ := electric.New(electric.Config{URL: url})
+	gone, _ := newProxy(electric.Config{URL: "http://127.0.0.1:1"})
+	live, _ := newProxy(electric.Config{URL: url})
 
 	// A hand-written one, so this test says nothing about where the rows came
 	// from: what it is about is the handle protocol.
