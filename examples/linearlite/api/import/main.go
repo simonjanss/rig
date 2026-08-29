@@ -26,7 +26,7 @@ import (
 	"time"
 
 	"github.com/simonjanss/rig/examples/linearlite/client"
-	"github.com/simonjanss/rig/examples/linearlite/importer"
+	"github.com/simonjanss/rig/examples/linearlite/import/importer"
 	"github.com/simonjanss/rig/rigclient"
 )
 
