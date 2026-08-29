@@ -10,7 +10,7 @@ import (
 	"testing"
 
 	"github.com/simonjanss/rig/examples/linearlite/client"
-	"github.com/simonjanss/rig/examples/linearlite/importer"
+	"github.com/simonjanss/rig/examples/linearlite/import/importer"
 	"github.com/simonjanss/rig/examples/linearlite/internal/app"
 	"github.com/simonjanss/rig/rigclient"
 )
