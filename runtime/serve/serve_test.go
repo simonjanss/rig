@@ -32,8 +32,12 @@ func TestDefaultsComeFromTheEnvironmentThenFromSense(t *testing.T) {
 	if got.ReadHeaderTimeout == 0 {
 		t.Error("ReadHeaderTimeout must have a default")
 	}
-	if got.MaxShutdown == 0 {
-		t.Error("MaxShutdown must have a default")
+	// The one field that does not get one. It is read by whoever writes the
+	// deployment, so a default here is a number nobody stated governing how long
+	// something outside this process waits before SIGKILL. checkShutdown refuses
+	// it unset, where the steps that were registered can be named.
+	if got.MaxShutdown != 0 {
+		t.Errorf("MaxShutdown = %s, want it left alone", got.MaxShutdown)
 	}
 	if got.Logger == nil {
 		t.Error("Logger should fall back to the default")

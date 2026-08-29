@@ -351,6 +351,7 @@ import (
 	"embed"
 	"net/http"
 	"os"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -374,13 +375,21 @@ const localDSN = "postgres://rig:rig@localhost:55450/rig?sslmode=disable"
 
 func main() {
 	// api.Main is the whole of a main function: this project's configuration,
-	// and the one function only this application can write. The probes, the
-	// shutdown budget and the housekeeping subcommands come out of rig.yaml, so
-	// none of them is a line here.
+	// and the one function only this application can write. The probes and the
+	// housekeeping subcommands come out of rig.yaml, so neither is a line here.
 	api.Main(serve.Config{
 		DatabaseURL: cmp.Or(os.Getenv("DATABASE_URL"), localDSN),
 		Addr:        cmp.Or(os.Getenv("ADDR"), "127.0.0.1:8080"),
 		Hint:        "run `rig db up` to start a local Postgres for this project",
+
+		// The shutdown budget is a line here, and it is the one number rig
+		// knows and settles anyway not at all: it is what goes into
+		// terminationGracePeriodSeconds, so it has to be readable off this
+		// struct. api.ShutdownBudget() is ten seconds for a project with no
+		// blocks yet — all of it for the requests in flight — and it grows as
+		// you turn blocks on. Leave it out and the server refuses to start,
+		// printing the number to write.
+		MaxShutdown: 10 * time.Second,
 
 		// `todo migrate` applies the schema and exits: a job before the
 		// rollout, so one process migrates and the replicas only serve.

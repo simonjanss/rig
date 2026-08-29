@@ -67,18 +67,18 @@ func main() {
 			"or point $DATABASE_URL at one you already have",
 
 		MaxStartup: 30 * time.Second,
-		// Forty seconds, and the ten that are not api.ShutdownBudget's thirty
-		// are why this one is still written out. rig's own steps are counted for
-		// us; the recorder and the store's cache subscription below are this
-		// example's own, five seconds each, and nothing generated can know about
-		// them.
+		// The field that leaves the program: it is what goes into
+		// terminationGracePeriodSeconds, so it has no default and every project
+		// writes it. serve adds up what it was actually given before the server
+		// listens, so a number this arithmetic got wrong is a refusal to start
+		// rather than a truncated shutdown under load.
 		//
-		// It is also the field that leaves the program: it is what goes into
-		// terminationGracePeriodSeconds, and whoever writes that manifest should
-		// read it off here rather than run the binary. serve adds up what it was
-		// actually given before the server listens, so a number this arithmetic
-		// got wrong is a refusal to start rather than a truncated shutdown under
-		// load.
+		// Forty rather than api.ShutdownBudget's thirty, and the ten are this
+		// example's own: rig's steps are counted for us, and the recorder and
+		// the store's cache subscription below are five seconds each that
+		// nothing generated can know about. This is the arithmetic
+		// ShutdownBudget's documentation describes — read the total, add your
+		// own closers, write the sum.
 		MaxShutdown: 40 * time.Second,
 
 		// `todo migrate` applies the schema and exits: a job before the

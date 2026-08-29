@@ -134,12 +134,15 @@ A project with `tracing:` on gets no more lines here: `api.Main` builds the
 process, and the `page` it hands your wiring is the other half of it —
 [observability.md](observability.md#wiring-it-up) has that in full. It also gets
 `api.ShutdownBudget()`, which adds up the closers rig registers so you do not
-have to. `api.Main` uses it as the default `MaxShutdown`, and writing the number
-out is still the better answer for anything that ships: `MaxShutdown` is the one
-field in that struct that leaves the program, since it is what goes into
-`terminationGracePeriodSeconds`, and whoever writes that manifest should be able
-to read it off the struct. `ShutdownBudget`'s own documentation states the total
-in words for exactly that.
+have to. **Read it and write the number out.** `MaxShutdown` is the one field in
+that struct with no default, because it is the one that leaves the program: it is
+what goes into `terminationGracePeriodSeconds`, and whoever writes that manifest
+should be able to read it off the struct rather than run the binary. A
+`serve.Config` that leaves it out is refused before the server listens.
+
+Add your own closers to the budget and write the sum; if you have none, write the
+budget. A project with a `DrainDelay` adds that too — `serve` counts it against
+the same number, and it is spent inside the grace period like everything else.
 
 A literal is safe: `serve.App` sums every step actually registered before the
 server listens and refuses a budget that cannot hold them, naming the parts. A

@@ -7,7 +7,9 @@ package api
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"net/http"
+	"os"
 
 	"github.com/simonjanss/rig/auth"
 	"github.com/simonjanss/rig/notify"
@@ -148,9 +150,10 @@ func Mount(build Build) serve.Mount {
 //
 //	func main() {
 //		api.Main(serve.Config{
-//			Addr:    cmp.Or(os.Getenv("ADDR"), "127.0.0.1:8080"),
-//			Tasks:   map[string]serve.Task{"migrate": migrate.Apply(migrations, migrate.Options{})},
-//			Migrate: migrate.Require(migrations, migrate.Options{}),
+//			Addr:        cmp.Or(os.Getenv("ADDR"), "127.0.0.1:8080"),
+//			MaxShutdown: 35 * time.Second, // ShutdownBudget()
+//			Tasks:       map[string]serve.Task{"migrate": migrate.Apply(migrations, migrate.Options{})},
+//			Migrate:     migrate.Require(migrations, migrate.Options{}),
 //		}, func(ctx context.Context, app *serve.App) (api.Parts, error) {
 //			return myapp.New(ctx, app.Pool, app.Logger)
 //		})
@@ -162,10 +165,34 @@ func Mount(build Build) serve.Mount {
 // file cannot hold: where the migrations are embedded, what this binary's
 // subcommands are, and the two addresses.
 //
+// MaxShutdown is the fourth, and it is there for a different reason than the
+// other three. rig knows what it should be — [ShutdownBudget] adds it up —
+// and settles it anyway not at all, because it is the one number in that
+// struct that leaves the program. Whoever writes terminationGracePeriodSeconds
+// has to read it off this literal rather than run the binary, so a value
+// nobody wrote is a deployment that stops this server faster than it can drain
+// and nothing that says so. Left out, it is refused before anything starts,
+// with the number to write.
+//
 // A project that wants a different order, or a process it keeps hold of, uses
 // [Mount] with serve.Main or serve.Run instead. This is the arrangement
 // rig.yaml describes, not the only one it allows.
 func Main(cfg serve.Config, build Build) {
+	// Before a database is opened or a process is built, because this is
+	// answerable without either and the answer belongs in a deployment rather than
+	// in a log at shutdown.
+	//
+	// serve refuses this too, and names what was actually registered — including
+	// closers this project wrote, which nothing here can know about. What only
+	// this side knows is the number rig.yaml adds up to, so that is what this one
+	// prints. Neither is the other's duplicate; removing either loses the half it
+	// names.
+	if cfg.MaxShutdown == 0 {
+		slog.Error("MaxShutdown is required: state it in the serve.Config above",
+			"budget", ShutdownBudget(), "drain delay", cfg.DrainDelay, "write", ShutdownBudget()+cfg.DrainDelay)
+		os.Exit(2)
+	}
+
 	serve.Main(settle(cfg), Mount(build))
 }
 
@@ -175,12 +202,12 @@ func Main(cfg serve.Config, build Build) {
 // Tasks are merged rather than replaced, the way [Tasks] merges them: the
 // application's half wins on a name they share.
 //
-// MaxShutdown is [ShutdownBudget] plus the drain delay, which is what serve
-// checks the registered steps against — it counts the delay too. Stating it
-// is still the better answer for anything that ships: it is the number that
-// belongs in Kubernetes' terminationGracePeriodSeconds, and an operator should
-// be able to read it off a struct rather than run the binary. ShutdownBudget's
-// own documentation states the total in words for exactly that.
+// MaxShutdown is deliberately not among them, though this is the one place
+// that knows the answer. It is what a deployment's
+// terminationGracePeriodSeconds has to agree with, so it is written in the
+// serve.Config where it can be read rather than settled where it cannot.
+// [Main] refuses one that was left out, and [ShutdownBudget] is the number to
+// write — plus the drain delay, which serve counts against it too.
 //
 // The probe paths are two questions rather than one, which is why both are
 // filled rather than neither. Liveness asks whether to restart this process
@@ -189,9 +216,6 @@ func Main(cfg serve.Config, build Build) {
 // nobody restarts or a fleet restarted because the database was slow.
 func settle(cfg serve.Config) serve.Config {
 	cfg.Tasks = Tasks(cfg.Tasks)
-	if cfg.MaxShutdown == 0 {
-		cfg.MaxShutdown = ShutdownBudget() + cfg.DrainDelay
-	}
 	if cfg.LivenessPath == "" {
 		cfg.LivenessPath = "/livez"
 	}

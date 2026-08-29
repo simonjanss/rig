@@ -239,6 +239,69 @@ func TestTheShutdownPartsMustFitTheMaximum(t *testing.T) {
 	}
 }
 
+// And a whole nobody stated is refused the same way, with the same parts, at the
+// same moment. This is the number that goes into terminationGracePeriodSeconds,
+// and the alternative to reading it off this refusal is adding up constants
+// across three files by hand.
+func TestAnUnstatedMaximumIsRefusedWithTheNumberToState(t *testing.T) {
+	app := &App{Logger: quiet()}
+	app.DrainWithin("consumer", 2*time.Second, noop)
+	app.CloseWithin("exporter", 5*time.Second, noop)
+
+	err := app.checkShutdown(t.Context(), 0, 3*time.Second)
+	if err == nil {
+		t.Fatal("a shutdown with no stated maximum should not start")
+	}
+
+	for _, want := range []string{"MaxShutdown", "10s", "drain delay 3s", "drain consumer 2s", "close exporter 5s", "terminationGracePeriodSeconds"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the error should mention %q: %v", want, err)
+		}
+	}
+}
+
+// Including a project that registered nothing of its own. What the budget buys
+// there is entirely the requests in flight, and how long those are worth waiting
+// for is not this package's guess to make.
+func TestAnUnstatedMaximumIsRefusedEvenWithNothingRegistered(t *testing.T) {
+	app := &App{Logger: quiet()}
+
+	err := app.checkShutdown(t.Context(), 0, 0)
+	if err == nil {
+		t.Fatal("a shutdown with no stated maximum should not start")
+	}
+	if !strings.Contains(err.Error(), "MaxShutdown") {
+		t.Errorf("the error should name the field: %v", err)
+	}
+	// The parts list is empty here, and an empty one must not be printed as an
+	// empty parenthesis with nothing in it.
+	if strings.Contains(err.Error(), "()") {
+		t.Errorf("the message should not print an empty list of parts: %v", err)
+	}
+}
+
+// The refusal above is reached with the teardown already deferred, so the steps
+// the mount function registered get closed under a budget that was never
+// stated. They have to get time rather than an expired context: otherwise the
+// one message that matters arrives joined to a paragraph of "gave up waiting"
+// from steps that were never the problem.
+func TestAZeroBudgetGivesTheStepsTimeRatherThanNone(t *testing.T) {
+	app := &App{Logger: quiet()}
+
+	ran := false
+	app.CloseWithin("exporter", 5*time.Second, func(ctx context.Context) error {
+		ran = true
+		return ctx.Err()
+	})
+
+	if err := app.runClose(t.Context(), 0); err != nil {
+		t.Errorf("a step under an unstated budget should still get its own time: %v", err)
+	}
+	if !ran {
+		t.Error("the step never ran")
+	}
+}
+
 func TestAShutdownThatFitsIsAccepted(t *testing.T) {
 	app := &App{Logger: quiet()}
 	app.CloseWithin("exporter", 5*time.Second, noop)

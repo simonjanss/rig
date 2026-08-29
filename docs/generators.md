@@ -39,7 +39,9 @@ the corresponding module out of the application's `go.mod`.
 the page, built in the order they depend on each other; `files:`, `presence:` and
 `throttle:` give it housekeeping subcommands in `Tasks`; and whichever of
 `tracing:`, `notifications:`, `presence:`, `auth:` and a table's `electric:`
-register a shutdown step give it a `ShutdownBudget` that adds them up.
+register a shutdown step are added up into a `ShutdownBudget` — the number your
+`main.go` writes as `MaxShutdown`, which is the one `serve.Config` field with no
+default because it is the one an operator has to copy into a manifest.
 
 `run.gen.go` is the order those parts come to exist in, which used to be a
 sequence every `main.go` wrote out. `Parts` has one field per lifetime longer

@@ -100,12 +100,14 @@ func main() {
 			"then open http://acme.localhost:8083",
 
 		MaxStartup: 30 * time.Second,
-		// No MaxShutdown and no probe paths: api.Main settles all three. The
-		// budget is fifteen seconds — five for the auth cache's invalidation
-		// channel, which is the one closer this project's configuration
-		// registers, and ten left for the requests still in flight — and
-		// api.ShutdownBudget's documentation states it in words for whoever
-		// writes terminationGracePeriodSeconds.
+		// No probe paths: api.Main settles those. This one it does not, because
+		// it is the field that leaves the program — fifteen seconds is what
+		// terminationGracePeriodSeconds has to agree with, and it should be
+		// readable here rather than out of a call. Five for the auth cache's
+		// invalidation channel, the one closer this project's configuration
+		// registers, and ten left for the requests still in flight; it is
+		// api.ShutdownBudget, written out.
+		MaxShutdown: 15 * time.Second,
 
 		Tasks: map[string]serve.Task{
 			"migrate": migrate.ApplyAll(migrationSources(), migrate.Options{Log: os.Stdout}),

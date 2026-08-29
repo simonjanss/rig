@@ -350,6 +350,7 @@ func TestAStartupThatHangsIsRefused(t *testing.T) {
 		DatabaseURL: dsn,
 		Addr:        "127.0.0.1:0",
 		MaxStartup:  200 * time.Millisecond,
+		MaxShutdown: 5 * time.Second,
 		Logger:      slog.New(slog.DiscardHandler),
 	}, func(_ context.Context, app *serve.App) (http.Handler, error) {
 		// Something slow that does not watch its context: a client dialling a

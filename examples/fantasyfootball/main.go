@@ -48,12 +48,6 @@ func main() {
 	// which is the ordinary case on a laptop, and then this costs one branch per
 	// log call, the spans cost nothing, and the trace ids are still real.
 	//
-	// No MaxShutdown, because there is no arithmetic left to state: fifteen
-	// seconds is api.ShutdownBudget — five for the trace flush, which is the one
-	// closer rig registers for this project, and ten left for the requests still
-	// in flight — and this example registers no closer of its own. Whoever
-	// writes terminationGracePeriodSeconds reads the total off that function's
-	// documentation, which states it in words.
 	api.Main(serve.Config{
 		DatabaseURL: cmp.Or(os.Getenv("DATABASE_URL"), localDSN),
 		Addr:        cmp.Or(os.Getenv("ADDR"), "127.0.0.1:8081"),
@@ -65,6 +59,15 @@ func main() {
 			"or point $DATABASE_URL at one you already have",
 
 		MaxStartup: 30 * time.Second,
+		// Fifteen seconds, which is api.ShutdownBudget for this project: five
+		// for the trace flush, the one closer rig registers here, and ten left
+		// for the requests still in flight. This example registers no closer of
+		// its own, so there is no arithmetic on top of it — and it is still
+		// written out, because it is the one number in this struct that leaves
+		// the program. Whoever writes terminationGracePeriodSeconds reads it
+		// here rather than out of a function they would have to run the binary
+		// to evaluate.
+		MaxShutdown: 15 * time.Second,
 
 		Tasks: map[string]serve.Task{
 			"migrate": migrate.Apply(migrations, migrate.Options{Log: os.Stdout}),

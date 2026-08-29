@@ -84,9 +84,10 @@ const (
 // subscriptions, 5s for the auth cache's invalidation channel and 10s left
 // over.
 //
-// **Read it, then write it down.** [Main] leaves this call in a serve.Config
-// for a project that states nothing, so the two ends cannot disagree by
-// default — but the number is one to look up once and write out:
+// **Read it, then write it down.** There is no default and nothing settles it:
+// a serve.Config that leaves MaxShutdown out is refused before the server
+// listens, because this is the one number in it that leaves the program. So
+// the number is one to look up once and write out:
 //
 //	MaxShutdown: 25 * time.Second
 //

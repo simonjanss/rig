@@ -169,8 +169,6 @@ func TestMainSettlesWhatTheConfigurationDecided(t *testing.T) {
 
 	for _, want := range []string{
 		"cfg.Tasks = Tasks(cfg.Tasks)",
-		"if cfg.MaxShutdown == 0 {",
-		"cfg.MaxShutdown = ShutdownBudget() + cfg.DrainDelay",
 		`if cfg.LivenessPath == "" {`,
 		`cfg.LivenessPath = "/livez"`,
 		`cfg.ReadinessPath = "/readyz"`,
@@ -181,25 +179,30 @@ func TestMainSettlesWhatTheConfigurationDecided(t *testing.T) {
 	}
 }
 
-// A project with no closer of rig's has no budget to default to, and must not
-// get a MaxShutdown of zero for it.
+// settle does not touch MaxShutdown, for any project.
 //
-// serve reads zero as "take my default", so the line simply has to be absent —
-// which is the same rule shutdownBudgetFunc keeps by not being emitted.
-func TestNoBudgetMeansNoDefaultedMaxShutdown(t *testing.T) {
+// It is the one field rig knows the answer to and fills in anyway not at all:
+// the number has to be readable in the serve.Config a main function writes,
+// because that is where whoever writes terminationGracePeriodSeconds reads it.
+// Main refuses one that was left out instead, which is a boot that fails with
+// the number to write rather than a deployment that disagrees silently.
+func TestSettleNeverFillsInTheShutdownBudget(t *testing.T) {
 	t.Parallel()
 
-	doc := gentest.LoadDocument(t, filepath.Join("testdata", fixture))
-	for i := range doc.API.Resources {
-		doc.API.Resources[i].Electric = nil
-	}
-	src := artifactNamed(t, gentest.Run(t, servergo.New(), doc, opts()), "run.gen.go")
+	for _, name := range []string{fixture, "presence.ir.json"} {
+		doc := gentest.LoadDocument(t, filepath.Join("testdata", name))
+		src := artifactNamed(t, gentest.Run(t, servergo.New(), doc, opts()), "run.gen.go")
 
-	if strings.Contains(src, "ShutdownBudget()") {
-		t.Errorf("settle calls a ShutdownBudget this project does not have:\n%s", src)
-	}
-	if strings.Contains(src, "cfg.MaxShutdown") {
-		t.Error("a project with no rig step got its MaxShutdown settled anyway")
+		settle := src[strings.Index(src, "func settle("):]
+		if strings.Contains(settle, "MaxShutdown") {
+			t.Errorf("%s: settle fills in MaxShutdown:\n%s", name, settle)
+		}
+		// And Main refuses it, naming the number this project adds up to.
+		for _, want := range []string{"if cfg.MaxShutdown == 0 {", "ShutdownBudget()", "os.Exit(2)"} {
+			if !strings.Contains(src, want) {
+				t.Errorf("%s: Main does not refuse an unstated MaxShutdown: missing %q", name, want)
+			}
+		}
 	}
 }
 

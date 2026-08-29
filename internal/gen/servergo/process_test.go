@@ -104,27 +104,34 @@ func TestTheShutdownBudgetIsTheSumOfItsSteps(t *testing.T) {
 	}
 }
 
-// A project with none of rig's own closers has no budget to state, and states
-// its own MaxShutdown instead.
+// A project with none of rig's own closers still gets a budget, and it is the
+// headroom on its own.
 //
-// Emitting one that was only the headroom would be worse than emitting none: it
-// would be shorter than serve's own default, so a project with closers of its
-// own would get a tighter budget for having asked rig for nothing.
-func TestAProjectWithNoRigStepGetsNoBudget(t *testing.T) {
+// This used to be the opposite. The reasoning was that a headroom-only budget
+// would be shorter than serve's default, so a project with closers of its own
+// would get a tighter budget for having asked rig for nothing — which was true
+// while serve had a default. It has none now: MaxShutdown is stated or the
+// server does not start, so a project with no rig step is the one that most
+// needs somewhere to read a number from. Emitting none would leave `rig init`
+// producing something that refuses to boot and offers nothing to copy.
+func TestAProjectWithNoRigStepStillGetsAHeadroomBudget(t *testing.T) {
 	t.Parallel()
 
 	doc := gentest.LoadDocument(t, filepath.Join("testdata", fixture))
-	// The fixture syncs a table live, and that is now a step: what this test is
+	// The fixture syncs a table live, and that is a step: what this test is
 	// about is a project with none at all, so the one it has is taken away.
 	for i := range doc.API.Resources {
 		doc.API.Resources[i].Electric = nil
 	}
 	src := artifactNamed(t, gentest.Run(t, servergo.New(), doc, opts()), "process.gen.go")
 
-	for _, absent := range []string{"ShutdownBudget", "shutdownHeadroom"} {
-		if strings.Contains(src, absent) {
-			t.Errorf("a project that registers no closer of rig's got %q", absent)
+	for _, want := range []string{"func ShutdownBudget()", "shutdownHeadroom", "For this project that is 10s:"} {
+		if !strings.Contains(src, want) {
+			t.Errorf("a project that registers no closer of rig's is missing %q:\n%s", want, src)
 		}
+	}
+	if strings.Contains(src, "shapesShutdown") {
+		t.Error("the budget counts a step this project does not register")
 	}
 }
 

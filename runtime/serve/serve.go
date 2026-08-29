@@ -220,14 +220,20 @@ type Config struct {
 	// MaxShutdown is the longest the whole stop sequence may take, from the
 	// signal to the process being gone: the drain delay, the drain steps, the
 	// requests in flight, and every dependency registered with App.Close.
-	// Default 20s.
+	//
+	// Required. It is the only field here with no default, because it is the
+	// only one that leaves the program: this is the number that belongs in
+	// Kubernetes' terminationGracePeriodSeconds, and a default would be a value
+	// nobody wrote deciding how long something outside this process waits before
+	// sending SIGKILL. A server that is stopped faster than its own budget does
+	// not drain, it is killed mid-flight.
 	//
 	// It is a stated maximum rather than the sum of its parts so that it can be
-	// read off and copied — this is the number that belongs in Kubernetes'
-	// terminationGracePeriodSeconds, and adding up whatever the mount function
-	// happened to register is not something anybody will do twice. The parts
-	// are checked against it before the server listens, so the two cannot drift
-	// apart quietly.
+	// read off and copied — adding up whatever the mount function happened to
+	// register is not something anybody will do twice. The parts are checked
+	// against it before the server listens, so the two cannot drift apart
+	// quietly, and a config that states nothing is refused there with the total
+	// and each part named. That refusal is where the number to write comes from.
 	MaxShutdown time.Duration
 
 	// OnListen is called with the address actually bound, which is the only
@@ -861,7 +867,13 @@ func (c Config) withDefaults() Config {
 	c.ReadTimeout = orDefault(c.ReadTimeout, 30*time.Second)
 	c.WriteTimeout = orDefault(c.WriteTimeout, 30*time.Second)
 	c.IdleTimeout = orDefault(c.IdleTimeout, 2*time.Minute)
-	c.MaxShutdown = orDefault(c.MaxShutdown, 20*time.Second)
+
+	// MaxShutdown is deliberately not here. Every other field above has a
+	// defensible default because getting it wrong costs this process something;
+	// that one is read by whoever writes the deployment, so a default is a
+	// number nobody stated governing a timeout somebody else has to guess.
+	// [App.checkShutdown] refuses it unset, with the steps that were registered
+	// named, so the answer arrives at the one moment it can be acted on.
 
 	return c
 }

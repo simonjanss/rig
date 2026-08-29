@@ -79,14 +79,17 @@ func main() {
 			"or point $DATABASE_URL at one you already have",
 
 		MaxStartup: 30 * time.Second,
-		// No MaxShutdown, and no probe paths: api.Main settles all three. The
-		// budget is thirty-five seconds — fifteen for the notification engine,
-		// five for the live subscriptions, five for the cache listener behind
-		// `cache:`, and ten left for the requests still in flight — and every
-		// one of those steps is now registered by generated code rather than by
-		// this file, so there is no sum here left to get wrong. Whoever writes
-		// terminationGracePeriodSeconds reads the total off api.ShutdownBudget,
-		// whose documentation states it in words.
+		// No probe paths — api.Main settles those. This it does not settle, and
+		// that is the difference worth noticing: thirty-five seconds is
+		// api.ShutdownBudget, and every step in it is registered by generated
+		// code rather than by this file, so rig knows the number exactly. It is
+		// written here anyway, because this is the field an operator reads to
+		// write terminationGracePeriodSeconds, and a number that only exists
+		// inside a function call is one they would have to run the binary to
+		// learn. Fifteen for the notification engine, five for the live
+		// subscriptions, five for the cache listener behind `cache:`, and ten
+		// left for the requests still in flight.
+		MaxShutdown: 35 * time.Second,
 
 		Tasks: map[string]serve.Task{
 			"migrate": migrate.Apply(migrations, migrate.Options{Log: os.Stdout}),
