@@ -88,11 +88,35 @@ hooks and none of your children's.
 `api.Main` is that with everything `rig.yaml` already decided filled in: a config
 and a function that builds your handler.
 
+`serve.Config` has no defaults. A value it invented for a config that said
+nothing would be a value nobody chose, discovered only by whatever it costs when
+it is wrong — so every field that would otherwise be one is refused unset, all of
+them named at once, before anything opens or listens. What a deployment supplies
+rather than states is still read from the environment: `DatabaseURL` and `Addr`
+fall back to `$DATABASE_URL` and `$ADDR`. Fields where saying nothing means there
+is nothing to do — `Ready`, `Pool`, `Monitor`, the `On…` hooks, `Hint` — stay
+optional, because nil is the whole of what those have to say.
+
 ```go
 api.Main(serve.Config{
     DatabaseURL: ...,
     Addr:        ...,
-    Migrate:     migrate.Require(migrations, migrate.Options{}),
+
+    // Two questions rather than one, and both read by whatever is checking
+    // them. serve.NoProbe is how a project says it wants neither.
+    LivenessPath:  "/livez",
+    ReadinessPath: "/readyz",
+
+    MaxStartup:        30 * time.Second,
+    ConnectTimeout:    10 * time.Second,
+    ProbeTimeout:      2 * time.Second,
+    ReadHeaderTimeout: 5 * time.Second,
+    ReadTimeout:       30 * time.Second,
+    WriteTimeout:      30 * time.Second,
+    IdleTimeout:       2 * time.Minute,
+    MaxShutdown:       api.ShutdownBudget(), // read it, then write the number
+
+    Migrate: migrate.Require(migrations, migrate.Options{}),
     // Only the ones you can write. The housekeeping this project's blocks
     // already decided is merged in, and yours wins on a shared name.
     Tasks: map[string]serve.Task{

@@ -3,6 +3,7 @@ package serve_test
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -49,10 +50,24 @@ func child() {
 
 	serve.Main(serve.Config{
 		// A port with nothing behind it, reached quickly.
-		DatabaseURL:    "postgres://rig:rig@127.0.0.1:1/nothing?sslmode=disable",
-		Addr:           "127.0.0.1:0",
+		DatabaseURL: "postgres://rig:rig@127.0.0.1:1/nothing?sslmode=disable",
+		Addr:        "127.0.0.1:0",
+		// Not a discard handler: the parent reads this child's output to see
+		// what it refused, so a log nobody can read would make every assertion
+		// below vacuous.
+		Logger:         slog.Default(),
 		MaxStartup:     2 * time.Second,
 		ConnectTimeout: time.Second,
+		// A task needs none of what follows, and this child is only ever driven
+		// down a task path. They are here so that a case added later is not
+		// refused for a reason that has nothing to do with what it tests.
+		LivenessPath:      "/livez",
+		ReadinessPath:     "/readyz",
+		ProbeTimeout:      time.Second,
+		ReadHeaderTimeout: time.Second,
+		ReadTimeout:       time.Second,
+		WriteTimeout:      time.Second,
+		IdleTimeout:       time.Second,
 		Tasks: map[string]serve.Task{
 			"migrate": func(context.Context, *pgxpool.Pool) error { return nil },
 		},

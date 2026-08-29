@@ -59,6 +59,29 @@ func main() {
 			"or point $DATABASE_URL at one you already have",
 
 		MaxStartup: 30 * time.Second,
+		// Nothing below has a default. serve refuses a config that left any of
+		// them empty, naming all of them at once, because a value it invented
+		// would be one nobody chose — found only by what it costs when it is
+		// wrong.
+		//
+		// Two questions rather than one. Liveness asks whether to restart this
+		// process and consults nothing, so a slow database cannot turn one
+		// outage into every replica being restarted at once; readiness asks
+		// whether to send it work, pings the database, and turns false the
+		// moment a shutdown begins.
+		LivenessPath:  "/livez",
+		ReadinessPath: "/readyz",
+
+		ConnectTimeout: 10 * time.Second,
+		ProbeTimeout:   2 * time.Second,
+
+		// The four the http.Server is built with. ReadHeaderTimeout is the one
+		// worth never turning off: without it a single connection that opens
+		// and sends nothing holds a goroutine until the process ends.
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      30 * time.Second,
+		IdleTimeout:       2 * time.Minute,
 		// Fifteen seconds, which is api.ShutdownBudget for this project: five
 		// for the trace flush, the one closer rig registers here, and ten left
 		// for the requests still in flight. This example registers no closer of

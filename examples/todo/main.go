@@ -14,6 +14,7 @@ import (
 	"cmp"
 	"context"
 	"embed"
+	"log/slog"
 	"net/http"
 	"os"
 	"time"
@@ -54,19 +55,41 @@ func main() {
 		DatabaseURL: cmp.Or(os.Getenv("DATABASE_URL"), localDSN),
 		Addr:        cmp.Or(os.Getenv("ADDR"), "127.0.0.1:8080"),
 
-		// Two probes, two questions, and neither is written here: api.Main
-		// settles /livez and /readyz. Liveness asks whether to restart this
-		// process; readiness asks whether to send it work. One check for both
-		// means either a wedged process nobody restarts, or the whole fleet
-		// restarted because the database was slow.
-
 		// What to say when the database is not there, which is the first thing
 		// to go wrong for somebody who has just cloned this. It is said within a
 		// second rather than at the end of the connect timeout.
 		Hint: "run `rig db up` to start a local Postgres for this project, " +
 			"or point $DATABASE_URL at one you already have",
 
+		// Where this project's log goes. A project with `tracing:` on has this
+		// filled in by api.Main from the sink it builds; with no tracing block
+		// there is nowhere else for it to come from, so it is said here.
+		Logger: slog.Default(),
+
 		MaxStartup: 30 * time.Second,
+		// Nothing below has a default. serve refuses a config that left any of
+		// them empty, naming all of them at once, because a value it invented
+		// would be one nobody chose — found only by what it costs when it is
+		// wrong.
+		//
+		// Two questions rather than one. Liveness asks whether to restart this
+		// process and consults nothing, so a slow database cannot turn one
+		// outage into every replica being restarted at once; readiness asks
+		// whether to send it work, pings the database, and turns false the
+		// moment a shutdown begins.
+		LivenessPath:  "/livez",
+		ReadinessPath: "/readyz",
+
+		ConnectTimeout: 10 * time.Second,
+		ProbeTimeout:   2 * time.Second,
+
+		// The four the http.Server is built with. ReadHeaderTimeout is the one
+		// worth never turning off: without it a single connection that opens
+		// and sends nothing holds a goroutine until the process ends.
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      30 * time.Second,
+		IdleTimeout:       2 * time.Minute,
 		// The field that leaves the program: it is what goes into
 		// terminationGracePeriodSeconds, so it has no default and every project
 		// writes it. serve adds up what it was actually given before the server

@@ -99,9 +99,36 @@ func main() {
 		Hint: "run `rig db up` to start a local Postgres for this project, " +
 			"then open http://acme.localhost:8083",
 
+		// Where this project's log goes. A project with `tracing:` on has this
+		// filled in by api.Main from the sink it builds; with no tracing block
+		// there is nowhere else for it to come from, so it is said here.
+		Logger: slog.Default(),
+
 		MaxStartup: 30 * time.Second,
-		// No probe paths: api.Main settles those. This one it does not, because
-		// it is the field that leaves the program — fifteen seconds is what
+		// Nothing below has a default. serve refuses a config that left any of
+		// them empty, naming all of them at once, because a value it invented
+		// would be one nobody chose — found only by what it costs when it is
+		// wrong.
+		//
+		// Two questions rather than one. Liveness asks whether to restart this
+		// process and consults nothing, so a slow database cannot turn one
+		// outage into every replica being restarted at once; readiness asks
+		// whether to send it work, pings the database, and turns false the
+		// moment a shutdown begins.
+		LivenessPath:  "/livez",
+		ReadinessPath: "/readyz",
+
+		ConnectTimeout: 10 * time.Second,
+		ProbeTimeout:   2 * time.Second,
+
+		// The four the http.Server is built with. ReadHeaderTimeout is the one
+		// worth never turning off: without it a single connection that opens
+		// and sends nothing holds a goroutine until the process ends.
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      30 * time.Second,
+		IdleTimeout:       2 * time.Minute,
+		// The field that leaves the program: fifteen seconds is what
 		// terminationGracePeriodSeconds has to agree with, and it should be
 		// readable here rather than out of a call. Five for the auth cache's
 		// invalidation channel, the one closer this project's configuration

@@ -60,14 +60,25 @@ func TestTheServerStopsWithASubscriptionOpen(t *testing.T) {
 
 	go func() {
 		stopped <- serve.Run(ctx, serve.Config{
-			DatabaseURL:   dsn,
-			Addr:          "127.0.0.1:0",
-			ReadinessPath: "/readyz",
-			MaxStartup:    30 * time.Second,
-			DrainDelay:    time.Second,
-			MaxShutdown:   api.ShutdownBudget() + time.Second,
-			Logger:        slog.New(slog.DiscardHandler),
-			OnListen:      func(a net.Addr) { listening <- a },
+			DatabaseURL: dsn,
+			Addr:        "127.0.0.1:0",
+			Logger:      slog.New(slog.DiscardHandler),
+			// serve has no defaults, so a config states all of it or is refused
+			// before anything listens. Only the drain delay and the budget are
+			// what this test is about; the rest are ordinary values written out
+			// because there is nowhere else for them to come from.
+			LivenessPath:      "/livez",
+			ReadinessPath:     "/readyz",
+			MaxStartup:        30 * time.Second,
+			ConnectTimeout:    10 * time.Second,
+			ProbeTimeout:      2 * time.Second,
+			ReadHeaderTimeout: 5 * time.Second,
+			ReadTimeout:       30 * time.Second,
+			WriteTimeout:      30 * time.Second,
+			IdleTimeout:       2 * time.Minute,
+			DrainDelay:        time.Second,
+			MaxShutdown:       api.ShutdownBudget() + time.Second,
+			OnListen:          func(a net.Addr) { listening <- a },
 		}, func(c context.Context, srv *serve.App) (http.Handler, error) {
 			// The generated sequence itself, not a copy of it. api.Main is this
 			// and a serve.Config; serve.Run is what a test that wants the

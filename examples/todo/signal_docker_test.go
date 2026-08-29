@@ -4,7 +4,6 @@ package main
 
 import (
 	"context"
-	"log/slog"
 	"net"
 	"net/http"
 	"os"
@@ -44,15 +43,13 @@ func child() {
 	// The test binary's own flags would otherwise be read as a subcommand.
 	os.Args = os.Args[:1]
 
-	serve.Main(serve.Config{
-		DatabaseURL: dsn,
-		Addr:        "127.0.0.1:0",
-		MaxShutdown: 2 * time.Minute,
-		Logger:      slog.New(slog.DiscardHandler),
-		OnListen: func(net.Addr) {
-			_ = os.WriteFile(os.Getenv(listeningEnv), []byte("up"), 0o600)
-		},
-	}, func(_ context.Context, app *serve.App) (http.Handler, error) {
+	cfg := stated(dsn)
+	cfg.MaxShutdown = 2 * time.Minute
+	cfg.OnListen = func(net.Addr) {
+		_ = os.WriteFile(os.Getenv(listeningEnv), []byte("up"), 0o600)
+	}
+
+	serve.Main(cfg, func(_ context.Context, app *serve.App) (http.Handler, error) {
 		app.Close("will not stop", func(context.Context) error {
 			select {}
 		})

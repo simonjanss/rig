@@ -161,20 +161,23 @@ func TestMainOwnsTheProcess(t *testing.T) {
 
 // What rig.yaml already decided is filled in, and anything already set is left
 // alone — so a field is still how a project disagrees.
-func TestMainSettlesWhatTheConfigurationDecided(t *testing.T) {
+func TestSettleMergesTheTasksAndNothingElse(t *testing.T) {
 	t.Parallel()
 
 	doc := gentest.LoadDocument(t, filepath.Join("testdata", "presence.ir.json"))
 	src := artifactNamed(t, gentest.Run(t, servergo.New(), doc, opts()), "run.gen.go")
 
-	for _, want := range []string{
-		"cfg.Tasks = Tasks(cfg.Tasks)",
-		`if cfg.LivenessPath == "" {`,
-		`cfg.LivenessPath = "/livez"`,
-		`cfg.ReadinessPath = "/readyz"`,
-	} {
-		if !strings.Contains(src, want) {
-			t.Errorf("settle does not fill in %q", want)
+	if !strings.Contains(src, "cfg.Tasks = Tasks(cfg.Tasks)") {
+		t.Error("settle does not merge the tasks")
+	}
+
+	// And fills in nothing else. Every other field serve needs is one the
+	// project states, because every one of them is read by something outside
+	// this binary — an orchestrator checking a path, a manifest naming a
+	// budget — and a value settled here is one nobody can read.
+	for _, absent := range []string{"cfg.LivenessPath", "cfg.ReadinessPath", "cfg.MaxShutdown"} {
+		if strings.Contains(src[strings.Index(src, "func settle("):], absent) {
+			t.Errorf("settle fills in %q", absent)
 		}
 	}
 }

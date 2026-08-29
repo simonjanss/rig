@@ -186,10 +186,19 @@ func (p *Process) Mount(build Build) serve.Mount {
 //
 //	func main() {
 //		api.Main(serve.Config{
-//			Addr:        cmp.Or(os.Getenv("ADDR"), "127.0.0.1:8080"),
-//			MaxShutdown: 45 * time.Second, // ShutdownBudget()
-//			Tasks:       map[string]serve.Task{"migrate": migrate.Apply(migrations, migrate.Options{})},
-//			Migrate:     migrate.Require(migrations, migrate.Options{}),
+//			Addr:              cmp.Or(os.Getenv("ADDR"), "127.0.0.1:8080"),
+//			LivenessPath:      "/livez",
+//			ReadinessPath:     "/readyz",
+//			MaxStartup:        30 * time.Second,
+//			ConnectTimeout:    10 * time.Second,
+//			ProbeTimeout:      2 * time.Second,
+//			ReadHeaderTimeout: 5 * time.Second,
+//			ReadTimeout:       30 * time.Second,
+//			WriteTimeout:      30 * time.Second,
+//			IdleTimeout:       2 * time.Minute,
+//			MaxShutdown:       45 * time.Second, // ShutdownBudget()
+//			Tasks:             map[string]serve.Task{"migrate": migrate.Apply(migrations, migrate.Options{})},
+//			Migrate:           migrate.Require(migrations, migrate.Options{}),
 //		}, func(ctx context.Context, app *serve.App, page *observe.Page) (api.Parts, error) {
 //			return myapp.New(ctx, app.Pool, app.Logger, page)
 //		})
@@ -197,9 +206,11 @@ func (p *Process) Mount(build Build) serve.Mount {
 //
 // What it settles is what rig.yaml already decided — [settle] lists it field
 // by field — and every one of those is still a field, so setting it is how a
-// project disagrees. What is left in the literal above is what a configuration
-// file cannot hold: where the migrations are embedded, what this binary's
-// subcommands are, and the two addresses.
+// project disagrees. What is left in the literal above is everything serve
+// will not choose for itself — every timeout, both probe paths, the address
+// and the shutdown budget — together with what a configuration file cannot
+// hold: where the migrations are embedded and what this binary's subcommands
+// are.
 //
 // MaxShutdown is the fourth, and it is there for a different reason than the
 // other three. rig knows what it should be — [ShutdownBudget] adds it up —
@@ -264,18 +275,15 @@ func Main(cfg serve.Config, build Build) {
 // [Main] refuses one that was left out, and [ShutdownBudget] is the number to
 // write — plus the drain delay, which serve counts against it too.
 //
-// The probe paths are two questions rather than one, which is why both are
-// filled rather than neither. Liveness asks whether to restart this process
-// and touches nothing; readiness asks whether to send it work and turns false
-// the moment a shutdown begins. One check for both is either a wedged process
-// nobody restarts or a fleet restarted because the database was slow.
+// The probe paths are not among them either, and for the same reason one step
+// down. They are two questions rather than one — liveness asks whether to
+// restart this process and touches nothing, readiness asks whether to send it
+// work and turns false the moment a shutdown begins — and both are read by
+// whatever is checking them, which is not this binary. A path settled here is
+// one an orchestrator has to be told about anyway, so it is written where it
+// can be read. serve refuses either left empty; serve.NoProbe is how a project
+// says it wants none.
 func settle(cfg serve.Config) serve.Config {
 	cfg.Tasks = Tasks(cfg.Tasks)
-	if cfg.LivenessPath == "" {
-		cfg.LivenessPath = "/livez"
-	}
-	if cfg.ReadinessPath == "" {
-		cfg.ReadinessPath = "/readyz"
-	}
 	return cfg
 }

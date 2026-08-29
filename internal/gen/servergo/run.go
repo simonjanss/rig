@@ -5,16 +5,6 @@ import (
 	"github.com/simonjanss/rig/pkg/gen"
 )
 
-// The probe paths a project gets without asking. serve registers nothing for an
-// empty one, which is the right default for a package every server imports and
-// the wrong one for a generated main: every rig project wants two probes, and
-// the two questions they answer are different enough that answering only one is
-// a mistake rather than a preference.
-const (
-	livenessPath  = "/livez"
-	readinessPath = "/readyz"
-)
-
 // hasAuth reports whether this project authenticates its callers.
 func (e *emitter) hasAuth() bool { return e.doc.API.Auth != nil }
 
@@ -402,12 +392,28 @@ func (e *emitter) processMountMethod(b *gobuf.Buf) {
 func (e *emitter) mainFunc(b *gobuf.Buf) {
 	servePkg := b.Import(runtimeModule + "/serve")
 
+	logger := ""
+	if !e.tracing() {
+		// A project that traces gets its logger from Process.Configure; one
+		// that does not has nowhere else for it to come from.
+		logger = "\t\t\tLogger:            slog.Default(),\n"
+	}
 	example := "\tfunc main() {\n" +
 		"\t\tapi.Main(serve.Config{\n" +
-		"\t\t\tAddr:        cmp.Or(os.Getenv(\"ADDR\"), \"127.0.0.1:8080\"),\n" +
-		"\t\t\tMaxShutdown: " + duration("time", e.shutdownBudget()) + ", // ShutdownBudget()\n" +
-		"\t\t\tTasks:       map[string]serve.Task{\"migrate\": migrate.Apply(migrations, migrate.Options{})},\n" +
-		"\t\t\tMigrate:     migrate.Require(migrations, migrate.Options{}),\n" +
+		"\t\t\tAddr:              cmp.Or(os.Getenv(\"ADDR\"), \"127.0.0.1:8080\"),\n" +
+		logger +
+		"\t\t\tLivenessPath:      \"/livez\",\n" +
+		"\t\t\tReadinessPath:     \"/readyz\",\n" +
+		"\t\t\tMaxStartup:        30 * time.Second,\n" +
+		"\t\t\tConnectTimeout:    10 * time.Second,\n" +
+		"\t\t\tProbeTimeout:      2 * time.Second,\n" +
+		"\t\t\tReadHeaderTimeout: 5 * time.Second,\n" +
+		"\t\t\tReadTimeout:       30 * time.Second,\n" +
+		"\t\t\tWriteTimeout:      30 * time.Second,\n" +
+		"\t\t\tIdleTimeout:       2 * time.Minute,\n" +
+		"\t\t\tMaxShutdown:       " + duration("time", e.shutdownBudget()) + ", // ShutdownBudget()\n" +
+		"\t\t\tTasks:             map[string]serve.Task{\"migrate\": migrate.Apply(migrations, migrate.Options{})},\n" +
+		"\t\t\tMigrate:           migrate.Require(migrations, migrate.Options{}),\n" +
 		"\t\t}, func(ctx context.Context, app *serve.App" +
 		func() string {
 			if e.monitoring() {
@@ -430,9 +436,11 @@ func (e *emitter) mainFunc(b *gobuf.Buf) {
 		example + "\n\n" +
 		"What it settles is what rig.yaml already decided — [settle] lists it " +
 		"field by field — and every one of those is still a field, so setting it " +
-		"is how a project disagrees. What is left in the literal above is what a " +
-		"configuration file cannot hold: where the migrations are embedded, what " +
-		"this binary's subcommands are, and the two addresses.\n\n" +
+		"is how a project disagrees. What is left in the literal above is " +
+		"everything serve will not choose for itself — every timeout, both probe " +
+		"paths, the address and the shutdown budget — together with what a " +
+		"configuration file cannot hold: where the migrations are embedded and " +
+		"what this binary's subcommands are.\n\n" +
 		"MaxShutdown is the fourth, and it is there for a different reason than " +
 		"the other three. rig knows what it should be — [ShutdownBudget] adds it " +
 		"up — and settles it anyway not at all, because it is the one number in " +
@@ -510,22 +518,18 @@ func (e *emitter) settleFunc(b *gobuf.Buf) {
 		"serve.Config where it can be read rather than settled where it cannot. " +
 		"[Main] refuses one that was left out, and [ShutdownBudget] is the number " +
 		"to write — plus the drain delay, which serve counts against it too.\n\n" +
-		"The probe paths are two questions rather than one, which is why both " +
-		"are filled rather than neither. Liveness asks whether to restart this " +
-		"process and touches nothing; readiness asks whether to send it work and " +
-		"turns false the moment a shutdown begins. One check for both is either a " +
-		"wedged process nobody restarts or a fleet restarted because the database " +
-		"was slow."
+		"The probe paths are not among them either, and for the same reason one " +
+		"step down. They are two questions rather than one — liveness asks " +
+		"whether to restart this process and touches nothing, readiness asks " +
+		"whether to send it work and turns false the moment a shutdown begins — " +
+		"and both are read by whatever is checking them, which is not this " +
+		"binary. A path settled here is one an orchestrator has to be told about " +
+		"anyway, so it is written where it can be read. serve refuses either left " +
+		"empty; serve.NoProbe is how a project says it wants none."
 	b.Comment(doc)
 
 	b.L("func settle(cfg %s.Config) %s.Config {", servePkg, servePkg)
 	b.L("cfg.Tasks = Tasks(cfg.Tasks)")
-	b.L("if cfg.LivenessPath == \"\" {")
-	b.L("cfg.LivenessPath = %s", gobuf.Quote(livenessPath))
-	b.L("}")
-	b.L("if cfg.ReadinessPath == \"\" {")
-	b.L("cfg.ReadinessPath = %s", gobuf.Quote(readinessPath))
-	b.L("}")
 	b.L("return cfg")
 	b.L("}")
 	b.NL()

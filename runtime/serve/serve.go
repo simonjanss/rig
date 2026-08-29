@@ -59,16 +59,36 @@ type Mount func(ctx context.Context, app *App) (http.Handler, error)
 // be the same value.
 type Task func(ctx context.Context, pool *pgxpool.Pool) error
 
+// NoProbe is a LivenessPath or ReadinessPath that should not be served.
+//
+// A probe path has no zero value meaning "none": the empty string is what a
+// config that said nothing looks like, and telling those two apart is the whole
+// point. So not wanting one is said with this rather than by omission, and a
+// project that forgot gets an error instead of a server with no way to be
+// checked.
+//
+// Not a path, so it cannot collide with one: an HTTP server is only ever asked
+// for a route beginning with a slash.
+const NoProbe = "-"
+
 // Config is everything the server needs that is not a route.
 //
-// Every field has a defensible default, and the two that vary per environment
-// read from the environment when they are left empty.
+// Nothing here has a default. A value this package invented for a config that
+// said nothing is one nobody chose, discovered only by what it costs when it is
+// wrong — so every field that would otherwise be one is refused unset, all of
+// them named at once, before anything opens or listens. What a deployment
+// supplies rather than states is still read from the environment: DatabaseURL
+// and Addr fall back to $DATABASE_URL and $ADDR, and are refused after that.
+//
+// The exceptions are the fields where saying nothing means there is nothing to
+// do rather than something to pick — Ready, Pool, Monitor, the On… hooks, Hint,
+// Tasks, Migrate and DrainDelay. Nil is the whole of what those have to say.
 type Config struct {
 	// DatabaseURL is the connection string. Empty means $DATABASE_URL, and
 	// failing that the server refuses to start rather than guessing.
 	DatabaseURL string
 
-	// Addr is the listen address. Empty means $ADDR, then ":8080".
+	// Addr is the listen address. Empty means $ADDR, and refused after that.
 	Addr string
 
 	// Monitor is served on a listener of its own, at MonitorAddr, in this same
@@ -103,6 +123,10 @@ type Config struct {
 	MonitorAddr string
 
 	// LivenessPath answers whether the process is running, and nothing else.
+	//
+	// Required, like ReadinessPath: a path this package chose would be one an
+	// orchestrator has to be told about anyway. [NoProbe] is how a project says
+	// it wants none.
 	// It never touches the database, and that is the whole point: a liveness
 	// probe that fails when a dependency does turns one database blip into
 	// every replica being killed at once, which is the outage the restart was
@@ -126,7 +150,8 @@ type Config struct {
 	Ready func(ctx context.Context) error
 
 	// DrainDelay is how long to keep serving after readiness turns false and
-	// before the shutdown starts. Default none. It comes out of MaxShutdown.
+	// before the shutdown starts. Zero is none, which is a real answer here
+	// rather than an absent one. It comes out of MaxShutdown either way.
 	//
 	// It exists because removing an instance from a load balancer is not
 	// instant: the probe has to fail, and the change has to propagate. Requests
@@ -172,7 +197,7 @@ type Config struct {
 
 	// MaxStartup is the longest the process may take between Run being called
 	// and the server listening: opening the pool, the Migrate hook, and the
-	// mount function. Default 60s.
+	// mount function.
 	//
 	// The counterpart of MaxShutdown, and for the same reason. A boot that
 	// hangs on something slow is not obviously different from a boot that is
@@ -181,9 +206,9 @@ type Config struct {
 	// inside the budget.
 	MaxStartup time.Duration
 
-	// ConnectTimeout bounds the first connection, inside MaxStartup. Default
-	// 10s, or MaxStartup when that is shorter — soon enough to say "the
-	// database" rather than "startup" when that is what went wrong.
+	// ConnectTimeout bounds the first connection, inside MaxStartup — soon
+	// enough to say "the database" rather than "startup" when that is what went
+	// wrong.
 	//
 	// Setting it longer than MaxStartup is refused: connecting alone would use
 	// the whole budget.
@@ -202,19 +227,18 @@ type Config struct {
 	// is worse than printing nothing.
 	Hint string
 
-	// ProbeTimeout bounds what a readiness check is allowed to wait for.
-	// Default 2s: a probe that hangs is a probe that has already failed.
+	// ProbeTimeout bounds what a readiness check is allowed to wait for: a probe
+	// that hangs is a probe that has already failed.
 	ProbeTimeout time.Duration
 
 	// ReadHeaderTimeout bounds how long a client may take to send its headers.
-	// Default 5s, and never zero: without it one open connection sending
-	// nothing occupies a goroutine forever.
+	// Worth stating rather than turning off: without it one open connection
+	// sending nothing occupies a goroutine forever.
 	ReadHeaderTimeout time.Duration
-	// ReadTimeout bounds the whole request. Default 30s.
+	// ReadTimeout bounds the whole request.
 	ReadTimeout time.Duration
-	// WriteTimeout bounds the response. Default 30s, and its clock starts when
-	// the request's headers were read rather than when the body starts going
-	// out.
+	// WriteTimeout bounds the response. Its clock starts when the request's
+	// headers were read rather than when the body starts going out.
 	//
 	// It is the bound for an ordinary route. A route that legitimately outlives
 	// it lifts it for its own request through http.NewResponseController — the
@@ -223,7 +247,7 @@ type Config struct {
 	// every other route to do it. That is why there is no per-route timeout
 	// here and should not be one.
 	WriteTimeout time.Duration
-	// IdleTimeout bounds a kept-alive connection between requests. Default 2m.
+	// IdleTimeout bounds a kept-alive connection between requests.
 	IdleTimeout time.Duration
 
 	// MaxShutdown is the longest the whole stop sequence may take, from the
@@ -312,13 +336,13 @@ func Main(cfg Config, mount Mount) {
 
 	name, err := taskName(os.Args[1:], cfg.Tasks)
 	if err != nil {
-		logger(cfg).ErrorContext(ctx, "cannot run that", "error", err)
+		reporter(cfg).ErrorContext(ctx, "cannot run that", "error", err)
 		exit(2)
 	}
 
 	if name != "" {
 		if err := Once(ctx, cfg, cfg.Tasks[name]); err != nil {
-			logger(cfg).ErrorContext(ctx, name+" failed", "error", err)
+			reporter(cfg).ErrorContext(ctx, name+" failed", "error", err)
 			exit(1)
 		}
 		done()
@@ -331,15 +355,31 @@ func Main(cfg Config, mount Mount) {
 		// nothing to repeat here — and nothing worth telling the orchestrator
 		// that the process crashed.
 		if Unclean(err) {
-			logger(cfg).ErrorContext(ctx, "stopped, but not cleanly")
+			reporter(cfg).ErrorContext(ctx, "stopped, but not cleanly")
 			done()
 			return
 		}
 
-		logger(cfg).ErrorContext(ctx, "server stopped", "error", err)
+		reporter(cfg).ErrorContext(ctx, "server stopped", "error", err)
 		exit(1)
 	}
 	done()
+}
+
+// reporter is what [Main] says something went wrong with.
+//
+// Not a default for [Config.Logger] — that one is refused unset, and this is
+// how the refusal gets out. A config with no logger is exactly the case where
+// there is nothing to report through, and answering it with silence would make
+// the one error that explains every other error the only one nobody sees.
+//
+// So it is scoped to that: Main's four error paths, none of which is reached by
+// a config that stated one, because Run and Once use cfg.Logger.
+func reporter(c Config) *slog.Logger {
+	if c.Logger != nil {
+		return c.Logger
+	}
+	return slog.Default()
 }
 
 // taskName picks the task the arguments ask for, if they ask for one.
@@ -378,7 +418,11 @@ func Once(ctx context.Context, cfg Config, task Task) error {
 		return errors.New("serve: no task to run")
 	}
 
-	cfg = cfg.withDefaults()
+	cfg = cfg.fromEnvironment()
+	if err := cfg.checkStated(false); err != nil {
+		return err
+	}
+	cfg = cfg.normalized()
 	if err := cfg.checkStartup(); err != nil {
 		return err
 	}
@@ -404,8 +448,12 @@ func Once(ctx context.Context, cfg Config, task Task) error {
 // MaxShutdown to finish, and only then does the pool close. Run returns nil
 // when that completes, and an error when it does not.
 func Run(ctx context.Context, cfg Config, mount Mount) (err error) {
-	cfg = cfg.withDefaults()
+	cfg = cfg.fromEnvironment()
 
+	if err := cfg.checkStated(true); err != nil {
+		return err
+	}
+	cfg = cfg.normalized()
 	if err := cfg.checkStartup(); err != nil {
 		return err
 	}
@@ -799,7 +847,7 @@ func address(pc *pgxpool.Config) string {
 // check means either a wedged process nobody restarts, or a whole fleet
 // restarted because the database was slow for thirty seconds.
 func withProbes(cfg Config, pool *pgxpool.Pool, ready *atomic.Bool, next http.Handler) http.Handler {
-	if cfg.LivenessPath == "" && cfg.ReadinessPath == "" {
+	if cfg.LivenessPath == NoProbe && cfg.ReadinessPath == NoProbe {
 		return next
 	}
 
@@ -850,59 +898,114 @@ func writeProbe(w http.ResponseWriter, status int, message string) {
 	_, _ = w.Write([]byte(message + "\n"))
 }
 
-// withDefaults fills in everything that was left out.
-func (c Config) withDefaults() Config {
+// fromEnvironment reads the two values a deployment supplies rather than states.
+//
+// The whole of what this used to be. Everything else it filled in was a value
+// rig invented for a config that said nothing — a timeout nobody chose, a port
+// nobody picked — and a default is only ever discovered by whatever it costs
+// when it is wrong. What is left here is not that: $DATABASE_URL and $ADDR are
+// how the thing running this binary hands it a value, so reading them is the
+// config being supplied rather than substituted for.
+//
+// [Config.checkStated] refuses what is still empty afterwards.
+func (c Config) fromEnvironment() Config {
 	if c.DatabaseURL == "" {
 		c.DatabaseURL = os.Getenv("DATABASE_URL")
 	}
 	if c.Addr == "" {
 		c.Addr = os.Getenv("ADDR")
 	}
-	if c.Addr == "" {
-		c.Addr = ":8080"
-	}
-
-	c.Logger = logger(c)
-
-	c.MaxStartup = orDefault(c.MaxStartup, 60*time.Second)
-
-	// A default that does not fit inside a stated budget yields to it. Only a
-	// connection budget somebody actually wrote is worth refusing over, and
-	// making every short MaxStartup require a second field would be a footnote
-	// nobody reads until it bites them.
-	c.ConnectTimeout = orDefault(c.ConnectTimeout, min(10*time.Second, c.MaxStartup))
-	c.ProbeTimeout = orDefault(c.ProbeTimeout, 2*time.Second)
-	c.ReadHeaderTimeout = orDefault(c.ReadHeaderTimeout, 5*time.Second)
-	c.ReadTimeout = orDefault(c.ReadTimeout, 30*time.Second)
-	c.WriteTimeout = orDefault(c.WriteTimeout, 30*time.Second)
-	c.IdleTimeout = orDefault(c.IdleTimeout, 2*time.Minute)
-
-	// MaxShutdown is deliberately not here. Every other field above has a
-	// defensible default because getting it wrong costs this process something;
-	// that one is read by whoever writes the deployment, so a default is a
-	// number nobody stated governing a timeout somebody else has to guess.
-	// [App.checkShutdown] refuses it unset, with the steps that were registered
-	// named, so the answer arrives at the one moment it can be acted on.
-
 	return c
 }
 
-func logger(c Config) *slog.Logger {
-	if c.Logger != nil {
-		return c.Logger
+// checkStated refuses a config that left a value for this package to invent.
+//
+// All of them at once, rather than the first one found. Filling these in is one
+// sitting, and answering it one field per run of the binary would be six runs to
+// learn six numbers.
+//
+// Only the fields where saying nothing would mean this package choosing. A nil
+// Ready, Pool, OnListen or Monitor means there is nothing to do rather than
+// something to pick, and there is no way to state that more plainly than by
+// leaving it out — requiring `Ready: nil` would be noise that reads like a
+// decision. What is here is every value that would otherwise be one.
+//
+// A negative duration is a stated answer, not a missing one: it is how a caller
+// says a timeout should not apply at all, which the standard library reads as
+// none. Zero is the value nobody wrote.
+func (c Config) checkStated(serving bool) error {
+	var missing []string
+
+	if c.DatabaseURL == "" {
+		missing = append(missing, "DatabaseURL (or $DATABASE_URL)")
 	}
-	return slog.Default()
+	if c.Logger == nil {
+		missing = append(missing, "Logger")
+	}
+	if c.MaxStartup == 0 {
+		missing = append(missing, "MaxStartup")
+	}
+	if c.ConnectTimeout == 0 {
+		missing = append(missing, "ConnectTimeout")
+	}
+
+	// The rest are about answering requests, and [Once] answers none. A
+	// subcommand that applies a migration and exits opens the same pool and is
+	// not a server, so asking it for a write timeout and a liveness path would
+	// be seven values invented for a listener that never starts.
+	if serving {
+		if c.Addr == "" {
+			missing = append(missing, "Addr (or $ADDR)")
+		}
+		for _, f := range []struct {
+			name string
+			v    time.Duration
+		}{
+			{"ProbeTimeout", c.ProbeTimeout},
+			{"ReadHeaderTimeout", c.ReadHeaderTimeout},
+			{"ReadTimeout", c.ReadTimeout},
+			{"WriteTimeout", c.WriteTimeout},
+			{"IdleTimeout", c.IdleTimeout},
+		} {
+			if f.v == 0 {
+				missing = append(missing, f.name)
+			}
+		}
+		if c.LivenessPath == "" {
+			missing = append(missing, "LivenessPath (or serve.NoProbe)")
+		}
+		if c.ReadinessPath == "" {
+			missing = append(missing, "ReadinessPath (or serve.NoProbe)")
+		}
+	}
+
+	if len(missing) > 0 {
+		return fmt.Errorf(
+			"serve: these have no value and this package will not invent one: %s. "+
+				"State each in the serve.Config; a duration that should not apply at "+
+				"all is a negative one, and a probe that should not be served is "+
+				"serve.NoProbe",
+			strings.Join(missing, ", "))
+	}
+	return nil
 }
 
-// orDefault treats zero as "not set". A caller who really wants no timeout says
-// so with a negative duration, which the standard library reads as none.
-func orDefault(v, fallback time.Duration) time.Duration {
-	switch {
-	case v == 0:
-		return fallback
-	case v < 0:
-		return 0
-	default:
-		return v
+// normalized turns a stated "no timeout" into the zero the standard library
+// reads as one.
+//
+// [Config.checkStated] needs zero and negative to mean different things — one is
+// a field nobody filled in, the other is a caller saying this timeout should not
+// apply — and net/http has only zero for the second. So they stay apart until
+// the check has run, and are folded together here, after it and before anything
+// uses them.
+func (c Config) normalized() Config {
+	for _, f := range []*time.Duration{
+		&c.MaxStartup, &c.ConnectTimeout, &c.ProbeTimeout,
+		&c.ReadHeaderTimeout, &c.ReadTimeout, &c.WriteTimeout, &c.IdleTimeout,
+	} {
+		if *f < 0 {
+			*f = 0
+		}
 	}
+	return c
 }
