@@ -25,8 +25,8 @@ import (
 // other tests here would see. A live shape poll is a request the server is
 // deliberately not answering yet, so http.Server.Shutdown waits for it; nothing
 // in the poll is late, so no timeout applies to it; and Shutdown does not cancel
-// a request's context. Without the drain api.AttachShapes registers, one open
-// board spends the entire budget — and then the trace flush, the presence sweep
+// a request's context. Without the drain api.Register attaches to Shapes.App,
+// one open board spends the entire budget — and then the trace flush, the sweep
 // and the notification engine's close, which is where its claims are handed
 // back, each find a deadline that has already passed.
 //
@@ -34,8 +34,9 @@ import (
 // what a paused container or a partition produces. A healthy Electric answers in
 // about twenty seconds, which is bad enough on a budget of forty.
 func TestTheServerStopsWithASubscriptionOpen(t *testing.T) {
-	// Both servers below read this when app.New builds the proxy, so it is set
-	// before either of them exists.
+	// The harness server below reads this through electricURL when it builds its
+	// proxy, so it is set before that server exists. The server under test is
+	// handed the same address by name.
 	upstream, release := newSilentSync(t)
 	t.Setenv("ELECTRIC_URL", upstream)
 
@@ -86,7 +87,15 @@ func TestTheServerStopsWithASubscriptionOpen(t *testing.T) {
 			// under test here is the order that ships rather than one written
 			// out again beside it. No page, the way a task has none.
 			handler, err := api.Mount(func(c context.Context, srv *serve.App, _ *observe.Page) (api.Parts, error) {
-				return app.New(c, srv, srv.Pool, srv.Logger, nil)
+				return app.New(c, app.Config{
+					Pool:   srv.Pool,
+					Logger: srv.Logger,
+					App:    srv,
+					// The sync service that accepts and never answers, named
+					// rather than read back out of the environment: this is the
+					// one thing the test is about.
+					ElectricURL: upstream,
+				})
 			})(c, srv)
 			if err != nil {
 				return nil, err

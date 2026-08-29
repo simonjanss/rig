@@ -5,7 +5,7 @@
 // integration/ can build exactly what ships — a test cannot import a `main`,
 // and a second wiring written for the tests would be a second thing to keep
 // true. main.go is what is left once the server moved out: the migrations, the
-// two addresses, and the three subcommands that are this application's own.
+// three addresses, and the three subcommands that are this application's own.
 //
 // What it returns is api.Parts, which is generated: one field per thing rig has
 // to start, drain or close. api.Main takes it from here.
@@ -36,21 +36,59 @@ import (
 	"github.com/simonjanss/rig/runtime/serve"
 )
 
-// New is everything this server is made of, as a function taking a pool so
+// Config is what this application cannot work out for itself.
+//
+// A struct rather than an argument each, because the three callers disagree
+// about most of it: the server has all of it, dispatch-notifications has a pool
+// and a logger, and the integration suite has those plus an App whose ending it
+// runs itself. A list of five where three are legitimately nil is a call site
+// where nothing names which nil is which.
+//
+// A pool alone stays enough to construct the whole graph, which is the property
+// this exists for.
+type Config struct {
+	// Pool is the database, and the one field every caller has. Everything below
+	// is something some caller legitimately does not.
+	Pool *pgxpool.Pool
+
+	// Logger is where this application says things.
+	Logger *slog.Logger
+
+	// App is what rig hangs the live subscriptions' drain on — the one ending it
+	// has nowhere else to register. Nil from a task, which mounts no routes, and
+	// from a test that owns the ending itself.
+	App *serve.App
+
+	// Page is the monitoring page when there is a server to mount it on, and nil
+	// from a task: a cron entry that dispatched notifications and also served a
+	// page over its own five-minute lifetime would be a page nobody could reach.
+	Page *observe.Page
+
+	// ElectricURL is the sync service every live subscription forwards to.
+	//
+	// Empty builds no proxy, and api.Shapes mounts no route without one — which
+	// is what a task serving nothing wants, rather than an HTTP client pointed
+	// at a development address by a process that will never call it.
+	//
+	// It is a field because it is a deployment address, the same kind of thing
+	// as serve.Config.DatabaseURL and Addr, and main.go is where this program
+	// decides those. Read three levels down it would be the one address a reader
+	// of main.go could not see.
+	ElectricURL string
+}
+
+// New is everything this server is made of, as a function taking a [Config] so
 // the tasks and the tests can build exactly what ships.
 //
-// page is the monitoring page when there is a server to mount it on, and nil
-// from a task — a cron entry that dispatched notifications and also served a
-// page over its own five-minute lifetime would be a page nobody could reach.
-// Everything else is identical either way, which is the reason this is a
+// What it builds is identical for all three, which is the reason this is a
 // function rather than a block inside the mount closure: the audience for a
 // notification is a method on a service, so a job has to be able to build one.
-//
-// srv is what rig hangs the live subscriptions' drain on, and is nil for the
-// same callers page is: a task mounts no routes, and a test that builds this
-// handler from a bare pool ends the proxy itself. A pool alone stays enough to
-// construct the whole graph, which is the property this signature exists for.
-func New(ctx context.Context, srv *serve.App, pool *pgxpool.Pool, log *slog.Logger, page *observe.Page) (api.Parts, error) {
+func New(ctx context.Context, cfg Config) (api.Parts, error) {
+	// Named once rather than read off cfg thirty times below. The struct is
+	// about the call site, where an unlabelled nil is what goes wrong; in here
+	// these are what they always were.
+	pool, log, page := cfg.Pool, cfg.Logger, cfg.Page
+
 	// No Tracer: the generated store.New settles a nil one to observe.Tracer(),
 	// which is a package-level value the provider in main installed. A task that
 	// never called observe.Setup gets a no-op there and every query below runs
@@ -158,58 +196,64 @@ func New(ctx context.Context, srv *serve.App, pool *pgxpool.Pool, log *slog.Logg
 	// Nothing here is about which rows a subscriber sees. That is the shape's
 	// own filter, which rig builds, and the Scope beside it — see the Shapes
 	// literal in the Register call.
-	upstream := cmp.Or(os.Getenv("ELECTRIC_URL"), api.DefaultElectricURL)
-	proxy, err := electric.New(electric.Config{
-		URL: upstream,
+	//
+	// No address, no proxy, and then no shape route: what a caller that serves
+	// nothing wants, and what it used to get instead was a connection pool
+	// aimed at whatever main.go's default happened to be.
+	var proxy *electric.Proxy
+	if cfg.ElectricURL != "" {
+		proxy, err = electric.New(electric.Config{
+			URL: cfg.ElectricURL,
 
-		// Nothing below has a default. Each governs what a subscriber sees
-		// while the sync service is away — how long it waits before that counts
-		// as an outage, how many rows a snapshot may hand it, when this proxy
-		// stops asking — and a value the package chose would be one nobody
-		// chose, found the first time a sync service goes away. The Default
-		// constants beside them in electric are what these are.
-		InitialTimeout:   electric.DefaultInitialTimeout,
-		MaxSnapshotRows:  electric.DefaultMaxSnapshotRows,
-		SnapshotTimeout:  electric.DefaultSnapshotTimeout,
-		BreakerThreshold: electric.DefaultBreakerThreshold,
-		BreakerCooldown:  electric.DefaultBreakerCooldown,
-		// And what answers a shape when that sync service cannot be reached.
-		// One field, and every shape survives an outage on a snapshot of its
-		// own rows — the board, the trash, one row's history and the bell, each
-		// of which renders nothing without them.
-		//
-		// It is the same pool everything else here reads from, and it works
-		// because a shape is a SELECT: the filter the proxy sent upstream is
-		// the filter it runs here, so there is nothing to keep in step and no
-		// way for a scope to narrow the stream and not the snapshot. Presence
-		// is the one shape that stays a 502, and rig decided that rather than
-		// this file — a snapshot of who was here a moment ago that then stops
-		// updating is worth less than the empty room it already shows.
-		//
-		// The cost is in one place: every subscriber falls back at the same
-		// moment, so an outage is one read per shape per subscriber against the
-		// database the sync service was shielding. MaxSnapshotRows bounds each
-		// one and SnapshotTimeout bounds how long it may take.
-		DB: pool,
-		// Why the sync service was not the one that answered. There is no logger
-		// inside the proxy, on purpose, so this is the only way the reason for a
-		// 502 on a shape route reaches the log everything else writes to.
-		OnError: func(ctx context.Context, err error) {
-			log.ErrorContext(ctx, "live sync", slog.Any("error", err))
-		},
-		// And whether it is there at all, which is twice per outage rather than
-		// once per request: the line worth alerting on, where the errors above
-		// are one per subscriber and mostly repeat each other.
-		OnSyncState: func(ctx context.Context, reachable bool) {
-			if reachable {
-				log.InfoContext(ctx, "live sync is answering again")
-				return
-			}
-			log.WarnContext(ctx, "live sync is not answering; shapes with a fallback are serving snapshots")
-		},
-	})
-	if err != nil {
-		return api.Parts{}, err
+			// Nothing below has a default. Each governs what a subscriber sees
+			// while the sync service is away — how long it waits before that counts
+			// as an outage, how many rows a snapshot may hand it, when this proxy
+			// stops asking — and a value the package chose would be one nobody
+			// chose, found the first time a sync service goes away. The Default
+			// constants beside them in electric are what these are.
+			InitialTimeout:   electric.DefaultInitialTimeout,
+			MaxSnapshotRows:  electric.DefaultMaxSnapshotRows,
+			SnapshotTimeout:  electric.DefaultSnapshotTimeout,
+			BreakerThreshold: electric.DefaultBreakerThreshold,
+			BreakerCooldown:  electric.DefaultBreakerCooldown,
+			// And what answers a shape when that sync service cannot be reached.
+			// One field, and every shape survives an outage on a snapshot of its
+			// own rows — the board, the trash, one row's history and the bell, each
+			// of which renders nothing without them.
+			//
+			// It is the same pool everything else here reads from, and it works
+			// because a shape is a SELECT: the filter the proxy sent upstream is
+			// the filter it runs here, so there is nothing to keep in step and no
+			// way for a scope to narrow the stream and not the snapshot. Presence
+			// is the one shape that stays a 502, and rig decided that rather than
+			// this file — a snapshot of who was here a moment ago that then stops
+			// updating is worth less than the empty room it already shows.
+			//
+			// The cost is in one place: every subscriber falls back at the same
+			// moment, so an outage is one read per shape per subscriber against the
+			// database the sync service was shielding. MaxSnapshotRows bounds each
+			// one and SnapshotTimeout bounds how long it may take.
+			DB: pool,
+			// Why the sync service was not the one that answered. There is no logger
+			// inside the proxy, on purpose, so this is the only way the reason for a
+			// 502 on a shape route reaches the log everything else writes to.
+			OnError: func(ctx context.Context, err error) {
+				log.ErrorContext(ctx, "live sync", slog.Any("error", err))
+			},
+			// And whether it is there at all, which is twice per outage rather than
+			// once per request: the line worth alerting on, where the errors above
+			// are one per subscriber and mostly repeat each other.
+			OnSyncState: func(ctx context.Context, reachable bool) {
+				if reachable {
+					log.InfoContext(ctx, "live sync is answering again")
+					return
+				}
+				log.WarnContext(ctx, "live sync is not answering; shapes with a fallback are serving snapshots")
+			},
+		})
+		if err != nil {
+			return api.Parts{}, err
+		}
 	}
 	mux := api.Register(api.Handlers{
 		Server: api.Server{
@@ -245,7 +289,7 @@ func New(ctx context.Context, srv *serve.App, pool *pgxpool.Pool, log *slog.Logg
 		// every subscriber, so its shape is the one place where narrowing is
 		// what makes the feature affordable.
 		Shapes: api.Shapes{
-			App:      srv,
+			App:      cfg.App,
 			Proxy:    proxy,
 			Presence: rig_presence.Shape,
 		},
@@ -265,7 +309,7 @@ func New(ctx context.Context, srv *serve.App, pool *pgxpool.Pool, log *slog.Logg
 	// and the gap between the two is the thing worth seeing; the URL goes in
 	// because a container the kernel gave a port to comes back on a different
 	// one, and this is where the process was told which port to forward to.
-	registerDemo(mux, mail, page, front.Claims, senders, proxy, upstream)
+	registerDemo(mux, mail, page, front.Claims, senders, proxy, cfg.ElectricURL)
 
 	// The front end, same origin as everything above. web/dist is read from
 	// disk so `make examples` — which has Go and Docker and deliberately not
@@ -337,10 +381,11 @@ func autoInvite() func(context.Context, *account.Service, account.Registered) er
 // DispatchNotifications is the inbox's cron half, built from the same
 // constructor the server uses because the audience is a method on a service.
 func DispatchNotifications(ctx context.Context, pool *pgxpool.Pool) error {
-	// No App and no page: this is a cron entry. It mounts no routes, so there
-	// are no subscriptions to drain, and its sends land in its own outbox —
-	// which is exactly what a separately deployed dispatcher has.
-	parts, err := New(ctx, nil, pool, slog.Default(), nil)
+	// A pool and a logger, and deliberately nothing else: this is a cron entry.
+	// It mounts no routes, so there is no page to reach, no subscription to
+	// drain and no sync service to forward one to — and its sends land in its
+	// own outbox, which is exactly what a separately deployed dispatcher has.
+	parts, err := New(ctx, Config{Pool: pool, Logger: slog.Default()})
 	if err != nil {
 		return err
 	}

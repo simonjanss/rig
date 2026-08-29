@@ -30,7 +30,7 @@ func presenceResource(t *testing.T) *ir.Resource {
 // TestPresenceIsNotOwnerScoped is the hole this feature could most easily open,
 // and the reason it is a named test rather than a line in a golden file.
 //
-// On an owner-scoped table the electric generator emits
+// On an owner-scoped table server-go emits
 // `where.Eq(owner, claims.AccountID)` into the shape before any application scope
 // runs, and there is no `?scope=all` for a stream. So a presence table with an
 // owner would stream every subscriber nothing but themselves — presence that is

@@ -463,9 +463,9 @@ type Database struct {
 // DatabaseElectric is the sync service `rig db up` runs beside the database.
 //
 // It is a different thing from the per-table `electric:` key, which says a
-// table has live-sync shapes, and from the electric generator's `electric_url`
-// option, which says where the generated proxy forwards to — that URL should
-// agree with the port here.
+// table has live-sync shapes, and from server-go's `electric_url` option, which
+// says where the generated proxy forwards to — that URL should agree with the
+// port here.
 type DatabaseElectric struct {
 	Enabled       bool   `yaml:"enabled,omitempty" json:"enabled,omitempty" jsonschema_description:"Start an ElectricSQL container beside the throwaway database."`
 	Image         string `yaml:"image,omitempty" json:"image,omitempty" jsonschema_description:"Container image for the sync service."`

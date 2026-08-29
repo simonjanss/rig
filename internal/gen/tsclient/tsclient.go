@@ -167,8 +167,8 @@ func (g *Generator) Generate(
 		artifacts = append(artifacts, art)
 	}
 
-	// Nothing at all until a table opts in, which is the same promise the
-	// electric generator makes: leaving the block configured costs a project
+	// Nothing at all until a table opts in, which is the same promise server-go
+	// makes about the shape routes: leaving the block configured costs a project
 	// that streams nothing neither a file nor a dependency.
 	if streams := e.streamed(); len(streams) > 0 {
 		art, err := e.electricFile(streams)

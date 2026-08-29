@@ -700,8 +700,8 @@ func checkCustomEndpoints(doc *ir.Document, set *tableconf.Set) diag.List {
 					r.Name, len(r.Endpoints))
 			}
 			// A live-sync shape is deliberately not one of these, and the
-			// rule used to say it was. The electric generator mounts its own
-			// routes and has never consulted `expose`, so the shape is served
+			// rule used to say it was. A shape route is mounted from
+			// Handlers.Shapes and has never consulted `expose`, so it is served
 			// either way — and the combination is not a contradiction but a
 			// shape somebody wants: the inbox has no CRUD surface at all and
 			// goes live the moment a row commits. What `expose` decides is

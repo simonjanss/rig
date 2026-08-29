@@ -18,6 +18,7 @@ package integration
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"log/slog"
@@ -29,11 +30,23 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/simonjanss/rig/examples/linearlite/internal/api"
 	"github.com/simonjanss/rig/examples/linearlite/internal/app"
 	"github.com/simonjanss/rig/examples/linearlite/services/outbox"
 	"github.com/simonjanss/rig/notify"
 	"github.com/simonjanss/rig/runtime/serve"
 )
+
+// electricURL is where the servers this suite builds forward a subscription.
+//
+// The env var is this suite's knob, and the tests that care set it: one points
+// at a closed port to prove the fallback, another at a container it started.
+// `make examples` sets nothing, which is what makes the live half skip rather
+// than fail, and rig.yaml's default is then what a developer who ran `rig db
+// up` in this directory already has.
+func electricURL() string {
+	return cmp.Or(os.Getenv("ELECTRIC_URL"), api.DefaultElectricURL)
+}
 
 type server struct {
 	pool *pgxpool.Pool
@@ -74,7 +87,12 @@ func newServer(t *testing.T) *server {
 	// Everything else rig would put on one belongs to a process that is
 	// listening, and this one is not.
 	lifecycle := &serve.App{Pool: pool, Logger: slog.Default()}
-	parts, err := app.New(ctx, lifecycle, pool, slog.Default(), nil)
+	parts, err := app.New(ctx, app.Config{
+		Pool:        pool,
+		Logger:      slog.Default(),
+		App:         lifecycle,
+		ElectricURL: electricURL(),
+	})
 	if err != nil {
 		t.Fatal(err)
 	}

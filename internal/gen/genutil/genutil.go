@@ -249,8 +249,9 @@ func PointerTo(t string) string {
 // ExpandLayout fills the placeholders in a stub directory template — {table},
 // {Table}, {tables} — from the resource a stub is being written for.
 //
-// The service generator and the electric generator both write stubs into a
-// project's own tree, from the same `layout` settings, so the path one of them
+// service-go's service stub and server-go's shape scopes both go into a
+// project's own tree, from the same `layout` settings and — since the two now
+// share a `stub_dir` — usually into the same directory, so the path one of them
 // computes has to be the path the other would.
 func ExpandLayout(namer *naming.Namer, res *ir.Resource, tmpl string) string {
 	table := res.Storage.Table

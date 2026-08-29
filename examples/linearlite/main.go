@@ -39,7 +39,7 @@
 // Every route above is mounted by internal/app's New, which is a package
 // rather than a function here so that the suite in integration/ builds exactly
 // what ships. What is left in this file is the part of the process rig.yaml
-// does not already decide: the embedded migrations, the two addresses, and the
+// does not already decide: the embedded migrations, the three addresses, and the
 // three tasks that are this application's own.
 //
 // Everything else is api.Main, generated from the blocks that describe it. The
@@ -183,15 +183,28 @@ func main() {
 	}, func(ctx context.Context, srv *serve.App, page *observe.Page) (api.Parts, error) {
 		// The whole of what this application is, and the whole of what a main
 		// function still writes. What comes back is api.Parts: the routes, and
-		// the three things rig starts or shuts down on the other side of this
-		// call — the notification engine, the live subscriptions and the auth
-		// cache's invalidation channel. The trace flush and the presence sweeper
-		// need nothing from here, so they are not fields; api.Main registers the
-		// one and starts the other before this even runs.
+		// the two things rig starts or shuts down on the other side of this call
+		// — the notification engine and the auth cache's invalidation channel.
+		// The trace flush and the presence sweeper need nothing from here, so
+		// they are not fields; api.Main registers the one and starts the other
+		// before this even runs. The live subscriptions are not one either: the
+		// proxy is named in api.Handlers.Shapes, which mounts the shape routes
+		// and registers their drain in the same call.
 		//
-		// A pool and a logger rather than the App itself, because
-		// dispatch-notifications above builds the same graph from a task, where
-		// there is no App to build it from.
-		return app.New(ctx, srv, srv.Pool, srv.Logger, page)
+		// A struct rather than five arguments, because the other two callers of
+		// this constructor have less than all of it — dispatch-notifications
+		// above builds the same graph from a task, where there is no App, no
+		// page and no sync service to forward a subscription to.
+		return app.New(ctx, app.Config{
+			Pool:   srv.Pool,
+			Logger: srv.Logger,
+			App:    srv,
+			Page:   page,
+			// The third address this file decides, beside DatabaseURL and Addr
+			// above. rig.yaml names the one `rig db up` starts, which is the
+			// default a deployment overrides here rather than a value it is
+			// stuck with.
+			ElectricURL: cmp.Or(os.Getenv("ELECTRIC_URL"), api.DefaultElectricURL),
+		})
 	})
 }

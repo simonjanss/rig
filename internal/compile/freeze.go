@@ -205,8 +205,8 @@ func computeRoutes(doc *ir.Document) diag.List {
 	}
 
 	// A live-sync shape's route is expanded the same way and against the same
-	// base, because it is served by the same mux: the electric generator adds to
-	// the one api.Register makes. The second pass is what lets it be checked
+	// base, because it is served by the same mux: api.Register mounts the shape
+	// routes beside the REST ones. The second pass is what lets it be checked
 	// against every REST route rather than only the ones ahead of it.
 	//
 	// The check is the live shape's route alone. The trash and the history sit

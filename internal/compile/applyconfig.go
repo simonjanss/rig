@@ -946,8 +946,8 @@ func applyNotificationTable(res *ir.Resource, t *ir.Table, opt ConfigOptions) {
 // would take a body — and a body is somewhere to name an account that is not
 // yours.
 //
-// **The owner column stays nil, deliberately.** On an owner-scoped table the
-// electric generator emits `where.Eq(owner, claims.AccountID)` into the shape
+// **The owner column stays nil, deliberately.** On an owner-scoped table
+// server-go emits `where.Eq(owner, claims.AccountID)` into the shape handler
 // before any application scope runs, and there is no `?scope=all` for a stream.
 // Presence is the one resource where you read everybody's rows and write only
 // your own, so setting an owner here would stream each subscriber nothing but

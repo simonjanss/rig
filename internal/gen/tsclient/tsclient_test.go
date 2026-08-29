@@ -148,8 +148,8 @@ func TestTheHistoryStreamSplicesTheIdIntoTheRoute(t *testing.T) {
 }
 
 // Nothing is emitted for live sync until a table asks for it, which is the
-// promise the electric generator makes on the server side. It is what keeps the
-// streaming package out of a project that streams nothing.
+// promise server-go makes on the server side. It is what keeps the streaming
+// package out of a project that streams nothing.
 func TestNoStreamFileWithoutAStreamedTable(t *testing.T) {
 	t.Parallel()
 

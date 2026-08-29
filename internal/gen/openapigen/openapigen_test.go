@@ -658,7 +658,7 @@ func routesFor(ep *ir.Endpoint) []string {
 
 // TestAnUnexposedResourceStillStreams: a shape is its own read surface. The
 // notification recipient table has no endpoints and is not exposed, and the mux
-// still serves its shape route — electricgo gates only on the resource having
+// still serves its shape route — server-go gates only on the resource having
 // an Electric block — so a document that left it out would be describing fewer
 // routes than the server answers on.
 func TestAnUnexposedResourceStillStreams(t *testing.T) {

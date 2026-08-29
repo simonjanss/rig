@@ -272,14 +272,23 @@ and refuses a budget that cannot hold them with the parts named — so a literal
 left stale by a new block is a process that will not start and says why. A wrong
 number that fails loudly at boot is worth more than a right one nobody can read.
 
-`api.Parts` is what `app.New` returns, and its four fields are the whole of what
-outlives a request here: the handler, the engine, the shape proxy and the auth
-foundation. `Shapes` is the one that used to be easy to leave out and worst to.
-A live subscription is a request the server is deliberately not answering yet, so
+`api.Parts` is what `app.New` returns, and its three fields are the whole of what
+outlives a request here: the handler, the engine and the auth foundation. The
+live subscriptions are the one that is not a field, and that is the point of
+where they went instead — `api.Shapes` on the `Handlers` literal mounts the shape
+routes and registers their drain in the same call, so the proxy is named once
+rather than once to serve it and once so the shutdown would know. A live
+subscription is a request the server is deliberately not answering yet, so
 `http.Server.Shutdown` waits for it and nothing else can end it: one open board
 would otherwise spend the entire budget, and the three steps after it would each
-find a deadline that had already passed. It is a field rather than a call now,
-and a nil one is a line at startup.
+find a deadline that had already passed.
+
+`app.Config` is the other side of that call, and it is why the constructor takes
+a struct: the server fills all of it, `dispatch-notifications` fills a pool and a
+logger, and `integration/` fills those plus an `App` whose ending it runs itself.
+`ElectricURL` is a field there rather than an `os.Getenv` inside `New`, so the
+sync service is decided in `main.go` beside `DatabaseURL` and `Addr` — and an
+empty one builds no proxy, which is what the cron entry wants.
 
 `tracing:` and `monitoring:` are on, which is why `api.Main` builds a process at
 all: the log sink, the provider and the page have to exist before the
@@ -290,10 +299,10 @@ value across both ends of it. `Configure` fills `Monitor`, `MonitorAddr` and
 `OnExit`; `Process.Mount` registers the flush and says which half of the page is
 unarmed; `OnExit` is `Process.Close`, the same flush for the path a `Tasks:`
 entry takes, which never reaches the closure at all — and for the three paths
-that end in `os.Exit`, where a `defer` would not have run. `app.New` still
-takes a `*observe.Page` — the one `api.Main` hands the build function — but only
-so `/_demo/tour` can say where the page is; nil from a task, since a cron entry
-serving a page nobody can reach is not worth the wiring. The password and the two
+that end in `os.Exit`, where a `defer` would not have run. `app.Config` still
+carries a `*observe.Page` — the one `api.Main` hands the build function — but
+only so `/_demo/tour` can say where the page is; nil from a task, since a cron
+entry serving a page nobody can reach is not worth the wiring. The password and the two
 file paths are set by `make demo` into a gitignored `.run/`, never by rig.yaml,
 which is checked in — the address is the one part of it that *is* in rig.yaml,
 because who can reach the page is a decision worth reading off the file.
