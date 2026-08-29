@@ -182,11 +182,18 @@ that will not finish spends what is left over and not their share of it —
 `serve.App` adds the parts up before the server listens and refuses a
 `MaxShutdown` that cannot hold them.
 
-A project with live sync has one more field, because a subscription is a request
-the server is deliberately not answering yet and nothing else can end it:
+A project with live sync ends its subscriptions in that same sequence, because
+a subscription is a request the server is deliberately not answering yet and
+nothing else can end it. It is not a `Parts` field: the proxy is named in
+`Handlers.Shapes`, which mounts the shape routes and registers their drain in
+one call.
 
 ```go
-return api.Parts{Handler: mux, Shapes: proxy}, nil
+mux := api.Register(api.Handlers{
+	Server: api.Server{Auth: front, DB: pool, Logger: log},
+	Todo:   todos,
+	Shapes: api.Shapes{App: app, Proxy: proxy},
+})
 ```
 
 See [electric.md](electric.md) for what a drained proxy tells a subscriber.

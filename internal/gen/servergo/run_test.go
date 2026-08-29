@@ -26,7 +26,6 @@ func TestTheSequenceIsGeneratedInOrder(t *testing.T) {
 	steps := []string{
 		"StartPresenceSweeper(app)",
 		"parts, err := build(ctx, app)",
-		"AttachShapes(app, parts.Shapes)",
 		"return parts.Handler, nil",
 	}
 	at := -1
@@ -72,7 +71,7 @@ func TestANilOptionalPartIsSaidRatherThanRefused(t *testing.T) {
 	doc := gentest.LoadDocument(t, filepath.Join("testdata", "notify.ir.json"))
 	src := artifactNamed(t, gentest.Run(t, servergo.New(), doc, opts()), "run.gen.go")
 
-	for _, field := range []string{"Engine", "Shapes", "Auth"} {
+	for _, field := range []string{"Engine", "Auth"} {
 		if strings.Contains(src, "Parts."+field+" is nil") {
 			t.Errorf("Parts.%s is refused rather than reported", field)
 		}
@@ -82,7 +81,6 @@ func TestANilOptionalPartIsSaidRatherThanRefused(t *testing.T) {
 	}
 	for _, said := range []string{
 		`"no notification engine in this server"`,
-		`"no live-sync proxy to drain"`,
 		`"no auth foundation to close"`,
 	} {
 		if !strings.Contains(src, said) {
@@ -108,7 +106,7 @@ func TestPartsHasAFieldPerBlock(t *testing.T) {
 			return doc
 		}(), opts()), "run.gen.go")
 
-	for _, absent := range []string{"Engine *notify.Engine", "Shapes *electric.Proxy", "Auth *auth.Auth"} {
+	for _, absent := range []string{"Engine *notify.Engine", "Auth *auth.Auth"} {
 		if strings.Contains(bare, absent) {
 			t.Errorf("a project with none of those blocks got %q", absent)
 		}
@@ -119,10 +117,18 @@ func TestPartsHasAFieldPerBlock(t *testing.T) {
 
 	full := artifactNamed(t, gentest.Run(t, servergo.New(),
 		gentest.LoadDocument(t, filepath.Join("testdata", "notify.ir.json")), opts()), "run.gen.go")
-	for _, want := range []string{"Engine *notify.Engine", "Shapes *electric.Proxy", "Auth *auth.Auth"} {
+	for _, want := range []string{"Engine *notify.Engine", "Auth *auth.Auth"} {
 		if !strings.Contains(full, want) {
 			t.Errorf("a project with the block got no field: no %q", want)
 		}
+	}
+
+	// The live-sync proxy is deliberately not one of them. It is named where it
+	// is used — Handlers.Shapes, which mounts the routes and registers their
+	// drain in one place — rather than travelling back here as a second thing
+	// to remember about the same object.
+	if strings.Contains(full, "Shapes *electric.Proxy") {
+		t.Error("the proxy should be wired through Handlers.Shapes, not Parts")
 	}
 }
 

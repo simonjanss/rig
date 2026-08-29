@@ -2,7 +2,7 @@
 //
 // This file is rewritten on every run. Put changes in the service layer.
 
-package electric
+package api
 
 import (
 	"context"
@@ -45,13 +45,26 @@ type NotificationRecipientScope func(ctx context.Context, r *http.Request, claim
 
 // handleNotificationRecipientShape serves GET
 // /api/v1/rig_notification_recipient/_stream.
-func handleNotificationRecipientShape(s Server, scope NotificationRecipientScope) http.HandlerFunc {
+func handleNotificationRecipientShape(s Server, sh Shapes) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		claims, where, ok := prepare(s, w, r, false)
+		ctx, claims, rc, ok := prepare(s, w, r)
 		if !ok {
 			return
 		}
 
+		// A credential that names no tenant is refused here or not at all. Every other
+		// route ends at a repository, where tenancy.FromContext refuses one a second
+		// time; a subscription ends at the sync service, so this is the only place
+		// that asks. A GetClaims that answers with an empty tenant rather than an
+		// error would otherwise reach a table with no tenant column and stream all of
+		// it.
+		if !claims.Valid() {
+			fail(s, w, r, rc, rigerr.Unauthorized("this request is not authenticated"))
+			return
+		}
+
+		// The filter, built here and never from anything a client sent.
+		where := &electric.Where{}
 		// Every row this shape can ever carry belongs to the caller's tenant. It is
 		// the first condition, and nothing below can remove it.
 		where.Eq("tenant_id", claims.TenantID.String())
@@ -65,7 +78,7 @@ func handleNotificationRecipientShape(s Server, scope NotificationRecipientScope
 		// subscriber handed an empty stream cannot tell it from having nothing to
 		// receive.
 		if claims.AccountID == uuid.Nil {
-			fail(s, w, r, rigerr.Forbidden("this shape is scoped to one account, and this credential is not one"))
+			fail(s, w, r, rc, rigerr.Forbidden("this shape is scoped to one account, and this credential is not one"))
 			return
 		}
 		where.Eq("account_id", claims.AccountID.String())
@@ -75,18 +88,18 @@ func handleNotificationRecipientShape(s Server, scope NotificationRecipientScope
 
 		params, err := parseNotificationRecipientShapeParams(r)
 		if err != nil {
-			fail(s, w, r, err)
+			fail(s, w, r, rc, err)
 			return
 		}
 
-		if scope != nil {
-			if err := scope(r.Context(), r, claims, params, where); err != nil {
-				fail(s, w, r, err)
+		if sh.NotificationRecipient != nil {
+			if err := sh.NotificationRecipient(ctx, r, claims, params, where); err != nil {
+				fail(s, w, r, rc, err)
 				return
 			}
 		}
 
-		s.Proxy.Serve(w, r, electric.Shape{
+		sh.Proxy.Serve(w, r, electric.Shape{
 			Table:  "rig_notification_recipient",
 			Where:  where.SQL(),
 			Params: where.Params(),
@@ -119,13 +132,26 @@ type NotificationRecipientDeletedScope func(ctx context.Context, r *http.Request
 
 // handleNotificationRecipientDeletedShape serves GET
 // /api/v1/rig_notification_recipient/_deleted/_stream.
-func handleNotificationRecipientDeletedShape(s Server, scope NotificationRecipientDeletedScope) http.HandlerFunc {
+func handleNotificationRecipientDeletedShape(s Server, sh Shapes) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		claims, where, ok := prepare(s, w, r, false)
+		ctx, claims, rc, ok := prepare(s, w, r)
 		if !ok {
 			return
 		}
 
+		// A credential that names no tenant is refused here or not at all. Every other
+		// route ends at a repository, where tenancy.FromContext refuses one a second
+		// time; a subscription ends at the sync service, so this is the only place
+		// that asks. A GetClaims that answers with an empty tenant rather than an
+		// error would otherwise reach a table with no tenant column and stream all of
+		// it.
+		if !claims.Valid() {
+			fail(s, w, r, rc, rigerr.Unauthorized("this request is not authenticated"))
+			return
+		}
+
+		// The filter, built here and never from anything a client sent.
+		where := &electric.Where{}
 		// Every row this shape can ever carry belongs to the caller's tenant. It is
 		// the first condition, and nothing below can remove it.
 		where.Eq("tenant_id", claims.TenantID.String())
@@ -139,7 +165,7 @@ func handleNotificationRecipientDeletedShape(s Server, scope NotificationRecipie
 		// subscriber handed an empty stream cannot tell it from having nothing to
 		// receive.
 		if claims.AccountID == uuid.Nil {
-			fail(s, w, r, rigerr.Forbidden("this shape is scoped to one account, and this credential is not one"))
+			fail(s, w, r, rc, rigerr.Forbidden("this shape is scoped to one account, and this credential is not one"))
 			return
 		}
 		where.Eq("account_id", claims.AccountID.String())
@@ -150,18 +176,18 @@ func handleNotificationRecipientDeletedShape(s Server, scope NotificationRecipie
 
 		params, err := parseNotificationRecipientShapeParams(r)
 		if err != nil {
-			fail(s, w, r, err)
+			fail(s, w, r, rc, err)
 			return
 		}
 
-		if scope != nil {
-			if err := scope(r.Context(), r, claims, params, where); err != nil {
-				fail(s, w, r, err)
+		if sh.NotificationRecipientDeleted != nil {
+			if err := sh.NotificationRecipientDeleted(ctx, r, claims, params, where); err != nil {
+				fail(s, w, r, rc, err)
 				return
 			}
 		}
 
-		s.Proxy.Serve(w, r, electric.Shape{
+		sh.Proxy.Serve(w, r, electric.Shape{
 			Table:  "rig_notification_recipient",
 			Where:  where.SQL(),
 			Params: where.Params(),

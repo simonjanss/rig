@@ -246,8 +246,8 @@ the authentication trail, and switching tenants. Those calls are hand-written in
 schema's — the generated client covers the API and stops at `/auth`.
 
 `presence:` is on with nothing but `enabled`, which is why there are two
-lines for it — `Presence` on `api.Handlers` and `RigPresence` on
-`genelectric.Handlers`, both in `internal/app`. The sweeper is `api.Main`'s: it
+lines for it — `Presence` on `api.Handlers` and `Presence` on the
+`api.Shapes` beside it, both in the one `api.Register` call in `internal/app`. The sweeper is `api.Main`'s: it
 runs before this application's wiring, because the service it sweeps through is
 its own over `app.Pool`.
 

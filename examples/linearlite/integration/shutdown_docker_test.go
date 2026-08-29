@@ -86,7 +86,7 @@ func TestTheServerStopsWithASubscriptionOpen(t *testing.T) {
 			// under test here is the order that ships rather than one written
 			// out again beside it. No page, the way a task has none.
 			handler, err := api.Mount(func(c context.Context, srv *serve.App, _ *observe.Page) (api.Parts, error) {
-				return app.New(c, srv.Pool, srv.Logger, nil)
+				return app.New(c, srv, srv.Pool, srv.Logger, nil)
 			})(c, srv)
 			if err != nil {
 				return nil, err

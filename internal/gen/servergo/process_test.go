@@ -148,8 +148,10 @@ func TestTheShapeDrainIsRegisteredWithTheNumberTheBudgetCounts(t *testing.T) {
 	doc := gentest.LoadDocument(t, filepath.Join("testdata", fixture))
 	artifacts := gentest.Run(t, servergo.New(), doc, opts())
 
-	if want := `app.DrainWithin("shapes", shapesShutdown, proxy.Drain)`; !strings.Contains(
-		artifactNamed(t, artifacts, "electric.gen.go"), want) {
+	// In Register, beside the routes it is the ending of, rather than in a
+	// second call an application makes with the same proxy.
+	if want := `h.Shapes.App.DrainWithin("shapes", shapesShutdown, h.Shapes.Proxy.Drain)`; !strings.Contains(
+		artifactNamed(t, artifacts, "server.gen.go"), want) {
 		t.Errorf("the shape drain is not registered as %s", want)
 	}
 	if body := artifactNamed(t, artifacts, "process.gen.go"); !strings.Contains(body, "shapesShutdown = 5 * time.Second") {

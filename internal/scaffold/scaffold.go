@@ -107,15 +107,20 @@ func rigYAML(opt ProjectOptions) string {
 	return b.String()
 }
 
-// generatorsYAML wires up the three Go layers, and the two things written from
-// the same document beside them.
+// generatorsYAML wires up the three Go layers, and the document written from
+// the same compiled schema beside them.
 //
 // The three layers are configured together because they only work together: the
 // API layer calls the repository and the HTTP layer calls the API layer, so a
 // project with one of the three is a project that does not build. The OpenAPI
-// document and the live-sync endpoints are configured beside them because both
-// are free — one writes nothing until a table asks for it, and the other
-// describes whatever the layers above turned out to be.
+// document is configured beside them because it is free — it describes whatever
+// the layers above turned out to be.
+//
+// Live sync has no block of its own. It used to, and what that bought was a
+// second package with a second server in it, whose claims lookup and error
+// writer an application had to remember to fill in twice. The shape endpoints
+// are server-go's now: a table asks for one with `electric: {enabled: true}`
+// and the routes appear beside the rest of its API.
 func generatorsYAML(module string) string {
 	var b strings.Builder
 	b.WriteString("generators:\n")
@@ -143,12 +148,24 @@ func generatorsYAML(module string) string {
 	fmt.Fprintf(&b, "      api_import: %s/internal/api\n", module)
 	b.WriteString("      # Where your service layer goes. Written once, then yours.\n")
 	b.WriteString("      stub_dir: services/{table}\n\n")
-	b.WriteString("  # Routing and handlers.\n")
+	b.WriteString("  # Routing and handlers, and the live-sync shape endpoints beside\n")
+	b.WriteString("  # them. A table gets a stream with `electric: {enabled: true}`;\n")
+	b.WriteString("  # until one asks, none of the shape options below writes anything.\n")
 	b.WriteString("  - name: server-go\n")
 	b.WriteString("    out_dir: internal/api\n")
 	b.WriteString("    options:\n")
 	b.WriteString("      package: api\n")
-	fmt.Fprintf(&b, "      model_import: %s/internal/model\n\n", module)
+	fmt.Fprintf(&b, "      model_import: %s/internal/model\n", module)
+	fmt.Fprintf(&b, "      api_import: %s/internal/api\n", module)
+	b.WriteString("      electric_url: http://localhost:3000\n")
+	b.WriteString("      # Where your extra shape scoping goes, beside the service layer\n")
+	b.WriteString("      # for the same table. Written once, then yours.\n")
+	b.WriteString("      stub_dir: services/{table}\n")
+	b.WriteString("      # Nothing here decides what happens when the sync service is\n")
+	b.WriteString("      # unreachable. Pass DB to electric.Config where you build the\n")
+	b.WriteString("      # proxy and every shape answers from its own filter instead of\n")
+	b.WriteString("      # 502; leave it out and a sync outage is a subscriber with no\n")
+	b.WriteString("      # rows. See docs/electric.md.\n\n")
 	b.WriteString("  # The OpenAPI document. It describes exactly the endpoints above,\n")
 	b.WriteString("  # because it is written from the same compiled document they are.\n")
 	b.WriteString("  - name: openapi\n")
@@ -157,23 +174,7 @@ func generatorsYAML(module string) string {
 	b.WriteString("      formats: [json, yaml]\n")
 	b.WriteString("      # Name the deployment to make the document usable in a viewer.\n")
 	b.WriteString("      # Leave it out for anything that runs in more than one place.\n")
-	b.WriteString("      # servers: [\"https://api.example.com\"]\n\n")
-	b.WriteString("  # Live-sync shape endpoints. It writes nothing until a table asks\n")
-	b.WriteString("  # for one with `electric: {enabled: true}`, so leaving it here costs\n")
-	b.WriteString("  # nothing and turning it on is one line in a table's configuration.\n")
-	b.WriteString("  - name: electric\n")
-	b.WriteString("    out_dir: internal/electric\n")
-	b.WriteString("    options:\n")
-	b.WriteString("      package: electric\n")
-	b.WriteString("      electric_url: http://localhost:3000\n")
-	fmt.Fprintf(&b, "      shape_import: %s/internal/electric\n", module)
-	b.WriteString("      # Where your extra scoping goes. Written once, then yours.\n")
-	b.WriteString("      stub_dir: services/{table}\n")
-	b.WriteString("      # Nothing here decides what happens when the sync service is\n")
-	b.WriteString("      # unreachable. Pass DB to electric.Config where you build the\n")
-	b.WriteString("      # proxy and every shape answers from its own filter instead of\n")
-	b.WriteString("      # 502; leave it out and a sync outage is a subscriber with no\n")
-	b.WriteString("      # rows. See docs/electric.md.\n")
+	b.WriteString("      # servers: [\"https://api.example.com\"]\n")
 	return b.String()
 }
 

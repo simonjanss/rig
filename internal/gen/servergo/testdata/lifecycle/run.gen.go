@@ -11,24 +11,17 @@ import (
 	"net/http"
 	"os"
 
-	"github.com/simonjanss/rig/runtime/electric"
 	"github.com/simonjanss/rig/runtime/serve"
 )
 
 // Parts is what this application's own wiring built, as far as the process
-// around it has to care: the routes to serve, and the live subscriptions —
-// the things whose lifetime is longer than a request's.
+// around it has to care: the routes to serve.
 //
-// Every field beside the handler is something rig starts, drains or closes on
-// the other side of the one call that returns this, and each used to be a line
-// in a main function — with no compiler, no test and usually no symptom
-// until a deploy under load. Naming them here is what makes them slots to fill
-// rather than calls to remember, and what makes turning a block on in rig.yaml
-// show up as a field in the one function that has to know about it.
-//
-// Handler is required. The rest may be nil, because rig cannot tell a project
-// that meant it from one that forgot. What a nil one gets instead is a line at
-// startup naming what is not running and what that costs.
+// One field, because this project's configuration gives the server nothing
+// whose lifetime outlasts a request. Turning a block on in rig.yaml adds one
+// — something rig starts, drains or closes on the other side of the one call
+// that returns this, and something that used to be a line in a main function
+// with no compiler, no test and usually no symptom until a deploy under load.
 type Parts struct {
 	// Handler is every route this server answers: the generated API, and anything
 	// else this application mounts beside it.
@@ -38,14 +31,6 @@ type Parts struct {
 	// middleware of your own. rig answers the two probes outside whatever this is,
 	// so a readiness check every second is not a request through all of it.
 	Handler http.Handler
-
-	// Shapes is the live-sync proxy the generated shape routes forward through.
-	//
-	// It is here for its ending rather than its beginning — nothing starts,
-	// since a shape route runs when a browser asks — and that ending is the one
-	// in this struct that is not a courtesy. [AttachShapes] says what an undrained
-	// subscription costs.
-	Shapes *electric.Proxy
 }
 
 // Build is this application's own wiring: everything the server is made of,
@@ -87,15 +72,6 @@ func Mount(build Build) serve.Mount {
 
 		if parts.Handler == nil {
 			return nil, errors.New("api: Parts.Handler is nil: there is nothing to serve")
-		}
-
-		if parts.Shapes != nil {
-			AttachShapes(app, parts.Shapes)
-		} else {
-			// Said rather than left to be discovered. Leaving it out is allowed — rig
-			// cannot tell a project that meant it from one that forgot — so what it can
-			// do is say so once, while it is still cheap to fix.
-			app.Logger.InfoContext(ctx, "no live-sync proxy to drain", "cost", "a shape route mounted on this server holds an open subscription until the shutdown budget runs out")
 		}
 
 		return parts.Handler, nil

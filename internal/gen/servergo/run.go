@@ -84,24 +84,6 @@ func (e *emitter) parts() []part {
 		})
 	}
 
-	if e.hasShapes() {
-		list = append(list, part{
-			field: "Shapes",
-			noun:  "the live subscriptions",
-			typ:   func(b *gobuf.Buf) string { return "*" + b.Import(electricModule) + ".Proxy" },
-			doc: "Shapes is the live-sync proxy the generated shape routes forward " +
-				"through.\n\n" +
-				"It is here for its ending rather than its beginning — nothing " +
-				"starts, since a shape route runs when a browser asks — and that " +
-				"ending is the one in this struct that is not a courtesy. " +
-				"[AttachShapes] says what an undrained subscription costs.",
-			said: "no live-sync proxy to drain",
-			cost: "a shape route mounted on this server holds an open " +
-				"subscription until the shutdown budget runs out",
-			attach: func(b *gobuf.Buf) string { return "AttachShapes(app, parts.Shapes)" },
-		})
-	}
-
 	if e.hasAuth() {
 		list = append(list, part{
 			field: "Auth",
@@ -130,7 +112,7 @@ func (e *emitter) parts() []part {
 // shutdown each of them registers.
 //
 // Everything in it was already generated one call at a time — StartPresenceSweeper,
-// StartNotificationEngine, AttachShapes, the Process. What was not, and what this
+// StartNotificationEngine, the Process. What was not, and what this
 // file is, is the order between them. It lived in a main function for one reason:
 // the calls need what the application built, the application's package imports
 // this one, and a generated file cannot import its way back. Naming the struct

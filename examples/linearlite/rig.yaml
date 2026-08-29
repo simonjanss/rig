@@ -204,6 +204,15 @@ generators:
     options:
       package: api
       model_import: github.com/simonjanss/rig/examples/linearlite/internal/model
+      api_import: github.com/simonjanss/rig/examples/linearlite/internal/api
+      # Live sync. A table asks for a stream with `electric: {enabled: true}`,
+      # and the routes are mounted beside the rest of its API — same mux, same
+      # claims lookup, same error mapper. Until one asks, none of this writes
+      # anything.
+      electric_url: http://localhost:55445
+      # Where your extra shape scoping goes, beside the service layer for the
+      # same table. Written once, then yours.
+      stub_dir: services/{table}
 
   # A typed Go client for this API. import/ is the consumer: a batch job
   # that signs in with a personal API key and creates a todo per CSV row.
@@ -229,15 +238,3 @@ generators:
     out_dir: docs
     options:
       formats: [json, yaml]
-
-  # Live-sync shape endpoints, proxying the Electric container `rig db up`
-  # runs. The URL agrees with database.electric.port above; main.go lets
-  # $ELECTRIC_URL override it for a deployment.
-  - name: electric
-    out_dir: internal/electric
-    options:
-      package: electric
-      electric_url: http://localhost:55445
-      shape_import: github.com/simonjanss/rig/examples/linearlite/internal/electric
-      # Where your extra scoping goes. Written once, then yours.
-      stub_dir: services/{table}

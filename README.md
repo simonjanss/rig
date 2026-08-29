@@ -35,8 +35,7 @@ rig generate   # 4. compile to one IR, fan out to generators
 | `model-go` | the shared entity, its enums, its query types, and its inputs |
 | `persist-go` | the repository interface and its pgx implementation |
 | `service-go` | API types, service interfaces, and a working default implementation |
-| `server-go` | net/http routing, request decoding, the handler registration struct, and the delete propagation |
-| `electric` | live-sync shape endpoints, with the tenant and lifecycle filters built in |
+| `server-go` | net/http routing, request decoding, the handler registration struct, the live-sync shape endpoints with their tenant and lifecycle filters built in, and the delete propagation |
 | `openapi` | an OpenAPI 3.1 document: every endpoint, schema and status the API answers with |
 | `go-client` | a typed Go client: the wire types and one method per endpoint |
 | `ts-client` | a typed TypeScript client: the wire types, one method per endpoint, and the live-sync collections |

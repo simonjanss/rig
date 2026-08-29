@@ -129,6 +129,15 @@ generators:
     options:
       package: api
       model_import: github.com/simonjanss/rig/examples/auth_oauth/internal/model
+      api_import: github.com/simonjanss/rig/examples/auth_oauth/internal/api
+      # Live sync. A table asks for a stream with `electric: {enabled: true}`,
+      # and the routes are mounted beside the rest of its API — same mux, same
+      # claims lookup, same error mapper. Until one asks, none of this writes
+      # anything.
+      electric_url: http://localhost:3000
+      # Where your extra shape scoping goes, beside the service layer for the
+      # same table. Written once, then yours.
+      stub_dir: services/{table}
 
   # The OpenAPI document, written from the same compiled document the routes
   # above are, so it cannot describe an endpoint that does not exist.
@@ -136,15 +145,3 @@ generators:
     out_dir: docs
     options:
       formats: [json, yaml]
-
-  # Live-sync shape endpoints. It writes nothing until a table asks
-  # for one with `electric: {enabled: true}`, so leaving it here costs
-  # nothing and turning it on is one line in a table's configuration.
-  - name: electric
-    out_dir: internal/electric
-    options:
-      package: electric
-      electric_url: http://localhost:3000
-      shape_import: github.com/simonjanss/rig/examples/auth_oauth/internal/electric
-      # Where your extra scoping goes. Written once, then yours.
-      stub_dir: services/{table}

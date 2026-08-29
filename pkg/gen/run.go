@@ -26,6 +26,20 @@ type Result struct {
 	Artifacts []Artifact
 }
 
+// Retired names a generator that used to exist, and says what to do instead.
+//
+// A configuration is a file somebody wrote by hand and does not reread, so a
+// generator that goes away has to answer for itself once. Without this the
+// message is "no generator named electric", which is true and tells a reader
+// nothing about where their shape endpoints went.
+var Retired = map[string]string{
+	"electric": "live-sync shapes are written by server-go now, into the API " +
+		"package beside the routes they answer next to. Delete this block and move " +
+		"its `electric_url` and `stub_dir` options onto server-go, adding " +
+		"`api_import` with the same value service-go has. The `shape_import` " +
+		"option is gone: a scoping stub names the API package it is already beside.",
+}
+
 // Run executes the requested generators against a document.
 //
 // A document that failed validation is refused outright. Generating from a
@@ -40,6 +54,9 @@ func Run(ctx context.Context, r *Registry, doc *ir.Document, root string, specs 
 	for _, spec := range specs {
 		g, ok := r.Get(spec.Name)
 		if !ok {
+			if why, retired := Retired[spec.Name]; retired {
+				return nil, fmt.Errorf("the %q generator no longer exists: %s", spec.Name, why)
+			}
 			return nil, fmt.Errorf("no generator named %q; `rig generators` lists the ones there are", spec.Name)
 		}
 

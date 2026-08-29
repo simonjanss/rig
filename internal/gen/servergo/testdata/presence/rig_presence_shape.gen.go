@@ -2,7 +2,7 @@
 //
 // This file is rewritten on every run. Put changes in the service layer.
 
-package electric
+package api
 
 import (
 	"context"
@@ -11,15 +11,16 @@ import (
 	"github.com/google/uuid"
 	"github.com/simonjanss/rig/runtime/electric"
 	"github.com/simonjanss/rig/runtime/httpx"
+	"github.com/simonjanss/rig/runtime/rigerr"
 	"github.com/simonjanss/rig/runtime/tenancy"
 )
 
-// PresenceShapeParams are the query parameters this shape accepts.
+// RigPresenceShapeParams are the query parameters this shape accepts.
 //
 // They are the application's, not the protocol's: a subscriber uses them to
 // ask for less, and the scoping function turns them into conditions. Nothing
 // here can ask for more.
-type PresenceShapeParams struct {
+type RigPresenceShapeParams struct {
 	// Only presence in this part of the application.
 	Scope string
 	// HasScope reports whether it was given, so a zero value can be told from an
@@ -33,9 +34,9 @@ type PresenceShapeParams struct {
 	HasTargetID bool
 }
 
-// parsePresenceShapeParams reads the declared parameters.
-func parsePresenceShapeParams(r *http.Request) (PresenceShapeParams, error) {
-	var p PresenceShapeParams
+// parseRigPresenceShapeParams reads the declared parameters.
+func parseRigPresenceShapeParams(r *http.Request) (RigPresenceShapeParams, error) {
+	var p RigPresenceShapeParams
 
 	if raw, ok := httpx.QueryOptional(r, "scope"); ok {
 		p.Scope = raw
@@ -54,7 +55,7 @@ func parsePresenceShapeParams(r *http.Request) (PresenceShapeParams, error) {
 	return p, nil
 }
 
-// PresenceScope narrows the shape further.
+// RigPresenceScope narrows the shape further.
 //
 // It receives a filter that already carries the tenant and lifecycle
 // conditions, and can only add to it — every condition is joined with AND,
@@ -64,48 +65,61 @@ func parsePresenceShapeParams(r *http.Request) (PresenceShapeParams, error) {
 // injection point with a streaming response attached.
 //
 // Returning an error refuses the subscription.
-type PresenceScope func(ctx context.Context, r *http.Request, claims tenancy.Claims, p PresenceShapeParams, w *electric.Where) error
+type RigPresenceScope func(ctx context.Context, r *http.Request, claims tenancy.Claims, p RigPresenceShapeParams, w *electric.Where) error
 
-// handlePresenceShape serves GET /api/v1/rig_presence/_stream.
-func handlePresenceShape(s Server, scope PresenceScope) http.HandlerFunc {
+// handleRigPresenceShape serves GET /api/v1/rig_presence/_stream.
+func handleRigPresenceShape(s Server, sh Shapes) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		claims, where, ok := prepare(s, w, r, false)
+		ctx, claims, rc, ok := prepare(s, w, r)
 		if !ok {
 			return
 		}
 
+		// A credential that names no tenant is refused here or not at all. Every other
+		// route ends at a repository, where tenancy.FromContext refuses one a second
+		// time; a subscription ends at the sync service, so this is the only place
+		// that asks. A GetClaims that answers with an empty tenant rather than an
+		// error would otherwise reach a table with no tenant column and stream all of
+		// it.
+		if !claims.Valid() {
+			fail(s, w, r, rc, rigerr.Unauthorized("this request is not authenticated"))
+			return
+		}
+
+		// The filter, built here and never from anything a client sent.
+		where := &electric.Where{}
 		// Every row this shape can ever carry belongs to the caller's tenant. It is
 		// the first condition, and nothing below can remove it.
 		where.Eq("tenant_id", claims.TenantID.String())
 
-		params, err := parsePresenceShapeParams(r)
+		params, err := parseRigPresenceShapeParams(r)
 		if err != nil {
-			fail(s, w, r, err)
+			fail(s, w, r, rc, err)
 			return
 		}
 
-		if scope != nil {
-			if err := scope(r.Context(), r, claims, params, where); err != nil {
-				fail(s, w, r, err)
+		if sh.RigPresence != nil {
+			if err := sh.RigPresence(ctx, r, claims, params, where); err != nil {
+				fail(s, w, r, rc, err)
 				return
 			}
 		}
 
-		s.Proxy.Serve(w, r, electric.Shape{
+		sh.Proxy.Serve(w, r, electric.Shape{
 			Table:  "rig_presence",
 			Where:  where.SQL(),
 			Params: where.Params(),
 			// The readable columns, named rather than left to default. A shape carries
 			// every column it names to every subscriber, and a column that is not in the
 			// API has no business in a live stream either.
-			Columns: PresenceShapeColumns,
+			Columns: RigPresenceShapeColumns,
 			// What the proxy needs to answer this shape itself while the sync service
 			// cannot be reached: the columns that name a row, and the types a subscriber
 			// reads them with. The filter above is the rest of it, which is the whole
 			// point — the read is this shape's own predicate, so there is nothing to
 			// write per shape and nothing that could narrow differently.
-			Key:    PresenceShapeKey,
-			Schema: PresenceShapeSchema,
+			Key:    RigPresenceShapeKey,
+			Schema: RigPresenceShapeSchema,
 			// This table asked not to be answered that way. A shape whose value is its
 			// freshness is worth less as a snapshot that stopped updating than as the
 			// empty list a refusal leaves.
@@ -114,12 +128,12 @@ func handlePresenceShape(s Server, scope PresenceScope) http.HandlerFunc {
 	}
 }
 
-// PresenceShapeColumns are the columns this shape carries.
+// RigPresenceShapeColumns are the columns this shape carries.
 //
 // They are the resource's readable fields — the same set a GET returns —
 // so a column excluded from the API is excluded here without anybody having to
 // remember.
-var PresenceShapeColumns = []string{
+var RigPresenceShapeColumns = []string{
 	"id",
 	"tenant_id",
 	"account_id",
@@ -131,17 +145,18 @@ var PresenceShapeColumns = []string{
 	"target_id",
 	"target_field",
 	"activity",
+	"state",
 }
 
-// PresenceShapeKey are the columns that identify a row of this shape.
+// RigPresenceShapeKey are the columns that identify a row of this shape.
 //
 // The table's primary key, in the order the table declares it. A snapshot
 // names each row by it, the way the sync service does.
-var PresenceShapeKey = []string{
+var RigPresenceShapeKey = []string{
 	"id",
 }
 
-// PresenceShapeSchema describes the columns this shape carries, in the form
+// RigPresenceShapeSchema describes the columns this shape carries, in the form
 // the sync service describes them.
 //
 // It is sent with a fallback snapshot and is how a subscriber knows to read a
@@ -149,4 +164,4 @@ var PresenceShapeKey = []string{
 // names — int8, timestamptz, an enum's type name — because those are what
 // the sync service sends and a subscriber has one set of parsers for both
 // paths.
-const PresenceShapeSchema = "{\"account_id\":{\"not_null\":true,\"type\":\"uuid\"},\"activity\":{\"not_null\":true,\"type\":\"rig_presence_activity\"},\"created_at\":{\"not_null\":true,\"type\":\"timestamptz\"},\"id\":{\"not_null\":true,\"pk_index\":0,\"type\":\"uuid\"},\"scope\":{\"not_null\":true,\"type\":\"text\"},\"seen_at\":{\"not_null\":true,\"type\":\"timestamptz\"},\"session_key\":{\"not_null\":true,\"type\":\"text\"},\"target_field\":{\"type\":\"text\"},\"target_id\":{\"type\":\"uuid\"},\"target_table\":{\"type\":\"text\"},\"tenant_id\":{\"not_null\":true,\"type\":\"uuid\"}}"
+const RigPresenceShapeSchema = "{\"account_id\":{\"not_null\":true,\"type\":\"uuid\"},\"activity\":{\"not_null\":true,\"type\":\"rig_presence_activity\"},\"created_at\":{\"not_null\":true,\"type\":\"timestamptz\"},\"id\":{\"not_null\":true,\"pk_index\":0,\"type\":\"uuid\"},\"scope\":{\"not_null\":true,\"type\":\"text\"},\"seen_at\":{\"not_null\":true,\"type\":\"timestamptz\"},\"session_key\":{\"not_null\":true,\"type\":\"text\"},\"state\":{\"not_null\":true,\"type\":\"jsonb\"},\"target_field\":{\"type\":\"text\"},\"target_id\":{\"type\":\"uuid\"},\"target_table\":{\"type\":\"text\"},\"tenant_id\":{\"not_null\":true,\"type\":\"uuid\"}}"

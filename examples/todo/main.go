@@ -196,6 +196,12 @@ func main() {
 		// budget above counted for them.
 		engine := api.NewNotificationEngine(app.Pool, reg, nil)
 
+		// No Shapes, and that is a decision rather than an omission: this table
+		// says `electric: enabled`, so api.Shapes has a field per shape and the
+		// handlers are generated — but there is no sync service in this
+		// example's `rig db up` to forward a subscription to, so leaving the
+		// proxy nil mounts no route at all. Setting it is the whole of turning
+		// them on; see examples/linearlite.
 		mux := api.Register(api.Handlers{
 			Server: api.Server{
 				GetClaims: headerClaims,
@@ -241,9 +247,9 @@ func main() {
 		}
 		ui.Mount(mux)
 
-		// Anything else this server answers is a Handle call on the same mux:
-		// static files, a second API, the shape endpoints the electric
-		// generator writes.
+		// Anything else this server answers is a Handle call on the same mux,
+		// the way ui.Mount above is: static files, a second API, a webhook
+		// receiver.
 
 		// Anything that has to see the response rather than only the request —
 		// tracing, a duration, a panic — wraps the handler instead:
@@ -252,12 +258,6 @@ func main() {
 		//
 		// rig answers /livez and /readyz outside whatever is returned here, so
 		// a probe every second is not a traced request.
-		//
-		// No Shapes, and that is a decision rather than an omission: this table
-		// says `electric: enabled`, so the routes exist in internal/electric,
-		// but nothing here mounts them and there is no sync service in this
-		// example's `rig db up`. api.Main says so once at startup — which is the
-		// point of the field being there to leave empty.
 		return api.Parts{Handler: mux, Engine: engine}, nil
 	})
 }

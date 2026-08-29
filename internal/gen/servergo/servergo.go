@@ -52,6 +52,26 @@ type Options struct {
 	// It only matters for a project with an auth block. Empty means
 	// [DefaultRequestIDHeader].
 	RequestIDHeader string `json:"request_id_header"`
+
+	// ElectricURL is the sync service the shape endpoints proxy to. It becomes
+	// the DefaultElectricURL a wiring can override, so a deployment can point at
+	// a different one without regenerating.
+	//
+	// It only matters for a project where some table asked for live sync.
+	ElectricURL string `json:"electric_url"`
+
+	// StubDir is where the hand-owned shape scoping files go, relative to the
+	// project root. {table} and {Table} are substituted. Empty writes no stubs.
+	//
+	// The same directory service-go writes its service stub into: everything
+	// about one table in one place.
+	StubDir string `json:"stub_dir"`
+	// StubPackage names the package a shape stub declares. Empty uses the table
+	// name.
+	StubPackage string `json:"stub_package"`
+	// APIImport is the import path of this generated package, so a shape stub in
+	// another directory can name the scope type it satisfies.
+	APIImport string `json:"api_import"`
 }
 
 // Generator emits the HTTP layer.
@@ -69,7 +89,7 @@ func (*Generator) Description() string {
 }
 
 // Version implements [gen.Generator].
-func (*Generator) Version() string { return "2" }
+func (*Generator) Version() string { return "3" }
 
 // Generate implements [gen.Generator].
 func (g *Generator) Generate(_ context.Context, doc *ir.Document, opts gen.Options) ([]gen.Artifact, error) {
@@ -86,8 +106,15 @@ func (g *Generator) Generate(_ context.Context, doc *ir.Document, opts gen.Optio
 	if cfg.RequestIDHeader == "" {
 		cfg.RequestIDHeader = DefaultRequestIDHeader
 	}
+	if cfg.StubDir != "" && cfg.APIImport == "" {
+		// Before anything is written rather than after. A scoping stub names the
+		// scope type it satisfies, which lives in this package, and one emitted
+		// without a path to it is a file that does not build — and CreateOnce means
+		// the next run leaves it exactly as it is.
+		return nil, fmt.Errorf("api_import is required alongside stub_dir: a shape's scoping stub names the scope type this package declares")
+	}
 
-	e := &emitter{doc: doc, cfg: cfg, namer: naming.New(naming.Config{})}
+	e := &emitter{doc: doc, cfg: cfg, root: opts.Root, namer: naming.New(naming.Config{})}
 
 	server, err := e.serverFile()
 	if err != nil {
@@ -189,15 +216,48 @@ func (g *Generator) Generate(_ context.Context, doc *ir.Document, opts gen.Optio
 		artifacts = append(artifacts, presence)
 	}
 
-	// The live-sync shutdown, when any table asked for a shape. The routes
-	// themselves are another generator's; what belongs here is the number, since
-	// the drain's limit is a term of ShutdownBudget.
+	// The live-sync shapes, when any table asked for one: the struct an
+	// application fills in, one file of endpoints per table, and a scoping stub
+	// beside each table's service.
+	//
+	// These were a generator of their own writing a package of their own, on the
+	// grounds that a project might want live sync without an HTTP layer. No
+	// project ever did, and the two were already coupled in both directions —
+	// the drain's limit is a term of ShutdownBudget, which lives here. What the
+	// separation actually bought was a second Server with its own claims lookup
+	// and its own error writer, which is to say a second place for either to be
+	// wrong.
 	if e.hasShapes() {
 		shapes, err := e.electricFile()
 		if err != nil {
 			return nil, err
 		}
 		artifacts = append(artifacts, shapes)
+
+		for _, res := range e.shapes() {
+			file, err := e.shapeFile(res)
+			if err != nil {
+				return nil, err
+			}
+			artifacts = append(artifacts, file)
+
+			// No scope stub for a table rig created, for the reason the service
+			// generator gives: it would be a file about somebody else's table, and
+			// the three in this repository's own examples were byte-identical
+			// `return nil`s. A project that does want to narrow one — presence is
+			// the case that earns it, where every heartbeat reaches every
+			// subscriber — writes the file, and CreateOnce then leaves it alone.
+			if cfg.StubDir == "" || res.Foundation {
+				continue
+			}
+			for _, sh := range e.shapesFor(res) {
+				stub, err := e.shapeStubFile(res, sh)
+				if err != nil {
+					return nil, err
+				}
+				artifacts = append(artifacts, stub)
+			}
+		}
 	}
 
 	// The process around the server, as far as this project's configuration
@@ -231,6 +291,7 @@ func (g *Generator) Generate(_ context.Context, doc *ir.Document, opts gen.Optio
 type emitter struct {
 	doc   *ir.Document
 	cfg   Options
+	root  string
 	namer *naming.Namer
 }
 
@@ -238,9 +299,20 @@ type emitter struct {
 func (e *emitter) model(b *gobuf.Buf) string { return b.Import(e.cfg.ModelImport) }
 
 func artifact(path string, b *gobuf.Buf) (gen.Artifact, error) {
+	return buffered(path, b, gen.Overwrite)
+}
+
+// stubArtifact is a file rig writes once and then leaves alone. Everything else
+// this generator emits carries .gen. in its name and is rewritten every run;
+// these do not, and are the developer's from the moment they exist.
+func stubArtifact(path string, b *gobuf.Buf) (gen.Artifact, error) {
+	return buffered(path, b, gen.CreateOnce)
+}
+
+func buffered(path string, b *gobuf.Buf, mode gen.WriteMode) (gen.Artifact, error) {
 	content, err := b.Bytes()
 	if err != nil {
 		return gen.Artifact{}, fmt.Errorf("%s: %w", path, err)
 	}
-	return gen.Artifact{Path: path, Content: content, Mode: gen.Overwrite}, nil
+	return gen.Artifact{Path: path, Content: content, Mode: mode}, nil
 }

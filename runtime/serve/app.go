@@ -108,12 +108,39 @@ func (a *App) CloseFunc(name string, f func() error) {
 	a.Close(name, func(context.Context) error { return f() })
 }
 
+// RunDrain stops the things that pull their own work, in the order they were
+// registered.
+//
+// [Run] calls it at the start of the shutdown, once readiness is already false
+// and before the server stops accepting. It is exported for the caller that
+// builds the shipped handler from a bare pool and owns the ending itself — an
+// integration test standing an httptest.Server over what main mounts, whose
+// Close blocks on exactly the long polls only this releases.
+//
+// Every failure is logged where it happens as well as returned, for the reason
+// [App.runClose] gives. Logger is what that line goes to, and [Run] is what
+// normally sets it — so an App somebody built themselves may have none, and
+// [App.log] is why that is a default rather than a panic on the one path where
+// something has already gone wrong.
+func (a *App) RunDrain(ctx context.Context) error { return a.runDrain(ctx) }
+
+// log is where this App says things, for the caller that built one without a
+// logger. Run always sets the field; nothing makes a caller who did not go
+// through it do the same, and discovering that from a nil dereference inside a
+// failed shutdown step is the worst moment to discover it.
+func (a *App) log() *slog.Logger {
+	if a.Logger != nil {
+		return a.Logger
+	}
+	return slog.Default()
+}
+
 // runDrain stops the things that pull their own work.
 func (a *App) runDrain(ctx context.Context) error {
 	var failed error
 	for _, s := range a.drain {
 		if err := a.run(ctx, s); err != nil {
-			a.Logger.ErrorContext(ctx, "draining failed", "step", s.name, "error", err)
+			a.log().ErrorContext(ctx, "draining failed", "step", s.name, "error", err)
 			failed = errors.Join(failed, fmt.Errorf("drain %s: %w", s.name, err))
 		}
 	}
@@ -146,7 +173,7 @@ func (a *App) runClose(ctx context.Context, timeout time.Duration) error {
 	for i := len(a.stop) - 1; i >= 0; i-- {
 		s := a.stop[i]
 		if err := a.run(closing, s); err != nil {
-			a.Logger.ErrorContext(closing, "shutdown failed", "step", s.name, "error", err)
+			a.log().ErrorContext(closing, "shutdown failed", "step", s.name, "error", err)
 			failed = errors.Join(failed, fmt.Errorf("close %s: %w", s.name, err))
 		}
 	}
@@ -275,7 +302,7 @@ func (a *App) checkShutdown(ctx context.Context, max, drainDelay time.Duration) 
 	// Whatever is left over is what requests in flight get. None is legal and
 	// almost never meant.
 	if total == max && total > 0 {
-		a.Logger.WarnContext(ctx, "the shutdown budget is fully spoken for, leaving nothing for requests in flight",
+		a.log().WarnContext(ctx, "the shutdown budget is fully spoken for, leaving nothing for requests in flight",
 			"max", max, "declared", total)
 	}
 	return nil

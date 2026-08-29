@@ -5,7 +5,7 @@ import (
 	"net/http"
 
 	"github.com/google/uuid"
-	internalelectric "github.com/simonjanss/rig/examples/linearlite/internal/electric"
+	"github.com/simonjanss/rig/examples/linearlite/internal/api"
 	"github.com/simonjanss/rig/runtime/electric"
 	"github.com/simonjanss/rig/runtime/tenancy"
 )
@@ -27,7 +27,7 @@ import (
 //
 // Unlike the .gen.go files, this one is yours: rig writes it once and never
 // touches it again.
-func VersionsShape(ctx context.Context, r *http.Request, claims tenancy.Claims, id uuid.UUID, p internalelectric.TodoShapeParams, w *electric.Where) error {
+func VersionsShape(ctx context.Context, r *http.Request, claims tenancy.Claims, id uuid.UUID, p api.TodoShapeParams, w *electric.Where) error {
 	// Nothing to add. The shape is already one row's history, and id is that
 	// row — refuse here to keep somebody out of a history they may not read.
 	//
@@ -38,4 +38,4 @@ func VersionsShape(ctx context.Context, r *http.Request, claims tenancy.Claims, 
 // VersionsShape satisfies the generated signature. The check is here so that a
 // parameter added to the configuration becomes a compile error rather than a
 // value nobody reads.
-var _ internalelectric.TodoVersionsScope = VersionsShape
+var _ api.TodoVersionsScope = VersionsShape

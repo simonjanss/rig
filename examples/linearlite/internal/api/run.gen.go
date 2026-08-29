@@ -14,14 +14,13 @@ import (
 	"github.com/simonjanss/rig/auth"
 	"github.com/simonjanss/rig/notify"
 	"github.com/simonjanss/rig/observe"
-	"github.com/simonjanss/rig/runtime/electric"
 	"github.com/simonjanss/rig/runtime/serve"
 )
 
 // Parts is what this application's own wiring built, as far as the process
-// around it has to care: the routes to serve, and the notification engine, the
-// live subscriptions and the auth cache's invalidation channel — the things
-// whose lifetime is longer than a request's.
+// around it has to care: the routes to serve, and the notification engine and
+// the auth cache's invalidation channel — the things whose lifetime is
+// longer than a request's.
 //
 // Every field beside the handler is something rig starts, drains or closes on
 // the other side of the one call that returns this, and each used to be a line
@@ -54,14 +53,6 @@ type Parts struct {
 	// method on a service, so the registry it resolves through is filled where
 	// this application builds its services.
 	Engine *notify.Engine
-
-	// Shapes is the live-sync proxy the generated shape routes forward through.
-	//
-	// It is here for its ending rather than its beginning — nothing starts,
-	// since a shape route runs when a browser asks — and that ending is the one
-	// in this struct that is not a courtesy. [AttachShapes] says what an undrained
-	// subscription costs.
-	Shapes *electric.Proxy
 
 	// Auth is the authentication foundation over this project's pool, and is
 	// [New]'s return value.
@@ -144,15 +135,6 @@ func mountWith(page *observe.Page, build Build) serve.Mount {
 			// cannot tell a project that meant it from one that forgot — so what it can
 			// do is say so once, while it is still cheap to fix.
 			app.Logger.InfoContext(ctx, "no notification engine in this server", "cost", "an inbox line waits for the dispatch-notifications task rather than arriving milliseconds after the commit")
-		}
-
-		if parts.Shapes != nil {
-			AttachShapes(app, parts.Shapes)
-		} else {
-			// Said rather than left to be discovered. Leaving it out is allowed — rig
-			// cannot tell a project that meant it from one that forgot — so what it can
-			// do is say so once, while it is still cheap to fix.
-			app.Logger.InfoContext(ctx, "no live-sync proxy to drain", "cost", "a shape route mounted on this server holds an open subscription until the shutdown budget runs out")
 		}
 
 		if parts.Auth != nil {

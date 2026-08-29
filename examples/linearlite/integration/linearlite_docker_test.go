@@ -32,6 +32,7 @@ import (
 	"github.com/simonjanss/rig/examples/linearlite/internal/app"
 	"github.com/simonjanss/rig/examples/linearlite/services/outbox"
 	"github.com/simonjanss/rig/notify"
+	"github.com/simonjanss/rig/runtime/serve"
 )
 
 type server struct {
@@ -67,7 +68,13 @@ func newServer(t *testing.T) *server {
 	// monitoring page: mounting one would need a password in the environment
 	// and a span file to read, and what it serves is covered on its own in
 	// monitor_test.go without a database.
-	parts, err := app.New(ctx, pool, slog.Default(), nil)
+	//
+	// An App of this test's own rather than nil: the shape routes register
+	// their drain on it, which is the thing this server cannot end without.
+	// Everything else rig would put on one belongs to a process that is
+	// listening, and this one is not.
+	lifecycle := &serve.App{Pool: pool, Logger: slog.Default()}
+	parts, err := app.New(ctx, lifecycle, pool, slog.Default(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -75,14 +82,15 @@ func newServer(t *testing.T) *server {
 	t.Cleanup(srv.Close)
 
 	// The shape proxy holds connections to the sync service and a poll may be
-	// open when a test ends. Draining it is what a shutdown does, and doing it
-	// here is what keeps one test's subscription out of the next one.
+	// open when a test ends. Draining it is what a shutdown does, and running
+	// the app's own drain is how this test does exactly that rather than
+	// something that resembles it.
 	//
 	// Registered after srv.Close so that it runs before it: cleanups run in
 	// reverse, and httptest.Server.Close blocks until every outstanding request
 	// has finished — including the poll that only this can release. The other
 	// order is the two of them waiting for each other.
-	t.Cleanup(func() { _ = parts.Shapes.Drain(context.Background()) })
+	t.Cleanup(func() { _ = lifecycle.RunDrain(context.Background()) })
 
 	return &server{pool: pool, http: srv, engine: parts.Engine}
 }
@@ -167,6 +175,9 @@ type request struct {
 	// raw overrides body with bytes already encoded, for multipart.
 	raw         []byte
 	contentType string
+	// headers are set on the way out, for the handful of tests that assert
+	// something about a header the server reads rather than one it writes.
+	headers map[string]string
 }
 
 type response struct {
@@ -205,6 +216,9 @@ func (s *server) do(t *testing.T, in request) response {
 	req.Header.Set("Content-Type", contentType)
 	if in.token != "" {
 		req.Header.Set("Authorization", "Bearer "+in.token)
+	}
+	for k, v := range in.headers {
+		req.Header.Set(k, v)
 	}
 
 	res, err := s.http.Client().Do(req)

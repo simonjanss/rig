@@ -1,4 +1,4 @@
-package electricgo
+package servergo
 
 import (
 	"encoding/json"

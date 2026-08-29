@@ -22,6 +22,7 @@ func opts() gen.Options {
 	return gen.Options{OutDir: ".", Raw: map[string]any{
 		"package":      "api",
 		"model_import": "rigtest/model",
+		"electric_url": "http://electric:3000",
 	}}
 }
 

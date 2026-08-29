@@ -6,8 +6,8 @@
 > [clients.md](clients.md#live-sync). Still to come: the scoping function.
 >
 > Until it exists, the `electric:` block in [tables.md](tables.md#electric) is
-> the complete configuration reference, and the `electric` generator's options
-> are in [generators.md](generators.md).
+> the complete configuration reference, and `server-go`'s `electric_url` and
+> `stub_dir` options are in [generators.md](generators.md).
 
 A **shape** is a filtered view of one table that a client subscribes to and keeps
 up to date, instead of polling. The sync service serves it;
@@ -33,8 +33,19 @@ Your declared params are handed to a scoping function rig writes a stub for, and
 that function can only **narrow** the shape further. There is no way for it to
 widen one.
 
-The generator writes nothing at all until some table opts in, so leaving it
-configured in `rig.yaml` costs nothing.
+`server-go` writes nothing about live sync until some table opts in, so leaving
+`electric_url` configured in `rig.yaml` costs nothing. The shapes are not a
+generator of their own: a shape route is an API route, and it is mounted on the
+same mux, identifies its caller with the same claims lookup, and refuses with
+the same error mapper as every other route this project answers.
+
+That last part is worth reading twice if you have a `throttle:` block, because
+these routes go through it too. A subscription is a long poll — held open, then
+answered, then reissued — so one open shape is roughly three requests a minute
+per subscriber, and four open shapes about a dozen. Against the standard limits
+that is nothing (they are a thousand a minute per account), but a limit you
+tightened for your own API now applies here as well, and a refused poll is a
+subscriber that stops receiving rather than one slow response.
 
 ## Three shapes, decided by your columns
 
@@ -71,12 +82,13 @@ rows on an owner-scoped table, exactly like the live shape.
 
 ### Scoping them
 
-Each gets its own field on `Handlers` and its own stub, so you can narrow a
-trash stream without touching a live one. **While the field is nil, the route
-uses the live shape's scope.** The trash and the history carry the same table's
-rows, so a check the live shape needed — team membership, a share table, whatever
-rig cannot read off a column — is almost always a check these need too, and
-inheriting can only ever show a subscriber less. Setting the field replaces the
+Each gets its own field on `api.Shapes` and its own stub — beside the service
+stub for the same table — so you can narrow a trash stream without touching a
+live one. **While the field is nil, the route uses the live shape's scope.** The
+trash and the history carry the same table's rows, so a check the live shape
+needed — team membership, a share table, whatever rig cannot read off a column —
+is almost always a check these need too, and inheriting can only ever show a
+subscriber less. Setting the field replaces the
 inherited scope rather than adding to it, so a stub you wire up should repeat
 whatever the live one adds unless the reason for it stops applying.
 
@@ -142,7 +154,7 @@ Three settings in three places have to agree, and each names a different thing:
 | Where | What it says |
 |---|---|
 | `database.electric.port` in rig.yaml | where the local sync service answers |
-| the `electric` generator's `electric_url` | where the generated proxy forwards |
+| `server-go`'s `electric_url` | where the generated proxy forwards |
 | `electric: {enabled: true}` in a table's yaml | that the table has shapes at all |
 
 So a project on port 55445 writes `electric_url: http://localhost:55445`, or
@@ -152,28 +164,42 @@ read in `main.go`.
 What happens to a subscription while that service is unreachable is
 [its own section](#when-the-sync-service-is-down).
 
-**One field on `api.Parts`, and it is not optional.**
+**Mounting them is one field on `api.Handlers`.**
 
 ```go
-return api.Parts{Handler: mux, Shapes: proxy}, nil
+mux := api.Register(api.Handlers{
+	Server: api.Server{Auth: front, DB: pool, Logger: log},
+	Todo:   todos,
+
+	Shapes: api.Shapes{
+		App:   app,     // what the drain registers on
+		Proxy: proxy,   // nil mounts no shape route at all
+		Todo:  todo.Shape,
+	},
+})
 ```
 
-`api.Main` drains it for you — the field is generated the moment any table asks
-for a shape, and a nil one gets a line at startup naming what is not running.
-The call behind it, `api.AttachShapes(app, proxy)`, stays exported for a project
-that keeps the sequence itself.
+`api.Shapes` has a field per shape, plus the proxy the routes forward through
+and the `serve.App` their ending registers on. Setting `Proxy` mounts every
+stream endpoint and registers the drain in the same call; leaving it nil mounts
+none of them, which is what a project that generated its shapes and has not
+written the front end yet wants.
+
+`App` may be nil when you own the ending yourself — a test building this handler
+from a bare pool, which drains the proxy in its own cleanup. rig says so on the
+way past rather than assuming you meant it.
 
 A live subscription is a request the server is deliberately not answering yet.
 That makes it an in-flight request, so `http.Server.Shutdown` waits for it — and
 waits, because nothing in the poll is late and `Shutdown` does not cancel a
-request's context. Without that field one open browser tab is a shutdown that
+request's context. Without the drain one open browser tab is a shutdown that
 spends its whole budget waiting for the sync service to have news, and a sync
 service that hangs rather than refuses is a shutdown that spends all of it. What
 goes without in either case is everything registered after: the trace flush, the
 presence sweep, and the notification engine's close, which is where its claims
 are handed back.
 
-`AttachShapes` registers `Proxy.Drain` as a drain step, so the polls end at the
+`Register` registers `Proxy.Drain` as a drain step, so the polls end at the
 *start* of the shutdown, once readiness is already false and there is nothing
 left to gain from holding a subscription open. A subscriber gets a 503 with a
 `Retry-After` and resumes from the same offset against whichever replica is still
@@ -433,4 +459,4 @@ working around it.
   moving-predicate rule decides there
 - [tables.md](tables.md#electric) — the configuration keys
 - [api.md](api.md) — what a shape route answers with, including the two failures
-- [generators.md](generators.md) — `electric_url`, `shape_import`, `stub_dir`
+- [generators.md](generators.md) — `electric_url`, `stub_dir`

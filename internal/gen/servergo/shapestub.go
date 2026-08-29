@@ -1,4 +1,4 @@
-package electricgo
+package servergo
 
 import (
 	"path/filepath"
@@ -38,15 +38,15 @@ func stubSubject(sh shape) string {
 	}
 }
 
-// stubFile emits one shape's scoping function, as a starting point.
+// shapeStubFile emits one shape's scoping function, as a starting point.
 //
 // It is written once and then belongs to the developer. What it starts as is a
 // function that adds nothing, which is correct: a shape is already filtered to
 // the caller's tenant and to one generation of its rows, and most tables need
 // nothing more.
-func (e *emitter) stubFile(res *ir.Resource, sh shape) (gen.Artifact, error) {
+func (e *emitter) shapeStubFile(res *ir.Resource, sh shape) (gen.Artifact, error) {
 	table := res.Storage.Table
-	dir := e.expand(e.cfg.StubDir, res)
+	dir := genutil.ExpandLayout(e.namer, res, e.cfg.StubDir)
 
 	pkg := e.cfg.StubPackage
 	if pkg == "" {
@@ -58,9 +58,9 @@ func (e *emitter) stubFile(res *ir.Resource, sh shape) (gen.Artifact, error) {
 	var (
 		ctxPkg  = b.Import("context")
 		httpPkg = b.Import("net/http")
-		elecPkg = b.Import(runtimeModule + "/electric")
+		elecPkg = b.Import(electricModule)
 		tenPkg  = b.Import(runtimeModule + "/tenancy")
-		shapes  = b.Import(e.cfg.ShapeImport)
+		apiPkg  = b.Import(e.cfg.APIImport)
 	)
 
 	suffix, fn := stubName(sh)
@@ -74,7 +74,7 @@ func (e *emitter) stubFile(res *ir.Resource, sh shape) (gen.Artifact, error) {
 		"point with a streaming response attached.\n\n"
 
 	if sh.kind != shapeLive {
-		doc += "Wiring this into Handlers takes the place of the live shape's scope, " +
+		doc += "Wiring this into Shapes takes the place of the live shape's scope, " +
 			"which is what this route uses while the field is nil. Whatever that one " +
 			"adds, add here too unless the reason it added it stops applying to " +
 			"these rows — otherwise this shape shows more than the live one does.\n\n"
@@ -86,10 +86,10 @@ func (e *emitter) stubFile(res *ir.Resource, sh shape) (gen.Artifact, error) {
 	if sh.kind == shapeVersions {
 		uuidPkg := b.Import("github.com/google/uuid")
 		b.L("func %s(ctx %s.Context, r *%s.Request, claims %s.Claims, id %s.UUID, p %s.%sShapeParams, w *%s.Where) error {",
-			fn, ctxPkg, httpPkg, tenPkg, uuidPkg, shapes, res.Name, elecPkg)
+			fn, ctxPkg, httpPkg, tenPkg, uuidPkg, apiPkg, res.Name, elecPkg)
 	} else {
 		b.L("func %s(ctx %s.Context, r *%s.Request, claims %s.Claims, p %s.%sShapeParams, w *%s.Where) error {",
-			fn, ctxPkg, httpPkg, tenPkg, shapes, res.Name, elecPkg)
+			fn, ctxPkg, httpPkg, tenPkg, apiPkg, res.Name, elecPkg)
 	}
 
 	switch {
@@ -124,14 +124,9 @@ func (e *emitter) stubFile(res *ir.Resource, sh shape) (gen.Artifact, error) {
 	b.Comment(fn + " satisfies the generated signature. The check is here so that a " +
 		"parameter added to the configuration becomes a compile error rather than " +
 		"a value nobody reads.")
-	b.L("var _ %s.%sScope = %s", shapes, sh.name, fn)
+	b.L("var _ %s.%sScope = %s", apiPkg, sh.name, fn)
 	b.NL()
 
 	path := filepath.Join(e.root, filepath.FromSlash(dir), naming.Snake(table)+suffix)
-	return artifact(path, b, gen.CreateOnce)
-}
-
-// expand fills the layout placeholders in a stub directory template.
-func (e *emitter) expand(tmpl string, res *ir.Resource) string {
-	return genutil.ExpandLayout(e.namer, res, tmpl)
+	return stubArtifact(path, b)
 }

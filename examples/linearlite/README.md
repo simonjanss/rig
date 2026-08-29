@@ -64,7 +64,7 @@ twice.
 
 | What you see | What it is |
 |---|---|
-| The board updates without a reload | `electric: {enabled: true}` in `services/todo/todo.yaml`; the generated shape routes on the API's own mux (`internal/electric/`, wired in `internal/app` — the proxy authenticates every subscriber and builds the tenant filter); `createTodoStream` + `useLiveQuery` in `web/src/board/` |
+| The board updates without a reload | `electric: {enabled: true}` in `services/todo/todo.yaml`; the generated shape routes on the API's own mux (`internal/api/*_shape.gen.go`, wired through `api.Shapes` in `internal/app` — the proxy authenticates every subscriber and builds the tenant filter); `createTodoStream` + `useLiveQuery` in `web/src/board/` |
 | Who else is here, on which card, in which field | `presence: {enabled: true}` in rig.yaml and three lines across `internal/app` and `main.go`; `services/rig_presence/rig_presence_shape.go` narrows the shape to a scope, which is the one thing that makes the fan-out affordable; `web/src/presence/` is the browser half — one loop for the whole app, built in an effect because StrictMode would otherwise orphan it, and a `useSpot` that ends where the panel does |
 | Register → invited to the demo tenant | `auth.allow_registration` in rig.yaml, and `autoInvite()` in `internal/app`: the `OnRegistered` hook provisions the newcomer with an invitation and attaches the member role, all in the registration transaction |
 | Create your own workspace | `auth.allow_tenant_creation`, with `authz.SeedFor` as `TenantOptions.OnCreated` — a new tenant gets its roles in the transaction that made it |

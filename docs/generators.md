@@ -7,25 +7,32 @@
 > [examples/todo](../examples/todo/rig.yaml) is a working, commented
 > configuration for every built-in.
 
-Eight generators ship with rig. `rig init` scaffolds all but the two clients.
+Seven generators ship with rig. `rig init` scaffolds all but the two clients.
 
 | Name | What it writes |
 |---|---|
 | `model-go` | the shared entity, its enums, its query types, and its inputs |
 | `persist-go` | the repository interface and its pgx implementation |
 | `service-go` | API types, service interfaces, and a working default implementation |
-| `server-go` | net/http routing, request decoding, the handler registration struct, the `Link` that wires deletes to the tables they reach, and the process around the server — `Main`, `Parts`, `Tasks`, `ShutdownBudget`, and the log sink, provider and page as one `Process` |
-| `electric` | live-sync shape endpoints, with the tenant and lifecycle filters built in |
+| `server-go` | net/http routing, request decoding, the handler registration struct, the live-sync shape endpoints with their tenant and lifecycle filters built in, the `Link` that wires deletes to the tables they reach, and the process around the server — `Main`, `Parts`, `Tasks`, `ShutdownBudget`, and the log sink, provider and page as one `Process` |
 | `openapi` | an OpenAPI 3.1 document: every endpoint, schema and status the API answers with |
 | `go-client` | a typed Go client: the wire types and one method per endpoint |
 | `ts-client` | a typed TypeScript client: the wire types, one method per endpoint, and the live-sync collections |
 
 `model-go` is listed first in a generated `rig.yaml` because the layers above
-import what it writes. `electric` emits nothing until a table opts in with
-`electric: {enabled: true}`, so leaving it configured costs nothing — and
-`ts-client` makes the same promise about the streaming half of its output, so a
-project that streams nothing never installs the streaming package. The two
-clients are opt-in, because not every project wants an SDK of its own.
+import what it writes. `server-go` writes nothing about live sync until a table
+opts in with `electric: {enabled: true}`, so leaving `electric_url` and
+`stub_dir` configured costs nothing — and `ts-client` makes the same promise
+about the streaming half of its output, so a project that streams nothing never
+installs the streaming package. The two clients are opt-in, because not every
+project wants an SDK of its own.
+
+Live sync had a generator of its own until it did not. What that bought was a
+second package with a second server in it, whose claims lookup and error writer
+an application had to fill in twice — and a second `Register` call it could
+forget, on routes whose absence looks exactly like a front end nobody wrote yet.
+A shape route is an API route: same mux, same caller, same refusal, same drain.
+A `rig.yaml` that still names `electric` is told where the options moved.
 
 Several blocks in `rig.yaml` change what these write without being generators of
 their own. `auth:` makes `server-go` write the authentication wiring, and
@@ -45,9 +52,11 @@ default because it is the one an operator has to copy into a manifest.
 
 `run.gen.go` is the order those parts come to exist in, which used to be a
 sequence every `main.go` wrote out. `Parts` has one field per lifetime longer
-than a request's — the handler always, and an `Engine`, `Shapes` or `Auth` when
-the block that gives it one is on — and `Main` is a `serve.Config` and the one
-function only your application can write. Everything between the two is
+than a request's — the handler always, and an `Engine` or `Auth` when the block
+that gives it one is on — and `Main` is a `serve.Config` and the one function
+only your application can write. The live-sync proxy is not one of them: it is
+named in `Handlers.Shapes`, which mounts its routes and registers their drain in
+the same call. Everything between the two is
 generated: the process built before the config it fills in and attached to the
 server it flushes for, the sweeper started before your wiring because it needs
 nothing from it, and each of the rest started, drained or closed after, with the
@@ -75,11 +84,10 @@ Every generator takes `out_dir` and an `options` block. The common ones:
 | `package` | all | The Go package the generated files declare |
 | `model_import` | `persist-go`, `service-go`, `server-go` | Import path of the generated model package. Required |
 | `store_import` | `service-go` | Import path of the generated persistence layer |
-| `api_import` | `service-go` | Import path of the generated API package, so a stub elsewhere can refer back |
-| `stub_dir` | `service-go`, `electric` | Where your hand-owned files go. `{table}` and `{Table}` are substituted. Empty writes no stubs |
-| `stub_package` | `service-go`, `electric` | Package a stub declares. Empty uses the table name |
-| `electric_url` | `electric` | The sync service to proxy to |
-| `shape_import` | `electric` | Import path of the generated shape package |
+| `api_import` | `service-go`, `server-go` | Import path of the generated API package, so a stub elsewhere can refer back |
+| `stub_dir` | `service-go`, `server-go` | Where your hand-owned files go — the service stub and the shape scopes, in the same directory. `{table}` and `{Table}` are substituted. Empty writes no stubs |
+| `stub_package` | `service-go`, `server-go` | Package a stub declares. Empty uses the table name |
+| `electric_url` | `server-go` | The sync service to proxy to |
 | `formats` | `openapi` | Which renderings to write: `json`, `yaml`, or both. Both by default |
 | `servers` | `openapi` | Origins the API answers on. Defaults to a single relative server |
 | `electric` | `openapi` | Whether the live-sync routes are described. On by default |

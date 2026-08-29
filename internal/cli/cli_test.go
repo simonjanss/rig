@@ -751,7 +751,7 @@ func TestGeneratorsListsWhatRigKnowsAbout(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("generators:\n%s", stderr)
 	}
-	for _, name := range []string{"model-go", "persist-go", "server-go", "service-go", "electric"} {
+	for _, name := range []string{"model-go", "persist-go", "server-go", "service-go", "openapi"} {
 		if !strings.Contains(stdout, name) {
 			t.Errorf("%s is missing from the list:\n%s", name, stdout)
 		}

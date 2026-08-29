@@ -4,7 +4,7 @@ import (
 	"context"
 	"net/http"
 
-	internalelectric "github.com/simonjanss/rig/examples/linearlite/internal/electric"
+	"github.com/simonjanss/rig/examples/linearlite/internal/api"
 	"github.com/simonjanss/rig/runtime/electric"
 	"github.com/simonjanss/rig/runtime/tenancy"
 )
@@ -26,7 +26,7 @@ import (
 //
 // Unlike the .gen.go files, this one is yours: rig writes it once and never
 // touches it again.
-func DeletedShape(ctx context.Context, r *http.Request, claims tenancy.Claims, p internalelectric.TodoShapeParams, w *electric.Where) error {
+func DeletedShape(ctx context.Context, r *http.Request, claims tenancy.Claims, p api.TodoShapeParams, w *electric.Where) error {
 	// Nothing to add. Delete this function and leave the field nil to keep the
 	// live shape's scope on this route.
 	return nil
@@ -35,4 +35,4 @@ func DeletedShape(ctx context.Context, r *http.Request, claims tenancy.Claims, p
 // DeletedShape satisfies the generated signature. The check is here so that a
 // parameter added to the configuration becomes a compile error rather than a
 // value nobody reads.
-var _ internalelectric.TodoDeletedScope = DeletedShape
+var _ api.TodoDeletedScope = DeletedShape

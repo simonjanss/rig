@@ -74,13 +74,18 @@ var decodeReader = apibase.DecodeReader
 type Handlers struct {
 	Server Server
 
+	// Shapes is this project's live sync. Setting its Proxy mounts a stream
+	// endpoint per table that asked for one and registers their drain; a zero one
+	// leaves both undone. See [Shapes].
+	Shapes Shapes
+
 	// Presence is who is here. Setting it mounts the routes under /presence; a nil
 	// one leaves them unmounted, so a project that has not built a front end for
 	// presence yet serves nothing rather than routes that write rows nobody reads.
 	//
 	// Reading presence is not here, and that is the design: the live shape is the
-	// read path, and it is mounted by the electric generator beside the rest of
-	// the API.
+	// read path, and it is mounted from [Handlers.Shapes] beside the rest of the
+	// API.
 	Presence *presence.Service
 
 	RigAccount RigAccountService
@@ -161,6 +166,28 @@ func Register(h Handlers) *http.ServeMux {
 				fail(h.Server, w, r, requestContext(h.Server, r), err)
 			},
 		}).Mount(mux)
+	}
+
+	// The live-sync shapes, on the same mux as everything else. Nil mounts
+	// nothing: the routes are absent rather than answering, which is what a
+	// project that has not built a front end for them yet wants.
+	if h.Shapes.Proxy != nil {
+		mux.HandleFunc("GET /api/v1/rig_presence/_stream", handleRigPresenceShape(h.Server, h.Shapes))
+
+		// And the ending, which is the whole of what there is to register: nothing is
+		// started, unlike the sweeper and the engine beside it, because a shape route
+		// runs when a browser asks and not before.
+		//
+		// Without an App there is nothing to register it on, which is allowed: a
+		// caller may own the ending itself, and a task that builds this handler to
+		// reach a service through it never serves a route at all. Said at info rather
+		// than refused or warned about, the way Mount says the same kind of thing
+		// about a part it cannot tell an omission from a decision about.
+		if h.Shapes.App != nil {
+			h.Shapes.App.DrainWithin("shapes", shapesShutdown, h.Shapes.Proxy.Drain)
+		} else if h.Server.Logger != nil {
+			h.Server.Logger.Info("live-sync shapes are mounted with no App to drain them", "cost", "a shape route on this server holds an open subscription until the shutdown budget runs out")
+		}
 	}
 
 	// After the resources, so a pattern collision between the two is a panic

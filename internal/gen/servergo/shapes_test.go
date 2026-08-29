@@ -1,7 +1,6 @@
-package electricgo_test
+package servergo_test
 
 import (
-	"flag"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -13,72 +12,24 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/simonjanss/rig/internal/gen/electricgo"
 	"github.com/simonjanss/rig/internal/gen/gentest"
+	"github.com/simonjanss/rig/internal/gen/modelgo"
+	"github.com/simonjanss/rig/internal/gen/persistgo"
+	"github.com/simonjanss/rig/internal/gen/servergo"
+	"github.com/simonjanss/rig/internal/gen/servicego"
 	"github.com/simonjanss/rig/pkg/gen"
 	"github.com/simonjanss/rig/pkg/ir"
 )
 
-var update = flag.Bool("update", false, "rewrite the golden files")
-
-const fixture = "lifecycle.ir.json"
-
-func opts() gen.Options {
-	return gen.Options{
-		OutDir: ".",
-		Raw: map[string]any{
-			"package":      "electric",
-			"electric_url": "http://electric:3000",
-		},
-	}
-}
-
-func TestGolden(t *testing.T) {
-	t.Parallel()
-
-	doc := gentest.LoadDocument(t, filepath.Join("testdata", fixture))
-	artifacts := gentest.Run(t, electricgo.New(), doc, opts())
-
-	gentest.Golden(t, filepath.Join("testdata", "lifecycle"), artifacts, *update)
-}
-
-func TestDeterministic(t *testing.T) {
-	t.Parallel()
-
-	doc := gentest.LoadDocument(t, filepath.Join("testdata", fixture))
-	gentest.Deterministic(t, electricgo.New(), doc, opts())
-}
-
-func TestGeneratedCodeCompiles(t *testing.T) {
-	t.Parallel()
-
-	doc := gentest.LoadDocument(t, filepath.Join("testdata", fixture))
-
-	all := gentest.Run(t, electricgo.New(), doc, gen.Options{
-		Raw: map[string]any{
-			"package":      "electric",
-			"electric_url": "http://electric:3000",
-			"shape_import": "rigtest/electric",
-			"stub_dir":     "shapes/{table}",
-		},
-	})
-
-	var shapes, stubs []gen.Artifact
-	for _, a := range all {
-		if a.Mode == gen.CreateOnce {
-			stubs = append(stubs, a)
-			continue
-		}
-		shapes = append(shapes, a)
-	}
-	if len(stubs) == 0 {
-		t.Fatal("no scoping stub was emitted")
-	}
-
-	gentest.MustCompileAll(t,
-		gentest.Package{Dir: "electric", Artifacts: shapes},
-		gentest.Package{Dir: "shapes/lesson", Artifacts: stubs},
-	)
+// stubOpts is opts with the hand-owned scoping files turned on.
+func stubOpts() gen.Options {
+	return gen.Options{Raw: map[string]any{
+		"package":      "api",
+		"model_import": "rigtest/model",
+		"electric_url": "http://electric:3000",
+		"api_import":   "rigtest/api",
+		"stub_dir":     "shapes/{table}",
+	}}
 }
 
 // A shape is answered from the database with what is on the Shape literal, so
@@ -90,7 +41,7 @@ func TestWhatDescribesAShapesRowsAgreesWithItself(t *testing.T) {
 	t.Parallel()
 
 	doc := gentest.LoadDocument(t, filepath.Join("testdata", fixture))
-	src := find(t, gentest.Run(t, electricgo.New(), doc, opts()), "lesson_shape.gen.go")
+	src := find(t, gentest.Run(t, servergo.New(), doc, opts()), "lesson_shape.gen.go")
 
 	columns, ok := between(src, "var LessonShapeColumns = []string{", "\n}")
 	if !ok {
@@ -153,7 +104,7 @@ func TestOnlyAShapeThatOptedOutSaysSo(t *testing.T) {
 	t.Parallel()
 
 	doc := gentest.LoadDocument(t, filepath.Join("testdata", fixture))
-	src := find(t, gentest.Run(t, electricgo.New(), doc, opts()), "lesson_shape.gen.go")
+	src := find(t, gentest.Run(t, servergo.New(), doc, opts()), "lesson_shape.gen.go")
 
 	if strings.Contains(src, "NoFallback") {
 		t.Error("a shape nobody opted out of refuses to answer a sync outage")
@@ -164,19 +115,19 @@ func TestOnlyAShapeThatOptedOutSaysSo(t *testing.T) {
 	off := gentest.LoadDocument(t, filepath.Join("testdata", fixture))
 	off.Resource("Lesson").Electric.Fallback = false
 
-	src = find(t, gentest.Run(t, electricgo.New(), off, opts()), "lesson_shape.gen.go")
+	src = find(t, gentest.Run(t, servergo.New(), off, opts()), "lesson_shape.gen.go")
 	if got := strings.Count(src, "NoFallback: true"); got != 3 {
 		t.Errorf("%d of the table's three shapes opted out, want all of them", got)
 	}
 }
 
-// The filter is the whole point of the package. A shape whose tenant condition
-// can be left off is a subscription to somebody else's data.
+// The filter is the whole point of a shape. One whose tenant condition can be
+// left off is a subscription to somebody else's data.
 func TestTheFilterIsBuiltBeforeAnythingElseRuns(t *testing.T) {
 	t.Parallel()
 
 	doc := gentest.LoadDocument(t, filepath.Join("testdata", fixture))
-	src := find(t, gentest.Run(t, electricgo.New(), doc, opts()), "lesson_shape.gen.go")
+	src := find(t, gentest.Run(t, servergo.New(), doc, opts()), "lesson_shape.gen.go")
 
 	body, ok := between(src, "func handleLessonShape(", "\n}")
 	if !ok {
@@ -197,14 +148,89 @@ func TestTheFilterIsBuiltBeforeAnythingElseRuns(t *testing.T) {
 	// Order matters: the scope runs last, and every condition is joined with
 	// AND, so there is nothing a scope can do to widen the shape.
 	tenant := strings.Index(collapsed, "tenant_id")
-	scope := strings.Index(collapsed, "scope(r.Context()")
+	scope := strings.Index(collapsed, "sh.Lesson(ctx,")
 	if tenant < 0 || scope < 0 || tenant > scope {
 		t.Error("the tenant condition should be added before the application's scope runs")
 	}
 
 	// And the proxy call comes after both.
-	if serve := strings.Index(collapsed, "s.Proxy.Serve("); serve < scope {
+	if serve := strings.Index(collapsed, "sh.Proxy.Serve("); serve < scope {
 		t.Error("the shape should not be served before the scope has run")
+	}
+}
+
+// A shape route is an API route, so it identifies its caller the way every
+// other one does. It used to have a prepare of its own — a thinner copy that
+// knew nothing about the revision gate, the rate limiter or the request
+// identifier, and whose refusals reached no log at all.
+func TestAShapeGoesThroughTheSharedRequestPipeline(t *testing.T) {
+	t.Parallel()
+
+	doc := gentest.LoadDocument(t, filepath.Join("testdata", fixture))
+	src := find(t, gentest.Run(t, servergo.New(), doc, opts()), "lesson_shape.gen.go")
+
+	body, ok := between(src, "func handleLessonShape(", "\n}")
+	if !ok {
+		t.Fatal("no handler")
+	}
+	collapsed := collapse(body)
+
+	// The same call every generated route opens with, so the claims, the
+	// request context and the refusal are one implementation rather than two.
+	if !strings.Contains(collapsed, "ctx, claims, rc, ok := prepare(s, w, r)") {
+		t.Errorf("a shape should prepare like every other route:\n%s", body)
+	}
+
+	// And every refusal carries the request context, which is what puts the
+	// identifier on the body and the failure in the log.
+	if strings.Contains(collapsed, "fail(s, w, r, err)") {
+		t.Errorf("a refusal without the request context reaches no log:\n%s", body)
+	}
+	if !strings.Contains(collapsed, "fail(s, w, r, rc, err)") {
+		t.Errorf("a refusal should carry the request context:\n%s", body)
+	}
+
+	// The scope receives the prepared context rather than the raw one, so what
+	// a scope reads about the caller is what every service method reads.
+	if !strings.Contains(collapsed, "sh.Lesson(ctx, r, claims, params, where)") {
+		t.Errorf("the scope should be given the prepared context:\n%s", body)
+	}
+}
+
+// Sharing that pipeline is not sharing all of it. prepare refuses a credential
+// GetClaims rejected and nothing else, which is enough for every other route
+// because the one after it ends at a repository, where tenancy.FromContext
+// refuses claims that name no tenant a second time. A subscription ends at the
+// sync service instead, so nothing downstream asks — and a GetClaims that
+// answers an anonymous caller with empty claims rather than an error would
+// otherwise reach a table with no tenant column and stream all of it.
+func TestAShapeRefusesClaimsThatNameNoTenant(t *testing.T) {
+	t.Parallel()
+
+	doc := gentest.LoadDocument(t, filepath.Join("testdata", fixture))
+	src := find(t, gentest.Run(t, servergo.New(), doc, opts()), "lesson_shape.gen.go")
+
+	// Every one of the table's shapes, not the live one alone: the trash and
+	// the history carry the same rows and are filtered by the same tenant.
+	for _, handler := range []string{
+		"handleLessonShape(", "handleLessonDeletedShape(", "handleLessonVersionsShape(",
+	} {
+		body, ok := between(src, "func "+handler, "\n}")
+		if !ok {
+			t.Fatalf("no %s", handler)
+		}
+		collapsed := collapse(body)
+
+		if !strings.Contains(collapsed, "if !claims.Valid() {") {
+			t.Errorf("%s streams for a caller with no tenant:\n%s", handler, body)
+		}
+
+		// Before the filter is built, since the filter is made of the claims.
+		refuse := strings.Index(collapsed, "claims.Valid()")
+		where := strings.Index(collapsed, "where := &electric.Where{}")
+		if refuse < 0 || where < 0 || refuse > where {
+			t.Errorf("%s builds its filter before checking there is one to build:\n%s", handler, body)
+		}
 	}
 }
 
@@ -220,7 +246,7 @@ func TestAnOwnerScopedShapeNarrowsToTheCaller(t *testing.T) {
 	t.Parallel()
 
 	doc := gentest.LoadDocument(t, filepath.Join("testdata", "ownerscope.ir.json"))
-	src := find(t, gentest.Run(t, electricgo.New(), doc, opts()), "memo_shape.gen.go")
+	src := find(t, gentest.Run(t, servergo.New(), doc, opts()), "memo_shape.gen.go")
 
 	body, ok := between(src, "func handleMemoShape(", "\n}")
 	if !ok {
@@ -234,7 +260,7 @@ func TestAnOwnerScopedShapeNarrowsToTheCaller(t *testing.T) {
 
 	// Before the stub, so the stub can still only narrow.
 	owner := strings.Index(collapsed, "created_by_account_id")
-	scope := strings.Index(collapsed, "scope(r.Context()")
+	scope := strings.Index(collapsed, "sh.Memo(ctx,")
 	if owner < 0 || scope < 0 || owner > scope {
 		t.Error("the owner condition should be added before the application's scope runs")
 	}
@@ -259,7 +285,7 @@ func TestATableWithNoTenantIsStillFiltered(t *testing.T) {
 	res := doc.Resource("Lesson")
 	res.Storage.Tenant = nil
 
-	src := find(t, gentest.Run(t, electricgo.New(), doc, opts()), "lesson_shape.gen.go")
+	src := find(t, gentest.Run(t, servergo.New(), doc, opts()), "lesson_shape.gen.go")
 	body, _ := between(src, "func handleLessonShape(", "\n}")
 
 	if strings.Contains(body, "tenant_id") {
@@ -276,7 +302,7 @@ func TestOnlyReadableColumnsAreStreamed(t *testing.T) {
 	t.Parallel()
 
 	doc := gentest.LoadDocument(t, filepath.Join("testdata", fixture))
-	src := find(t, gentest.Run(t, electricgo.New(), doc, opts()), "lesson_shape.gen.go")
+	src := find(t, gentest.Run(t, servergo.New(), doc, opts()), "lesson_shape.gen.go")
 
 	columns, ok := between(src, "var LessonShapeColumns = []string{", "\n}")
 	if !ok {
@@ -295,7 +321,7 @@ func TestDeclaredParametersAreTyped(t *testing.T) {
 	t.Parallel()
 
 	doc := gentest.LoadDocument(t, filepath.Join("testdata", fixture))
-	src := find(t, gentest.Run(t, electricgo.New(), doc, opts()), "lesson_shape.gen.go")
+	src := find(t, gentest.Run(t, servergo.New(), doc, opts()), "lesson_shape.gen.go")
 
 	params, ok := between(src, "type LessonShapeParams struct {", "\n}")
 	if !ok {
@@ -322,21 +348,35 @@ func TestDeclaredParametersAreTyped(t *testing.T) {
 	}
 }
 
-// A server that cannot identify a subscriber has no tenant filter to build.
-func TestRegisterRefusesWithoutClaimsOrAProxy(t *testing.T) {
+// Mounting the routes and registering their ending are one call, because they
+// were two and the second was the one a main function forgot.
+func TestRegisterMountsAndDrainsTheShapesTogether(t *testing.T) {
 	t.Parallel()
 
 	doc := gentest.LoadDocument(t, filepath.Join("testdata", fixture))
-	src := find(t, gentest.Run(t, electricgo.New(), doc, opts()), "electric.gen.go")
+	register := collapse(routes(t, find(t, gentest.Run(t, servergo.New(), doc, opts()), "server.gen.go")))
 
-	register, ok := between(src, "func Register(", "\n}")
-	if !ok {
-		t.Fatal("no Register")
+	// A nil proxy mounts nothing: a project that generated its shapes and has
+	// not built a front end for them yet serves no route rather than one that
+	// answers.
+	if !strings.Contains(register, "if h.Shapes.Proxy != nil {") {
+		t.Errorf("a nil proxy should mount nothing:\n%s", register)
 	}
-	for _, want := range []string{"Server.Proxy is required", "Server.GetClaims is required"} {
-		if !strings.Contains(register, want) {
-			t.Errorf("Register should refuse without %q:\n%s", want, register)
-		}
+
+	// The drain is registered where the proxy is named, rather than travelling
+	// back to rig as a second thing to remember about the same object.
+	if !strings.Contains(register, `h.Shapes.App.DrainWithin("shapes", shapesShutdown, h.Shapes.Proxy.Drain)`) {
+		t.Errorf("Register should register the drain:\n%s", register)
+	}
+
+	// A caller with no App owns the ending itself, or serves no route at all,
+	// which is allowed and said out loud — the same treatment Mount gives every
+	// other part it cannot tell an omission from a decision about.
+	if !strings.Contains(register, "} else if h.Server.Logger != nil {") {
+		t.Errorf("a nil App should be reported rather than refused:\n%s", register)
+	}
+	if !strings.Contains(register, "live-sync shapes are mounted with no App to drain them") {
+		t.Errorf("nothing is said about shapes nobody will drain:\n%s", register)
 	}
 }
 
@@ -348,39 +388,49 @@ func TestAdminShapesRefuseWhenUnconfigured(t *testing.T) {
 	doc := gentest.LoadDocument(t, filepath.Join("testdata", fixture))
 	doc.Resource("Lesson").Electric.Auth = ir.ElectricAuthAdmin
 
-	artifacts := gentest.Run(t, electricgo.New(), doc, opts())
+	artifacts := gentest.Run(t, servergo.New(), doc, opts())
+	shape := collapse(find(t, artifacts, "lesson_shape.gen.go"))
 
-	base := find(t, artifacts, "electric.gen.go")
-	if !strings.Contains(collapse(base), "s.IsAdmin == nil || !s.IsAdmin(claims)") {
+	if !strings.Contains(shape, "if sh.IsAdmin == nil || !sh.IsAdmin(claims) {") {
 		t.Error("an unconfigured IsAdmin should refuse rather than admit")
 	}
 
-	shape := find(t, artifacts, "lesson_shape.gen.go")
-	if !strings.Contains(collapse(shape), "prepare(s, w, r, true)") {
-		t.Error("an admin shape should ask for the admin check")
+	// A shape nobody marked administrative asks nothing of IsAdmin, so the
+	// check is generated rather than paid for on every subscription.
+	plain := gentest.LoadDocument(t, filepath.Join("testdata", fixture))
+	if src := find(t, gentest.Run(t, servergo.New(), plain, opts()), "lesson_shape.gen.go"); strings.Contains(src, "IsAdmin") {
+		t.Error("a shape that is not admin-only should not consult IsAdmin")
 	}
 }
 
-// Nothing has asked for live sync, so there is nothing to generate — and an
-// empty package is a directory nobody imports plus a manifest entry nobody
-// wants.
+// Nothing has asked for live sync, so there is nothing to mount, no struct to
+// fill in, and no shape file — the same rule the auth, files and presence
+// blocks follow.
 func TestNothingIsEmittedWithoutAShape(t *testing.T) {
 	t.Parallel()
 
 	doc := gentest.LoadDocument(t, filepath.Join("testdata", fixture))
 	doc.Resource("Lesson").Electric = nil
 
-	if artifacts := gentest.Run(t, electricgo.New(), doc, opts()); len(artifacts) != 0 {
-		t.Errorf("got %d files, want none", len(artifacts))
+	artifacts := gentest.Run(t, servergo.New(), doc, opts())
+	for _, a := range artifacts {
+		if base := filepath.Base(a.Path); base == "electric.gen.go" || strings.HasSuffix(base, "_shape.gen.go") {
+			t.Errorf("nothing asked for live sync and %s was written anyway", base)
+		}
+	}
+
+	if src := find(t, artifacts, "server.gen.go"); strings.Contains(src, "Shapes") {
+		t.Error("a project with no shapes should have no Shapes field to fill in")
 	}
 }
 
-func TestUnknownOptionIsRejected(t *testing.T) {
+func TestUnknownShapeOptionIsRejected(t *testing.T) {
 	t.Parallel()
 
 	doc := gentest.LoadDocument(t, filepath.Join("testdata", fixture))
-	_, err := electricgo.New().Generate(t.Context(), doc,
-		gen.Options{Raw: map[string]any{"electric_ur": "http://electric:3000"}})
+	_, err := servergo.New().Generate(t.Context(), doc, gen.Options{Raw: map[string]any{
+		"package": "api", "model_import": "rigtest/model", "electric_ur": "http://electric:3000",
+	}})
 
 	if err == nil {
 		t.Fatal("a mistyped option should be rejected")
@@ -397,7 +447,7 @@ func TestTheTrashShapeWantsWhatTheLiveShapeExcludes(t *testing.T) {
 	t.Parallel()
 
 	doc := gentest.LoadDocument(t, filepath.Join("testdata", fixture))
-	src := find(t, gentest.Run(t, electricgo.New(), doc, opts()), "lesson_shape.gen.go")
+	src := find(t, gentest.Run(t, servergo.New(), doc, opts()), "lesson_shape.gen.go")
 
 	body, ok := between(src, "func handleLessonDeletedShape(", "\n}")
 	if !ok {
@@ -423,7 +473,7 @@ func TestTheTrashShapeWantsWhatTheLiveShapeExcludes(t *testing.T) {
 
 	// Same as everywhere else: the scope runs last and can only narrow.
 	deleted := strings.Index(collapsed, "deleted_at")
-	scope := strings.Index(collapsed, "scope(r.Context()")
+	scope := strings.Index(collapsed, "sh.LessonDeleted(ctx,")
 	if deleted < 0 || scope < 0 || deleted > scope {
 		t.Error("the lifecycle condition should be added before the application's scope runs")
 	}
@@ -436,7 +486,7 @@ func TestAHistoryShapeIsScopedToOneRow(t *testing.T) {
 	t.Parallel()
 
 	doc := gentest.LoadDocument(t, filepath.Join("testdata", fixture))
-	src := find(t, gentest.Run(t, electricgo.New(), doc, opts()), "lesson_shape.gen.go")
+	src := find(t, gentest.Run(t, servergo.New(), doc, opts()), "lesson_shape.gen.go")
 
 	body, ok := between(src, "func handleLessonVersionsShape(", "\n}")
 	if !ok {
@@ -463,11 +513,11 @@ func TestAHistoryShapeIsScopedToOneRow(t *testing.T) {
 	// The row is bound before the scope runs, so there is nothing a scope can
 	// do to point the shape at somebody else's history.
 	row := strings.Index(collapsed, "snapshot_from_lesson_id")
-	scope := strings.Index(collapsed, "scope(r.Context()")
+	scope := strings.Index(collapsed, "sh.LessonVersions(ctx,")
 	if row < 0 || scope < 0 || row > scope {
 		t.Error("the row condition should be added before the application's scope runs")
 	}
-	if !strings.Contains(collapsed, "scope(r.Context(), r, claims, id, params, where)") {
+	if !strings.Contains(collapsed, "sh.LessonVersions(ctx, r, claims, id, params, where)") {
 		t.Errorf("the scope should receive the row it is the history of:\n%s", body)
 	}
 }
@@ -481,7 +531,7 @@ func TestTheExtraShapesComeFromTheColumns(t *testing.T) {
 	// Memo retires its rows and keeps no previous versions, so it has a trash
 	// shape and no history one.
 	doc := gentest.LoadDocument(t, filepath.Join("testdata", "ownerscope.ir.json"))
-	base := routes(t, find(t, gentest.Run(t, electricgo.New(), doc, opts()), "electric.gen.go"))
+	base := routes(t, find(t, gentest.Run(t, servergo.New(), doc, opts()), "server.gen.go"))
 
 	if !strings.Contains(base, `"GET /api/v1/memo/_stream"`) {
 		t.Error("the live shape should be mounted")
@@ -496,7 +546,7 @@ func TestTheExtraShapesComeFromTheColumns(t *testing.T) {
 	// And a table with neither has the live shape and nothing else.
 	plain := gentest.LoadDocument(t, filepath.Join("testdata", "ownerscope.ir.json"))
 	plain.Resource("Memo").Storage.SoftDelete = nil
-	only := routes(t, find(t, gentest.Run(t, electricgo.New(), plain, opts()), "electric.gen.go"))
+	only := routes(t, find(t, gentest.Run(t, servergo.New(), plain, opts()), "server.gen.go"))
 
 	if !strings.Contains(only, `"GET /api/v1/memo/_stream"`) {
 		t.Error("the live shape should still be mounted")
@@ -514,7 +564,7 @@ func TestEveryShapeCarriesTheTenantAndOwnerConditions(t *testing.T) {
 	t.Parallel()
 
 	doc := gentest.LoadDocument(t, filepath.Join("testdata", "ownerscope.ir.json"))
-	src := find(t, gentest.Run(t, electricgo.New(), doc, opts()), "memo_shape.gen.go")
+	src := find(t, gentest.Run(t, servergo.New(), doc, opts()), "memo_shape.gen.go")
 
 	for _, handler := range []string{"handleMemoShape(", "handleMemoDeletedShape("} {
 		body, ok := between(src, "func "+handler, "\n}")
@@ -549,7 +599,7 @@ func TestTheExtraShapesIgnoreTheOperations(t *testing.T) {
 		t.Fatalf("this test needs a resource that exposes no endpoints, got %v", ops)
 	}
 
-	body := routes(t, find(t, gentest.Run(t, electricgo.New(), doc, opts()), "electric.gen.go"))
+	body := routes(t, find(t, gentest.Run(t, servergo.New(), doc, opts()), "server.gen.go"))
 
 	for _, want := range []string{
 		`"GET /api/v1/rig_notification_recipient/_stream"`,
@@ -570,21 +620,23 @@ func TestADerivedShapeInheritsTheLiveScope(t *testing.T) {
 	t.Parallel()
 
 	doc := gentest.LoadDocument(t, filepath.Join("testdata", fixture))
-	artifacts := gentest.Run(t, electricgo.New(), doc, opts())
-	body := collapse(routes(t, find(t, artifacts, "electric.gen.go")))
+	artifacts := gentest.Run(t, servergo.New(), doc, opts())
+	body := collapse(routes(t, find(t, artifacts, "server.gen.go")))
 
 	for _, want := range []string{
-		"if h.LessonDeleted == nil { h.LessonDeleted = LessonDeletedScope(h.Lesson) }",
-		"if h.LessonVersions == nil { h.LessonVersions = versionsFromLiveLesson(h.Lesson) }",
+		"if h.Shapes.LessonDeleted == nil { h.Shapes.LessonDeleted = LessonDeletedScope(h.Shapes.Lesson) }",
+		"if h.Shapes.LessonVersions == nil { h.Shapes.LessonVersions = versionsFromLiveLesson(h.Shapes.Lesson) }",
 	} {
 		if !strings.Contains(body, collapse(want)) {
 			t.Errorf("missing %s:\n%s", want, body)
 		}
 	}
 
-	// Before the routes are mounted, because a handler closes over the scope it
-	// was given and cannot be told about one later.
-	if fallback, mount := strings.Index(body, "h.LessonDeleted ="), strings.Index(body, "mux.HandleFunc"); fallback > mount {
+	// Before the routes are mounted, because a handler is given the struct as
+	// it stands and cannot be told about a scope later.
+	fallback := strings.Index(body, "h.Shapes.LessonDeleted =")
+	mount := strings.Index(body, `mux.HandleFunc("GET /api/v1/lesson/_stream"`)
+	if fallback < 0 || mount < 0 || fallback > mount {
 		t.Error("the fallback should be wired before the routes are mounted")
 	}
 
@@ -604,13 +656,7 @@ func TestEachShapeGetsItsOwnStub(t *testing.T) {
 	t.Parallel()
 
 	doc := gentest.LoadDocument(t, filepath.Join("testdata", fixture))
-	artifacts := gentest.Run(t, electricgo.New(), doc, gen.Options{
-		Raw: map[string]any{
-			"package":      "electric",
-			"shape_import": "rigtest/electric",
-			"stub_dir":     "shapes/{table}",
-		},
-	})
+	artifacts := gentest.Run(t, servergo.New(), doc, stubOpts())
 
 	stubs := map[string]string{}
 	for _, a := range artifacts {
@@ -635,15 +681,45 @@ func TestEachShapeGetsItsOwnStub(t *testing.T) {
 	}
 }
 
-func find(t *testing.T, artifacts []gen.Artifact, name string) string {
-	t.Helper()
-	for _, a := range artifacts {
-		if filepath.Base(a.Path) == name {
-			return string(a.Content)
+// The stub names a scope type and a params struct the API package declares, and
+// nothing but a compile proves the two agree — which is most of what folding
+// these files into that package was for.
+func TestShapeStubsCompileAgainstTheAPIPackage(t *testing.T) {
+	t.Parallel()
+
+	doc := gentest.LoadDocument(t, filepath.Join("testdata", fixture))
+
+	api := gentest.Run(t, servicego.New(), doc, gen.Options{Raw: map[string]any{
+		"package": "api", "model_import": "rigtest/model", "store_import": "rigtest/store",
+	}})
+
+	var stubs []gen.Artifact
+	for _, a := range gentest.Run(t, servergo.New(), doc, stubOpts()) {
+		if a.Mode == gen.CreateOnce {
+			stubs = append(stubs, a)
+			continue
 		}
+		api = append(api, a)
 	}
-	t.Fatalf("no artifact named %s", name)
-	return ""
+	if len(stubs) == 0 {
+		t.Fatal("no scoping stub was emitted")
+	}
+
+	gentest.MustCompileAll(t,
+		gentest.Package{
+			Dir: "model",
+			Artifacts: gentest.Run(t, modelgo.New(), doc,
+				gen.Options{Raw: map[string]any{"package": "model"}}),
+		},
+		gentest.Package{
+			Dir: "store",
+			Artifacts: gentest.Run(t, persistgo.New(), doc, gen.Options{Raw: map[string]any{
+				"package": "store", "model_import": "rigtest/model",
+			}}),
+		},
+		gentest.Package{Dir: "api", Artifacts: api},
+		gentest.Package{Dir: "shapes/lesson", Artifacts: stubs},
+	)
 }
 
 // http.ServeMux panics on conflicting patterns, and it does it at registration
@@ -651,20 +727,19 @@ func find(t *testing.T, artifacts []gen.Artifact, name string) string {
 // application that will not start. The generated patterns are mounted here for
 // real rather than reasoned about, because "/x/_deleted" and "/x/{id}/_thing"
 // are exactly the pair where the reasoning is easy to get wrong.
-func TestTheGeneratedRoutesMountOnARealMux(t *testing.T) {
+func TestTheGeneratedShapeRoutesMountOnARealMux(t *testing.T) {
 	t.Parallel()
 
 	doc := gentest.LoadDocument(t, filepath.Join("testdata", fixture))
-	body := routes(t, find(t, gentest.Run(t, electricgo.New(), doc, opts()), "electric.gen.go"))
+	body := routes(t, find(t, gentest.Run(t, servergo.New(), doc, opts()), "server.gen.go"))
 
-	patterns := mounted(body)
+	patterns := mountedShapes(body)
 	if len(patterns) != 3 {
 		t.Fatalf("got %d routes %v, want the live, trash and history shapes", len(patterns), patterns)
 	}
 
 	mux := http.NewServeMux()
 	for _, p := range patterns {
-		p := p
 		mux.HandleFunc(p, func(w http.ResponseWriter, _ *http.Request) {
 			_, _ = io.WriteString(w, p)
 		})
@@ -686,8 +761,10 @@ func TestTheGeneratedRoutesMountOnARealMux(t *testing.T) {
 	}
 }
 
-// mounted is the pattern of every mux.HandleFunc in a Register body.
-func mounted(body string) []string {
+// mountedShapes is the pattern of every mux.HandleFunc in a Register body. The
+// resource routes are mounted by a registerX call rather than here, so what
+// this finds is the shapes.
+func mountedShapes(body string) []string {
 	var out []string
 	for _, m := range regexp.MustCompile(`mux\.HandleFunc\("([^"]+)"`).FindAllStringSubmatch(body, -1) {
 		out = append(out, m[1])
@@ -695,9 +772,9 @@ func mounted(body string) []string {
 	return out
 }
 
-// routes is Register's body: the mounted patterns and nothing else. The doc
-// comments around it talk about _deleted in prose, and a test that grepped the
-// whole file would find that and call it a route.
+// routes is Register's body: what it mounts and nothing else. The doc comments
+// around it talk about _deleted in prose, and a test that grepped the whole
+// file would find that and call it a route.
 func routes(t *testing.T, src string) string {
 	t.Helper()
 	body, ok := between(src, "func Register(", "\n}")
@@ -707,17 +784,21 @@ func routes(t *testing.T, src string) string {
 	return body
 }
 
-func collapse(s string) string { return strings.Join(strings.Fields(s), " ") }
+// A stub names the scope type this package declares, so it needs a path to it.
+// Emitting one without would write a file that does not build — and CreateOnce
+// means the run after it would leave that file exactly as it is.
+func TestStubDirWithoutAnAPIImportIsRefused(t *testing.T) {
+	t.Parallel()
 
-func between(s, start, end string) (string, bool) {
-	i := strings.Index(s, start)
-	if i < 0 {
-		return "", false
+	doc := gentest.LoadDocument(t, filepath.Join("testdata", fixture))
+	_, err := servergo.New().Generate(t.Context(), doc, gen.Options{Raw: map[string]any{
+		"package": "api", "model_import": "rigtest/model", "stub_dir": "shapes/{table}",
+	}})
+
+	if err == nil {
+		t.Fatal("a stub with nowhere to import its scope type from should be refused")
 	}
-	rest := s[i+len(start):]
-	j := strings.Index(rest, end)
-	if j < 0 {
-		return "", false
+	if !strings.Contains(err.Error(), "api_import") {
+		t.Errorf("the error should name the missing option: %v", err)
 	}
-	return rest[:j], true
 }

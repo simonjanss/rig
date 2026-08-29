@@ -139,7 +139,7 @@ the same commit.** The pages are short and the mapping is mechanical:
 | `internal/compile/builtin.go` — the error codes, the pagination limits | `docs/api.md` |
 | `internal/diag` — a code added, or a severity changed | `docs/diagnostics.md` |
 | `auth/`, or `internal/project/auth.go` | `docs/auth.md` |
-| `runtime/electric`, `internal/gen/electricgo` | `docs/electric.md` |
+| `runtime/electric`, the shape half of `internal/gen/servergo` | `docs/electric.md` |
 | `internal/gen/openapigen` | `docs/api.md`, `docs/generators.md`, `README.md` |
 | `notify/`, `internal/project/notifications.go` | `docs/notifications.md`, `docs/rig-yaml.md` |
 | `presence/`, `internal/project/presence.go` | `docs/presence.md`, `docs/rig-yaml.md` |

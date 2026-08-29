@@ -6,7 +6,6 @@
 package allgen
 
 import (
-	_ "github.com/simonjanss/rig/internal/gen/electricgo"
 	_ "github.com/simonjanss/rig/internal/gen/goclient"
 	_ "github.com/simonjanss/rig/internal/gen/modelgo"
 	_ "github.com/simonjanss/rig/internal/gen/openapigen"

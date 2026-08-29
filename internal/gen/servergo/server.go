@@ -183,6 +183,13 @@ func (e *emitter) handlersStruct(b *gobuf.Buf) {
 	b.L("type Handlers struct {")
 	b.L("Server Server")
 	b.NL()
+	if e.hasShapes() {
+		b.Comment("Shapes is this project's live sync. Setting its Proxy mounts a " +
+			"stream endpoint per table that asked for one and registers their " +
+			"drain; a zero one leaves both undone. See [Shapes].")
+		b.L("Shapes Shapes")
+		b.NL()
+	}
 	if e.hasNotifications() {
 		b.Comment("Notifications is this project's inbox. Setting it mounts the " +
 			"routes under /notifications and lets a delete of a notifiable row " +
@@ -197,8 +204,8 @@ func (e *emitter) handlersStruct(b *gobuf.Buf) {
 			"not built a front end for presence yet serves nothing rather than " +
 			"routes that write rows nobody reads.\n\n" +
 			"Reading presence is not here, and that is the design: the live shape " +
-			"is the read path, and it is mounted by the electric generator beside " +
-			"the rest of the API.")
+			"is the read path, and it is mounted from [Handlers.Shapes] beside the " +
+			"rest of the API.")
 		b.L("Presence *%s.Service", b.Import(presenceModule))
 		b.NL()
 	}
@@ -341,6 +348,10 @@ func (e *emitter) registerFunc(b *gobuf.Buf) {
 		b.L("},")
 		b.L("}).Mount(mux)")
 		b.L("}")
+	}
+
+	if e.hasShapes() {
+		e.shapesMount(b)
 	}
 
 	b.NL()

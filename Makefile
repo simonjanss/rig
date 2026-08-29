@@ -140,7 +140,7 @@ update-examples: build
 ##                Only the packages that define -update: passing it to a test
 ##                binary without the flag is a usage error, which used to fail
 ##                this target no matter what.
-GOLDEN := ./internal/compile ./internal/gen/electricgo ./internal/gen/goclient \
+GOLDEN := ./internal/compile ./internal/gen/goclient \
           ./internal/gen/modelgo ./internal/gen/openapigen ./internal/gen/persistgo \
           ./internal/gen/servergo ./internal/gen/servicego ./internal/gen/tsclient
 update-golden:

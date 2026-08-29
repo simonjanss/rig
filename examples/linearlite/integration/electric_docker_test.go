@@ -33,9 +33,33 @@ func TestTheShapeRoutes(t *testing.T) {
 			// here at all.
 			"/api/v1/rig_presence/_stream?offset=-1&scope=board",
 		} {
-			res := api.do(t, request{method: http.MethodGet, path: path})
+			// The identifier the caller wants this correlated by. A shape route
+			// used to refuse through an error writer of its own that was handed
+			// no request context and so could not echo one at all; it goes
+			// through the same mapper as every other route now, which is the
+			// whole of what mounting these beside the API bought.
+			const correlate = "shape-refusal-1"
+
+			res := api.do(t, request{
+				method:  http.MethodGet,
+				path:    path,
+				headers: map[string]string{"X-Request-Id": correlate},
+			})
 			if res.status != http.StatusUnauthorized {
 				t.Errorf("an anonymous stream of %s: %d %s, want 401", path, res.status, res.body)
+			}
+
+			var body struct {
+				Code      string `json:"code"`
+				RequestID string `json:"requestId"`
+			}
+			res.decode(t, &body)
+			if body.Code == "" {
+				t.Errorf("a refused stream of %s carries no error code: %s", path, res.body)
+			}
+			if body.RequestID != correlate {
+				t.Errorf("a refused stream of %s came back with requestId %q, want the caller's %q: %s",
+					path, body.RequestID, correlate, res.body)
 			}
 		}
 	})

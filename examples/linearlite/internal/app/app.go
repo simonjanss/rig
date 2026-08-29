@@ -23,7 +23,6 @@ import (
 
 	"github.com/simonjanss/rig/auth/account"
 	"github.com/simonjanss/rig/examples/linearlite/internal/api"
-	genelectric "github.com/simonjanss/rig/examples/linearlite/internal/electric"
 	"github.com/simonjanss/rig/examples/linearlite/internal/store"
 	"github.com/simonjanss/rig/examples/linearlite/services/authz"
 	"github.com/simonjanss/rig/examples/linearlite/services/outbox"
@@ -34,6 +33,7 @@ import (
 	"github.com/simonjanss/rig/observe"
 	"github.com/simonjanss/rig/runtime/dbx"
 	"github.com/simonjanss/rig/runtime/electric"
+	"github.com/simonjanss/rig/runtime/serve"
 )
 
 // New is everything this server is made of, as a function taking a pool so
@@ -45,7 +45,12 @@ import (
 // Everything else is identical either way, which is the reason this is a
 // function rather than a block inside the mount closure: the audience for a
 // notification is a method on a service, so a job has to be able to build one.
-func New(ctx context.Context, pool *pgxpool.Pool, log *slog.Logger, page *observe.Page) (api.Parts, error) {
+//
+// srv is what rig hangs the live subscriptions' drain on, and is nil for the
+// same callers page is: a task mounts no routes, and a test that builds this
+// handler from a bare pool ends the proxy itself. A pool alone stays enough to
+// construct the whole graph, which is the property this signature exists for.
+func New(ctx context.Context, srv *serve.App, pool *pgxpool.Pool, log *slog.Logger, page *observe.Page) (api.Parts, error) {
 	// No Tracer: the generated store.New settles a nil one to observe.Tracer(),
 	// which is a package-level value the provider in main installed. A task that
 	// never called observe.Setup gets a no-op there and every query below runs
@@ -145,40 +150,15 @@ func New(ctx context.Context, pool *pgxpool.Pool, log *slog.Logger, page *observ
 		return api.Parts{}, err
 	}
 
-	mux := api.Register(api.Handlers{
-		Server: api.Server{
-			Auth:   front,
-			DB:     pool,
-			Logger: log,
-		},
-		Account:             members,
-		Todo:                todos,
-		TodoAttachment:      attachments,
-		NotificationDevice:  devices,
-		NotificationSetting: prefs,
-		Notifications:       inbox,
-		// Who is here. Setting it mounts the three routes under /presence; nil
-		// leaves them unmounted, which is what a project that generated the
-		// wiring and has not written the front end yet wants.
-		//
-		// No service layer, and nothing to register: presence has no rules of
-		// this schema's to enforce. The account comes from the credential and
-		// the target table is checked against PresenceTargets(), which rig
-		// wrote from the compiled document.
-		Presence: api.NewPresence(pool),
-	})
-
-	// The live-sync shapes, on the same mux as everything else. The proxy is
-	// the only thing a browser talks to: it authenticates the subscriber with
-	// the same claims lookup the handlers use, builds the tenant filter, and
-	// forwards to the sync service `rig db up` started.
+	// The proxy every live subscription goes through. It is built before the
+	// routes because it is one of the things they are registered with: rig
+	// mounts the shapes from api.Handlers.Shapes below, on the same mux and
+	// with the same claims lookup and error mapper as everything else.
 	//
-	// The todo shapes leave their scope nil, so the generated tenant filter is
-	// the whole scope — right for a board the whole tenant shares. Presence is
-	// the one that does not, and the reason is in services/rig_presence: every
-	// heartbeat is a row change delivered to every subscriber, so its shape is
-	// the one place where narrowing is what makes the feature affordable.
-	upstream := cmp.Or(os.Getenv("ELECTRIC_URL"), genelectric.DefaultElectricURL)
+	// Nothing here is about which rows a subscriber sees. That is the shape's
+	// own filter, which rig builds, and the Scope beside it — see the Shapes
+	// literal in the Register call.
+	upstream := cmp.Or(os.Getenv("ELECTRIC_URL"), api.DefaultElectricURL)
 	proxy, err := electric.New(electric.Config{
 		URL: upstream,
 
@@ -231,12 +211,44 @@ func New(ctx context.Context, pool *pgxpool.Pool, log *slog.Logger, page *observ
 	if err != nil {
 		return api.Parts{}, err
 	}
-	// One scope, and nothing else. Surviving a sync outage is the proxy's DB
-	// field above rather than a line per shape here, which is most of what this
-	// registration used to be.
-	genelectric.Register(mux, genelectric.Handlers{
-		Server:   genelectric.Server{Proxy: proxy, GetClaims: front.Claims},
-		Presence: rig_presence.Shape,
+	mux := api.Register(api.Handlers{
+		Server: api.Server{
+			Auth:   front,
+			DB:     pool,
+			Logger: log,
+		},
+		Account:             members,
+		Todo:                todos,
+		TodoAttachment:      attachments,
+		NotificationDevice:  devices,
+		NotificationSetting: prefs,
+		Notifications:       inbox,
+		// Who is here. Setting it mounts the three routes under /presence; nil
+		// leaves them unmounted, which is what a project that generated the
+		// wiring and has not written the front end yet wants.
+		//
+		// No service layer, and nothing to register: presence has no rules of
+		// this schema's to enforce. The account comes from the credential and
+		// the target table is checked against PresenceTargets(), which rig
+		// wrote from the compiled document.
+		Presence: api.NewPresence(pool),
+
+		// The live-sync shapes, on the same mux as everything else. Setting the
+		// proxy mounts a stream endpoint per table that asked for one; App is
+		// what the drain registers on, so a shutdown lets those subscriptions go
+		// rather than spending its budget waiting for one open tab.
+		//
+		// The todo shapes leave their scope nil, so the generated tenant filter
+		// is the whole scope — right for a board the whole tenant shares.
+		// Presence is the one that does not, and the reason is in
+		// services/rig_presence: every heartbeat is a row change delivered to
+		// every subscriber, so its shape is the one place where narrowing is
+		// what makes the feature affordable.
+		Shapes: api.Shapes{
+			App:      srv,
+			Proxy:    proxy,
+			Presence: rig_presence.Shape,
+		},
 	})
 
 	// The permission table, made to match what the handlers check — including
@@ -266,7 +278,7 @@ func New(ctx context.Context, pool *pgxpool.Pool, log *slog.Logger, page *observ
 	// package is what lets the sequence live there too, and what turns
 	// forgetting one from a shutdown that misbehaves under load into a build
 	// that does not finish.
-	return api.Parts{Handler: mux, Engine: engine, Shapes: proxy, Auth: front}, nil
+	return api.Parts{Handler: mux, Engine: engine, Auth: front}, nil
 }
 
 // autoInvite is what happens when a stranger signs themselves up: an account
@@ -325,9 +337,10 @@ func autoInvite() func(context.Context, *account.Service, account.Registered) er
 // DispatchNotifications is the inbox's cron half, built from the same
 // constructor the server uses because the audience is a method on a service.
 func DispatchNotifications(ctx context.Context, pool *pgxpool.Pool) error {
-	// No page: this is a cron entry, and its sends land in its own outbox —
+	// No App and no page: this is a cron entry. It mounts no routes, so there
+	// are no subscriptions to drain, and its sends land in its own outbox —
 	// which is exactly what a separately deployed dispatcher has.
-	parts, err := New(ctx, pool, slog.Default(), nil)
+	parts, err := New(ctx, nil, pool, slog.Default(), nil)
 	if err != nil {
 		return err
 	}

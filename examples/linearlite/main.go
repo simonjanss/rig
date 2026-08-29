@@ -192,6 +192,6 @@ func main() {
 		// A pool and a logger rather than the App itself, because
 		// dispatch-notifications above builds the same graph from a task, where
 		// there is no App to build it from.
-		return app.New(ctx, srv.Pool, srv.Logger, page)
+		return app.New(ctx, srv, srv.Pool, srv.Logger, page)
 	})
 }

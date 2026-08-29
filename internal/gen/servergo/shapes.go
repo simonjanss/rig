@@ -1,4 +1,4 @@
-package electricgo
+package servergo
 
 import (
 	"github.com/simonjanss/rig/internal/gen/gobuf"
@@ -14,61 +14,6 @@ const (
 	versionSnapshot = "Snapshot"
 )
 
-// shapeKind distinguishes the routes a table's live-sync surface has.
-type shapeKind int
-
-const (
-	// shapeLive streams the rows an ordinary read returns.
-	shapeLive shapeKind = iota
-	// shapeDeleted streams the retired ones — the trash.
-	shapeDeleted
-	// shapeVersions streams one row's prior versions — its history.
-	shapeVersions
-)
-
-// shape is one route of a table's live-sync surface.
-type shape struct {
-	kind shapeKind
-	// name is the Go stem for this shape's scope type and handler.
-	name string
-	// path is the route, for example "/api/v1/lesson/_deleted/_stream".
-	path string
-}
-
-// shapesFor is the routes a resource exposes.
-//
-// Nothing configures this. A table that retires its rows has a trash to stream,
-// and a table that keeps its previous versions has a history — the schema
-// already answers both questions, and answering them again in a configuration
-// key would only create a way for the two answers to disagree.
-//
-// It is the columns alone, and deliberately not the resource's operations. The
-// API asks for both — listDeleted needs List and versions needs Get — but live
-// sync is its own read surface and has never been gated on the CRUD set: a table
-// with no operations at all still gets a live shape, which is how an unexposed
-// table like rig_notification_recipient is subscribed to. Reading the operations
-// here and not there would mean a table whose only read surface is a shape could
-// never have a trash, so what the two rules have in common is the columns and
-// that is what is asked.
-func (e *emitter) shapesFor(res *ir.Resource) []shape {
-	shapes := []shape{{kind: shapeLive, name: res.Name, path: res.Electric.Path}}
-	if res.Storage.IsSoftDeletable() {
-		shapes = append(shapes, shape{
-			kind: shapeDeleted,
-			name: res.Name + "Deleted",
-			path: res.Electric.DeletedPath(),
-		})
-	}
-	if res.Storage.IsSnapshotable() {
-		shapes = append(shapes, shape{
-			kind: shapeVersions,
-			name: res.Name + "Versions",
-			path: res.Electric.VersionsPath(),
-		})
-	}
-	return shapes
-}
-
 // shapeFile emits one resource's shape endpoints.
 func (e *emitter) shapeFile(res *ir.Resource) (gen.Artifact, error) {
 	b := gobuf.New(e.cfg.Package)
@@ -78,7 +23,7 @@ func (e *emitter) shapeFile(res *ir.Resource) (gen.Artifact, error) {
 	e.paramsType(b, res)
 	for _, sh := range e.shapesFor(res) {
 		e.scopeType(b, res, sh)
-		e.handler(b, res, sh)
+		e.shapeHandler(b, res, sh)
 		if sh.kind == shapeVersions {
 			e.versionsAdapter(b, res)
 		}
@@ -89,7 +34,7 @@ func (e *emitter) shapeFile(res *ir.Resource) (gen.Artifact, error) {
 		return gen.Artifact{}, err
 	}
 
-	return artifact(naming.Snake(res.Name)+"_shape.gen.go", b, gen.Overwrite)
+	return artifact(naming.Snake(res.Name)+"_shape.gen.go", b)
 }
 
 // versionsAdapter lets the history shape inherit the live shape's scope.
@@ -102,7 +47,7 @@ func (e *emitter) versionsAdapter(b *gobuf.Buf, res *ir.Resource) {
 	var (
 		ctxPkg  = b.Import("context")
 		httpPkg = b.Import("net/http")
-		elecPkg = b.Import(runtimeModule + "/electric")
+		elecPkg = b.Import(electricModule)
 		tenPkg  = b.Import(runtimeModule + "/tenancy")
 		uuidPkg = b.Import("github.com/google/uuid")
 	)
@@ -136,7 +81,7 @@ func (e *emitter) paramsType(b *gobuf.Buf, res *ir.Resource) {
 		if p.Description != "" {
 			b.Comment(p.Description)
 		}
-		b.L("%s %s", p.Field, e.paramType(b, p))
+		b.L("%s %s", p.Field, e.shapeParamType(b, p))
 		if p.Optional {
 			b.Comment("Has" + p.Field + " reports whether it was given, so a zero " +
 				"value can be told from an absent one.")
@@ -150,8 +95,8 @@ func (e *emitter) paramsType(b *gobuf.Buf, res *ir.Resource) {
 	e.parseParams(b, res)
 }
 
-// paramType is the Go type one declared parameter takes.
-func (e *emitter) paramType(b *gobuf.Buf, p ir.ElectricParam) string {
+// shapeParamType is the Go type one declared parameter takes.
+func (e *emitter) shapeParamType(b *gobuf.Buf, p ir.ElectricParam) string {
 	switch p.Type {
 	case ir.TypeBool:
 		return "bool"
@@ -170,9 +115,9 @@ func (e *emitter) paramType(b *gobuf.Buf, p ir.ElectricParam) string {
 	}
 }
 
-// parseCall names the [runtime/httpx] parser a declared parameter goes through,
-// or "" for one that arrives as text and needs none.
-func parseCall(b *gobuf.Buf, p ir.ElectricParam) string {
+// shapeParseCall names the [runtime/httpx] parser a declared parameter goes
+// through, or "" for one that arrives as text and needs none.
+func shapeParseCall(b *gobuf.Buf, p ir.ElectricParam) string {
 	name := ""
 	switch p.Type {
 	case ir.TypeBool:
@@ -208,7 +153,7 @@ func (e *emitter) parseParams(b *gobuf.Buf, res *ir.Resource) {
 		// above this would land in every shape file that has none.
 		httpxPkg := b.Import(runtimeModule + "/httpx")
 		quoted := gobuf.Quote(param.Name)
-		call := parseCall(b, param)
+		call := shapeParseCall(b, param)
 
 		if param.Optional {
 			b.L("if raw, ok := %s.QueryOptional(r, %s); ok {", httpxPkg, quoted)
@@ -276,7 +221,7 @@ func (e *emitter) scopeType(b *gobuf.Buf, res *ir.Resource, sh shape) {
 	var (
 		ctxPkg  = b.Import("context")
 		httpPkg = b.Import("net/http")
-		elecPkg = b.Import(runtimeModule + "/electric")
+		elecPkg = b.Import(electricModule)
 		tenPkg  = b.Import(runtimeModule + "/tenancy")
 	)
 
@@ -293,21 +238,58 @@ func (e *emitter) scopeType(b *gobuf.Buf, res *ir.Resource, sh shape) {
 	b.NL()
 }
 
-// handler emits one endpoint.
-func (e *emitter) handler(b *gobuf.Buf, res *ir.Resource, sh shape) {
+// shapeHandler emits one endpoint.
+//
+// It goes through the same prepare and fail as every other route in this
+// package, which is what moving these files here bought: the revision header, a
+// PreHooks pass, the rate limiter, the tenancy context, and — the one that was
+// plainly missing — a refusal that reaches the log and carries the request
+// identifier. The shape's own package used to answer those with a second,
+// thinner copy that knew about none of them.
+func (e *emitter) shapeHandler(b *gobuf.Buf, res *ir.Resource, sh shape) {
 	var (
 		httpPkg = b.Import("net/http")
-		elecPkg = b.Import(runtimeModule + "/electric")
+		elecPkg = b.Import(electricModule)
+		errPkg  = b.Import(runtimeModule + "/rigerr")
 		storage = res.Storage
 		admin   = res.Electric.Auth == ir.ElectricAuthAdmin
 	)
 
 	b.Comment("handle" + sh.name + "Shape serves GET " + sh.path + ".")
-	b.L("func handle%sShape(s Server, scope %sScope) %s.HandlerFunc {", sh.name, sh.name, httpPkg)
+	b.L("func handle%sShape(s Server, sh Shapes) %s.HandlerFunc {", sh.name, httpPkg)
 	b.L("return func(w %s.ResponseWriter, r *%s.Request) {", httpPkg, httpPkg)
-	b.L("claims, where, ok := prepare(s, w, r, %t)", admin)
+	b.L("ctx, claims, rc, ok := prepare(s, w, r)")
 	b.L("if !ok { return }")
 	b.NL()
+
+	b.Comment("A credential that names no tenant is refused here or not at all. " +
+		"Every other route ends at a repository, where tenancy.FromContext " +
+		"refuses one a second time; a subscription ends at the sync service, so " +
+		"this is the only place that asks. A GetClaims that answers with an empty " +
+		"tenant rather than an error would otherwise reach a table with no tenant " +
+		"column and stream all of it.")
+	b.L("if !claims.Valid() {")
+	b.L("fail(s, w, r, rc, %s.Unauthorized(%s))", errPkg,
+		gobuf.Quote("this request is not authenticated"))
+	b.L("return")
+	b.L("}")
+	b.NL()
+
+	if admin {
+		b.Comment("This shape is administrative. A nil IsAdmin refuses rather than " +
+			"admits: a server that cannot tell an administrator from anybody else " +
+			"has not decided who may subscribe, and streaming while it makes its " +
+			"mind up is the wrong way to be wrong.")
+		b.L("if sh.IsAdmin == nil || !sh.IsAdmin(claims) {")
+		b.L("fail(s, w, r, rc, %s.Forbidden(%s))", errPkg,
+			gobuf.Quote("this shape is not available to you"))
+		b.L("return")
+		b.L("}")
+		b.NL()
+	}
+
+	b.Comment("The filter, built here and never from anything a client sent.")
+	b.L("where := &%s.Where{}", elecPkg)
 
 	if sh.kind == shapeVersions {
 		b.Comment("Before the filter rather than after, because this one is part of it: " +
@@ -315,7 +297,7 @@ func (e *emitter) handler(b *gobuf.Buf, res *ir.Resource, sh shape) {
 			"of everything.")
 		b.L("id, err := %s.PathUUID(r, %s)", b.Import(runtimeModule+"/httpx"), gobuf.Quote("id"))
 		b.L("if err != nil {")
-		b.L("fail(s, w, r, err)")
+		b.L("fail(s, w, r, rc, err)")
 		b.L("return")
 		b.L("}")
 		b.NL()
@@ -328,7 +310,6 @@ func (e *emitter) handler(b *gobuf.Buf, res *ir.Resource, sh shape) {
 		b.L("where.Eq(%s, claims.TenantID.String())", gobuf.Quote(storage.Tenant.Name))
 	}
 	if storage.Owner != nil {
-		errPkg := b.Import(runtimeModule + "/rigerr")
 		uuidPkg := b.Import("github.com/google/uuid")
 
 		b.Comment("This table is owner-scoped, so a subscriber sees its own rows " +
@@ -342,7 +323,7 @@ func (e *emitter) handler(b *gobuf.Buf, res *ir.Resource, sh shape) {
 			"kind of correct, because a subscriber handed an empty stream cannot " +
 			"tell it from having nothing to receive.")
 		b.L("if claims.AccountID == %s.Nil {", uuidPkg)
-		b.L("fail(s, w, r, %s.Forbidden(%s))", errPkg,
+		b.L("fail(s, w, r, rc, %s.Forbidden(%s))", errPkg,
 			gobuf.Quote("this shape is scoped to one account, and this credential is not one"))
 		b.L("return")
 		b.L("}")
@@ -353,24 +334,24 @@ func (e *emitter) handler(b *gobuf.Buf, res *ir.Resource, sh shape) {
 
 	b.L("params, err := parse%sShapeParams(r)", res.Name)
 	b.L("if err != nil {")
-	b.L("fail(s, w, r, err)")
+	b.L("fail(s, w, r, rc, err)")
 	b.L("return")
 	b.L("}")
 	b.NL()
 
-	b.L("if scope != nil {")
+	b.L("if sh.%s != nil {", sh.name)
 	if sh.kind == shapeVersions {
-		b.L("if err := scope(r.Context(), r, claims, id, params, where); err != nil {")
+		b.L("if err := sh.%s(ctx, r, claims, id, params, where); err != nil {", sh.name)
 	} else {
-		b.L("if err := scope(r.Context(), r, claims, params, where); err != nil {")
+		b.L("if err := sh.%s(ctx, r, claims, params, where); err != nil {", sh.name)
 	}
-	b.L("fail(s, w, r, err)")
+	b.L("fail(s, w, r, rc, err)")
 	b.L("return")
 	b.L("}")
 	b.L("}")
 	b.NL()
 
-	b.L("s.Proxy.Serve(w, r, %s.Shape{", elecPkg)
+	b.L("sh.Proxy.Serve(w, r, %s.Shape{", elecPkg)
 	b.L("Table:   %s,", gobuf.Quote(storage.Table))
 	b.L("Where:   where.SQL(),")
 	b.L("Params:  where.Params(),")

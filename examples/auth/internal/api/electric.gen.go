@@ -7,31 +7,74 @@ package api
 import (
 	"github.com/simonjanss/rig/runtime/electric"
 	"github.com/simonjanss/rig/runtime/serve"
+	"github.com/simonjanss/rig/runtime/tenancy"
 )
 
-// AttachShapes registers the shutdown for live sync, which is the whole of
-// what a main function does with the proxy beyond mounting it:
+// DefaultElectricURL is the sync service configured when this was generated. A
+// deployment can point somewhere else by building its own proxy.
+const DefaultElectricURL = "http://localhost:3000"
+
+// Shapes is this server's live-sync half: the proxy the shape routes forward
+// through, and one scoping function per shape.
 //
-//	api.AttachShapes(app, proxy)
+// It is a field of [Handlers] rather than a second registration of its own, so
+// mounting the API and mounting its shapes are the same call. They were two,
+// and the cost of that was not the extra line: a shape route identifies its
+// caller, refuses a request and drains at shutdown exactly the way every other
+// route does, and every one of those was a field an application had to
+// remember to set twice.
 //
-// Nothing is started, unlike the sweeper and the engine beside it: a shape
-// route runs when a browser asks and not before. What there is to register is
-// the ending, and it is a drain rather than a close because of what a live
-// subscription is — a request the server is deliberately not answering yet.
+// A nil Proxy mounts nothing at all, which is what a project that generated
+// its shapes and has not written the front end yet wants — the routes are
+// absent rather than answering.
 //
-// That makes it an in-flight request, so http.Server.Shutdown waits for it,
-// and waits: nothing in the poll is late, and Shutdown does not cancel a
-// request's context. One open tab is a shutdown that spends its budget waiting
-// for the sync service to have news, and a sync service that hangs rather than
-// refuses is a shutdown that spends all of it — after which the flush, the
-// sweep and the notification engine's own close each find a deadline that has
-// already passed.
+// A nil scope is not an error either: it means the shape is filtered by tenant
+// and lifecycle and nothing else, which is exactly right for most tables.
 //
-// A drain step runs first, once readiness is already false, which is the point
-// at which there is nothing left to gain from holding a subscription open. The
-// subscriber is told to come back and resumes from the same offset against a
-// replica that is still serving. Nothing is lost, because a poll that had not
-// answered had nothing in it yet.
-func AttachShapes(app *serve.App, proxy *electric.Proxy) {
-	app.DrainWithin("shapes", shapesShutdown, proxy.Drain)
+// A soft-deletable table has a trash shape here as well as a live one, and a
+// table that keeps its previous versions has a history shape. Neither is
+// configured: the columns are what decide, the same way they decide whether
+// the API has a GET /_deleted.
+//
+// Those two inherit the live shape's scope while their own field is nil. They
+// carry the same table's rows, so a narrowing that mattered for the live shape
+// almost always matters for the trash and the history too — and a narrowing
+// the application has to remember to repeat on a route rig added is one that
+// eventually does not get repeated. Set the field to scope them differently;
+// setting it replaces the inherited scope rather than adding to it.
+type Shapes struct {
+	// Proxy forwards to the sync service. Nil mounts no shape routes.
+	Proxy *electric.Proxy
+
+	// App is the lifecycle the drain registers on.
+	//
+	// A shape route is a request the server is deliberately not answering yet, so
+	// http.Server.Shutdown waits for it, and waits: nothing in the poll is late,
+	// and Shutdown does not cancel a request's context. One open tab is a shutdown
+	// that spends its budget waiting for the sync service to have news, after
+	// which the flush, the sweep and the notification engine's own close each find
+	// a deadline that has already passed.
+	//
+	// The drain runs first, once readiness is already false, which is the point at
+	// which there is nothing left to gain from holding a subscription open. The
+	// subscriber is told to come back and resumes from the same offset against a
+	// replica that is still serving. Nothing is lost, because a poll that had not
+	// answered had nothing in it yet.
+	//
+	// Inside Build it is the App that was handed in:
+	//
+	//	Shapes: api.Shapes{App: app, Proxy: proxy},
+	//
+	// Nil mounts the routes and registers no drain, and says so on the way past.
+	// That is for the caller that has no App and owns the ending itself — a test
+	// building this handler from a bare pool — rather than for forgetting.
+	App *serve.App
+
+	// IsAdmin reports whether a caller may subscribe to a shape marked admin-only.
+	// Nil refuses every one of them, which is the safe way to leave it
+	// unconfigured.
+	IsAdmin func(tenancy.Claims) bool
+
+	NotificationRecipient        NotificationRecipientScope
+	NotificationRecipientDeleted NotificationRecipientDeletedScope
 }

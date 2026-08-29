@@ -20,11 +20,24 @@ func TestEveryBuiltInIsRegistered(t *testing.T) {
 	slices.Sort(registered)
 
 	want := []string{
-		"electric", "go-client", "model-go", "openapi",
+		"go-client", "model-go", "openapi",
 		"persist-go", "server-go", "service-go", "ts-client",
 	}
 	if !slices.Equal(registered, want) {
 		t.Errorf("registered = %v, want %v", registered, want)
+	}
+
+	// A generator that went away is not simply absent. A rig.yaml is a file
+	// somebody wrote once and does not reread, so the one that used to write the
+	// shape endpoints answers for itself rather than leaving a reader with "no
+	// generator named electric" and nowhere to look.
+	for name := range gen.Retired {
+		if slices.Contains(registered, name) {
+			t.Errorf("%s is registered and also listed as retired", name)
+		}
+	}
+	if _, ok := gen.Retired["electric"]; !ok {
+		t.Error("the electric generator was folded into server-go and should say so")
 	}
 }
 
