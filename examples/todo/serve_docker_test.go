@@ -17,6 +17,31 @@ import (
 	"github.com/simonjanss/rig/runtime/serve"
 )
 
+// stated is a serve.Config with every value serve refuses to invent, so a test
+// below writes only what it is actually about.
+//
+// serve has no defaults: a config that leaves a timeout or a probe path empty is
+// refused before anything listens, which is the point — a value nobody chose is
+// found only by what it costs when it is wrong. In a test that trade lands as
+// ten fields per case that are not what the case is about, so they are written
+// once, here, where they can still be read.
+func stated(dsn string) serve.Config {
+	return serve.Config{
+		DatabaseURL:       dsn,
+		Addr:              "127.0.0.1:0",
+		Logger:            slog.New(slog.DiscardHandler),
+		LivenessPath:      "/livez",
+		ReadinessPath:     "/readyz",
+		MaxStartup:        30 * time.Second,
+		ConnectTimeout:    10 * time.Second,
+		ProbeTimeout:      2 * time.Second,
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      30 * time.Second,
+		IdleTimeout:       2 * time.Minute,
+	}
+}
+
 // What main does, driven from a test: boot against the real database, answer,
 // and stop when asked. The interesting part is the last one — a shutdown that
 // hangs, or one that drops the connection instead of finishing the request, is
@@ -35,19 +60,15 @@ func TestTheServerBootsAndShutsDown(t *testing.T) {
 	drained := make(chan struct{})
 	closed := make(chan time.Time, 1)
 
+	cfg := stated(dsn)
+	cfg.DrainDelay = 2 * time.Second
+	// Room for the drain delay and the notifier's own five seconds, which mount
+	// registers. rig refuses to start if there is not.
+	cfg.MaxShutdown = 15 * time.Second
+	cfg.OnListen = func(a net.Addr) { listening <- a }
+
 	go func() {
-		stopped <- serve.Run(ctx, serve.Config{
-			DatabaseURL:   dsn,
-			Addr:          "127.0.0.1:0",
-			LivenessPath:  "/livez",
-			ReadinessPath: "/readyz",
-			DrainDelay:    2 * time.Second,
-			// Room for the drain delay and the notifier's own five seconds,
-			// which mount registers. rig refuses to start if there is not.
-			MaxShutdown: 15 * time.Second,
-			Logger:      slog.New(slog.DiscardHandler),
-			OnListen:    func(a net.Addr) { listening <- a },
-		}, func(_ context.Context, app *serve.App) (http.Handler, error) {
+		stopped <- serve.Run(ctx, cfg, func(_ context.Context, app *serve.App) (http.Handler, error) {
 			// A dependency of the kind every real service has. What is being
 			// checked is when it stops: after the last request, not before.
 			app.Drain("consumer", func(context.Context) error {
@@ -181,22 +202,18 @@ func TestTheMonitorIsASecondListener(t *testing.T) {
 	monitoring := make(chan net.Addr, 1)
 	stopped := make(chan error, 1)
 
+	cfg := stated(dsn)
+	cfg.DrainDelay = 2 * time.Second
+	cfg.MaxShutdown = 15 * time.Second
+	cfg.Monitor = http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusTeapot)
+	})
+	cfg.MonitorAddr = "127.0.0.1:0"
+	cfg.OnListen = func(a net.Addr) { listening <- a }
+	cfg.OnMonitorListen = func(a net.Addr) { monitoring <- a }
+
 	go func() {
-		stopped <- serve.Run(ctx, serve.Config{
-			DatabaseURL:   dsn,
-			Addr:          "127.0.0.1:0",
-			LivenessPath:  "/livez",
-			ReadinessPath: "/readyz",
-			DrainDelay:    2 * time.Second,
-			MaxShutdown:   15 * time.Second,
-			Logger:        slog.New(slog.DiscardHandler),
-			Monitor: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-				w.WriteHeader(http.StatusTeapot)
-			}),
-			MonitorAddr:     "127.0.0.1:0",
-			OnListen:        func(a net.Addr) { listening <- a },
-			OnMonitorListen: func(a net.Addr) { monitoring <- a },
-		}, func(_ context.Context, app *serve.App) (http.Handler, error) {
+		stopped <- serve.Run(ctx, cfg, func(_ context.Context, app *serve.App) (http.Handler, error) {
 			return newHandler(app.Pool, nil), nil
 		})
 	}()
@@ -299,13 +316,10 @@ func TestAFailedShutdownIsNotAFailedServer(t *testing.T) {
 	broken := errors.New("would not close")
 
 	go func() {
-		stopped <- serve.Run(ctx, serve.Config{
-			DatabaseURL: dsn,
-			Addr:        "127.0.0.1:0",
-			MaxShutdown: 5 * time.Second,
-			Logger:      slog.New(slog.DiscardHandler),
-			OnListen:    func(a net.Addr) { listening <- a },
-		}, func(_ context.Context, app *serve.App) (http.Handler, error) {
+		cfg := stated(dsn)
+		cfg.MaxShutdown = 5 * time.Second
+		cfg.OnListen = func(a net.Addr) { listening <- a }
+		stopped <- serve.Run(ctx, cfg, func(_ context.Context, app *serve.App) (http.Handler, error) {
 			app.Close("stubborn", func(context.Context) error { return broken })
 			return newHandler(app.Pool, nil), nil
 		})
@@ -346,12 +360,16 @@ func TestAStartupThatHangsIsRefused(t *testing.T) {
 	t.Cleanup(func() { close(release) })
 
 	start := time.Now()
-	err := serve.Run(t.Context(), serve.Config{
-		DatabaseURL: dsn,
-		Addr:        "127.0.0.1:0",
-		MaxStartup:  200 * time.Millisecond,
-		Logger:      slog.New(slog.DiscardHandler),
-	}, func(_ context.Context, app *serve.App) (http.Handler, error) {
+	cfg := stated(dsn)
+	cfg.MaxStartup = 200 * time.Millisecond
+	// And the connection budget with it. A short MaxStartup used to pull this
+	// down on its own; nothing adjusts a stated value now, so a config that
+	// asked to connect for ten seconds inside a two-hundred-millisecond boot is
+	// refused for saying two things that cannot both be true.
+	cfg.ConnectTimeout = 100 * time.Millisecond
+	cfg.MaxShutdown = 5 * time.Second
+
+	err := serve.Run(t.Context(), cfg, func(_ context.Context, app *serve.App) (http.Handler, error) {
 		// Something slow that does not watch its context: a client dialling a
 		// host that will never answer.
 		<-release
@@ -399,15 +417,12 @@ func TestAHandlerThatWillNotReturnDoesNotStarveTheTeardown(t *testing.T) {
 	t.Cleanup(func() { close(hung) })
 
 	go func() {
-		stopped <- serve.Run(ctx, serve.Config{
-			DatabaseURL: dsn,
-			Addr:        "127.0.0.1:0",
-			// Four seconds, of which two belong to the closer below. A handler
-			// that never returns should get the other two and no more.
-			MaxShutdown: 4 * time.Second,
-			Logger:      slog.New(slog.DiscardHandler),
-			OnListen:    func(a net.Addr) { listening <- a },
-		}, func(_ context.Context, app *serve.App) (http.Handler, error) {
+		cfg := stated(dsn)
+		// Four seconds, of which two belong to the closer below. A handler that
+		// never returns should get the other two and no more.
+		cfg.MaxShutdown = 4 * time.Second
+		cfg.OnListen = func(a net.Addr) { listening <- a }
+		stopped <- serve.Run(ctx, cfg, func(_ context.Context, app *serve.App) (http.Handler, error) {
 			app.CloseWithin("release the claims", 2*time.Second, func(c context.Context) error {
 				deadline, ok := c.Deadline()
 				if !ok {

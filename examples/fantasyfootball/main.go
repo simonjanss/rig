@@ -48,12 +48,6 @@ func main() {
 	// which is the ordinary case on a laptop, and then this costs one branch per
 	// log call, the spans cost nothing, and the trace ids are still real.
 	//
-	// No MaxShutdown, because there is no arithmetic left to state: fifteen
-	// seconds is api.ShutdownBudget — five for the trace flush, which is the one
-	// closer rig registers for this project, and ten left for the requests still
-	// in flight — and this example registers no closer of its own. Whoever
-	// writes terminationGracePeriodSeconds reads the total off that function's
-	// documentation, which states it in words.
 	api.Main(serve.Config{
 		DatabaseURL: cmp.Or(os.Getenv("DATABASE_URL"), localDSN),
 		Addr:        cmp.Or(os.Getenv("ADDR"), "127.0.0.1:8081"),
@@ -65,6 +59,38 @@ func main() {
 			"or point $DATABASE_URL at one you already have",
 
 		MaxStartup: 30 * time.Second,
+		// Nothing below has a default. serve refuses a config that left any of
+		// them empty, naming all of them at once, because a value it invented
+		// would be one nobody chose — found only by what it costs when it is
+		// wrong.
+		//
+		// Two questions rather than one. Liveness asks whether to restart this
+		// process and consults nothing, so a slow database cannot turn one
+		// outage into every replica being restarted at once; readiness asks
+		// whether to send it work, pings the database, and turns false the
+		// moment a shutdown begins.
+		LivenessPath:  "/livez",
+		ReadinessPath: "/readyz",
+
+		ConnectTimeout: 10 * time.Second,
+		ProbeTimeout:   2 * time.Second,
+
+		// The four the http.Server is built with. ReadHeaderTimeout is the one
+		// worth never turning off: without it a single connection that opens
+		// and sends nothing holds a goroutine until the process ends.
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      30 * time.Second,
+		IdleTimeout:       2 * time.Minute,
+		// Fifteen seconds, which is api.ShutdownBudget for this project: five
+		// for the trace flush, the one closer rig registers here, and ten left
+		// for the requests still in flight. This example registers no closer of
+		// its own, so there is no arithmetic on top of it — and it is still
+		// written out, because it is the one number in this struct that leaves
+		// the program. Whoever writes terminationGracePeriodSeconds reads it
+		// here rather than out of a function they would have to run the binary
+		// to evaluate.
+		MaxShutdown: 15 * time.Second,
 
 		Tasks: map[string]serve.Task{
 			"migrate": migrate.Apply(migrations, migrate.Options{Log: os.Stdout}),

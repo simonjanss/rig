@@ -15,28 +15,83 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-func TestDefaultsComeFromTheEnvironmentThenFromSense(t *testing.T) {
+// The environment supplies two values. Nothing else is supplied at all.
+func TestTheEnvironmentIsReadAndNothingElseIsInvented(t *testing.T) {
 	t.Setenv("DATABASE_URL", "postgres://from-the-environment")
-	t.Setenv("ADDR", "")
+	t.Setenv("ADDR", "127.0.0.1:9999")
 
-	got := Config{}.withDefaults()
+	got := Config{}.fromEnvironment()
 
 	if got.DatabaseURL != "postgres://from-the-environment" {
 		t.Errorf("DatabaseURL = %q", got.DatabaseURL)
 	}
-	if got.Addr != ":8080" {
-		t.Errorf("Addr = %q, want :8080", got.Addr)
+	if got.Addr != "127.0.0.1:9999" {
+		t.Errorf("Addr = %q", got.Addr)
 	}
-	// Never zero: one client that opens a connection and sends nothing would
-	// otherwise hold a goroutine until the process ends.
-	if got.ReadHeaderTimeout == 0 {
-		t.Error("ReadHeaderTimeout must have a default")
+
+	// Everything else is still exactly what the caller wrote, which was
+	// nothing. A value here would be one this package chose.
+	for _, f := range []struct {
+		name string
+		v    time.Duration
+	}{
+		{"MaxStartup", got.MaxStartup},
+		{"ConnectTimeout", got.ConnectTimeout},
+		{"ProbeTimeout", got.ProbeTimeout},
+		{"ReadHeaderTimeout", got.ReadHeaderTimeout},
+		{"ReadTimeout", got.ReadTimeout},
+		{"WriteTimeout", got.WriteTimeout},
+		{"IdleTimeout", got.IdleTimeout},
+		{"MaxShutdown", got.MaxShutdown},
+	} {
+		if f.v != 0 {
+			t.Errorf("%s = %s, want it left alone", f.name, f.v)
+		}
 	}
-	if got.MaxShutdown == 0 {
-		t.Error("MaxShutdown must have a default")
+	if got.Logger != nil {
+		t.Error("Logger should be left alone")
 	}
-	if got.Logger == nil {
-		t.Error("Logger should fall back to the default")
+	if got.LivenessPath != "" || got.ReadinessPath != "" {
+		t.Errorf("probe paths = %q, %q, want them left alone", got.LivenessPath, got.ReadinessPath)
+	}
+}
+
+// And what is left empty is refused, all of it at once, before anything opens
+// or listens. One field per run of the binary would be nine runs.
+func TestAnUnstatedConfigIsRefusedWithEveryFieldNamed(t *testing.T) {
+	t.Setenv("DATABASE_URL", "")
+	t.Setenv("ADDR", "")
+
+	err := Config{}.checkStated(true)
+	if err == nil {
+		t.Fatal("a config that stated nothing was accepted")
+	}
+	for _, want := range []string{
+		"DatabaseURL", "Logger", "MaxStartup", "ConnectTimeout", "ProbeTimeout",
+		"ReadHeaderTimeout", "ReadTimeout", "WriteTimeout", "IdleTimeout",
+		"Addr", "LivenessPath", "ReadinessPath", "serve.NoProbe",
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the refusal should name %q: %v", want, err)
+		}
+	}
+}
+
+// A task is not a server. Asking a migration subcommand for a write timeout and
+// a liveness path would be seven values invented for a listener never started.
+func TestATaskIsNotAskedForWhatOnlyAServerNeeds(t *testing.T) {
+	cfg := Config{
+		DatabaseURL:    "postgres://somewhere",
+		Logger:         quiet(),
+		MaxStartup:     time.Minute,
+		ConnectTimeout: time.Second,
+	}
+
+	if err := cfg.checkStated(false); err != nil {
+		t.Errorf("a task has everything it needs: %v", err)
+	}
+	if err := cfg.checkStated(true); err == nil {
+		t.Error("a server needs more than that")
 	}
 }
 
@@ -51,7 +106,7 @@ func TestWhatWasSetIsKept(t *testing.T) {
 		DatabaseURL: "postgres://from-the-code",
 		Addr:        "127.0.0.1:1234",
 		MaxShutdown: time.Second,
-	}.withDefaults()
+	}.fromEnvironment()
 
 	if got.DatabaseURL != "postgres://from-the-code" {
 		t.Errorf("DatabaseURL = %q", got.DatabaseURL)
@@ -65,15 +120,24 @@ func TestWhatWasSetIsKept(t *testing.T) {
 }
 
 // Zero means "I did not say", which is why it cannot also mean "no limit".
-// Negative is how a caller says that.
+// Negative is how a caller says that, and the two stay apart until the refusal
+// has run: net/http has only zero for the second, so they are folded together
+// afterwards.
 func TestANegativeTimeoutMeansNone(t *testing.T) {
-	got := Config{ReadTimeout: -1}.withDefaults()
+	stated := Config{ReadTimeout: -1, WriteTimeout: time.Second}
 
+	// Still told apart where it matters: a negative is an answer, so it is not
+	// in the list of things nobody stated.
+	if err := stated.checkStated(true); err == nil || strings.Contains(err.Error(), "ReadTimeout") {
+		t.Errorf("a negative ReadTimeout is a stated one: %v", err)
+	}
+
+	got := stated.normalized()
 	if got.ReadTimeout != 0 {
 		t.Errorf("ReadTimeout = %s, want none", got.ReadTimeout)
 	}
-	if got.WriteTimeout == 0 {
-		t.Error("the other timeouts should still have their defaults")
+	if got.WriteTimeout != time.Second {
+		t.Errorf("WriteTimeout = %s, want it untouched", got.WriteTimeout)
 	}
 }
 
@@ -97,7 +161,7 @@ func TestLivenessDoesNotDependOnAnything(t *testing.T) {
 	var ready atomic.Bool
 	ready.Store(true)
 
-	cfg := Config{LivenessPath: "/livez", ReadinessPath: "/readyz"}.withDefaults()
+	cfg := Config{LivenessPath: "/livez", ReadinessPath: "/readyz"}
 
 	// A nil pool is the strongest form of "no database": readiness would panic
 	// on it, so a liveness check that answers proves it never looked.
@@ -114,7 +178,7 @@ func TestLivenessDoesNotDependOnAnything(t *testing.T) {
 func TestReadinessIsFalseWhileShuttingDown(t *testing.T) {
 	var ready atomic.Bool // zero value: not ready yet
 
-	cfg := Config{LivenessPath: "/livez", ReadinessPath: "/readyz"}.withDefaults()
+	cfg := Config{LivenessPath: "/livez", ReadinessPath: "/readyz"}
 	h := withProbes(cfg, nil, &ready, http.NotFoundHandler())
 
 	res := probe(t, h, "/readyz")
@@ -135,7 +199,7 @@ func TestEverythingElsePassesThrough(t *testing.T) {
 	var ready atomic.Bool
 	ready.Store(true)
 
-	cfg := Config{LivenessPath: "/livez"}.withDefaults()
+	cfg := Config{LivenessPath: "/livez", ReadinessPath: NoProbe}
 	h := withProbes(cfg, nil, &ready, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusTeapot)
 	}))
@@ -145,13 +209,15 @@ func TestEverythingElsePassesThrough(t *testing.T) {
 	}
 }
 
-// With neither path configured the wrapper is not there at all, so a project
-// that wants to answer /livez itself can.
+// With both paths declined the wrapper is not there at all, so a project that
+// wants to answer /livez itself can. Declined rather than omitted: an empty path
+// is a config that said nothing, and checkStated refuses that.
 func TestNoProbesNoWrapper(t *testing.T) {
 	var ready atomic.Bool
 	inner := http.NotFoundHandler()
+	cfg := Config{LivenessPath: NoProbe, ReadinessPath: NoProbe}
 
-	if got := withProbes(Config{}.withDefaults(), nil, &ready, inner); got == nil {
+	if got := withProbes(cfg, nil, &ready, inner); got == nil {
 		t.Fatal("the handler should still be there")
 	}
 }
@@ -165,10 +231,10 @@ func TestTheMonitorNeedsBothHalves(t *testing.T) {
 		name string
 		cfg  Config
 	}{
-		{"a handler and nowhere to put it", Config{Monitor: http.NotFoundHandler()}},
-		{"an address and nothing to serve", Config{MonitorAddr: "127.0.0.1:0"}},
+		{"a handler and nowhere to put it", Config{Logger: quiet(), Monitor: http.NotFoundHandler()}},
+		{"an address and nothing to serve", Config{Logger: quiet(), MonitorAddr: "127.0.0.1:0"}},
 	} {
-		if _, err := tc.cfg.withDefaults().serveMonitor(t.Context()); err == nil {
+		if _, err := tc.cfg.serveMonitor(t.Context()); err == nil {
 			t.Errorf("%s was accepted", tc.name)
 		}
 	}
@@ -178,7 +244,7 @@ func TestTheMonitorNeedsBothHalves(t *testing.T) {
 // monitoring password gets: observe hands back a nil handler and an empty
 // address together, and this is where that turns into nothing being opened.
 func TestNoMonitorNoListener(t *testing.T) {
-	stop, err := Config{}.withDefaults().serveMonitor(t.Context())
+	stop, err := Config{Logger: quiet()}.serveMonitor(t.Context())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -191,12 +257,13 @@ func TestNoMonitorNoListener(t *testing.T) {
 func TestTheMonitorIsOnItsOwnListener(t *testing.T) {
 	var bound net.Addr
 	cfg := Config{
+		Logger: quiet(),
 		Monitor: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			w.WriteHeader(http.StatusTeapot)
 		}),
 		MonitorAddr:     "127.0.0.1:0",
 		OnMonitorListen: func(a net.Addr) { bound = a },
-	}.withDefaults()
+	}
 
 	stop, err := cfg.serveMonitor(t.Context())
 	if err != nil {
@@ -223,10 +290,11 @@ func TestTheMonitorIsOnItsOwnListener(t *testing.T) {
 func TestStoppingTheMonitorClosesThePort(t *testing.T) {
 	var bound net.Addr
 	cfg := Config{
+		Logger:          quiet(),
 		Monitor:         http.NotFoundHandler(),
 		MonitorAddr:     "127.0.0.1:0",
 		OnMonitorListen: func(a net.Addr) { bound = a },
-	}.withDefaults()
+	}
 
 	stop, err := cfg.serveMonitor(t.Context())
 	if err != nil {
@@ -249,7 +317,7 @@ func TestAMonitorPortAlreadyTakenIsAnError(t *testing.T) {
 	}
 	defer taken.Close()
 
-	cfg := Config{Monitor: http.NotFoundHandler(), MonitorAddr: taken.Addr().String()}.withDefaults()
+	cfg := Config{Logger: quiet(), Monitor: http.NotFoundHandler(), MonitorAddr: taken.Addr().String()}
 	if stop, err := cfg.serveMonitor(t.Context()); err == nil {
 		stop()
 		t.Error("a port already in use was accepted")
@@ -367,8 +435,7 @@ func TestBoundedPassesTheFailureThrough(t *testing.T) {
 // Connecting is part of starting, so a connection budget larger than the whole
 // is a configuration that cannot mean what it says.
 func TestConnectTimeoutMustFitInsideMaxStartup(t *testing.T) {
-	err := Config{MaxStartup: 5 * time.Second, ConnectTimeout: 30 * time.Second}.
-		withDefaults().checkStartup()
+	err := Config{MaxStartup: 5 * time.Second, ConnectTimeout: 30 * time.Second}.checkStartup()
 
 	if err == nil {
 		t.Fatal("a connection budget larger than the startup budget should be refused")
@@ -379,19 +446,11 @@ func TestConnectTimeoutMustFitInsideMaxStartup(t *testing.T) {
 		}
 	}
 
-	if err := (Config{}).withDefaults().checkStartup(); err != nil {
-		t.Errorf("the defaults should fit each other: %v", err)
-	}
-}
-
-// A short MaxStartup should not need a second field lowered to go with it.
-func TestTheConnectionBudgetYieldsToAShortStartup(t *testing.T) {
-	got := Config{MaxStartup: 200 * time.Millisecond}.withDefaults()
-
-	if got.ConnectTimeout != 200*time.Millisecond {
-		t.Errorf("ConnectTimeout = %s, want it to fit inside MaxStartup", got.ConnectTimeout)
-	}
-	if err := got.checkStartup(); err != nil {
+	// A connection budget that fits is not refused. It used to be that a short
+	// MaxStartup silently pulled ConnectTimeout down with it; both are stated
+	// now, so the only thing left to check is that they agree.
+	fits := Config{MaxStartup: 200 * time.Millisecond, ConnectTimeout: 200 * time.Millisecond}
+	if err := fits.checkStartup(); err != nil {
 		t.Errorf("the adjusted default should be accepted: %v", err)
 	}
 }
@@ -410,7 +469,7 @@ func TestTheHintIsSaidEarlyAndAgainInTheError(t *testing.T) {
 		MaxStartup:     time.Second,
 		Hint:           "run `rig db up` to start a local Postgres",
 		Logger:         slog.New(slog.NewTextHandler(&log, nil)),
-	}.withDefaults()
+	}
 
 	_, err := open(context.Background(), cfg)
 	if err == nil {
@@ -449,7 +508,7 @@ func TestNoHintNoInvention(t *testing.T) {
 		ConnectTimeout: 300 * time.Millisecond,
 		MaxStartup:     time.Second,
 		Logger:         slog.New(slog.DiscardHandler),
-	}.withDefaults()
+	}
 
 	_, err := open(context.Background(), cfg)
 	if err == nil {

@@ -54,7 +54,7 @@ func TestAnOpenCircuitStopsAskingTheSyncService(t *testing.T) {
 	t.Parallel()
 
 	up := newCounted(t)
-	p, _ := electric.New(electric.Config{
+	p, _ := newProxy(electric.Config{
 		URL:              up.srv.URL,
 		BreakerThreshold: 3,
 		// Long enough that nothing is let through to test the service during
@@ -86,7 +86,7 @@ func TestAnOpenCircuitAnswersWithoutWaiting(t *testing.T) {
 	up.block = make(chan struct{})
 	t.Cleanup(func() { close(up.block) })
 
-	p, _ := electric.New(electric.Config{
+	p, _ := newProxy(electric.Config{
 		URL:              up.srv.URL,
 		InitialTimeout:   300 * time.Millisecond,
 		BreakerThreshold: 1,
@@ -120,7 +120,7 @@ func TestAnOpenCircuitStillRefusesAShapeWithNoFallback(t *testing.T) {
 	t.Parallel()
 
 	up := newCounted(t)
-	p, _ := electric.New(electric.Config{
+	p, _ := newProxy(electric.Config{
 		URL: up.srv.URL, BreakerThreshold: 1, BreakerCooldown: time.Hour,
 	})
 	shape := electric.Shape{Table: "lesson"}
@@ -144,7 +144,7 @@ func TestOneRequestAtATimeTestsTheService(t *testing.T) {
 	t.Parallel()
 
 	up := newCounted(t)
-	p, _ := electric.New(electric.Config{
+	p, _ := newProxy(electric.Config{
 		URL:              up.srv.URL,
 		BreakerThreshold: 1,
 		BreakerCooldown:  50 * time.Millisecond,
@@ -174,7 +174,7 @@ func TestTheRequestThatSucceedsClosesTheCircuit(t *testing.T) {
 	t.Parallel()
 
 	up := newCounted(t)
-	p, _ := electric.New(electric.Config{
+	p, _ := newProxy(electric.Config{
 		URL:              up.srv.URL,
 		BreakerThreshold: 1,
 		BreakerCooldown:  50 * time.Millisecond,
@@ -215,7 +215,7 @@ func TestOnSyncStateSaysWhenItWentAndWhenItCameBack(t *testing.T) {
 
 	up := newCounted(t)
 	var seen []bool
-	p, _ := electric.New(electric.Config{
+	p, _ := newProxy(electric.Config{
 		URL:              up.srv.URL,
 		BreakerThreshold: 2,
 		BreakerCooldown:  50 * time.Millisecond,
@@ -248,7 +248,7 @@ func TestAClientHangingUpDoesNotOpenTheCircuit(t *testing.T) {
 	up.block = make(chan struct{})
 	t.Cleanup(func() { close(up.block) })
 
-	p, _ := electric.New(electric.Config{
+	p, _ := newProxy(electric.Config{
 		URL: up.srv.URL, BreakerThreshold: 1, InitialTimeout: -1,
 	})
 	front := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -280,7 +280,7 @@ func TestTheCircuitCanBeTurnedOff(t *testing.T) {
 	t.Parallel()
 
 	up := newCounted(t)
-	p, _ := electric.New(electric.Config{URL: up.srv.URL, BreakerThreshold: -1})
+	p, _ := newProxy(electric.Config{URL: up.srv.URL, BreakerThreshold: -1})
 	shape := electric.Shape{Table: "lesson", Fallback: snapshotOf("one")}
 
 	for range 4 {

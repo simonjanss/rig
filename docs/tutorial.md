@@ -349,8 +349,10 @@ import (
 	"cmp"
 	"context"
 	"embed"
+	"log/slog"
 	"net/http"
 	"os"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -374,13 +376,41 @@ const localDSN = "postgres://rig:rig@localhost:55450/rig?sslmode=disable"
 
 func main() {
 	// api.Main is the whole of a main function: this project's configuration,
-	// and the one function only this application can write. The probes, the
-	// shutdown budget and the housekeeping subcommands come out of rig.yaml, so
-	// none of them is a line here.
+	// and the one function only this application can write. The housekeeping
+	// subcommands come out of rig.yaml, so those are not lines here.
+	//
+	// Everything serve will not choose for itself is. It has no defaults: a
+	// config that leaves a timeout or a probe path empty is refused before
+	// anything listens, naming all of them at once, because a value nobody
+	// chose is one you find out about from what it costs.
 	api.Main(serve.Config{
 		DatabaseURL: cmp.Or(os.Getenv("DATABASE_URL"), localDSN),
 		Addr:        cmp.Or(os.Getenv("ADDR"), "127.0.0.1:8080"),
 		Hint:        "run `rig db up` to start a local Postgres for this project",
+		Logger:      slog.Default(),
+
+		// Liveness asks whether to restart this process and consults nothing;
+		// readiness asks whether to send it work, pings the database, and turns
+		// false the moment a shutdown begins. serve.NoProbe declines either.
+		LivenessPath:  "/livez",
+		ReadinessPath: "/readyz",
+
+		MaxStartup:        30 * time.Second,
+		ConnectTimeout:    10 * time.Second,
+		ProbeTimeout:      2 * time.Second,
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      30 * time.Second,
+		IdleTimeout:       2 * time.Minute,
+
+		// The shutdown budget is a line here, and it is the one number rig
+		// knows and settles anyway not at all: it is what goes into
+		// terminationGracePeriodSeconds, so it has to be readable off this
+		// struct. api.ShutdownBudget() is ten seconds for a project with no
+		// blocks yet — all of it for the requests in flight — and it grows as
+		// you turn blocks on. Leave it out and the server refuses to start,
+		// printing the number to write.
+		MaxShutdown: 10 * time.Second,
 
 		// `todo migrate` applies the schema and exits: a job before the
 		// rollout, so one process migrates and the replicas only serve.

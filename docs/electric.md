@@ -228,12 +228,21 @@ logs have one. `snapshot` on the rows themselves, and `must-refetch` on the 409
 that sends a resuming subscriber to fetch them, which is what tells that 409
 apart from the sync service's own.
 
-Settings on the proxy, all with defaults. `electric.Config.InitialTimeout` (10s)
+Settings on the proxy, none of them with defaults — `electric.New` refuses a
+config that left one empty, because each governs what a subscriber sees while the
+sync service is away and a value the package chose would be one nobody chose. The
+`Default…` constants beside each field are what to write.
+`electric.Config.InitialTimeout` (10s)
 is how long a first read waits for the sync service to *begin* answering before it
 counts as unreachable — the answer itself is then copied out however long it
 takes. `MaxSnapshotRows` (20,000) is how large a snapshot may be, applied as a
 `LIMIT` so the rows past the bound are never read, and `SnapshotTimeout` (5s) is
-how long one read may take. `OnError` is worth setting too — it is the only way
+how long one read may take. The response's own clock is not one of these
+settings: `serve.Config.WriteTimeout` (30s) is set once for every route in the
+application and would otherwise cut a live poll's answer off on the way out, so
+the proxy replaces it for the request it is serving with `electric.PollDeadline`
+(5m) — the same mechanism a file transfer uses, and the reason neither needs a
+field on `serve.Config`. `OnError` is worth setting too — it is the only way
 the reason for a 502 on a shape route reaches your log, and every error it is
 handed names the shape's table, so an outage across four shapes is four lines you
 can tell apart rather than four copies of one.

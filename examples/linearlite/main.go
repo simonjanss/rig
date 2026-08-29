@@ -109,21 +109,59 @@ func main() {
 			"or point $DATABASE_URL at a database you already have",
 
 		MaxStartup: 30 * time.Second,
+		// Nothing below has a default. serve refuses a config that left any of
+		// them empty, naming all of them at once, because a value it invented
+		// would be one nobody chose — found only by what it costs when it is
+		// wrong.
+		//
+		// Two questions rather than one. Liveness asks whether to restart this
+		// process and consults nothing, so a slow database cannot turn one
+		// outage into every replica being restarted at once; readiness asks
+		// whether to send it work, pings the database, and turns false the
+		// moment a shutdown begins.
+		LivenessPath:  "/livez",
+		ReadinessPath: "/readyz",
+
+		ConnectTimeout: 10 * time.Second,
+		ProbeTimeout:   2 * time.Second,
+
+		// The four the http.Server is built with. ReadHeaderTimeout is the one
+		// worth never turning off: without it a single connection that opens
+		// and sends nothing holds a goroutine until the process ends.
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      30 * time.Second,
+		IdleTimeout:       2 * time.Minute,
 		// Two seconds of still serving after readiness turns false, before
 		// anything stops. Not padding: taking an instance out of a load balancer
 		// is not instant — the probe has to fail, and the change has to
 		// propagate — and requests sent during that window arrive at a server
 		// that has already stopped accepting them.
-		//
-		// No MaxShutdown beside it, and that is the one number worth explaining
-		// by its absence. api.Main settles it to api.ShutdownBudget plus this
-		// delay — 45s of steps and headroom, 47s in total — because every step
-		// it counts is now one rig registers rather than one this file did.
-		// Whoever writes terminationGracePeriodSeconds reads the total off
-		// ShutdownBudget's own documentation, which states it in words; state it
-		// here instead and serve still checks it against what was registered
-		// before the server listens.
 		DrainDelay: 2 * time.Second,
+		// And the whole that delay is spent inside. Forty-five is
+		// api.ShutdownBudget — 5s for the trace flush, 15s for the notification
+		// engine, 5s for the presence sweeper, 5s for the live subscriptions, 5s
+		// for the auth cache's invalidation channel, and 10s left for the
+		// requests in flight — plus the two above.
+		//
+		// The delay is inside the total for two separate reasons, and both are
+		// worth having straight. serve counts it among the parts it checks
+		// against this number — the two seconds here plus thirty-five of steps
+		// is thirty-seven — so writing 45 would still start, and would leave the
+		// requests in flight eight seconds rather than the ten the budget set
+		// aside for them. And terminationGracePeriodSeconds is wall clock from
+		// the signal, which the delay is spent inside: a manifest written from a
+		// number that left it out sends SIGKILL two seconds before the sequence
+		// it was sized for has finished.
+		//
+		// Written as a literal rather than api.ShutdownBudget()+2*time.Second,
+		// because an expression is not something an operator can read off a
+		// struct — and reading it off is the entire reason this field has no
+		// default. A literal is not a number waiting to drift either: serve adds
+		// up every step actually registered before the server listens, so a new
+		// block that outgrows 47 is a process that refuses to start and names the
+		// parts that no longer fit.
+		MaxShutdown: 47 * time.Second,
 
 		Tasks: map[string]serve.Task{
 			"migrate": migrate.ApplyAll(migrationSources(), migrate.Options{Log: os.Stdout}),

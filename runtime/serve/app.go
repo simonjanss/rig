@@ -226,15 +226,44 @@ func (a *App) reserved() time.Duration {
 	return total
 }
 
-// checkShutdown refuses a shutdown whose parts do not fit inside its whole.
+// checkShutdown refuses a shutdown whose parts do not fit inside its whole, and
+// one whose whole was never stated.
 //
 // It runs before the server listens, because that is the only time the answer
 // is useful. A step given thirty seconds inside a twenty-second budget is a
 // step that can never finish, and finding that out during an actual shutdown
 // means finding out from a truncated flush in a process that is already going
 // away.
+//
+// The two refusals are one question asked at one moment, which is why they are
+// here together rather than split across [Config.checkStartup] and this: both
+// are answered by what the mount function actually registered, and neither can
+// be answered before it has. A budget nobody stated is the same failure as one
+// that does not fit — a shutdown nobody has thought about — and it is worth more
+// as a process that will not start than as a truncated flush six months later.
+//
+// Both messages carry the parts, because the number this produces is the one
+// somebody has to write into a deployment, and the only alternative to reading
+// it here is adding up constants across three files.
 func (a *App) checkShutdown(ctx context.Context, max, drainDelay time.Duration) error {
 	total, parts := a.declared(drainDelay)
+
+	if max <= 0 {
+		// A project with nothing of its own registered still has to state one:
+		// what the budget buys there is entirely the requests in flight, and
+		// how long those are worth waiting for is not this package's guess to
+		// make.
+		reserved := "nothing here reserves time of its own, so the whole of it is for the requests in flight"
+		if len(parts) > 0 {
+			reserved = fmt.Sprintf("the steps registered here reserve %s (%s), and the requests in flight get what is left",
+				total, strings.Join(parts, " + "))
+		}
+		return fmt.Errorf(
+			"serve: MaxShutdown is not set and has no default: %s. "+
+				"State the longest the whole stop sequence may take — it is the "+
+				"number that belongs in terminationGracePeriodSeconds",
+			reserved)
+	}
 
 	if total > max {
 		return fmt.Errorf(
@@ -254,9 +283,23 @@ func (a *App) checkShutdown(ctx context.Context, max, drainDelay time.Duration) 
 
 // stopContext shares the deadline of a shutdown already under way, so that the
 // budget is for the whole sequence rather than for each part of it.
+//
+// A timeout of zero or less is no deadline of its own rather than one already
+// in the past. It is reachable from one place — [Run] defers its teardown before
+// the mount function runs and therefore before [App.checkShutdown] has had a
+// chance to refuse an unset MaxShutdown, so the steps that mount registered are
+// closed under a budget that was never stated. Giving them an expired context
+// there would answer a config error with a paragraph of "gave up waiting" from
+// steps that were never the problem, joined onto the one message that was.
+//
+// Not a fallback duration, which would be the default this field deliberately
+// does not have, reintroduced one layer down where nobody would find it.
 func (a *App) stopContext(ctx context.Context, timeout time.Duration) (context.Context, context.CancelFunc) {
 	if !a.until.IsZero() {
 		return context.WithDeadline(context.WithoutCancel(ctx), a.until)
+	}
+	if timeout <= 0 {
+		return context.WithCancel(context.WithoutCancel(ctx))
 	}
 	return context.WithTimeout(context.WithoutCancel(ctx), timeout)
 }

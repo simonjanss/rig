@@ -125,10 +125,8 @@ func (e *emitter) processFile() (gen.Artifact, error) {
 
 	e.tasksFunc(b)
 
-	if len(e.shutdownSteps()) > 0 {
-		e.shutdownConstants(b)
-		e.shutdownBudgetFunc(b)
-	}
+	e.shutdownConstants(b)
+	e.shutdownBudgetFunc(b)
 
 	if e.tracing() {
 		e.processType(b)
@@ -226,6 +224,21 @@ func (e *emitter) poolTask(b *gobuf.Buf, name, call string) {
 func (e *emitter) shutdownConstants(b *gobuf.Buf) {
 	timePkg := b.Import("time")
 
+	steps := e.shutdownSteps()
+
+	if len(steps) == 0 {
+		// Nothing of rig's to bound, so the whole of the budget is the headroom
+		// and there is no block for it to lead.
+		b.Comment("What the requests still in flight are worth waiting for.\n\n" +
+			"The whole of [ShutdownBudget] here: this project's configuration " +
+			"registers no shutdown step of rig's, so there is nothing ahead of the " +
+			"requests to bound. A project that closes something of its own adds " +
+			"that to the total rather than to this.")
+		b.L("const %s = %s", headroomConst, duration(timePkg, shutdownHeadroom))
+		b.NL()
+		return
+	}
+
 	b.Comment("How long each shutdown step rig registers may take.\n\n" +
 		"Each has a limit of its own rather than a share of the whole, because a " +
 		"step that cannot finish must not be able to spend the budget the steps " +
@@ -234,7 +247,7 @@ func (e *emitter) shutdownConstants(b *gobuf.Buf) {
 		"the number a step is registered with and the number the budget counts " +
 		"for it are one number.")
 	b.L("const (")
-	for _, s := range e.shutdownSteps() {
+	for _, s := range steps {
 		b.Comment(strings.ToUpper(s.about[:1]) + s.about[1:] + ".")
 		b.L("%s = %s", s.name, duration(timePkg, s.took))
 	}
@@ -260,19 +273,27 @@ func (e *emitter) shutdownBudgetFunc(b *gobuf.Buf) {
 
 	parts := make([]string, 0, len(steps)+1)
 	terms := make([]string, 0, len(steps)+1)
+	if len(steps) == 0 {
+		parts = append(parts, "")
+	}
 	for _, s := range steps {
 		parts = append(parts, s.took.String()+" for "+s.about)
 		terms = append(terms, s.name)
 	}
-	parts = append(parts, shutdownHeadroom.String()+" left over")
+	if len(steps) > 0 {
+		parts = append(parts, shutdownHeadroom.String()+" left over")
+	} else {
+		parts[0] = shutdownHeadroom.String() + " for the requests still in flight, and no step of rig's ahead of them"
+	}
 	terms = append(terms, headroomConst)
 
 	b.Comment("ShutdownBudget is what this project's own shutdown needs of " +
 		"[github.com/simonjanss/rig/runtime/serve.Config.MaxShutdown].\n\n" +
 		"For this project that is " + total.String() + ": " + english(parts) + ".\n\n" +
-		"**Read it, then write it down.** [Main] leaves this call in a serve.Config " +
-		"for a project that states nothing, so the two ends cannot disagree by " +
-		"default — but the number is one to look up once and write out:\n\n" +
+		"**Read it, then write it down.** There is no default and nothing settles " +
+		"it: a serve.Config that leaves MaxShutdown out is refused before the " +
+		"server listens, because this is the one number in it that leaves the " +
+		"program. So the number is one to look up once and write out:\n\n" +
 		"\tMaxShutdown: " + duration("time", total) + "\n\n" +
 		"MaxShutdown is the one field in that struct that leaves the program — it " +
 		"is what belongs in Kubernetes' terminationGracePeriodSeconds — and " +
@@ -520,13 +541,12 @@ func (e *emitter) configureMethod(b *gobuf.Buf) {
 		"the three paths where something went wrong — a task that failed, a boot " +
 		"that failed, a subcommand that does not exist. Those are the runs whose " +
 		"spans somebody actually wants.\n\n" +
-		"MaxShutdown is deliberately not one of them. [settle] defaults it to " +
-		"[ShutdownBudget] plus the drain delay, so a project that states neither " +
-		"still holds together — but it stays a field, and setting it is how a " +
-		"project disagrees. Writing it out is the better answer for anything that " +
-		"ships: it is the number an operator copies into " +
-		"terminationGracePeriodSeconds, and it should be readable off the struct " +
-		"rather than out of a call."
+		"MaxShutdown is deliberately not one of them, and nothing else fills it " +
+		"either. It is the project's to state: the number an operator copies into " +
+		"terminationGracePeriodSeconds should be readable off the struct rather " +
+		"than out of a call, and a value this method supplied would be one nobody " +
+		"wrote deciding how long something outside this process waits before " +
+		"SIGKILL. [ShutdownBudget] is what to write."
 	b.Comment(doc)
 
 	b.L("func (p *Process) Configure(cfg %s.Config) %s.Config {", servePkg, servePkg)

@@ -259,12 +259,13 @@ the trace flush, the sweeper and the auth cache's channel — and leaves ten for
 the requests in flight. A sixth block would change the number without anything
 here being edited.
 
-`main.go` states `DrainDelay` and nothing else: `api.Main` settles `MaxShutdown`
-to the budget plus that delay, forty-seven seconds. Writing it out is still
-allowed and still checked — it is the one field here that leaves the program,
-since it is what goes into `terminationGracePeriodSeconds` — and
-`ShutdownBudget`'s own documentation states the total in words for whoever writes
-that manifest.
+`main.go` states both halves of the total: `DrainDelay` of two seconds and
+`MaxShutdown` of forty-seven, which is the budget plus that delay. Nothing
+settles it — `MaxShutdown` is the one field here with no default, because it is
+the one that leaves the program, and `terminationGracePeriodSeconds` has to be
+read off this struct rather than out of a function call. The delay is inside the
+total because `serve` counts it there and because the grace period is wall clock
+from the signal, which the delay is spent within.
 
 `serve.App` adds up every step actually registered, before the server listens,
 and refuses a budget that cannot hold them with the parts named — so a literal

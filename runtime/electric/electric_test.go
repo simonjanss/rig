@@ -13,6 +13,33 @@ import (
 	"github.com/simonjanss/rig/runtime/electric"
 )
 
+// newProxy is [electric.New] with every value it refuses to invent filled in,
+// leaving anything the case set alone.
+//
+// electric has no defaults: a Config that says nothing about how long a first
+// read waits, or how large a snapshot may be, is refused rather than given a
+// number nobody chose. In a test that lands as five fields per case that are not
+// what the case is about, so they are written once, here, from the constants the
+// package documents as the answer to write.
+func newProxy(cfg electric.Config) (*electric.Proxy, error) {
+	if cfg.InitialTimeout == 0 {
+		cfg.InitialTimeout = electric.DefaultInitialTimeout
+	}
+	if cfg.MaxSnapshotRows == 0 {
+		cfg.MaxSnapshotRows = electric.DefaultMaxSnapshotRows
+	}
+	if cfg.SnapshotTimeout == 0 {
+		cfg.SnapshotTimeout = electric.DefaultSnapshotTimeout
+	}
+	if cfg.BreakerThreshold == 0 {
+		cfg.BreakerThreshold = electric.DefaultBreakerThreshold
+	}
+	if cfg.BreakerCooldown == 0 {
+		cfg.BreakerCooldown = electric.DefaultBreakerCooldown
+	}
+	return electric.New(cfg)
+}
+
 func TestWhereBindsEveryValue(t *testing.T) {
 	t.Parallel()
 
@@ -146,7 +173,7 @@ func TestProxyDecidesTheFilter(t *testing.T) {
 	t.Parallel()
 
 	up := newUpstream(t)
-	p, err := electric.New(electric.Config{URL: up.srv.URL})
+	p, err := newProxy(electric.Config{URL: up.srv.URL})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -195,7 +222,7 @@ func TestProxyIgnoresWhatTheClientAsksFor(t *testing.T) {
 	t.Parallel()
 
 	up := newUpstream(t)
-	p, _ := electric.New(electric.Config{URL: up.srv.URL})
+	p, _ := newProxy(electric.Config{URL: up.srv.URL})
 
 	var w electric.Where
 	w.Eq("tenant_id", "the-tenant")
@@ -223,7 +250,7 @@ func TestProxyForwardsTheProtocolParameters(t *testing.T) {
 	t.Parallel()
 
 	up := newUpstream(t)
-	p, _ := electric.New(electric.Config{URL: up.srv.URL})
+	p, _ := newProxy(electric.Config{URL: up.srv.URL})
 
 	serve(t, p, electric.Shape{Table: "lesson"},
 		"offset=1234_5&handle=abc&live=true&cursor=99&replica=full&nonsense=x")
@@ -245,7 +272,7 @@ func TestProxyDoesNotForwardTheCallersCredential(t *testing.T) {
 	t.Parallel()
 
 	up := newUpstream(t)
-	p, _ := electric.New(electric.Config{
+	p, _ := newProxy(electric.Config{
 		URL:     up.srv.URL,
 		Headers: http.Header{"Authorization": []string{"Bearer the-sync-credential"}},
 		Extra:   url.Values{"source_id": []string{"the-source"}},
@@ -291,7 +318,7 @@ func TestClientDisconnectCancelsTheUpstreamPoll(t *testing.T) {
 	up := newUpstream(t)
 	up.block = make(chan struct{})
 
-	p, _ := electric.New(electric.Config{URL: up.srv.URL})
+	p, _ := newProxy(electric.Config{URL: up.srv.URL})
 
 	mux := http.NewServeMux()
 	served := make(chan struct{})
@@ -324,7 +351,7 @@ func TestClientDisconnectCancelsTheUpstreamPoll(t *testing.T) {
 func TestUpstreamFailureIsABadGateway(t *testing.T) {
 	t.Parallel()
 
-	p, _ := electric.New(electric.Config{URL: "http://127.0.0.1:1"})
+	p, _ := newProxy(electric.Config{URL: "http://127.0.0.1:1"})
 	res := serve(t, p, electric.Shape{Table: "lesson"}, "")
 
 	if res.StatusCode != http.StatusBadGateway {
@@ -336,7 +363,7 @@ func TestAShapeNeedsATable(t *testing.T) {
 	t.Parallel()
 
 	up := newUpstream(t)
-	p, _ := electric.New(electric.Config{URL: up.srv.URL})
+	p, _ := newProxy(electric.Config{URL: up.srv.URL})
 
 	if res := serve(t, p, electric.Shape{}, ""); res.StatusCode != http.StatusBadGateway {
 		t.Errorf("status = %d", res.StatusCode)
@@ -346,7 +373,7 @@ func TestAShapeNeedsATable(t *testing.T) {
 func TestAURLIsRequired(t *testing.T) {
 	t.Parallel()
 
-	if _, err := electric.New(electric.Config{}); err == nil {
+	if _, err := newProxy(electric.Config{}); err == nil {
 		t.Error("a proxy with nowhere to forward to should refuse to exist")
 	}
 }
@@ -376,7 +403,7 @@ func TestHopHeadersAreNotForwardedAndTheCursorIs(t *testing.T) {
 	}))
 	t.Cleanup(up.Close)
 
-	p, err := electric.New(electric.Config{URL: up.URL})
+	p, err := newProxy(electric.Config{URL: up.URL})
 	if err != nil {
 		t.Fatal(err)
 	}

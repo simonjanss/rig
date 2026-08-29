@@ -5,6 +5,8 @@
 package api
 
 import (
+	"time"
+
 	"github.com/simonjanss/rig/runtime/serve"
 )
 
@@ -37,4 +39,48 @@ func Tasks(own map[string]serve.Task) map[string]serve.Task {
 		out[name] = task
 	}
 	return out
+}
+
+// What the requests still in flight are worth waiting for.
+//
+// The whole of [ShutdownBudget] here: this project's configuration registers
+// no shutdown step of rig's, so there is nothing ahead of the requests to
+// bound. A project that closes something of its own adds that to the total
+// rather than to this.
+const shutdownHeadroom = 10 * time.Second
+
+// ShutdownBudget is what this project's own shutdown needs of
+// [github.com/simonjanss/rig/runtime/serve.Config.MaxShutdown].
+//
+// For this project that is 10s: 10s for the requests still in flight, and no
+// step of rig's ahead of them.
+//
+// **Read it, then write it down.** There is no default and nothing settles it:
+// a serve.Config that leaves MaxShutdown out is refused before the server
+// listens, because this is the one number in it that leaves the program. So
+// the number is one to look up once and write out:
+//
+//	MaxShutdown: 10 * time.Second
+//
+// MaxShutdown is the one field in that struct that leaves the program — it
+// is what belongs in Kubernetes' terminationGracePeriodSeconds — and whoever
+// writes the manifest should be able to read it off the struct rather than run
+// the binary or add up a sum spread over three files. A project with closers
+// of its own adds theirs to the total above and writes that:
+//
+//	MaxShutdown: 15 * time.Second // 10s here, plus 5s for a closer of my own
+//
+// A literal is not a number waiting to drift. serve.App adds up every step
+// actually registered, before the server listens, and refuses a budget that
+// cannot hold them with the parts named — so a number left stale by a new
+// block is a process that will not start and says which parts no longer fit. A
+// wrong number that fails loudly at boot is worth more than a right one nobody
+// can read.
+//
+// Every step this project's configuration registers is counted here, including
+// one in a process that never starts it — a `Tasks:` entry never reaches the
+// mount closure, and serve.Config is built before it either way. It is a
+// maximum, so counting a step that is not there costs nothing but headroom.
+func ShutdownBudget() time.Duration {
+	return shutdownHeadroom
 }

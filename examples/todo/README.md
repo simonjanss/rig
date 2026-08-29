@@ -170,9 +170,9 @@ closers rig itself registers for the blocks in `rig.yaml` — the notification
 engine's fifteen seconds and the live subscriptions' five — plus ten seconds of
 headroom for the requests in flight. The other ten is this example's own two
 closers, the recorder and the store's cache subscription, which no generator can
-know about — and that is why this one is still written out. A project whose
-closers are all rig's leaves the field alone and `api.Main` settles it to the
-budget plus the drain delay.
+know about. A project whose closers are all rig's writes `ShutdownBudget()`'s
+own total instead — every project writes something, because the field has no
+default and nothing settles it.
 
 Written out rather than summed, because this is the number somebody copies into
 a manifest and they should not have to run the binary to learn it. Read

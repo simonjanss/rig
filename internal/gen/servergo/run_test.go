@@ -161,45 +161,51 @@ func TestMainOwnsTheProcess(t *testing.T) {
 
 // What rig.yaml already decided is filled in, and anything already set is left
 // alone — so a field is still how a project disagrees.
-func TestMainSettlesWhatTheConfigurationDecided(t *testing.T) {
+func TestSettleMergesTheTasksAndNothingElse(t *testing.T) {
 	t.Parallel()
 
 	doc := gentest.LoadDocument(t, filepath.Join("testdata", "presence.ir.json"))
 	src := artifactNamed(t, gentest.Run(t, servergo.New(), doc, opts()), "run.gen.go")
 
-	for _, want := range []string{
-		"cfg.Tasks = Tasks(cfg.Tasks)",
-		"if cfg.MaxShutdown == 0 {",
-		"cfg.MaxShutdown = ShutdownBudget() + cfg.DrainDelay",
-		`if cfg.LivenessPath == "" {`,
-		`cfg.LivenessPath = "/livez"`,
-		`cfg.ReadinessPath = "/readyz"`,
-	} {
-		if !strings.Contains(src, want) {
-			t.Errorf("settle does not fill in %q", want)
+	if !strings.Contains(src, "cfg.Tasks = Tasks(cfg.Tasks)") {
+		t.Error("settle does not merge the tasks")
+	}
+
+	// And fills in nothing else. Every other field serve needs is one the
+	// project states, because every one of them is read by something outside
+	// this binary — an orchestrator checking a path, a manifest naming a
+	// budget — and a value settled here is one nobody can read.
+	for _, absent := range []string{"cfg.LivenessPath", "cfg.ReadinessPath", "cfg.MaxShutdown"} {
+		if strings.Contains(src[strings.Index(src, "func settle("):], absent) {
+			t.Errorf("settle fills in %q", absent)
 		}
 	}
 }
 
-// A project with no closer of rig's has no budget to default to, and must not
-// get a MaxShutdown of zero for it.
+// settle does not touch MaxShutdown, for any project.
 //
-// serve reads zero as "take my default", so the line simply has to be absent —
-// which is the same rule shutdownBudgetFunc keeps by not being emitted.
-func TestNoBudgetMeansNoDefaultedMaxShutdown(t *testing.T) {
+// It is the one field rig knows the answer to and fills in anyway not at all:
+// the number has to be readable in the serve.Config a main function writes,
+// because that is where whoever writes terminationGracePeriodSeconds reads it.
+// Main refuses one that was left out instead, which is a boot that fails with
+// the number to write rather than a deployment that disagrees silently.
+func TestSettleNeverFillsInTheShutdownBudget(t *testing.T) {
 	t.Parallel()
 
-	doc := gentest.LoadDocument(t, filepath.Join("testdata", fixture))
-	for i := range doc.API.Resources {
-		doc.API.Resources[i].Electric = nil
-	}
-	src := artifactNamed(t, gentest.Run(t, servergo.New(), doc, opts()), "run.gen.go")
+	for _, name := range []string{fixture, "presence.ir.json"} {
+		doc := gentest.LoadDocument(t, filepath.Join("testdata", name))
+		src := artifactNamed(t, gentest.Run(t, servergo.New(), doc, opts()), "run.gen.go")
 
-	if strings.Contains(src, "ShutdownBudget()") {
-		t.Errorf("settle calls a ShutdownBudget this project does not have:\n%s", src)
-	}
-	if strings.Contains(src, "cfg.MaxShutdown") {
-		t.Error("a project with no rig step got its MaxShutdown settled anyway")
+		settle := src[strings.Index(src, "func settle("):]
+		if strings.Contains(settle, "MaxShutdown") {
+			t.Errorf("%s: settle fills in MaxShutdown:\n%s", name, settle)
+		}
+		// And Main refuses it, naming the number this project adds up to.
+		for _, want := range []string{"if cfg.MaxShutdown == 0 {", "ShutdownBudget()", "os.Exit(2)"} {
+			if !strings.Contains(src, want) {
+				t.Errorf("%s: Main does not refuse an unstated MaxShutdown: missing %q", name, want)
+			}
+		}
 	}
 }
 
