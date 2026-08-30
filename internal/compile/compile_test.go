@@ -2010,6 +2010,10 @@ func TestAForeignKeyToRigsOwnTableMayDropThePrefix(t *testing.T) {
 		// replaced them, so the replacement has to cover both.
 		{"the notification link", "notification_id", "rig_notification", ""},
 		{"the inbox owner", "account_id", "rig_account", ""},
+		// And the file column, which had one too: <role>_file_id is the ordinary
+		// <qualifier>_file_id spelling once rig_file may be named without the
+		// prefix, so the rule reaches it without an exemption of its own.
+		{"a file column", "profile_image_file_id", "rig_file", ""},
 		{"named after nothing", "org_id", "rig_tenant",
 			"named tenant_id or rig_tenant_id, either with a <qualifier>_ prefix"},
 		{"an ordinary table still wants its own name", "player_id", "player", ""},

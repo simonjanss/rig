@@ -542,15 +542,15 @@ func checkColumnNaming(t *ir.Table, loaded *tableconf.Loaded, rigsOwn bool, bool
 		// target obvious rather than to make names long.
 		selfReference := c.ForeignKey != nil && c.ForeignKey.Table == t.Name
 
-		// A file column is exempt for the same reason. `<role>_file_id` is the
-		// declaration: there is only one table it could point at, so naming the
-		// role says more than naming the target, and the alternative the rule
-		// would demand is either rig_file_id — one file per table, forever — or
-		// profile_image_rig_file_id.
-
-		// A reference to one of rig's own tables is not exempt but is allowed
-		// two spellings — see [foreignKeyNames], which is where the carve-outs
-		// for notification_id and the inbox's account_id went.
+		// A file column no longer needs an exemption of its own. The rule used
+		// to demand rig_file_id of profile_image_file_id — one file per table,
+		// forever — or profile_image_rig_file_id; with the prefix optional,
+		// `<role>_file_id` is the ordinary <qualifier>_file_id spelling for
+		// rig_file, and the rule reaches it without one.
+		//
+		// Because a reference to one of rig's own tables is not exempt but is
+		// allowed two spellings — see [foreignKeyNames], which is where that
+		// carve-out went, along with notification_id and the inbox's account_id.
 
 		// And every column of every table rig created, which a project cannot
 		// rename and did not write. The rule is advice about a schema somebody
@@ -563,7 +563,7 @@ func checkColumnNaming(t *ir.Table, loaded *tableconf.Loaded, rigsOwn bool, bool
 		// rig's is projected that way.
 
 		if fkSev != "" && c.ForeignKey != nil && !isAuditActorColumn(c.Name) &&
-			!selfReference && !isFileColumn(t, c) && !rigsOwn {
+			!selfReference && !rigsOwn {
 			want := foreignKeyNames(c.ForeignKey.Table)
 			if !namedAfter(c.Name, want) {
 				diags.AddSeverity(diag.CodeForeignKeyNaming, fkSev, at,
@@ -592,10 +592,12 @@ func checkColumnNaming(t *ir.Table, loaded *tableconf.Loaded, rigsOwn bool, bool
 //
 // It was three carve-outs before it was a rule: the notification link table's
 // notification_id, the inbox's account_id, and a project's own tenant_id, which
-// never got one and is what sent the other two looking for a shared reason.
-// A file column keeps its own exemption, because that one is a different
-// argument — profile_image_id names the role rather than the target, and the
-// prefix is not what is missing from it.
+// never got one and is what sent the other two looking for a shared reason. The
+// file column's went the same way, by a different argument arriving in the same
+// place: profile_image_file_id names the role rather than the target, and once
+// the prefix is optional that is <qualifier>_file_id against rig_file rather
+// than an exception to the rule. [isFileColumn] still decides what a file column
+// is everywhere else; it just no longer has to be consulted here.
 func foreignKeyNames(target string) []string {
 	if bare := strings.TrimPrefix(target, scaffold.TablePrefix); bare != target && bare != "" {
 		return []string{bare + "_id", target + "_id"}
