@@ -91,7 +91,7 @@ export type NotificationRecipientRow = {
  * call during render — no memoization needed.
  */
 export const createNotificationRecipientStream = createCollectionCache(
-    (runtime: Runtime, params: Record<string, never>) =>
+    (runtime: Runtime, _params: Record<string, never>) =>
         createRigCollection<NotificationRecipientRow>({
             runtime,
             path: "/api/v1/rig_notification_recipient/_stream",
@@ -116,7 +116,7 @@ export const createNotificationRecipientStream = createCollectionCache(
  * call during render — no memoization needed.
  */
 export const createNotificationRecipientDeletedStream = createCollectionCache(
-    (runtime: Runtime, params: Record<string, never>) =>
+    (runtime: Runtime, _params: Record<string, never>) =>
         createRigCollection<NotificationRecipientRow>({
             runtime,
             path: "/api/v1/rig_notification_recipient/_deleted/_stream",
@@ -135,7 +135,7 @@ export const createNotificationRecipientDeletedStream = createCollectionCache(
  * call during render — no memoization needed.
  */
 export const createTodoStream = createCollectionCache(
-    (runtime: Runtime, params: Record<string, never>) =>
+    (runtime: Runtime, _params: Record<string, never>) =>
         createRigCollection<TodoRow>({
             runtime,
             path: "/api/v1/todo/_stream",
@@ -160,7 +160,7 @@ export const createTodoStream = createCollectionCache(
  * call during render — no memoization needed.
  */
 export const createTodoDeletedStream = createCollectionCache(
-    (runtime: Runtime, params: Record<string, never>) =>
+    (runtime: Runtime, _params: Record<string, never>) =>
         createRigCollection<TodoRow>({
             runtime,
             path: "/api/v1/todo/_deleted/_stream",

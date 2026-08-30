@@ -20,6 +20,13 @@ const (
 	// carries all three cases: an optional file column, a required one, and a
 	// table with two.
 	filesFixture = "files.ir.json"
+	// A third, because neither of the above has a table that streams without
+	// declaring params, and a factory with nothing to forward binds its params
+	// differently. This one has two: the notification tables are rig's own,
+	// unexposed, and subscribed to rather than read — which is the shape a
+	// project meets first, since it arrives with the module rather than being
+	// asked for.
+	notifyFixture = "notify.ir.json"
 )
 
 func opts() gen.Options {
@@ -44,10 +51,16 @@ func TestGoldenFiles(t *testing.T) {
 	gentest.Golden(t, filepath.Join("testdata", "files"), load(t, filesFixture), *update)
 }
 
+func TestGoldenNotify(t *testing.T) {
+	t.Parallel()
+
+	gentest.Golden(t, filepath.Join("testdata", "notify"), load(t, notifyFixture), *update)
+}
+
 func TestDeterministic(t *testing.T) {
 	t.Parallel()
 
-	for _, name := range []string{fixture, filesFixture} {
+	for _, name := range []string{fixture, filesFixture, notifyFixture} {
 		doc := gentest.LoadDocument(t, filepath.Join("testdata", name))
 		gentest.Deterministic(t, tsclient.New(), doc, opts())
 	}
@@ -318,6 +331,66 @@ func TestAnUnexposedStreamedRowDeclaresItsEnums(t *testing.T) {
 		t.Errorf("the enum should be imported where it is named:\n%s", src)
 	}
 	fileOf(t, artifacts, "lesson_status.gen.ts")
+}
+
+// A factory's second parameter is bound whether or not the body reads it, so
+// that `createCollectionCache` keeps inferring the params type from that
+// position. Where nothing reads it the name is underscored, because rig writes
+// no tsconfig and the templates a front end starts from turn
+// `noUnusedParameters` on — the alternative is a TS6133 in a file whose banner
+// says not to edit it.
+func TestAParamlessStreamUnderscoresTheBindingNothingReads(t *testing.T) {
+	t.Parallel()
+
+	src := fileOf(t, load(t, notifyFixture), "electric.gen.ts")
+
+	if n := strings.Count(src, "_params: Record<string, never>"); n == 0 {
+		t.Errorf("a factory with nothing to forward should underscore it:\n%s", src)
+	}
+	if strings.Contains(src, " params: Record<string, never>") {
+		t.Errorf("no factory should bind a params it never reads:\n%s", src)
+	}
+}
+
+// The history route is the exception, and it is not about the declared params:
+// the identifier is a path segment, so that factory reads the binding even when
+// the resource declares nothing. Asserted on a lifecycle document with its
+// params taken away, because no committed schema has a snapshotable table that
+// streams without them.
+func TestTheHistoryStreamBindsParamsWithNoneDeclared(t *testing.T) {
+	t.Parallel()
+
+	doc := gentest.LoadDocument(t, filepath.Join("testdata", fixture))
+	for i := range doc.API.Resources {
+		if doc.API.Resources[i].Electric != nil {
+			doc.API.Resources[i].Electric.Params = nil
+		}
+	}
+	src := fileOf(t, gentest.Run(t, tsclient.New(), doc, opts()), "electric.gen.ts")
+
+	if !strings.Contains(src, "(runtime: Runtime, params: { id: string }) =>") {
+		t.Errorf("the history factory should still bind params:\n%s", src)
+	}
+	if !strings.Contains(src, "pathValue(params.id)") {
+		t.Errorf("the history route should splice the identifier:\n%s", src)
+	}
+	// And its siblings, which have nothing to read, should not.
+	if n := strings.Count(src, "(runtime: Runtime, _params: Record<string, never>) =>"); n != 2 {
+		t.Errorf("want the live and trash factories underscored, got %d:\n%s", n, src)
+	}
+}
+
+// The same document with its params declared reads the binding in every
+// factory, so nothing there is underscored. Without this the underscore could
+// be applied to all of them and only a golden would notice.
+func TestAStreamWithParamsBindsThemPlainly(t *testing.T) {
+	t.Parallel()
+
+	src := fileOf(t, load(t, fixture), "electric.gen.ts")
+
+	if strings.Contains(src, "_params") {
+		t.Errorf("a factory that reads its params should not underscore them:\n%s", src)
+	}
 }
 
 func fileOf(t *testing.T, artifacts []gen.Artifact, path string) string {

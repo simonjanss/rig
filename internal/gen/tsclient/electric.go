@@ -154,7 +154,7 @@ func (e *emitter) streamFactory(b *tsbuf.Buf, res *ir.Resource, kind streamKind)
 		"to call during render — no memoization needed.")
 	b.L("export const %s = %s(", name, cache)
 	b.Indent()
-	b.L("(runtime: %s, params: %s) =>", runtime, params)
+	b.L("(runtime: %s, %s: %s) =>", runtime, streamParamsBinding(res, kind), params)
 	b.Indent()
 	b.L("%s<%s>({", createCollection, row)
 	b.Indent()
@@ -206,6 +206,25 @@ func (e *emitter) streamArgs(res *ir.Resource, kind streamKind) (string, string)
 	default:
 		return declared, sent
 	}
+}
+
+// streamParamsBinding is what a factory calls its second parameter.
+//
+// Underscored where nothing reads it — the live and trash routes of a resource
+// that declares no params, where [emitter.streamArgs] sends a literal `{}` and
+// [emitter.streamPath] has no identifier to splice in. rig generates no
+// tsconfig, so the one this output lands under is always the project's, and the
+// templates a front end starts from turn `noUnusedParameters` on: the
+// alternative is a TS6133 in a file whose banner says not to edit it.
+//
+// The name rather than the parameter, because the arity is not ours to change:
+// `createCollectionCache` reads the params type off that position, and a
+// one-argument factory would be a different type for every caller.
+func streamParamsBinding(res *ir.Resource, kind streamKind) string {
+	if kind != streamVersions && len(res.Electric.Params) == 0 {
+		return "_params"
+	}
+	return "params"
 }
 
 // streamPath is the route expression, with the identifier spliced in for the
