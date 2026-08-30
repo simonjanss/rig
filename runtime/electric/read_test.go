@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -512,17 +511,15 @@ func field(name string, oid uint32, format int16) pgconn.FieldDescription {
 // to a map it holds — so two parallel tests encoding two types at once is a
 // concurrent write and a fatal error. Only encoding memoises; the scan the read
 // path does works its plan out each time.
-var encoding sync.Mutex
-
 // mustEncode is a value in the wire form Postgres would have sent it in, so a
 // decoding test does not depend on a database to produce its input.
 func mustEncode(t *testing.T, oid uint32, v any) []byte {
 	t.Helper()
 
-	encoding.Lock()
-	defer encoding.Unlock()
+	m := borrowCodec()
+	defer returnCodec(m)
 
-	out, err := codecs.Encode(oid, pgx.BinaryFormatCode, v, nil)
+	out, err := m.Encode(oid, pgx.BinaryFormatCode, v, nil)
 	if err != nil {
 		t.Fatalf("encoding for oid %d: %v", oid, err)
 	}

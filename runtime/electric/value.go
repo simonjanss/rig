@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"reflect"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -109,8 +110,10 @@ func Value(v any) any {
 	// the columns Go has no type for. This is pgx's own text encoder, which is
 	// the same code that read the value out of the database in the first place,
 	// so an array's quoting and a numeric's scale are not this package's opinion.
-	if typ, ok := codecs.TypeForValue(v); ok {
-		if out, err := codecs.Encode(typ.OID, pgtype.TextFormatCode, v, nil); err == nil {
+	m := borrowCodec()
+	defer returnCodec(m)
+	if typ, ok := m.TypeForValue(v); ok {
+		if out, err := m.Encode(typ.OID, pgtype.TextFormatCode, v, nil); err == nil {
 			return string(out)
 		}
 	}
@@ -123,9 +126,30 @@ func Value(v any) any {
 	return fmt.Sprint(v)
 }
 
-// codecs is pgx's text encoder, held once because building one is not free and
-// nothing here mutates it.
-var codecs = pgtype.NewMap()
+// codecs hands out pgx's encoder, one per caller rather than one for the
+// package.
+//
+// It was a single [pgtype.Map] until a parallel test killed the process with
+// "concurrent map writes". Encode and Scan look plainly read-only and are not:
+// each memoizes the plan it resolved into a map on the value, so two goroutines
+// rendering rows at the same time write to the same map. pgx never hits this
+// because a Map belongs to a connection and a connection belongs to one
+// goroutine; this package has no connection to hang one on, so it borrows.
+//
+// A pool rather than a Map per call because building one is not free — it
+// registers every type pgx knows — and rather than a mutex because this is on
+// the path that renders every column of every row a fallback read answers, and
+// serializing that would make one slow decode everybody's problem. What the
+// pool drops is memoized plans, which cost a rebuild and nothing else.
+var codecs = sync.Pool{New: func() any { return pgtype.NewMap() }}
+
+// borrowCodec takes an encoder nobody else holds. Every caller returns it with
+// [returnCodec], and holding one across a goroutine boundary is the one thing
+// that would put the shared map back.
+func borrowCodec() *pgtype.Map { return codecs.Get().(*pgtype.Map) }
+
+// returnCodec gives one back, memoized plans and all.
+func returnCodec(m *pgtype.Map) { codecs.Put(m) }
 
 // isNull reports whether a value is absent rather than empty.
 //

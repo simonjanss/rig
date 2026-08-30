@@ -14,8 +14,15 @@ version: 1
 # than here — the paths on the generators are the whole of that arrangement.
 #
 # The module path does not mention api/, deliberately: api/go.mod is where the
-# module begins, so api/internal/model is the package this names. A project that
-# would rather the two agree renames both, and nothing here objects.
+# module begins, so api/internal/generated/model is the package this names. A
+# project that would rather the two agree renames both, and nothing objects.
+#
+# Under api/ the split is between what `rig generate` writes and what you do.
+# Everything generated goes to api/internal/generated/ — model, store, api —
+# so the directory nobody edits is named as such rather than mixed in beside
+# api/internal/app, which is wiring somebody wrote. api/client is the deliberate
+# exception: it is a library, and internal/ would stop anything outside this
+# module importing it.
 project:
   name: linearlite
   module: github.com/simonjanss/rig/examples/linearlite
@@ -153,7 +160,7 @@ database:
     enabled: true
     port: 55445
 
-# rig's own tables stay in the modules that own them, so api/migrations/ below
+# rig's own tables stay in the modules that own them, so the directory below
 # holds only this example's five migrations rather than the twelve hundred lines
 # of DDL nobody here wrote. examples/auth and examples/todo vendor theirs, which
 # is the default — between them all three readings are generated and run on every
@@ -166,19 +173,22 @@ database:
 # the only place the order is written down.
 #
 # `dir:` is under api/ rather than beside this file, and that is not a taste
-# question. api/main.go carries `//go:embed migrations/*.sql`, and go:embed
-# cannot reach outside its own package's directory — so the SQL has to live
-# inside the Go module that ships it. Anything else would mean the binary and
-# `rig db up` reading two different sets.
+# question. api/main.go carries `//go:embed internal/migrations/*.sql`, and
+# go:embed cannot reach outside its own package's directory — so the SQL has to
+# live inside the Go module that ships it. Anything else would mean the binary
+# and `rig db up` reading two different sets. It can reach downwards, which is
+# why the SQL sits under internal/ with the rest of what only this module uses.
 migrations:
-  dir: api/migrations
+  dir: api/internal/migrations
   foundation: embedded
 
 # Every table gets a configuration file. `rig sync` creates and updates them.
-# Under api/ with the service layer it describes, because a table's YAML and the
-# Go beside it are read together and neither is any use to web/.
+# Under api/internal/ with the service layer it describes: a table's YAML
+# and the Go beside it are read together and neither is any use to web/. Beside
+# generated/ rather than in it: these directories are written once and then
+# yours.
 layout:
-  table_dir: api/services/{table}
+  table_dir: api/internal/services/{table}
   config_file: "{table_dir}/{table}.yaml"
 
 # Convention rules. Each is off, warn, or error.
@@ -194,7 +204,7 @@ generators:
   # layers below import this one, so there is one definition of a row
   # rather than a copy on each side and a conversion between them.
   - name: model-go
-    out_dir: api/internal/model
+    out_dir: api/internal/generated/model
     options:
       package: model
 
@@ -203,34 +213,34 @@ generators:
   # The import path below has no `api` in it while the directory above does, and
   # that is the two-half layout showing through rather than a mistake: `out_dir`
   # is a path from this file, `model_import` is a Go import path from the module
-  # root, and the module root is api/. Every `*_import` on the blocks that
-  # follow reads the same way.
+  # root, and the module root is api/. Both end in internal/generated/model.
+  # Every `*_import` on the blocks that follow reads the same way.
   - name: persist-go
-    out_dir: api/internal/store
+    out_dir: api/internal/generated/store
     options:
       package: store
-      model_import: github.com/simonjanss/rig/examples/linearlite/internal/model
+      model_import: github.com/simonjanss/rig/examples/linearlite/internal/generated/model
 
   # Wire types, the interface your service layer implements, and a
   # working default implementation of every operation.
   - name: service-go
-    out_dir: api/internal/api
+    out_dir: api/internal/generated/api
     options:
       package: api
-      model_import: github.com/simonjanss/rig/examples/linearlite/internal/model
-      store_import: github.com/simonjanss/rig/examples/linearlite/internal/store
-      api_import: github.com/simonjanss/rig/examples/linearlite/internal/api
+      model_import: github.com/simonjanss/rig/examples/linearlite/internal/generated/model
+      store_import: github.com/simonjanss/rig/examples/linearlite/internal/generated/store
+      api_import: github.com/simonjanss/rig/examples/linearlite/internal/generated/api
       # Where your service layer goes. Written once, then yours.
-      stub_dir: api/services/{table}
+      stub_dir: api/internal/services/{table}
 
   # Routing and handlers — and, because the auth block above is enabled, the
   # authentication wiring beside them.
   - name: server-go
-    out_dir: api/internal/api
+    out_dir: api/internal/generated/api
     options:
       package: api
-      model_import: github.com/simonjanss/rig/examples/linearlite/internal/model
-      api_import: github.com/simonjanss/rig/examples/linearlite/internal/api
+      model_import: github.com/simonjanss/rig/examples/linearlite/internal/generated/model
+      api_import: github.com/simonjanss/rig/examples/linearlite/internal/generated/api
       # Live sync. A table asks for a stream with `electric: {enabled: true}`,
       # and the routes are mounted beside the rest of its API — same mux, same
       # claims lookup, same error mapper. Until one asks, none of this writes
@@ -238,10 +248,15 @@ generators:
       electric_url: http://localhost:55445
       # Where your extra shape scoping goes, beside the service layer for the
       # same table. Written once, then yours.
-      stub_dir: api/services/{table}
+      stub_dir: api/internal/services/{table}
 
   # A typed Go client for this API. api/import/ is the consumer: a batch job
   # that signs in with a personal API key and creates a todo per CSV row.
+  #
+  # Generated, and the one generated directory outside internal/generated/. A
+  # client is for callers, and callers of a real project's client are in other
+  # modules, which internal/ forbids. Here that is only api/import/, but the
+  # layout is the one a project should copy.
   - name: go-client
     out_dir: api/client
     options:

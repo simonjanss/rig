@@ -13,7 +13,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/simonjanss/rig/examples/linearlite/services/outbox"
+	"github.com/simonjanss/rig/examples/linearlite/internal/services/outbox"
 	"github.com/simonjanss/rig/notify"
 	"github.com/simonjanss/rig/observe"
 	"github.com/simonjanss/rig/runtime/electric"
