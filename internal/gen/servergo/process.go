@@ -589,6 +589,17 @@ func (e *emitter) attachMethod(b *gobuf.Buf) {
 	b.L("app.CloseWithin(%s, %s, p.tracing.Shutdown)", gobuf.Quote("traces"), tracesConst)
 	b.NL()
 
+	if e.monitoring() {
+		b.Comment("The database, on the monitoring page, beside whatever else this " +
+			"server registers. The probe rather than a state, so the pill answers " +
+			"whether the pool can reach Postgres now — which is the question " +
+			"somebody looking at that page during an incident is asking, and one " +
+			"the request list can only answer for requests that have already " +
+			"failed.")
+		b.L("p.page.Watch(%s, app.Pool.Ping)", gobuf.Quote("database"))
+		b.NL()
+	}
+
 	said := "A log file is a deployment's to ask for"
 	if e.monitoring() {
 		said = "An address and a password are a deployment's to set"

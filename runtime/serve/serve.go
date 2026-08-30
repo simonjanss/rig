@@ -528,7 +528,7 @@ func Run(ctx context.Context, cfg Config, mount Mount) (err error) {
 	// Readiness is false until the server is listening and false again the
 	// moment it starts to stop, which is what a load balancer watches.
 	var ready atomic.Bool
-	handler = withProbes(cfg, pool, &ready, handler)
+	handler = withProbes(cfg, app, pool, &ready, handler)
 
 	// The shutdown is checked now, while the answer can still change anything:
 	// a step that cannot fit in the budget is a truncated flush during an
@@ -846,7 +846,7 @@ func address(pc *pgxpool.Config) string {
 // this process; readiness asks whether to send it work. Answering both from one
 // check means either a wedged process nobody restarts, or a whole fleet
 // restarted because the database was slow for thirty seconds.
-func withProbes(cfg Config, pool *pgxpool.Pool, ready *atomic.Bool, next http.Handler) http.Handler {
+func withProbes(cfg Config, app *App, pool *pgxpool.Pool, ready *atomic.Bool, next http.Handler) http.Handler {
 	if cfg.LivenessPath == NoProbe && cfg.ReadinessPath == NoProbe {
 		return next
 	}
@@ -858,11 +858,11 @@ func withProbes(cfg Config, pool *pgxpool.Pool, ready *atomic.Bool, next http.Ha
 			writeProbe(w, http.StatusOK, "alive")
 
 		case cfg.ReadinessPath:
-			if err := readiness(r.Context(), cfg, pool, ready); err != nil {
+			if err := readiness(r.Context(), cfg, app, pool, ready); err != nil {
 				writeProbe(w, http.StatusServiceUnavailable, err.Error())
 				return
 			}
-			writeProbe(w, http.StatusOK, "ready")
+			writeProbe(w, http.StatusOK, readyBody(app))
 
 		default:
 			next.ServeHTTP(w, r)
@@ -872,7 +872,7 @@ func withProbes(cfg Config, pool *pgxpool.Pool, ready *atomic.Bool, next http.Ha
 
 // readiness is everything that has to be true for this instance to be worth
 // sending a request to.
-func readiness(ctx context.Context, cfg Config, pool *pgxpool.Pool, ready *atomic.Bool) error {
+func readiness(ctx context.Context, cfg Config, app *App, pool *pgxpool.Pool, ready *atomic.Bool) error {
 	if !ready.Load() {
 		return errors.New("shutting down")
 	}
@@ -888,7 +888,39 @@ func readiness(ctx context.Context, cfg Config, pool *pgxpool.Pool, ready *atomi
 			return err
 		}
 	}
+	return runChecks(ctx, app)
+}
+
+// runChecks asks every dependency the mount function registered, and names the
+// one that said no.
+//
+// They share the single budget readiness already took, rather than each getting
+// one: three dependencies with two seconds apiece is a readiness check that
+// takes six, which is a probe that has already failed by the time it answers.
+func runChecks(ctx context.Context, app *App) error {
+	for _, c := range app.readyChecks() {
+		if err := c.probe(ctx); err != nil {
+			return fmt.Errorf("%s: %w", c.name, err)
+		}
+	}
 	return nil
+}
+
+// readyBody is what a passing readiness check says: what was checked, rather
+// than only that something was.
+//
+// The endpoint is read by whoever is debugging a deployment, and "ready" alone
+// leaves them with no way to tell an instance that checked its dependencies from
+// one that has none registered — which is exactly the difference they came to
+// find out.
+func readyBody(app *App) string {
+	checks := app.readyChecks()
+	names := make([]string, 0, len(checks)+1)
+	names = append(names, "database")
+	for _, c := range checks {
+		names = append(names, c.name)
+	}
+	return "ready\n" + strings.Join(names, "\n")
 }
 
 func writeProbe(w http.ResponseWriter, status int, message string) {

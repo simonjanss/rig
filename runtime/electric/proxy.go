@@ -454,6 +454,69 @@ func New(cfg Config) (*Proxy, error) {
 // [Config.BreakerThreshold], because then nothing is counting.
 func (p *Proxy) SyncReachable() bool { return p.breaker.reachable() }
 
+// Health asks the sync service whether it is serving.
+//
+// One request to its own health endpoint, bounded by ctx and nothing else — the
+// way everything in this package is bounded by the request that caused it. A nil
+// error means the service is there and has finished connecting to its database;
+// any other means it is not, and says which of those two it failed at.
+//
+// Answering HTTP is deliberately not the whole test. The sync service comes up
+// before it has connected to Postgres and reports its own state in the body, and
+// a shape request sent during that gap hangs rather than fails — which is the
+// worst of the three answers, because a startup check that hangs is
+// indistinguishable from a startup that is merely slow. So a 200 whose body does
+// not say active is a failure here.
+//
+// It does not touch the circuit, in either direction. This is a probe somebody
+// asked for rather than a subscription that failed: a monitoring page polling
+// every few seconds must not be what stops this proxy serving live shapes, and a
+// probe that succeeded must not put a subscriber back on a service it has not
+// tried itself. [Proxy.SyncReachable] is the other question — what the requests
+// that did happen found — and the two are worth having separately.
+func (p *Proxy) Health(ctx context.Context) error {
+	p.mu.RLock()
+	draining := p.draining
+	p.mu.RUnlock()
+	if draining {
+		return errors.New("electric: this proxy is shutting down")
+	}
+
+	target := *p.base
+	target.Path = strings.TrimRight(target.Path, "/") + "/v1/health"
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target.String(), nil)
+	if err != nil {
+		return fmt.Errorf("electric: %w", err)
+	}
+	// The same credentials a shape request carries. A deployment with something
+	// in front of the sync service would otherwise have a probe that fails for a
+	// reason the shapes never hit.
+	for name, values := range p.headers {
+		for _, v := range values {
+			req.Header.Add(name, v)
+		}
+	}
+
+	res, err := p.client.Do(req)
+	if err != nil {
+		return fmt.Errorf("electric: cannot reach the sync service at %s: %w", p.base, err)
+	}
+	defer res.Body.Close()
+
+	// Bounded, because this body is a status and an unbounded read from
+	// something that answered 200 by accident is this process's memory.
+	body, _ := io.ReadAll(io.LimitReader(res.Body, 4<<10))
+	if res.StatusCode != http.StatusOK {
+		return fmt.Errorf("electric: the sync service at %s answered %d", p.base, res.StatusCode)
+	}
+	if !strings.Contains(string(body), "active") {
+		return fmt.Errorf("electric: the sync service at %s is up but not serving yet: %s",
+			p.base, strings.TrimSpace(string(body)))
+	}
+	return nil
+}
+
 // Drain ends the polls this proxy is holding open and stops it starting more.
 //
 // Register it as the first step of a shutdown, which is what the step is for:

@@ -194,7 +194,9 @@ different thing from the per-table `electric:` key ([tables.md](tables.md)),
 which says a table has shapes, and from the generator's `electric_url` option
 ([generators.md](generators.md)), which says where the proxy forwards.
 [electric.md](electric.md#running-electric-alongside-your-application) puts the
-three together.
+three together — and covers `server-go`'s `electric_required`, which decides
+whether a sync service that is not answering is a line in the log at boot or a
+refusal to start.
 
 ---
 

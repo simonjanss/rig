@@ -503,11 +503,32 @@ One search box for both halves, over routes, messages, error text, attributes
 and trace ids. Paste the `requestId` from somebody's screenshot and you have
 their request and everything it logged.
 
+**Dependencies**, in the header beside the live pulse: one pill per thing this
+server cannot work without, green when it answered and red when it did not, with
+the reason on hover. rig registers the database, and the sync service where a
+table has shapes; `Page.Watch` adds your own.
+
+```go
+page.Watch("search index", func(ctx context.Context) error { return idx.Ping(ctx) })
+```
+
+The page holds the probe rather than a state something pushed to it, so a pill
+answers whether the dependency is there *now* — a sync service that comes back
+shows up on the next poll without any traffic having to discover it. All of them
+run at once, under one two-second budget, and a probe still running when it is
+spent is reported as not answering rather than waited on — including one that
+ignores the context it is handed. The endpoint answers 200 whatever they say:
+this is a report, not a verdict. The verdict is `serve`'s
+`ReadinessPath`, which is deliberately a different endpoint with a different
+opinion about which dependencies are worth taking an instance out of rotation
+for — see [electric.md](electric.md#running-electric-alongside-your-application).
+
 The state is in the URL, so a view is a link: reload it, share it, or use the
 back button. `?` lists the keyboard shortcuts.
 
-`/_rig/monitor/traces.json` and `/_rig/monitor/logs.json` — on the page's own
-port, not your API's — are the same data, and
+`/_rig/monitor/traces.json`, `/_rig/monitor/logs.json` and
+`/_rig/monitor/checks.json` — on the page's own port, not your API's — are the
+same data, and
 `observe.ReadTraces` and `observe.ReadLogs` read the files straight from a script
 if you would rather not have a page in the loop.
 

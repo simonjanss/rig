@@ -11,17 +11,24 @@ import (
 	"net/http"
 	"os"
 
+	"github.com/simonjanss/rig/runtime/electric"
 	"github.com/simonjanss/rig/runtime/serve"
 )
 
 // Parts is what this application's own wiring built, as far as the process
-// around it has to care: the routes to serve.
+// around it has to care: the routes to serve, and the sync proxy — the
+// things whose lifetime is longer than a request's.
 //
-// One field, because this project's configuration gives the server nothing
-// whose lifetime outlasts a request. Turning a block on in rig.yaml adds one
-// — something rig starts, drains or closes on the other side of the one call
-// that returns this, and something that used to be a line in a main function
-// with no compiler, no test and usually no symptom until a deploy under load.
+// Every field beside the handler is something rig starts, drains or closes on
+// the other side of the one call that returns this, and each used to be a line
+// in a main function — with no compiler, no test and usually no symptom
+// until a deploy under load. Naming them here is what makes them slots to fill
+// rather than calls to remember, and what makes turning a block on in rig.yaml
+// show up as a field in the one function that has to know about it.
+//
+// Handler is required. The rest may be nil, because rig cannot tell a project
+// that meant it from one that forgot. What a nil one gets instead is a line at
+// startup naming what is not running and what that costs.
 type Parts struct {
 	// Handler is every route this server answers: the generated API, and anything
 	// else this application mounts beside it.
@@ -31,6 +38,21 @@ type Parts struct {
 	// middleware of your own. rig answers the two probes outside whatever this is,
 	// so a readiness check every second is not a request through all of it.
 	Handler http.Handler
+
+	// Proxy is the sync service this server's shape routes forward through — the
+	// same *electric.Proxy given to Handlers.Shapes, named again here.
+	//
+	// Twice because the two uses are different questions. Register mounts the
+	// routes with it and cannot fail; this is the one that asks the sync service
+	// whether it is there, while the server is still starting and while refusing
+	// to start is still an option. [CheckSyncService] is what happens to the
+	// answer.
+	//
+	// Nil is allowed, and is what a project that generated its shapes and has not
+	// written a front end for them yet has. It is said out loud rather than
+	// refused, because rig cannot tell that project from one that meant to wire a
+	// proxy and did not.
+	Proxy *electric.Proxy
 }
 
 // Build is this application's own wiring: everything the server is made of,
@@ -75,6 +97,17 @@ func Mount(build Build) serve.Mount {
 
 		if parts.Handler == nil {
 			return nil, errors.New("api: Parts.Handler is nil: there is nothing to serve")
+		}
+
+		if parts.Proxy != nil {
+			if err := CheckSyncService(ctx, app, parts.Proxy); err != nil {
+				return nil, err
+			}
+		} else {
+			// Said rather than left to be discovered. Leaving it out is allowed — rig
+			// cannot tell a project that meant it from one that forgot — so what it can
+			// do is say so once, while it is still cheap to fix.
+			app.Logger.InfoContext(ctx, "no sync service in this server", "cost", "no shape route is mounted and nothing on this server live-syncs")
 		}
 
 		return parts.Handler, nil

@@ -165,7 +165,7 @@ func TestLivenessDoesNotDependOnAnything(t *testing.T) {
 
 	// A nil pool is the strongest form of "no database": readiness would panic
 	// on it, so a liveness check that answers proves it never looked.
-	h := withProbes(cfg, nil, &ready, http.NotFoundHandler())
+	h := withProbes(cfg, &App{}, nil, &ready, http.NotFoundHandler())
 
 	res := probe(t, h, "/livez")
 	if res.Code != http.StatusOK {
@@ -179,7 +179,7 @@ func TestReadinessIsFalseWhileShuttingDown(t *testing.T) {
 	var ready atomic.Bool // zero value: not ready yet
 
 	cfg := Config{LivenessPath: "/livez", ReadinessPath: "/readyz"}
-	h := withProbes(cfg, nil, &ready, http.NotFoundHandler())
+	h := withProbes(cfg, &App{}, nil, &ready, http.NotFoundHandler())
 
 	res := probe(t, h, "/readyz")
 	if res.Code != http.StatusServiceUnavailable {
@@ -200,7 +200,7 @@ func TestEverythingElsePassesThrough(t *testing.T) {
 	ready.Store(true)
 
 	cfg := Config{LivenessPath: "/livez", ReadinessPath: NoProbe}
-	h := withProbes(cfg, nil, &ready, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	h := withProbes(cfg, &App{}, nil, &ready, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusTeapot)
 	}))
 
@@ -217,7 +217,7 @@ func TestNoProbesNoWrapper(t *testing.T) {
 	inner := http.NotFoundHandler()
 	cfg := Config{LivenessPath: NoProbe, ReadinessPath: NoProbe}
 
-	if got := withProbes(cfg, nil, &ready, inner); got == nil {
+	if got := withProbes(cfg, &App{}, nil, &ready, inner); got == nil {
 		t.Fatal("the handler should still be there")
 	}
 }

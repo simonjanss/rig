@@ -164,6 +164,38 @@ read in `main.go`.
 What happens to a subscription while that service is unreachable is
 [its own section](#when-the-sync-service-is-down).
 
+**The server says at boot whether it found it.** The generated `Mount` asks the
+sync service's health endpoint once, before the first connection is accepted,
+and logs what it found:
+
+```
+INFO  the sync service is answering
+WARN  the sync service is not answering  error="…connection refused"  hint="run `rig db up` to start the sync service, or set $ELECTRIC_URL"  cost="a shape with a fallback serves a snapshot; the rest answer 502"
+```
+
+A warning, and the server starts — which is the right default, because a shape
+with a fallback serves a snapshot through an outage and every route that is not
+a shape never touched the sync service at all. For an application whose pages
+*are* shapes, say so and it refuses to start instead:
+
+```yaml
+  - name: server-go
+    options:
+      electric_required: true
+```
+
+That also puts the sync service in `ReadinessPath`, so an instance that loses it
+is taken out of the load balancer rather than left in it answering nothing. Both
+halves are off by default for the same reason: coupling readiness to a
+dependency you degrade gracefully without turns one sync outage into every
+replica dropping out at once.
+
+A project with the [monitoring page](observability.md) gets the same answer as a
+status pill beside the request list, without the flag and without waiting for a
+subscriber to discover it — the page holds `Proxy.Health` and asks it on every
+poll. `Proxy.SyncReachable` is the cheaper, different question: what the requests
+that actually happened found. See [Rig stops asking](#rig-stops-asking).
+
 **Mounting them is one field on `api.Handlers`.**
 
 ```go
@@ -310,6 +342,21 @@ proxy, err := electric.New(electric.Config{
 ...
 proxy.SyncReachable() // the same answer, for a health endpoint or a banner
 ```
+
+A third, when the question is "is it there *now*" rather than "what did the last
+requests find":
+
+```go
+err := proxy.Health(ctx) // one GET at the sync service's own health endpoint
+```
+
+It is a probe and touches the circuit in neither direction — a status page
+polling every few seconds must not be what stops the proxy serving live shapes,
+and a probe that succeeded must not put a subscriber back onto a service it has
+not tried itself. Answering HTTP is not enough for it: the sync service comes up
+before it has connected to Postgres and reports its own state in the body, and a
+shape request in that gap hangs rather than fails. This is what the boot check
+and the monitoring page's pill both ask.
 
 The trade is a sync service that is fine behind a network that briefly is not:
 those requests are answered from a fallback, or refused, for as long as one

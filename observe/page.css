@@ -112,6 +112,31 @@ h1 {
 .pulse.on { background: var(--good); }
 .pulse.bad { background: var(--critical); }
 
+.checks {
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+}
+.checks .dep {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 12px; color: var(--ink-2);
+  background: var(--raised);
+  border: 1px solid var(--border);
+  border-radius: 999px; padding: 2px 8px;
+  cursor: default;
+}
+/* The dot carries the state and the word carries the name, so the pill is
+   still readable to anyone who cannot tell the two colours apart. */
+.checks .dep::before {
+  content: ""; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--grid);
+}
+.checks .dep.ok::before { background: var(--good); }
+.checks .dep.bad::before { background: var(--critical); }
+.checks .dep.bad { color: var(--critical); border-color: var(--critical); }
+/* Why there are no pills, in the place they would have been. The bar wraps, so
+   a sentence here takes a line of its own rather than squeezing the tabs. */
+.checks .why { color: var(--muted); font-size: 12px; }
+.checks .why:empty { display: none; }
+
 /* ── tabs ───────────────────────────────────────────────────────────────── */
 
 .tabs {

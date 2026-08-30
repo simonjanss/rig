@@ -120,6 +120,8 @@ func (e *emitter) shapesStruct(b *gobuf.Buf) {
 		b.NL()
 	}
 
+	e.syncCheck(b)
+
 	b.Comment("Shapes is this server's live-sync half: the proxy the shape routes " +
 		"forward through, and one scoping function per shape.\n\n" +
 		"It is a field of [Handlers] rather than a second registration of its own, " +
@@ -272,4 +274,142 @@ func (e *emitter) inherit(b *gobuf.Buf, shapes []*ir.Resource) {
 	if wrote {
 		b.NL()
 	}
+}
+
+// syncCheck emits the boot-time answer to "is the sync service there".
+//
+// It exists because a server that uses live sync starts perfectly well without
+// it and, until this, said nothing: the pool is pinged and hinted about, and the
+// sync service was discovered ten seconds into somebody's first subscription, as
+// a 502 or a silently degraded snapshot. The three ways to get here are ordinary
+// — no `rig db up`, no database.electric block, a stale $ELECTRIC_URL under an
+// isolated database — and all three are cheap to fix at the moment the server
+// starts and expensive to work out from a blank page.
+//
+// Whether that is a warning or a refusal is [Options.ElectricRequired], and it
+// has to be the project's answer rather than rig's: a shape with a fallback
+// serves a snapshot through an outage, so refusing to start would be rig
+// deciding that a degraded server is worth less than no server.
+func (e *emitter) syncCheck(b *gobuf.Buf) {
+	var (
+		ctxPkg   = b.Import("context")
+		elecPkg  = b.Import(electricModule)
+		fmtPkg   = b.Import("fmt")
+		servePkg = b.Import(runtimeModule + "/serve")
+		timePkg  = b.Import("time")
+	)
+
+	b.Comment("ElectricRequired is whether this project decided it cannot serve " +
+		"without live sync.\n\n" +
+		"It comes from server-go's electric_required in rig.yaml, and it is what " +
+		"[CheckSyncService] does with a sync service that is not answering: false " +
+		"warns and carries on, true refuses to start and puts the sync service in " +
+		"the readiness check.")
+	b.L("const ElectricRequired = %t", e.cfg.ElectricRequired)
+	b.NL()
+
+	b.Comment("syncProbeTimeout bounds the one question asked at boot. It is inside " +
+		"the server's own MaxStartup, and short because the answer wanted here is " +
+		"\"is it there\" rather than \"will it eventually be\": a sync service still " +
+		"connecting to its database is reported as not serving, which is the " +
+		"honest answer and the one that comes back on its own.")
+	b.L("const syncProbeTimeout = 5 * %s.Second", timePkg)
+	b.NL()
+
+	b.Comment("syncHint is what to tell somebody whose sync service is not there.\n\n" +
+		"The counterpart of the serve.Config.Hint the database has, and it is here " +
+		"for the same reason that one is a field: the address a shape route " +
+		"forwards to is a container in development and a deployed service in " +
+		"production, and printing the wrong one is worse than printing nothing.")
+	b.L("const syncHint = %s", gobuf.Quote(
+		"run `rig db up` to start the sync service, or set $ELECTRIC_URL"))
+	b.NL()
+
+	b.Comment("CheckSyncService asks the sync service whether it is serving, once, " +
+		"while the server is still starting.\n\n" +
+		"Called by [Mount] with whatever the application put in Parts.Proxy, so a " +
+		"project gets this without writing it. What it does with a bad answer is " +
+		"[ElectricRequired]: an error that stops the boot, or a warning and a " +
+		"server that starts anyway.\n\n" +
+		"A nil proxy is not a failure in either case, and returns without a word: " +
+		"rig cannot tell a project that has not built a front end for its shapes " +
+		"yet from one that forgot to wire the proxy, and [Mount] is where that is " +
+		"said.\n\n" +
+		syncCheckRegisters(e.monitoring()))
+	// The page is a parameter only where there is one. A project with no
+	// monitoring block has no rig/observe in its module at all, and naming the
+	// type here would put it there for the sake of an argument nobody passes.
+	page := ""
+	if e.monitoring() {
+		page = ", page *" + b.Import(observeModule) + ".Page"
+	}
+	b.L("func CheckSyncService(ctx %s.Context, app *%s.App%s, proxy *%s.Proxy) error {",
+		ctxPkg, servePkg, page, elecPkg)
+
+	b.L("if proxy == nil {")
+	b.Comment("Nothing to ask, and nothing said either: [Mount] is the caller " +
+		"that can tell a nil Parts.Proxy from an absent one, and it already " +
+		"logged which. Saying it again here would be the same line twice for " +
+		"every project that left the field alone.")
+	b.L("return nil")
+	b.L("}")
+	b.NL()
+
+	if e.monitoring() {
+		b.Comment("The probe rather than a state, so the pill on the monitoring page " +
+			"answers whether the sync service is there now instead of whether it " +
+			"was there when something last happened to touch it. A nil page — a " +
+			"caller using Mount rather than Process.Mount — registers nothing.")
+		b.L("page.Watch(%s, proxy.Health)", gobuf.Quote("sync service"))
+		b.NL()
+	}
+
+	b.L("probe, cancel := %s.WithTimeout(ctx, syncProbeTimeout)", ctxPkg)
+	b.L("defer cancel()")
+	b.NL()
+
+	b.L("if err := proxy.Health(probe); err != nil {")
+	b.L("if ElectricRequired {")
+	b.L("return %s.Errorf(\"%%w (%%s)\", err, syncHint)", fmtPkg)
+	b.L("}")
+	b.L("app.Logger.WarnContext(ctx, %s, %s, err, %s, syncHint, %s, %s)",
+		gobuf.Quote("the sync service is not answering"),
+		gobuf.Quote("error"),
+		gobuf.Quote("hint"),
+		gobuf.Quote("cost"),
+		gobuf.Quote("a shape with a fallback serves a snapshot; the rest answer 502"))
+	b.L("return nil")
+	b.L("}")
+	b.NL()
+
+	b.L("app.Logger.InfoContext(ctx, %s)", gobuf.Quote("the sync service is answering"))
+	b.NL()
+
+	b.L("if ElectricRequired {")
+	b.Comment("Only when the project said so. By default a sync outage must not " +
+		"take every replica out of the load balancer at once: the shapes with a " +
+		"fallback are still serving, and so is every route that never touched " +
+		"the sync service.")
+	b.L("app.Ready(%s, proxy.Health)", gobuf.Quote("sync service"))
+	b.L("}")
+	b.L("return nil")
+	b.L("}")
+	b.NL()
+}
+
+// syncCheckRegisters is the last paragraph of CheckSyncService's documentation:
+// what it hangs the probe on, which depends on whether this project has a
+// monitoring page to hang it on at all.
+func syncCheckRegisters(monitoring bool) string {
+	if monitoring {
+		return "It also registers what it found, in the two places it belongs: the " +
+			"monitoring page gets the probe itself, so a sync service that comes " +
+			"back shows up there without any subscriber having to discover it, and " +
+			"— only when this project said it is required — so does the readiness " +
+			"check."
+	}
+	return "When this project said live sync is required, it also registers the " +
+		"probe as a readiness check, so an instance that loses the sync service " +
+		"is taken out of the load balancer rather than left in it answering " +
+		"nothing."
 }

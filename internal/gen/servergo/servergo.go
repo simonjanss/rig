@@ -60,6 +60,22 @@ type Options struct {
 	// It only matters for a project where some table asked for live sync.
 	ElectricURL string `json:"electric_url"`
 
+	// ElectricRequired makes a sync service that is not answering a refusal to
+	// start rather than a line in the log.
+	//
+	// False, the default, is a server that boots, says once that live sync is
+	// not there, and serves — because that is what most projects want: a shape
+	// with a fallback answers from the database, and every route that is not a
+	// shape never touched the sync service at all.
+	//
+	// True is for the application whose pages are shapes, where starting is a
+	// server that answers 502 to everything that matters. It also makes the sync
+	// service part of the readiness check, so an instance that loses it is taken
+	// out of the load balancer rather than left in it answering nothing.
+	//
+	// It only matters for a project where some table asked for live sync.
+	ElectricRequired bool `json:"electric_required"`
+
 	// StubDir is where the hand-owned shape scoping files go, relative to the
 	// project root. {table} and {Table} are substituted. Empty writes no stubs.
 	//
@@ -89,7 +105,7 @@ func (*Generator) Description() string {
 }
 
 // Version implements [gen.Generator].
-func (*Generator) Version() string { return "3" }
+func (*Generator) Version() string { return "4" }
 
 // Generate implements [gen.Generator].
 func (g *Generator) Generate(_ context.Context, doc *ir.Document, opts gen.Options) ([]gen.Artifact, error) {

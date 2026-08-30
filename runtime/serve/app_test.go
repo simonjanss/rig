@@ -390,3 +390,58 @@ func TestAHandlerThatWillNotReturnDoesNotStarveTheTeardown(t *testing.T) {
 		t.Errorf("the flush was given %s of its 200ms", left)
 	}
 }
+
+// A dependency the mount function registered fails readiness by name, so the
+// 503 body says which one rather than only that something is wrong.
+func TestAReadyCheckIsNamedWhenItFails(t *testing.T) {
+	app := &App{Logger: quiet()}
+	app.Ready("sync service", func(context.Context) error {
+		return errors.New("electric: the sync service answered 503")
+	})
+
+	err := runChecks(t.Context(), app)
+	if err == nil {
+		t.Fatal("runChecks = nil, want the check's error")
+	}
+	if !strings.Contains(err.Error(), "sync service") {
+		t.Errorf("error = %q, want the dependency named", err)
+	}
+	if !strings.Contains(err.Error(), "503") {
+		t.Errorf("error = %q, want the cause kept", err)
+	}
+}
+
+// Nil is nothing to check rather than something to blow up on, the same answer
+// Drain and Close give a nil function.
+func TestANilReadyCheckIsNotRegistered(t *testing.T) {
+	app := &App{Logger: quiet()}
+	app.Ready("nothing", nil)
+
+	if got := len(app.readyChecks()); got != 0 {
+		t.Errorf("registered %d checks, want 0", got)
+	}
+	if err := runChecks(t.Context(), app); err != nil {
+		t.Errorf("runChecks = %v, want nil", err)
+	}
+}
+
+// A passing readiness check says what it checked. "ready" alone cannot tell an
+// instance that asked its dependencies from one that has none registered, and
+// that is the difference somebody reading this endpoint came to find out.
+func TestTheReadyBodyNamesWhatWasChecked(t *testing.T) {
+	app := &App{Logger: quiet()}
+	app.Ready("sync service", func(context.Context) error { return nil })
+
+	body := readyBody(app)
+	for _, want := range []string{"ready", "database", "sync service"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("body = %q, want %q in it", body, want)
+		}
+	}
+
+	// And with nothing registered it still names the one dependency serve
+	// always checks itself.
+	if body := readyBody(&App{}); !strings.Contains(body, "database") {
+		t.Errorf("body = %q, want the pool ping named", body)
+	}
+}

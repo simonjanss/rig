@@ -31,6 +31,8 @@ type App struct {
 
 	drain []step
 	stop  []step
+	// checks are the dependencies readiness asks about, beyond the pool.
+	checks []check
 
 	// until is the deadline for the whole stop sequence, set when it begins.
 	until time.Time
@@ -47,6 +49,44 @@ type step struct {
 	// whole sequence. Zero means the sequence's remaining time is the only
 	// limit.
 	timeout time.Duration
+}
+
+// check is one dependency ReadinessPath asks about.
+type check struct {
+	name  string
+	probe func(context.Context) error
+}
+
+// Ready registers a dependency this instance cannot serve without, so that
+// [Config.ReadinessPath] fails while it is away and names it when it does.
+//
+// It is here rather than on the Config for the reason Drain and Close are: the
+// thing being checked is built by the mount function, and a Config is filled in
+// by a main that runs before the mount. [Config.Ready] is the same hook for a
+// dependency that does exist by then.
+//
+// Register only what genuinely makes this instance not worth sending work to.
+// The temptation is to list everything the server talks to, and the cost of
+// giving in is the outage the probe was supposed to contain: one dependency
+// being slow takes every replica out of the load balancer at once, including the
+// requests that never touch it. A dependency the server degrades gracefully
+// without — a sync service whose shapes fall back to a snapshot, a cache — is
+// something to log and to show, not something to fail readiness on.
+//
+// The probes run after the pool ping and after Config.Ready, in the order they
+// were registered, and all of them share [Config.ProbeTimeout].
+func (a *App) Ready(name string, probe func(ctx context.Context) error) {
+	if probe != nil {
+		a.checks = append(a.checks, check{name: name, probe: probe})
+	}
+}
+
+// readyChecks is what readiness runs, for the one caller in this package.
+func (a *App) readyChecks() []check {
+	if a == nil {
+		return nil
+	}
+	return a.checks
 }
 
 // Drain registers work for the start of the shutdown: after readiness turns
