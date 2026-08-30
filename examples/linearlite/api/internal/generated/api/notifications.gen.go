@@ -6,8 +6,7 @@ package api
 
 import (
 	"context"
-	"fmt"
-	"io"
+	"log/slog"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -41,7 +40,7 @@ func NewNotifications(db notify.DB, reg *notify.Registry) *notify.Service {
 //
 // Start it and register its two shutdown steps beside the line that builds it:
 //
-//	engine := api.NewNotificationEngine(app.Pool, reg)
+//	engine := api.NewNotificationEngine(app.Pool, reg, senders, app.Logger)
 //	engine.Start()
 //	app.Drain("notifications", engine.StopClaiming)
 //	app.CloseWithin("notifications", 15*time.Second, engine.Close)
@@ -50,10 +49,15 @@ func NewNotifications(db notify.DB, reg *notify.Registry) *notify.Service {
 // is the right order: the requests in flight are the last ones whose commits
 // will nudge it, and the time left is better spent finishing than starting.
 // Closing runs before the pool does, because what is in flight is a write.
-func NewNotificationEngine(db notify.DB, reg *notify.Registry, senders map[notify.Channel]notify.Sender) *notify.Engine {
+func NewNotificationEngine(db notify.DB, reg *notify.Registry, senders map[notify.Channel]notify.Sender, logger *slog.Logger) *notify.Engine {
 	return notify.NewEngine(notify.EngineConfig{
 		Config: notify.Config{DB: db, Registry: reg},
 		Links:  NotificationLinks(),
+		// app.Logger, so a pass says what it did wherever the server says everything
+		// else. Nil is not silence — it is slog.Default, which is the right answer
+		// for the cron task and the wrong one for a project with a log file, because
+		// the file is teed into what the server was handed and not into the default.
+		Logger: logger,
 		// Every number here came from the `notifications:` block, so a claim lease is
 		// a line in a file the documentation can quote rather than a literal in a main
 		// function nobody diffs.
@@ -70,7 +74,7 @@ func NewNotificationEngine(db notify.DB, reg *notify.Registry, senders map[notif
 // StartNotificationEngine starts the engine and registers its two shutdown
 // steps, which is the whole of what a main function does with one:
 //
-//	engine := api.NewNotificationEngine(app.Pool, reg, senders)
+//	engine := api.NewNotificationEngine(app.Pool, reg, senders, app.Logger)
 //	api.StartNotificationEngine(app, engine)
 //
 // Draining stops it claiming while the server is still answering, which is the
@@ -107,23 +111,24 @@ func NotificationLinks() []notify.Subject {
 // something racing itself in every replica. Register it in serve.Config.Tasks
 // and run `<binary> dispatch-notifications`.
 //
-// The writer is where each pass's report goes, and os.Stdout is the answer for
-// a cron job — every count including the zeros, because a pass that sent
-// nothing is the ordinary case and the absence of a line cannot be told from
-// the job not running. A nil writer prints nothing and is for a test.
-func NotificationDispatcher(engine *notify.Engine, log io.Writer) serve.Task {
+// The logger is where each pass's report goes, at debug — every count
+// including the zeros, because a pass that sent nothing is the ordinary case
+// and the absence of a line cannot be told from the job not running. A nil
+// logger is not silence: it is slog.Default, the same reading every other
+// Logger in rig gives it, which for a cron job is the terminal it was started
+// from.
+func NotificationDispatcher(engine *notify.Engine, logger *slog.Logger) serve.Task {
+	if logger == nil {
+		logger = slog.Default()
+	}
 	return func(ctx context.Context, _ *pgxpool.Pool) error {
 		resolved, err := engine.Resolve(ctx)
-		if log != nil {
-			fmt.Fprintln(log, resolved)
-		}
+		logger.DebugContext(ctx, "notifications resolved", "counts", resolved.String())
 		if err != nil {
 			return err
 		}
 		dispatched, err := engine.Dispatch(ctx)
-		if log != nil {
-			fmt.Fprintln(log, dispatched)
-		}
+		logger.DebugContext(ctx, "notifications dispatched", "counts", dispatched.String())
 		if err != nil {
 			return err
 		}
@@ -131,9 +136,7 @@ func NotificationDispatcher(engine *notify.Engine, log io.Writer) serve.Task {
 		// rules share one: a schema that grows forever is the state every other table
 		// in rig is already in, and this milestone added three more.
 		pruned, err := engine.Prune(ctx, 7776000*time.Second)
-		if log != nil {
-			fmt.Fprintf(log, "notify: pruned %d\n", pruned)
-		}
+		logger.DebugContext(ctx, "notifications pruned", "count", pruned)
 		return err
 	}
 }

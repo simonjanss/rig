@@ -208,7 +208,7 @@ func TestTheBackgroundLoopsAreStarted(t *testing.T) {
 		gentest.LoadDocument(t, filepath.Join("testdata", "presence.ir.json")), opts()), "presence.gen.go")
 	for _, want := range []string{
 		"func StartPresenceSweeper(app *serve.App) {",
-		"sweeper := NewPresenceSweeper(NewPresence(app.Pool))",
+		"sweeper := NewPresenceSweeper(NewPresence(app.Pool), app.Logger)",
 		"sweeper.Start()",
 	} {
 		if !strings.Contains(presence, want) {

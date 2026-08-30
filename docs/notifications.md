@@ -213,7 +213,7 @@ inbox := api.NewNotifications(pool, reg)
 posts := blogpost.New(repos.BlogPosts, inbox, pool)
 reg.Register(api.NewBlogPostSubject(posts))
 
-engine := api.NewNotificationEngine(pool, reg)
+engine := api.NewNotificationEngine(pool, reg, nil, app.Logger)
 ```
 
 and then handed back rather than started: `Engine` is a field on `api.Parts`,
@@ -268,7 +268,7 @@ platform on a device row cannot express it.
 ```go
 engine := api.NewNotificationEngine(pool, reg, map[notify.Channel]notify.Sender{
     notify.ChannelEmail: myMailer,
-})
+}, app.Logger)
 ```
 
 A channel with nothing registered has no delivery rows written for it at all,

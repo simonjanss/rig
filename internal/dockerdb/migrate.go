@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"log/slog"
 	"os"
 	"path/filepath"
 
@@ -74,7 +75,18 @@ func Migrate(ctx context.Context, opt MigrateOptions) (applied int, err error) {
 		Table: opt.Table,
 	})
 
-	names, err := migrate.UpAll(ctx, db, sources, migrate.Options{Log: opt.Log})
+	// Silence, said out loud: migrate writes what it applied through a
+	// *slog.Logger now, and a nil one means slog.Default — which for a CLI
+	// would be a second, structured copy of the lines printed below. `rig db
+	// up` is somebody watching a terminal, not a deployment reading a log.
+	names, err := migrate.UpAll(ctx, db, sources, migrate.Options{
+		Logger: slog.New(slog.DiscardHandler),
+	})
+	for _, name := range names {
+		if opt.Log != nil {
+			fmt.Fprintf(opt.Log, "applied %s\n", name)
+		}
+	}
 	return len(names), err
 }
 

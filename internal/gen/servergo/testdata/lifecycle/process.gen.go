@@ -15,7 +15,7 @@ import (
 // merged with the ones only this application can write.
 //
 //	Tasks: api.Tasks(map[string]serve.Task{
-//		"migrate": migrate.Apply(migrations, migrate.Options{Log: os.Stdout}),
+//		"migrate": migrate.Apply(migrations, migrate.Options{}),
 //	}),
 //
 // Same bargain as [MigrationSources]: the argument is this application's half

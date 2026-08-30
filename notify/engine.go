@@ -3,6 +3,7 @@ package notify
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"math/rand/v2"
 	"sync"
 	"time"
@@ -42,6 +43,8 @@ type Engine struct {
 	// The delivery half, and what it runs on. Resolved once at construction so
 	// that a pass reads no configuration.
 	senders       map[Channel]Sender
+	interval      time.Duration
+	logger        *slog.Logger
 	claimedBy     uuid.UUID
 	claimTTL      time.Duration
 	sendTimeout   time.Duration
@@ -123,6 +126,21 @@ type EngineConfig struct {
 	// DefaultDigest is what an account with no setting for a channel gets.
 	// Empty means Immediate.
 	DefaultDigest Digest
+
+	// Logger is where a pass says what it did.
+	//
+	// Nil is not silence: it is [log/slog.Default], the reading every other
+	// Logger in rig gives it. Before this field the goroutine threw both of its
+	// reports away — [Report] and [DispatchReport] were built for "the log line
+	// the task writes" and only the cron half ever wrote one — so a project
+	// running the engine in-process could not tell a dispatcher that was
+	// working from one that had stopped.
+	//
+	// The lines are DEBUG, because there is one pair of them per interval
+	// forever. What is not debug is a pass that failed, and a pass that found
+	// notifications whose subject nothing answers for: both are ERROR and WARN,
+	// and both are invisible today.
+	Logger *slog.Logger
 }
 
 // DefaultInterval is how often the engine looks for work on its own.
@@ -212,7 +230,9 @@ func NewEngine(cfg EngineConfig) *Engine {
 		store: store{db: cfg.DB},
 		links: cfg.Links,
 
-		senders: cfg.Senders,
+		senders:  cfg.Senders,
+		interval: interval,
+		logger:   cfg.Logger,
 		// One identifier per process, with the hostname beside it in the log
 		// line, so a lease that is stuck traces to a pod rather than a mystery.
 		claimedBy:     uuid.New(),
@@ -265,7 +285,11 @@ func idsOf(ds []Delivery) []uuid.UUID {
 // notification write the same inbox lines, and the unique index absorbs it.
 // What it buys is that a reply notification is in somebody's inbox in
 // milliseconds rather than by the next tick.
-func (e *Engine) Start() { e.ticker.Start() }
+func (e *Engine) Start() {
+	e.ticker.Start()
+	e.log().DebugContext(context.Background(), "the notification engine is running",
+		"interval", e.interval, "claimed by", e.claimedBy)
+}
 
 // Nudge asks for a pass now.
 //
@@ -299,8 +323,15 @@ func (e *Engine) Close(ctx context.Context) error {
 	// for crashes; a process that knows it is going has no excuse for being
 	// slow about saying so, and leaving them turns every ordinary rollout into
 	// a delivery delay — repeatedly, for a rollout that replaces every pod.
-	_, err := e.ReleaseClaims(ctx)
-	return err
+	released, err := e.ReleaseClaims(ctx)
+	if err != nil {
+		return err
+	}
+	// How many were given back rather than left for the TTL, which is the
+	// difference between a rollout that costs nothing and one that delays every
+	// message it was holding by a claim lease.
+	e.log().DebugContext(ctx, "the notification engine has stopped", "claims released", released)
+	return nil
 }
 
 // pass is one run of the goroutine's work.
@@ -318,9 +349,46 @@ func (e *Engine) pass(ctx context.Context) {
 	}
 
 	// A pass that fails is a pass: the rows are still Pending and the next one
-	// takes them. Nothing here may take the process down.
-	_, _ = e.Resolve(ctx)
-	_, _ = e.Dispatch(ctx)
+	// takes them. Nothing here may take the process down — but something has to
+	// say it happened, which is what the goroutine never did.
+	resolved, err := e.Resolve(ctx)
+	e.report(ctx, "resolved", resolved.String(), err)
+	if resolved.Unregistered > 0 {
+		// The one failure of this design that is otherwise silent: a
+		// notification whose subject nothing answers for looks exactly like a
+		// notification nobody was owed, and the usual cause is a build whose
+		// registry lost a service. A count in a report nobody prints was not
+		// enough to find it.
+		e.log().WarnContext(ctx, "notifications named a subject nothing is registered for",
+			"count", resolved.Unregistered)
+	}
+
+	dispatched, err := e.Dispatch(ctx)
+	e.report(ctx, "dispatched", dispatched.String(), err)
+}
+
+// log is where this engine says what it did, and [log/slog.Default] when the
+// configuration named nowhere.
+func (e *Engine) log() *slog.Logger {
+	if e.logger != nil {
+		return e.logger
+	}
+	return slog.Default()
+}
+
+// report is one half of a pass, said once.
+//
+// A pass that worked is debug and a pass that failed is an error, and they are
+// one call because the counts are worth having either way: a Dispatch that
+// failed after sending forty is a different morning from one that failed after
+// sending none.
+func (e *Engine) report(ctx context.Context, what, counts string, err error) {
+	if err != nil {
+		e.log().ErrorContext(ctx, "a notification pass failed", "pass", what,
+			"counts", counts, "error", err)
+		return
+	}
+	e.log().DebugContext(ctx, "a notification pass finished", "pass", what, "counts", counts)
 }
 
 // Report is what one pass did, for the log line the task writes.

@@ -192,7 +192,7 @@ func main() {
 		MaxShutdown: 47 * time.Second,
 
 		Tasks: map[string]serve.Task{
-			"migrate": migrate.ApplyAll(migrationSources(), migrate.Options{Log: os.Stdout}),
+			"migrate": migrate.ApplyAll(migrationSources(), migrate.Options{}),
 			// The demo tenant, two people to sign in as, the level roles, and a
 			// board's worth of items. Idempotent, so running it twice is not an
 			// error.

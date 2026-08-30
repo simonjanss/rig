@@ -3,6 +3,7 @@ package presence
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/simonjanss/rig/runtime/tick"
@@ -54,8 +55,9 @@ func (r SweepReport) String() string {
 // wrong, and there is none here. The absence of a lease is a decision, not an
 // omission.
 type Sweeper struct {
-	svc   *Service
-	grace time.Duration
+	svc    *Service
+	grace  time.Duration
+	logger *slog.Logger
 
 	// The lifecycle is [tick.Ticker]'s, which is where the four properties a
 	// hand-rolled one keeps getting wrong are asserted once. What is left here is
@@ -82,6 +84,17 @@ type SweeperConfig struct {
 	// row that reappears when a slow client catches up. Zero means
 	// [DefaultGrace].
 	Grace time.Duration
+
+	// Logger is where a pass says what it deleted.
+	//
+	// Nil is not silence: it is [log/slog.Default], the reading every other
+	// Logger in rig gives it. The goroutine used to discard [SweepReport]
+	// entirely — the type exists for "the one line a sweep is worth in a log"
+	// and only the generated cron task ever had anywhere to write one.
+	//
+	// The line is DEBUG, because it is one per interval forever. A sweep that
+	// failed is an ERROR, and was silent.
+	Logger *slog.Logger
 }
 
 // NewSweeper builds one. It does nothing until [Sweeper.Start].
@@ -97,10 +110,10 @@ func NewSweeper(cfg SweeperConfig) *Sweeper {
 	if grace == 0 {
 		grace = DefaultGrace
 	}
-	sw := &Sweeper{svc: cfg.Service, grace: grace}
+	sw := &Sweeper{svc: cfg.Service, grace: grace, logger: cfg.Logger}
 	sw.ticker = tick.New(tick.Config{
 		Interval: interval,
-		Pass:     func(ctx context.Context) { _, _ = sw.Sweep(ctx) },
+		Pass:     sw.pass,
 		// The pass gets its own bounded context rather than one that lives as
 		// long as the process: a sweep that cannot reach the database should fail
 		// and be retried on the next tick, not hold a slot forever. It can be
@@ -109,6 +122,29 @@ func NewSweeper(cfg SweeperConfig) *Sweeper {
 		PassTimeout: interval,
 	})
 	return sw
+}
+
+// pass is one run of the goroutine's work, said out loud.
+//
+// A sweep that fails is a sweep: the rows are still there and the next pass
+// takes them, so nothing here may take the process down. What it may do — and
+// what the discarded report meant it did not — is say so.
+func (s *Sweeper) pass(ctx context.Context) {
+	report, err := s.Sweep(ctx)
+	if err != nil {
+		s.log().ErrorContext(ctx, "a presence sweep failed", "counts", report.String(), "error", err)
+		return
+	}
+	s.log().DebugContext(ctx, "a presence sweep finished", "counts", report.String())
+}
+
+// log is where this sweeper says what it did, and [log/slog.Default] when the
+// configuration named nowhere.
+func (s *Sweeper) log() *slog.Logger {
+	if s.logger != nil {
+		return s.logger
+	}
+	return slog.Default()
 }
 
 // Start begins the ticker. A negative interval starts nothing and is not an

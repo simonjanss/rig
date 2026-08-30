@@ -103,7 +103,7 @@ func (e *emitter) notifyConstructor(b *gobuf.Buf) {
 		"writes the inbox lines.\n\n" +
 		"Start it and register its two shutdown steps beside the line that builds " +
 		"it:\n\n" +
-		"\tengine := api.NewNotificationEngine(app.Pool, reg)\n" +
+		"\tengine := api.NewNotificationEngine(app.Pool, reg, senders, app.Logger)\n" +
 		"\tengine.Start()\n" +
 		"\tapp.Drain(\"notifications\", engine.StopClaiming)\n" +
 		"\tapp.CloseWithin(\"notifications\", 15*time.Second, engine.Close)\n\n" +
@@ -115,11 +115,17 @@ func (e *emitter) notifyConstructor(b *gobuf.Buf) {
 	timePkg := b.Import("time")
 	cfg := e.doc.API.Notifications
 
-	b.L("func NewNotificationEngine(db %s.DB, reg *%s.Registry, senders map[%s.Channel]%s.Sender) *%s.Engine {",
-		notifyPkg, notifyPkg, notifyPkg, notifyPkg, notifyPkg)
+	b.L("func NewNotificationEngine(db %s.DB, reg *%s.Registry, senders map[%s.Channel]%s.Sender, logger *%s.Logger) *%s.Engine {",
+		notifyPkg, notifyPkg, notifyPkg, notifyPkg, b.Import("log/slog"), notifyPkg)
 	b.L("return %s.NewEngine(%s.EngineConfig{", notifyPkg, notifyPkg)
 	b.L("Config: %s.Config{DB: db, Registry: reg},", notifyPkg)
 	b.L("Links: NotificationLinks(),")
+	b.Comment("app.Logger, so a pass says what it did wherever the server says " +
+		"everything else. Nil is not silence — it is slog.Default, which is the " +
+		"right answer for the cron task and the wrong one for a project with a " +
+		"log file, because the file is teed into what the server was handed and " +
+		"not into the default.")
+	b.L("Logger: logger,")
 	b.Comment("Every number here came from the `notifications:` block, so a " +
 		"claim lease is a line in a file the documentation can quote rather " +
 		"than a literal in a main function nobody diffs.")
@@ -195,33 +201,35 @@ func (e *emitter) notifyDispatcher(b *gobuf.Buf) {
 		"A subcommand rather than a goroutine, so it is a cron job rather than " +
 		"something racing itself in every replica. Register it in " +
 		"serve.Config.Tasks and run `<binary> dispatch-notifications`.\n\n" +
-		"The writer is where each pass's report goes, and os.Stdout is the answer " +
-		"for a cron job — every count including the zeros, because a pass that " +
-		"sent nothing is the ordinary case and the absence of a line cannot be " +
-		"told from the job not running. A nil writer prints nothing and is for a " +
-		"test.")
+		"The logger is where each pass's report goes, at debug — every count " +
+		"including the zeros, because a pass that sent nothing is the ordinary " +
+		"case and the absence of a line cannot be told from the job not " +
+		"running. A nil logger is not silence: it is slog.Default, the same " +
+		"reading every other Logger in rig gives it, which for a cron job is " +
+		"the terminal it was started from.")
 	timePkg := b.Import("time")
-	ioPkg := b.Import("io")
+	slogPkg := b.Import("log/slog")
 	retention := e.doc.API.Notifications.RetentionSeconds
 
-	b.L("func NotificationDispatcher(engine *%s.Engine, log %s.Writer) %s.Task {",
-		notifyPkg, ioPkg, servePkg)
+	b.L("func NotificationDispatcher(engine *%s.Engine, logger *%s.Logger) %s.Task {",
+		notifyPkg, slogPkg, servePkg)
+	b.L("if logger == nil { logger = %s.Default() }", slogPkg)
 	b.L("return func(ctx %s.Context, _ *%s.Pool) error {", ctxPkg, poolPkg)
 	b.L("resolved, err := engine.Resolve(ctx)")
-	b.L("if log != nil { %s.Fprintln(log, resolved) }", b.Import("fmt"))
+	b.L(`logger.DebugContext(ctx, "notifications resolved", "counts", resolved.String())`)
 	b.L("if err != nil { return err }")
 	b.L("dispatched, err := engine.Dispatch(ctx)")
-	b.L("if log != nil { %s.Fprintln(log, dispatched) }", b.Import("fmt"))
+	b.L(`logger.DebugContext(ctx, "notifications dispatched", "counts", dispatched.String())`)
 	b.L("if err != nil { return err }")
 	b.Comment("And the housekeeping, in the same task for the reason the file " +
 		"sweeper's two rules share one: a schema that grows forever is the " +
 		"state every other table in rig is already in, and this milestone " +
 		"added three more.")
 	b.L("pruned, err := engine.Prune(ctx, %d * %s.Second)", retention, timePkg)
-	// Labelled, because this one is an int rather than a report that names its
-	// own counts: an unadorned `0` under the two report lines says nothing about
+	// Named, because this one is an int rather than a report that names its own
+	// counts: an unadorned `0` under the two report lines says nothing about
 	// what was counted.
-	b.L(`if log != nil { %s.Fprintf(log, "notify: pruned %%d\n", pruned) }`, b.Import("fmt"))
+	b.L(`logger.DebugContext(ctx, "notifications pruned", "count", pruned)`)
 	b.L("return err")
 	b.L("}")
 	b.L("}")
@@ -316,7 +324,7 @@ func (e *emitter) notifyStarter(b *gobuf.Buf) {
 	b.Comment("StartNotificationEngine starts the engine and registers its two " +
 		"shutdown steps, which is the whole of what a main function does with " +
 		"one:\n\n" +
-		"\tengine := api.NewNotificationEngine(app.Pool, reg, senders)\n" +
+		"\tengine := api.NewNotificationEngine(app.Pool, reg, senders, app.Logger)\n" +
 		"\tapi.StartNotificationEngine(app, engine)\n\n" +
 		"Draining stops it claiming while the server is still answering, which is " +
 		"the right order: the requests in flight are the last ones whose commits " +

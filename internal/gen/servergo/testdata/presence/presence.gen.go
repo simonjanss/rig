@@ -6,6 +6,7 @@ package api
 
 import (
 	"context"
+	"log/slog"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -68,9 +69,13 @@ func PresenceTargets() []string {
 // audience twice costs a read and sending twice costs somebody a duplicate
 // mail; deleting rows that have already expired is idempotent, so two replicas
 // sweeping at once agree and the loser deletes nothing.
-func NewPresenceSweeper(svc *presence.Service) *presence.Sweeper {
+func NewPresenceSweeper(svc *presence.Service, logger *slog.Logger) *presence.Sweeper {
 	return presence.NewSweeper(presence.SweeperConfig{
-		Service:  svc,
+		Service: svc,
+		// app.Logger, so a sweep says what it deleted wherever the server says
+		// everything else. Nil is not silence — it is slog.Default, which is what
+		// the cron form below has and all it can have.
+		Logger:   logger,
 		Interval: 60 * time.Second,
 		// How long past the TTL a row survives. It is what keeps the two expiry
 		// mechanisms from disagreeing: a subscriber stops drawing a row at the TTL and
@@ -119,7 +124,7 @@ func PresenceSweep(sweeper *presence.Sweeper) serve.Task {
 // No Drain, because there is nothing in flight worth finishing: a pass
 // interrupted mid-DELETE leaves rows that the next pass takes.
 func StartPresenceSweeper(app *serve.App) {
-	sweeper := NewPresenceSweeper(NewPresence(app.Pool))
+	sweeper := NewPresenceSweeper(NewPresence(app.Pool), app.Logger)
 	sweeper.Start()
 	app.CloseWithin("presence", presenceShutdown, sweeper.Close)
 }

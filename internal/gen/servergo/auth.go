@@ -932,8 +932,7 @@ func (e *authEmitter) mailDispatcherFunc(b *gobuf.Buf) {
 		servePkg = b.Import(runtimeModule + "/serve")
 		ctxPkg   = b.Import("context")
 		poolPkg  = b.Import("github.com/jackc/pgx/v5/pgxpool")
-		ioPkg    = b.Import("io")
-		fmtPkg   = b.Import("fmt")
+		slogPkg  = b.Import("log/slog")
 	)
 
 	b.Comment("AuthMailDispatcher is the guarantee behind every link rig mints: it " +
@@ -946,17 +945,20 @@ func (e *authEmitter) mailDispatcherFunc(b *gobuf.Buf) {
 		"**With Hooks.Mail.Queue set and no cron entry for this, links are queued and " +
 		"never sent.** With the queue off it claims nothing and returns, so registering " +
 		"it either way costs nothing.\n\n" +
-		"The writer is where each pass's report goes, and os.Stdout is the answer for " +
-		"a cron job — every count including the zeros, because a pass that sent nothing " +
-		"is the ordinary case and the absence of a line cannot be told from the job not " +
-		"running. A nil writer prints nothing and is for a test.")
-	b.L("func AuthMailDispatcher(front *%s.Auth, log %s.Writer) %s.Task {",
-		authPkg, ioPkg, servePkg)
+		"The logger is where each pass's report goes, at debug — every count including " +
+		"the zeros, because a pass that sent nothing is the ordinary case and the " +
+		"absence of a line cannot be told from the job not running. A nil logger is " +
+		"not silence: it is slog.Default, the same reading every other Logger in rig " +
+		"gives it, which for a cron job is the terminal it was started from.")
+	b.L("func AuthMailDispatcher(front *%s.Auth, logger *%s.Logger) %s.Task {",
+		authPkg, slogPkg, servePkg)
+	b.L("if logger == nil { logger = %s.Default() }", slogPkg)
 	b.L("return func(ctx %s.Context, _ *%s.Pool) error {", ctxPkg, poolPkg)
 	b.L("report, err := front.DispatchMail(ctx)")
-	b.L("if log != nil { %s.Fprintln(log, report) }", fmtPkg)
+	b.L(`logger.DebugContext(ctx, "authentication mail dispatched", "counts", report.String())`)
 	b.L("if err != nil { return err }")
-	b.L("_, err = front.PruneMail(ctx)")
+	b.L("pruned, err := front.PruneMail(ctx)")
+	b.L(`logger.DebugContext(ctx, "authentication mail pruned", "count", pruned)`)
 	b.L("return err")
 	b.L("}")
 	b.L("}")

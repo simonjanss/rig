@@ -408,7 +408,7 @@ func main() {
 		// decided — `todo prune-idempotency` here, deleting the records of
 		// writes nobody will send again — and yours wins on a shared name.
 		Tasks: map[string]serve.Task{
-			"migrate": migrate.Apply(migrations, migrate.Options{Log: os.Stdout}),
+			"migrate": migrate.Apply(migrations, migrate.Options{}),
 		},
 		// The server refuses to start when the database is behind, which is
 		// what catches a deploy that got ahead of its migration job.

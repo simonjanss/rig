@@ -125,7 +125,7 @@ func New(ctx context.Context, cfg Config) (api.Parts, error) {
 		notify.ChannelEmail:   mail.NotificationSender(),
 		notify.ChannelDesktop: mail.PushSender(notify.ChannelDesktop),
 	}
-	engine := api.NewNotificationEngine(pool, reg, senders)
+	engine := api.NewNotificationEngine(pool, reg, senders, log)
 
 	// The engine's Nudge is handed to the service, so a status change becomes
 	// an inbox line moments after its transaction commits rather than at the
@@ -402,7 +402,7 @@ func DispatchNotifications(ctx context.Context, pool *pgxpool.Pool) error {
 	// The generated task rather than its steps written out again. It resolves,
 	// dispatches and prunes; this function used to do only the first, so the mail
 	// it was resolving was never actually sent from the cron path.
-	return api.NotificationDispatcher(parts.Engine, os.Stdout)(ctx, pool)
+	return api.NotificationDispatcher(parts.Engine, slog.Default())(ctx, pool)
 }
 
 // accountService builds the account service on its own, for the seed: a
