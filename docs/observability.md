@@ -137,19 +137,28 @@ Everything else the lifecycle says is `DEBUG`, and there is a lot more of it:
 | `migrated` / `not migrating` | and one `applied` line per migration, at `INFO` |
 | `mounted` | how long your `mount` function took out of `MaxStartup` |
 | `the shutdown budget fits` | every step this process registered and what each may take |
-| `shutdown step` / `shutdown step finished` | one pair per drain and close step, with its own duration |
+| `shutdown step` / `shutdown step finished` | one pair per drain and close step, with its own duration, and the error when it gave up |
 | `the drain delay is over`, or that it was cut short | |
 | `the requests in flight are done` | in how long, out of how much was left |
 | `the database pool is closed` | |
 | `running` / `finished` | around a subcommand — `migrate`, `sweep-files`, `dispatch-notifications` |
 
 And the background work, which used to say nothing at all: a notification pass,
-a presence sweep and a file sweep each write one `DEBUG` line per pass with
-every count in it, including the zeros — because a pass that did nothing cannot
-otherwise be told from a job that never ran. A pass that *failed* is `ERROR`,
-and a notification whose subject nothing is registered for is `WARN`.
+a presence sweep and a file sweep each write one line per pass with every count
+in it, including the zeros — because a pass that did nothing cannot otherwise be
+told from a job that never ran. A pass that *failed* is `ERROR`, and a
+notification whose subject nothing is registered for is `WARN`.
 
-**They are debug, so by default you do not see them.** The two ways to:
+**Which level depends on which form runs it, and the split is the point.** The
+goroutines — the notification engine and the presence sweeper the server starts —
+write `DEBUG`, because that is a line per interval forever. The cron subcommands
+— `dispatch-notifications`, `dispatch-auth-mail`, `sweep-presence`, `sweep-files`,
+and `migrate`'s `applied` lines — write `INFO`, because there the report is the
+whole output of a run that happened while nobody was watching, and `slog.Default()`
+drops `DEBUG`: a level you have to turn on in advance cannot answer "did the cron
+entry fire".
+
+So to see the goroutines' lines, either:
 
 - set `$RIG_LOG_FILE` — the file sink keeps `DEBUG` whatever stderr is set to,
   which is what [the monitoring page](#the-logs) lists;
@@ -169,9 +178,8 @@ api.StartPresenceSweeper(app) // passes app.Logger for you
 
 That matters for a project with `tracing:` on, because the log file is teed into
 the logger the server was handed and not into `slog.Default()`. The subcommands
-— `migrate`, `sweep-files`, `dispatch-notifications` — are the other way round
-and deliberately so: a cron job's log is the terminal something started it from,
-which is what `slog.Default()` is.
+are the other way round and deliberately so: a cron job's log is the terminal
+something started it from, which is what `slog.Default()` is.
 
 If you really want one of them quiet, say so:
 

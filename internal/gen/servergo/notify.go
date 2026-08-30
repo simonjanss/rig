@@ -201,12 +201,17 @@ func (e *emitter) notifyDispatcher(b *gobuf.Buf) {
 		"A subcommand rather than a goroutine, so it is a cron job rather than " +
 		"something racing itself in every replica. Register it in " +
 		"serve.Config.Tasks and run `<binary> dispatch-notifications`.\n\n" +
-		"The logger is where each pass's report goes, at debug — every count " +
-		"including the zeros, because a pass that sent nothing is the ordinary " +
-		"case and the absence of a line cannot be told from the job not " +
-		"running. A nil logger is not silence: it is slog.Default, the same " +
-		"reading every other Logger in rig gives it, which for a cron job is " +
-		"the terminal it was started from.")
+		"The logger is where each pass's report goes — every count including " +
+		"the zeros, because a pass that sent nothing is the ordinary case and " +
+		"the absence of a line cannot be told from the job not running. A nil " +
+		"logger is not silence: it is slog.Default, the same reading every " +
+		"other Logger in rig gives it, which for a cron job is the terminal it " +
+		"was started from.\n\n" +
+		"At info, unlike the pair the in-process engine writes per interval. " +
+		"This is not one line among thousands, it is the whole output of a run " +
+		"that happens when nobody is watching, and slog.Default drops debug — " +
+		"so a level that has to have been turned on in advance would make the " +
+		"cron form silent, which is the one thing this line exists to prevent.")
 	timePkg := b.Import("time")
 	slogPkg := b.Import("log/slog")
 	retention := e.doc.API.Notifications.RetentionSeconds
@@ -216,20 +221,20 @@ func (e *emitter) notifyDispatcher(b *gobuf.Buf) {
 	b.L("if logger == nil { logger = %s.Default() }", slogPkg)
 	b.L("return func(ctx %s.Context, _ *%s.Pool) error {", ctxPkg, poolPkg)
 	b.L("resolved, err := engine.Resolve(ctx)")
-	b.L(`logger.DebugContext(ctx, "notifications resolved", "counts", resolved.String())`)
+	b.L(`logger.InfoContext(ctx, "notifications resolved", "counts", resolved.String())`)
 	b.L("if err != nil { return err }")
 	b.L("dispatched, err := engine.Dispatch(ctx)")
-	b.L(`logger.DebugContext(ctx, "notifications dispatched", "counts", dispatched.String())`)
+	b.L(`logger.InfoContext(ctx, "notifications dispatched", "counts", dispatched.String())`)
 	b.L("if err != nil { return err }")
 	b.Comment("And the housekeeping, in the same task for the reason the file " +
 		"sweeper's two rules share one: a schema that grows forever is the " +
 		"state every other table in rig is already in, and this milestone " +
 		"added three more.")
 	b.L("pruned, err := engine.Prune(ctx, %d * %s.Second)", retention, timePkg)
-	// Named, because this one is an int rather than a report that names its own
-	// counts: an unadorned `0` under the two report lines says nothing about
-	// what was counted.
-	b.L(`logger.DebugContext(ctx, "notifications pruned", "count", pruned)`)
+	// Under the same key as the two above, because Prune returns a report that
+	// names its own counts exactly as they do. It was `count` while this was an
+	// int, and the int is long gone.
+	b.L(`logger.InfoContext(ctx, "notifications pruned", "counts", pruned.String())`)
 	b.L("return err")
 	b.L("}")
 	b.L("}")

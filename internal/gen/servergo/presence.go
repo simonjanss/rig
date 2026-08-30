@@ -172,10 +172,20 @@ func (e *emitter) presenceSweeper(b *gobuf.Buf) {
 		"and correctly within a second — this only keeps the table, and every new " +
 		"subscriber's first fetch, from carrying yesterday. Skipping it costs " +
 		"space.\n\n" +
-		"Register it in serve.Config.Tasks and run `<binary> sweep-presence`.")
-	b.L("func PresenceSweep(sweeper *%s.Sweeper) %s.Task {", presencePkg, servePkg)
+		"Register it in serve.Config.Tasks and run `<binary> sweep-presence`.\n\n" +
+		"The logger is where the pass's report goes, and it is written here " +
+		"rather than inside Sweep because the goroutine calls Sweep too and " +
+		"that one is a line per interval forever. A nil logger is not silence: " +
+		"it is slog.Default, which for a cron job is the terminal it was " +
+		"started from. At info, because slog.Default drops debug and a sweep " +
+		"nobody can see is one nobody can tell from a cron entry that never " +
+		"fired.")
+	b.L("func PresenceSweep(sweeper *%s.Sweeper, logger *%s.Logger) %s.Task {",
+		presencePkg, b.Import("log/slog"), servePkg)
+	b.L("if logger == nil { logger = %s.Default() }", b.Import("log/slog"))
 	b.L("return func(ctx %s.Context, _ *%s.Pool) error {", ctxPkg, poolPkg)
-	b.L("_, err := sweeper.Sweep(ctx)")
+	b.L("report, err := sweeper.Sweep(ctx)")
+	b.L(`logger.InfoContext(ctx, "presence swept", "counts", report.String())`)
 	b.L("return err")
 	b.L("}")
 	b.L("}")

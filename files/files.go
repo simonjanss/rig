@@ -195,8 +195,16 @@ type Config struct {
 	// writes" and the generated task discards it, so what a project's
 	// housekeeping actually did has never been written anywhere.
 	//
-	// The line is DEBUG. A sweep that failed is not logged here at all: the
-	// error is returned, and whatever ran the task reports it once.
+	// The line is INFO, unlike the per-interval lines rig's two background
+	// loops write. Nothing sweeps files in-process — [Service.Sweep] is reached
+	// from the generated `sweep-files` cron job and nowhere else — so this is
+	// the whole output of a run that happens when nobody is watching, and
+	// [log/slog.Default] drops DEBUG. A level that has to have been turned on
+	// in advance would leave a sweep that did nothing looking exactly like a
+	// cron entry that never fired.
+	//
+	// A sweep that failed is not logged here at all: the error is returned, and
+	// whatever ran the task reports it once.
 	Logger *slog.Logger
 }
 

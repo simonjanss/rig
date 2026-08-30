@@ -111,24 +111,29 @@ func NotificationLinks() []notify.Subject {
 // something racing itself in every replica. Register it in serve.Config.Tasks
 // and run `<binary> dispatch-notifications`.
 //
-// The logger is where each pass's report goes, at debug — every count
-// including the zeros, because a pass that sent nothing is the ordinary case
-// and the absence of a line cannot be told from the job not running. A nil
-// logger is not silence: it is slog.Default, the same reading every other
-// Logger in rig gives it, which for a cron job is the terminal it was started
-// from.
+// The logger is where each pass's report goes — every count including the
+// zeros, because a pass that sent nothing is the ordinary case and the absence
+// of a line cannot be told from the job not running. A nil logger is not
+// silence: it is slog.Default, the same reading every other Logger in rig
+// gives it, which for a cron job is the terminal it was started from.
+//
+// At info, unlike the pair the in-process engine writes per interval. This is
+// not one line among thousands, it is the whole output of a run that happens
+// when nobody is watching, and slog.Default drops debug — so a level that
+// has to have been turned on in advance would make the cron form silent, which
+// is the one thing this line exists to prevent.
 func NotificationDispatcher(engine *notify.Engine, logger *slog.Logger) serve.Task {
 	if logger == nil {
 		logger = slog.Default()
 	}
 	return func(ctx context.Context, _ *pgxpool.Pool) error {
 		resolved, err := engine.Resolve(ctx)
-		logger.DebugContext(ctx, "notifications resolved", "counts", resolved.String())
+		logger.InfoContext(ctx, "notifications resolved", "counts", resolved.String())
 		if err != nil {
 			return err
 		}
 		dispatched, err := engine.Dispatch(ctx)
-		logger.DebugContext(ctx, "notifications dispatched", "counts", dispatched.String())
+		logger.InfoContext(ctx, "notifications dispatched", "counts", dispatched.String())
 		if err != nil {
 			return err
 		}
@@ -136,7 +141,7 @@ func NotificationDispatcher(engine *notify.Engine, logger *slog.Logger) serve.Ta
 		// rules share one: a schema that grows forever is the state every other table
 		// in rig is already in, and this milestone added three more.
 		pruned, err := engine.Prune(ctx, 7776000*time.Second)
-		logger.DebugContext(ctx, "notifications pruned", "count", pruned)
+		logger.InfoContext(ctx, "notifications pruned", "counts", pruned.String())
 		return err
 	}
 }

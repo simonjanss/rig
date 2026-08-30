@@ -208,9 +208,11 @@ func (e *emitter) tasksFunc(b *gobuf.Buf) {
 			"guarantee behind anything: who is present is decided by whoever is " +
 			"reading, against the clock. This only keeps the table — and every " +
 			"new subscriber's first fetch — from carrying yesterday.")
-		// A nil logger, which is slog.Default: a task is a cron job, and its log
-		// is the terminal something started it from.
-		e.poolTask(b, "sweep-presence", "PresenceSweep(NewPresenceSweeper(NewPresence(pool), nil))")
+		// Two nil loggers, and both are slog.Default rather than silence: a task
+		// is a cron job, and its log is the terminal something started it from.
+		// The sweeper's is for a goroutine this form never starts; the task's is
+		// the one that writes the report.
+		e.poolTask(b, "sweep-presence", "PresenceSweep(NewPresenceSweeper(NewPresence(pool), nil), nil)")
 	}
 
 	if e.throttleEnabled() {

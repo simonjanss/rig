@@ -945,20 +945,24 @@ func (e *authEmitter) mailDispatcherFunc(b *gobuf.Buf) {
 		"**With Hooks.Mail.Queue set and no cron entry for this, links are queued and " +
 		"never sent.** With the queue off it claims nothing and returns, so registering " +
 		"it either way costs nothing.\n\n" +
-		"The logger is where each pass's report goes, at debug — every count including " +
-		"the zeros, because a pass that sent nothing is the ordinary case and the " +
+		"The logger is where each pass's report goes — every count including the " +
+		"zeros, because a pass that sent nothing is the ordinary case and the " +
 		"absence of a line cannot be told from the job not running. A nil logger is " +
 		"not silence: it is slog.Default, the same reading every other Logger in rig " +
-		"gives it, which for a cron job is the terminal it was started from.")
+		"gives it, which for a cron job is the terminal it was started from.\n\n" +
+		"At info, because this is the whole output of a run that happens when " +
+		"nobody is watching and slog.Default drops debug — a level that has to " +
+		"have been turned on in advance would make this silent, which is the one " +
+		"thing the line exists to prevent.")
 	b.L("func AuthMailDispatcher(front *%s.Auth, logger *%s.Logger) %s.Task {",
 		authPkg, slogPkg, servePkg)
 	b.L("if logger == nil { logger = %s.Default() }", slogPkg)
 	b.L("return func(ctx %s.Context, _ *%s.Pool) error {", ctxPkg, poolPkg)
 	b.L("report, err := front.DispatchMail(ctx)")
-	b.L(`logger.DebugContext(ctx, "authentication mail dispatched", "counts", report.String())`)
+	b.L(`logger.InfoContext(ctx, "authentication mail dispatched", "counts", report.String())`)
 	b.L("if err != nil { return err }")
 	b.L("pruned, err := front.PruneMail(ctx)")
-	b.L(`logger.DebugContext(ctx, "authentication mail pruned", "count", pruned)`)
+	b.L(`logger.InfoContext(ctx, "authentication mail pruned", "count", pruned)`)
 	b.L("return err")
 	b.L("}")
 	b.L("}")

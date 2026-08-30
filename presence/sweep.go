@@ -90,10 +90,13 @@ type SweeperConfig struct {
 	// Nil is not silence: it is [log/slog.Default], the reading every other
 	// Logger in rig gives it. The goroutine used to discard [SweepReport]
 	// entirely — the type exists for "the one line a sweep is worth in a log"
-	// and only the generated cron task ever had anywhere to write one.
+	// and nothing shipped wrote one.
 	//
-	// The line is DEBUG, because it is one per interval forever. A sweep that
-	// failed is an ERROR, and was silent.
+	// This is the goroutine's half only. [Sweeper.Sweep] says nothing itself,
+	// because the generated `sweep-presence` task calls it too and that one
+	// wants a line an operator can see without turning debug on — so it writes
+	// its own, at INFO. Here the line is DEBUG, because it is one per interval
+	// forever. A sweep that failed is an ERROR, and was silent.
 	Logger *slog.Logger
 }
 

@@ -96,9 +96,20 @@ func NewPresenceSweeper(svc *presence.Service, logger *slog.Logger) *presence.Sw
 // subscriber's first fetch, from carrying yesterday. Skipping it costs space.
 //
 // Register it in serve.Config.Tasks and run `<binary> sweep-presence`.
-func PresenceSweep(sweeper *presence.Sweeper) serve.Task {
+//
+// The logger is where the pass's report goes, and it is written here rather
+// than inside Sweep because the goroutine calls Sweep too and that one is a
+// line per interval forever. A nil logger is not silence: it is slog.Default,
+// which for a cron job is the terminal it was started from. At info, because
+// slog.Default drops debug and a sweep nobody can see is one nobody can tell
+// from a cron entry that never fired.
+func PresenceSweep(sweeper *presence.Sweeper, logger *slog.Logger) serve.Task {
+	if logger == nil {
+		logger = slog.Default()
+	}
 	return func(ctx context.Context, _ *pgxpool.Pool) error {
-		_, err := sweeper.Sweep(ctx)
+		report, err := sweeper.Sweep(ctx)
+		logger.InfoContext(ctx, "presence swept", "counts", report.String())
 		return err
 	}
 }

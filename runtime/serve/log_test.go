@@ -106,6 +106,54 @@ func TestEveryShutdownStepIsNamedBeforeAndAfterItRuns(t *testing.T) {
 	}
 }
 
+// A step cut off at its deadline comes back through the same defer as one that
+// returned, so the second half of the pair has to say which it was. Without the
+// error, "it used its whole two seconds" and "it was still going at two
+// seconds" are the same line — and telling those apart is the only reason the
+// pair exists.
+func TestAStepThatGaveUpSaysSoOnTheLineThatSaysItFinished(t *testing.T) {
+	var buf bytes.Buffer
+	app := &App{Logger: recorder(&buf)}
+
+	// Released at the end of the test rather than never: the goroutine behind a
+	// step that ignored its context is left behind by design, and a test should
+	// not leave one behind for the rest of the run.
+	release := make(chan struct{})
+	defer close(release)
+	app.CloseWithin("store", 10*time.Millisecond, func(context.Context) error {
+		<-release
+		return nil
+	})
+
+	if err := app.runClose(context.Background(), 5*time.Second); err == nil {
+		t.Fatal("a step that ran past its own timeout should be an error")
+	}
+
+	rec := stepLine(t, &buf, "shutdown step finished", "close")
+	if rec["error"] == nil {
+		t.Errorf("the line reads as a clean finish for a step that gave up: %v", rec)
+	}
+	if rec["in"] == nil {
+		t.Errorf("a step that gave up still took time, and does not say how long: %v", rec)
+	}
+}
+
+// And the other way round: a step that did finish carries no error, so the
+// attribute means what it says.
+func TestAStepThatFinishedCarriesNoError(t *testing.T) {
+	var buf bytes.Buffer
+	app := &App{Logger: recorder(&buf)}
+
+	app.CloseWithin("store", time.Second, func(context.Context) error { return nil })
+	if err := app.runClose(context.Background(), 5*time.Second); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+
+	if rec := stepLine(t, &buf, "shutdown step finished", "close"); rec["error"] != nil {
+		t.Errorf("error = %v, want it left out entirely", rec["error"])
+	}
+}
+
 // A step registered with no limit of its own takes whatever is left, so the
 // line must not claim it was allowed nothing.
 func TestAnUnboundedStepIsNotReportedAsHavingNoTime(t *testing.T) {

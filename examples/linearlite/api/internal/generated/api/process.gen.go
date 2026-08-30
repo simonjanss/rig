@@ -50,7 +50,7 @@ func Tasks(own map[string]serve.Task) map[string]serve.Task {
 		// decided by whoever is reading, against the clock. This only keeps the table
 		// — and every new subscriber's first fetch — from carrying yesterday.
 		"sweep-presence": func(ctx context.Context, pool *pgxpool.Pool) error {
-			return PresenceSweep(NewPresenceSweeper(NewPresence(pool), nil))(ctx, pool)
+			return PresenceSweep(NewPresenceSweeper(NewPresence(pool), nil), nil)(ctx, pool)
 		},
 	}
 

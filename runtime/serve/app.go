@@ -338,8 +338,10 @@ func (a *App) runClose(ctx context.Context, timeout time.Duration) error {
 // The two debug lines around it are what makes "which step ate the budget"
 // answerable, and they are two rather than one for the case that most needs
 // them: a step that never returns is a process killed from outside, so the only
-// line naming it is the one written before it started. A step that finished has
-// a pair, and the difference between the two is where the time went.
+// line naming it is the one written before it started. A step that came back has
+// a pair, the difference between the two is where the time went, and the second
+// one carries the error when it gave up — so "it took its whole two seconds" and
+// "it was cut off at two seconds" are not the same line.
 func (a *App) run(ctx context.Context, phase string, s step) (err error) {
 	// The context as it arrived, so that the line at the end is not written
 	// against the per-step deadline that may be what ended it.
@@ -353,8 +355,16 @@ func (a *App) run(ctx context.Context, phase string, s step) (err error) {
 
 	began := time.Now()
 	defer func() {
-		a.log().DebugContext(outer, "shutdown step finished", "phase", phase, "step", s.Name,
-			"in", time.Since(began).Round(time.Millisecond))
+		// With the outcome, because a step that blew its own deadline returns
+		// here too: without it the pair reads the same for a step that
+		// finished and one that was abandoned halfway, which is the difference
+		// the pair exists to show.
+		done := []any{"phase", phase, "step", s.Name,
+			"in", time.Since(began).Round(time.Millisecond)}
+		if err != nil {
+			done = append(done, "error", err)
+		}
+		a.log().DebugContext(outer, "shutdown step finished", done...)
 	}()
 
 	if s.Timeout > 0 {
