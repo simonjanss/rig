@@ -116,8 +116,8 @@ type Options struct {
 	// name here. They are the same bookkeeping.
 	Table string
 
-	// Logger receives one line per migration applied, at INFO, and a line at
-	// DEBUG for a run that found nothing to do.
+	// Logger receives one line per migration applied, and a line for a run that
+	// found nothing to do. Both at INFO.
 	//
 	// Nil is not silence. It is [log/slog.Default], which is the reading every
 	// other Logger in rig gives it, and it is the whole point of this field
@@ -234,10 +234,13 @@ func ApplyAll(srcs []Source, opt Options) func(ctx context.Context, pool *pgxpoo
 			return err
 		}
 		if len(applied) == 0 {
-			// Debug, unlike the applied lines: that the schema was already
-			// where it should be is the ordinary outcome of every boot after
-			// the first.
-			opt.log().DebugContext(ctx, "no migrations to apply")
+			// INFO, like the applied lines and for the same reason. This is
+			// the ordinary outcome of every run after the first, and it is
+			// also the whole output of one: the doc comment on [Apply] wires
+			// it as a subcommand, and slog.Default drops DEBUG — so a level
+			// below this makes a migration job that found nothing and a cron
+			// entry that never fired the same silence.
+			opt.log().InfoContext(ctx, "no migrations to apply")
 		}
 		return nil
 	}

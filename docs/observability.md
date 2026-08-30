@@ -134,7 +134,7 @@ Everything else the lifecycle says is `DEBUG`, and there is a lot more of it:
 |---|---|
 | `starting` | the version, the commit and the Go toolchain, when the build recorded them |
 | `connected` | which database, on which host, with what pool size, in how long |
-| `migrated` / `not migrating` | and one `applied` line per migration, at `INFO` |
+| `migrated` / `not migrating` | and from `migrate` itself, at `INFO`: one `applied` line per migration, or `no migrations to apply` |
 | `mounted` | how long your `mount` function took out of `MaxStartup` |
 | `the shutdown budget fits` | every step this process registered and what each may take |
 | `shutdown step` / `shutdown step finished` | one pair per drain and close step, with its own duration, and the error when it gave up |
@@ -152,11 +152,10 @@ notification whose subject nothing is registered for is `WARN`.
 **Which level depends on which form runs it, and the split is the point.** The
 goroutines — the notification engine and the presence sweeper the server starts —
 write `DEBUG`, because that is a line per interval forever. The cron subcommands
-— `dispatch-notifications`, `dispatch-auth-mail`, `sweep-presence`, `sweep-files`,
-and `migrate`'s `applied` lines — write `INFO`, because there the report is the
-whole output of a run that happened while nobody was watching, and `slog.Default()`
-drops `DEBUG`: a level you have to turn on in advance cannot answer "did the cron
-entry fire".
+— `dispatch-notifications`, `dispatch-auth-mail`, `sweep-presence`, `sweep-files`
+and `migrate` — write `INFO`, because there the report is the whole output of a
+run that happened while nobody was watching, and `slog.Default()` drops `DEBUG`:
+a level you have to turn on in advance cannot answer "did the cron entry fire".
 
 So to see the goroutines' lines, either:
 
