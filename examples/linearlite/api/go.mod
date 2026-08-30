@@ -13,7 +13,7 @@ require (
 	github.com/simonjanss/rig/observe v0.0.0-00010101000000-000000000000
 	github.com/simonjanss/rig/presence v0.0.0
 	github.com/simonjanss/rig/rigclient v0.0.0
-	github.com/simonjanss/rig/runtime v0.2.0
+	github.com/simonjanss/rig/runtime v0.2.1
 	go.opentelemetry.io/otel/trace v1.45.0
 )
 
