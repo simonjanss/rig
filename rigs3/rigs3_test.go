@@ -275,6 +275,7 @@ func withFilterPrefix(p string) func(*types.LifecycleRule) {
 }
 
 func withLegacyPrefix(p string) func(*types.LifecycleRule) {
+	//nolint:staticcheck // the spelling a rule written before Filter comes back in
 	return func(r *types.LifecycleRule) { r.Prefix = aws.String(p) }
 }
 

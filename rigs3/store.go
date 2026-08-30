@@ -13,6 +13,7 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	awshttp "github.com/aws/aws-sdk-go-v2/aws/transport/http"
+	"github.com/aws/aws-sdk-go-v2/feature/s3/transfermanager"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 
@@ -48,7 +49,7 @@ import (
 func (s *Store) Put(ctx context.Context, key string, r io.Reader, opt blob.PutOptions) (blob.Info, error) {
 	counted := &hashed{sum: sha256.New()}
 
-	in := &s3.PutObjectInput{
+	in := &transfermanager.UploadObjectInput{
 		Bucket: aws.String(s.bucket),
 		Key:    aws.String(key),
 		Body:   io.TeeReader(r, counted),
@@ -56,7 +57,7 @@ func (s *Store) Put(ctx context.Context, key string, r io.Reader, opt blob.PutOp
 	if opt.ContentType != "" {
 		in.ContentType = aws.String(opt.ContentType)
 	}
-	if _, err := s.uploader.Upload(ctx, in); err != nil {
+	if _, err := s.uploader.UploadObject(ctx, in); err != nil {
 		return blob.Info{}, err
 	}
 

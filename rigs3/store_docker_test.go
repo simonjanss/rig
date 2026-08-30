@@ -29,6 +29,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/google/uuid"
 
 	"github.com/simonjanss/rig/files/blob"
@@ -305,16 +307,21 @@ func TestMarkingSomethingThatIsNotThere(t *testing.T) {
 	}
 }
 
-// Past the SDK's five-megabyte part size the upload is multipart, and the ETag
-// stops being a hash of the object. This is the case blob.Info's doc comment is
-// about, and the reason the checksum is rig's own rather than the bucket's.
+// Past the SDK's threshold the upload is multipart, and the ETag stops being a
+// hash of the object. This is the case blob.Info's doc comment is about, and
+// the reason the checksum is rig's own rather than the bucket's.
+//
+// The size is chosen to cross that threshold, and the ETag is checked rather
+// than assumed: the SDK has raised the number once already, and a test that
+// took it on trust would go on passing while quietly testing the single-part
+// path instead.
 func TestAMultipartUploadHashesTheWholeObject(t *testing.T) {
 	t.Parallel()
 
-	s, _ := store(t, 0)
+	s, bucket := store(t, 0)
 	key := blob.Key(uuid.New())
 
-	content := bytes.Repeat([]byte("rig"), 4*1024*1024) // 12 MiB, so three parts
+	content := bytes.Repeat([]byte("rig"), 8*1024*1024) // 24 MiB
 
 	info, err := s.Put(t.Context(), key, bytes.NewReader(content), blob.PutOptions{})
 	if err != nil {
@@ -325,6 +332,24 @@ func TestAMultipartUploadHashesTheWholeObject(t *testing.T) {
 	}
 	if want := sha256Of(content); info.Checksum != want {
 		t.Errorf("Checksum is %q, want the hash of the whole object %q", info.Checksum, want)
+	}
+
+	// A multipart ETag is a hash of the part hashes with the part count after
+	// it, so the dash is how the bucket admits the upload was multipart — and
+	// it is also the thing blob.Info refuses to be.
+	head, err := s.api.HeadObject(t.Context(), &s3.HeadObjectInput{
+		Bucket: aws.String(bucket),
+		Key:    aws.String(key),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	etag := aws.ToString(head.ETag)
+	if !strings.Contains(etag, "-") {
+		t.Fatalf("the upload was not multipart (ETag %s), so this test is watching the single-part path", etag)
+	}
+	if strings.Contains(etag, info.Checksum) {
+		t.Error("the ETag and the checksum are the same string, which is the case this test cannot then distinguish")
 	}
 
 	// And it reads back byte for byte, which a badly assembled multipart upload

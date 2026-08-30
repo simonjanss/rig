@@ -34,7 +34,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials"
-	"github.com/aws/aws-sdk-go-v2/feature/s3/manager"
+	"github.com/aws/aws-sdk-go-v2/feature/s3/transfermanager"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 	"github.com/aws/smithy-go"
@@ -113,7 +113,7 @@ const defaultRegion = "us-east-1"
 // Store is a bucket, as [blob.Store].
 type Store struct {
 	api      *s3.Client
-	uploader *manager.Uploader
+	uploader *transfermanager.Client
 	presign  *s3.PresignClient
 	bucket   string
 }
@@ -166,7 +166,7 @@ func New(ctx context.Context, cfg Config) (*Store, error) {
 
 	s := &Store{
 		api:      api,
-		uploader: manager.NewUploader(api),
+		uploader: transfermanager.New(api),
 		presign:  s3.NewPresignClient(api),
 		bucket:   cfg.Bucket,
 	}
@@ -271,10 +271,13 @@ func ruleReaches(r types.LifecycleRule) bool {
 		prefix = *r.Filter.Prefix
 	case r.Filter != nil && r.Filter.And != nil && r.Filter.And.Prefix != nil:
 		prefix = *r.Filter.And.Prefix
-	case r.Prefix != nil:
-		// The pre-Filter spelling. Deprecated by S3 and still returned for every
-		// rule written before Filter existed.
-		prefix = *r.Prefix
+
+	// The pre-Filter spelling. Deprecated by S3 for writing and still what it
+	// answers with for every rule written before Filter existed, which is the
+	// only reason this reads it: a check that ignored the old spelling would
+	// pass on the oldest and most likely bucket to have one.
+	case r.Prefix != nil: //nolint:staticcheck // reading what S3 still returns
+		prefix = *r.Prefix //nolint:staticcheck // as above
 	}
 	return strings.HasPrefix(keyPrefix, prefix) || strings.HasPrefix(prefix, keyPrefix)
 }
