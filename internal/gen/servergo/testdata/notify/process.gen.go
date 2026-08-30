@@ -137,6 +137,11 @@ func ShutdownBudget() time.Duration {
 // compute it than read it off.
 type Shutdown struct {
 	// The notification engine, 15 * time.Second as generated.
+	//
+	// The engine finishing what it claimed, which is the half of its shutdown that
+	// has a limit. The half ahead of it — the drain that stops it claiming more
+	// — is bounded only by what is left of the budget, and stays that way
+	// whatever this says.
 	Notifications time.Duration
 
 	// The live subscriptions, 5 * time.Second as generated.
@@ -184,6 +189,11 @@ func (s Shutdown) Steps() []serve.Step {
 //
 // The headroom is in it and cannot be changed. What is left for the requests
 // in flight is not a step and is not this struct's to shorten.
+//
+// A DrainDelay is not in it either, for the reason it is not in
+// [ShutdownBudget]: it is a number the serve.Config beside this one states,
+// and serve counts it against the same total. A project with one writes the
+// sum — which is what [Main] prints when it has a budget to complain about.
 func (s Shutdown) Budget() time.Duration {
 	return cmp.Or(s.Notifications, notificationsShutdown) + cmp.Or(s.Shapes, shapesShutdown) + cmp.Or(s.Auth, authShutdown) + shutdownHeadroom
 }

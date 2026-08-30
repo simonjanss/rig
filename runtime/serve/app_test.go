@@ -531,3 +531,54 @@ func TestConfigShutdownIsAcceptedWhenTheStepIsThere(t *testing.T) {
 		t.Errorf("a shutdown that sizes a step this server has was refused: %v", err)
 	}
 }
+
+// The unbounded half of a two-step name stays unbounded.
+//
+// `api.StartNotificationEngine` registers both halves of the engine under
+// "notifications": a drain that stops it claiming, unbounded on purpose, and a
+// close that finishes what it claimed within fifteen seconds. A number that
+// reached both would be counted twice by [App.declared] while the generated
+// Shutdown.Budget counts it once — so shortening the engine would grow the
+// total its own budget has to hold, and a set built with Budget would be
+// refused by the check that reads it.
+func TestConfigShutdownLeavesTheUnboundedHalfOfAStepAlone(t *testing.T) {
+	app := &App{Logger: quiet()}
+	app.limit(steps{{Name: "notifications", Timeout: 10 * time.Second}})
+
+	app.Drain("notifications", func(context.Context) error { return nil })
+	app.CloseWithin("notifications", 15*time.Second, func(context.Context) error { return nil })
+	app.DrainWithin("shapes", 5*time.Second, func(context.Context) error { return nil })
+
+	if got := app.drain[0].Timeout; got != 0 {
+		t.Errorf("the engine's drain got %s, want the no limit it was registered with", got)
+	}
+	if got := app.stop[0].Timeout; got != 10*time.Second {
+		t.Errorf("the engine's close got %s, want the 10s the config asked for", got)
+	}
+
+	// Ten for the engine and five for the subscriptions, and the drain that
+	// declared nothing still declares nothing. The same numbers the generated
+	// Shutdown.Budget adds the headroom to.
+	if total, _ := app.declared(0); total != 15*time.Second {
+		t.Errorf("the declared total is %s, want 15s — the engine counted once", total)
+	}
+}
+
+// And a name that only ever reached the unbounded form is refused, because
+// that number went nowhere.
+func TestConfigShutdownIsRefusedWhenTheStepItNamesHasNoLimit(t *testing.T) {
+	app := &App{Logger: quiet()}
+	app.limit(steps{{Name: "store", Timeout: 2 * time.Second}})
+	app.Close("store", func(context.Context) error { return nil })
+	app.CloseWithin("presence", 5*time.Second, func(context.Context) error { return nil })
+
+	err := app.checkShutdown(context.Background(), time.Minute, 0)
+	if err == nil {
+		t.Fatal("a shutdown step with no limit to replace was sized and accepted")
+	}
+	for _, want := range []string{"store", "presence"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the refusal does not name %q: %v", want, err)
+		}
+	}
+}

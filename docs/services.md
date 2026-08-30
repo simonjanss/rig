@@ -204,7 +204,10 @@ api.Main(serve.Config{
 registers and no others — so a name that does not apply here is a compile error
 rather than a number nothing reads, and one that applies but was never
 registered is refused before the server listens. A field left zero keeps what
-the step was generated with.
+the step was generated with. So does a step registered with no limit at all: a
+number here replaces one, it does not impose one, which is what keeps the
+notification engine's drain — the half that stops it claiming more work —
+bounded by what is left of the budget rather than by `Notifications`.
 
 It is a `serve.Config` field rather than a `rig.yaml` key on purpose. How long
 a stop may take is usually decided by a `terminationGracePeriodSeconds`
@@ -213,8 +216,17 @@ where it is five — so this is a number an environment can supply, next to
 `DatabaseURL` and `Addr`. Lowering a step leaves the budget with room to spare;
 raising one past `MaxShutdown` is a process that refuses to start and names
 what no longer fits. `api.Shutdown{...}.Budget()` is the total with your
-numbers in it, for a `MaxShutdown` you would rather compute than copy. What is
-left for the requests in flight is not a step and is not settable.
+numbers in it, for a `MaxShutdown` you would rather compute than copy — plus
+the `DrainDelay`, which `serve` counts against the same number. What is left
+for the requests in flight is not a step and is not settable.
+
+`api.Main` reads that total before it opens a database: a `MaxShutdown` left
+out is refused there with the number to write, and one that is smaller than
+what this project's configuration adds up to is said out loud while there is
+still a literal on screen to fix it in. It is said rather than refused, because
+this side counts every step rig.yaml describes — including one whose `Parts`
+field your build returns nil for — so a smaller number is sometimes exactly
+right. `serve` adds up what was actually registered and has the last word.
 
 A project with live sync ends its subscriptions in that same sequence, because
 a subscription is a request the server is deliberately not answering yet and

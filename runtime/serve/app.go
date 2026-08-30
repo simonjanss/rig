@@ -36,8 +36,8 @@ type App struct {
 	checks []check
 
 	// limits are [Config.Shutdown]'s numbers, keyed by step name, and they
-	// replace whatever registers a step of that name. Nil is the ordinary case
-	// and means every step keeps the limit it was registered with.
+	// replace the limit a step of that name was registered with. Nil is the
+	// ordinary case and means every step keeps the one it asked for.
 	limits map[string]time.Duration
 
 	// until is the deadline for the whole stop sequence, set when it begins.
@@ -51,13 +51,17 @@ type App struct {
 //
 // It is what [Shutdown] is a set of, and what [Config.Shutdown] carries: a
 // number in it replaces the one whatever registered that step asked for. The
-// name is the one given to [App.Drain], [App.DrainWithin], [App.Close] or
-// [App.CloseWithin] — for rig's own steps, "traces", "notifications",
-// "presence", "shapes" and "auth", which the generated api package's Shutdown
-// spells as fields rather than as strings.
+// name is the one given to [App.DrainWithin] or [App.CloseWithin] — for rig's
+// own steps, "traces", "notifications", "presence", "shapes" and "auth", which
+// the generated api package's Shutdown spells as fields rather than as strings.
+//
+// A limit is replaced rather than imposed, so a step registered through
+// [App.Drain] or [App.Close] — which are the two that say "bounded only by what
+// is left of the budget" — keeps that whatever a set says. [App.within] is why
+// it has to work that way.
 type Step struct {
-	// Name is the step this is about, and a name nothing registers is refused
-	// before the server listens rather than silently doing nothing.
+	// Name is the step this is about, and a name no step here has a limit for is
+	// refused before the server listens rather than silently doing nothing.
 	Name string
 
 	// Timeout is how long that step may take. Zero leaves it alone, which is
@@ -197,8 +201,18 @@ func (a *App) CloseWithin(name string, timeout time.Duration, f func(ctx context
 // what it asked for, and the names that were named but never registered are
 // answered for in [App.checkShutdown] — here there is nothing yet to compare
 // them against.
+//
+// It replaces a limit rather than imposing one, so a step registered through
+// [App.Drain] or [App.Close] stays unbounded whatever the deployment said. One
+// name can be two steps — the notification engine registers a drain that stops
+// it claiming and a close that finishes what it claimed — and giving both the
+// same number would mean two things. The unbounded half would stop being the
+// "whatever is left" [App.declared] counts as nothing, so a set that shortened
+// the engine would grow the total the budget has to hold; and a step whose
+// author wrote no limit on purpose would acquire one from a field that says it
+// is sizing something else.
 func (a *App) within(name string, timeout time.Duration) Step {
-	if d, ok := a.limits[name]; ok {
+	if d, ok := a.limits[name]; ok && timeout > 0 {
 		timeout = d
 	}
 	return Step{Name: name, Timeout: timeout}
@@ -379,7 +393,8 @@ func (a *App) reserved() time.Duration {
 	return total
 }
 
-// checkLimits refuses a [Config.Shutdown] that named a step nothing registered.
+// checkLimits refuses a [Config.Shutdown] that named a step nothing here has a
+// limit for.
 //
 // It is the same failure the configuration blocks are refused for: a number
 // somebody set and believed in, read by nothing. Here it is worth more than
@@ -392,17 +407,24 @@ func (a *App) reserved() time.Duration {
 // project registers depends on what its wiring built. A nil engine means no
 // notification step, so a set that sizes one is a set describing a server this
 // is not.
+//
+// What counts as registered is a step with a limit of its own, because
+// [App.within] replaces a limit rather than imposing one: a name that only ever
+// reached [App.Drain] or [App.Close] is a name whose number went nowhere, which
+// is exactly what this exists to say out loud. Every step rig registers under a
+// name the generated Shutdown has a field for has one, so this only reaches a
+// deployment that filled the field with a set of its own.
 func (a *App) checkLimits() error {
 	if len(a.limits) == 0 {
 		return nil
 	}
 
-	registered := make(map[string]bool, len(a.drain)+len(a.stop))
+	sized := make(map[string]bool, len(a.drain)+len(a.stop))
 	names := make([]string, 0, len(a.drain)+len(a.stop))
 	for _, steps := range [][]step{a.drain, a.stop} {
 		for _, s := range steps {
-			if !registered[s.Name] {
-				registered[s.Name] = true
+			if s.Timeout > 0 && !sized[s.Name] {
+				sized[s.Name] = true
 				names = append(names, s.Name)
 			}
 		}
@@ -410,7 +432,7 @@ func (a *App) checkLimits() error {
 
 	var unread []string
 	for name := range a.limits {
-		if !registered[name] {
+		if !sized[name] {
 			unread = append(unread, name)
 		}
 	}
@@ -419,12 +441,12 @@ func (a *App) checkLimits() error {
 	}
 	sort.Strings(unread)
 
-	had := "nothing registered a shutdown step at all"
+	had := "no step here has a limit of its own to replace"
 	if len(names) > 0 {
-		had = "what this server registered is " + strings.Join(names, ", ")
+		had = "what this server sizes is " + strings.Join(names, ", ")
 	}
 	return fmt.Errorf(
-		"serve: Config.Shutdown sizes %s, which nothing here registers, so the number is read by nobody: %s",
+		"serve: Config.Shutdown sizes %s, which nothing here registers with a limit, so the number is read by nobody: %s",
 		strings.Join(unread, ", "), had)
 }
 

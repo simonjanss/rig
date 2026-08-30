@@ -166,6 +166,11 @@ func (s Shutdown) Steps() []serve.Step {
 //
 // The headroom is in it and cannot be changed. What is left for the requests
 // in flight is not a step and is not this struct's to shorten.
+//
+// A DrainDelay is not in it either, for the reason it is not in
+// [ShutdownBudget]: it is a number the serve.Config beside this one states,
+// and serve counts it against the same total. A project with one writes the
+// sum — which is what [Main] prints when it has a budget to complain about.
 func (s Shutdown) Budget() time.Duration {
 	return cmp.Or(s.Auth, authShutdown) + shutdownHeadroom
 }

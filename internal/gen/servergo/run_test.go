@@ -256,3 +256,58 @@ func TestAProjectWithNoTablesStillGetsMain(t *testing.T) {
 		}
 	}
 }
+
+// A MaxShutdown that was stated but is too small is said before a database is
+// opened, and said rather than refused.
+//
+// This side counts every step the configuration describes, including one whose
+// part a build returns nil for, so a smaller number is sometimes right and
+// refusing it would refuse a server rig cannot see. serve adds up what was
+// actually registered and has the last word.
+func TestMainSaysSoWhenMaxShutdownIsBelowTheBudget(t *testing.T) {
+	t.Parallel()
+
+	doc := gentest.LoadDocument(t, filepath.Join("testdata", "notify.ir.json"))
+	src := artifactNamed(t, gentest.Run(t, servergo.New(), doc, opts()), "run.gen.go")
+
+	for _, want := range []string{
+		"if cfg.MaxShutdown < budget+cfg.DrainDelay {",
+		"slog.Warn(",
+	} {
+		if !strings.Contains(src, want) {
+			t.Errorf("Main does not say a stated MaxShutdown is too small: missing %q\n%s", want, src)
+		}
+	}
+	if strings.Contains(src, "if cfg.MaxShutdown < budget+cfg.DrainDelay {\n\t\tos.Exit") {
+		t.Error("a MaxShutdown below the budget is refused, and this side cannot know that it is wrong")
+	}
+}
+
+// The budget both checks print is the deployment's when it sized its steps,
+// and it is read through an interface so that a pointer to the generated set —
+// or a set a project wrote itself — is read too.
+func TestMainReadsTheDeploymentsBudgetThroughAnInterface(t *testing.T) {
+	t.Parallel()
+
+	doc := gentest.LoadDocument(t, filepath.Join("testdata", "notify.ir.json"))
+	src := artifactNamed(t, gentest.Run(t, servergo.New(), doc, opts()), "run.gen.go")
+
+	want := "if s, ok := cfg.Shutdown.(interface{ Budget() time.Duration }); ok {"
+	if !strings.Contains(src, want) {
+		t.Errorf("Main does not read the deployment's budget: want %q\n%s", want, src)
+	}
+	if strings.Contains(src, "cfg.Shutdown.(Shutdown)") {
+		t.Error("Main asserts the generated type back out of the field, so a pointer to one is not read")
+	}
+
+	// And a project with no step of rig's has nothing to read: there is no
+	// Shutdown for a deployment to have filled the field with.
+	empty := gentest.LoadDocument(t, filepath.Join("testdata", fixture))
+	for i := range empty.API.Resources {
+		empty.API.Resources[i].Electric = nil
+	}
+	bare := artifactNamed(t, gentest.Run(t, servergo.New(), empty, opts()), "run.gen.go")
+	if strings.Contains(bare, "Budget() time.Duration") {
+		t.Errorf("a project with nothing to size reads a budget that cannot exist:\n%s", bare)
+	}
+}

@@ -69,11 +69,6 @@ const (
 	authStep          = "auth"
 )
 
-// tracesField is the emitted Shutdown's field for the flush, named here as well
-// as in [emitter.shutdownSteps] because the process methods read it directly:
-// the flush is the one step with a half that never sees an App.
-const tracesField = "Traces"
-
 // shutdownStep is one of rig's own closers: what it is called in the generated
 // source, how long it gets, and what to say about it.
 type shutdownStep struct {
@@ -86,6 +81,11 @@ type shutdownStep struct {
 	// is a string serve matches on and the other is a field a compiler checks.
 	step  string
 	field string
+
+	// note is what the emitted field says beyond its number, for the step whose
+	// name is registered twice. Empty for the four where the field and the
+	// closer are one to one.
+	note string
 }
 
 // shutdownSteps are the closers this project's configuration registers, in the
@@ -98,19 +98,23 @@ type shutdownStep struct {
 func (e *emitter) shutdownSteps() []shutdownStep {
 	var steps []shutdownStep
 	if e.tracing() {
-		steps = append(steps, shutdownStep{tracesConst, tracesFlush, "the trace flush", tracesStep, tracesField})
+		steps = append(steps, shutdownStep{tracesConst, tracesFlush, "the trace flush", tracesStep, "Traces", ""})
 	}
 	if e.hasNotifications() {
-		steps = append(steps, shutdownStep{notificationsConst, notificationsStop, "the notification engine", notificationsStep, "Notifications"})
+		steps = append(steps, shutdownStep{notificationsConst, notificationsStop, "the notification engine", notificationsStep, "Notifications",
+			"The engine finishing what it claimed, which is the half of its shutdown " +
+				"that has a limit. The half ahead of it — the drain that stops it " +
+				"claiming more — is bounded only by what is left of the budget, and " +
+				"stays that way whatever this says."})
 	}
 	if e.hasPresence() {
-		steps = append(steps, shutdownStep{presenceConst, presenceStop, "the presence sweeper", presenceStep, "Presence"})
+		steps = append(steps, shutdownStep{presenceConst, presenceStop, "the presence sweeper", presenceStep, "Presence", ""})
 	}
 	if e.hasShapes() {
-		steps = append(steps, shutdownStep{shapesConst, shapesDrain, "the live subscriptions", shapesStep, "Shapes"})
+		steps = append(steps, shutdownStep{shapesConst, shapesDrain, "the live subscriptions", shapesStep, "Shapes", ""})
 	}
 	if e.hasAuth() {
-		steps = append(steps, shutdownStep{authConst, authClose, "the auth cache's invalidation channel", authStep, "Auth"})
+		steps = append(steps, shutdownStep{authConst, authClose, "the auth cache's invalidation channel", authStep, "Auth", ""})
 	}
 	return steps
 }
@@ -411,8 +415,12 @@ func (e *emitter) shutdownType(b *gobuf.Buf) {
 		if i > 0 {
 			b.NL()
 		}
-		b.Comment(strings.ToUpper(s.about[:1]) + s.about[1:] + ", " +
-			duration("time", s.took) + " as generated.")
+		doc := strings.ToUpper(s.about[:1]) + s.about[1:] + ", " +
+			duration("time", s.took) + " as generated."
+		if s.note != "" {
+			doc += "\n\n" + s.note
+		}
+		b.Comment(doc)
 		b.L("%s %s.Duration", s.field, timePkg)
 	}
 	b.L("}")
@@ -450,7 +458,12 @@ func (e *emitter) shutdownType(b *gobuf.Buf) {
 		"to size its own steps has the numbers in front of it either way, and two " +
 		"of them to keep in step by hand is one too many.\n\n" +
 		"The headroom is in it and cannot be changed. What is left for the requests " +
-		"in flight is not a step and is not this struct's to shorten.")
+		"in flight is not a step and is not this struct's to shorten.\n\n" +
+		"A DrainDelay is not in it either, for the reason it is not in " +
+		"[ShutdownBudget]: it is a number the serve.Config beside this one " +
+		"states, and serve counts it against the same total. A project with one " +
+		"writes the sum \u2014 which is what [Main] prints when it has a budget " +
+		"to complain about.")
 	b.L("func (s Shutdown) Budget() %s.Duration {", timePkg)
 	b.L("return %s", strings.Join(func() []string {
 		terms := make([]string, 0, len(steps)+1)

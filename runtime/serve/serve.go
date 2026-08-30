@@ -287,10 +287,15 @@ type Config struct {
 	// by somebody else, which is exactly the fact rig.yaml cannot carry because
 	// the same build runs where it is thirty seconds and where it is five.
 	//
+	// A number here replaces the limit a step was registered with rather than
+	// giving one to a step that has none — see [Step]. What that leaves alone is
+	// the drain half of the notification engine, which stops it claiming more
+	// work and is deliberately bounded only by what is left of the budget.
+	//
 	// It does not raise MaxShutdown. The parts are checked against the whole
 	// before the server listens either way, so a set that outgrows the budget is
 	// a process that refuses to start and names what no longer fits, and a step
-	// named here that nothing registers is refused there too.
+	// named here that nothing registers a limit for is refused there too.
 	Shutdown Shutdown
 
 	// OnListen is called with the address actually bound, which is the only
