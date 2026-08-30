@@ -321,6 +321,42 @@ func TestViewsExcludedByDefault(t *testing.T) {
 	}
 }
 
+// TestReplicationFacts covers what live sync depends on, and what no fixture
+// can be trusted to describe: whether the server can decode a publication at
+// all, which publications carry which tables, and whether a table writes WAL.
+func TestReplicationFacts(t *testing.T) {
+	s := schema(t)
+
+	if s.Replication == nil {
+		t.Fatal("a live read reported no replication facts at all")
+	}
+
+	// The corpus container runs with default settings, so this is the answer
+	// that makes a shape impossible — and reading it back is the point.
+	if s.Replication.WALLevel != "replica" {
+		t.Errorf("wal_level is %q, want replica", s.Replication.WALLevel)
+	}
+
+	want := []ir.Publication{{Name: "corpus_publication"}}
+	if diff := gocmp.Diff(want, s.Replication.Publications); diff != "" {
+		t.Errorf("publications (-want +got):\n%s", diff)
+	}
+
+	if got := findTable(t, s, "lesson").Publications; !slices.Equal(got, []string{"corpus_publication"}) {
+		t.Errorf("lesson is carried by %v, want [corpus_publication]", got)
+	}
+	if got := findTable(t, s, "tag").Publications; len(got) != 0 {
+		t.Errorf("tag is in no publication, but was reported as carried by %v", got)
+	}
+
+	if !findTable(t, s, "scratch").Unlogged {
+		t.Error("scratch is UNLOGGED and was not reported as such")
+	}
+	if findTable(t, s, "lesson").Unlogged {
+		t.Error("lesson is a logged table and was reported as UNLOGGED")
+	}
+}
+
 func findTable(t *testing.T, s ir.Schema, name string) *ir.Table {
 	t.Helper()
 	for i := range s.Tables {

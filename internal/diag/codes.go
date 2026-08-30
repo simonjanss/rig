@@ -312,6 +312,38 @@ var (
 	CodeUnresolvedType = newCode("RIG5080", SeverityError,
 		"A field references a type that is not declared anywhere.",
 		"")
+
+	CodeElectricNotPublished = newCode("RIG5090", SeverityError,
+		"A table with live sync is in no publication.",
+		"The sync service publishes a table itself when the first subscription "+
+			"arrives, so this is not always a stream that stays empty — but it needs "+
+			"a database role that owns the table, because Postgres requires ownership "+
+			"both to add a table to a publication and to set REPLICA IDENTITY FULL. A "+
+			"least-privilege role fails there, and it fails as an obscure error on the "+
+			"subscription rather than as anything about a publication. Under "+
+			"ELECTRIC_MANUAL_TABLE_PUBLISHING it never publishes anything at all. "+
+			"Doing both in a migration — `ALTER PUBLICATION <publication> ADD TABLE "+
+			"<table>` and `ALTER TABLE <table> REPLICA IDENTITY FULL` — depends on none of "+
+			"that, and publishing without the second leaves the deployment failing on the "+
+			"half this rule cannot see. Or remove the table's `electric` block. "+
+			"The publication Electric maintains for itself, `electric_publication_default`, "+
+			"does not count as an answer here and is not somewhere to add a table by hand: "+
+			"membership in it is what this rule is asking a project not to depend on.")
+
+	CodeElectricUnlogged = newCode("RIG5091", SeverityError,
+		"A table with live sync is UNLOGGED.",
+		"An UNLOGGED table writes no WAL, so nothing can follow it and the shape "+
+			"streams empty forever. Make it a logged table, or remove its `electric` block.")
+
+	CodeElectricWALLevel = newCode("RIG5092", SeverityError,
+		"Live sync needs wal_level=logical.",
+		"It has to be set when Postgres starts, so it is a property of the container "+
+			"or the server rather than something a migration can turn on. "+
+			"`database.electric.enabled` adds it to the local container for you. A "+
+			"project with shapes but no local sync service — the generated proxy "+
+			"pointed at a deployment, say — says it directly instead, with "+
+			"`wal_level=logical` under `database.settings`. A managed database sets it "+
+			"in its own parameter group.")
 )
 
 // Convention validation: RIG6xxx. Severity comes from the `validate` block of

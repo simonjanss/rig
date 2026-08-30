@@ -83,9 +83,16 @@ notifications:
 
 # A throwaway Postgres, created on demand. The port is explicit so this example
 # can run alongside the others.
+#
+# wal_level is here even though no table in this example asks for live sync. The
+# inbox gets a shape from rig the moment `notifications:` is on, and a shape rig
+# wrote is still a shape that has to be followable off this database — see the
+# publication migration beside the others. RIG5092 is the diagnostic without it.
 database:
   image: postgres:17-alpine
   port: 55442
+  settings:
+    - wal_level=logical
 
 # Every table gets a configuration file. `rig sync` creates and updates them.
 layout:

@@ -1,0 +1,10 @@
+table: memo
+comment: A note somebody left, kept only while the server is up.
+
+columns:
+  body:
+    comment: What the note says.
+
+electric:
+  enabled: true
+  auth: tenant

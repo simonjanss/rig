@@ -30,9 +30,18 @@ servers:
 
 # A throwaway Postgres, created on demand. The port is explicit so this example
 # can run alongside another rig project without fighting over the default.
+#
+# wal_level is here without a sync service beside it, which looks odd and is
+# deliberate: todo asks for live sync, so its shapes have to be followable off
+# this database even though this example never runs Electric. Without it every
+# shape here is a route that can only ever answer 200 with no rows, and RIG5092
+# says so. examples/linearlite is where the container is actually run —
+# `database.electric.enabled` would add this line for us there.
 database:
   image: postgres:17-alpine
   port: 55440
+  settings:
+    - wal_level=logical
 
 # Uploads. `enabled` is what makes server-go write the wiring at all, and a
 # project without this block carries no blob store and no multipart reader.

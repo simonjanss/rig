@@ -59,13 +59,24 @@ func Read(ctx context.Context, q Querier, opt Options) (ir.Schema, error) {
 	if err != nil {
 		return ir.Schema{}, fmt.Errorf("read tables: %w", err)
 	}
-	if len(tables) == 0 {
-		return out, nil
-	}
 
 	byName := make(map[string]*ir.Table, len(tables))
 	for i := range tables {
 		byName[tables[i].Name] = &tables[i]
+	}
+
+	// Replication comes before the empty-schema shortcut on purpose: it is the
+	// one thing here that describes the server rather than the tables, and a
+	// caller distinguishes "no database was read" from "read, and nothing is
+	// published" by whether it is nil.
+	replication, err := readReplication(ctx, q, schemaName, byName)
+	if err != nil {
+		return ir.Schema{}, fmt.Errorf("read replication: %w", err)
+	}
+	out.Replication = replication
+
+	if len(tables) == 0 {
+		return out, nil
 	}
 
 	if err := readColumns(ctx, q, schemaName, byName); err != nil {

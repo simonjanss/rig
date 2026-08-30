@@ -1,0 +1,6 @@
+project:
+  name: demo
+  module: example.com/demo
+
+database:
+  url: postgres://localhost:5432/demo

@@ -12,6 +12,32 @@ type Schema struct {
 
 	Tables []Table  `json:"tables"`
 	Enums  []PgEnum `json:"enums"`
+
+	// Replication is what the server says about logical replication.
+	//
+	// Nil means nobody looked: a schema dump written before rig read these
+	// facts, or a hand-written fixture. A live introspection always sets it,
+	// even when the database has no publication at all, which is what lets a
+	// rule tell "looked and found none" from "never looked".
+	Replication *Replication `json:"replication,omitempty"`
+}
+
+// Replication is the server-wide half of what live sync needs.
+type Replication struct {
+	// WALLevel is the server's wal_level. Logical replication needs "logical",
+	// and it cannot be turned on after Postgres has started.
+	WALLevel string `json:"wal_level,omitempty"`
+	// Publications is every publication in the database, sorted by name,
+	// whether or not it carries anything.
+	Publications []Publication `json:"publications,omitempty"`
+}
+
+// Publication is one Postgres publication.
+type Publication struct {
+	Name string `json:"name"`
+	// AllTables is a publication declared FOR ALL TABLES, which carries every
+	// table in the database including ones created after it.
+	AllTables bool `json:"all_tables,omitempty"`
 }
 
 // TableKind distinguishes real tables from the read-only relations that share
@@ -38,6 +64,14 @@ type Table struct {
 	Indexes     []Index      `json:"indexes,omitempty"`
 	ForeignKeys []ForeignKey `json:"foreign_keys,omitempty"`
 	Checks      []Check      `json:"checks,omitempty"`
+
+	// Publications names every publication that carries this table, sorted,
+	// including one declared FOR ALL TABLES. Empty on a table with live sync
+	// means the stream would never emit a row.
+	Publications []string `json:"publications,omitempty"`
+	// Unlogged is a table whose relpersistence is 'u'. It writes no WAL, so
+	// logical replication cannot see it at all.
+	Unlogged bool `json:"unlogged,omitempty"`
 
 	// LinkTable is set when this table is a pure many-to-many join: its primary
 	// key is exactly two foreign-key columns. Such tables become relations on

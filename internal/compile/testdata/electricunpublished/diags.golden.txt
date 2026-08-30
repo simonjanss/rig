@@ -1,0 +1,3 @@
+error[RIG5092] testdata/electricunpublished/rig.yaml:5:1: some table asks for live sync and this database runs with wal_level=replica: no publication on it can be decoded
+error[RIG5091] testdata/electricunpublished/tables/memo.yaml:9:3: table "memo" asks for live sync and is UNLOGGED: it writes no WAL, so its shape would stream nothing
+error[RIG5090] testdata/electricunpublished/tables/todo.yaml:11:3: table "todo" asks for live sync, but no publication carries it (this database has app_publication): nothing has told Postgres to replicate it

@@ -207,6 +207,58 @@ func TestHashIgnoresTheRevision(t *testing.T) {
 	}
 }
 
+// The replication facts are the only part of the document nobody wrote: they
+// are read off the server, and the sync service publishes a table itself the
+// first time somebody subscribes. A hash that saw them would move on the day a
+// developer opened the app, telling every client the API was older than the
+// server over a change nobody made.
+func TestHashIgnoresWhatTheServerReplicates(t *testing.T) {
+	t.Parallel()
+
+	doc := sample()
+	doc.Schema.Replication = &ir.Replication{
+		WALLevel:     "logical",
+		Publications: []ir.Publication{{Name: "app_publication"}},
+	}
+	doc.Schema.Tables[0].Publications = []string{"app_publication"}
+	before, err := doc.Hash()
+	if err != nil {
+		t.Fatalf("hash: %v", err)
+	}
+
+	// Electric adds the table to its own publication on the first subscription,
+	// and somebody else's CDC tool adds one of its own.
+	doc.Schema.Replication.Publications = append(doc.Schema.Replication.Publications,
+		ir.Publication{Name: "electric_publication_default"}, ir.Publication{Name: "debezium"})
+	doc.Schema.Tables[0].Publications = append(doc.Schema.Tables[0].Publications,
+		"electric_publication_default")
+	after, err := doc.Hash()
+	if err != nil {
+		t.Fatalf("hash: %v", err)
+	}
+	if after != before {
+		t.Fatalf("a publication appearing moved the hash: %s then %s", before, after)
+	}
+
+	// Nor does the server's wal_level, which differs between a developer's
+	// container and the managed database the same files are generated against.
+	doc.Schema.Replication.WALLevel = "replica"
+	doc.Schema.Tables[0].Unlogged = true
+	level, err := doc.Hash()
+	if err != nil {
+		t.Fatalf("hash: %v", err)
+	}
+	if level != before {
+		t.Fatalf("wal_level moved the hash: %s then %s", before, level)
+	}
+
+	// Cleared for the hash, left on the caller's document: validation reads
+	// these after the hash is taken.
+	if doc.Schema.Replication == nil || len(doc.Schema.Tables[0].Publications) != 2 {
+		t.Fatal("hashing erased the replication facts from the caller's document")
+	}
+}
+
 func TestUnmarshalRejectsUnknownFields(t *testing.T) {
 	t.Parallel()
 

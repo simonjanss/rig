@@ -45,6 +45,7 @@ func Validate(doc *ir.Document, set *tableconf.Set, p *project.Project) diag.Lis
 		diags.Append(checkTenantColumn(t, loaded))
 		diags.Append(checkAuditColumns(t, loaded))
 		diags.Append(checkSnapshotColumns(doc, t, loaded))
+		diags.Append(checkElectricReplication(doc, t, res, loaded))
 		if !unreadable {
 			diags.Append(checkRestoreWindow(t, res, loaded, fileRestoreWindowDays(p),
 				p.Config.Notifications.Enabled))
@@ -70,8 +71,139 @@ func Validate(doc *ir.Document, set *tableconf.Set, p *project.Project) diag.Lis
 	diags.Append(checkCustomEndpoints(doc, set))
 	diags.Append(checkFoundationJSONCase(doc, p))
 	diags.Append(checkCacheHasReaders(doc, p))
+	diags.Append(checkElectricWALLevel(doc, p))
 
 	return diags
+}
+
+// checkElectricReplication refuses live sync on a table Postgres will not
+// publish.
+//
+// A shape is not a query rig runs. It is a filter in front of a stream the sync
+// service follows over logical replication, and logical replication carries only
+// what a publication names. So everything about the endpoint can be right — the
+// route mounted, the caller authenticated, the tenant predicate built — and
+// there still be nothing behind it.
+//
+// The two halves are refused for different reasons, and only one of them is
+// absolute. An UNLOGGED table can never be followed by anything. An unpublished
+// table usually can be, because the sync service publishes it on the first
+// subscription — but only from a role that owns it, since Postgres wants
+// ownership both to add a table to a publication and to set REPLICA IDENTITY
+// FULL. A least-privilege deployment fails there, on the subscription, as an
+// error about access rather than about replication. Saying it in a migration is
+// what makes the answer the same in every environment.
+//
+// Which is why Electric's own publication is not evidence. It maintains
+// `electric_publication_default` itself and adds a table to it on the first
+// subscription, so on any machine where `rig db up` has served one shape the
+// table is published — by exactly the mechanism this rule exists to stop a
+// project depending on. Counting it would leave the rule silent on every
+// developer's machine and loud only where nobody has run the app, which is the
+// wrong way round for a rule about what happens somewhere else.
+//
+// This is the only rule here that reads the schema's replication block, and the
+// nil check is the whole reason it can be an error. Nil means nobody looked: a
+// dump written before rig read these facts, or a hand-written fixture. Silence
+// is the only honest answer then, because reporting a table as unpublished on
+// evidence nobody collected would fail `rig validate --schema` on a correct
+// project.
+func checkElectricReplication(doc *ir.Document, t *ir.Table, res *ir.Resource,
+	loaded *tableconf.Loaded,
+) diag.List {
+	var diags diag.List
+
+	if res == nil || res.Electric == nil || doc.Schema.Replication == nil {
+		return diags
+	}
+	where := at(loaded, t, "electric", "enabled")
+
+	// An UNLOGGED table can be published — Postgres accepts the ALTER — and it
+	// still emits nothing, so this is reported even when the publication is
+	// there. Reporting only the membership would send somebody to fix the half
+	// that was already right.
+	if t.Unlogged {
+		diags.Add(diag.CodeElectricUnlogged, where,
+			"table %q asks for live sync and is UNLOGGED: it writes no WAL, so its shape "+
+				"would stream nothing", t.Name)
+	}
+
+	if slices.ContainsFunc(t.Publications, func(name string) bool {
+		return !syncServicePublication(name)
+	}) {
+		return diags
+	}
+
+	// The three ways of being unpublished want different next steps — write the
+	// migration, add one table to the publication that is already there, or stop
+	// relying on the one Electric wrote — so the message says which one this is.
+	// None of them claims the stream is empty: the sync service may well publish
+	// the table on the first subscription, and what this rule is about is not
+	// depending on that.
+	switch names := publicationNames(doc.Schema.Replication); {
+	case len(t.Publications) > 0:
+		diags.Add(diag.CodeElectricNotPublished, where,
+			"table %q asks for live sync, and the only publication carrying it is the sync "+
+				"service's own (%s): Electric added it there itself, which it can only do "+
+				"where its database role owns the table",
+			t.Name, strings.Join(t.Publications, ", "))
+	case len(names) == 0:
+		diags.Add(diag.CodeElectricNotPublished, where,
+			"table %q asks for live sync, and this database has no publication at all: "+
+				"nothing has told Postgres to replicate it", t.Name)
+	default:
+		diags.Add(diag.CodeElectricNotPublished, where,
+			"table %q asks for live sync, but no publication carries it (this database has %s): "+
+				"nothing has told Postgres to replicate it",
+			t.Name, strings.Join(names, ", "))
+	}
+
+	return diags
+}
+
+// syncServicePublication reports whether a publication is the one Electric keeps
+// for itself rather than one a migration wrote.
+//
+// The name is `electric_publication_` followed by the sync service's replication
+// stream id, which is "default" unless a deployment sets one. Matching the
+// prefix rather than the whole name is what keeps this true under a deployment
+// that does.
+func syncServicePublication(name string) bool {
+	return strings.HasPrefix(name, "electric_publication_")
+}
+
+// checkElectricWALLevel refuses live sync on a server that cannot decode a
+// publication at all.
+//
+// Once per document rather than once per table: the setting is the server's, and
+// a project with a dozen shapes has one thing to fix, not a dozen.
+func checkElectricWALLevel(doc *ir.Document, p *project.Project) diag.List {
+	var diags diag.List
+
+	rep := doc.Schema.Replication
+	if rep == nil || rep.WALLevel == "" || rep.WALLevel == "logical" {
+		return diags
+	}
+	if !slices.ContainsFunc(doc.API.Resources, func(r ir.Resource) bool { return r.Electric != nil }) {
+		return diags
+	}
+
+	diags.Add(diag.CodeElectricWALLevel, p.At("database", "electric", "enabled"),
+		"some table asks for live sync and this database runs with wal_level=%s: "+
+			"no publication on it can be decoded", rep.WALLevel)
+
+	return diags
+}
+
+// publicationNames lists the publications a database has, for a message that
+// has to tell "you published this somewhere else" from "you have published
+// nothing yet".
+func publicationNames(rep *ir.Replication) []string {
+	out := make([]string, 0, len(rep.Publications))
+	for _, p := range rep.Publications {
+		out = append(out, p.Name)
+	}
+	return out
 }
 
 // checkCacheHasReaders refuses a `cache:` block nothing would read.
