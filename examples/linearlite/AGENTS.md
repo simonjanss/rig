@@ -308,10 +308,35 @@ read off this struct rather than out of a function call. The delay is inside the
 total because `serve` counts it there and because the grace period is wall clock
 from the signal, which the delay is spent within.
 
+`serve.Config.Shutdown` is where a deployment disagrees with one of those five
+numbers, and `api.Shutdown` — generated beside the budget — is what fills it: a
+field per step this project registers, which here is all five, so a step this
+server does not have is one there is no way to write a number for. A number in
+it replaces the limit its step was registered with. It does not impose one on a
+step that has none, which is what leaves the engine's drain — the half that
+stops it claiming, registered with no limit on purpose — bounded by what is
+left of the total rather than by `Notifications`. And it does not raise
+`MaxShutdown`: the literal above is still the literal, so a step sized past it
+is a process that refuses to start and names what no longer fits.
+`api.Shutdown{...}.Budget()` is the total with the new numbers in it, for a main
+that would rather compute the sum than keep two of them in step by hand.
+
+Nothing in `api/main.go` fills it, and that is the ordinary case: the generated
+numbers are rig's answer to what each step costs, and this example has no reason
+to disagree with them. It is a `serve.Config` field rather than a `rig.yaml` key
+for the reason the addresses are — the same build runs where
+`terminationGracePeriodSeconds` is thirty seconds and where it is five, so it is
+a number an environment can supply.
+
 `serve.App` adds up every step actually registered, before the server listens,
 and refuses a budget that cannot hold them with the parts named — so a literal
 left stale by a new block is a process that will not start and says why. A wrong
 number that fails loudly at boot is worth more than a right one nobody can read.
+`api.Main` says it earlier still, before a database is opened: it compares the
+literal against what this project's blocks add up to and warns when the literal
+is behind. Warns rather than refuses, because a step whose `api.Parts` field a
+build returns nil for is counted on that side and registered on neither — so a
+smaller number is sometimes exactly right, and `serve` is the one that knows.
 
 `api.Parts` is what `app.New` returns, and its three fields are the whole of what
 outlives a request here: the handler, the engine and the auth foundation. The

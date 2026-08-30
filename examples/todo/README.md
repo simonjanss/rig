@@ -180,7 +180,23 @@ a manifest and they should not have to run the binary to learn it. Read
 and write the result down. A block added later changes what rig registers
 without changing this line — and that is caught at boot rather than under load,
 because rig adds up the declared limits before the server listens and refuses to
-start when they do not fit.
+start when they do not fit. `api.Main` warns about it one step earlier, before a
+database is opened, when the literal is smaller than what this project's blocks
+add up to.
+
+Those fifteen and five seconds are rig's answer to what each step costs, and
+`serve.Config.Shutdown` is where a deployment says otherwise. `api.Shutdown` is
+what fills it — generated, with a field per step this project registers, which
+here is `Notifications` and `Shapes` and nothing else, so a step this server
+does not have is one there is no way to write a number for. A field left zero
+keeps what its step was generated with, and a number in one replaces that step's
+limit rather than imposing a limit on a step that has none: the engine's drain,
+the half that stops it claiming more work, stays bounded by what is left of the
+total. It does not raise `MaxShutdown` — that literal is still the literal — and
+`api.Shutdown{...}.Budget()` is the sum with the new numbers in it for a main
+that would rather compute it. This example writes none of that, which is the
+ordinary case; it is for the deployment whose `terminationGracePeriodSeconds`
+somebody else decided.
 
 `api.Register` makes the mux and hands it back, so adding a table is one field
 in `api.Handlers` and anything else this server answers is a `Handle` call on

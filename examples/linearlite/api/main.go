@@ -180,7 +180,15 @@ func main() {
 		// default. A literal is not a number waiting to drift either: serve adds
 		// up every step actually registered before the server listens, so a new
 		// block that outgrows 47 is a process that refuses to start and names the
-		// parts that no longer fit.
+		// parts that no longer fit. api.Main says it a step earlier, before a
+		// database is opened, when this number is behind what the blocks add up
+		// to — a warning rather than a refusal, because that side counts a step
+		// whose api.Parts field is nil and serve is the one that knows.
+		//
+		// serve.Config.Shutdown is where a deployment disagrees with one of
+		// those five numbers; api.Shutdown has a field for each of them. Nothing
+		// here fills it, which is the ordinary case: they are rig's answer to
+		// what a step costs, and this example has no reason to want another.
 		MaxShutdown: 47 * time.Second,
 
 		Tasks: map[string]serve.Task{
