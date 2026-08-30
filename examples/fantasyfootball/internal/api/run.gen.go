@@ -12,6 +12,7 @@ import (
 	"os"
 
 	"github.com/simonjanss/rig/observe"
+	"github.com/simonjanss/rig/runtime/apibase"
 	"github.com/simonjanss/rig/runtime/serve"
 )
 
@@ -76,6 +77,11 @@ type Build func(ctx context.Context, app *serve.App, page *observe.Page) (Parts,
 // It attaches no process, so nothing here flushes spans and [Process.Attach]
 // is still a caller's to write. [Process.Mount] is the pair that does both.
 //
+// app.Logger is labelled with the request before build is called, so
+// everything built out of it — the services, their repositories, the
+// authentication configuration — writes lines that say which request they
+// belong to. See [github.com/simonjanss/rig/runtime/apibase.RequestLogger].
+//
 // What comes back is registered in the order it has to be, and anything left
 // nil is said out loud on the way past — see [Parts].
 func Mount(build Build) serve.Mount { return mountWith(nil, build) }
@@ -84,6 +90,8 @@ func Mount(build Build) serve.Mount { return mountWith(nil, build) }
 // [Process.Mount] adds to it besides the flush.
 func mountWith(page *observe.Page, build Build) serve.Mount {
 	return func(ctx context.Context, app *serve.App) (http.Handler, error) {
+		app.Logger = apibase.RequestLogger(app.Logger)
+
 		parts, err := build(ctx, app, page)
 		if err != nil {
 			return nil, err
@@ -140,6 +148,13 @@ func (p *Process) Mount(build Build) serve.Mount {
 // and the shutdown budget — together with what a configuration file cannot
 // hold: where the migrations are embedded and what this binary's subcommands
 // are.
+//
+// There is no Logger in it, and that is not an omission. serve refuses a
+// config that states none, and it is filled in by [Process.Configure], from
+// the sink [NewProcess] built — so the log file the monitoring page reads is
+// the one this server writes to. State one to send the lines somewhere else;
+// [Mount] wraps whatever it ends up being, so a line written inside a request
+// says which request.
 //
 // MaxShutdown is the fourth, and it is there for a different reason than the
 // other three. rig knows what it should be — [ShutdownBudget] adds it up —

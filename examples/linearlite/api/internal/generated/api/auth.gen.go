@@ -107,14 +107,15 @@ type Hooks struct {
 	// routes label a request one way and whose sign-in labels it another has two
 	// answers to the question the label exists to settle.
 	//
-	// **A caller that sends no header gets no identifier here, even in a project
-	// that traces**, and that is worth knowing rather than discovering. These
-	// routes are rig's own: they are mounted by Auth.Mount rather than emitted per
-	// endpoint, so no span is opened over them and there is no trace to fall back
-	// to. A resource route in the same project answers with one. A client that
-	// wants its sign-in correlated with the rest of its requests sends the header
-	// — which is the case this field exists to make work, and the one it now
-	// does.
+	// The trace is the one answer these routes cannot give. They are rig's own:
+	// mounted by Auth.Mount rather than emitted per endpoint, so no span is opened
+	// over them and there is nothing to fall back to. What a caller that sent no
+	// header gets here is a fresh identifier — the same string as the requestId
+	// in the error body and the request_id on the line, which is what the label is
+	// for — where a resource route in the same traced project would have
+	// answered with its trace id. A client that wants its sign-in correlated with
+	// the rest of its requests sends the header, which is the case this field
+	// exists to make work.
 	RequestID func(*http.Request) string
 
 	// Logger records why an authentication request failed. Nil uses
@@ -219,10 +220,16 @@ func Config(pool *pgxpool.Pool, h Hooks) (auth.Config, error) {
 	// one step out: a literal here is a second place deciding what a request looks
 	// like, and the two had already drifted — this one named no caller, no
 	// client revision, and a request identifier nothing validated. What it still
-	// cannot reach is the trace fallback, because these routes carry no span;
+	// cannot reach is the trace fallback, because these routes carry no span, so a
+	// request nobody named is named here instead of by its trace;
 	// [Hooks.RequestID] says what that costs.
+	//
+	// RequestIDHeader is on the literal because it is what decides which header is
+	// read, and a Server without it reads the default one — which is the right
+	// header in most projects and the wrong one in exactly the projects that said
+	// so in rig.yaml.
 	if cfg.OnError == nil {
-		srv := Server{Logger: h.Logger, RequestID: h.RequestID}
+		srv := Server{Logger: h.Logger, RequestID: h.RequestID, RequestIDHeader: RequestIDHeader}
 		cfg.OnError = func(w http.ResponseWriter, r *http.Request, err error) {
 			fail(srv, w, r, requestContext(srv, r), err)
 		}

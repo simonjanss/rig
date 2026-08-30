@@ -340,7 +340,6 @@ import (
 	"cmp"
 	"context"
 	"embed"
-	"log/slog"
 	"net/http"
 	"os"
 	"time"
@@ -378,7 +377,6 @@ func main() {
 		DatabaseURL: cmp.Or(os.Getenv("DATABASE_URL"), localDSN),
 		Addr:        cmp.Or(os.Getenv("ADDR"), "127.0.0.1:8080"),
 		Hint:        "run `rig db up` to start a local Postgres for this project",
-		Logger:      slog.Default(),
 
 		// Liveness asks whether to restart this process and consults nothing;
 		// readiness asks whether to send it work, pings the database, and turns

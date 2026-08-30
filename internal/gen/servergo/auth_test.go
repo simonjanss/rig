@@ -167,6 +167,13 @@ func TestTheErrorMapperIsThisPackages(t *testing.T) {
 	if !strings.Contains(got, "RequestID: h.RequestID") {
 		t.Error("a project that labels its requests its own way does not reach the auth routes")
 	}
+	// Without it the Server reads apibase's default header, which is the right
+	// one in most projects and the wrong one in exactly the projects that said
+	// otherwise in rig.yaml — so /auth/* would look for a header the resource
+	// routes in the same binary do not.
+	if !strings.Contains(got, "RequestIDHeader: RequestIDHeader") {
+		t.Error("the auth mapper reads a different header than every other route")
+	}
 }
 
 // TestDefaultsUseRigAuthsOwnResolver checks that a project configuring nothing

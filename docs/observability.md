@@ -21,7 +21,10 @@ laptop with nothing to export to.
 
 ## The short version
 
-Give the server a logger. That is the whole setup:
+There is no setup. `api.Main` states a logger in the `serve.Config` for you —
+from the log sink it builds when `tracing:` is on, and `slog.Default()` when it
+is not — and `api.Mount` labels it with the request before your own wiring is
+called. Hand `app.Logger` to the server and to everything else:
 
 ```go
 api.Register(api.Handlers{
@@ -29,13 +32,17 @@ api.Register(api.Handlers{
         GetClaims: yourClaimsFunc,
         Logger:    app.Logger,
     },
-    Todo: todo.New(repos.Todos),
+    Todo: todo.New(repos.Todos, app.Logger),
 })
 ```
 
 `Logger` is optional and nil is not silence — it means `slog.Default()`. There is
 no switch that turns logging off, because there is one line you want whether or
 not you ever thought about logging, and it is the next section.
+
+State `serve.Config.Logger` yourself to send the lines somewhere else. It is
+kept — labelling a logger is not choosing one, and rig never redirects your
+output.
 
 ## Why a 500 happened
 
@@ -64,8 +71,11 @@ The `requestId` in the body and the `request_id` in the log are the same string.
 That pair is the whole mechanism: somebody sends you the identifier from their
 screenshot, and you have the cause.
 
-Which is why `RequestID` is worth setting. Without it the line still says what
-failed and on which route — you just cannot tie it to a particular complaint.
+**Every request has one, and you set nothing.** The caller's own `X-Request-Id`
+if it sent one, this request's trace id when `tracing:` is on, and a fresh one
+otherwise — the order and what it costs are in *Correlating a log line with a
+trace* below. `RequestID` is a field for answering the question differently, not
+for turning the answer on.
 
 **Anything that is not a 500 is `DEBUG`, not `ERROR`.** A 404, a 422, a refused
 permission: the server did its job. A log that reports those as errors is a log
@@ -440,6 +450,12 @@ nothing to list:
 Logger: slog.New(observe.Tee(myHandler, process.LogHandler()))
 ```
 
+`api.Mount` labels whatever this ends up being, so the `request` group lands in
+the file too and one identifier narrows both halves of the page. Note the two
+`LogHandler`s are different things and compose rather than compete:
+`Process.LogHandler` is the sink the page reads, `apibase.LogHandler` is the
+wrapper that says which request a line belongs to.
+
 ```
 RIG_LOG_FILE=/var/log/myapp/rig.jsonl
 ```
@@ -558,15 +574,26 @@ that is not one — the page, the probes — is invisible to both.
 
 ## Correlating a log line with a trace
 
-**`RequestID` is a field you almost never set.** Nil does not mean nothing: it
-means the caller's own `X-Request-Id` when it sent one, and — with `tracing:` on
-— this request's trace id when it did not. The `requestId` in the error body,
-the `request_id` on every log line and the trace in your collector are then the
-same string, and you wrote nothing.
+**`RequestID` is a field you almost never set.** Nil does not mean nothing, it
+means three answers in order:
+
+1. The caller's own `X-Request-Id`, when it sent one worth trusting.
+2. This request's trace id, when `tracing:` is on. The `requestId` in the error
+   body, the `request_id` on every log line and the trace in your collector are
+   then the same string, and you wrote nothing.
+3. A fresh identifier, otherwise.
 
 The order is the point. A client that labelled its own request is the one
 correlating two sides, so it is believed; only a request nobody named gets a
-name invented for it.
+name invented for it. And a trace id beats a fresh one, because a request that
+already has an identifier does not need a second answer to the same question.
+
+**The result is that every request has exactly one identifier, always.** What
+`tracing:` changes is what the string *is* — a trace id you can paste into a
+collector rather than a uuid that only appears in your own logs — not whether
+there is one, and not the field it arrives in. Turning tracing on later upgrades
+what `request_id` means without changing a line of your code or how anybody uses
+the string.
 
 In the log file the sink writes, the trace is also `trace_id` on the line itself,
 taken from the context rather than from the request — which is what the
@@ -580,22 +607,31 @@ text in two places read by machines; a header rig does not understand is not one
 it should half-quote into a log file. What a caller gets for sending nonsense is
 the identifier it would have got for sending nothing.
 
-Without the `tracing:` block the caller's own is the only identifier there is,
-and a request that sent none gets an empty one. Turning `tracing:` on is what
-gives every request one whether or not the caller thought to send it.
+**Without the `tracing:` block there is no log sink either.** `$RIG_LOG_FILE`,
+the trace file and the monitoring page all come with `tracing:`, and `monitoring:`
+cannot be turned on without it. For a project that traces nothing, what you get
+is stderr — or wherever you pointed `serve.Config.Logger` — with one `request_id`
+per line, and whatever your deployment does with stderr.
 
 **The authentication routes are the one place the trace fallback does not
 reach.** `/auth/*` is mounted by `Auth.Mount` rather than emitted per endpoint,
-so no span is opened over it — a sign-in that sent no header gets no `requestId`,
-where a resource route in the same project gets a trace id. The caller's own
-header does reach it, and that is the case worth having: a client that wants its
-sign-in correlated with the rest of its requests sends one.
+so no span is opened over it: a sign-in gets a fresh identifier where a resource
+route in the same project would have got the trace id. It is still labelled, and
+the `requestId` in the body is still the `request_id` on the line — what is lost
+is only the join into a collector. The caller's own header does reach these
+routes, and that is the case worth having: a client that wants its sign-in
+correlated with the rest of its requests sends one.
 
 Set `RequestID` only to answer the question differently — an identifier from the
 rest of your system, including a trace id from an OpenTelemetry setup that is
 entirely your own. rig needs no dependency for that. If you do set it, set
 `Hooks.RequestID` to the same function: the authentication routes are configured
 before the `Server` literal exists, so that is how the one answer reaches them.
+
+A hook replaces step 1 and nothing else. Return `""` for the requests it has no
+answer for and they fall through to the trace id and then to a fresh one, the
+same way a caller that sent no header does — a hook is how the answer is chosen,
+not how a request opts out of having one.
 
 ## Tracing a client
 
@@ -627,28 +663,53 @@ by your `main`, so hand it a logger there — the same one you gave the server:
 svc := todo.New(repos.Todos, app.Logger)
 ```
 
-To put the request on your own lines, take it off the context and log it as one
-attribute, which is what the server does:
+Then write your lines. The request arrives on them by itself:
 
 ```go
 func (s *Service) Create(ctx context.Context, r api.Request[...]) (*model.Todo, error) {
-    rc, _ := api.RequestContextFrom(ctx)
-    s.logger.InfoContext(ctx, "importing",
-        slog.Any("request", rc),
-        slog.Int("rows", len(r.Body.Items)))
+    s.logger.InfoContext(ctx, "importing", slog.Int("rows", len(r.Body.Items)))
     ...
 }
 ```
 
-`RequestContext` implements `slog.LogValuer`, so `slog.Any("request", rc)` is a
-group with the fields that have something in them and no keys for the ones that
-do not. `ok` is false when there is no request — a migration, a background task —
-and the zero value logs as an empty group rather than a row of empty strings.
+```json
+{"level":"INFO","msg":"importing","rows":12,
+ "request":{"request_id":"4bf92f…","method":"POST","route":"POST /api/v1/todos"}}
+```
 
-**Pass the context.** `InfoContext`, not `Info`. A `slog.Handler` is given the
-context, which is how anything that decorates records finds what the line belongs
-to. A call that drops the context drops that with it, and rig's own linter
-(`sloglint`, `context: all`) refuses one.
+`api.Mount` wraps `app.Logger` in `apibase.LogHandler` before your own wiring is
+called, so everything you build out of it — services, repositories, the `auth:`
+configuration — writes the same `request` group the server's own lines carry,
+with nothing at the call site saying so. A line written *outside* a request — a
+migration, a `serve.Task`, a background sweep — gains nothing, which is the
+honest answer rather than a line claiming to belong to a request it does not.
+
+**Pass the context.** `InfoContext`, not `Info`. This is the mechanism, not a
+style rule: a `slog.Handler` is given the context, and the context is where the
+request is. A call that drops it writes a line that cannot say which request it
+belongs to. rig's own linter (`sloglint`, `context: all`) refuses one.
+
+**A logger you built yourself is not wrapped.** Only what rig handed you is —
+`app.Logger`, and whatever you derived from it with `With` or `WithGroup`. For
+anything else, wrap it:
+
+```go
+logger := slog.New(apibase.LogHandler(myHandler))
+```
+
+Wrapping twice is wrapping once, so passing an already-wrapped logger back to rig
+costs nothing.
+
+**Reaching the fields rather than the group.** `RequestContextFrom` is still how
+you get at `rc.Route`, `rc.RequestID` or `rc.BuiltBefore` as values:
+
+```go
+rc, ok := api.RequestContextFrom(ctx)
+```
+
+`ok` is false when there is no request — a migration, a background task — and the
+zero value is usable. Logging `slog.Any("request", rc)` yourself still works too,
+and does not double up: a line that already names a request is left alone.
 
 ## Authentication routes
 
@@ -666,6 +727,11 @@ front, err := api.New(pool, api.Hooks{
 Give it the same logger as `Server.Logger`. Nothing enforces that they match, and
 a 500 from signing in going somewhere else is exactly the kind of thing you find
 out at the wrong moment.
+
+These routes are labelled like every other one — a sign-in that sent no header
+gets a fresh identifier, in the error body and on the line — with the single
+caveat in *Correlating a log line with a trace*: no span is opened over them, so
+the identifier is never a trace id.
 
 ## What rig does not do here
 

@@ -27,6 +27,13 @@ type App struct {
 	// Logger is the server's, so a request line, a shutdown step and anything
 	// a dependency says all land in the same place. Run always sets it, to
 	// Config.Logger or the default.
+	//
+	// A rig-generated Mount replaces it with the same logger wrapped in
+	// [github.com/simonjanss/rig/runtime/apibase.LogHandler] before the
+	// application's own wiring is called, so that everything built out of it
+	// says which request a line belongs to. This package does none of that and
+	// knows nothing about it; it is noted here because this is the field the
+	// substitution is visible on.
 	Logger *slog.Logger
 
 	drain []step

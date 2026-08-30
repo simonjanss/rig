@@ -99,11 +99,6 @@ func main() {
 		Hint: "run `rig db up` to start a local Postgres for this project, " +
 			"then open http://acme.localhost:8083",
 
-		// Where this project's log goes. A project with `tracing:` on has this
-		// filled in by api.Main from the sink it builds; with no tracing block
-		// there is nowhere else for it to come from, so it is said here.
-		Logger: slog.Default(),
-
 		MaxStartup: 30 * time.Second,
 		// Nothing below has a default. serve refuses a config that left any of
 		// them empty, naming all of them at once, because a value it invented

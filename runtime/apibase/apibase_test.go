@@ -105,12 +105,72 @@ func TestRequestContextOf(t *testing.T) {
 		}
 	})
 
-	t.Run("untraced and unlabelled is empty", func(t *testing.T) {
+	t.Run("untraced and unlabelled is minted", func(t *testing.T) {
 		r := httptest.NewRequest(http.MethodGet, "/x", nil)
 
 		rc := apibase.RequestContextOf(apibase.Server{}, r)
-		if rc.RequestID != "" {
-			t.Fatalf("RequestID = %q, want nothing to correlate on", rc.RequestID)
+		if rc.RequestID == "" {
+			t.Fatal("RequestID is empty: a request the server served has one")
+		}
+		if _, err := uuid.Parse(rc.RequestID); err != nil {
+			t.Errorf("RequestID = %q, want a uuid: %v", rc.RequestID, err)
+		}
+
+		// Per request rather than per process, which is the whole of what an
+		// identifier is for.
+		again := apibase.RequestContextOf(apibase.Server{}, r)
+		if again.RequestID == rc.RequestID {
+			t.Errorf("two requests were both named %q", rc.RequestID)
+		}
+	})
+
+	// The authentication routes carry no span, so before the mint they had no
+	// identifier at all in a project whose callers do not send one — which is
+	// this Server exactly: no Tracer, no header.
+	t.Run("a route with no span still gets one", func(t *testing.T) {
+		r := httptest.NewRequest(http.MethodPost, "/auth/sign-in", nil)
+
+		rc := apibase.RequestContextOf(apibase.Server{}, r)
+		if rc.RequestID == "" {
+			t.Fatal("RequestID is empty: an auth route is labelled like every other")
+		}
+	})
+
+	// A hook is how the answer is chosen, not how it is opted out of: "every
+	// request has an identifier" is the promise, and one that held only for the
+	// requests a hook felt like answering would be a different, weaker promise.
+	t.Run("a hook that answers is believed", func(t *testing.T) {
+		r := httptest.NewRequest(http.MethodGet, "/x", nil)
+		r.Header.Set(apibase.DefaultRequestIDHeader, "from-the-client")
+
+		s := apibase.Server{RequestID: func(*http.Request) string { return "from-the-hook" }}
+		if rc := apibase.RequestContextOf(s, r); rc.RequestID != "from-the-hook" {
+			t.Fatalf("RequestID = %q, want the hook's answer over the header", rc.RequestID)
+		}
+	})
+
+	t.Run("a hook that does not answer is not the end of it", func(t *testing.T) {
+		r := httptest.NewRequest(http.MethodGet, "/x", nil)
+
+		s := apibase.Server{RequestID: func(*http.Request) string { return "" }}
+		if rc := apibase.RequestContextOf(s, r); rc.RequestID == "" {
+			t.Fatal("RequestID is empty: a hook that says nothing is a request nobody named")
+		}
+	})
+
+	// And what it is not the end of is the whole of the rest of the order. A hook
+	// replaces the first answer only: a traced project whose hook declines a
+	// request labels it with that request's trace, rather than minting a string
+	// no collector has ever seen.
+	t.Run("a hook that does not answer still reaches the trace", func(t *testing.T) {
+		r := httptest.NewRequest(http.MethodGet, "/x", nil)
+
+		s := apibase.Server{
+			Tracer:    tracer{id: "from-the-trace"},
+			RequestID: func(*http.Request) string { return "" },
+		}
+		if rc := apibase.RequestContextOf(s, r); rc.RequestID != "from-the-trace" {
+			t.Fatalf("RequestID = %q, want the trace a declining hook falls through to", rc.RequestID)
 		}
 	})
 }
