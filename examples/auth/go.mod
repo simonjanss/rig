@@ -8,7 +8,7 @@ require (
 	github.com/simonjanss/rig/auth v0.0.0
 	github.com/simonjanss/rig/migrate v0.0.0
 	github.com/simonjanss/rig/rigclient v0.0.0
-	github.com/simonjanss/rig/runtime v0.1.0
+	github.com/simonjanss/rig/runtime v0.2.0
 )
 
 require (
