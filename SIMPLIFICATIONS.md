@@ -1,5 +1,9 @@
 # Simplification backlog
 
+> **Closed, and kept for the reasoning.** Every item here is done or decided
+> against; the one deliberate residue is named in A6. New todos go to
+> [GitHub issues](https://github.com/simonjanss/rig/issues), not to this file.
+
 Findings from a full-repo review (2026-08-26) hunting for duplication, needless
 complexity, and dead code. Each task is written to be workable on its own
 branch; the **Files** list is the collision surface — two tasks that name the
