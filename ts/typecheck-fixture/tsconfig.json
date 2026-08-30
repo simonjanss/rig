@@ -3,13 +3,19 @@
     "compilerOptions": {
         "noEmit": true,
         "types": [],
-        // Stricter than tsconfig.base.json on purpose, and it is not a rule for
-        // the hand-written packages: it stands in for the tsconfig the generated
-        // output actually lands under. rig scaffolds no front end, so that file
-        // is always somebody else's, and Vite's react-ts template — with the
-        // TanStack ones on top of it — turns this on. Anything it catches here
-        // is a TS6133 in a file whose banner tells a project not to edit it,
-        // which is the one kind of error they cannot fix where it lands.
+        // Stricter than tsconfig.base.json on purpose, and it is here for the
+        // generated output: it stands in for the tsconfig that output actually
+        // lands under. rig scaffolds no front end, so that file is always
+        // somebody else's, and Vite's react-ts template — with the TanStack
+        // ones on top of it — turns this on. Anything it catches there is a
+        // TS6133 in a file whose banner tells a project not to edit it, which
+        // is the one kind of error they cannot fix where it lands.
+        //
+        // It reaches the hand-written packages as well, because the paths below
+        // put their sources in this program. That is how the fixture is built
+        // rather than a rule anybody chose for them, and a TS6133 in
+        // ts/packages is answered the way the generator answers one: underscore
+        // the binding.
         "noUnusedParameters": true,
         // Mapped rather than resolved through node_modules. The files being
         // checked live outside this directory, so TypeScript would look for

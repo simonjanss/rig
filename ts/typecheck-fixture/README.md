@@ -13,11 +13,16 @@ is how `send` returning `T | undefined` was caught the day it was introduced.
 than copies of them, so refreshing those is most of updating this.
 
 It also turns on `noUnusedParameters`, which `tsconfig.base.json` does not. That
-is a claim about the generated output rather than a rule for the hand-written
-packages: rig scaffolds no front end, so the tsconfig this output lands under is
-always the project's, and the templates one starts from enable it. An unused
-binding there is a TS6133 in a file whose banner says not to edit it — the one
-kind of error a project cannot fix where it lands.
+is a claim about the generated output: rig scaffolds no front end, so the
+tsconfig this output lands under is always the project's, and the templates one
+starts from enable it. An unused binding there is a TS6133 in a file whose
+banner says not to edit it — the one kind of error a project cannot fix where it
+lands.
+
+The flag reaches the hand-written packages as well, because the `paths` mapping
+puts their sources in the same program. That is how this fixture is built rather
+than a rule anybody chose for them, and one that turns up is answered the way
+the generator answers one: underscore the binding.
 
 `src/` is the rest: the two claims that no generated file makes on its own.
 `presence.ts` is there because nothing generated imports `@rig-ts/presence`, so a
