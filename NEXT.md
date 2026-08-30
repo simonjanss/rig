@@ -1,5 +1,12 @@
 # rig — where things stand, and what is left
 
+> **This file is history, not a queue.** It records what got built, where it
+> departed from the plan, and why each thing came out the way it did. Everything
+> that was still open when it was written now lives in
+> [GitHub issues](https://github.com/simonjanss/rig/issues) — file new todos
+> there, not here. Issues point back at line numbers in this file for the full
+> reasoning.
+
 Working notes, not documentation. The approved plan is at
 `~/.claude/plans/dazzling-purring-flame.md`; this file records what actually got
 built, where it departed from that plan, and what is still to come.

@@ -7,6 +7,39 @@ cannot be moved, deleted or fixed afterwards, so it is not something to do
 because main looks ready — read [Releasing](#releasing) before deciding to, and
 do not cut one you were not asked for.
 
+## Issues
+
+Todos live in GitHub issues on `simonjanss/rig`, and nowhere else. `NEXT.md` and
+`SIMPLIFICATIONS.md` are a record of what was built and why it came out the way
+it did — not a queue. Do not add a todo to either of them, and do not start a
+third markdown file for one.
+
+**Search before filing.** `gh issue list --search "<terms>"`. Several workspaces
+run against this repository at once, so the thing may already be there.
+
+**File one when the work will outlive the session, or when you were asked for a
+todo.** A fix you are making right now does not need an issue first, and
+read-only work — answering a question, reading around the codebase — never does.
+
+**Check nobody else has it.** An issue carrying the `claimed` label, or with an
+assignee, is one another workspace is probably inside. Stop and ask rather than
+starting a second branch on it.
+
+**Claim it before the first commit**, so the claim is visible while the work is
+in flight rather than after it:
+
+```bash
+gh issue edit N --add-label claimed --add-assignee @me
+```
+
+If you put the work down without finishing it, hand the claim back:
+`gh issue edit N --remove-label claimed --remove-assignee @me`.
+
+**Closing is the pull request's job.** Put `Closes #N` in the PR body and
+merging closes the issue. Do not close it by hand, and keep the number out of
+the commit subject — merges here are squashed, so the subject already ends in
+the PR number.
+
 ## Before pushing
 
 ```bash
