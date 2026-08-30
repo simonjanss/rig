@@ -21,10 +21,10 @@
 import type { NotificationRecipientRow } from "./notification_recipient.gen.js";
 import type { PresenceActivity } from "./presence_activity.gen.js";
 import type { TodoRow } from "./todo.gen.js";
-import type { Runtime } from "@rig/client";
+import type { Runtime } from "@rig-ts/client";
 
-import { pathValue } from "@rig/client";
-import { createCollectionCache, createRigCollection } from "@rig/electric";
+import { pathValue } from "@rig-ts/client";
+import { createCollectionCache, createRigCollection } from "@rig-ts/electric";
 
 /**
  * Streams the rows an ordinary read returns: not deleted, and not a snapshot.

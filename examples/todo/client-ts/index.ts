@@ -7,7 +7,7 @@
  *
  * The runtime it is built on is a separate package and is not re-exported: a
  * caller who needs `RigError`, `Session` or `paginate` imports them from
- * @rig/client directly, which is where their documentation is.
+ * @rig-ts/client directly, which is where their documentation is.
  */
 
 export * from "./client.gen.js";

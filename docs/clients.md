@@ -140,7 +140,7 @@ rt, err := rigclient.New(rigclient.Config{
 ```
 
 ```ts
-import { fraction } from "@rig/client";
+import { fraction } from "@rig-ts/client";
 import { createClient } from "./api";
 
 const client = createClient({
@@ -153,7 +153,7 @@ const client = createClient({
 });
 ```
 
-The generated `createClient` takes `@rig/client`'s own `Config`, so this is one
+The generated `createClient` takes `@rig-ts/client`'s own `Config`, so this is one
 setting rather than something the generator had to learn.
 
 It runs once per attempt — including attempts a retry replaced, because a 429
@@ -476,7 +476,7 @@ generators:
     out_dir: web/src/api
 ```
 
-> **Not published yet.** `@rig/client` and `@rig/electric` live in
+> **Not published yet.** `@rig-ts/client` and `@rig-ts/electric` live in
 > [ts/](../ts) and are not on a registry, so the names below are what the
 > generator emits rather than something you can install. Point them somewhere
 > real with the `client_import` and `electric_import`
@@ -485,7 +485,7 @@ generators:
 
 The generated half is the wire types, one method per endpoint, and — when a
 table has opted into live sync — one factory per stream. The other half is
-`@rig/client`: the request, the credential, the retries, the pagination, the
+`@rig-ts/client`: the request, the credential, the retries, the pagination, the
 error decoding. It has no dependencies of its own and nothing in it is React.
 
 ```ts
@@ -591,7 +591,7 @@ Leaving out a file the schema insists on does not compile.
 ### Live sync
 
 A table with `electric: {enabled: true}` gets a factory per shape, in
-`electric.gen.ts`. Those need the second package, `@rig/electric`:
+`electric.gen.ts`. Those need the second package, `@rig-ts/electric`:
 
 ```ts
 import { useLiveQuery } from "@tanstack/react-db";
@@ -616,7 +616,7 @@ they exist — `createTodoDeletedStream` when the table has a `deleted_at`,
 `createTodoVersionsStream` when it has the snapshot columns. That is the same
 rule the [shape routes](electric.md) follow.
 
-`@rig/electric` is framework-free. `useLiveQuery` above is
+`@rig-ts/electric` is framework-free. `useLiveQuery` above is
 `@tanstack/react-db`'s, which your application installs; the collection a
 factory returns is a plain TanStack DB collection and works with any binding.
 
@@ -637,7 +637,7 @@ fields — so a column excluded from the API is excluded from the stream too. It
 members are nullable rather than optional: the sync service sends every column
 on every row, with a null where the column is null.
 
-The values agree even where the keys do not. `@rig/electric` corrects what
+The values agree even where the keys do not. `@rig-ts/electric` corrects what
 Postgres prints so a `timestamptz` decodes to the same RFC 3339 string the API
 would have sent, and an `int8` to a `number` rather than a BigInt.
 
@@ -738,7 +738,7 @@ error path needs — the guards are ordinary functions over an ordinary error, s
 that arrived:
 
 ```ts
-import { ErrorCode, FieldCode, RigError } from "@rig/client";
+import { ErrorCode, FieldCode, RigError } from "@rig-ts/client";
 
 create: async () => {
     throw new RigError({
@@ -772,13 +772,13 @@ leaving the stream alone.
 ## Presence
 
 A project with `presence: {enabled: true}` gets a third package,
-`@rig/presence`. It is not a generated one — no generator writes it — and it
+`@rig-ts/presence`. It is not a generated one — no generator writes it — and it
 mirrors the hand-written `/presence` routes the way `web/src/auth` mirrors
 `/auth/*` in every rig front end.
 
 ```tsx
-import { createPresence } from "@rig/presence";
-import { usePresence } from "@rig/presence/react";
+import { createPresence } from "@rig-ts/presence";
+import { usePresence } from "@rig-ts/presence/react";
 
 const presence = createPresence({
     runtime: client.runtime,
@@ -804,13 +804,13 @@ const others = usePresence(presence, { table: "todo", id });
 fires on every render — and it belongs on `onFocus`, never on `onChange`. Typing a
 two-hundred-character title should be one presence write.
 
-**It is the first rig package with side effects.** `@rig/client` retries and
-`@rig/electric` maps; neither does anything until it is called. This one runs a
+**It is the first rig package with side effects.** `@rig-ts/client` retries and
+`@rig-ts/electric` maps; neither does anything until it is called. This one runs a
 timer and listens on `window`, which is why it is a package of its own rather than
-part of `@rig/electric`: a project that streams a table but shows no presence
+part of `@rig-ts/electric`: a project that streams a table but shows no presence
 should install none of it.
 
-`@rig/presence/react` is a second entry point, three lines over
+`@rig-ts/presence/react` is a second entry point, three lines over
 `useSyncExternalStore`, behind an optional `react` peer dependency. The core
 exports `subscribe` and `others` in exactly that contract, so a binding for
 another framework is the same size.
@@ -825,7 +825,7 @@ carries Postgres column names (`seen_at`, `account_id`, `target_field`), and off
 `api.json_case` you set, for the reason `/auth/*` does — they are rig's, identical
 in every project, and this package is compiled against them once.
 
-`@rig/presence` normalises both to camelCase at its boundary, so a `Person` means
+`@rig-ts/presence` normalises both to camelCase at its boundary, so a `Person` means
 one thing whichever door it came through.
 
 ### The parts this package cannot own
@@ -842,7 +842,7 @@ says what each one is and why.
 - [electric.md](electric.md) — the shapes a table gets, and how they are scoped
 - [presence.md](presence.md) — what presence costs, why a subscriber decides who
   is here, and [the three things](presence.md#three-things-the-package-deliberately-does-not-do-for-you)
-  `@rig/presence` leaves to your component tree
+  `@rig-ts/presence` leaves to your component tree
 - [generators.md](generators.md) — `go-client` and `ts-client` options
 - [examples/sdk](../examples/sdk) — a program built on two generated clients
 - [examples/linearlite](../examples/linearlite) — all three packages in one

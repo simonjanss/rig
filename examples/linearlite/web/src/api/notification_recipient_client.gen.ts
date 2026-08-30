@@ -15,7 +15,7 @@ import type {
 import type {
     NotificationRecipientFilter,
 } from "./notification_recipient_query.gen.js";
-import type { CallOptions, Runtime } from "@rig/client";
+import type { CallOptions, Runtime } from "@rig-ts/client";
 
 import {
     METHOD_QUERY,
@@ -23,7 +23,7 @@ import {
     send,
     sendNoContent,
     setParam,
-} from "@rig/client";
+} from "@rig-ts/client";
 
 /**
  * NotificationRecipientClient is what `client.notificationRecipients` is, and

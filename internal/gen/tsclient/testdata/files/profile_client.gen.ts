@@ -14,7 +14,7 @@ import type {
 } from "./profile_input.gen.js";
 import type { ProfileFilter } from "./profile_query.gen.js";
 import type { RigFile } from "./rig_file.gen.js";
-import type { CallOptions, RigError, Runtime, Upload } from "@rig/client";
+import type { CallOptions, RigError, Runtime, Upload } from "@rig-ts/client";
 
 import {
     METHOD_QUERY,
@@ -25,7 +25,7 @@ import {
     sendContent,
     sendNoContent,
     setParam,
-} from "@rig/client";
+} from "@rig-ts/client";
 
 /**
  * ProfileClient is what `client.profiles` is, and what a test writes to stand

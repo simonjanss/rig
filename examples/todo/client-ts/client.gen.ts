@@ -8,17 +8,17 @@
  * One method per endpoint, grouped by resource: `createClient(config)` and then
  * `client.<resource>.<operation>(…)`. The types are this directory's;
  * everything underneath a method — the request, the credential, the failure
- * — is @rig/client's, and a failure arrives as a `RigError` whose `code` says
- * which of them it was.
+ * — is @rig-ts/client's, and a failure arrives as a `RigError` whose `code`
+ * says which of them it was.
  */
 
 import type { TodoAttachmentClient } from "./todo_attachment_client.gen.js";
 import type { TodoClient } from "./todo_client.gen.js";
-import type { Config } from "@rig/client";
+import type { Config } from "@rig-ts/client";
 
 import { createTodoAttachmentClient } from "./todo_attachment_client.gen.js";
 import { createTodoClient } from "./todo_client.gen.js";
-import { Runtime } from "@rig/client";
+import { Runtime } from "@rig-ts/client";
 
 /**
  * The prefix every route sits under.
@@ -36,7 +36,7 @@ export const basePath = "/api/v1";
  * calling. Regenerating against an unchanged API leaves it alone — it is not
  * a build stamp.
  */
-export const revision = "2026-08-27";
+export const revision = "2026-08-30";
 
 /**
  * Where the revision is sent: the same header the server generated from this

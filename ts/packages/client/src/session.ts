@@ -26,7 +26,7 @@ export type TokenPair = {
 /** Thrown when a session has nothing left to present. */
 export class NoSessionError extends Error {
     constructor() {
-        super("@rig/client: no session; sign in again");
+        super("@rig-ts/client: no session; sign in again");
         this.name = "NoSessionError";
     }
 }

@@ -1,4 +1,4 @@
-import type { TokenPair } from "@rig/client";
+import type { TokenPair } from "@rig-ts/client";
 
 /**
  * The `/auth/*` wire shapes, mirrored by hand from rig's runtime/authwire.

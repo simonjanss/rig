@@ -2,7 +2,7 @@
  * The address one stream subscribes to.
  *
  * It exists because the sync client resolves nothing: it hands its `url` to
- * `new URL()` with no base. So the relative origin `@rig/client` documents as
+ * `new URL()` with no base. So the relative origin `@rig-ts/client` documents as
  * the ordinary same-origin case — `baseUrl: ""`, resolved against the page —
  * arrives there as `/api/v1/todo/_stream` and throws `Invalid URL`. And because
  * a TypeError is not a `FetchError`, the error handler reads it as a failure

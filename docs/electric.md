@@ -274,7 +274,7 @@ handed names the shape's table, so an outage across four shapes is four lines yo
 can tell apart rather than four copies of one.
 
 **A refused shape route answers the same error envelope as every other route** —
-flat JSON with `code` and `message`, which is what `@rig/client`'s error
+flat JSON with `code` and `message`, which is what `@rig-ts/client`'s error
 predicates read. Setting `OnError` on the generated `Server` to your API
 server's error writer adds the request identifier and puts the failure in the
 same log line as the rest; leaving it nil still answers the envelope, without

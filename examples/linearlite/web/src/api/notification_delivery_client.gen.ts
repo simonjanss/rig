@@ -9,9 +9,9 @@ import type {
 import type {
     NotificationDeliveryListQuery,
 } from "./notification_delivery_input.gen.js";
-import type { CallOptions, Runtime } from "@rig/client";
+import type { CallOptions, Runtime } from "@rig-ts/client";
 
-import { pathValue, send, setParam } from "@rig/client";
+import { pathValue, send, setParam } from "@rig-ts/client";
 
 /**
  * NotificationDeliveryClient is what `client.notificationDeliveries` is, and

@@ -16,7 +16,7 @@ import type {
     LessonUpdateInput,
 } from "./lesson_input.gen.js";
 import type { LessonFilter } from "./lesson_query.gen.js";
-import type { CallOptions, RigError, Runtime } from "@rig/client";
+import type { CallOptions, RigError, Runtime } from "@rig-ts/client";
 
 import {
     METHOD_QUERY,
@@ -25,7 +25,7 @@ import {
     send,
     sendNoContent,
     setParam,
-} from "@rig/client";
+} from "@rig-ts/client";
 
 /**
  * LessonClient is what `client.lessons` is, and what a test writes to stand in

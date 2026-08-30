@@ -1,0 +1,169 @@
+name: release
+
+# Only the root tag. A release creates ten — v0.1.0 for the root module and
+# runtime/v0.1.0, auth/v0.1.0 and so on for the rest — and `v*` matches the
+# first and none of the others, because a glob does not cross a slash and the
+# submodule tags do not begin with a v. So one release, one run.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  goreleaser:
+    name: Binaries
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # goreleaser reads the history to build the changelog, and a shallow
+          # clone gives it one commit.
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+          cache-dependency-path: "**/go.sum"
+
+      - uses: goreleaser/goreleaser-action@v6
+        with:
+          version: "~> v2"
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Without this goreleaser asks git which tag it is on, and on a
+          # release commit `git describe` can answer runtime/v0.1.0 — which
+          # would name every archive after a module that is not the binary.
+          GORELEASER_CURRENT_TAG: ${{ github.ref_name }}
+
+
+  # The three packages a generated TypeScript client imports, at the same
+  # version as the tag — rig generates imports of @rig-ts/client, so the
+  # generator and the package are one version, the same way the Go modules are.
+  #
+  # No NPM_TOKEN. This publishes through npm's trusted publishing (OIDC), which
+  # is why `id-token: write` is here and no secret is: npm trusts this
+  # repository and this workflow file, and mints a short-lived credential for
+  # the run. The trusted publisher has to be registered on npm for each package
+  # first, under the @rig-ts org.
+  npm:
+    name: npm packages
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: ts/package.json
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+
+      # Trusted publishing needs npm 11.5.1 or newer, which is newer than what
+      # ships with any Node release the action offers.
+      - name: Use an npm that can publish without a token
+        run: npm install -g npm@latest
+
+      - name: Build
+        working-directory: ts
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm -r --filter "@rig-ts/*" run build
+
+      # The version in package.json is set by `make release`, so a mismatch here
+      # means the tag and the commit disagree — publish the wrong one and npm
+      # keeps it forever.
+      - name: Check the versions are the tag
+        run: |
+          set -euo pipefail
+          want="${GITHUB_REF_NAME#v}"
+          for p in client electric presence; do
+            got=$(node -p "require('./ts/packages/$p/package.json').version")
+            if [ "$got" != "$want" ]; then
+              echo "::error::@rig-ts/$p is $got, tag is $want"
+              exit 1
+            fi
+          done
+
+      # pnpm packs and npm publishes, and it takes both: only pnpm rewrites the
+      # `workspace:^` peer dependencies into real ranges, and only npm can
+      # publish with OIDC. Packing first gets both.
+      #
+      # client goes first because the other two depend on it.
+      - name: Publish
+        working-directory: ts
+        run: |
+          set -euo pipefail
+          for p in client electric presence; do
+            tarball=$(cd "packages/$p" && pnpm pack --pack-destination "$RUNNER_TEMP" | tail -1)
+            npm publish "$tarball" --provenance
+            echo "published @rig-ts/$p"
+          done
+
+  # The check that the workspace cannot do. Inside the repository go.work
+  # resolves every sibling to the working tree, so a broken go.mod is invisible
+  # until somebody outside tries to use it. This is that somebody.
+  consumable:
+    name: Installable from the proxy
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    needs: goreleaser
+
+    steps:
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+
+      - name: go install
+        run: |
+          set -euo pipefail
+          cd "$(mktemp -d)"
+          go install github.com/simonjanss/rig/cmd/rig@${{ github.ref_name }}
+          rig="$(go env GOPATH)/bin/rig"
+          "$rig" version --verbose
+
+          # The version has to be the tag, exactly: the documented way to pin
+          # the libraries is `go get .../runtime@$(rig version)`, and goreleaser
+          # names things after the tag with the v stripped, so getting this
+          # wrong is a plausible mistake rather than a paranoid one.
+          got="$("$rig" version)"
+          if [ "$got" != "${{ github.ref_name }}" ]; then
+            echo "::error::rig version says $got, tag is ${{ github.ref_name }}"
+            exit 1
+          fi
+
+      - name: go get the libraries
+        run: |
+          cd "$(mktemp -d)"
+          go mod init consumer
+          go get github.com/simonjanss/rig/runtime@${{ github.ref_name }}
+          go get github.com/simonjanss/rig/auth@${{ github.ref_name }}
+          go get github.com/simonjanss/rig/migrate@${{ github.ref_name }}
+          go get github.com/simonjanss/rig/rigclient@${{ github.ref_name }}
+          cat > main.go <<'GO'
+          package main
+
+          import (
+          	_ "github.com/simonjanss/rig/auth/session"
+          	_ "github.com/simonjanss/rig/migrate"
+          	_ "github.com/simonjanss/rig/rigclient"
+          	_ "github.com/simonjanss/rig/runtime/serve"
+          )
+
+          func main() {}
+          GO
+          go mod tidy
+          go build ./...

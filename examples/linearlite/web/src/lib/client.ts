@@ -1,4 +1,4 @@
-import { Session } from "@rig/client";
+import { Session } from "@rig-ts/client";
 
 import { createClient } from "../api/client.gen.js";
 import { load, update } from "./storage.js";

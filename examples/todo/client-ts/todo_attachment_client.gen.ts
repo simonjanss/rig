@@ -18,7 +18,7 @@ import type {
     TodoAttachmentUpdateInput,
 } from "./todo_attachment_input.gen.js";
 import type { TodoAttachmentFilter } from "./todo_attachment_query.gen.js";
-import type { CallOptions, RigError, Runtime, Upload } from "@rig/client";
+import type { CallOptions, RigError, Runtime, Upload } from "@rig-ts/client";
 
 import {
     METHOD_QUERY,
@@ -29,7 +29,7 @@ import {
     sendContent,
     sendNoContent,
     setParam,
-} from "@rig/client";
+} from "@rig-ts/client";
 
 /**
  * TodoAttachmentClient is what `client.todoAttachments` is, and what a test

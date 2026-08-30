@@ -3,7 +3,7 @@
 // This file is rewritten on every run. Put changes in the code that calls it.
 
 import type { ProfileFilter } from "./profile_query.gen.js";
-import type { FieldError, Upload } from "@rig/client";
+import type { FieldError, Upload } from "@rig-ts/client";
 
 /**
  * ProfileCreateFiles is the files a create carries with it.

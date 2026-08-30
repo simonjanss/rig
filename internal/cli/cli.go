@@ -15,6 +15,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/simonjanss/rig/internal/diag"
+	"github.com/simonjanss/rig/internal/version"
 
 	// The built-in generators register themselves. Importing them here rather
 	// than from the command means there is no way to build a rig that has a
@@ -22,8 +23,11 @@ import (
 	_ "github.com/simonjanss/rig/internal/gen/allgen"
 )
 
-// Version is stamped at build time.
-var Version = "dev"
+// Version is what this build of rig calls itself. It is read from the binary's
+// own build information rather than stamped here; see
+// [github.com/simonjanss/rig/internal/version] for what a release, a `go
+// install` and a checkout each contribute.
+var Version = version.String()
 
 // ErrDiagnostics is returned when a command failed because of reported
 // diagnostics. The diagnostics have already been printed, so the top level
@@ -131,6 +135,7 @@ func newRoot(e *env) *cobra.Command {
 		newGenerateCmd(e),
 		newCheckCmd(e),
 		newGeneratorsCmd(e),
+		newVersionCmd(e),
 	)
 
 	return root

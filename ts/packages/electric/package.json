@@ -1,5 +1,5 @@
 {
-    "name": "@rig/electric",
+    "name": "@rig-ts/electric",
     "version": "0.1.0",
     "type": "module",
     "sideEffects": false,
@@ -24,11 +24,19 @@
         "@tanstack/electric-db-collection": "0.3.15"
     },
     "peerDependencies": {
-        "@rig/client": "workspace:^"
+        "@rig-ts/client": "workspace:^"
     },
     "devDependencies": {
-        "@rig/client": "workspace:*",
+        "@rig-ts/client": "workspace:*",
         "tsdown": "0.21.10",
         "typescript": "5.9.3"
+    },
+    "publishConfig": {
+        "access": "public"
+    },
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/simonjanss/rig.git",
+        "directory": "ts/packages/electric"
     }
 }

@@ -1,16 +1,16 @@
-// @rig/presence, compiled against a generated collection.
+// @rig-ts/presence, compiled against a generated collection.
 //
 // This file exists because nothing else would check the package at all. Its own
 // `tsc` proves it is internally consistent; a golden test proves the generator
 // emits the same bytes it emitted last time. Neither notices that the two stopped
-// fitting together — and unlike @rig/client and @rig/electric, no generated file
+// fitting together — and unlike @rig-ts/client and @rig-ts/electric, no generated file
 // imports this one, so a project's own `tsc` would not notice either.
 //
 // So the fitting is asserted here, by hand, in the shape an application writes.
 
-import { createPresence } from "@rig/presence";
-import type { Person, PresenceHandle, PresenceRow } from "@rig/presence";
-import { usePresence } from "@rig/presence/react";
+import { createPresence } from "@rig-ts/presence";
+import type { Person, PresenceHandle, PresenceRow } from "@rig-ts/presence";
+import { usePresence } from "@rig-ts/presence/react";
 
 import { createClient } from "../../../examples/linearlite/web/src/api/index.js";
 

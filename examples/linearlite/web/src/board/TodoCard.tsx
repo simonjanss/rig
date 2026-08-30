@@ -1,5 +1,5 @@
 import { useDraggable } from "@dnd-kit/core";
-import { usePresence } from "@rig/presence/react";
+import { usePresence } from "@rig-ts/presence/react";
 import { Link } from "react-router";
 
 import type { BoardTodo } from "../lib/rows.js";

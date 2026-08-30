@@ -10,10 +10,10 @@
         // say now, not what they said at the last build.
         "baseUrl": ".",
         "paths": {
-            "@rig/client": ["../packages/client/src/index.ts"],
-            "@rig/electric": ["../packages/electric/src/index.ts"],
-            "@rig/presence": ["../packages/presence/src/index.ts"],
-            "@rig/presence/react": ["../packages/presence/src/react.ts"]
+            "@rig-ts/client": ["../packages/client/src/index.ts"],
+            "@rig-ts/electric": ["../packages/electric/src/index.ts"],
+            "@rig-ts/presence": ["../packages/presence/src/index.ts"],
+            "@rig-ts/presence/react": ["../packages/presence/src/react.ts"]
         }
     },
     // The generator's own output, rather than a copy of it. A copy is a second

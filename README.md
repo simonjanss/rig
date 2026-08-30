@@ -17,6 +17,28 @@ clients, an authentication foundation, file uploads, and an inbox.
       pgx                                          net/http
 ```
 
+## Install
+
+```bash
+go install github.com/simonjanss/rig/cmd/rig@latest
+```
+
+Or download a binary from [the releases](https://github.com/simonjanss/rig/releases).
+In a GitHub Actions workflow:
+
+```yaml
+- uses: simonjanss/rig/.github/actions/setup-rig@v0.1.0
+- run: rig validate --strict
+```
+
+rig is ten Go modules released together at one version, because the CLI
+generates code that imports the runtime and the two have to agree. `rig version`
+is the version to pin the libraries to:
+
+```bash
+go get github.com/simonjanss/rig/runtime@$(rig version)
+```
+
 ## Four steps
 
 ```bash
@@ -86,5 +108,5 @@ pre-push hook that runs the checks. [AGENTS.md](AGENTS.md) has the rest.
 A generated application depends on `rig/runtime` (and optionally `rig/auth` and
 `rig/migrate`) — never on the CLI. A program that *calls* one depends on
 `rig/rigclient`; see [examples/sdk](examples/sdk) for what that looks like. A
-front end that calls one depends on `@rig/client`, and on `@rig/electric` as
+front end that calls one depends on `@rig-ts/client`, and on `@rig-ts/electric` as
 well if it subscribes to a live-sync stream.

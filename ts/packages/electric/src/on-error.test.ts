@@ -1,4 +1,4 @@
-import type { Credential, Reauthorizer, Runtime } from "@rig/client";
+import type { Credential, Reauthorizer, Runtime } from "@rig-ts/client";
 
 import { FetchError } from "@electric-sql/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";

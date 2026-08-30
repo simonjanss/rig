@@ -1,4 +1,4 @@
-import { usePresence } from "@rig/presence/react";
+import { usePresence } from "@rig-ts/presence/react";
 
 import { useAuth } from "../auth/AuthContext.js";
 import { Avatar } from "../board/Avatar.js";

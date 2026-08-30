@@ -1,7 +1,7 @@
 # typecheck-fixture
 
 `tsc --noEmit` over the `ts-client` generator's golden output, against the real
-`@rig/client` and `@rig/electric`.
+`@rig-ts/client` and `@rig-ts/electric`.
 
 It is the check the Go tests cannot make. A golden test proves the generator
 emits the bytes it emitted last time; it cannot notice that those bytes stop
@@ -13,7 +13,7 @@ is how `send` returning `T | undefined` was caught the day it was introduced.
 those is most of updating this.
 
 `src/` is the rest: the two claims that no generated file makes on its own.
-`presence.ts` is there because nothing generated imports `@rig/presence`, so a
+`presence.ts` is there because nothing generated imports `@rig-ts/presence`, so a
 project's own `tsc` would never compare the package against a generated row.
 `fake-client.ts` is there because the generated output compiling says nothing
 about whether anybody _outside_ it can write a stand-in for a resource — which

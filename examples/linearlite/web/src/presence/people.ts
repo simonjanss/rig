@@ -1,4 +1,4 @@
-import type { Person } from "@rig/presence";
+import type { Person } from "@rig-ts/presence";
 
 /**
  * One entry per person, out of a list where one person may have several tabs.

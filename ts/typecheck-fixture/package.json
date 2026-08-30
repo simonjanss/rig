@@ -8,9 +8,9 @@
         "typecheck": "tsc --noEmit"
     },
     "dependencies": {
-        "@rig/client": "workspace:*",
-        "@rig/electric": "workspace:*",
-        "@rig/presence": "workspace:*"
+        "@rig-ts/client": "workspace:*",
+        "@rig-ts/electric": "workspace:*",
+        "@rig-ts/presence": "workspace:*"
     },
     "devDependencies": {
         "@types/react": "19.2.2",

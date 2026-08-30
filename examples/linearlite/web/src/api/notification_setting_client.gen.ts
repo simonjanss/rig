@@ -14,7 +14,7 @@ import type {
     NotificationSettingUpdateFields,
     NotificationSettingUpdateInput,
 } from "./notification_setting_input.gen.js";
-import type { CallOptions, RigError, Runtime } from "@rig/client";
+import type { CallOptions, RigError, Runtime } from "@rig-ts/client";
 
 import {
     isInvalid,
@@ -22,7 +22,7 @@ import {
     send,
     sendNoContent,
     setParam,
-} from "@rig/client";
+} from "@rig-ts/client";
 
 /**
  * NotificationSettingClient is what `client.notificationSettings` is, and what

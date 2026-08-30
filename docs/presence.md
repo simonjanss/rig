@@ -16,7 +16,7 @@ That gives you `rig_presence` in the [foundation](schema.md#names-rig-reserves),
 three routes under `/presence`, a live shape at
 `/api/v1/rig_presence/_stream`, a sweeper, and the wiring for all of it in your
 generated API package. The browser half is
-[`@rig/presence`](clients.md#presence).
+[`@rig-ts/presence`](clients.md#presence).
 
 ## What a presence row is
 
@@ -25,7 +25,7 @@ one and editing in another is the ordinary case, and a row keyed by account alon
 would have two tabs overwrite each other on every heartbeat. The person would
 appear to teleport between the two things they were doing.
 
-So a tab names itself — `@rig/presence` mints a key per tab — and the server
+So a tab names itself — `@rig-ts/presence` mints a key per tab — and the server
 stores one row per `(tenant, account, session key)`. Two tabs are two presences,
 and it is the reader's job to collapse them if it wants one avatar per person.
 `others()` answers freshest first, so the first sighting of an account is the tab
@@ -79,7 +79,7 @@ the truth and the engine is only latency. Here the reader's own comparison is th
 truth: it is correct within a second, it costs nothing, and it works on the day
 your project was generated, before anybody has wired a cron.
 
-`@rig/presence` does this for you, and there is one trick in it worth knowing
+`@rig-ts/presence` does this for you, and there is one trick in it worth knowing
 because it is what makes it correct. A browser cannot compare `seenAt` against
 its own clock — a laptop five minutes fast would show an empty room. **The
 freshest `seenAt` in the collection is itself a reading of the server's clock**,
@@ -160,7 +160,7 @@ invent a scope to ask for it.
 Two more things about the cost, both intended:
 
 **A hidden tab ages out, and that is the right answer.** The sync service pauses
-a stream in a hidden tab, so it is not receiving; `@rig/presence` stops beating
+a stream in a hidden tab, so it is not receiving; `@rig-ts/presence` stops beating
 and sends a leave, so it is not broadcasting either. "Simon's tab is behind his
 mail client, he is not editing your title" is true. It also stops the browser's
 background-timer throttling from clamping a heartbeat below the TTL and making
@@ -178,7 +178,7 @@ deliberately does not, because a snapshot of who was here a moment ago that then
 stops updating is worth less than an empty list: the feature *is* the freshness.
 It is also the one that would come out right anyway. The heartbeat is a REST call
 an outage does not touch, so it goes on supplying a fresh reading of the server's
-clock while the streamed rows sit still, and `@rig/presence` ages them out at the
+clock while the streamed rows sit still, and `@rig-ts/presence` ages them out at the
 TTL. A fallback here would buy a minute of ghosts and then the empty room it
 already shows.
 
@@ -207,7 +207,7 @@ presence.focus({ table: "todo", id, field: "title" }, "editing");
 
 ### Three things the package deliberately does not do for you
 
-`@rig/presence` owns the timer, the throttle, the clock and the teardown. What it
+`@rig-ts/presence` owns the timer, the throttle, the clock and the teardown. What it
 cannot own is where in *your* component tree those things live, and each of the
 three is a bug the first time somebody writes it.
 `examples/linearlite/web/src/presence` gets all three right, and is worth copying
@@ -305,7 +305,7 @@ whoever was here last week until something deletes them.
 
 - [electric.md](electric.md) — the shape this is read over, and the rule that
   decides its design
-- [clients.md](clients.md#presence) — `@rig/presence` in full
+- [clients.md](clients.md#presence) — `@rig-ts/presence` in full
 - [rig-yaml.md](rig-yaml.md#presence) — every key and its default
 - [notifications.md](notifications.md) — the other feature built on a table and a
   shape, with the opposite answer about where the truth lives

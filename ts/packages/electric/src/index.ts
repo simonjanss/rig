@@ -9,7 +9,7 @@
  * wire format so a row means the same thing here as it does over REST, and hold
  * one collection per route so navigating away does not re-sync.
  *
- * It is a separate package from `@rig/client` because it is not free: the sync
+ * It is a separate package from `@rig-ts/client` because it is not free: the sync
  * client and TanStack DB come with it, and rig's electric generator writes
  * nothing at all until some table opts in. An application that streams nothing
  * should install nothing.

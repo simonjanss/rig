@@ -9,9 +9,9 @@ import type {
     AccountSearchQuery,
 } from "./account_input.gen.js";
 import type { AccountFilter } from "./account_query.gen.js";
-import type { CallOptions, Runtime } from "@rig/client";
+import type { CallOptions, Runtime } from "@rig-ts/client";
 
-import { METHOD_QUERY, pathValue, send, setParam } from "@rig/client";
+import { METHOD_QUERY, pathValue, send, setParam } from "@rig-ts/client";
 
 /**
  * AccountClient is what `client.accounts` is, and what a test writes to stand

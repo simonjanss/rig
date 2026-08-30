@@ -14,7 +14,7 @@
  * author guessed.
  *
  * Nothing here is React, and nothing here is live sync. Streams are
- * `@rig/electric`, which takes the {@link Runtime} this module builds.
+ * `@rig-ts/electric`, which takes the {@link Runtime} this module builds.
  *
  * **What is exported is what a caller or a generated client uses, and nothing
  * else.** The plumbing under those — how an operation is classified, how a

@@ -1,6 +1,6 @@
-import type { Runtime } from "@rig/client";
+import type { Runtime } from "@rig-ts/client";
 
-import { send } from "@rig/client";
+import { send } from "@rig-ts/client";
 
 /**
  * Two of the demonstration's own routes, at `/_demo/`. The third, the switch

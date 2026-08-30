@@ -40,6 +40,8 @@ const (
 	CreateOnce
 )
 
+// String is the mode as it appears in a manifest and in `rig generate`'s
+// report of what it did.
 func (m WriteMode) String() string {
 	if m == CreateOnce {
 		return "create-once"

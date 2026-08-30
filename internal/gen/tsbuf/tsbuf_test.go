@@ -45,17 +45,17 @@ func TestTypeImportsComeFirstAndBothAreSorted(t *testing.T) {
 
 	b := tsbuf.NewHandOwned()
 	b.Import("./zeta.js", "zeta")
-	b.Import("@rig/client", "send")
+	b.Import("@rig-ts/client", "send")
 	b.ImportType("./alpha.js", "Alpha")
-	b.ImportType("@rig/client", "Runtime")
+	b.ImportType("@rig-ts/client", "Runtime")
 	b.L("const x = 1;")
 
 	want := strings.Join([]string{
 		`import type { Alpha } from "./alpha.js";`,
-		`import type { Runtime } from "@rig/client";`,
+		`import type { Runtime } from "@rig-ts/client";`,
 		``,
 		`import { zeta } from "./zeta.js";`,
-		`import { send } from "@rig/client";`,
+		`import { send } from "@rig-ts/client";`,
 		``,
 		`const x = 1;`,
 		``,
@@ -72,14 +72,14 @@ func TestOneModuleCanBeImportedTwoWays(t *testing.T) {
 	t.Parallel()
 
 	b := tsbuf.NewHandOwned()
-	b.Import("@rig/client", "Runtime")
-	b.ImportType("@rig/client", "Config")
+	b.Import("@rig-ts/client", "Runtime")
+	b.ImportType("@rig-ts/client", "Config")
 
 	src := render(t, b)
-	if !strings.Contains(src, `import type { Config } from "@rig/client";`) {
+	if !strings.Contains(src, `import type { Config } from "@rig-ts/client";`) {
 		t.Errorf("no type import:\n%s", src)
 	}
-	if !strings.Contains(src, `import { Runtime } from "@rig/client";`) {
+	if !strings.Contains(src, `import { Runtime } from "@rig-ts/client";`) {
 		t.Errorf("no value import:\n%s", src)
 	}
 }
@@ -88,11 +88,11 @@ func TestRepeatedImportsCollapse(t *testing.T) {
 	t.Parallel()
 
 	b := tsbuf.NewHandOwned()
-	b.Import("@rig/client", "send")
-	b.Import("@rig/client", "send")
-	b.Import("@rig/client", "pathValue")
+	b.Import("@rig-ts/client", "send")
+	b.Import("@rig-ts/client", "send")
+	b.Import("@rig-ts/client", "pathValue")
 
-	want := `import { pathValue, send } from "@rig/client";`
+	want := `import { pathValue, send } from "@rig-ts/client";`
 	if got := render(t, b); !strings.Contains(got, want) {
 		t.Errorf("got:\n%s\nwant a line:\n%s", got, want)
 	}

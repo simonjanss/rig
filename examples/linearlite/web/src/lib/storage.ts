@@ -1,4 +1,4 @@
-import type { TokenPair } from "@rig/client";
+import type { TokenPair } from "@rig-ts/client";
 
 /**
  * What survives a reload, in one key: the session pair, which tenant it is

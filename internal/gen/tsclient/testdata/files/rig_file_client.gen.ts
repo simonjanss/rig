@@ -13,7 +13,7 @@ import type {
     RigFileUpdateInput,
 } from "./rig_file_input.gen.js";
 import type { RigFileFilter } from "./rig_file_query.gen.js";
-import type { CallOptions, RigError, Runtime } from "@rig/client";
+import type { CallOptions, RigError, Runtime } from "@rig-ts/client";
 
 import {
     METHOD_QUERY,
@@ -22,7 +22,7 @@ import {
     send,
     sendNoContent,
     setParam,
-} from "@rig/client";
+} from "@rig-ts/client";
 
 /**
  * RigFileClient is what `client.rigFiles` is, and what a test writes to stand

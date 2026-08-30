@@ -1,0 +1,84 @@
+name: Setup rig
+description: Install the rig CLI and put it on PATH.
+
+# Why this exists rather than `go install`: a workflow that only runs `rig
+# validate` should not need a Go toolchain and a two-minute compile of the
+# generators to get there. This downloads one binary.
+#
+#   - uses: simonjanss/rig/.github/actions/setup-rig@v0.1.0
+#     with:
+#       version: v0.1.0   # optional; the tag you pin the action to is not read
+#
+# rig starts throwaway Postgres containers for `rig sync` and `rig check`, and
+# reaches the runner's own Docker daemon to do it — which is why this installs a
+# binary on the runner rather than running rig in a container.
+
+inputs:
+  version:
+    description: 'The rig release to install, e.g. "v0.1.0". Defaults to the latest release.'
+    required: false
+    default: latest
+
+outputs:
+  version:
+    description: The version that was installed, resolved if the input was "latest".
+    value: ${{ steps.install.outputs.version }}
+
+runs:
+  using: composite
+  steps:
+    - id: install
+      shell: bash
+      env:
+        RIG_VERSION: ${{ inputs.version }}
+        # The API call that resolves "latest" is rate limited for anonymous
+        # callers, and a shared runner is a busy anonymous caller.
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        set -euo pipefail
+
+        repo=simonjanss/rig
+
+        version="$RIG_VERSION"
+        if [ "$version" = "latest" ]; then
+          version=$(curl -fsSL -H "Authorization: Bearer $GH_TOKEN" \
+            "https://api.github.com/repos/$repo/releases/latest" \
+            | grep '"tag_name"' | head -1 | cut -d'"' -f4)
+          if [ -z "$version" ]; then
+            echo "::error::could not resolve the latest rig release" >&2
+            exit 1
+          fi
+        fi
+
+        case "$RUNNER_OS" in
+          Linux)  os=linux  ;;
+          macOS)  os=darwin ;;
+          *) echo "::error::rig has no build for $RUNNER_OS" >&2; exit 1 ;;
+        esac
+        case "$RUNNER_ARCH" in
+          X64)   arch=amd64 ;;
+          ARM64) arch=arm64 ;;
+          *) echo "::error::rig has no build for $RUNNER_ARCH" >&2; exit 1 ;;
+        esac
+
+        # The version without its leading v: goreleaser names archives after
+        # {{ .Version }}, which is the tag with the v stripped.
+        bare="${version#v}"
+        archive="rig_${bare}_${os}_${arch}.tar.gz"
+        base="https://github.com/$repo/releases/download/$version"
+
+        dir=$(mktemp -d)
+        curl -fsSL -o "$dir/$archive"      "$base/$archive"
+        curl -fsSL -o "$dir/checksums.txt" "$base/checksums.txt"
+
+        # Verify before extracting, not after: an archive that fails the sum is
+        # not one to unpack and then think better of.
+        ( cd "$dir" && grep " $archive\$" checksums.txt | shasum -a 256 -c - )
+
+        mkdir -p "$dir/bin"
+        tar -xzf "$dir/$archive" -C "$dir/bin" rig
+        chmod +x "$dir/bin/rig"
+
+        echo "$dir/bin" >> "$GITHUB_PATH"
+        echo "version=$version" >> "$GITHUB_OUTPUT"
+        echo "rig $version installed ($os/$arch)"

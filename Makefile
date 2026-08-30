@@ -33,9 +33,13 @@ EXAMPLE_MODULES := ./examples/todo ./examples/fantasyfootball ./examples/auth ./
 
 # The core modules less the root: the ones a generated application imports, so
 # their godoc is the documentation for a Go surface somebody depends on rather
-# than commentary on it. That is why `godoc-check` runs over these and not over
-# `internal/`, `pkg/ir` or `pkg/gen`, which are nobody else's dependency.
+# than commentary on it.
 PUBLIC_MODULES  := ./runtime ./auth ./authmodel ./files ./notify ./observe ./presence ./migrate ./rigclient
+
+# Everything godoc-check reads: the modules above, plus `pkg/` — the root
+# module's own published surface, which is what somebody writing a generator
+# against the IR imports. `internal/` is not in here and does not render.
+PUBLIC_SURFACE  := ./pkg $(PUBLIC_MODULES)
 MODULES         := $(CORE_MODULES) $(EXAMPLE_MODULES)
 EXAMPLES        := todo fantasyfootball auth auth_oauth linearlite
 
@@ -45,6 +49,7 @@ EXAMPLES        := todo fantasyfootball auth auth_oauth linearlite
 GOLANGCI_VERSION   := v2.12.2
 GOVULNCHECK_VERSION := v1.7.0
 VACUUM_VERSION      := v0.30.0
+GORELEASER_VERSION  := v2.12.7
 
 # A module with no packages yet — auth, until M4 lands — is skipped rather than
 # treated as a failure, so `make test` says something useful during the build-out.
@@ -73,7 +78,7 @@ help:
 ##        first feature rig ships whose interesting half is a browser one — a
 ##        timer, two window listeners and a teardown — and six of the eight
 ##        bugs review found in it were in code nothing else here compiles.
-check: fmt-check vet godoc-check build test deps lint vulncheck ts test-docker examples openapi-lint linearlite-web
+check: fmt-check vet godoc-check build test deps lint vulncheck release-check ts test-docker examples openapi-lint linearlite-web
 
 ## hooks: install the repository's git hooks into this clone
 ##        Cloning does not bring hooks with it, so this is opt-in and has to be
@@ -173,7 +178,7 @@ vet:
 ##              Presence, not form — what a comment says is a reviewer's
 ##              question, which is why ST1000 and ST1020-ST1022 stay off.
 godoc-check:
-	@$(GO) run ./internal/godoccheck $(PUBLIC_MODULES)
+	@$(GO) run ./internal/godoccheck $(PUBLIC_SURFACE)
 
 ## fmt: gofmt every module
 fmt:
@@ -191,8 +196,19 @@ fmt-check:
 	fi
 
 ## tidy: go mod tidy every module
+##       An "unknown revision runtime/vX.Y.Z" here is not a broken checkout: it
+##       is a release that was prepared and not yet tagged. `go mod tidy` is a
+##       single-module operation that resolves from the proxy and ignores the
+##       workspace, so it is the one command that cannot see a sibling until
+##       the sibling is published. See Releasing in AGENTS.md.
 tidy:
-	@for m in $(MODULES); do (cd $$m && $(GO) mod tidy) || exit 1; done
+	@for m in $(MODULES); do (cd $$m && $(GO) mod tidy) || { \
+		echo ""; \
+		echo "If that says \"unknown revision <module>/vX.Y.Z\": the version in"; \
+		echo "go.mod is not tagged yet. Push the release tags first —"; \
+		echo "  git push origin --tags"; \
+		echo "See Releasing in AGENTS.md."; \
+		exit 1; }; done
 
 ## deps: fail if any go.mod or go.sum is not what `go mod tidy` produces
 ##       Untracked files count: a module whose go.sum was never committed
@@ -205,6 +221,27 @@ deps: tidy
 		echo "dependencies are not tidy — run \`make tidy\` and commit the result"; \
 		exit 1; \
 	fi
+
+## release: set one version across every published module, commit it, and tag
+##          `make release VERSION=v0.1.0` rewrites every intra-repository
+##          requirement, commits, and creates ten tags. It does not push and it
+##          does not tidy — see internal/release for why the order matters.
+##          `make release-dry VERSION=v0.1.0` prints what it would do.
+release:
+	@$(GO) run ./internal/release $(VERSION)
+
+## release-dry: what `make release` would write, without writing it
+release-dry:
+	@$(GO) run ./internal/release $(VERSION) --dry-run
+
+## release-check: validate .goreleaser.yaml and build the binaries it would ship
+##                Part of `check`, because the alternative is finding out on a
+##                tag push — and a tag the proxy has seen cannot be taken back.
+release-check:
+	@GOBIN=$(CURDIR)/bin $(GO) install github.com/goreleaser/goreleaser/v2@$(GORELEASER_VERSION)
+	@$(CURDIR)/bin/goreleaser check
+	@$(CURDIR)/bin/goreleaser build --snapshot --clean --single-target
+	@./dist/rig_$$($(GO) env GOOS)_$$($(GO) env GOARCH)*/rig version
 
 ## lint: run golangci-lint over the modules rig is written in
 ##       Each module is a separate run: with a workspace, `./...` names the
@@ -248,15 +285,15 @@ ts-deps:
 
 ## ts-build: build the published packages
 ts-build: ts-deps
-	@cd $(TS_DIR) && $(PNPM) -r --filter "@rig/*" run build
+	@cd $(TS_DIR) && $(PNPM) -r --filter "@rig-ts/*" run build
 
 ## ts-typecheck: tsc over the packages and over the generator's golden output
-##               Depends on ts-build, and has to: @rig/electric and
-##               @rig/presence resolve @rig/client through node_modules, which
+##               Depends on ts-build, and has to: @rig-ts/electric and
+##               @rig-ts/presence resolve @rig-ts/client through node_modules, which
 ##               reaches its `exports` and therefore its dist — and dist is
 ##               gitignored, so on a fresh clone there is nothing there to
 ##               resolve. Without this, `make ts` fails on every new checkout
-##               with seven "cannot find module @rig/client" errors that look
+##               with seven "cannot find module @rig-ts/client" errors that look
 ##               like a broken workspace rather than a missing build.
 ts-typecheck: ts-build
 	@cd $(TS_DIR) && $(PNPM) -r run typecheck
@@ -291,4 +328,4 @@ vulncheck:
 	@GOBIN=$(CURDIR)/bin $(GO) install golang.org/x/vuln/cmd/govulncheck@$(GOVULNCHECK_VERSION)
 	$(eachcore) $(CURDIR)/bin/govulncheck ./...) || exit 1; done
 
-.PHONY: help check hooks build test test-docker examples db-down update-schema update-golden update-examples vet godoc-check fmt fmt-check tidy deps lint openapi-lint vulncheck ts ts-deps ts-build ts-typecheck ts-test ts-fmt ts-fmt-check linearlite-web
+.PHONY: help check hooks build test test-docker examples db-down update-schema update-golden update-examples vet godoc-check fmt fmt-check tidy deps lint openapi-lint vulncheck ts ts-deps ts-build ts-typecheck ts-test ts-fmt ts-fmt-check linearlite-web release release-dry release-check

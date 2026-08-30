@@ -1,4 +1,4 @@
-import type { Person } from "@rig/presence";
+import type { Person } from "@rig-ts/presence";
 
 import { byPerson, names } from "./people.js";
 import { useNameOf } from "./useNameOf.js";

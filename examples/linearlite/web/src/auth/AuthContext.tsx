@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 
 import { createContext, useCallback, useContext, useState } from "react";
 
-import type { TokenPair } from "@rig/client";
+import type { TokenPair } from "@rig-ts/client";
 
 import type { SignInResponse, TenantView } from "./wire.js";
 import type { StoredTenant } from "../lib/storage.js";

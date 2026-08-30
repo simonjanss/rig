@@ -1,5 +1,5 @@
 {
-    "name": "@rig/presence",
+    "name": "@rig-ts/presence",
     "version": "0.1.0",
     "type": "module",
     "sideEffects": false,
@@ -23,8 +23,8 @@
         "typecheck": "tsc --noEmit"
     },
     "peerDependencies": {
-        "@rig/client": "workspace:^",
-        "@rig/electric": "workspace:^",
+        "@rig-ts/client": "workspace:^",
+        "@rig-ts/electric": "workspace:^",
         "react": ">=18"
     },
     "peerDependenciesMeta": {
@@ -33,11 +33,19 @@
         }
     },
     "devDependencies": {
-        "@rig/client": "workspace:*",
-        "@rig/electric": "workspace:*",
+        "@rig-ts/client": "workspace:*",
+        "@rig-ts/electric": "workspace:*",
         "@types/react": "19.2.2",
         "react": "19.2.0",
         "tsdown": "0.21.10",
         "typescript": "5.9.3"
+    },
+    "publishConfig": {
+        "access": "public"
+    },
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/simonjanss/rig.git",
+        "directory": "ts/packages/presence"
     }
 }

@@ -39,6 +39,10 @@ jobs:
             description: "go vet over every module"
             command: "make vet"
 
+          - name: "Doc Comments"
+            description: "Every exported symbol somebody imports has a doc comment"
+            command: "make godoc-check"
+
           - name: "Build"
             description: "The rig binary compiles"
             command: "make build"
@@ -50,6 +54,10 @@ jobs:
           - name: "Security Scan"
             description: "Known vulnerabilities, via govulncheck"
             command: "make vulncheck"
+
+          - name: "Release Config"
+            description: "goreleaser validates, and builds the binary it would ship"
+            command: "make release-check"
 
     steps:
       - uses: actions/checkout@v4

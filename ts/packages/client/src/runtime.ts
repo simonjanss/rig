@@ -182,7 +182,7 @@ export class Runtime {
 
     constructor(config: Config, api: ApiDescriptor) {
         if (config.baseUrl === undefined) {
-            throw new Error("@rig/client: a baseUrl is required");
+            throw new Error("@rig-ts/client: a baseUrl is required");
         }
         this.baseUrl = config.baseUrl.replace(/\/+$/, "");
         this.api = api;
