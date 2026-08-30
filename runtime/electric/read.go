@@ -411,16 +411,19 @@ func keyPart(f pgconn.FieldDescription, raw []byte) (string, error) {
 
 // decoded renders one of [binaryFormats]'s columns.
 func decoded(f pgconn.FieldDescription, raw []byte) (any, error) {
+	m := borrowCodec()
+	defer returnCodec(m)
+
 	if f.DataTypeOID == pgtype.BoolOID {
 		var v bool
-		if err := codecs.Scan(f.DataTypeOID, f.Format, raw, &v); err != nil {
+		if err := m.Scan(f.DataTypeOID, f.Format, raw, &v); err != nil {
 			return nil, err
 		}
 		return Value(v), nil
 	}
 
 	var v time.Time
-	if err := codecs.Scan(f.DataTypeOID, f.Format, raw, &v); err != nil {
+	if err := m.Scan(f.DataTypeOID, f.Format, raw, &v); err != nil {
 		return nil, err
 	}
 	if f.DataTypeOID == pgtype.DateOID {
