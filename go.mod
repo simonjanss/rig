@@ -37,12 +37,12 @@ require (
 	github.com/mfridman/interpolate v0.0.2 // indirect
 	github.com/pb33f/ordered-map/v2 v2.3.1 // indirect
 	github.com/sethvargo/go-retry v0.4.0 // indirect
-	github.com/simonjanss/rig/auth v0.2.0
-	github.com/simonjanss/rig/files v0.2.0
-	github.com/simonjanss/rig/migrate v0.2.0
-	github.com/simonjanss/rig/notify v0.2.0
-	github.com/simonjanss/rig/presence v0.2.0
-	github.com/simonjanss/rig/runtime v0.2.0
+	github.com/simonjanss/rig/auth v0.2.1
+	github.com/simonjanss/rig/files v0.2.1
+	github.com/simonjanss/rig/migrate v0.2.1
+	github.com/simonjanss/rig/notify v0.2.1
+	github.com/simonjanss/rig/presence v0.2.1
+	github.com/simonjanss/rig/runtime v0.2.1
 	github.com/spf13/pflag v1.0.9 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	go.yaml.in/yaml/v4 v4.0.0-rc.6
