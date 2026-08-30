@@ -14,20 +14,40 @@ import (
 	"github.com/simonjanss/rig/runtime/serve"
 )
 
-// NewFiles builds this project's file handling from its `files:` block.
+// NewFilesWithStore builds this project's file handling around a store you
+// supply.
+//
+// Everything but the store came from the `files:` block in rig.yaml, so a byte
+// cap or a sweep interval is a line somebody can read there rather than a
+// literal in a main function nobody diffs.
 //
 // The pool is the same one the repositories use, and that is not a detail: the
 // transaction that finalizes a file and writes the row pointing at it has to
 // be one transaction, and it cannot be if the two live in different pools.
-func NewFiles(db files.DB) *files.Service {
+//
+// This is the seam a test uses. A project keeping its uploads in a bucket
+// still has to be runnable without one — pass blob.NewMemory() and the same
+// handlers, the same caps and the same sweeper run against a map.
+func NewFilesWithStore(db files.DB, store blob.Store) *files.Service {
 	return files.New(files.Config{
-		Store:          blob.NewMemory(),
+		Store:          store,
 		DB:             db,
 		MaxBytes:       5242880,
 		InlineTypes:    []string{"image/jpeg", "image/png", "image/gif", "image/webp"},
 		AbandonedAfter: 86400 * time.Second,
 		RestoreWindow:  2592000 * time.Second,
 	})
+}
+
+// NewFiles builds this project's file handling from its `files:` block.
+//
+// `files.backend` is memory, so the objects live in a map: this is for tests
+// and `go run`, and a restart empties it. The bucket-backed constructor has a
+// context and an error because reaching one can fail; a map cannot, and
+// pretending otherwise would be a signature apologising for a backend this
+// project does not use.
+func NewFiles(db files.DB) *files.Service {
+	return NewFilesWithStore(db, blob.NewMemory())
 }
 
 // FileSweeper is the housekeeping task: abandoned uploads, and trash past the

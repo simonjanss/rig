@@ -16,5 +16,6 @@ use (
 	./observe
 	./presence
 	./rigclient
+	./rigs3
 	./runtime
 )

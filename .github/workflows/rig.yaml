@@ -74,6 +74,11 @@ jobs:
   # golangci-lint is its own job because the action runs in one directory at a
   # time, and in a workspace `./...` names the packages of one module. Only the
   # modules rig is written in: the examples are mostly generated output.
+  #
+  # This list is CORE_MODULES in the Makefile, written out because a matrix
+  # cannot read a make variable. It had drifted to five entries while `make
+  # lint` covered nine, which is the quiet way for this job to say a module is
+  # clean without having looked at it.
   lint:
     name: Code Quality (${{ matrix.module }})
     runs-on: ubuntu-24.04
@@ -82,7 +87,20 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        module: [".", "runtime", "auth", "migrate", "rigclient"]
+        module:
+          [
+            ".",
+            "runtime",
+            "auth",
+            "authmodel",
+            "files",
+            "notify",
+            "observe",
+            "presence",
+            "migrate",
+            "rigclient",
+            "rigs3",
+          ]
 
     steps:
       - uses: actions/checkout@v4

@@ -1,0 +1,32 @@
+project:
+  name: demo
+  module: example.com/demo
+
+# testdata/files with the bytes in a bucket, which is the whole of the
+# difference: everything about a file column, a shape or a restore window is the
+# same either way, and the backend is a `files.s3` block on the document that
+# `server-go` reads and nothing else does.
+#
+# bucket_env rather than bucket, because the two produce different code — a
+# literal against a read of the environment — and the one that is a read is the
+# one worth having a golden for.
+files:
+  enabled: true
+  expose: true
+  restore_window: 168h
+  backend: s3
+  s3:
+    bucket_env: UPLOADS_BUCKET
+    region: eu-north-1
+
+# The two rules this fixture exists to exercise, both turned up so a regression
+# is a failure rather than a warning nobody reads.
+#
+# fk_naming has to stay quiet about a <role>_file_id column and keep speaking
+# about everything else. fk_needs_index has to see a composite key at all —
+# before the tenant-carrying form was denormalized onto its column, it saw
+# nothing there to check.
+validate:
+  fk_naming: error
+  fk_needs_index: error
+  missing_comment: warn

@@ -62,9 +62,30 @@ func (p *Project) checkFiles() diag.List {
 			"files.backend is %q; it has to be one of %v", f.Backend, Backends())
 	}
 
-	if f.Backend == BackendS3 && f.S3.Bucket == "" && f.S3.BucketEnv == "" {
-		diags.Add(diag.CodeConfigInvalid, p.At("files", "s3", "bucket"),
-			"files.backend is s3, so one of files.s3.bucket and files.s3.bucket_env has to say which bucket")
+	if f.Backend == BackendS3 {
+		switch {
+		case f.S3.Bucket == "" && f.S3.BucketEnv == "":
+			diags.Add(diag.CodeConfigInvalid, p.At("files", "s3", "bucket"),
+				"files.backend is s3, so one of files.s3.bucket and files.s3.bucket_env has to say which bucket")
+		case f.S3.Bucket != "" && f.S3.BucketEnv != "":
+			// Two answers to one question, and the generated code can only read
+			// one of them. Refusing is better than picking, because whichever it
+			// picked would be right on somebody's deployment and silently wrong
+			// on the next.
+			diags.Add(diag.CodeConfigInvalid, p.At("files", "s3", "bucket_env"),
+				"files.s3.bucket and files.s3.bucket_env both name the bucket; set one of them")
+		}
+
+		// Without an endpoint this is AWS, and AWS will not guess a region. With
+		// one it is a compatible service, most of which have no regions at all,
+		// and the adapter tells the signer us-east-1 so it has a string to work
+		// with. Refused here rather than at boot: a rig.yaml that cannot address
+		// a bucket is a configuration mistake, and this is where those are said.
+		if f.S3.Region == "" && f.S3.Endpoint == "" {
+			diags.Add(diag.CodeConfigInvalid, p.At("files", "s3", "region"),
+				"files.s3 names no region and no endpoint, so there is nothing to address the bucket with; "+
+					"set files.s3.region, or files.s3.endpoint for a service that is not AWS")
+		}
 	}
 
 	// Only the cap is checked for sign. The durations cannot be wrong in this
@@ -140,5 +161,25 @@ func (f Files) IR() *ir.Files {
 		AbandonedAfterSeconds: int64(f.AbandonedAfter.Duration().Seconds()),
 		RestoreWindowSeconds:  int64(f.RestoreWindow.Duration().Seconds()),
 		CookieDownloads:       f.CookieDownloads,
+		S3:                    f.s3IR(),
+	}
+}
+
+// s3IR is the bucket, and nil for a project that keeps its uploads in memory.
+//
+// Nil rather than an empty struct because [ir.Files.S3] is omitempty: a
+// document for a memory project has to stay byte for byte what it was, or every
+// such project's API revision moves the day s3 becomes possible.
+func (f Files) s3IR() *ir.FilesS3 {
+	if f.Backend != BackendS3 {
+		return nil
+	}
+	return &ir.FilesS3{
+		Bucket:       f.S3.Bucket,
+		BucketEnv:    f.S3.BucketEnv,
+		Region:       f.S3.Region,
+		Endpoint:     f.S3.Endpoint,
+		AccessKeyEnv: f.S3.AccessKeyEnv,
+		SecretKeyEnv: f.S3.SecretKeyEnv,
 	}
 }

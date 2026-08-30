@@ -208,14 +208,16 @@ func (e *emitter) hasFiles() bool {
 // rather than a literal in a main function nobody diffs.
 func (e *emitter) filesFile() (gen.Artifact, error) {
 	cfgIR := e.doc.API.Files
-	if cfgIR.Backend != backendMemory {
-		// The adapter is a module of its own and has not shipped. Refusing here
-		// is the honest failure: the alternative is an application that names a
-		// bucket, starts cleanly, and keeps every upload in a map a restart
-		// empties.
+	if cfgIR.Backend != backendMemory && cfgIR.Backend != backendS3 {
 		return gen.Artifact{}, fmt.Errorf(
-			"files.backend is %q, and only %q has shipped: the S3 adapter is a module of its own",
-			cfgIR.Backend, backendMemory)
+			"files.backend is %q, and the backends that exist are %q and %q",
+			cfgIR.Backend, backendMemory, backendS3)
+	}
+	if cfgIR.Backend == backendS3 && cfgIR.S3 == nil {
+		// The document said s3 and carried no bucket, which means it was written
+		// by something other than this repository's compiler. Refusing beats
+		// emitting a store addressed at the empty string.
+		return gen.Artifact{}, fmt.Errorf("files.backend is s3 and the document names no bucket")
 	}
 
 	b := gobuf.New(e.cfg.Package)
@@ -229,14 +231,21 @@ func (e *emitter) filesFile() (gen.Artifact, error) {
 		poolPkg  = b.Import("github.com/jackc/pgx/v5/pgxpool")
 	)
 
-	b.Comment("NewFiles builds this project's file handling from its `files:` block.\n\n" +
+	b.Comment("NewFilesWithStore builds this project's file handling around a store " +
+		"you supply.\n\n" +
+		"Everything but the store came from the `files:` block in rig.yaml, so a " +
+		"byte cap or a sweep interval is a line somebody can read there rather " +
+		"than a literal in a main function nobody diffs.\n\n" +
 		"The pool is the same one the repositories use, and that is not a detail: " +
 		"the transaction that finalizes a file and writes the row pointing at it " +
 		"has to be one transaction, and it cannot be if the two live in different " +
-		"pools.")
-	b.L("func NewFiles(db %s.DB) *%s.Service {", filesPkg, filesPkg)
+		"pools.\n\n" +
+		"This is the seam a test uses. A project keeping its uploads in a bucket " +
+		"still has to be runnable without one — pass blob.NewMemory() and the " +
+		"same handlers, the same caps and the same sweeper run against a map.")
+	b.L("func NewFilesWithStore(db %s.DB, store %s.Store) *%s.Service {", filesPkg, blobPkg, filesPkg)
 	b.L("return %s.New(%s.Config{", filesPkg, filesPkg)
-	b.L("Store: %s.NewMemory(),", blobPkg)
+	b.L("Store: store,")
 	b.L("DB: db,")
 	b.L("MaxBytes: %d,", cfgIR.MaxBytes)
 	b.L("InlineTypes: []string{%s},", quoteAll(cfgIR.InlineTypes))
@@ -245,6 +254,21 @@ func (e *emitter) filesFile() (gen.Artifact, error) {
 	b.L("})")
 	b.L("}")
 	b.NL()
+
+	if cfgIR.Backend == backendS3 {
+		e.filesS3Constructor(b, cfgIR, ctxPkg, filesPkg)
+	} else {
+		b.Comment("NewFiles builds this project's file handling from its `files:` block.\n\n" +
+			"`files.backend` is memory, so the objects live in a map: this is for " +
+			"tests and `go run`, and a restart empties it. The bucket-backed " +
+			"constructor has a context and an error because reaching one can fail; " +
+			"a map cannot, and pretending otherwise would be a signature apologising " +
+			"for a backend this project does not use.")
+		b.L("func NewFiles(db %s.DB) *%s.Service {", filesPkg, filesPkg)
+		b.L("return NewFilesWithStore(db, %s.NewMemory())", blobPkg)
+		b.L("}")
+		b.NL()
+	}
 
 	b.Comment("FileSweeper is the housekeeping task: abandoned uploads, and trash " +
 		"past the restore window.\n\n" +
@@ -262,10 +286,77 @@ func (e *emitter) filesFile() (gen.Artifact, error) {
 	return artifact("files.gen.go", b)
 }
 
-// backendMemory is the only backend that has shipped. It is spelled here rather
-// than imported from the project package because a generator reads the document
-// and not the configuration.
-const backendMemory = "memory"
+// The backends, spelled here rather than imported from the project package
+// because a generator reads the document and not the configuration.
+const (
+	backendMemory = "memory"
+	backendS3     = "s3"
+)
+
+// rigs3Module is the adapter, and it is a module of its own so that a project
+// on the memory backend never has an AWS SDK in its go.mod. The import below is
+// the only thing in anything rig generates that reaches for it, which is what
+// makes `backend: s3` in rig.yaml the whole of the decision.
+const rigs3Module = "github.com/simonjanss/rig/rigs3"
+
+// filesS3Constructor emits the bucket-backed NewFiles.
+//
+// It differs from the memory one in two ways that are both consequences of
+// talking to somebody else's server. It takes a context, because building the
+// store reads the bucket's lifecycle configuration. And it returns an error,
+// because every part of that can fail — which is why the signature is not the
+// same as the memory backend's: a `NewFiles` that could not report a missing
+// bucket would report it by panicking on the first upload instead.
+func (e *emitter) filesS3Constructor(b *gobuf.Buf, cfgIR *ir.Files, ctxPkg, filesPkg string) {
+	var (
+		osPkg    = b.Import("os")
+		timePkg  = b.Import("time")
+		rigs3Pkg = b.Import(rigs3Module)
+	)
+
+	b.Comment("NewFiles builds this project's file handling from its `files:` block.\n\n" +
+		"The bucket is reached once here rather than on the first upload, and the " +
+		"error is the point: a bucket that cannot be addressed, or one whose own " +
+		"lifecycle rule would take the bytes before `files.restore_window` says " +
+		"they are restorable, stops the process at startup instead of losing a " +
+		"file a month later.\n\n" +
+		"The credentials are read from the environment, because rig.yaml names " +
+		"the variables rather than holding the secrets. Leaving them unset is a " +
+		"real answer: the adapter falls back to the AWS default chain, which is " +
+		"what an instance profile or IRSA wants.\n\n" +
+		"For a test, or anything else that should not need a bucket, build the " +
+		"service with NewFilesWithStore instead.")
+	b.L("func NewFiles(ctx %s.Context, db %s.DB) (*%s.Service, error) {", ctxPkg, filesPkg, filesPkg)
+	b.L("store, err := %s.New(ctx, %s.Config{", rigs3Pkg, rigs3Pkg)
+	b.L("Bucket: %s,", s3Bucket(cfgIR.S3, osPkg))
+	if cfgIR.S3.Region != "" {
+		b.L("Region: %s,", gobuf.Quote(cfgIR.S3.Region))
+	}
+	if cfgIR.S3.Endpoint != "" {
+		b.L("Endpoint: %s,", gobuf.Quote(cfgIR.S3.Endpoint))
+	}
+	b.L("AccessKeyID: %s.Getenv(%s),", osPkg, gobuf.Quote(cfgIR.S3.AccessKeyEnv))
+	b.L("SecretAccessKey: %s.Getenv(%s),", osPkg, gobuf.Quote(cfgIR.S3.SecretKeyEnv))
+	b.L("RestoreWindow: %d * %s.Second,", cfgIR.RestoreWindowSeconds, timePkg)
+	b.L("})")
+	b.L("if err != nil {")
+	b.L("return nil, err")
+	b.L("}")
+	b.L("return NewFilesWithStore(db, store), nil")
+	b.L("}")
+	b.NL()
+}
+
+// s3Bucket is the expression naming the bucket: a literal when rig.yaml said
+// which one, and a read of the environment when it named a variable instead —
+// which is what a bucket that differs per deployment needs. Validation refuses
+// a configuration that gives both, so there is no precedence to decide here.
+func s3Bucket(cfg *ir.FilesS3, osPkg string) string {
+	if cfg.BucketEnv != "" {
+		return fmt.Sprintf("%s.Getenv(%s)", osPkg, gobuf.Quote(cfg.BucketEnv))
+	}
+	return gobuf.Quote(cfg.Bucket)
+}
 
 // quoteAll renders a list of strings as Go literals.
 func quoteAll(values []string) string {

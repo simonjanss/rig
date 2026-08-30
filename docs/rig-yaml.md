@@ -624,9 +624,64 @@ past the window — and no third: finding unreferenced files means enumerating
 every foreign key pointing at `rig_file`, and the failure mode of getting that
 wrong is deleting somebody's data.
 
-> **`backend: s3` has not shipped.** The adapter is a module of its own, and
-> `rig generate` refuses the setting rather than writing wiring that would keep
-> every upload in a map a restart empties.
+### `files.s3`
+
+`backend: memory` keeps objects in a map, which is right for a test and for
+`go run` and is not durable. `backend: s3` is a bucket, and it needs one more
+block:
+
+```yaml
+files:
+  enabled: true
+  backend: s3
+  restore_window: 720h
+  s3:
+    bucket: acme-uploads       # or bucket_env, not both
+    region: eu-north-1
+    endpoint: ""               # for MinIO, R2, anything that is not AWS
+    access_key_env: AWS_ACCESS_KEY_ID
+    secret_key_env: AWS_SECRET_ACCESS_KEY
+```
+
+`bucket` and `bucket_env` are the same setting written two ways, and naming both
+is refused: `bucket_env` is for a bucket whose name differs per deployment, and
+the generated code reads the variable at startup. `region` is required unless
+`endpoint` is set — AWS will not guess one, and a service reached by endpoint
+usually has no regions at all.
+
+**`endpoint` also selects path-style addressing**, because virtual-host style
+asks DNS to resolve `<bucket>.<endpoint>` and almost nothing but AWS answers
+that. There is no separate setting, because there is no combination of the two
+worth writing down.
+
+**The credentials are variable names, not values**, the way the OAuth client
+secrets are: `rig.yaml` is a file you commit. Leaving them at their defaults and
+setting nothing in the environment is a real answer — the adapter falls back to
+the AWS default credential chain, which is what an instance profile, IRSA or a
+laptop with `aws configure` already provides.
+
+The adapter is [`rig/rigs3`](https://pkg.go.dev/github.com/simonjanss/rig/rigs3),
+a module of its own, and the generated `files.gen.go` is the only thing that
+imports it — so a project on `memory` never compiles an AWS SDK.
+
+> **A bucket lifecycle rule has to outlive `restore_window`, and rig checks.**
+> The rule somebody adds on purpose is the dangerous one: expire what rig
+> tagged deleted, and let the bucket do the sweeping. Set that to seven days
+> while `restore_window` is thirty and a restore inside the window succeeds and
+> hands back a row pointing at nothing.
+>
+> The adapter reads the bucket's lifecycle configuration once, at startup, and
+> refuses to start when a rule that could reach rig's objects expires them
+> sooner than the window. Give it room: S3 counts those days from when an object
+> was **written**, not from when it was deleted, so a rule that only just
+> outlives the window still expires a year-old file the moment somebody deletes
+> it. A rule comfortably longer than the window, or no rule at all.
+
+Because `NewFiles` on this backend has to reach the bucket, it takes a context
+and returns an error, which the memory one does not. Both backends also get
+`NewFilesWithStore`, so a test of a project that stores its uploads in a bucket
+can run against `blob.NewMemory()` without one — see
+[generators.md](generators.md).
 
 ## `notifications`
 

@@ -1,6 +1,6 @@
 name: release
 
-# Only the root tag. A release creates ten — v0.1.0 for the root module and
+# Only the root tag. A release creates eleven — v0.1.0 for the root module and
 # runtime/v0.1.0, auth/v0.1.0 and so on for the rest — and `v*` matches the
 # first and none of the others, because a glob does not cross a slash and the
 # submodule tags do not begin with a v. So one release, one run.
@@ -193,6 +193,11 @@ jobs:
           go get github.com/simonjanss/rig/auth@${{ github.ref_name }}
           go get github.com/simonjanss/rig/migrate@${{ github.ref_name }}
           go get github.com/simonjanss/rig/rigclient@${{ github.ref_name }}
+          # rigs3 is here because it is the newest module and therefore the one
+          # whose first tag is most likely to be the one nobody can resolve. It
+          # also requires files, so importing it proves that edge of the graph
+          # too.
+          go get github.com/simonjanss/rig/rigs3@${{ github.ref_name }}
           cat > main.go <<'GO'
           package main
 
@@ -200,6 +205,7 @@ jobs:
           	_ "github.com/simonjanss/rig/auth/session"
           	_ "github.com/simonjanss/rig/migrate"
           	_ "github.com/simonjanss/rig/rigclient"
+          	_ "github.com/simonjanss/rig/rigs3"
           	_ "github.com/simonjanss/rig/runtime/serve"
           )
 

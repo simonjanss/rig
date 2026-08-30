@@ -197,6 +197,14 @@ type Files struct {
 	Expose bool `json:"expose,omitempty"`
 	// Backend is where the bytes go: memory or s3.
 	Backend string `json:"backend"`
+	// S3 is the bucket, for a project whose backend is s3, and nil for one
+	// whose backend is memory.
+	//
+	// Nil rather than a zero struct, so that a document for a project keeping
+	// its uploads in memory is byte for byte what it was before this field
+	// existed — which is what keeps the API revision of every such project from
+	// moving because a backend it does not use became possible.
+	S3 *FilesS3 `json:"s3,omitempty"`
 
 	// MaxBytes caps one upload. A hard per-file cap and not a quota.
 	MaxBytes int64 `json:"max_bytes"`
@@ -212,6 +220,34 @@ type Files struct {
 	// CookieDownloads accepts the session cookie on file GET routes, so a
 	// stored URL works in an img or a download link.
 	CookieDownloads bool `json:"cookie_downloads,omitempty"`
+}
+
+// FilesS3 is the bucket a project on the s3 backend writes to, and how to reach
+// it.
+//
+// The credentials are the names of environment variables rather than values,
+// the way the OAuth client secrets are: rig.yaml is a file people commit, so
+// the generated code reads the environment and rig never carries the secret.
+type FilesS3 struct {
+	// Bucket is the bucket name, and BucketEnv names an environment variable
+	// holding it. Exactly one of them is set — a project that named both would
+	// have given two answers to one question, and validation refuses it.
+	Bucket    string `json:"bucket,omitempty"`
+	BucketEnv string `json:"bucket_env,omitempty"`
+
+	// Region is the bucket's region.
+	Region string `json:"region,omitempty"`
+	// Endpoint points at something other than AWS — MinIO, R2, a test double.
+	// Setting it also selects path-style addressing, because virtual-host style
+	// asks DNS to resolve a name almost nothing but AWS answers.
+	Endpoint string `json:"endpoint,omitempty"`
+
+	// AccessKeyEnv and SecretKeyEnv name the environment variables the
+	// credentials are read from. Both empty at the point of use means the AWS
+	// default credential chain, which is what an instance profile or IRSA
+	// wants.
+	AccessKeyEnv string `json:"access_key_env,omitempty"`
+	SecretKeyEnv string `json:"secret_key_env,omitempty"`
 }
 
 // Notifications is the resolved notifications block: whether this project has an

@@ -1,6 +1,7 @@
 package project_test
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -113,6 +114,19 @@ func TestFilesDiagnostics(t *testing.T) {
 			want: "which bucket",
 		},
 		{
+			// Two answers to one question, and the generated code reads one.
+			name: "s3 naming the bucket twice",
+			body: "files:\n  enabled: true\n  backend: s3\n  s3:\n    bucket: uploads\n" +
+				"    bucket_env: UPLOADS_BUCKET\n    region: eu-north-1\n",
+			want: "set one of them",
+		},
+		{
+			// AWS will not guess a region, and without an endpoint this is AWS.
+			name: "s3 with nothing to address the bucket with",
+			body: "files:\n  enabled: true\n  backend: s3\n  s3:\n    bucket: uploads\n",
+			want: "no region and no endpoint",
+		},
+		{
 			name: "a cap that accepts nothing",
 			body: "files:\n  enabled: true\n  max_bytes: -1\n",
 			want: "negative cap",
@@ -180,5 +194,67 @@ files:
 	}
 	if f.S3.Bucket != "" {
 		t.Errorf("bucket = %q; bucket_env was given instead and nothing should invent one", f.S3.Bucket)
+	}
+}
+
+// An endpoint is enough on its own: the services behind one mostly have no
+// regions, and the adapter tells the signer a default so it has a string.
+func TestFilesAcceptsAnEndpointWithoutARegion(t *testing.T) {
+	if _, out := parseFiles(t, "files:\n  enabled: true\n  backend: s3\n  s3:\n"+
+		"    bucket: uploads\n    endpoint: http://127.0.0.1:9000\n"); out != "" {
+		t.Fatalf("an endpoint should be enough to address a bucket:\n%s", out)
+	}
+}
+
+// The bucket has to reach the document, or the generator has nothing to write
+// into the wiring and every s3 project names the same nothing.
+func TestTheBucketReachesTheDocument(t *testing.T) {
+	p, out := parseFiles(t, `files:
+  enabled: true
+  backend: s3
+  s3:
+    bucket: uploads
+    region: eu-north-1
+    endpoint: http://minio.internal:9000
+`)
+	if out != "" {
+		t.Fatalf("this configuration should be accepted:\n%s", out)
+	}
+
+	got := p.Config.Files.IR()
+	if got.S3 == nil {
+		t.Fatal("the s3 block did not reach the document, so the generator has no bucket to name")
+	}
+	if got.S3.Bucket != "uploads" || got.S3.Region != "eu-north-1" {
+		t.Errorf("the document says bucket %q in region %q", got.S3.Bucket, got.S3.Region)
+	}
+	if got.S3.Endpoint != "http://minio.internal:9000" {
+		t.Errorf("the document says endpoint %q", got.S3.Endpoint)
+	}
+	// Defaulted rather than left empty, so the generated code names a variable.
+	if got.S3.AccessKeyEnv != project.DefaultAccessKeyEnv {
+		t.Errorf("access_key_env reached the document as %q", got.S3.AccessKeyEnv)
+	}
+}
+
+// A memory project's document has to stay what it was, or every one of them
+// gets a new API revision the day a backend it does not use becomes possible.
+func TestAMemoryProjectCarriesNoBucket(t *testing.T) {
+	p, out := parseFiles(t, "files:\n  enabled: true\n")
+	if out != "" {
+		t.Fatalf("this configuration should be accepted:\n%s", out)
+	}
+
+	got := p.Config.Files.IR()
+	if got.S3 != nil {
+		t.Error("a memory project carries an s3 block, which moves the document hash of every project that has one")
+	}
+
+	encoded, err := json.Marshal(got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encoded), `"s3"`) {
+		t.Errorf("the encoded block mentions s3:\n%s", encoded)
 	}
 }

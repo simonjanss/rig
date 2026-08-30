@@ -1,10 +1,10 @@
 // Command release prepares a lockstep release of every published rig module.
 //
-// rig is ten modules in one repository, and they are not independent: the
+// rig is eleven modules in one repository, and they are not independent: the
 // binary links auth, files, migrate, notify, presence and runtime, and it
 // generates code that imports them. A rig that generates against a runtime API
 // released under a different number is a rig nobody can use, so there is one
-// version for all ten, and one commit that sets it everywhere.
+// version for all eleven, and one commit that sets it everywhere.
 //
 // What this does, in order:
 //
@@ -29,7 +29,7 @@
 //
 //	--push     the submodule tags in one push, then the root tag by itself.
 //	           GitHub creates no push event for a batch of more than three
-//	           tags, so pushing all ten fires no release workflow at all.
+//	           tags, so pushing all of them fires no release workflow at all.
 //	--verify   whether the tag produced a release: the tags on origin, the run
 //	           it was supposed to trigger, the GitHub release and its archives,
 //	           npm, and a real `go install`. A workflow that never started looks
@@ -83,7 +83,7 @@ const releaseWorkflow = "release.yaml"
 const usage = `usage: make release VERSION=v0.1.0     (or: go run ./internal/release <version>)
        make release-dry VERSION=v0.1.0
 
-Cuts one version across all ten published Go modules and all three npm
+Cuts one version across all eleven published Go modules and all three npm
 packages: rewrites every intra-repository requirement, sets the package.json
 versions, commits, and tags.
 
@@ -318,13 +318,13 @@ push, release the fix as the next patch version rather than moving %s.
 // The order is the whole point, and it is not tidiness. GitHub creates no push
 // event for a batch of more than three tags, and `release.yaml` triggers on
 // `v*` — so `git push origin --tags`, which is what this command used to print,
-// sends all ten at once and fires nothing. The tags land, the release looks
+// sends all eleven at once and fires nothing. The tags land, the release looks
 // done, and there are no binaries, no GitHub release and nothing on npm. That
 // is what happened to v0.2.0, which had to be superseded by v0.2.1 to get a
 // build.
 //
 // Pushing the root tag alone, last, makes the trigger a single-ref event no
-// batching rule can swallow. Last rather than first because the nine are what
+// batching rule can swallow. Last rather than first because the others are what
 // the root's go.mod requires: by the time anything reacts to `v*`, the versions
 // it resolves are already there.
 func pushTags(mods []mod, version string) error {

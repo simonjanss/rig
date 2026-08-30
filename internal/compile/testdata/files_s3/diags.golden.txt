@@ -1,0 +1,2 @@
+error[RIG6010] testdata/files_s3/tables/profile_attachment.yaml:11:3: foreign key profile_attachment.document_file_id is not covered by an index
+error[RIG6030] testdata/files_s3/tables/profile_attachment.yaml:16:3: column profile_attachment.thumbnail_file_id references profile, so it should be named profile_id or <qualifier>_profile_id
