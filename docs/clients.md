@@ -476,10 +476,11 @@ generators:
     out_dir: web/src/api
 ```
 
-> **Not published yet.** `@rig-ts/client` and `@rig-ts/electric` live in
-> [ts/](../ts) and are not on a registry, so the names below are what the
-> generator emits rather than something you can install. Point them somewhere
-> real with the `client_import` and `electric_import`
+> **The packages.** `@rig-ts/client`, `@rig-ts/electric` and `@rig-ts/presence`
+> are on npm, at the same version as the rig that generated the code importing
+> them — `rig version` with its leading `v` stripped. The names below are what
+> the generator emits by default; point them somewhere else with the
+> `client_import` and `electric_import`
 > [options](generators.md#options-briefly) — a file: specifier, a workspace, or
 > a registry of your own.
 

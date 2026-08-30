@@ -14,7 +14,9 @@
 //  2. refuses to continue if any of them still replaces a sibling, because a
 //     replace directive is exactly what a published module may not carry;
 //  3. rewrites every intra-repository requirement to the new version;
-//  4. commits, and tags: vX.Y.Z for the root, <dir>/vX.Y.Z for the rest.
+//  4. commits if that rewrote anything, and tags either way: vX.Y.Z for the
+//     root, <dir>/vX.Y.Z for the rest. A version already in place is not a
+//     version already released — the tags are what release it.
 //
 // It does not push and it does not tidy. Not tidying is not an oversight: `go
 // mod tidy` is a single-module operation that resolves from the proxy and
@@ -222,8 +224,24 @@ func run(args []string) error {
 		return nil
 	}
 
-	if err := git("git", "commit", "-am", "release "+version); err != nil {
+	// Nothing to commit is not nothing to do. The tree was clean going in, so
+	// the only changes here are the ones just written — and a rewrite that
+	// wrote none means the version is already what it should be. That is the
+	// ordinary state of a first release, whose versions were set in the commit
+	// that added this command, and of a second attempt after one failed
+	// between the commit and the tags. `git commit -am` fails on an empty
+	// commit, so asking it for one would abort the release with every tag
+	// still uncreated, which is the one outcome worth avoiding here.
+	dirty, err := changed()
+	if err != nil {
 		return err
+	}
+	if dirty {
+		if err := git("git", "commit", "-am", "release "+version); err != nil {
+			return err
+		}
+	} else {
+		fmt.Printf("\nnothing to rewrite — %s is already what the tree says; tagging HEAD\n", version)
 	}
 	for _, m := range mods {
 		if err := git("git", "tag", "-a", m.Tag(version), "-m", m.Path+" "+version); err != nil {
@@ -365,6 +383,17 @@ func checkClean() error {
 		return fmt.Errorf("the working tree is not clean:\n%s", out)
 	}
 	return nil
+}
+
+// changed reports whether there is anything to commit. Called after the
+// rewrite and only there, where — because [checkClean] passed first — the
+// answer is exactly whether the rewrite wrote anything.
+func changed() (bool, error) {
+	out, err := output("git", "status", "--porcelain")
+	if err != nil {
+		return false, err
+	}
+	return len(strings.TrimSpace(string(out))) > 0, nil
 }
 
 // setNPMVersion rewrites a package.json's own version in place.

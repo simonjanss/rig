@@ -58,6 +58,13 @@ changelog:
       - "^chore:"
 
 release:
+  # A prerelease tag is a rehearsal, and marking it as one is the whole reason
+  # it is cheap: GitHub's /releases/latest skips prereleases, and that endpoint
+  # is what .github/actions/setup-rig reads to resolve `version: latest`. The
+  # default here is false, which would make v0.1.0-rc.1 the binary every
+  # pipeline downloads.
+  prerelease: auto
+
   # rig is ten modules and a release tags all ten, so the notes say which
   # versions to pin — the whole point of releasing them in lockstep.
   footer: |

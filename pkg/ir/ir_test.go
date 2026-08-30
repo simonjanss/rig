@@ -146,7 +146,6 @@ func TestHashTracksContent(t *testing.T) {
 	}
 }
 
-// The revision is derived from the hash, so a hash that saw it would never
 // A release of rig is not a change to anybody's API. The tool that produced a
 // document is written into it and must not be compared by it, or upgrading the
 // generator would move every project's revision and tell every client the API
@@ -174,6 +173,7 @@ func TestHashIgnoresTheTool(t *testing.T) {
 	}
 }
 
+// The revision is derived from the hash, so a hash that saw it would never
 // settle: stamping would move the hash, which would move the revision.
 func TestHashIgnoresTheRevision(t *testing.T) {
 	t.Parallel()

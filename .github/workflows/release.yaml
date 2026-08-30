@@ -107,10 +107,21 @@ jobs:
         working-directory: ts
         run: |
           set -euo pipefail
+
+          # The dist-tag, which npm will not infer. Unlike the Go proxy, `npm
+          # publish` puts whatever it is given on `latest` unless told
+          # otherwise — so an unqualified publish of v0.1.0-rc.1 would make the
+          # rehearsal the default `npm install` for everyone. A hyphen in a
+          # semantic version is a prerelease and nothing else.
+          tag=latest
+          case "${GITHUB_REF_NAME#v}" in
+            *-*) tag=next ;;
+          esac
+
           for p in client electric presence; do
             tarball=$(cd "packages/$p" && pnpm pack --pack-destination "$RUNNER_TEMP" | tail -1)
-            npm publish "$tarball" --provenance
-            echo "published @rig-ts/$p"
+            npm publish "$tarball" --provenance --tag "$tag"
+            echo "published @rig-ts/$p at $tag"
           done
 
   # The check that the workspace cannot do. Inside the repository go.work
