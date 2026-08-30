@@ -226,7 +226,7 @@ func (e *emitter) shapesMount(b *gobuf.Buf) {
 		"thing about a part it cannot tell an omission from a decision about.")
 	b.L("if h.Shapes.App != nil {")
 	b.L("h.Shapes.App.DrainWithin(%s, %s, h.Shapes.Proxy.Drain)",
-		gobuf.Quote("shapes"), shapesConst)
+		gobuf.Quote(shapesStep), shapesConst)
 	b.L("} else if h.Server.Logger != nil {")
 	b.L("h.Server.Logger.Info(%s, %s, %s)",
 		gobuf.Quote("live-sync shapes are mounted with no App to drain them"),

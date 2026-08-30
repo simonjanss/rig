@@ -219,7 +219,9 @@ engine := api.NewNotificationEngine(pool, reg)
 and then handed back rather than started: `Engine` is a field on `api.Parts`,
 and `api.Main` starts it, drains it and registers its shutdown — all three, so
 the number it is closed within and the number `api.ShutdownBudget()` counts for
-it cannot drift apart.
+it cannot drift apart. Fifteen seconds, and
+`serve.Config.Shutdown: api.Shutdown{Notifications: ...}` is how a deployment
+asks for another — see [services.md](services.md).
 
 ```go
 return api.Parts{Handler: mux, Engine: engine}, nil

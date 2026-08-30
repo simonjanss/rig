@@ -58,7 +58,10 @@ the page, built in the order they depend on each other; `files:`, `presence:` an
 `tracing:`, `notifications:`, `presence:`, `auth:` and a table's `electric:`
 register a shutdown step are added up into a `ShutdownBudget` — the number your
 `main.go` writes as `MaxShutdown`, which is the one `serve.Config` field with no
-default because it is the one an operator has to copy into a manifest.
+default because it is the one an operator has to copy into a manifest. The same
+steps give it a `Shutdown`, with a field per step this project registers and no
+others, for the deployment that wants one of them sized differently —
+[services.md](services.md) has it.
 
 `run.gen.go` is the order those parts come to exist in, which used to be a
 sequence every `main.go` wrote out. `Parts` has one field per lifetime longer

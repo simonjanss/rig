@@ -329,8 +329,8 @@ func (e *emitter) notifyStarter(b *gobuf.Buf) {
 		"never ran one, did not.")
 	b.L("func StartNotificationEngine(app *%s.App, engine *%s.Engine) {", servePkg, notifyPkg)
 	b.L("engine.Start()")
-	b.L("app.Drain(%s, engine.StopClaiming)", gobuf.Quote("notifications"))
-	b.L("app.CloseWithin(%s, %s, engine.Close)", gobuf.Quote("notifications"), notificationsConst)
+	b.L("app.Drain(%s, engine.StopClaiming)", gobuf.Quote(notificationsStep))
+	b.L("app.CloseWithin(%s, %s, engine.Close)", gobuf.Quote(notificationsStep), notificationsConst)
 	b.L("}")
 	b.NL()
 }

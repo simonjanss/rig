@@ -493,6 +493,21 @@ func (e *emitter) mainFunc(b *gobuf.Buf) {
 	slogPkg := b.Import("log/slog")
 	osPkg := b.Import("os")
 
+	b.Comment("What this project's own shutdown needs, which is [ShutdownBudget] " +
+		"unless the deployment sized its steps.\n\n" +
+		"Asked through an interface rather than by asserting [Shutdown] back out " +
+		"of the field, so that a pointer to one — or a set a project wrote " +
+		"itself — is read here too. What the two checks below say is only worth " +
+		"anything if the number in it is the one the config being read would " +
+		"actually produce.")
+	b.L("budget := ShutdownBudget()")
+	if len(e.shutdownSteps()) > 0 {
+		b.L("if s, ok := cfg.Shutdown.(interface{ Budget() %s.Duration }); ok {", b.Import("time"))
+		b.L("budget = s.Budget()")
+		b.L("}")
+	}
+	b.NL()
+
 	b.Comment("Before a database is opened or a process is built, because this is " +
 		"answerable without either and the answer belongs in a deployment rather " +
 		"than in a log at shutdown.\n\n" +
@@ -503,8 +518,30 @@ func (e *emitter) mainFunc(b *gobuf.Buf) {
 		"removing either loses the half it names.")
 	b.L("if cfg.MaxShutdown == 0 {")
 	b.L("%s.Error(\"MaxShutdown is required: state it in the serve.Config above\",", slogPkg)
-	b.L("\"budget\", ShutdownBudget(), \"drain delay\", cfg.DrainDelay, \"write\", ShutdownBudget()+cfg.DrainDelay)")
+	b.L("\"budget\", budget, \"drain delay\", cfg.DrainDelay, \"write\", budget+cfg.DrainDelay)")
 	b.L("%s.Exit(2)", osPkg)
+	b.L("}")
+	b.NL()
+
+	b.Comment("And a number that was stated but is smaller than what this project " +
+		"asks for, which is the same failure one step later: a total written " +
+		"once and left behind by a block turned on in rig.yaml, or by a step " +
+		"sized in the serve.Config above.\n\n" +
+		"Said rather than refused, because this side cannot tell the difference " +
+		"between a step that is counted and a step that is registered. " +
+		"[ShutdownBudget] counts every step this project's configuration " +
+		"describes, including one whose part a build returns nil for — so a " +
+		"number below it is sometimes exactly right, and refusing it here would " +
+		"be refusing a server rig cannot see. serve has the last word: it adds " +
+		"up what was actually registered and refuses a budget that cannot hold " +
+		"it. What this catches is the case that reaches serve as a warning about " +
+		"a shutdown with nothing left for the requests in flight, at the moment " +
+		"there is still a literal on screen to fix.")
+	b.L("if cfg.MaxShutdown < budget+cfg.DrainDelay {")
+	b.L("%s.Warn(\"MaxShutdown is less than this project's own shutdown asks for: "+
+		"the requests still in flight get what is left of it\",", slogPkg)
+	b.L("\"max shutdown\", cfg.MaxShutdown, \"budget\", budget, " +
+		"\"drain delay\", cfg.DrainDelay, \"write\", budget+cfg.DrainDelay)")
 	b.L("}")
 	b.NL()
 

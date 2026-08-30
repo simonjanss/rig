@@ -279,3 +279,117 @@ func TestAProjectWithNoTablesStillGetsTheFile(t *testing.T) {
 		t.Errorf("an empty project's task table is not the one every project has:\n%s", src)
 	}
 }
+
+// The one thing above a deployment can disagree with is a struct with a field
+// per step this project registers, and no others.
+//
+// A map keyed on the names serve matches would have done the same job and would
+// have made a misspelling a number nobody read. The names stay strings inside
+// the generated file, which is where they already were; what a main function
+// writes is a field, and what a field costs to get wrong is a compilation.
+func TestTheShutdownSetHasAFieldPerStepAndNoOthers(t *testing.T) {
+	t.Parallel()
+
+	doc := gentest.LoadDocument(t, filepath.Join("testdata", "notify.ir.json"))
+	doc.API.Tracing = &ir.Tracing{Enabled: true, ServiceName: "notify"}
+	src := artifactNamed(t, gentest.Run(t, servergo.New(), doc, opts()), "process.gen.go")
+
+	body := regexp.MustCompile(`type Shutdown struct \{\n((?s).*?)\n\}`).FindStringSubmatch(src)
+	if body == nil {
+		t.Fatalf("no Shutdown to read:\n%s", src)
+	}
+	for _, want := range []string{"Traces", "Notifications", "Shapes", "Auth"} {
+		if !strings.Contains(body[1], want+" time.Duration") {
+			t.Errorf("a step this project registers has no field: %s", want)
+		}
+	}
+	// The fixture has no presence, so there is no way to write a number for a
+	// sweeper this server does not run.
+	if strings.Contains(body[1], "Presence") {
+		t.Errorf("a step this project does not register is settable:\n%s", body[1])
+	}
+
+	// And each field reaches the name that step is registered under, which is
+	// the only place those two spellings meet.
+	for field, name := range map[string]string{
+		"Traces": "traces", "Notifications": "notifications", "Shapes": "shapes", "Auth": "auth",
+	} {
+		want := `steps = append(steps, serve.Step{Name: "` + name + `", Timeout: s.` + field + `})`
+		if !strings.Contains(src, want) {
+			t.Errorf("Steps does not carry %s across: want %q", field, want)
+		}
+	}
+}
+
+// Budget is the same sum ShutdownBudget is, with whatever was set in place of
+// what it replaced — and the headroom, which is not a step and not this
+// struct's to shorten.
+func TestTheShutdownSetsBudgetIsTheSameSum(t *testing.T) {
+	t.Parallel()
+
+	doc := gentest.LoadDocument(t, filepath.Join("testdata", "presence.ir.json"))
+	src := artifactNamed(t, gentest.Run(t, servergo.New(), doc, opts()), "process.gen.go")
+
+	body := regexp.MustCompile(`func \(s Shutdown\) Budget\(\) time\.Duration \{\n\treturn ([^\n]+)\n\}`).
+		FindStringSubmatch(src)
+	if body == nil {
+		t.Fatalf("no Shutdown.Budget to read:\n%s", src)
+	}
+	if !strings.Contains(body[1], "cmp.Or(s.Presence, presenceShutdown)") {
+		t.Errorf("the budget does not fall back to the generated number: %q", body[1])
+	}
+	if !strings.HasSuffix(body[1], "+ shutdownHeadroom") {
+		t.Errorf("the headroom is not in the budget, or is not last: %q", body[1])
+	}
+	if strings.Contains(src, "Headroom time.Duration") {
+		t.Error("the headroom is settable, and it is not a step")
+	}
+}
+
+// A project with no step of rig's gets no set either. There would be no field
+// to put in it.
+func TestAProjectWithNoRigStepGetsNoShutdownSet(t *testing.T) {
+	t.Parallel()
+
+	doc := gentest.LoadDocument(t, filepath.Join("testdata", fixture))
+	for i := range doc.API.Resources {
+		doc.API.Resources[i].Electric = nil
+	}
+	src := artifactNamed(t, gentest.Run(t, servergo.New(), doc, opts()), "process.gen.go")
+
+	if strings.Contains(src, "type Shutdown struct") {
+		t.Errorf("a project with nothing to size got a set to size it with:\n%s", src)
+	}
+}
+
+// The flush is the one step with a half that never sees an App, so it is the
+// one that has to be told twice.
+//
+// Attach registers the server's half on an App, which is where serve applies
+// what Config.Shutdown said. Close is what a `Tasks:` entry reaches — no mount,
+// no App, nowhere for that to have happened — so Configure reads the same
+// number on the way past and both halves spend it.
+func TestTheFlushIsSizedOnBothOfItsHalves(t *testing.T) {
+	t.Parallel()
+
+	doc := gentest.LoadDocument(t, filepath.Join("testdata", fixture))
+	doc.API.Tracing = &ir.Tracing{Enabled: true, ServiceName: "traced"}
+	src := artifactNamed(t, gentest.Run(t, servergo.New(), doc, opts()), "process.gen.go")
+
+	// Aligned by gofmt against whatever else is in the literal, so the field
+	// and its value are matched rather than the spacing between them.
+	if !regexp.MustCompile(`traces:\s+tracesShutdown,`).MatchString(src) {
+		t.Errorf("the flush does not start at the generated number:\n%s", src)
+	}
+	for _, want := range []string{
+		"for _, s := range cfg.Shutdown.Steps() {",
+		`if s.Name == "traces" && s.Timeout > 0 {`,
+		"p.traces = s.Timeout",
+		`app.CloseWithin("traces", p.traces, p.tracing.Shutdown)`,
+		"flushing, cancel := context.WithTimeout(context.Background(), p.traces)",
+	} {
+		if !strings.Contains(src, want) {
+			t.Errorf("the flush's two halves are not sized together: missing %q\n%s", want, src)
+		}
+	}
+}

@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"time"
 
 	"github.com/simonjanss/rig/observe"
 	"github.com/simonjanss/rig/runtime/apibase"
@@ -209,6 +210,18 @@ func (p *Process) Mount(build Build) serve.Mount {
 // [Mount] with serve.Main or serve.Run instead. This is the arrangement
 // rig.yaml describes, not the only one it allows.
 func Main(cfg serve.Config, build Build) {
+	// What this project's own shutdown needs, which is [ShutdownBudget] unless the
+	// deployment sized its steps.
+	//
+	// Asked through an interface rather than by asserting [Shutdown] back out of
+	// the field, so that a pointer to one — or a set a project wrote itself —
+	// is read here too. What the two checks below say is only worth anything if
+	// the number in it is the one the config being read would actually produce.
+	budget := ShutdownBudget()
+	if s, ok := cfg.Shutdown.(interface{ Budget() time.Duration }); ok {
+		budget = s.Budget()
+	}
+
 	// Before a database is opened or a process is built, because this is
 	// answerable without either and the answer belongs in a deployment rather than
 	// in a log at shutdown.
@@ -220,8 +233,27 @@ func Main(cfg serve.Config, build Build) {
 	// names.
 	if cfg.MaxShutdown == 0 {
 		slog.Error("MaxShutdown is required: state it in the serve.Config above",
-			"budget", ShutdownBudget(), "drain delay", cfg.DrainDelay, "write", ShutdownBudget()+cfg.DrainDelay)
+			"budget", budget, "drain delay", cfg.DrainDelay, "write", budget+cfg.DrainDelay)
 		os.Exit(2)
+	}
+
+	// And a number that was stated but is smaller than what this project asks for,
+	// which is the same failure one step later: a total written once and left
+	// behind by a block turned on in rig.yaml, or by a step sized in the
+	// serve.Config above.
+	//
+	// Said rather than refused, because this side cannot tell the difference
+	// between a step that is counted and a step that is registered.
+	// [ShutdownBudget] counts every step this project's configuration describes,
+	// including one whose part a build returns nil for — so a number below it is
+	// sometimes exactly right, and refusing it here would be refusing a server rig
+	// cannot see. serve has the last word: it adds up what was actually registered
+	// and refuses a budget that cannot hold it. What this catches is the case that
+	// reaches serve as a warning about a shutdown with nothing left for the
+	// requests in flight, at the moment there is still a literal on screen to fix.
+	if cfg.MaxShutdown < budget+cfg.DrainDelay {
+		slog.Warn("MaxShutdown is less than this project's own shutdown asks for: the requests still in flight get what is left of it",
+			"max shutdown", cfg.MaxShutdown, "budget", budget, "drain delay", cfg.DrainDelay, "write", budget+cfg.DrainDelay)
 	}
 
 	process, err := NewProcess()

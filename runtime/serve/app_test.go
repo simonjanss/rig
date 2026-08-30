@@ -445,3 +445,140 @@ func TestTheReadyBodyNamesWhatWasChecked(t *testing.T) {
 		t.Errorf("body = %q, want the pool ping named", body)
 	}
 }
+
+// steps is a [Shutdown] written by hand, which is what a hand-written main has
+// and what these tests use in place of the generated struct.
+type steps []Step
+
+func (s steps) Steps() []Step { return s }
+
+// A number in Config.Shutdown replaces the one the step was registered with.
+//
+// The registration is generated code — `api.StartPresenceSweeper` and the four
+// beside it — so this is the only place a deployment can disagree with it, and
+// the disagreement has to reach the step rather than only the arithmetic: what
+// it buys is a flush that gives up sooner, not a smaller number in a log line.
+func TestConfigShutdownResizesTheStepItNames(t *testing.T) {
+	app := &App{Logger: quiet()}
+	app.limit(steps{{Name: "presence", Timeout: 2 * time.Second}})
+
+	app.CloseWithin("presence", 5*time.Second, func(context.Context) error { return nil })
+	app.DrainWithin("shapes", 5*time.Second, func(context.Context) error { return nil })
+
+	if got := app.stop[0].Timeout; got != 2*time.Second {
+		t.Errorf("the presence step got %s, want the 2s the config asked for", got)
+	}
+	if got := app.drain[0].Timeout; got != 5*time.Second {
+		t.Errorf("a step nothing sized got %s, want the 5s it was registered with", got)
+	}
+
+	// And the arithmetic follows, because it is read off the same steps: a
+	// deployment that shortens a step is one whose budget has room it did not
+	// have before.
+	if total, _ := app.declared(0); total != 7*time.Second {
+		t.Errorf("the declared total is %s, want 7s — the resized step and the untouched one", total)
+	}
+}
+
+// A zero is "I did not say", not "no limit at all".
+//
+// It is the whole reason the generated set is a struct: most of its fields are
+// zero most of the time, and a zero that reached the step would turn every
+// step the deployment did not mention into one bounded only by what is left of
+// the budget — which is the opposite of what sizing one asks for.
+func TestAZeroInConfigShutdownLeavesTheStepAlone(t *testing.T) {
+	app := &App{Logger: quiet()}
+	app.limit(steps{{Name: "traces"}, {Name: "auth", Timeout: 0}})
+
+	app.CloseWithin("traces", 5*time.Second, func(context.Context) error { return nil })
+
+	if got := app.stop[0].Timeout; got != 5*time.Second {
+		t.Errorf("a step sized with a zero got %s, want the 5s it was registered with", got)
+	}
+}
+
+// A step nobody registers is refused before the server listens.
+//
+// The same failure the configuration blocks are refused for — a number
+// somebody set and believed in, read by nothing — and worth more here than
+// elsewhere, because what is believed is about a shutdown. Nobody watches one
+// until the day it drops requests, and by then the evidence is a killed
+// process rather than a value that did nothing.
+func TestConfigShutdownIsRefusedWhenNothingRegistersTheStep(t *testing.T) {
+	app := &App{Logger: quiet()}
+	app.limit(steps{{Name: "notifications", Timeout: 10 * time.Second}})
+	app.CloseWithin("presence", 5*time.Second, func(context.Context) error { return nil })
+
+	err := app.checkShutdown(context.Background(), time.Minute, 0)
+	if err == nil {
+		t.Fatal("a shutdown step nothing registers was accepted")
+	}
+	for _, want := range []string{"notifications", "presence"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the refusal does not name %q: %v", want, err)
+		}
+	}
+}
+
+// And one that does reach a step is not refused, however many were left out.
+func TestConfigShutdownIsAcceptedWhenTheStepIsThere(t *testing.T) {
+	app := &App{Logger: quiet()}
+	app.limit(steps{{Name: "presence", Timeout: 2 * time.Second}})
+	app.CloseWithin("presence", 5*time.Second, func(context.Context) error { return nil })
+	app.DrainWithin("shapes", 5*time.Second, func(context.Context) error { return nil })
+
+	if err := app.checkShutdown(context.Background(), time.Minute, 0); err != nil {
+		t.Errorf("a shutdown that sizes a step this server has was refused: %v", err)
+	}
+}
+
+// The unbounded half of a two-step name stays unbounded.
+//
+// `api.StartNotificationEngine` registers both halves of the engine under
+// "notifications": a drain that stops it claiming, unbounded on purpose, and a
+// close that finishes what it claimed within fifteen seconds. A number that
+// reached both would be counted twice by [App.declared] while the generated
+// Shutdown.Budget counts it once — so shortening the engine would grow the
+// total its own budget has to hold, and a set built with Budget would be
+// refused by the check that reads it.
+func TestConfigShutdownLeavesTheUnboundedHalfOfAStepAlone(t *testing.T) {
+	app := &App{Logger: quiet()}
+	app.limit(steps{{Name: "notifications", Timeout: 10 * time.Second}})
+
+	app.Drain("notifications", func(context.Context) error { return nil })
+	app.CloseWithin("notifications", 15*time.Second, func(context.Context) error { return nil })
+	app.DrainWithin("shapes", 5*time.Second, func(context.Context) error { return nil })
+
+	if got := app.drain[0].Timeout; got != 0 {
+		t.Errorf("the engine's drain got %s, want the no limit it was registered with", got)
+	}
+	if got := app.stop[0].Timeout; got != 10*time.Second {
+		t.Errorf("the engine's close got %s, want the 10s the config asked for", got)
+	}
+
+	// Ten for the engine and five for the subscriptions, and the drain that
+	// declared nothing still declares nothing. The same numbers the generated
+	// Shutdown.Budget adds the headroom to.
+	if total, _ := app.declared(0); total != 15*time.Second {
+		t.Errorf("the declared total is %s, want 15s — the engine counted once", total)
+	}
+}
+
+// And a name that only ever reached the unbounded form is refused, because
+// that number went nowhere.
+func TestConfigShutdownIsRefusedWhenTheStepItNamesHasNoLimit(t *testing.T) {
+	app := &App{Logger: quiet()}
+	app.limit(steps{{Name: "store", Timeout: 2 * time.Second}})
+	app.Close("store", func(context.Context) error { return nil })
+	app.CloseWithin("presence", 5*time.Second, func(context.Context) error { return nil })
+
+	err := app.checkShutdown(context.Background(), time.Minute, 0)
+	if err == nil {
+		t.Fatal("a shutdown step with no limit to replace was sized and accepted")
+	}
+	for _, want := range []string{"store", "presence"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the refusal does not name %q: %v", want, err)
+		}
+	}
+}
