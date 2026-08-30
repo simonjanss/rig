@@ -58,7 +58,11 @@ type server struct {
 	engine *notify.Engine
 }
 
-func newServer(t *testing.T) *server {
+// testPool is the database these tests run against, or a skip.
+//
+// $DATABASE_URL rather than a fixed port, because `make examples` and an
+// isolated `rig db up` both publish somewhere the test cannot guess.
+func testPool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
 
 	dsn := os.Getenv("DATABASE_URL")
@@ -76,6 +80,14 @@ func newServer(t *testing.T) *server {
 		t.Skipf("no database at %s: %v — run `rig db up` first", dsn, err)
 	}
 	t.Cleanup(pool.Close)
+	return pool
+}
+
+func newServer(t *testing.T) *server {
+	t.Helper()
+
+	ctx := context.Background()
+	pool := testPool(t)
 
 	// The same function main uses, so what the tests drive is what ships. No
 	// monitoring page: mounting one would need a password in the environment

@@ -20,6 +20,10 @@
       <span class="pulse" id="pulse"></span>
       <span class="updated" id="updated" aria-live="polite"></span>
     </div>
+    <!-- What this server depends on, asked rather than remembered: the page
+         holds the probe, so a dependency that comes back shows up on the next
+         poll without any traffic having to find it first. -->
+    <div class="checks" id="checks" aria-live="polite"></div>
     <div class="tabs" role="tablist" aria-label="View">
       <button type="button" role="tab" id="tab-requests" aria-controls="panel-requests" aria-selected="true">Requests</button>
       <button type="button" role="tab" id="tab-logs" aria-controls="panel-logs" aria-selected="false">Logs</button>

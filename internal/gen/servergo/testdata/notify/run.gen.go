@@ -13,13 +13,14 @@ import (
 
 	"github.com/simonjanss/rig/auth"
 	"github.com/simonjanss/rig/notify"
+	"github.com/simonjanss/rig/runtime/electric"
 	"github.com/simonjanss/rig/runtime/serve"
 )
 
 // Parts is what this application's own wiring built, as far as the process
-// around it has to care: the routes to serve, and the notification engine and
-// the auth cache's invalidation channel — the things whose lifetime is
-// longer than a request's.
+// around it has to care: the routes to serve, and the notification engine, the
+// sync proxy and the auth cache's invalidation channel — the things whose
+// lifetime is longer than a request's.
 //
 // Every field beside the handler is something rig starts, drains or closes on
 // the other side of the one call that returns this, and each used to be a line
@@ -52,6 +53,21 @@ type Parts struct {
 	// method on a service, so the registry it resolves through is filled where
 	// this application builds its services.
 	Engine *notify.Engine
+
+	// Proxy is the sync service this server's shape routes forward through — the
+	// same *electric.Proxy given to Handlers.Shapes, named again here.
+	//
+	// Twice because the two uses are different questions. Register mounts the
+	// routes with it and cannot fail; this is the one that asks the sync service
+	// whether it is there, while the server is still starting and while refusing
+	// to start is still an option. [CheckSyncService] is what happens to the
+	// answer.
+	//
+	// Nil is allowed, and is what a project that generated its shapes and has not
+	// written a front end for them yet has. It is said out loud rather than
+	// refused, because rig cannot tell that project from one that meant to wire a
+	// proxy and did not.
+	Proxy *electric.Proxy
 
 	// Auth is the authentication foundation over this project's pool, and is
 	// [New]'s return value.
@@ -112,6 +128,17 @@ func Mount(build Build) serve.Mount {
 			// cannot tell a project that meant it from one that forgot — so what it can
 			// do is say so once, while it is still cheap to fix.
 			app.Logger.InfoContext(ctx, "no notification engine in this server", "cost", "an inbox line waits for the dispatch-notifications task rather than arriving milliseconds after the commit")
+		}
+
+		if parts.Proxy != nil {
+			if err := CheckSyncService(ctx, app, parts.Proxy); err != nil {
+				return nil, err
+			}
+		} else {
+			// Said rather than left to be discovered. Leaving it out is allowed — rig
+			// cannot tell a project that meant it from one that forgot — so what it can
+			// do is say so once, while it is still cheap to fix.
+			app.Logger.InfoContext(ctx, "no sync service in this server", "cost", "no shape route is mounted and nothing on this server live-syncs")
 		}
 
 		if parts.Auth != nil {

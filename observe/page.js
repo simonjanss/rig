@@ -154,11 +154,15 @@ async function load() {
   if (inFlight) return;
   inFlight = true;
   try {
+    // Both, because the dependency pills are in the header and belong to
+    // neither tab. Started together so a slow probe does not delay the list.
+    const checks = loadChecks();
     if (state.tab === "requests") {
       await loadTraces();
     } else {
       await loadLogs();
     }
+    await checks;
     lastLoad = new Date();
     $("pulse").className = "pulse on";
   } catch (err) {
@@ -196,6 +200,39 @@ async function loadLogs() {
   $("note-logs").textContent = data.reason || "";
   renderLevels(data.levels || {});
   renderLogs(data.logs || []);
+}
+
+// loadChecks is on its own path and its own failure. The dependency pills are
+// beside the request list rather than part of it, and a probe round that fails
+// should not blank the list or claim the page could not load — the page loaded,
+// and what it has to say is that it cannot tell.
+async function loadChecks() {
+  const box = $("checks");
+  let data;
+  try {
+    data = await get("checks.json", {});
+  } catch {
+    box.replaceChildren();
+    return;
+  }
+  const checks = data.checks || [];
+  if (!checks.length) {
+    // The reason rather than an empty row, which reads as "no dependencies,
+    // all fine" — the one answer this is never allowed to give by accident.
+    box.replaceChildren(el("span", "why", data.reason || ""));
+    return;
+  }
+  box.replaceChildren(
+    ...checks.map((c) => {
+      const pill = el("span", "dep " + (c.ok ? "ok" : "bad"), c.name);
+      // The whole of why it is failing, on hover, because a status pill has
+      // room for a name and nothing else and the reason is the useful half.
+      pill.title = c.ok
+        ? c.name + " answered in " + c.ms + "ms"
+        : c.detail || c.name + " is not answering";
+      return pill;
+    }),
+  );
 }
 
 function service(name) {

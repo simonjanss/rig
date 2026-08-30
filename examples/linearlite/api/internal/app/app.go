@@ -327,7 +327,12 @@ func New(ctx context.Context, cfg Config) (api.Parts, error) {
 	// package is what lets the sequence live there too, and what turns
 	// forgetting one from a shutdown that misbehaves under load into a build
 	// that does not finish.
-	return api.Parts{Handler: mux, Engine: engine, Auth: front}, nil
+	// Proxy is the same one Handlers.Shapes above was registered with, named
+	// again because the two uses are different questions. There it mounts the
+	// routes; here it is asked, once and while refusing to start is still an
+	// option, whether the sync service is actually answering — which is the
+	// difference between a board that renders and a boot that looked fine.
+	return api.Parts{Handler: mux, Engine: engine, Auth: front, Proxy: proxy}, nil
 }
 
 // autoInvite is what happens when a stranger signs themselves up: an account

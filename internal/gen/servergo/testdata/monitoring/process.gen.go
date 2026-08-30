@@ -281,6 +281,13 @@ func (p *Process) Attach(app *serve.App) {
 	// of the pair — the half a task run reaches.
 	app.CloseWithin("traces", tracesShutdown, p.tracing.Shutdown)
 
+	// The database, on the monitoring page, beside whatever else this server
+	// registers. The probe rather than a state, so the pill answers whether the
+	// pool can reach Postgres now — which is the question somebody looking at
+	// that page during an incident is asking, and one the request list can only
+	// answer for requests that have already failed.
+	p.page.Watch("database", app.Pool.Ping)
+
 	// Said rather than left to be discovered. An address and a password are a
 	// deployment's to set, so a missing one is not a failure: it is an environment
 	// saying it does not want this. Empty for no visible reason is the outcome

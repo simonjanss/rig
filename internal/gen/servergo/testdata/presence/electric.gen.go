@@ -5,6 +5,10 @@
 package api
 
 import (
+	"context"
+	"fmt"
+	"time"
+
 	"github.com/simonjanss/rig/runtime/electric"
 	"github.com/simonjanss/rig/runtime/serve"
 	"github.com/simonjanss/rig/runtime/tenancy"
@@ -13,6 +17,76 @@ import (
 // DefaultElectricURL is the sync service configured when this was generated. A
 // deployment can point somewhere else by building its own proxy.
 const DefaultElectricURL = "http://electric:3000"
+
+// ElectricRequired is whether this project decided it cannot serve without
+// live sync.
+//
+// It comes from server-go's electric_required in rig.yaml, and it is what
+// [CheckSyncService] does with a sync service that is not answering: false
+// warns and carries on, true refuses to start and puts the sync service in the
+// readiness check.
+const ElectricRequired = false
+
+// syncProbeTimeout bounds the one question asked at boot. It is inside the
+// server's own MaxStartup, and short because the answer wanted here is "is it
+// there" rather than "will it eventually be": a sync service still connecting
+// to its database is reported as not serving, which is the honest answer and
+// the one that comes back on its own.
+const syncProbeTimeout = 5 * time.Second
+
+// syncHint is what to tell somebody whose sync service is not there.
+//
+// The counterpart of the serve.Config.Hint the database has, and it is here
+// for the same reason that one is a field: the address a shape route forwards
+// to is a container in development and a deployed service in production, and
+// printing the wrong one is worse than printing nothing.
+const syncHint = "run `rig db up` to start the sync service, or set $ELECTRIC_URL"
+
+// CheckSyncService asks the sync service whether it is serving, once, while
+// the server is still starting.
+//
+// Called by [Mount] with whatever the application put in Parts.Proxy, so a
+// project gets this without writing it. What it does with a bad answer is
+// [ElectricRequired]: an error that stops the boot, or a warning and a server
+// that starts anyway.
+//
+// A nil proxy is not a failure in either case, and returns without a word: rig
+// cannot tell a project that has not built a front end for its shapes yet from
+// one that forgot to wire the proxy, and [Mount] is where that is said.
+//
+// When this project said live sync is required, it also registers the probe as
+// a readiness check, so an instance that loses the sync service is taken out
+// of the load balancer rather than left in it answering nothing.
+func CheckSyncService(ctx context.Context, app *serve.App, proxy *electric.Proxy) error {
+	if proxy == nil {
+		// Nothing to ask, and nothing said either: [Mount] is the caller that can tell
+		// a nil Parts.Proxy from an absent one, and it already logged which. Saying it
+		// again here would be the same line twice for every project that left the
+		// field alone.
+		return nil
+	}
+
+	probe, cancel := context.WithTimeout(ctx, syncProbeTimeout)
+	defer cancel()
+
+	if err := proxy.Health(probe); err != nil {
+		if ElectricRequired {
+			return fmt.Errorf("%w (%s)", err, syncHint)
+		}
+		app.Logger.WarnContext(ctx, "the sync service is not answering", "error", err, "hint", syncHint, "cost", "a shape with a fallback serves a snapshot; the rest answer 502")
+		return nil
+	}
+
+	app.Logger.InfoContext(ctx, "the sync service is answering")
+
+	if ElectricRequired {
+		// Only when the project said so. By default a sync outage must not take every
+		// replica out of the load balancer at once: the shapes with a fallback are
+		// still serving, and so is every route that never touched the sync service.
+		app.Ready("sync service", proxy.Health)
+	}
+	return nil
+}
 
 // Shapes is this server's live-sync half: the proxy the shape routes forward
 // through, and one scoping function per shape.

@@ -84,6 +84,34 @@ func (e *emitter) parts() []part {
 		})
 	}
 
+	if e.hasShapes() {
+		list = append(list, part{
+			field: "Proxy",
+			noun:  "the sync proxy",
+			typ:   func(b *gobuf.Buf) string { return "*" + b.Import(electricModule) + ".Proxy" },
+			doc: "Proxy is the sync service this server's shape routes forward " +
+				"through — the same *electric.Proxy given to Handlers.Shapes, named " +
+				"again here.\n\n" +
+				"Twice because the two uses are different questions. Register mounts " +
+				"the routes with it and cannot fail; this is the one that asks the " +
+				"sync service whether it is there, while the server is still starting " +
+				"and while refusing to start is still an option. [CheckSyncService] " +
+				"is what happens to the answer.\n\n" +
+				"Nil is allowed, and is what a project that generated its shapes and " +
+				"has not written a front end for them yet has. It is said out loud " +
+				"rather than refused, because rig cannot tell that project from one " +
+				"that meant to wire a proxy and did not.",
+			said: "no sync service in this server",
+			cost: "no shape route is mounted and nothing on this server live-syncs",
+			attach: func(b *gobuf.Buf) string {
+				if e.monitoring() {
+					return "if err := CheckSyncService(ctx, app, page, parts.Proxy); err != nil {\nreturn nil, err\n}"
+				}
+				return "if err := CheckSyncService(ctx, app, parts.Proxy); err != nil {\nreturn nil, err\n}"
+			},
+		})
+	}
+
 	if e.hasAuth() {
 		list = append(list, part{
 			field: "Auth",

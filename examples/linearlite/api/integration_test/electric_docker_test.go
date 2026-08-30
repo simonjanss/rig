@@ -3,14 +3,19 @@
 package integration
 
 import (
+	"context"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/exec"
 	"strings"
 	"testing"
 
+	"github.com/simonjanss/rig/examples/linearlite/internal/api"
 	"github.com/simonjanss/rig/examples/linearlite/internal/app"
+	"github.com/simonjanss/rig/observe"
+	"github.com/simonjanss/rig/runtime/serve"
 )
 
 // The shape routes, against a real sync service when one is around.
@@ -337,4 +342,54 @@ func hasContainerEngine() bool {
 		}
 	}
 	return false
+}
+
+// The boot check says which it found, and — with electric_required off, which
+// is what this project generates — starts either way.
+//
+// It drives api.Mount rather than app.New, because Mount is where the check
+// lives: app.New builds the proxy and Mount is what asks it anything. That is
+// also the only difference between this and the test above, which goes through
+// app.New and therefore never reaches the check at all.
+func TestTheBootSaysWhetherTheSyncServiceIsThere(t *testing.T) {
+	pool := testPool(t)
+
+	for _, tc := range []struct {
+		name string
+		url  string
+		want string
+	}{
+		// A closed port rather than an absent variable, so the answer cannot
+		// come from a sync service a developer happens to have running.
+		{"not there", "http://127.0.0.1:1", "the sync service is not answering"},
+		{"there", electricURL(), "the sync service is answering"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.name == "there" && os.Getenv("ELECTRIC_URL") == "" {
+				t.Skip("no $ELECTRIC_URL: run `rig db up` here and export the sync URL it prints")
+			}
+			t.Setenv("ELECTRIC_URL", tc.url)
+
+			var said strings.Builder
+			log := slog.New(slog.NewTextHandler(&said, &slog.HandlerOptions{Level: slog.LevelInfo}))
+			lifecycle := &serve.App{Pool: pool, Logger: log}
+
+			handler, err := api.Mount(func(ctx context.Context, a *serve.App, _ *observe.Page) (api.Parts, error) {
+				return app.New(ctx, app.Config{
+					Pool: pool, Logger: log, App: a, ElectricURL: tc.url,
+				})
+			})(context.Background(), lifecycle)
+			// Not a refusal: this project did not say live sync is required, and
+			// every shape here has a fallback.
+			if err != nil {
+				t.Fatalf("the server did not start without the sync service: %v", err)
+			}
+			if handler == nil {
+				t.Fatal("no handler")
+			}
+			if !strings.Contains(said.String(), tc.want) {
+				t.Errorf("the boot never said %q:\n%s", tc.want, said.String())
+			}
+		})
+	}
 }

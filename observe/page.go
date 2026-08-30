@@ -2,6 +2,7 @@ package observe
 
 import (
 	"cmp"
+	"context"
 	"crypto/subtle"
 	_ "embed"
 	"encoding/json"
@@ -9,8 +10,11 @@ import (
 	"net/http"
 	"net/netip"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
 )
 
 // PasswordEnv is where the monitoring page's password comes from unless the
@@ -51,6 +55,10 @@ const (
 	// is the one guard against a brute force, because there is no lockout and
 	// no rate limit here — see the package documentation.
 	MinPasswordLength = 12
+	// DefaultCheckTimeout bounds one round of [PageConfig.Checks]. A probe that
+	// hangs is a probe that has already answered, and the page would rather show
+	// a dependency as failing than show nothing at all while it waits.
+	DefaultCheckTimeout = 2 * time.Second
 )
 
 // The page's assets: markup, style and behaviour, one file each rather than one
@@ -160,6 +168,34 @@ type PageConfig struct {
 	// [PageConfig.Addr] is the boundary — bind the page somewhere the balancer
 	// is not — and this list is what narrows the addresses on that network.
 	Allow []string
+
+	// Checks are the dependencies the page shows the state of, beside the
+	// requests and the logs.
+	//
+	// The page holds the probe rather than a state somebody pushed to it, which
+	// is what makes it answer the question actually being asked — "is the
+	// database there now" — rather than "was it there when something last
+	// happened to touch it". A dependency that comes back is visible on the next
+	// poll without any traffic having to discover it first.
+	//
+	// It is not in rig.yaml and cannot be: a probe is a function. A generated
+	// Monitoring() therefore leaves this empty, and the wiring that has the pool
+	// and the sync proxy calls [Page.Watch].
+	Checks []Check
+
+	// CheckTimeout bounds one round of Checks, all of them together. Zero means
+	// [DefaultCheckTimeout].
+	CheckTimeout time.Duration
+}
+
+// Check is one dependency the monitoring page asks about.
+//
+// Probe returns nil when the dependency is there. Anything else is shown as
+// failing, with the error's text as the detail — so write the error for somebody
+// reading a status pill at three in the morning, not for a stack trace.
+type Check struct {
+	Name  string
+	Probe func(ctx context.Context) error
 }
 
 // Page is rig's monitoring page: the last requests this server served, and the
@@ -178,6 +214,11 @@ type Page struct {
 	allow []netip.Prefix
 	// unarmed is why this page will serve nothing, or empty when it will.
 	unarmed string
+
+	// mu guards checks, which Watch appends to while the page is being wired
+	// and checks.json ranges over once it is serving.
+	mu     sync.Mutex
+	checks []Check
 }
 
 // Page builds the monitoring page over the span file this provider is writing.
@@ -205,6 +246,7 @@ func (p *Provider) Page(cfg PageConfig) (*Page, error) {
 	cfg.BasePath = cmp.Or(cfg.BasePath, DefaultMonitorPath)
 	cfg.MaxTraces = cmp.Or(cfg.MaxTraces, DefaultMaxTraces)
 	cfg.MaxLogs = cmp.Or(cfg.MaxLogs, DefaultMaxLogs)
+	cfg.CheckTimeout = cmp.Or(cfg.CheckTimeout, DefaultCheckTimeout)
 	cfg.PasswordEnv = cmp.Or(cfg.PasswordEnv, PasswordEnv)
 
 	if !strings.HasPrefix(cfg.BasePath, "/") || strings.HasSuffix(cfg.BasePath, "/") {
@@ -217,6 +259,7 @@ func (p *Provider) Page(cfg PageConfig) (*Page, error) {
 	}
 
 	pg := &Page{cfg: cfg, logs: cfg.Logs, password: cmp.Or(cfg.Password, os.Getenv(cfg.PasswordEnv)), allow: allow}
+	pg.checks = append(pg.checks, cfg.Checks...)
 	if p != nil {
 		pg.file = p.cfg.File
 	}
@@ -350,6 +393,7 @@ func (pg *Page) Mount(mux *http.ServeMux) {
 	mux.Handle("GET "+pg.cfg.BasePath+"/page.js", pg.guard(pg.asset("text/javascript; charset=utf-8", pageJS)))
 	mux.Handle("GET "+pg.cfg.BasePath+"/traces.json", pg.guard(pg.serveTraces))
 	mux.Handle("GET "+pg.cfg.BasePath+"/logs.json", pg.guard(pg.serveLogs))
+	mux.Handle("GET "+pg.cfg.BasePath+"/checks.json", pg.guard(pg.serveChecks))
 }
 
 // guard is the address list and then the password, in that order.
@@ -699,6 +743,125 @@ func attrsMatch(attrs map[string]any, term string) bool {
 		}
 	}
 	return false
+}
+
+// Watch adds a dependency to the page after it has been built.
+//
+// It exists because of the order rig starts things in: the page is built by
+// NewProcess, before there is a pool to ping or a sync proxy to ask, and the
+// wiring that has those runs later with the page already in hand.
+//
+//	page.Watch("database", app.Pool.Ping)
+//
+// Safe on a nil or unarmed page, which is the same courtesy [Page.Mount] gives:
+// a caller registering a probe should not have to first find out whether the
+// environment armed the page.
+//
+// A nil probe registers nothing. There is no way to remove one.
+func (pg *Page) Watch(name string, probe func(ctx context.Context) error) {
+	if pg == nil || probe == nil {
+		return
+	}
+	pg.mu.Lock()
+	defer pg.mu.Unlock()
+	pg.checks = append(pg.checks, Check{Name: name, Probe: probe})
+}
+
+// CheckResult is one dependency's answer, as the page renders it.
+type CheckResult struct {
+	Name string `json:"name"`
+	OK   bool   `json:"ok"`
+	// Detail is the error's text when OK is false, and empty otherwise.
+	Detail string `json:"detail,omitempty"`
+	// Millis is how long the probe took, which is most of what distinguishes a
+	// dependency that is there from one that is barely there.
+	Millis int64 `json:"ms"`
+}
+
+type checkList struct {
+	Reason string        `json:"reason,omitempty"`
+	Checks []CheckResult `json:"checks"`
+}
+
+// serveChecks asks every dependency at once and reports what each one said.
+//
+// At once rather than in turn: they are independent, and one that is slow should
+// cost the page its own latency rather than everybody else's. The whole round
+// shares [PageConfig.CheckTimeout], and the wait is on that budget rather than
+// on the probes: one that ignores its context is answered for rather than
+// waited on, because a page that hangs is the one thing worse than a page
+// showing a dependency as down.
+//
+// Which is why the answers come back over a channel. Filling a slot in after
+// the round has given up would race the goroutine still writing to it, and the
+// goroutine cannot be cancelled — only a probe that reads its context can be.
+// The channel is buffered for every probe, so a late one has somewhere to put
+// its answer and exits rather than blocking until the process does.
+//
+// Always 200. This is a page telling somebody what it found, not a probe an
+// orchestrator acts on — serve's ReadinessPath is that, and it is deliberately
+// a different endpoint with a different opinion about which dependencies matter.
+func (pg *Page) serveChecks(w http.ResponseWriter, r *http.Request) {
+	pg.mu.Lock()
+	checks := slices.Clone(pg.checks)
+	pg.mu.Unlock()
+
+	out := checkList{Checks: []CheckResult{}}
+	if len(checks) == 0 {
+		out.Reason = "Nothing registered. Call Page.Watch with the dependencies this server cannot work without."
+		writeJSON(w, http.StatusOK, out)
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), pg.cfg.CheckTimeout)
+	defer cancel()
+
+	// What each dependency gets if the round ends before it answers, so a probe
+	// that never returns is still a pill with a reason on it.
+	results := make([]CheckResult, len(checks))
+	for i, c := range checks {
+		results[i] = CheckResult{
+			Name:   c.Name,
+			Detail: "did not answer within " + pg.cfg.CheckTimeout.String(),
+			Millis: pg.cfg.CheckTimeout.Milliseconds(),
+		}
+	}
+
+	type answer struct {
+		at  int
+		res CheckResult
+	}
+	answers := make(chan answer, len(checks))
+	for i, c := range checks {
+		go func() {
+			began := time.Now()
+			err := c.Probe(ctx)
+			res := CheckResult{
+				Name:   c.Name,
+				OK:     err == nil,
+				Millis: time.Since(began).Milliseconds(),
+			}
+			if err != nil {
+				res.Detail = err.Error()
+			}
+			answers <- answer{at: i, res: res}
+		}()
+	}
+
+collect:
+	for range checks {
+		select {
+		case a := <-answers:
+			results[a.at] = a.res
+		case <-ctx.Done():
+			// The budget is spent. Whatever has not answered keeps the line
+			// above, and this round reports what it has.
+			break collect
+		}
+	}
+
+	out.Checks = results
+	writeJSON(w, http.StatusOK, out)
 }
 
 func writeJSON(w http.ResponseWriter, status int, body any) {

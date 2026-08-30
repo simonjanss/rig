@@ -88,6 +88,7 @@ Every generator takes `out_dir` and an `options` block. The common ones:
 | `stub_dir` | `service-go`, `server-go` | Where your hand-owned files go — the service stub and the shape scopes, in the same directory. `{table}` and `{Table}` are substituted. Empty writes no stubs |
 | `stub_package` | `service-go`, `server-go` | Package a stub declares. Empty uses the table name |
 | `electric_url` | `server-go` | The sync service to proxy to |
+| `electric_required` | `server-go` | Whether a sync service that is not answering stops the server starting, instead of a warning at boot. Off by default |
 | `formats` | `openapi` | Which renderings to write: `json`, `yaml`, or both. Both by default |
 | `servers` | `openapi` | Origins the API answers on. Defaults to a single relative server |
 | `electric` | `openapi` | Whether the live-sync routes are described. On by default |
