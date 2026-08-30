@@ -280,6 +280,12 @@ END
 $$;
 
 ALTER PUBLICATION rig_publication ADD TABLE todo;
+
+-- The second half of the same job. Electric wants the whole old row on an
+-- update or a delete, and Postgres gates this on ownership exactly as it gates
+-- the line above — so a migration that publishes and stops has moved only one
+-- of the two things a least-privilege deployment cannot do for itself.
+ALTER TABLE todo REPLICA IDENTITY FULL;
 ```
 
 `rig validate` refuses a table that streams and is in no publication

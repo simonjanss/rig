@@ -173,13 +173,13 @@ database:
     port: 55445
 
 # rig's own tables stay in the modules that own them, so the directory below
-# holds only this example's five migrations rather than the twelve hundred lines
+# holds only this example's six migrations rather than the twelve hundred lines
 # of DDL nobody here wrote. examples/auth and examples/todo vendor theirs, which
 # is the default — between them all three readings are generated and run on every
 # check.
 #
 # The cost is admitted rather than argued away: that directory no longer says what
-# is in the database. What is in it is these five files plus whatever rig/auth,
+# is in the database. What is in it is these six files plus whatever rig/auth,
 # rig/files, rig/notify, rig/presence and rig/runtime ship, and `rig db up`
 # applies their sets first. api/main.go names both halves in one list, which is
 # the only place the order is written down.

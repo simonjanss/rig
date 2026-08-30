@@ -112,6 +112,17 @@ func Unmarshal(b []byte) (*Document, error) {
 // stay, because that is exactly what a revision is for. The sweeper's interval
 // and its grace period are housekeeping: no response carries them and no caller
 // can tell what they are, so they are cleared for the reason Monitoring is.
+//
+// [Schema.Replication] is cleared for Monitoring's reason too, together with the
+// two facts hung on each table for it — [Table.Publications] and
+// [Table.Unlogged]. It is the only thing in the document that nobody wrote: it
+// is read off the server, so it can differ between two machines holding the same
+// files and change on one of them while nobody is looking. The sync service adds
+// a table to its own publication the first time somebody subscribes, so a
+// revision that saw it would move on the day a developer opened the app, and
+// again on the day an unrelated tool published something. What a publication
+// carries decides whether a shape streams, which is why validation reads it —
+// but no response says it, so it is not what a revision is for.
 func (d *Document) Hash() (string, error) {
 	unstamped := *d
 	unstamped.Tool = ""
@@ -124,6 +135,20 @@ func (d *Document) Hash() (string, error) {
 	// revision is the question "how old is the oldest caller still calling",
 	// and a deployment appearing must not make every client look stale.
 	unstamped.API.Servers = nil
+	unstamped.Schema.Replication = nil
+	if slices.ContainsFunc(unstamped.Schema.Tables, func(t Table) bool {
+		return t.Unlogged || len(t.Publications) > 0
+	}) {
+		// A copy for the reason the three below take one: the shallow copy above
+		// shares the backing array, and clearing in place would reach the
+		// caller's document.
+		plain := slices.Clone(unstamped.Schema.Tables)
+		for i := range plain {
+			plain[i].Publications = nil
+			plain[i].Unlogged = false
+		}
+		unstamped.Schema.Tables = plain
+	}
 	if slices.ContainsFunc(unstamped.API.Resources, func(r Resource) bool { return r.Cached }) {
 		// A copy for the reason the two below take one: the shallow copy above
 		// shares the backing array, and clearing in place would reach the

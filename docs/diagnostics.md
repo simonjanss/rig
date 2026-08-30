@@ -55,7 +55,7 @@ database is not arranged to give it one.
 |---|---|---|
 | `RIG5090` | No publication a migration wrote carries the table. Publish it in one — `ALTER PUBLICATION rig_publication ADD TABLE todo`. The publication Electric maintains for itself does not count | The sync service will try to publish it on the first subscription, and can only do so from a role that owns the table — otherwise the subscription fails as an access error |
 | `RIG5091` | The table is `UNLOGGED`, so it writes no WAL | Nothing can ever follow it. The shape answers `200` with no rows, forever |
-| `RIG5092` | The server runs with `wal_level` other than `logical`. Reported once, not once per table | No publication on it can be decoded, so every shape in the project is empty |
+| `RIG5092` | The server runs with `wal_level` other than `logical`. Reported once, not once per table. `database.electric.enabled` sets it on the local container; a project with shapes and no local sync service writes `wal_level=logical` under `database.settings` instead | No publication on it can be decoded, so every shape in the project is empty |
 
 Two of those are absolute and one is not, which is worth knowing before you
 reach for a workaround. `RIG5091` and `RIG5092` describe streams that cannot

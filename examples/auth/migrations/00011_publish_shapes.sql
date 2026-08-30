@@ -27,11 +27,20 @@ $$;
 
 ALTER PUBLICATION rig_publication ADD TABLE rig_notification_recipient;
 
+-- REPLICA IDENTITY is the second half of the same job, and it is gated on
+-- ownership exactly as the line above is: Electric wants the whole old row on
+-- an update or a delete, and the default identity carries only the primary key.
+-- Publishing without it would leave the deployment this migration exists for
+-- failing on the half nobody wrote down.
+ALTER TABLE rig_notification_recipient REPLICA IDENTITY FULL;
+
 -- +goose StatementEnd
 
 -- +goose Down
 -- +goose StatementBegin
 
 DROP PUBLICATION rig_publication;
+
+ALTER TABLE rig_notification_recipient REPLICA IDENTITY DEFAULT;
 
 -- +goose StatementEnd
