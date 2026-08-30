@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -113,5 +114,42 @@ func TestTagsToPushNeedsARootModule(t *testing.T) {
 	_, _, err := tagsToPush([]mod{{Dir: "runtime", Path: modulePrefix + "/runtime"}}, "v0.3.0")
 	if err == nil {
 		t.Fatal("no error when go.work names no root module")
+	}
+}
+
+// A --dry-run that --push ignored would push tags for real, and a tag the proxy
+// has fetched cannot be moved — so the careful spelling would be the dangerous
+// one. Calling run is safe because the refusal comes before anything is read or
+// pushed, which is half of what this proves.
+func TestPushRefusesADryRun(t *testing.T) {
+	t.Parallel()
+
+	err := run([]string{"v0.3.0", "--push", "--dry-run"})
+	if err == nil {
+		t.Fatal("no error for --push --dry-run, so the tags were pushed for real")
+	}
+	if !strings.Contains(err.Error(), "--dry-run") {
+		t.Errorf("error is %q, which does not say the problem is --dry-run", err)
+	}
+}
+
+// What separates "this release failed" from "this machine has no gh": the
+// first line of what the command actually said. Reporting the second as the
+// first is how a verify tells you to supersede a release that is fine.
+func TestFirstLineIsTheSentenceNotTheBlankAboveIt(t *testing.T) {
+	t.Parallel()
+
+	for name, tc := range map[string]struct{ in, want string }{
+		"gh":     {"release not found\n", "release not found"},
+		"npm":    {"\nnpm error code E404\nnpm error 404 No match found\n", "npm error code E404"},
+		"silent": {"\n  \n", ""},
+		"empty":  {"", ""},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			if got := firstLine([]byte(tc.in)); got != tc.want {
+				t.Errorf("firstLine(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
 	}
 }

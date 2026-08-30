@@ -413,6 +413,12 @@ to, the three npm versions, and a real `go install` of the binary. The three
 surfaces fail separately — v0.2.0 had tags and no build, v0.1.0 had a build and
 an npm job that failed — and nothing said so until somebody tried to install it.
 
+**A workflow that has not finished yet looks like one that never started, too**,
+which is why the first thing verify asks is whether there is a run at all. The
+answers are opposite: an unfinished run wants five more minutes, and a missing
+one wants another version. Verify says which, and reports nothing as settled
+while a run is still going.
+
 It asks `checksums.txt` which archives shipped rather than listing them here,
 because those names are a contract: `.github/actions/setup-rig` downloads
 `rig_${version}_${os}_${arch}.tar.gz` by name, and a second copy of that

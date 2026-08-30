@@ -206,7 +206,7 @@ tidy:
 		echo ""; \
 		echo "If that says \"unknown revision <module>/vX.Y.Z\": the version in"; \
 		echo "go.mod is not tagged yet. Push the release tags first —"; \
-		echo "  git push origin --tags"; \
+		echo "  make release-push VERSION=<version>"; \
 		echo "See Releasing in AGENTS.md."; \
 		exit 1; }; done
 
@@ -242,10 +242,10 @@ release-push:
 	@$(GO) run ./internal/release $(VERSION) --push
 
 ## release-verify: check the tag actually produced a release
-##                 Tags, the GitHub release and its archives, the three npm
-##                 packages, and a real `go install` — the three surfaces fail
-##                 separately, and a workflow that never ran looks exactly like
-##                 one that succeeded. Needs `gh` and `npm`.
+##                 Tags, the workflow run itself, the GitHub release and its
+##                 archives, the three npm packages, and a real `go install` —
+##                 the surfaces fail separately, and a workflow that never ran
+##                 looks exactly like one that succeeded. Needs `gh` and `npm`.
 release-verify:
 	@$(GO) run ./internal/release $(VERSION) --verify
 

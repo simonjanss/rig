@@ -30,16 +30,18 @@
 //	--push     the submodule tags in one push, then the root tag by itself.
 //	           GitHub creates no push event for a batch of more than three
 //	           tags, so pushing all ten fires no release workflow at all.
-//	--verify   whether the tag produced a release: the tags on origin, the
-//	           GitHub release and its archives, npm, and a real `go install`.
-//	           A workflow that never started looks exactly like one that
-//	           succeeded, and nothing else here would notice.
+//	--verify   whether the tag produced a release: the tags on origin, the run
+//	           it was supposed to trigger, the GitHub release and its archives,
+//	           npm, and a real `go install`. A workflow that never started looks
+//	           exactly like one that succeeded, and nothing else here would
+//	           notice.
 //
 //	go run ./internal/release v0.1.0 [--dry-run | --push | --verify]
 package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -69,6 +71,10 @@ const modulePrefix = "github.com/simonjanss/rig"
 
 // defaultBranch is the only branch a release may be cut from.
 const defaultBranch = "main"
+
+// releaseWorkflow is the workflow a root tag is supposed to trigger, and the
+// one `--verify` asks about by name.
+const releaseWorkflow = "release.yaml"
 
 // usage is printed when no version is given, and it is the long version on
 // purpose: this is where somebody who is about to release rig without having
@@ -168,6 +174,19 @@ func run(args []string) error {
 		return fmt.Errorf("%q is not a version: want vMAJOR.MINOR.PATCH, optionally with a prerelease suffix", version)
 	}
 
+	// The flags, before anything is read or run — a combination that means two
+	// things should not get as far as doing one of them.
+	if pushing && verifying {
+		return fmt.Errorf("--push and --verify are separate steps: push, tidy, check, push main, then verify")
+	}
+	// --dry-run is what somebody cautious types before an irreversible command,
+	// and --push is the irreversible one: a tag the proxy has fetched cannot be
+	// moved. Ignoring the flag rather than refusing it would make the careful
+	// spelling the dangerous one.
+	if dryRun && (pushing || verifying) {
+		return fmt.Errorf("--dry-run previews cutting a release; --push and --verify have nothing to preview")
+	}
+
 	mods, err := modules()
 	if err != nil {
 		return err
@@ -177,9 +196,6 @@ func run(args []string) error {
 	// guards below apply: the tags they are asking about are exactly the ones
 	// `checkTags` refuses to let a release overwrite, and verifying is a
 	// read-only question about a version that is already published.
-	if pushing && verifying {
-		return fmt.Errorf("--push and --verify are separate steps: push, tidy, check, push main, then verify")
-	}
 	if pushing {
 		return pushTags(mods, version)
 	}
@@ -375,6 +391,11 @@ func tagsToPush(mods []mod, version string) (root string, siblings []string, err
 // npm (trusted publishing, which was misconfigured for v0.1.0 and silently
 // worked around by hand). Every failure is collected rather than returned, so
 // one run names everything that is wrong.
+//
+// And it asks first whether the run exists at all, because an unfinished one
+// leaves those three surfaces looking exactly like a tag that triggered
+// nothing. Waiting is the fix for the one and a new version is the fix for the
+// other, so a report that cannot tell them apart is worse than none.
 func verifyRelease(mods []mod, version string) error {
 	var root mod
 	for _, m := range mods {
@@ -409,6 +430,25 @@ func verifyRelease(mods []mod, version string) error {
 		}
 	}
 
+	// Asked before the surfaces it explains, because it is the difference
+	// between the two ways they come up empty: a tag that triggered nothing,
+	// and a run that is six minutes into a job that publishes at the end.
+	fmt.Printf("\nthe release workflow\n")
+	running := false
+	switch status, conclusion, err := workflowRun(version); {
+	case err != nil:
+		fail("asking whether %s ran for %s — %v", releaseWorkflow, version, err)
+	case status == "":
+		fail("no run of %s for %s — the tag triggered nothing", releaseWorkflow, version)
+	case status != "completed":
+		running = true
+		fmt.Printf("  wait  a run is %s — everything below may be failing only because of that\n", status)
+	case conclusion != "success":
+		fail("the run for %s %s", version, conclusion)
+	default:
+		ok("%s succeeded", releaseWorkflow)
+	}
+
 	fmt.Printf("\nGitHub release\n")
 	verifyGitHubRelease(version, ok, fail)
 
@@ -417,11 +457,14 @@ func verifyRelease(mods []mod, version string) error {
 	for _, p := range tsPackages {
 		name := "@rig-ts/" + filepath.Base(filepath.Dir(p))
 		out, err := quiet("npm", "view", name+"@"+want, "version")
-		if err != nil || strings.TrimSpace(string(out)) != want {
-			fail("%s is not published at %s", name, want)
-			continue
+		switch got := strings.TrimSpace(string(out)); {
+		case err != nil:
+			fail("%s is not published at %s — %v", name, want, err)
+		case got != want:
+			fail("%s@%s answers %q", name, want, got)
+		default:
+			ok("%s@%s", name, want)
 		}
-		ok("%s@%s", name, want)
 	}
 
 	fmt.Printf("\ninstallable from the proxy\n")
@@ -429,12 +472,51 @@ func verifyRelease(mods []mod, version string) error {
 
 	fmt.Println()
 	if len(failed) > 0 {
+		if running {
+			return fmt.Errorf("%d checks failed while the run for %s is still going — "+
+				"nothing here is settled until it finishes, so run this again rather than acting on it",
+				len(failed), version)
+		}
 		return fmt.Errorf("%d checks failed — %s is not fully released; "+
 			"a missing GitHub release or npm package is fixed by the next version, never by moving this tag",
 			len(failed), version)
 	}
+	if running {
+		fmt.Printf("%s looks right so far, but its run has not finished — check again when it has.\n", version)
+		return nil
+	}
 	fmt.Printf("%s is released: tags, binaries and npm all agree.\n", version)
 	return nil
+}
+
+// workflowRun reports the state of the most recent release.yaml run for a tag:
+// its status, and its conclusion once it has one. No run at all is no error —
+// it is an answer, and the empty status says so.
+//
+// This is the question that separates the two ways a release comes up empty.
+// v0.2.0 had no run because a ten-tag push produces no push event, and the fix
+// for that is another version. A run six minutes into a twenty-minute
+// goreleaser job has published nothing either, and the fix for that is to wait.
+// Everything below reports them identically, and the advice for one is the
+// worst possible advice for the other.
+//
+// `gh run list --branch` takes a tag: a run triggered by a tag push records the
+// tag as its head branch.
+func workflowRun(version string) (status, conclusion string, err error) {
+	out, err := quiet("gh", "run", "list",
+		"--workflow", releaseWorkflow, "--branch", version, "--limit", "1",
+		"--json", "status,conclusion")
+	if err != nil {
+		return "", "", err
+	}
+	var runs []struct{ Status, Conclusion string }
+	if err := json.Unmarshal(out, &runs); err != nil {
+		return "", "", fmt.Errorf("reading the run list: %w", err)
+	}
+	if len(runs) == 0 {
+		return "", "", nil
+	}
+	return runs[0].Status, runs[0].Conclusion, nil
 }
 
 // verifyGitHubRelease checks what goreleaser was supposed to leave behind.
@@ -448,7 +530,10 @@ func verifyRelease(mods []mod, version string) error {
 func verifyGitHubRelease(version string, ok, fail func(string, ...any)) {
 	out, err := quiet("gh", "release", "view", version, "--json", "isDraft,isPrerelease,assets")
 	if err != nil {
-		fail("no GitHub release for %s — the release workflow did not run, or did not finish", version)
+		// With the error rather than a diagnosis of it: "release not found" is
+		// the ordinary answer here, and "gh: not logged in" reaches the same
+		// branch while meaning nothing about the release at all.
+		fail("no GitHub release for %s — %v", version, err)
 		return
 	}
 	var rel struct {
@@ -745,10 +830,37 @@ func output(name string, args ...string) ([]byte, error) {
 // `gh release view` on a tag with no release prints its own — which is the
 // ordinary case during a verify, and letting it through buries the report it
 // is part of under the noise of the thing it just found.
+//
+// Captured rather than discarded, though, and the first line of it becomes the
+// error. "release not found" and "gh: not logged in" reach the same branch of
+// every caller here, and a verify that reported the second as the first would
+// be saying a release failed because nobody ran `gh auth login`.
 func quiet(name string, args ...string) ([]byte, error) {
 	out, err := exec.Command(name, args...).Output()
-	if err != nil {
-		return nil, fmt.Errorf("%s %s: %w", name, strings.Join(args, " "), err)
+	if err == nil {
+		return out, nil
 	}
-	return out, nil
+	// The line as the command wrote it, without a prefix naming the command
+	// again: every caller here already says what it was asking, and both tools
+	// label their own errors anyway ("npm error code E404"). A failure that is
+	// not an exit — no such binary — describes itself.
+	var exit *exec.ExitError
+	if errors.As(err, &exit) {
+		if line := firstLine(exit.Stderr); line != "" {
+			return nil, errors.New(line)
+		}
+	}
+	return nil, err
+}
+
+// firstLine is the first non-blank line of a command's stderr, which for both
+// `gh` and `npm` is the sentence saying what went wrong; the rest is registry
+// URLs and the path to a log file.
+func firstLine(b []byte) string {
+	for line := range strings.SplitSeq(string(b), "\n") {
+		if s := strings.TrimSpace(line); s != "" {
+			return s
+		}
+	}
+	return ""
 }
