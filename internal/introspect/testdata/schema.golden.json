@@ -271,6 +271,9 @@
           "name": "lesson_capacity_positive",
           "expression": "CHECK (((capacity IS NULL) OR (capacity \u003e 0)))"
         }
+      ],
+      "publications": [
+        "corpus_publication"
       ]
     },
     {
@@ -374,6 +377,67 @@
       ]
     },
     {
+      "name": "scratch",
+      "kind": "Base",
+      "columns": [
+        {
+          "name": "id",
+          "comment_source": "",
+          "sql_type": "uuid",
+          "udt_name": "uuid",
+          "nullable": false,
+          "ordinal": 1
+        },
+        {
+          "name": "tenant_id",
+          "comment_source": "",
+          "sql_type": "uuid",
+          "udt_name": "uuid",
+          "nullable": false,
+          "ordinal": 2
+        },
+        {
+          "name": "created_at",
+          "comment_source": "",
+          "sql_type": "timestamp with time zone",
+          "udt_name": "timestamptz",
+          "nullable": false,
+          "has_default": true,
+          "default": "now()",
+          "ordinal": 3
+        },
+        {
+          "name": "note",
+          "comment_source": "",
+          "sql_type": "text",
+          "udt_name": "text",
+          "nullable": false,
+          "ordinal": 4
+        }
+      ],
+      "primary_key": [
+        "id"
+      ],
+      "indexes": [
+        {
+          "name": "scratch_pkey",
+          "columns": [
+            "id"
+          ],
+          "unique": true,
+          "method": "btree"
+        },
+        {
+          "name": "scratch_tenant_idx",
+          "columns": [
+            "tenant_id"
+          ],
+          "method": "btree"
+        }
+      ],
+      "unlogged": true
+    },
+    {
       "name": "tag",
       "kind": "Base",
       "columns": [
@@ -460,5 +524,13 @@
         }
       ]
     }
-  ]
+  ],
+  "replication": {
+    "wal_level": "replica",
+    "publications": [
+      {
+        "name": "corpus_publication"
+      }
+    ]
+  }
 }

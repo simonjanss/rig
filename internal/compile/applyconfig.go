@@ -89,6 +89,10 @@ func ApplyConfig(api ir.API, schema ir.Schema, set *tableconf.Set, opt ConfigOpt
 		Name:   schema.Name,
 		Tables: slices.Clone(schema.Tables),
 		Enums:  slices.Clone(schema.Enums),
+		// Table configuration cannot change what the server publishes, so this
+		// is carried through as it came from introspection — named rather than
+		// left out, for the reason spelled out on the API copy below.
+		Replication: schema.Replication,
 	}
 	outAPI := ir.API{
 		Name:           api.Name,

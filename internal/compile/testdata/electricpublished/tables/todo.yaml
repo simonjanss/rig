@@ -1,0 +1,12 @@
+table: todo
+comment: A single thing someone means to get done.
+
+columns:
+  title:
+    comment: Short description of the task.
+  is_done:
+    comment: Whether the task has been completed.
+
+electric:
+  enabled: true
+  auth: tenant

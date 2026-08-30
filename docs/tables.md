@@ -468,6 +468,13 @@ only narrow a shape further.
 your columns, not by a key here: a soft-deletable table also gets a trash shape,
 and one that keeps its previous versions also gets a per-row history shape.
 
+It is not quite the whole story outside this file: Postgres replicates only a
+published table, so the table also has to be in a publication, which is one
+`ALTER PUBLICATION` in a migration. The sync service will do it for you where
+its database role owns the table and cannot where it does not, so `rig validate`
+asks you to say it rather than leaving the stream to depend on a privilege — see
+[electric.md](electric.md#the-table-has-to-be-published).
+
 ```yaml
 electric:
   enabled: true

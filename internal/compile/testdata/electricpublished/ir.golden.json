@@ -1,0 +1,1322 @@
+{
+  "ir_version": 1,
+  "generated_by": "rig (test)",
+  "api": {
+    "name": "demo",
+    "version": "v1",
+    "base_path": "/api/v1",
+    "revision_header": "API-Revision",
+    "enums": [
+      {
+        "name": "ErrorCode",
+        "description": "Machine-readable reason a request failed.",
+        "values": [
+          {
+            "name": "BadRequest",
+            "wire": "BadRequest",
+            "description": "The request was malformed or a parameter could not be parsed."
+          },
+          {
+            "name": "Unauthorized",
+            "wire": "Unauthorized",
+            "description": "No valid session or API key was presented."
+          },
+          {
+            "name": "Forbidden",
+            "wire": "Forbidden",
+            "description": "The caller is known but not permitted to do this."
+          },
+          {
+            "name": "NotFound",
+            "wire": "NotFound",
+            "description": "No such resource, or it belongs to another tenant."
+          },
+          {
+            "name": "Conflict",
+            "wire": "Conflict",
+            "description": "The request conflicts with the current state of the resource."
+          },
+          {
+            "name": "UnprocessableEntity",
+            "wire": "UnprocessableEntity",
+            "description": "The request was well-formed but failed validation."
+          },
+          {
+            "name": "RateLimited",
+            "wire": "RateLimited",
+            "description": "Too many requests. Retry after the interval in the Retry-After header."
+          },
+          {
+            "name": "TooLarge",
+            "wire": "TooLarge",
+            "description": "The request body is larger than this endpoint accepts."
+          },
+          {
+            "name": "UnsupportedMediaType",
+            "wire": "UnsupportedMediaType",
+            "description": "The body's content type is not one this endpoint accepts."
+          },
+          {
+            "name": "UpgradeRequired",
+            "wire": "UpgradeRequired",
+            "description": "The client was built against an API revision this server no longer serves."
+          },
+          {
+            "name": "Internal",
+            "wire": "Internal",
+            "description": "Something went wrong on the server."
+          }
+        ]
+      }
+    ],
+    "objects": [
+      {
+        "name": "Error",
+        "description": "Returned whenever a request fails.",
+        "fields": [
+          {
+            "name": "Code",
+            "wire": "code",
+            "description": "Machine-readable reason the request failed.",
+            "type": "ErrorCode",
+            "type_kind": "Enum",
+            "go_type": "ErrorCode"
+          },
+          {
+            "name": "Message",
+            "wire": "message",
+            "description": "Human-readable explanation. Not intended for clients to parse.",
+            "type": "String",
+            "type_kind": "Primitive",
+            "go_type": "string"
+          },
+          {
+            "name": "RequestID",
+            "wire": "requestId",
+            "description": "Identifier of this request, for correlating with server logs.",
+            "type": "String",
+            "type_kind": "Primitive",
+            "go_type": "string",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "Fields",
+            "wire": "fields",
+            "description": "Present when the failure was validation. It is shaped like the request body that failed — one member per field, holding the problem with that field — so a client can put each message beside the control it belongs to.",
+            "type": "JSON",
+            "type_kind": "Primitive",
+            "go_type": "any",
+            "modifiers": [
+              "Nullable"
+            ]
+          }
+        ],
+        "origin": "Builtin"
+      },
+      {
+        "name": "Pagination",
+        "description": "Where the returned page sits within the full result set.",
+        "fields": [
+          {
+            "name": "Offset",
+            "wire": "offset",
+            "description": "Number of rows skipped before this page.",
+            "type": "Int",
+            "type_kind": "Primitive",
+            "go_type": "int"
+          },
+          {
+            "name": "Limit",
+            "wire": "limit",
+            "description": "Maximum number of rows in this page.",
+            "type": "Int",
+            "type_kind": "Primitive",
+            "go_type": "int"
+          },
+          {
+            "name": "Total",
+            "wire": "total",
+            "description": "Total number of rows matching the query, ignoring pagination.",
+            "type": "Int64",
+            "type_kind": "Primitive",
+            "go_type": "int64"
+          }
+        ],
+        "origin": "Builtin"
+      },
+      {
+        "name": "Todo",
+        "description": "A single thing someone means to get done.",
+        "fields": [
+          {
+            "name": "ID",
+            "wire": "id",
+            "description": "Unique identifier for this row.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "uuid.UUID",
+            "read_only": true,
+            "column": {
+              "table": "todo",
+              "name": "id",
+              "sql_type": "uuid",
+              "nullable": false,
+              "scan": "UUID"
+            }
+          },
+          {
+            "name": "TenantID",
+            "wire": "tenantId",
+            "description": "Tenant this row belongs to. Every query is scoped by it.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "uuid.UUID",
+            "read_only": true,
+            "column": {
+              "table": "todo",
+              "name": "tenant_id",
+              "sql_type": "uuid",
+              "nullable": false,
+              "scan": "UUID"
+            }
+          },
+          {
+            "name": "CreatedAt",
+            "wire": "createdAt",
+            "description": "When this row was created. Set automatically and never changes.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "time.Time",
+            "read_only": true,
+            "column": {
+              "table": "todo",
+              "name": "created_at",
+              "sql_type": "timestamptz",
+              "nullable": false,
+              "scan": "Timestamptz"
+            }
+          },
+          {
+            "name": "UpdatedAt",
+            "wire": "updatedAt",
+            "description": "When this row was last updated. Set automatically on every update.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "*time.Time",
+            "modifiers": [
+              "Nullable"
+            ],
+            "read_only": true,
+            "column": {
+              "table": "todo",
+              "name": "updated_at",
+              "sql_type": "timestamptz",
+              "nullable": true,
+              "scan": "Timestamptz"
+            }
+          },
+          {
+            "name": "Title",
+            "wire": "title",
+            "description": "Short description of the task.",
+            "type": "String",
+            "type_kind": "Primitive",
+            "go_type": "string",
+            "column": {
+              "table": "todo",
+              "name": "title",
+              "sql_type": "text",
+              "nullable": false,
+              "scan": "Direct"
+            }
+          },
+          {
+            "name": "IsDone",
+            "wire": "isDone",
+            "description": "Whether the task has been completed.",
+            "type": "Bool",
+            "type_kind": "Primitive",
+            "go_type": "bool",
+            "default": "false",
+            "column": {
+              "table": "todo",
+              "name": "is_done",
+              "sql_type": "bool",
+              "nullable": false,
+              "scan": "Direct"
+            }
+          }
+        ],
+        "origin": "Projected"
+      },
+      {
+        "name": "TodoFilter",
+        "description": "Conditions a Todo must satisfy to match a search.",
+        "fields": [
+          {
+            "name": "Equals",
+            "wire": "equals",
+            "description": "Fields that must equal the given value.",
+            "type": "TodoFilterEquals",
+            "type_kind": "Object",
+            "go_type": "*TodoFilterEquals",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "NotEquals",
+            "wire": "notEquals",
+            "description": "Fields that must not equal the given value.",
+            "type": "TodoFilterEquals",
+            "type_kind": "Object",
+            "go_type": "*TodoFilterEquals",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "GreaterThan",
+            "wire": "greaterThan",
+            "description": "Fields that must be greater than the given value.",
+            "type": "TodoFilterRange",
+            "type_kind": "Object",
+            "go_type": "*TodoFilterRange",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "SmallerThan",
+            "wire": "smallerThan",
+            "description": "Fields that must be less than the given value.",
+            "type": "TodoFilterRange",
+            "type_kind": "Object",
+            "go_type": "*TodoFilterRange",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "GreaterOrEqual",
+            "wire": "greaterOrEqual",
+            "description": "Fields that must be greater than or equal to the given value.",
+            "type": "TodoFilterRange",
+            "type_kind": "Object",
+            "go_type": "*TodoFilterRange",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "SmallerOrEqual",
+            "wire": "smallerOrEqual",
+            "description": "Fields that must be less than or equal to the given value.",
+            "type": "TodoFilterRange",
+            "type_kind": "Object",
+            "go_type": "*TodoFilterRange",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "Contains",
+            "wire": "contains",
+            "description": "Fields that must be one of the given values.",
+            "type": "TodoFilterContains",
+            "type_kind": "Object",
+            "go_type": "*TodoFilterContains",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "NotContains",
+            "wire": "notContains",
+            "description": "Fields that must not be one of the given values.",
+            "type": "TodoFilterContains",
+            "type_kind": "Object",
+            "go_type": "*TodoFilterContains",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "Like",
+            "wire": "like",
+            "description": "Text fields that must match the given pattern.",
+            "type": "TodoFilterLike",
+            "type_kind": "Object",
+            "go_type": "*TodoFilterLike",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "NotLike",
+            "wire": "notLike",
+            "description": "Text fields that must not match the given pattern.",
+            "type": "TodoFilterLike",
+            "type_kind": "Object",
+            "go_type": "*TodoFilterLike",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "Null",
+            "wire": "null",
+            "description": "Fields that must be null.",
+            "type": "TodoFilterNull",
+            "type_kind": "Object",
+            "go_type": "*TodoFilterNull",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "NotNull",
+            "wire": "notNull",
+            "description": "Fields that must not be null.",
+            "type": "TodoFilterNull",
+            "type_kind": "Object",
+            "go_type": "*TodoFilterNull",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "OrCondition",
+            "wire": "orCondition",
+            "description": "Combine this filter's conditions with OR instead of AND.",
+            "type": "Bool",
+            "type_kind": "Primitive",
+            "go_type": "bool"
+          },
+          {
+            "name": "NestedFilters",
+            "wire": "nestedFilters",
+            "description": "Sub-filters combined with this one, so that AND and OR can be mixed to any depth.",
+            "type": "TodoFilter",
+            "type_kind": "Object",
+            "go_type": "[]TodoFilter",
+            "modifiers": [
+              "Array"
+            ]
+          }
+        ],
+        "origin": "Filter"
+      },
+      {
+        "name": "TodoFilterContains",
+        "description": "Set-membership conditions on Todo fields.",
+        "fields": [
+          {
+            "name": "ID",
+            "wire": "id",
+            "description": "Unique identifier for this row.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "[]uuid.UUID",
+            "modifiers": [
+              "Array"
+            ]
+          },
+          {
+            "name": "CreatedAt",
+            "wire": "createdAt",
+            "description": "When this row was created. Set automatically and never changes.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "[]time.Time",
+            "modifiers": [
+              "Array"
+            ]
+          },
+          {
+            "name": "UpdatedAt",
+            "wire": "updatedAt",
+            "description": "When this row was last updated. Set automatically on every update.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "[]time.Time",
+            "modifiers": [
+              "Array"
+            ]
+          },
+          {
+            "name": "Title",
+            "wire": "title",
+            "description": "Short description of the task.",
+            "type": "String",
+            "type_kind": "Primitive",
+            "go_type": "[]string",
+            "modifiers": [
+              "Array"
+            ]
+          },
+          {
+            "name": "IsDone",
+            "wire": "isDone",
+            "description": "Whether the task has been completed.",
+            "type": "Bool",
+            "type_kind": "Primitive",
+            "go_type": "[]bool",
+            "modifiers": [
+              "Array"
+            ]
+          }
+        ],
+        "origin": "Filter"
+      },
+      {
+        "name": "TodoFilterEquals",
+        "description": "Exact-match conditions on Todo fields.",
+        "fields": [
+          {
+            "name": "ID",
+            "wire": "id",
+            "description": "Unique identifier for this row.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "*uuid.UUID",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "CreatedAt",
+            "wire": "createdAt",
+            "description": "When this row was created. Set automatically and never changes.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "*time.Time",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "UpdatedAt",
+            "wire": "updatedAt",
+            "description": "When this row was last updated. Set automatically on every update.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "*time.Time",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "Title",
+            "wire": "title",
+            "description": "Short description of the task.",
+            "type": "String",
+            "type_kind": "Primitive",
+            "go_type": "*string",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "IsDone",
+            "wire": "isDone",
+            "description": "Whether the task has been completed.",
+            "type": "Bool",
+            "type_kind": "Primitive",
+            "go_type": "*bool",
+            "modifiers": [
+              "Nullable"
+            ]
+          }
+        ],
+        "origin": "Filter"
+      },
+      {
+        "name": "TodoFilterLike",
+        "description": "Pattern conditions on Todo text fields.",
+        "fields": [
+          {
+            "name": "Title",
+            "wire": "title",
+            "description": "Short description of the task.",
+            "type": "String",
+            "type_kind": "Primitive",
+            "go_type": "*string",
+            "modifiers": [
+              "Nullable"
+            ]
+          }
+        ],
+        "origin": "Filter"
+      },
+      {
+        "name": "TodoFilterNull",
+        "description": "Presence conditions on nullable Todo fields.",
+        "fields": [
+          {
+            "name": "UpdatedAt",
+            "wire": "updatedAt",
+            "description": "When this row was last updated. Set automatically on every update.",
+            "type": "Bool",
+            "type_kind": "Primitive",
+            "go_type": "*bool",
+            "modifiers": [
+              "Nullable"
+            ]
+          }
+        ],
+        "origin": "Filter"
+      },
+      {
+        "name": "TodoFilterRange",
+        "description": "Ordering conditions on Todo fields that can be compared.",
+        "fields": [
+          {
+            "name": "CreatedAt",
+            "wire": "createdAt",
+            "description": "When this row was created. Set automatically and never changes.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "*time.Time",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "UpdatedAt",
+            "wire": "updatedAt",
+            "description": "When this row was last updated. Set automatically on every update.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "*time.Time",
+            "modifiers": [
+              "Nullable"
+            ]
+          }
+        ],
+        "origin": "Filter"
+      },
+      {
+        "name": "TodoListResponse",
+        "description": "A page of Todos.",
+        "fields": [
+          {
+            "name": "Data",
+            "wire": "data",
+            "description": "The rows in this page.",
+            "type": "Todo",
+            "type_kind": "Resource",
+            "go_type": "[]Todo",
+            "modifiers": [
+              "Array"
+            ]
+          },
+          {
+            "name": "Pagination",
+            "wire": "pagination",
+            "description": "Where this page sits in the full result set.",
+            "type": "Pagination",
+            "type_kind": "Object",
+            "go_type": "Pagination"
+          }
+        ],
+        "origin": "Projected"
+      }
+    ],
+    "resources": [
+      {
+        "name": "Todo",
+        "plural": "Todos",
+        "path_segment": "todos",
+        "description": "A single thing someone means to get done.",
+        "operations": [
+          "Create",
+          "Get",
+          "List",
+          "Search",
+          "Update",
+          "Delete"
+        ],
+        "fields": [
+          {
+            "name": "ID",
+            "wire": "id",
+            "description": "Unique identifier for this row.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "uuid.UUID",
+            "read_only": true,
+            "column": {
+              "table": "todo",
+              "name": "id",
+              "sql_type": "uuid",
+              "nullable": false,
+              "scan": "UUID"
+            },
+            "operations": [
+              "Read"
+            ]
+          },
+          {
+            "name": "TenantID",
+            "wire": "tenantId",
+            "description": "Tenant this row belongs to. Every query is scoped by it.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "uuid.UUID",
+            "read_only": true,
+            "column": {
+              "table": "todo",
+              "name": "tenant_id",
+              "sql_type": "uuid",
+              "nullable": false,
+              "scan": "UUID"
+            },
+            "operations": [
+              "Read"
+            ]
+          },
+          {
+            "name": "CreatedAt",
+            "wire": "createdAt",
+            "description": "When this row was created. Set automatically and never changes.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "time.Time",
+            "read_only": true,
+            "column": {
+              "table": "todo",
+              "name": "created_at",
+              "sql_type": "timestamptz",
+              "nullable": false,
+              "scan": "Timestamptz"
+            },
+            "operations": [
+              "Read"
+            ]
+          },
+          {
+            "name": "UpdatedAt",
+            "wire": "updatedAt",
+            "description": "When this row was last updated. Set automatically on every update.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "*time.Time",
+            "modifiers": [
+              "Nullable"
+            ],
+            "read_only": true,
+            "column": {
+              "table": "todo",
+              "name": "updated_at",
+              "sql_type": "timestamptz",
+              "nullable": true,
+              "scan": "Timestamptz"
+            },
+            "operations": [
+              "Read"
+            ]
+          },
+          {
+            "name": "Title",
+            "wire": "title",
+            "description": "Short description of the task.",
+            "type": "String",
+            "type_kind": "Primitive",
+            "go_type": "string",
+            "column": {
+              "table": "todo",
+              "name": "title",
+              "sql_type": "text",
+              "nullable": false,
+              "scan": "Direct"
+            },
+            "operations": [
+              "Read",
+              "Create",
+              "Update"
+            ]
+          },
+          {
+            "name": "IsDone",
+            "wire": "isDone",
+            "description": "Whether the task has been completed.",
+            "type": "Bool",
+            "type_kind": "Primitive",
+            "go_type": "bool",
+            "default": "false",
+            "column": {
+              "table": "todo",
+              "name": "is_done",
+              "sql_type": "bool",
+              "nullable": false,
+              "scan": "Direct"
+            },
+            "operations": [
+              "Read",
+              "Create",
+              "Update"
+            ]
+          }
+        ],
+        "endpoints": [
+          {
+            "name": "List",
+            "summary": "List Todos.",
+            "method": "GET",
+            "path": "",
+            "pattern": "GET /api/v1/todos",
+            "operation_id": "listTodos",
+            "permission": "todo.read",
+            "request": {
+              "query_params": [
+                {
+                  "name": "Limit",
+                  "wire": "limit",
+                  "description": "Maximum rows to return.",
+                  "type": "Int",
+                  "type_kind": "Primitive",
+                  "go_type": "int",
+                  "default": "50"
+                },
+                {
+                  "name": "Offset",
+                  "wire": "offset",
+                  "description": "Rows to skip before the first returned row.",
+                  "type": "Int",
+                  "type_kind": "Primitive",
+                  "go_type": "int",
+                  "default": "0"
+                }
+              ]
+            },
+            "responses": [
+              {
+                "status_code": 200,
+                "description": "A page of Todos.",
+                "content_types": [
+                  "application/json"
+                ],
+                "body_object": "TodoListResponse"
+              }
+            ],
+            "errors": [
+              400,
+              401,
+              403,
+              429,
+              500
+            ],
+            "impl": {
+              "kind": "Generated",
+              "repo_method": "List",
+              "service_method": "List",
+              "handler_name": "ListTodos"
+            }
+          },
+          {
+            "name": "Create",
+            "summary": "Create a Todo.",
+            "method": "POST",
+            "path": "",
+            "pattern": "POST /api/v1/todos",
+            "operation_id": "createTodo",
+            "permission": "todo.write",
+            "request": {
+              "content_types": [
+                "application/json"
+              ],
+              "body_params": [
+                {
+                  "name": "Title",
+                  "wire": "title",
+                  "description": "Short description of the task.",
+                  "type": "String",
+                  "type_kind": "Primitive",
+                  "go_type": "string",
+                  "column": {
+                    "table": "todo",
+                    "name": "title",
+                    "sql_type": "text",
+                    "nullable": false,
+                    "scan": "Direct"
+                  }
+                },
+                {
+                  "name": "IsDone",
+                  "wire": "isDone",
+                  "description": "Whether the task has been completed.",
+                  "type": "Bool",
+                  "type_kind": "Primitive",
+                  "go_type": "bool",
+                  "default": "false",
+                  "column": {
+                    "table": "todo",
+                    "name": "is_done",
+                    "sql_type": "bool",
+                    "nullable": false,
+                    "scan": "Direct"
+                  }
+                }
+              ]
+            },
+            "responses": [
+              {
+                "status_code": 201,
+                "description": "The created Todo.",
+                "content_types": [
+                  "application/json"
+                ],
+                "body_object": "Todo"
+              }
+            ],
+            "errors": [
+              400,
+              401,
+              403,
+              409,
+              422,
+              429,
+              500
+            ],
+            "impl": {
+              "kind": "Generated",
+              "repo_method": "Create",
+              "service_method": "Create",
+              "handler_name": "CreateTodo"
+            }
+          },
+          {
+            "name": "Search",
+            "summary": "Search Todos with filters.",
+            "method": "QUERY",
+            "path": "",
+            "pattern": "QUERY /api/v1/todos",
+            "alias_patterns": [
+              "POST /api/v1/todos/_search"
+            ],
+            "operation_id": "searchTodos",
+            "permission": "todo.read",
+            "request": {
+              "content_types": [
+                "application/json"
+              ],
+              "query_params": [
+                {
+                  "name": "Limit",
+                  "wire": "limit",
+                  "description": "Maximum rows to return.",
+                  "type": "Int",
+                  "type_kind": "Primitive",
+                  "go_type": "int",
+                  "default": "50"
+                },
+                {
+                  "name": "Offset",
+                  "wire": "offset",
+                  "description": "Rows to skip before the first returned row.",
+                  "type": "Int",
+                  "type_kind": "Primitive",
+                  "go_type": "int",
+                  "default": "0"
+                }
+              ],
+              "body_params": [
+                {
+                  "name": "Filter",
+                  "wire": "filter",
+                  "description": "Conditions rows must satisfy.",
+                  "type": "TodoFilter",
+                  "type_kind": "Object",
+                  "go_type": "TodoFilter"
+                }
+              ]
+            },
+            "responses": [
+              {
+                "status_code": 200,
+                "description": "A page of matching Todos.",
+                "content_types": [
+                  "application/json"
+                ],
+                "body_object": "TodoListResponse"
+              }
+            ],
+            "errors": [
+              400,
+              401,
+              403,
+              422,
+              429,
+              500
+            ],
+            "impl": {
+              "kind": "Generated",
+              "repo_method": "List",
+              "service_method": "Search",
+              "handler_name": "SearchTodos"
+            }
+          },
+          {
+            "name": "Delete",
+            "summary": "Delete a Todo.",
+            "method": "DELETE",
+            "path": "/{id}",
+            "pattern": "DELETE /api/v1/todos/{id}",
+            "operation_id": "deleteTodo",
+            "permission": "todo.delete",
+            "request": {
+              "path_params": [
+                {
+                  "name": "ID",
+                  "wire": "id",
+                  "description": "Identifier of the Todo.",
+                  "type": "UUID",
+                  "type_kind": "Primitive",
+                  "go_type": "uuid.UUID"
+                }
+              ]
+            },
+            "responses": [
+              {
+                "status_code": 204,
+                "description": "The Todo was deleted."
+              }
+            ],
+            "errors": [
+              400,
+              401,
+              403,
+              404,
+              409,
+              429,
+              500
+            ],
+            "impl": {
+              "kind": "Generated",
+              "repo_method": "Delete",
+              "service_method": "Delete",
+              "handler_name": "DeleteTodo"
+            }
+          },
+          {
+            "name": "Get",
+            "summary": "Fetch one Todo by identifier.",
+            "method": "GET",
+            "path": "/{id}",
+            "pattern": "GET /api/v1/todos/{id}",
+            "operation_id": "getTodo",
+            "permission": "todo.read",
+            "request": {
+              "path_params": [
+                {
+                  "name": "ID",
+                  "wire": "id",
+                  "description": "Identifier of the Todo.",
+                  "type": "UUID",
+                  "type_kind": "Primitive",
+                  "go_type": "uuid.UUID"
+                }
+              ]
+            },
+            "responses": [
+              {
+                "status_code": 200,
+                "description": "The requested Todo.",
+                "content_types": [
+                  "application/json"
+                ],
+                "body_object": "Todo"
+              }
+            ],
+            "errors": [
+              400,
+              401,
+              403,
+              404,
+              429,
+              500
+            ],
+            "impl": {
+              "kind": "Generated",
+              "repo_method": "Get",
+              "service_method": "Get",
+              "handler_name": "GetTodo"
+            }
+          },
+          {
+            "name": "Update",
+            "summary": "Update a Todo.",
+            "description": "Only the fields present in the body are changed. A field set to null is cleared; a field left out is left alone.",
+            "method": "PATCH",
+            "path": "/{id}",
+            "pattern": "PATCH /api/v1/todos/{id}",
+            "operation_id": "updateTodo",
+            "permission": "todo.write",
+            "request": {
+              "content_types": [
+                "application/json"
+              ],
+              "path_params": [
+                {
+                  "name": "ID",
+                  "wire": "id",
+                  "description": "Identifier of the Todo.",
+                  "type": "UUID",
+                  "type_kind": "Primitive",
+                  "go_type": "uuid.UUID"
+                }
+              ],
+              "body_params": [
+                {
+                  "name": "Title",
+                  "wire": "title",
+                  "description": "Short description of the task.",
+                  "type": "String",
+                  "type_kind": "Primitive",
+                  "go_type": "string",
+                  "column": {
+                    "table": "todo",
+                    "name": "title",
+                    "sql_type": "text",
+                    "nullable": false,
+                    "scan": "Direct"
+                  }
+                },
+                {
+                  "name": "IsDone",
+                  "wire": "isDone",
+                  "description": "Whether the task has been completed.",
+                  "type": "Bool",
+                  "type_kind": "Primitive",
+                  "go_type": "bool",
+                  "default": "false",
+                  "column": {
+                    "table": "todo",
+                    "name": "is_done",
+                    "sql_type": "bool",
+                    "nullable": false,
+                    "scan": "Direct"
+                  }
+                }
+              ]
+            },
+            "responses": [
+              {
+                "status_code": 200,
+                "description": "The updated Todo.",
+                "content_types": [
+                  "application/json"
+                ],
+                "body_object": "Todo"
+              }
+            ],
+            "errors": [
+              400,
+              401,
+              403,
+              404,
+              409,
+              422,
+              429,
+              500
+            ],
+            "impl": {
+              "kind": "Generated",
+              "repo_method": "Update",
+              "service_method": "Update",
+              "handler_name": "UpdateTodo"
+            }
+          }
+        ],
+        "storage": {
+          "table": "todo",
+          "primary_key": [
+            "id"
+          ],
+          "tenant": {
+            "table": "todo",
+            "name": "tenant_id",
+            "sql_type": "uuid",
+            "nullable": false,
+            "scan": "UUID"
+          },
+          "audit": {
+            "created_at": {
+              "table": "todo",
+              "name": "created_at",
+              "sql_type": "timestamptz",
+              "nullable": false,
+              "scan": "Timestamptz"
+            },
+            "updated_at": {
+              "table": "todo",
+              "name": "updated_at",
+              "sql_type": "timestamptz",
+              "nullable": true,
+              "scan": "Timestamptz"
+            }
+          },
+          "default_order": [
+            {
+              "column": "created_at",
+              "desc": true
+            },
+            {
+              "column": "id"
+            }
+          ],
+          "sortable": [
+            "id",
+            "tenant_id",
+            "created_at",
+            "updated_at",
+            "title",
+            "is_done"
+          ],
+          "filterable": [
+            "id",
+            "tenant_id",
+            "created_at",
+            "updated_at",
+            "title",
+            "is_done"
+          ]
+        },
+        "electric": {
+          "auth": "tenant",
+          "path": "/api/v1/todo/_stream",
+          "fallback": true
+        }
+      }
+    ],
+    "permissions": [
+      {
+        "key": "todo.delete",
+        "name": "Delete todos",
+        "description": "Delete todos — A single thing someone means to get done.",
+        "resource": "Todo",
+        "action": "delete"
+      },
+      {
+        "key": "todo.read",
+        "name": "Read todos",
+        "description": "Read todos — A single thing someone means to get done.",
+        "resource": "Todo",
+        "action": "read"
+      },
+      {
+        "key": "todo.write",
+        "name": "Write todos",
+        "description": "Create and change todos — A single thing someone means to get done.",
+        "resource": "Todo",
+        "action": "write"
+      }
+    ]
+  },
+  "schema": {
+    "name": "public",
+    "tables": [
+      {
+        "name": "todo",
+        "comment": "A single thing someone means to get done.",
+        "kind": "Base",
+        "columns": [
+          {
+            "name": "id",
+            "comment": "Unique identifier for this row.",
+            "comment_source": "auto",
+            "sql_type": "uuid",
+            "udt_name": "uuid",
+            "nullable": false,
+            "ordinal": 1,
+            "is_primary_key": true
+          },
+          {
+            "name": "tenant_id",
+            "comment": "Tenant this row belongs to. Every query is scoped by it.",
+            "comment_source": "auto",
+            "sql_type": "uuid",
+            "udt_name": "uuid",
+            "nullable": false,
+            "ordinal": 2
+          },
+          {
+            "name": "created_at",
+            "comment": "When this row was created. Set automatically and never changes.",
+            "comment_source": "auto",
+            "sql_type": "timestamptz",
+            "udt_name": "timestamptz",
+            "nullable": false,
+            "ordinal": 3
+          },
+          {
+            "name": "updated_at",
+            "comment": "When this row was last updated. Set automatically on every update.",
+            "comment_source": "auto",
+            "sql_type": "timestamptz",
+            "udt_name": "timestamptz",
+            "nullable": true,
+            "ordinal": 4
+          },
+          {
+            "name": "title",
+            "comment": "Short description of the task.",
+            "comment_source": "config",
+            "sql_type": "text",
+            "udt_name": "text",
+            "nullable": false,
+            "ordinal": 5
+          },
+          {
+            "name": "is_done",
+            "comment": "Whether the task has been completed.",
+            "comment_source": "config",
+            "sql_type": "bool",
+            "udt_name": "bool",
+            "nullable": false,
+            "has_default": true,
+            "default": "false",
+            "ordinal": 6
+          }
+        ],
+        "primary_key": [
+          "id"
+        ],
+        "indexes": [
+          {
+            "name": "todo_pkey",
+            "columns": [
+              "id"
+            ],
+            "unique": true,
+            "method": "btree"
+          },
+          {
+            "name": "todo_tenant_created_idx",
+            "columns": [
+              "tenant_id",
+              "created_at"
+            ],
+            "method": "btree"
+          }
+        ],
+        "publications": [
+          "app_publication"
+        ]
+      }
+    ],
+    "enums": [],
+    "replication": {
+      "wal_level": "logical",
+      "publications": [
+        {
+          "name": "app_publication"
+        }
+      ]
+    }
+  },
+  "valid": true
+}

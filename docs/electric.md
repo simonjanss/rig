@@ -149,17 +149,19 @@ recreates the service rather than leaving it following nothing. Enabling the
 block also adds `wal_level=logical` to the database's settings, which logical
 replication requires and which cannot be turned on after Postgres has started.
 
-Three settings in three places have to agree, and each names a different thing:
+Four settings in four places have to agree, and each names a different thing:
 
 | Where | What it says |
 |---|---|
 | `database.electric.port` in rig.yaml | where the local sync service answers |
 | `server-go`'s `electric_url` | where the generated proxy forwards |
 | `electric: {enabled: true}` in a table's yaml | that the table has shapes at all |
+| `ALTER PUBLICATION` in a migration | that Postgres will replicate the table |
 
 So a project on port 55445 writes `electric_url: http://localhost:55445`, or
 overrides it at runtime the way the examples do, with an environment variable
-read in `main.go`.
+read in `main.go`. The fourth is [the next
+section](#the-table-has-to-be-published).
 
 What happens to a subscription while that service is unreachable is
 [its own section](#when-the-sync-service-is-down).
@@ -257,6 +259,72 @@ also the one place to read a **filled-in scope stub** —
 narrowing is not an optimization: a heartbeat is a row change delivered to every
 subscriber, so the scope is what decides whether the feature is affordable at
 all. See [presence.md](presence.md#scope-and-what-presence-costs).
+
+## The table has to be published
+
+Logical replication carries only what a publication names, and a shape is a
+filter in front of that stream. The sync service will publish a table for you —
+that part is covered below, and it is why this is easy to never think about — but
+it can only do so where its database role owns the table, which is exactly the
+privilege a production deployment tends not to grant it. Say it in a migration
+and the answer stops varying by environment:
+
+```sql
+-- Postgres has no CREATE PUBLICATION IF NOT EXISTS, hence the block.
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_publication WHERE pubname = 'rig_publication') THEN
+        CREATE PUBLICATION rig_publication;
+    END IF;
+END
+$$;
+
+ALTER PUBLICATION rig_publication ADD TABLE todo;
+```
+
+`rig validate` refuses a table that streams and is in no publication
+([`RIG5090`](diagnostics.md#the-three-that-read-the-database-rather-than-your-files)),
+one that is `UNLOGGED` and therefore writes no WAL at all (`RIG5091`), and a
+server whose `wal_level` is not `logical` (`RIG5092`). All three read the
+database `rig generate` already reads — after your migrations have been applied,
+which is why the migration is where the answer belongs.
+
+**What the sync service does, and where it stops.** Electric maintains a
+publication of its own — `electric_publication_default` — and adds a table to it
+the first time somebody requests a shape on that table. So on your machine, with
+the superuser `rig db up` hands it, this mostly just works and `RIG5090` reads
+like bureaucracy.
+
+It stops in two places, both of them somebody else's environment. Postgres wants
+ownership of a table both to add it to a publication and to set `REPLICA
+IDENTITY FULL`, and Electric does both — so a least-privilege role cannot, and
+the way you find out is a subscription failing with an error about access rather
+than anything about replication. And a deployment running with
+`ELECTRIC_MANUAL_TABLE_PUBLISHING=true` has told Electric not to try: there,
+membership is entirely yours to maintain and Electric only checks it.
+
+A publication your migrations own is true the moment they run, under any role,
+in every environment. Electric keeps its own alongside it — a table can be in
+both — so declaring it costs nothing where the automatic path would have worked
+anyway. That is the whole argument for the rule: not that your stream is empty,
+but that whether it is empty depends on a privilege you probably have locally and
+probably will not have in production.
+
+Which is why `RIG5090` does not accept `electric_publication_default` as an
+answer. Once you have opened the app on your machine, Electric has published the
+table there, and a rule that counted it would go quiet on every developer's
+database and speak up only where nobody has run anything — the exact opposite of
+what it is for. A table carried by that publication and no other is still
+reported, and the message says so. Adding a table to it by hand is not the fix
+either: it is Electric's to maintain, and it does not exist in the deployment you
+are being warned about.
+
+**rig's own tables need it too.** `notifications:` gives
+`rig_notification_recipient` a shape and `presence:` gives `rig_presence` one,
+neither of which you asked for — a client reads its inbox and who else is here
+as streams, or not at all. So a project with either block has a table to publish
+even if none of its own tables mention live sync. `examples/auth` is that case
+and its migration publishes exactly one table.
 
 ## When the sync service is down
 

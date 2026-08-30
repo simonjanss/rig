@@ -298,7 +298,9 @@ than the three target columns and `activity` says it in a table of its own.
 
 **No `UNLOGGED` table**, which is the first thing an experienced reader suggests.
 It writes no WAL, so logical replication sees nothing and the shape streams
-empty forever.
+empty forever. `rig validate` refuses one now rather than leaving it as a
+sentence on this page — `RIG5091`, alongside the rule that wants the table in a
+publication at all ([electric.md](electric.md#the-table-has-to-be-published)).
 
 **Nothing prunes for you if you skip the sweeper.** The table is bounded by
 people rather than by time, so it does not grow without limit — but it does keep

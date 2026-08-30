@@ -32,6 +32,14 @@ func Normalize(raw ir.Schema, opt NormalizeOptions) (ir.Schema, diag.List) {
 		Tables: make([]ir.Table, 0, len(raw.Tables)),
 		Enums:  slices.Clone(raw.Enums),
 	}
+	if raw.Replication != nil {
+		r := *raw.Replication
+		r.Publications = slices.Clone(raw.Replication.Publications)
+		slices.SortFunc(r.Publications, func(a, b ir.Publication) int {
+			return cmp.Compare(a.Name, b.Name)
+		})
+		out.Replication = &r
+	}
 
 	// Enums first: columns need to be able to look up the type behind them.
 	for i := range out.Enums {
@@ -150,7 +158,14 @@ func normalizeTable(t ir.Table, enumNames map[string]bool) (ir.Table, diag.List)
 	out.Indexes = slices.Clone(t.Indexes)
 	out.ForeignKeys = slices.Clone(t.ForeignKeys)
 	out.Checks = slices.Clone(t.Checks)
+	out.Publications = slices.Clone(t.Publications)
 	out.LinkTable = nil // recomputed below, never carried in from the input
+
+	// Two catalog views answer "which publications carry this table", and a
+	// table both of them name arrives twice. Sorted and deduped here, so the
+	// document is the same bytes whichever order the rows came back in.
+	slices.Sort(out.Publications)
+	out.Publications = slices.Compact(out.Publications)
 
 	// Ordinals are the CREATE TABLE order, which is the order a reader of the
 	// generated struct expects. Introspection may hand them over in any order.

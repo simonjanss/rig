@@ -59,6 +59,7 @@ const tableQuery = `
 SELECT
     c.relname                                       AS name,
     c.relkind                                       AS kind,
+    c.relpersistence = 'u'                          AS unlogged,
     coalesce(obj_description(c.oid, 'pg_class'), '') AS comment
 FROM pg_class c
 JOIN pg_namespace n ON n.oid = c.relnamespace
@@ -81,14 +82,18 @@ func readTables(ctx context.Context, q Querier, schema string, includeViews bool
 
 	var out []ir.Table
 	for rows.Next() {
-		var name, kind, comment string
-		if err := rows.Scan(&name, &kind, &comment); err != nil {
+		var (
+			name, kind, comment string
+			unlogged            bool
+		)
+		if err := rows.Scan(&name, &kind, &unlogged, &comment); err != nil {
 			return nil, err
 		}
 		out = append(out, ir.Table{
-			Name:    name,
-			Kind:    tableKind(kind),
-			Comment: comment,
+			Name:     name,
+			Kind:     tableKind(kind),
+			Comment:  comment,
+			Unlogged: unlogged,
 		})
 	}
 	return out, rows.Err()
@@ -334,6 +339,130 @@ func readIndexes(ctx context.Context, q Querier, schema string, tables map[strin
 		}
 		idx.Columns = columns
 		t.Indexes = append(t.Indexes, idx)
+	}
+	return rows.Err()
+}
+
+// walLevelQuery reads the setting logical replication cannot do without.
+//
+// It is its own query rather than a column on [publicationQuery] because a
+// database with no publications still has a wal_level worth reporting: a
+// project that has not published anything yet is the case where knowing it is
+// "replica" saves the most time.
+const walLevelQuery = `SELECT current_setting('wal_level')`
+
+// publicationQuery reads every publication, carrying anything or not.
+//
+// An empty publication is a fact worth keeping: it is what the sync service
+// leaves behind when it has connected but nothing has subscribed yet, and a
+// diagnostic reads very differently when it can say so.
+const publicationQuery = `
+SELECT
+    p.pubname      AS name,
+    p.puballtables AS all_tables
+FROM pg_publication p
+ORDER BY p.pubname
+`
+
+// publicationTableQuery reads which publications carry which tables.
+//
+// pg_publication_tables is the view that already resolves FOR ALL TABLES, which
+// is why membership is read from it rather than from pg_publication_rel alone.
+// The union adds back the one thing it hides: a partitioned table published as a
+// parent appears there as its leaves, and rig introspects the parent. Both
+// halves are needed, and a table listed by both is listed once.
+const publicationTableQuery = `
+SELECT pubname, tablename
+FROM pg_publication_tables
+WHERE schemaname = $1
+UNION
+SELECT p.pubname, c.relname
+FROM pg_publication_rel pr
+JOIN pg_publication p ON p.oid = pr.prpubid
+JOIN pg_class c       ON c.oid = pr.prrelid
+JOIN pg_namespace n   ON n.oid = c.relnamespace
+WHERE n.nspname = $1
+ORDER BY 1, 2
+`
+
+// readReplication reads the server's replication settings and hangs each table's
+// publications onto it.
+//
+// The result is never nil, because "this database has no publications" and "no
+// database was read" are different answers, and a nil is how everything
+// downstream tells them apart.
+func readReplication(ctx context.Context, q Querier, schema string, tables map[string]*ir.Table) (*ir.Replication, error) {
+	level, err := readWALLevel(ctx, q)
+	if err != nil {
+		return nil, err
+	}
+	publications, err := readPublications(ctx, q)
+	if err != nil {
+		return nil, err
+	}
+	out := &ir.Replication{WALLevel: level, Publications: publications}
+
+	// Nothing to be a member of, so nothing to ask.
+	if len(publications) == 0 {
+		return out, nil
+	}
+	if err := readPublicationMembers(ctx, q, schema, tables); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func readWALLevel(ctx context.Context, q Querier) (string, error) {
+	rows, err := q.Query(ctx, walLevelQuery)
+	if err != nil {
+		return "", err
+	}
+	defer rows.Close()
+
+	var out string
+	for rows.Next() {
+		if err := rows.Scan(&out); err != nil {
+			return "", err
+		}
+	}
+	return out, rows.Err()
+}
+
+func readPublications(ctx context.Context, q Querier) ([]ir.Publication, error) {
+	rows, err := q.Query(ctx, publicationQuery)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []ir.Publication
+	for rows.Next() {
+		var p ir.Publication
+		if err := rows.Scan(&p.Name, &p.AllTables); err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
+func readPublicationMembers(ctx context.Context, q Querier, schema string, tables map[string]*ir.Table) error {
+	rows, err := q.Query(ctx, publicationTableQuery, schema)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var publication, table string
+		if err := rows.Scan(&publication, &table); err != nil {
+			return err
+		}
+		t, ok := tables[table]
+		if !ok {
+			continue
+		}
+		t.Publications = append(t.Publications, publication)
 	}
 	return rows.Err()
 }
