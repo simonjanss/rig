@@ -7,6 +7,7 @@ import (
 
 	"github.com/simonjanss/rig/internal/diag"
 	"github.com/simonjanss/rig/internal/project"
+	"github.com/simonjanss/rig/internal/scaffold"
 	"github.com/simonjanss/rig/internal/tableconf"
 	"github.com/simonjanss/rig/pkg/ir"
 )
@@ -541,27 +542,15 @@ func checkColumnNaming(t *ir.Table, loaded *tableconf.Loaded, rigsOwn bool, bool
 		// target obvious rather than to make names long.
 		selfReference := c.ForeignKey != nil && c.ForeignKey.Table == t.Name
 
-		// A file column is exempt for the same reason, and it is the third of
-		// these. `<role>_file_id` is the declaration: there is only one table it
-		// could point at, so naming the role says more than naming the target,
-		// and the alternative the rule would demand is either rig_file_id — one
-		// file per table, forever — or profile_image_rig_file_id.
-		// And a link to a notification is exempt for the same reason again. The
-		// rule wants rig_notification_id; the column is notification_id, on a
-		// join table whose other column names the subject, and the prefix is
-		// there so a project can tell rig's tables from its own in psql rather
-		// than so a foreign key has to repeat it.
-		notificationLink := c.ForeignKey != nil && c.ForeignKey.Table == NotificationTable &&
-			c.Name == "notification_id"
+		// A file column is exempt for the same reason. `<role>_file_id` is the
+		// declaration: there is only one table it could point at, so naming the
+		// role says more than naming the target, and the alternative the rule
+		// would demand is either rig_file_id — one file per table, forever — or
+		// profile_image_rig_file_id.
 
-		// And the inbox's own account_id, for the third time and the same
-		// reason. The rule wants rig_account_id; the column is the one
-		// `access.owner` narrows on, it is spelled the way an application would
-		// spell its own, and the rig_ prefix is there so a project can tell
-		// rig's tables from its own in psql rather than so a foreign key has to
-		// carry it.
-		inboxOwner := t.Name == NotificationRecipientTable &&
-			c.Name == NotificationRecipientOwner
+		// A reference to one of rig's own tables is not exempt but is allowed
+		// two spellings — see [foreignKeyNames], which is where the carve-outs
+		// for notification_id and the inbox's account_id went.
 
 		// And every column of every table rig created, which a project cannot
 		// rename and did not write. The rule is advice about a schema somebody
@@ -574,17 +563,64 @@ func checkColumnNaming(t *ir.Table, loaded *tableconf.Loaded, rigsOwn bool, bool
 		// rig's is projected that way.
 
 		if fkSev != "" && c.ForeignKey != nil && !isAuditActorColumn(c.Name) &&
-			!selfReference && !isFileColumn(t, c) && !notificationLink && !inboxOwner && !rigsOwn {
-			want := c.ForeignKey.Table + "_id"
-			if c.Name != want && !strings.HasSuffix(c.Name, "_"+want) {
+			!selfReference && !isFileColumn(t, c) && !rigsOwn {
+			want := foreignKeyNames(c.ForeignKey.Table)
+			if !namedAfter(c.Name, want) {
 				diags.AddSeverity(diag.CodeForeignKeyNaming, fkSev, at,
-					"column %s.%s references %s, so it should be named %s or <qualifier>_%s",
-					t.Name, c.Name, c.ForeignKey.Table, want, want)
+					"column %s.%s references %s, so it should be named %s",
+					t.Name, c.Name, c.ForeignKey.Table, foreignKeyAdvice(want))
 			}
 		}
 	}
 
 	return diags
+}
+
+// foreignKeyNames are the column names the convention accepts for a foreign key
+// to target.
+//
+// `<target>_id` always, and — when the target is one of rig's own tables — the
+// same without the rig_ prefix. The prefix is there so a project can tell rig's
+// tables from its own in psql, not so every foreign key to one has to repeat
+// it: tenant_id names what it points at as plainly as rig_tenant_id does, and
+// it is what the project would have written had the table been its own.
+//
+// rig's own DDL already agrees — every foundation table scoped to a tenant
+// calls the column tenant_id — and so does the projection, where
+// [relationName] takes the column stem and yields the accessor Tenant rather
+// than RigTenant. This rule was the last thing asking for the prefix back.
+//
+// It was three carve-outs before it was a rule: the notification link table's
+// notification_id, the inbox's account_id, and a project's own tenant_id, which
+// never got one and is what sent the other two looking for a shared reason.
+// A file column keeps its own exemption, because that one is a different
+// argument — profile_image_id names the role rather than the target, and the
+// prefix is not what is missing from it.
+func foreignKeyNames(target string) []string {
+	if bare := strings.TrimPrefix(target, scaffold.TablePrefix); bare != target && bare != "" {
+		return []string{bare + "_id", target + "_id"}
+	}
+	return []string{target + "_id"}
+}
+
+// namedAfter reports whether a column is named after one of the accepted
+// targets, bare or behind a <qualifier>_ prefix.
+func namedAfter(column string, names []string) bool {
+	return slices.ContainsFunc(names, func(want string) bool {
+		return column == want || strings.HasSuffix(column, "_"+want)
+	})
+}
+
+// foreignKeyAdvice is the "should be named ..." half of the RIG6030 message.
+//
+// One accepted name reads as the rule always did. Two have to say that the
+// qualifier applies to both, or the message would look like a choice between a
+// bare name and a qualified one.
+func foreignKeyAdvice(names []string) string {
+	if len(names) == 1 {
+		return names[0] + " or <qualifier>_" + names[0]
+	}
+	return strings.Join(names, " or ") + ", either with a <qualifier>_ prefix"
 }
 
 // checkCascades rejects ON DELETE CASCADE.

@@ -340,7 +340,8 @@ var (
 
 	CodeForeignKeyNaming = newCode("RIG6030", SeverityWarning,
 		"A foreign-key column is not named after the table it references.",
-		"Name it <target>_id, or <qualifier>_<target>_id.")
+		"Name it <target>_id, or <qualifier>_<target>_id. A reference to one of "+
+			"rig's own tables may drop the rig_ prefix: tenant_id or rig_tenant_id.")
 
 	CodeCascadeDelete = newCode("RIG6040", SeverityError,
 		"A foreign key declares ON DELETE CASCADE.",

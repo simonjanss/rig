@@ -367,7 +367,7 @@ validate:
 | `boolean_prefix` | A boolean column does not read as a predicate |
 | `timestamp_suffix` | A timestamp column is not named `_at`, or an `_at` column is not a `timestamptz` |
 | `date_suffix` | A date column is not named `_date`, or a `_date` column is not a `date` |
-| `fk_naming` | A foreign-key column is not named after the table it references |
+| `fk_naming` | A foreign-key column is not named after the table it references, with or without the `rig_` prefix |
 | `cascade_delete` | A foreign key declares `ON DELETE CASCADE` |
 | `migration_filename` | A migration file is not named `NNNNN_snake_case.sql` |
 
