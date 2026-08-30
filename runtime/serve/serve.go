@@ -18,6 +18,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"runtime/debug"
 	"sort"
 	"strings"
 	"sync/atomic"
@@ -331,7 +332,7 @@ type Config struct {
 // whole of a main function, so that a main function can be the wiring and
 // nothing else. Use Run directly to keep control of the process.
 func Main(cfg Config, mount Mount) {
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	ctx, stop := signalled(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
 	// The first signal starts the shutdown; the second one should end it.
@@ -365,15 +366,19 @@ func Main(cfg Config, mount Mount) {
 
 	name, err := taskName(os.Args[1:], cfg.Tasks)
 	if err != nil {
-		reporter(cfg).ErrorContext(ctx, "cannot run that", "error", err)
+		cfg.log().ErrorContext(ctx, "cannot run that", "error", err)
 		exit(2)
 	}
 
 	if name != "" {
+		began := time.Now()
+		cfg.log().DebugContext(ctx, "running", "command", name)
 		if err := Once(ctx, cfg, cfg.Tasks[name]); err != nil {
-			reporter(cfg).ErrorContext(ctx, name+" failed", "error", err)
+			cfg.log().ErrorContext(ctx, name+" failed", "error", err)
 			exit(1)
 		}
+		cfg.log().DebugContext(ctx, "finished", "command", name,
+			"in", time.Since(began).Round(time.Millisecond))
 		done()
 		return
 	}
@@ -384,27 +389,81 @@ func Main(cfg Config, mount Mount) {
 		// nothing to repeat here — and nothing worth telling the orchestrator
 		// that the process crashed.
 		if Unclean(err) {
-			reporter(cfg).ErrorContext(ctx, "stopped, but not cleanly")
+			cfg.log().ErrorContext(ctx, "stopped, but not cleanly")
 			done()
 			return
 		}
 
-		reporter(cfg).ErrorContext(ctx, "server stopped", "error", err)
+		cfg.log().ErrorContext(ctx, "server stopped", "error", err)
 		exit(1)
 	}
 	done()
 }
 
-// reporter is what [Main] says something went wrong with.
+// signalled is [os/signal.NotifyContext] with the reason kept.
+//
+// NotifyContext cancels and says nothing about which signal did it, so by the
+// time [Run] looks at the context, a SIGTERM, a ^C and a parent that cancelled
+// are one event. "Did the orchestrator evict it, or did something upstream fall
+// over" is the first question a shutdown raises, and answering it after the
+// fact means correlating timestamps with somebody else's log.
+// [context.WithCancelCause] is the whole of the difference: the cause is the
+// signal, and [context.Cause] is where Run reads it back.
+//
+// The returned stop puts the signals back to their default disposition, exactly
+// as NotifyContext's does — which is what makes a second SIGTERM kill a process
+// that is not making progress. It is also what the goroutine below is waiting
+// to be able to do, and cancelling with a cause a second time changes nothing:
+// the first one wins.
+func signalled(parent context.Context, sigs ...os.Signal) (context.Context, func()) {
+	ctx, cancel := context.WithCancelCause(parent)
+
+	ch := make(chan os.Signal, 1)
+	signal.Notify(ch, sigs...)
+
+	go func() {
+		select {
+		case s := <-ch:
+			cancel(fmt.Errorf("signal %s", s))
+		case <-ctx.Done():
+		}
+	}()
+
+	return ctx, func() {
+		signal.Stop(ch)
+		cancel(context.Canceled)
+	}
+}
+
+// stopCause is why the shutdown started, in the words the thing that started it
+// used.
+//
+// "signal terminated" for an eviction and "signal interrupt" for a ^C, because
+// [signalled] cancelled with the signal. A caller driving [Run] from a context
+// of its own gets whatever that context was cancelled with, and "context
+// canceled" when it said nothing — which is still an answer, since it says the
+// reason was not a signal this process was sent.
+func stopCause(ctx context.Context) string {
+	if err := context.Cause(ctx); err != nil {
+		return err.Error()
+	}
+	return "no reason given"
+}
+
+// log is what this configuration says things through, and [log/slog.Default]
+// when it says nothing.
 //
 // Not a default for [Config.Logger] — that one is refused unset, and this is
 // how the refusal gets out. A config with no logger is exactly the case where
 // there is nothing to report through, and answering it with silence would make
 // the one error that explains every other error the only one nobody sees.
 //
-// So it is scoped to that: Main's four error paths, none of which is reached by
-// a config that stated one, because Run and Once use cfg.Logger.
-func reporter(c Config) *slog.Logger {
+// So it is scoped to the two places that run either side of that refusal:
+// [Main]'s error paths, which include the one the refusal itself takes, and
+// [open], which a test reaches with a Config it built by hand. Everything
+// between them is inside a config checkStated has already passed, and uses
+// cfg.Logger directly.
+func (c Config) log() *slog.Logger {
 	if c.Logger != nil {
 		return c.Logger
 	}
@@ -487,6 +546,12 @@ func Run(ctx context.Context, cfg Config, mount Mount) (err error) {
 		return err
 	}
 
+	// Which build this is, first, because it is the fact every other line in
+	// the log is about. A server that has been up for three weeks is one whose
+	// log is the only record of what it is running, and `rig version` cannot
+	// answer for it: that is rig's binary, and this is the application's.
+	cfg.Logger.DebugContext(ctx, "starting", buildAttrs()...)
+
 	// The monitoring listener, first and stopped last.
 	//
 	// First, because everything below this can fail slowly — a database that
@@ -509,6 +574,30 @@ func Run(ctx context.Context, cfg Config, mount Mount) (err error) {
 	}
 	defer stopMonitor()
 
+	// The line that says it is over, and the counterpart to "listening".
+	//
+	// A defer, and registered here rather than written at the end of the body,
+	// because the body returns while the shutdown is still going: the steps
+	// registered with App.Close run from a defer below this one, and so does
+	// the pool. A "stopped" written before either would be the same wrong
+	// answer "draining" is today — the last line of a healthy shutdown reading
+	// exactly like the last line of one that hung.
+	//
+	// Only the monitoring listener outlives it, which is deliberate: the page
+	// answers for as long as there is anything left to watch.
+	//
+	// Nothing is written for a boot that never served, because there was no
+	// shutdown to report, and nothing for one that failed: Main says that, once,
+	// with the error.
+	var stopBegan time.Time
+	defer func() {
+		if stopBegan.IsZero() || err != nil {
+			return
+		}
+		cfg.Logger.InfoContext(ctx, "stopped",
+			"in", time.Since(stopBegan).Round(time.Millisecond))
+	}()
+
 	// Everything up to the first accepted connection happens under one budget.
 	// It is released before serving: a deadline that outlived the boot would
 	// shut the server down the moment it passed.
@@ -521,15 +610,29 @@ func Run(ctx context.Context, cfg Config, mount Mount) (err error) {
 	if err != nil {
 		return err
 	}
-	defer pool.Close()
+	defer func() {
+		pool.Close()
+		cfg.Logger.DebugContext(ctx, "the database pool is closed")
+	}()
 
 	if cfg.Migrate != nil {
 		cfg.Logger.InfoContext(starting, "migrating")
+		migrating := time.Now()
 		if err := bounded(starting, "migrate", func(c context.Context) error {
 			return cfg.Migrate(c, pool)
 		}); err != nil {
 			return err
 		}
+		// What was applied is migrate's to say, through the logger it was given.
+		// This is only that it finished, and how much of the startup budget it
+		// took — which is the number that turns a boot that timed out into a
+		// boot that timed out here.
+		cfg.Logger.DebugContext(starting, "migrated",
+			"in", time.Since(migrating).Round(time.Millisecond))
+	} else {
+		// Worth a line, because a deployment where the migration job did not run
+		// looks exactly like one where this server was never asked to migrate.
+		cfg.Logger.DebugContext(starting, "not migrating")
 	}
 
 	app := &App{Pool: pool, Logger: cfg.Logger}
@@ -547,6 +650,7 @@ func Run(ctx context.Context, cfg Config, mount Mount) (err error) {
 	}()
 
 	var handler http.Handler
+	mounting := time.Now()
 	if err := bounded(starting, "build the routes", func(c context.Context) error {
 		built, err := mount(c, app)
 		handler = built
@@ -557,6 +661,11 @@ func Run(ctx context.Context, cfg Config, mount Mount) (err error) {
 	if handler == nil {
 		return errors.New("serve: the mount function returned no handler")
 	}
+	// The mount function is the entire application, run inside the startup
+	// budget, and a mount that takes twenty-five of thirty seconds is invisible
+	// until the day it takes thirty-one.
+	cfg.Logger.DebugContext(starting, "mounted",
+		"in", time.Since(mounting).Round(time.Millisecond))
 	// Readiness is false until the server is listening and false again the
 	// moment it starts to stop, which is what a load balancer watches.
 	var ready atomic.Bool
@@ -604,6 +713,7 @@ func Run(ctx context.Context, cfg Config, mount Mount) (err error) {
 		}
 		return err
 	case <-ctx.Done():
+		stopBegan = time.Now()
 	}
 
 	// The stop sequence outlives the context that triggered it. Deriving from a
@@ -616,7 +726,8 @@ func Run(ctx context.Context, cfg Config, mount Mount) (err error) {
 	// Announced before anything stops, so that whatever is routing traffic has
 	// a chance to look away first.
 	ready.Store(false)
-	cfg.Logger.InfoContext(stopping, "draining", "delay", cfg.DrainDelay, "timeout", cfg.MaxShutdown)
+	cfg.Logger.InfoContext(stopping, "draining", "cause", stopCause(ctx),
+		"delay", cfg.DrainDelay, "timeout", cfg.MaxShutdown)
 
 	// Then the things that fetch their own work, which should stop fetching
 	// while the server is still finishing what it has.
@@ -626,11 +737,18 @@ func Run(ctx context.Context, cfg Config, mount Mount) (err error) {
 		timer := time.NewTimer(cfg.DrainDelay)
 		defer timer.Stop()
 
+		delaying := time.Now()
 		select {
 		case <-timer.C:
+			cfg.Logger.DebugContext(stopping, "the drain delay is over",
+				"in", time.Since(delaying).Round(time.Millisecond))
 		case <-stopping.Done():
 			// The budget ran out during the delay. Stopping now beats being
-			// killed halfway through the shutdown.
+			// killed halfway through the shutdown — and saying so is the point,
+			// because what follows is a shutdown with no time left in it and
+			// nothing else would explain why.
+			cfg.Logger.DebugContext(stopping, "the drain delay was cut short: the shutdown budget ran out",
+				"delay", cfg.DrainDelay, "waited", time.Since(delaying).Round(time.Millisecond))
 		}
 	}
 
@@ -655,11 +773,14 @@ func Run(ctx context.Context, cfg Config, mount Mount) (err error) {
 	// window nobody had is the wrong thing to hand somebody reading the line.
 	left := time.Until(serving).Round(time.Millisecond)
 
+	finishing := time.Now()
 	if err := srv.Shutdown(inflight); err != nil {
 		return &ShutdownError{Err: errors.Join(drained, fmt.Errorf(
 			"the server would not stop within the %s left for requests in flight: %w",
 			left, err))}
 	}
+	cfg.Logger.DebugContext(stopping, "the requests in flight are done",
+		"in", time.Since(finishing).Round(time.Millisecond), "of", left)
 	// Everything registered with App.Close runs from the deferred teardown,
 	// after this, and before the pool closes.
 	if drained != nil {
@@ -800,6 +921,8 @@ func open(ctx context.Context, cfg Config) (*pgxpool.Pool, error) {
 		return nil, errors.New("serve: no database url: set Config.DatabaseURL or $DATABASE_URL")
 	}
 
+	began := time.Now()
+
 	pc, err := pgxpool.ParseConfig(cfg.DatabaseURL)
 	if err != nil {
 		return nil, fmt.Errorf("parse the database url: %w", err)
@@ -822,7 +945,26 @@ func open(ctx context.Context, cfg Config) (*pgxpool.Pool, error) {
 		pool.Close()
 		return nil, err
 	}
+
+	// Which database this process actually reached, which is the most common
+	// thing to get wrong in a deploy and the one thing the log has never said:
+	// until now the only line about the database was the warning when it could
+	// not be reached at all. The address and the name, never the url, for the
+	// reason ping gives — a connection string carries a password.
+	cfg.log().DebugContext(ctx, "connected", "addr", address(pc), "database", databaseName(pc),
+		"max conns", pc.MaxConns, "in", time.Since(began).Round(time.Millisecond))
+
 	return pool, nil
+}
+
+// databaseName is which database on that host, and the other half of what
+// [address] says: two deployments pointed at one server and the wrong database
+// have the same address and nothing else to tell them apart.
+func databaseName(pc *pgxpool.Config) string {
+	if pc.ConnConfig == nil {
+		return ""
+	}
+	return pc.ConnConfig.Database
 }
 
 // ping proves the connection, and says something before the whole budget is
@@ -869,6 +1011,44 @@ func address(pc *pgxpool.Config) string {
 		return "the configured host"
 	}
 	return net.JoinHostPort(c.Host, strconv.Itoa(int(c.Port)))
+}
+
+// buildAttrs is what this binary knows about itself.
+//
+// Assembled from whatever the toolchain recorded rather than guessed, because
+// each piece is absent in a build somebody really makes: a binary built with
+// `go build` from a checkout has no module version, a git worktree records no
+// vcs stamp at all, and `go test` has neither. An attribute that is only
+// sometimes a real answer is worth leaving out — a log that says version="" is
+// worse than one that does not raise the question.
+//
+// It is deliberately not [github.com/simonjanss/rig/internal/version], which
+// answers for rig's own binary and is wired to `rig version`. This is the
+// application's binary, which is a different build with a different version.
+func buildAttrs() []any {
+	bi, ok := debug.ReadBuildInfo()
+	if !ok {
+		return nil
+	}
+
+	var attrs []any
+	if bi.Main.Version != "" {
+		attrs = append(attrs, "version", bi.Main.Version)
+	}
+	if bi.GoVersion != "" {
+		attrs = append(attrs, "go", bi.GoVersion)
+	}
+	for _, setting := range bi.Settings {
+		switch setting.Key {
+		case "vcs.revision":
+			attrs = append(attrs, "revision", setting.Value)
+		case "vcs.modified":
+			if setting.Value == "true" {
+				attrs = append(attrs, "modified", true)
+			}
+		}
+	}
+	return attrs
 }
 
 // withProbes answers the two probe paths itself and passes everything else

@@ -3,6 +3,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
@@ -11,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -490,4 +492,104 @@ func TestAHandlerThatWillNotReturnDoesNotStarveTheTeardown(t *testing.T) {
 	if took := time.Since(began); took > 6*time.Second {
 		t.Errorf("the shutdown took %s against a 4s budget", took)
 	}
+}
+
+// The whole lifecycle, as an operator reads it back.
+//
+// The unit suites in runtime/serve check each line where it is written; this is
+// the one place they are checked in the order and against the real thing they
+// describe — a real pool, a real mount, a real drain. What it is really about is
+// the ending: before this, the last word of a healthy shutdown was "draining",
+// which reads exactly like a shutdown that hung.
+func TestTheLifecycleIsInTheLog(t *testing.T) {
+	dsn := os.Getenv("DATABASE_URL")
+	if dsn == "" {
+		dsn = dsnFallback
+	}
+
+	ctx, cancel := context.WithCancelCause(t.Context())
+	defer cancel(nil)
+
+	var log lockedBuffer
+	listening := make(chan net.Addr, 1)
+	stopped := make(chan error, 1)
+
+	cfg := stated(dsn)
+	cfg.Logger = slog.New(slog.NewJSONHandler(&log, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	cfg.MaxShutdown = 15 * time.Second
+	cfg.OnListen = func(a net.Addr) { listening <- a }
+
+	go func() {
+		stopped <- serve.Run(ctx, cfg, func(_ context.Context, app *serve.App) (http.Handler, error) {
+			app.CloseWithin("store", 2*time.Second, func(context.Context) error { return nil })
+			return newHandler(app.Pool, nil), nil
+		})
+	}()
+
+	select {
+	case <-listening:
+	case err := <-stopped:
+		t.Fatalf("the server stopped before it listened: %v", err)
+	case <-time.After(15 * time.Second):
+		t.Fatal("the server never listened")
+	}
+
+	cancel(errors.New("the test asked it to"))
+
+	select {
+	case err := <-stopped:
+		if err != nil {
+			t.Fatalf("a clean shutdown should not be an error: %v", err)
+		}
+	case <-time.After(15 * time.Second):
+		t.Fatal("the server did not stop")
+	}
+
+	written := log.String()
+
+	// In order, because the order is the story: what it is, what it reached,
+	// what it built, what it will tear down, that it served, that it began to
+	// stop — and that it finished.
+	var at int
+	for _, want := range []string{
+		`"msg":"starting"`,
+		`"msg":"connected"`,
+		`"msg":"mounted"`,
+		`"msg":"the shutdown budget fits"`,
+		`"msg":"listening"`,
+		`"msg":"draining"`,
+		`"msg":"shutdown step","phase":"close","step":"store"`,
+		`"msg":"the database pool is closed"`,
+		`"msg":"stopped"`,
+	} {
+		i := strings.Index(written[at:], want)
+		if i < 0 {
+			t.Fatalf("missing %s after position %d in:\n%s", want, at, written)
+		}
+		at += i + len(want)
+	}
+
+	// And why it started stopping, which signal.NotifyContext cannot say.
+	if !strings.Contains(written, `"cause":"the test asked it to"`) {
+		t.Errorf("the draining line does not say what caused it:\n%s", written)
+	}
+}
+
+// lockedBuffer is a bytes.Buffer a logger can be pointed at from the server's
+// goroutines while the test reads it.
+type lockedBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *lockedBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *lockedBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
 }
