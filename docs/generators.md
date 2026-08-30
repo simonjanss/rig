@@ -103,7 +103,7 @@ Every generator takes `out_dir` and an `options` block. The common ones:
 | `electric` | `openapi` | Whether the live-sync routes are described. On by default |
 | `client_import` | `go-client`, `ts-client` | Import path, or npm specifier, of the SDK runtime. For a fork or a vendored copy |
 | `electric_import` | `ts-client` | npm specifier of the streaming runtime. Same reasons |
-| `request_id_header` | `server-go` | Header the generated auth error mapper reads a request identifier from |
+| `request_id_header` | `server-go` | Header a caller may name its own request in. Read on every route, `/auth/*` included |
 
 **Two options are not in that table, because they left it.** `servers` on
 `openapi` and `default_base_url` on the two clients both moved to rig.yaml's

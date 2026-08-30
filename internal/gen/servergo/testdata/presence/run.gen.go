@@ -12,6 +12,7 @@ import (
 	"os"
 
 	"github.com/simonjanss/rig/auth"
+	"github.com/simonjanss/rig/runtime/apibase"
 	"github.com/simonjanss/rig/runtime/electric"
 	"github.com/simonjanss/rig/runtime/serve"
 )
@@ -95,10 +96,17 @@ type Build func(ctx context.Context, app *serve.App) (Parts, error)
 //
 //	serve.Run(ctx, cfg, api.Mount(build))
 //
+// app.Logger is labelled with the request before build is called, so
+// everything built out of it — the services, their repositories, the
+// authentication configuration — writes lines that say which request they
+// belong to. See [github.com/simonjanss/rig/runtime/apibase.RequestLogger].
+//
 // What comes back is registered in the order it has to be, and anything left
 // nil is said out loud on the way past — see [Parts].
 func Mount(build Build) serve.Mount {
 	return func(ctx context.Context, app *serve.App) (http.Handler, error) {
+		app.Logger = apibase.RequestLogger(app.Logger)
+
 		// Before the application's own wiring, because it needs nothing from it: the
 		// service it sweeps through is its own, over app.Pool.
 		StartPresenceSweeper(app)
@@ -142,7 +150,6 @@ func Mount(build Build) serve.Mount {
 //	func main() {
 //		api.Main(serve.Config{
 //			Addr:              cmp.Or(os.Getenv("ADDR"), "127.0.0.1:8080"),
-//			Logger:            slog.Default(),
 //			LivenessPath:      "/livez",
 //			ReadinessPath:     "/readyz",
 //			MaxStartup:        30 * time.Second,
@@ -167,6 +174,12 @@ func Mount(build Build) serve.Mount {
 // and the shutdown budget — together with what a configuration file cannot
 // hold: where the migrations are embedded and what this binary's subcommands
 // are.
+//
+// There is no Logger in it, and that is not an omission. serve refuses a
+// config that states none, and it is filled in by settle, with the default
+// logger, there being no sink to choose between without a `tracing:` block.
+// State one to send the lines somewhere else; [Mount] wraps whatever it ends
+// up being, so a line written inside a request says which request.
 //
 // MaxShutdown is the fourth, and it is there for a different reason than the
 // other three. rig knows what it should be — [ShutdownBudget] adds it up —
@@ -205,6 +218,15 @@ func Main(cfg serve.Config, build Build) {
 // Tasks are merged rather than replaced, the way [Tasks] merges them: the
 // application's half wins on a name they share.
 //
+// The logger is among them, and it is the one that is not out of rig.yaml —
+// there is no `logging:` block to read. It is here because serve refuses a
+// config that states no logger, and with no `tracing:` block there is no sink
+// to choose between: the answer is the default logger, and a main function
+// writing it out would be a line that could only have said that. A stated one
+// is left alone. Either way [Mount] wraps what comes out, so the request is on
+// every line written inside one — which is labelling a logger rather than
+// choosing one, and is why this does not belong with the three below.
+//
 // MaxShutdown is deliberately not among them, though this is the one place
 // that knows the answer. It is what a deployment's
 // terminationGracePeriodSeconds has to agree with, so it is written in the
@@ -221,6 +243,18 @@ func Main(cfg serve.Config, build Build) {
 // can be read. serve refuses either left empty; serve.NoProbe is how a project
 // says it wants none.
 func settle(cfg serve.Config) serve.Config {
+	// serve refuses a config with no logger, and there is nothing for this project
+	// to decide about one: with no `tracing:` block there is no sink to build, so
+	// the answer is the default logger and a main function writing it out is a
+	// line that could only have said this.
+	//
+	// Only when it was left unset. A logger stated in the serve.Config is the
+	// application's and is kept — [Mount] wraps whatever this ends up being, so
+	// a stated one is labelled rather than replaced.
+	if cfg.Logger == nil {
+		cfg.Logger = slog.Default()
+	}
+
 	cfg.Tasks = Tasks(cfg.Tasks)
 	return cfg
 }

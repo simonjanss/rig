@@ -142,7 +142,10 @@ build expects ships with that build. `migrate.Require` refuses to start when the
 database is behind; `migrate.Apply` migrates on the way up instead.
 
 `Logger` is where the server records why a request failed. It is optional and
-nil means `slog.Default()` rather than silence — see
+nil means `slog.Default()` rather than silence. There is no `Logger` in the
+`serve.Config` above either: `api.Main` states one, and `api.Mount` labels
+`app.Logger` with the request before your wiring is called — so a line your
+service writes says which request it belongs to without saying so. See
 [observability.md](observability.md).
 
 **`api.Server` is an alias.** The struct itself is

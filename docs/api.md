@@ -75,6 +75,9 @@ went wrong", because the real one names your tables. The cause is written to the
 server's log with the same `requestId` that went out in the body — see
 [observability.md](observability.md#why-a-500-happened).
 
+Every request has a `requestId`, whether or not the caller named one and whether
+or not the project traces, so that pair is always there to be quoted.
+
 ```json
 {
   "code": "UnprocessableEntity",

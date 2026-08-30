@@ -288,14 +288,15 @@ func (e *authEmitter) hooks(b *gobuf.Buf) {
 		"what Server.Auth is then set to. Set both or neither — a project whose " +
 		"resource routes label a request one way and whose sign-in labels it " +
 		"another has two answers to the question the label exists to settle.\n\n" +
-		"**A caller that sends no header gets no identifier here, even in a " +
-		"project that traces**, and that is worth knowing rather than " +
-		"discovering. These routes are rig's own: they are mounted by " +
-		"Auth.Mount rather than emitted per endpoint, so no span is opened over " +
-		"them and there is no trace to fall back to. A resource route in the " +
-		"same project answers with one. A client that wants its sign-in " +
-		"correlated with the rest of its requests sends the header — which is " +
-		"the case this field exists to make work, and the one it now does.")
+		"The trace is the one answer these routes cannot give. They are rig's " +
+		"own: mounted by Auth.Mount rather than emitted per endpoint, so no span " +
+		"is opened over them and there is nothing to fall back to. What a caller " +
+		"that sent no header gets here is a fresh identifier — the same string " +
+		"as the requestId in the error body and the request_id on the line, " +
+		"which is what the label is for — where a resource route in the same " +
+		"traced project would have answered with its trace id. A client that " +
+		"wants its sign-in correlated with the rest of its requests sends the " +
+		"header, which is the case this field exists to make work.")
 	b.L("RequestID func(*%s.Request) string", httpPkg)
 	b.NL()
 
@@ -570,9 +571,14 @@ func (e *authEmitter) configFunc(b *gobuf.Buf) {
 		"request looks like, and the two had already drifted — this one named no " +
 		"caller, no client revision, and a request identifier nothing validated. " +
 		"What it still cannot reach is the trace fallback, because these routes " +
-		"carry no span; [Hooks.RequestID] says what that costs.")
+		"carry no span, so a request nobody named is named here instead of by " +
+		"its trace; [Hooks.RequestID] says what that costs.\n\n" +
+		"RequestIDHeader is on the literal because it is what decides which " +
+		"header is read, and a Server without it reads the default one — which " +
+		"is the right header in most projects and the wrong one in exactly the " +
+		"projects that said so in rig.yaml.")
 	b.L("if cfg.OnError == nil {")
-	b.L("srv := Server{Logger: h.Logger, RequestID: h.RequestID}")
+	b.L("srv := Server{Logger: h.Logger, RequestID: h.RequestID, RequestIDHeader: RequestIDHeader}")
 	b.L("cfg.OnError = func(w %s.ResponseWriter, r *%s.Request, err error) {", httpPkg, httpPkg)
 	b.L("fail(srv, w, r, requestContext(srv, r), err)")
 	b.L("}")

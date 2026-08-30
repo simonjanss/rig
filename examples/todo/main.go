@@ -14,7 +14,6 @@ import (
 	"cmp"
 	"context"
 	"embed"
-	"log/slog"
 	"net/http"
 	"os"
 	"time"
@@ -60,11 +59,6 @@ func main() {
 		// second rather than at the end of the connect timeout.
 		Hint: "run `rig db up` to start a local Postgres for this project, " +
 			"or point $DATABASE_URL at one you already have",
-
-		// Where this project's log goes. A project with `tracing:` on has this
-		// filled in by api.Main from the sink it builds; with no tracing block
-		// there is nowhere else for it to come from, so it is said here.
-		Logger: slog.Default(),
 
 		MaxStartup: 30 * time.Second,
 		// Nothing below has a default. serve refuses a config that left any of
@@ -209,13 +203,17 @@ func main() {
 				// so a client that had to send one twice gets one row.
 				DB: app.Pool,
 				// No RequestID: the generated default already reads the caller's
-				// own X-Request-Id, bounded and checked before it is believed.
-				// This project does not trace, so that is the only identifier
-				// there is — turning `tracing:` on is what would give every
-				// request one whether or not the caller thought to send it.
+				// own X-Request-Id, bounded and checked before it is believed,
+				// and names the request itself when it sent none. This project
+				// does not trace, so that name is a fresh one; turning
+				// `tracing:` on is what would make it the trace id instead,
+				// without changing a line here or how the string is used.
 				// app.Logger rather than the package default, so a request
 				// line, a shutdown step and anything a dependency says all
-				// land wherever the server was told to write.
+				// land wherever the server was told to write. api.Mount has
+				// already put the request on it, which is why the service at
+				// the bottom of this file logs without saying which request it
+				// is in.
 				//
 				// This used to be a PreHook logging the method and the path.
 				// The generated server writes the line itself now, and writes a

@@ -127,7 +127,9 @@ func (r Request[Path, Query, Body]) BuiltBefore(rev apirev.Revision) bool {
 
 // RequestContext is the request's own metadata.
 type RequestContext struct {
-	// RequestID correlates this request with the server's logs.
+	// RequestID correlates this request with the server's logs. Always set on a
+	// request the server served — see [RequestContextOf] for where it comes from
+	// — and empty only on a context somebody built by hand.
 	RequestID string
 	Method    string
 	Path      string
@@ -163,8 +165,10 @@ type RequestContext struct {
 //
 // Only the fields that have something in them. An empty attribute on every
 // line is the same width in a terminal and a key in a structured backend, and
-// it says a field was collected when it was not — a project that set no
-// RequestID gets lines with no request_id rather than lines with an empty one.
+// it says a field was collected when it was not — a context built by hand for
+// work that came from no request at all, a migration or a background job, logs
+// as a smaller group rather than as a row of empty strings. One that came from
+// [RequestContextOf] always has a request_id.
 func (rc RequestContext) LogValue() slog.Value {
 	attrs := make([]slog.Attr, 0, 6)
 	if rc.RequestID != "" {
@@ -364,9 +368,17 @@ type Server struct {
 	//
 	// Nil is the ordinary case and does not mean nothing: it means
 	// [CallerRequestID] — the caller's own [Server.RequestIDHeader], if it sent one worth
-	// trusting, and this request's trace otherwise. Set this only to answer the
-	// question differently; the default is already the answer every route in this
-	// package gives, including the authentication ones.
+	// trusting — then this request's trace, and a fresh identifier when there is
+	// neither. Set this only to answer the question differently; the default is
+	// already the answer every route in this package gives, including the
+	// authentication ones.
+	//
+	// A hook replaces only the first of those three. One that returns "" for some
+	// requests leaves them to the trace and then to a fresh identifier, exactly
+	// as a caller that sent no header is left — so "every request has an
+	// identifier" is true rather than usually true, and a traced project whose
+	// hook declines a request still labels it with that request's trace. A hook
+	// is how the answer is chosen, not how it is opted out of.
 	RequestID func(*http.Request) string
 
 	// Logger is where this server says what it did and why a request failed. Nil
@@ -381,10 +393,18 @@ type Server struct {
 	// What comes out: an error line per failed request carrying the whole error,
 	// and, at [log/slog.LevelDebug], a line per request with its status and size.
 	//
-	// There is no logger on the context and no way to reach this one from a
-	// service. A service is constructed by the application, so it is handed a
-	// logger there — the same one this field gets — and puts the request on
-	// its own lines with [RequestContextFrom].
+	// There is still no logger on the context and no way to reach this one from a
+	// service: a service is constructed by the application and handed a logger
+	// there. What it is handed is already request-aware, though. The generated
+	// Mount wraps [github.com/simonjanss/rig/runtime/serve.App.Logger] in
+	// [LogHandler] before the application's own wiring sees it, so every line a
+	// service writes inside a request carries the same request group these two
+	// lines do, without the call site saying so.
+	//
+	// This field is not wrapped, because it is a value the application set.
+	// [LogFailure] and [LogRequest] put the request on their lines themselves,
+	// so they read the same whoever configured the logger. [RequestContextFrom]
+	// is still how anything reaches the fields rather than the group.
 	Logger *slog.Logger
 
 	// MinRevision refuses a caller built against an API revision older than this
@@ -501,6 +521,11 @@ func Prepare(s Server, w http.ResponseWriter, r *http.Request) (context.Context,
 // a blank one still answers correctly and still logs a failure — it just
 // logs one that names no method, no path and no request identifier, which is
 // the one thing the line exists for.
+//
+// What comes back always has a [RequestContext.RequestID]. The three ways it
+// gets one are in order below; the last of them invents one, so an untraced
+// project answering a caller that named nothing still has a string to correlate
+// on.
 func RequestContextOf(s Server, r *http.Request) RequestContext {
 	rc := RequestContext{
 		Method:         r.Method,
@@ -511,23 +536,46 @@ func RequestContextOf(s Server, r *http.Request) RequestContext {
 		ClientRevision: r.Header.Get(s.revisionHeader()),
 		ServerRevision: s.Revision,
 	}
+	// The first answer: the hook when there is one, and otherwise the caller's
+	// own, so a client correlating its side with this one is believed.
 	if s.RequestID != nil {
 		rc.RequestID = s.RequestID(r)
 	} else {
-		// The caller's own first, so a client correlating its side with this one is
-		// believed. Failing that, the trace, when this project traces: the request
-		// already has an identifier then, and inventing a second one would be
-		// inventing a second answer to the same question. The requestId in the error
-		// body, the request_id on every log line and the trace in a collector are one
-		// string, and nobody had to wire it up.
-		//
-		// Empty when neither is there, which is a request nothing can correlate —
-		// turning `tracing:` on in rig.yaml is what gives every request one whether
-		// or not the caller thought to.
 		rc.RequestID = CallerRequestID(r, s.RequestIDHeader)
-		if rc.RequestID == "" && s.Tracer != nil {
-			rc.RequestID = s.Tracer.TraceID(r)
-		}
+	}
+
+	// Failing that, the trace, when this project traces: the request already has
+	// an identifier then, and inventing a second one would be inventing a second
+	// answer to the same question. The requestId in the error body, the
+	// request_id on every log line and the trace in a collector are one string,
+	// and nobody had to wire it up.
+	//
+	// Outside the branch above rather than inside it, so that a hook declining a
+	// request gets the same treatment as a caller that sent no header. A hook is
+	// how the answer is chosen, not how a request opts out of being correlated
+	// with its own trace.
+	if rc.RequestID == "" && s.Tracer != nil {
+		rc.RequestID = s.Tracer.TraceID(r)
+	}
+
+	// Nobody named this request, so it is named here, and that is what makes this
+	// function's promise one sentence: a request the server served has an
+	// identifier.
+	//
+	// This is the last of the three answers and not a competitor to them. The
+	// first answer still wins, and the trace still beats a mint — that order
+	// is what keeps the requestId in an error body, the request_id on every log
+	// line and the trace in a collector one string when this project traces.
+	// What changes without `tracing:` is that the string is fresh rather than
+	// absent, so an untraced project can still be asked what happened to one
+	// request.
+	//
+	// A uuid rather than something cheaper. A counter with a process prefix is
+	// unique in a process and the question is asked across replicas; sixteen
+	// random bytes as hex is shaped exactly like a trace id, which is a string
+	// that looks pasteable into a collector and is not.
+	if rc.RequestID == "" {
+		rc.RequestID = uuid.NewString()
 	}
 	return rc
 }
@@ -661,7 +709,7 @@ func LogFailure(s Server, r *http.Request, rc RequestContext, err error) {
 	}
 
 	attrs := []any{
-		slog.Any("request", rc),
+		slog.Any(requestAttr, rc),
 		slog.Int("status", code.HTTPStatus()),
 		slog.Any("code", code),
 		slog.Any("error", err),
@@ -690,7 +738,7 @@ func LogRequest(s Server, r *http.Request, rec *reqlog.Writer, rc RequestContext
 	}
 
 	l.DebugContext(r.Context(), "request served",
-		slog.Any("request", rc),
+		slog.Any(requestAttr, rc),
 		slog.Int("status", rec.Status()),
 		slog.Int64("bytes", rec.Bytes()),
 	)

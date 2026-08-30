@@ -731,10 +731,28 @@ func TestAServiceAccountCannotSignIn(t *testing.T) {
 		method: http.MethodPost, path: "/auth/login", tenant: tenant,
 		body: map[string]any{"emailAddress": "nobody-at-all@example.com", "password": SeedPassword},
 	})
-	if stranger.body != res.body {
+	// Everything except the requestId, which is per request by design: every
+	// request is named, so two of them are never byte-identical and never should
+	// be. What must not differ is what the answer says.
+	if told(t, stranger.body) != told(t, res.body) {
 		t.Errorf("a service account and an unknown address must answer alike:\n  service: %s\n  unknown: %s",
 			res.body, stranger.body)
 	}
+}
+
+// told is what an error body tells the caller, with the request's own name
+// dropped. Two refusals that must give nothing away are compared on this.
+func told(t *testing.T, body string) string {
+	t.Helper()
+
+	var e struct {
+		Code    string `json:"code"`
+		Message string `json:"message"`
+	}
+	if err := json.Unmarshal([]byte(body), &e); err != nil {
+		t.Fatalf("the error body is not JSON: %v\n%s", err, body)
+	}
+	return e.Code + ": " + e.Message
 }
 
 // The level reaches a caller's claims as a role name, so a check sees it without

@@ -177,14 +177,69 @@ func TestSettleMergesTheTasksAndNothingElse(t *testing.T) {
 		t.Error("settle does not merge the tasks")
 	}
 
-	// And fills in nothing else. Every other field serve needs is one the
-	// project states, because every one of them is read by something outside
-	// this binary — an orchestrator checking a path, a manifest naming a
-	// budget — and a value settled here is one nobody can read.
+	// And fills in nothing else that a deployment reads. Every other field serve
+	// needs is one the project states, because every one of them is read by
+	// something outside this binary — an orchestrator checking a path, a
+	// manifest naming a budget — and a value settled here is one nobody can
+	// read. The logger below is the exception that proves it: nothing outside
+	// the process reads which logger this is.
 	for _, absent := range []string{"cfg.LivenessPath", "cfg.ReadinessPath", "cfg.MaxShutdown"} {
 		if strings.Contains(src[strings.Index(src, "func settle("):], absent) {
 			t.Errorf("settle fills in %q", absent)
 		}
+	}
+}
+
+// A project with no `tracing:` block has nowhere else for a logger to come
+// from, and serve refuses a config that states none — so settle states it, and
+// a main function stops carrying a line that could only have said this.
+//
+// The second half is the one worth guarding. Main emits
+// serve.Main(process.Configure(settle(cfg)), …), so settle runs first: a fill
+// that was not guarded on `tracing:` would pre-empt Configure's own nil check
+// and a traced project would write nothing to $RIG_LOG_FILE and show an empty
+// log panel — with every test still passing, because nothing else asks.
+func TestSettleStatesTheLoggerOnlyWhereNothingElseWill(t *testing.T) {
+	t.Parallel()
+
+	doc := gentest.LoadDocument(t, filepath.Join("testdata", fixture))
+	plain := artifactNamed(t, gentest.Run(t, servergo.New(), doc, opts()), "run.gen.go")
+	if !strings.Contains(plain, "cfg.Logger = slog.Default()") {
+		t.Errorf("an untraced project's settle states no logger:\n%s", plain)
+	}
+
+	traced := artifactNamed(t, gentest.Run(t, servergo.New(), monitored(t), opts()), "run.gen.go")
+	if strings.Contains(traced[strings.Index(traced, "func settle("):], "cfg.Logger") {
+		t.Error("settle fills the logger in a traced project, so Process.Configure never does")
+	}
+}
+
+// Every line written inside a request says which request, and no call site
+// anywhere says so — which only works if the logger the application is handed
+// has been through apibase before the application builds anything out of it.
+func TestMountLabelsTheLoggerBeforeAnythingIsBuiltFromIt(t *testing.T) {
+	t.Parallel()
+
+	for _, c := range []struct {
+		name string
+		doc  func(*testing.T) *ir.Document
+	}{
+		{"untraced", func(t *testing.T) *ir.Document {
+			return gentest.LoadDocument(t, filepath.Join("testdata", fixture))
+		}},
+		{"traced", monitored},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			src := artifactNamed(t, gentest.Run(t, servergo.New(), c.doc(t), opts()), "run.gen.go")
+
+			label := strings.Index(src, "app.Logger = apibase.RequestLogger(app.Logger)")
+			if label < 0 {
+				t.Fatalf("Mount does not label the logger:\n%s", src)
+			}
+			if build := strings.Index(src, "build(ctx, app"); build < label {
+				t.Error("the application is built before its logger is labelled")
+			}
+		})
 	}
 }
 

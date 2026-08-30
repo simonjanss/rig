@@ -297,8 +297,12 @@ func TestClientValidationFailureIsTyped(t *testing.T) {
 	}
 
 	// The envelope rides on the same value, which is the difference between one
-	// match and two. The request id is empty here because this server sets no
-	// RequestID hook, and that is the server's choice rather than the client's.
+	// match and two. The request id on it is a fresh one: this server sets no
+	// RequestID hook and this project does not trace, so nobody named this
+	// request and it was named for it.
+	if refused.RequestID == "" {
+		t.Errorf("the refusal names no request: %+v", refused)
+	}
 	if refused.Code != rigerr.CodeUnprocessableEntity ||
 		refused.Status != http.StatusUnprocessableEntity {
 		t.Errorf("code = %q, status = %d, want both off the same value",

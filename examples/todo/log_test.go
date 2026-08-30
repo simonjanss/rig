@@ -21,6 +21,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/simonjanss/rig/examples/todo/internal/api"
+	"github.com/simonjanss/rig/runtime/apibase"
 	"github.com/simonjanss/rig/runtime/rigerr"
 	"github.com/simonjanss/rig/runtime/tenancy"
 )
@@ -144,16 +145,31 @@ func TestTheLineCarriesWhatTheClientWasHanded(t *testing.T) {
 	}
 }
 
-// A server nobody configured a RequestID for should produce lines with no
-// request_id, not lines with an empty one — the second says a field was
-// collected when it was not.
-func TestAnAbsentRequestIDIsAbsentFromTheLine(t *testing.T) {
+// This project does not trace and this caller sent no header, which used to be
+// a request nothing could be asked about: an error body with no requestId and a
+// line with no request_id. It is named anyway now, and the pair is the point —
+// somebody quoting the string from their screen is quoting the string in the
+// log.
+func TestEveryRequestIsNamedEvenWithoutTracing(t *testing.T) {
 	t.Parallel()
 
-	log, _ := call(t, api.Server{}, rigerr.Internal(errors.New("boom"), "listing todos"))
+	log, rec := call(t, api.Server{}, rigerr.Internal(errors.New("boom"), "listing todos"))
 
-	if strings.Contains(log.String(), "request_id") {
-		t.Errorf("an empty request_id was logged anyway:\n%s", log)
+	var body struct {
+		RequestID string `json:"requestId"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("the error body is not JSON: %v", err)
+	}
+	if body.RequestID == "" {
+		t.Fatal("the error body names no request")
+	}
+	if _, err := uuid.Parse(body.RequestID); err != nil {
+		t.Errorf("requestId = %q, want a uuid: %v", body.RequestID, err)
+	}
+
+	if want := `"request_id":"` + body.RequestID + `"`; !strings.Contains(log.String(), want) {
+		t.Errorf("the log does not carry what the client was told (%s):\n%s", want, log)
 	}
 }
 
@@ -172,10 +188,10 @@ func TestTheRequestLineIsDebugAndCarriesTheAnswer(t *testing.T) {
 	}
 }
 
-// A service that wants the request on its own lines reaches it the way anything
-// else does: RequestContextFrom, and one attribute. There is no logger on the
-// context — a service is constructed by the application, so it is handed a
-// logger there, the way todo.New already is.
+// A service that wants the request on its own lines can still reach it the way
+// anything else does: RequestContextFrom, and one attribute. This is the shape
+// for a logger the application built itself and did not get from app.Logger —
+// see the test below for the one it did.
 func TestAServiceCanPutTheRequestOnItsOwnLines(t *testing.T) {
 	t.Parallel()
 
@@ -195,6 +211,34 @@ func TestAServiceCanPutTheRequestOnItsOwnLines(t *testing.T) {
 
 	entry := only(t, &log, slog.LevelInfo, "counting")
 	for _, want := range []string{`"request_id":"req-7"`, `"route":"GET /api/v1/todos"`} {
+		if !strings.Contains(entry, want) {
+			t.Errorf("the service's line is missing %s:\n%s", want, entry)
+		}
+	}
+}
+
+// And the ordinary case: the logger the application was handed has already been
+// through apibase.LogHandler — api.Mount does it before anything is built out
+// of it — so a service writes what it has to say and the request arrives on the
+// line without the service naming it.
+//
+// This is the same test as the one above with the attribute deleted, which is
+// the diff worth reading: nothing at the call site says which request this is.
+func TestAServiceGetsTheRequestWithoutAskingForIt(t *testing.T) {
+	t.Parallel()
+
+	var log bytes.Buffer
+	logger := apibase.RequestLogger(slog.New(slog.NewJSONHandler(&log, nil)))
+	srv := api.Server{RequestID: func(*http.Request) string { return "req-8" }}
+
+	todos := &stubTodos{list: func(ctx context.Context) error {
+		logger.InfoContext(ctx, "counting")
+		return rigerr.NotFound("no such todo")
+	}}
+	drive(t, srv, todos)
+
+	entry := only(t, &log, slog.LevelInfo, "counting")
+	for _, want := range []string{`"request_id":"req-8"`, `"route":"GET /api/v1/todos"`} {
 		if !strings.Contains(entry, want) {
 			t.Errorf("the service's line is missing %s:\n%s", want, entry)
 		}

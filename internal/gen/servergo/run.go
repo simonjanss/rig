@@ -301,6 +301,11 @@ func (e *emitter) mountFunc(b *gobuf.Buf) {
 			"[Process.Attach] is still a caller's to write. [Process.Mount] is the " +
 			"pair that does both.\n\n"
 	}
+	doc += "app.Logger is labelled with the request before build is called, so " +
+		"everything built out of it — the services, their repositories, the " +
+		"authentication configuration — writes lines that say which request " +
+		"they belong to. See " +
+		"[github.com/simonjanss/rig/runtime/apibase.RequestLogger].\n\n"
 	doc += "What comes back is registered in the order it has to be, and anything " +
 		"left nil is said out loud on the way past — see [Parts]."
 	b.Comment(doc)
@@ -317,6 +322,10 @@ func (e *emitter) mountFunc(b *gobuf.Buf) {
 	}
 
 	b.L("return func(ctx %s.Context, app *%s.App) (%s.Handler, error) {", ctxPkg, servePkg, httpPkg)
+
+	basePkg := b.Import(runtimeModule + "/apibase")
+	b.L("app.Logger = %s.RequestLogger(app.Logger)", basePkg)
+	b.NL()
 
 	if e.hasPresence() {
 		b.Comment("Before the application's own wiring, because it needs nothing from " +
@@ -402,16 +411,9 @@ func (e *emitter) processMountMethod(b *gobuf.Buf) {
 func (e *emitter) mainFunc(b *gobuf.Buf) {
 	servePkg := b.Import(runtimeModule + "/serve")
 
-	logger := ""
-	if !e.tracing() {
-		// A project that traces gets its logger from Process.Configure; one
-		// that does not has nowhere else for it to come from.
-		logger = "\t\t\tLogger:            slog.Default(),\n"
-	}
 	example := "\tfunc main() {\n" +
 		"\t\tapi.Main(serve.Config{\n" +
 		"\t\t\tAddr:              cmp.Or(os.Getenv(\"ADDR\"), \"127.0.0.1:8080\"),\n" +
-		logger +
 		"\t\t\tLivenessPath:      \"/livez\",\n" +
 		"\t\t\tReadinessPath:     \"/readyz\",\n" +
 		"\t\t\tMaxStartup:        30 * time.Second,\n" +
@@ -451,6 +453,19 @@ func (e *emitter) mainFunc(b *gobuf.Buf) {
 		"paths, the address and the shutdown budget — together with what a " +
 		"configuration file cannot hold: where the migrations are embedded and " +
 		"what this binary's subcommands are.\n\n" +
+		"There is no Logger in it, and that is not an omission. serve refuses a " +
+		"config that states none, and it is filled in" +
+		func() string {
+			if e.tracing() {
+				return " by [Process.Configure], from the sink [NewProcess] built " +
+					"— so the log file the monitoring page reads is the one this " +
+					"server writes to"
+			}
+			return " by settle, with the default logger, there being no sink to " +
+				"choose between without a `tracing:` block"
+		}() + ". State one to send the lines somewhere else; [Mount] wraps " +
+		"whatever it ends up being, so a line written inside a request says " +
+		"which request.\n\n" +
 		"MaxShutdown is the fourth, and it is there for a different reason than " +
 		"the other three. rig knows what it should be — [ShutdownBudget] adds it " +
 		"up — and settles it anyway not at all, because it is the one number in " +
@@ -522,6 +537,17 @@ func (e *emitter) settleFunc(b *gobuf.Buf) {
 		"already decided, and leaves anything already set alone.\n\n" +
 		"Tasks are merged rather than replaced, the way [Tasks] merges them: the " +
 		"application's half wins on a name they share.\n\n"
+	if !e.tracing() {
+		doc += "The logger is among them, and it is the one that is not out of " +
+			"rig.yaml — there is no `logging:` block to read. It is here because " +
+			"serve refuses a config that states no logger, and with no `tracing:` " +
+			"block there is no sink to choose between: the answer is the default " +
+			"logger, and a main function writing it out would be a line that could " +
+			"only have said that. A stated one is left alone. Either way [Mount] " +
+			"wraps what comes out, so the request is on every line written inside " +
+			"one — which is labelling a logger rather than choosing one, and is " +
+			"why this does not belong with the three below.\n\n"
+	}
 	doc += "MaxShutdown is deliberately not among them, though this is the one " +
 		"place that knows the answer. It is what a deployment's " +
 		"terminationGracePeriodSeconds has to agree with, so it is written in the " +
@@ -539,6 +565,19 @@ func (e *emitter) settleFunc(b *gobuf.Buf) {
 	b.Comment(doc)
 
 	b.L("func settle(cfg %s.Config) %s.Config {", servePkg, servePkg)
+	if !e.tracing() {
+		b.Comment("serve refuses a config with no logger, and there is nothing for " +
+			"this project to decide about one: with no `tracing:` block there is no " +
+			"sink to build, so the answer is the default logger and a main function " +
+			"writing it out is a line that could only have said this.\n\n" +
+			"Only when it was left unset. A logger stated in the serve.Config is " +
+			"the application's and is kept — [Mount] wraps whatever this ends up " +
+			"being, so a stated one is labelled rather than replaced.")
+		b.L("if cfg.Logger == nil {")
+		b.L("cfg.Logger = %s.Default()", b.Import("log/slog"))
+		b.L("}")
+		b.NL()
+	}
 	b.L("cfg.Tasks = Tasks(cfg.Tasks)")
 	b.L("return cfg")
 	b.L("}")
