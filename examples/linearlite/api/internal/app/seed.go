@@ -9,8 +9,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/simonjanss/rig/examples/linearlite/internal/api"
-	"github.com/simonjanss/rig/examples/linearlite/services/authz"
+	"github.com/simonjanss/rig/examples/linearlite/internal/generated/api"
+	"github.com/simonjanss/rig/examples/linearlite/internal/services/authz"
 )
 
 // The seed's fixed identifiers, so the README can show a sign-in that works,

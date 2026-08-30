@@ -18,10 +18,11 @@ Generated with [rig](https://github.com/simonjanss/rig).
 Both outer layers speak the model's types, so nothing is converted between
 them: a field is defined once and returned as it is stored.
 
-The service layer under `api/services/<table>/` is the only place to write code.
-It implements a generated interface and calls a generated repository. A table
-with no business logic needs nothing but its constructor and an empty set of
-rules: the generated default implementation already satisfies the interface.
+The service layer under `api/internal/services/<table>/` is the only place to
+write code. It implements a generated interface and calls a generated
+repository. A table with no business logic needs nothing but its constructor and
+an empty set of rules: the generated default implementation already satisfies
+the interface.
 
 Every service says what it owes, in a `contract()` function the stub writes. It
 is passed to the constructor, so there is no service whose rules were never
@@ -56,18 +57,26 @@ Two halves and the document that describes both:
 
     rig.yaml        the whole configuration — above both halves, because it
                     describes both
-    api/            the Go module: main.go, migrations/, internal/, services/,
-                    client/, importer/, import/, integration/
+    api/            the Go module: main.go, client/, importer/, import/,
+                    integration/, and internal/, which holds generated/,
+                    services/, migrations/ and app/
     web/            the React front end, including its generated client
     docs/           the generated OpenAPI document
 
 Every path in `rig.yaml` is relative to `rig.yaml`, which is what puts the Go
-module root a directory below it. Two consequences worth knowing before moving
+module root a directory below it. Three consequences worth knowing before moving
 anything:
 
-- **`api/migrations/` is under the module because `api/main.go` embeds it.**
-  `go:embed` cannot reach outside its own package's directory, so SQL that ships
-  in the binary has to live inside the module that ships it.
+- **`api/internal/migrations/` is under the module because `api/main.go`
+  embeds it.** `go:embed` cannot reach outside its own package's directory, so
+  SQL that ships in the binary has to live inside the module that ships it. It
+  can reach downwards, which is why the SQL sits under `internal/`: the embed
+  pattern and the `Dir:` on the `migrate.Source` both name
+  `internal/migrations`.
+- **Everything `rig generate` writes under `api/` lands in
+  `api/internal/generated/`**, bar `api/client/`. The split is the point —
+  `generated/` is rewritten on every run, and every other directory under
+  `api/internal/` is yours.
 - **`go` commands run in `api/`; `rig` commands run anywhere.** rig walks up to
   the first `rig.yaml`, so `rig check` and `rig db url` work from either
   directory. `go build ./...` does not: run from here it matches no packages,
@@ -75,25 +84,25 @@ anything:
   package pattern for exactly this reason.
 
 The module path is `github.com/simonjanss/rig/examples/linearlite`, without the
-`api`. `api/go.mod` is where the module begins, so `api/internal/model` is the
-package that path names.
+`api`. `api/go.mod` is where the module begins, so
+`api/internal/generated/model` is the package that path names.
 
 ## Which files you may edit
 
 | Pattern | Who owns it |
 |---|---|
 | `rig.yaml` | you — the project's whole configuration |
-| `api/migrations/*.sql` | you — and only yours; rig's are carried by its modules |
-| `api/services/<table>/<table>.yaml` | you, via `rig sync` |
+| `api/internal/migrations/*.sql` | you — and only yours; rig's are carried by its modules |
+| `api/internal/services/<table>/<table>.yaml` | you, via `rig sync` |
 | `api/main.go` | you |
-| `api/internal/app/*.go` | you — the one hand-written directory under `api/internal/` |
+| `api/internal/app/*.go` | you — hand-written wiring, beside `generated/` rather than inside it |
 | `api/integration/*_test.go` | you |
-| `api/services/<table>/<table>.go` | you |
+| `api/internal/services/<table>/<table>.go` | you |
 | `*.gen.go`, `*.gen.ts` | rig — rewritten on every run, never edit |
 
-`api/client/` is generated too, and is the one generated directory not under
-`api/internal/`: it is the Go SDK for this API, and it exists to be imported by
-somebody else's program. `api/import/` is that somebody: the CSV job that fills the board through it.
+`api/client/` is generated too, and is the one generated directory outside
+`api/internal/generated/`: it is the Go SDK for this API, and it exists to be
+imported by somebody else's program, which `internal/` would forbid. `api/import/` is that somebody: the CSV job that fills the board through it.
 
 ## Migrations
 
@@ -176,12 +185,12 @@ Beyond the todo example's layout, seven directories and one file:
 - `api/importer/` + `api/import/` — the batch job over the generated Go client, split
   so the docker test drives the same loop the command runs.
 - `api/internal/app/` — the server itself: every service, hook and route the
-  binary mounts, built by `app.New` over a pool. The one hand-written
-  directory under `api/internal/`, and a package rather than a block in `api/main.go`
-  for one reason — a test cannot import a `main`, so this is what
-  `api/integration/` builds. What is left in `api/main.go` is the process around it:
-  the log sink, the tracing provider, the embedded migrations, and the
-  `serve.Config` naming the tasks.
+  binary mounts, built by `app.New` over a pool. Hand-written, which is why it
+  sits beside `api/internal/generated/` rather than in it, and a package rather
+  than a block in `api/main.go` for one reason — a test cannot import a `main`,
+  so this is what `api/integration/` builds. What is left in `api/main.go` is
+  the process around it: the log sink, the tracing provider, the embedded
+  migrations, and the `serve.Config` naming the tasks.
 - `api/integration/` — every test in this example, the docker suite and the one
   file that needs no database. `go test -tags docker ./integration/` in `api/`
   runs it;
@@ -198,26 +207,26 @@ Beyond the todo example's layout, seven directories and one file:
   Presence is the exception and rig decides it rather than this project —
   `applyPresenceTable` sets `Fallback: false`, and
   `api/integration/electric_docker_test.go`'s 502 assertion is the guard on that.
-- `api/services/rig_presence/` — one file, the scope stub, and the only filled-in
-  scope stub in the repository. Every other shape here leaves the generated
-  tenant filter as the whole scope; this one narrows on `scope` and `target_id`,
-  because a heartbeat is a row change delivered to every subscriber and the
-  fan-out is what decides whether presence is affordable. There is no
-  `rig_presence.yaml` beside it, and there is none anywhere under `api/services/`
-  for a table of rig's: rig ships their configuration and the compiler reads it
-  from there. It is also the one `api/services/rig_*` file left, and it is
-  hand-written rather than scaffolded — rig no longer writes stubs for its own
-  tables, because the three others here were `return nil` and two were imported
-  by nothing.
-- `api/services/authz/` — the roles-and-permissions model, an adapted copy of
-  examples/auth's; that copy's comments explain every decision. Note the one
-  name spelled out in it: `todo.claim` is the key rig derived from the custom
-  endpoint, and a derived key nobody grants is a 403 on a working button.
-- `api/services/outbox/` — one ring buffer implementing both interfaces rig ships
-  no transport for: `account.Notifier` (the links auth mints) and
-  `notify.Sender` (the email copy of an inbox line). It records instead of
-  sending, which is the thing a real one must never do, and the front end says
-  so where it shows them.
+- `api/internal/services/rig_presence/` — one file, the scope stub, and the
+  only filled-in scope stub in the repository. Every other shape here leaves the
+  generated tenant filter as the whole scope; this one narrows on `scope` and
+  `target_id`, because a heartbeat is a row change delivered to every subscriber
+  and the fan-out is what decides whether presence is affordable. There is no
+  `rig_presence.yaml` beside it, and there is none anywhere under
+  `api/internal/services/` for a table of rig's: rig ships their configuration
+  and the compiler reads it from there. It is also the one
+  `api/internal/services/rig_*` file left, and it is hand-written rather than
+  scaffolded — rig no longer writes stubs for its own tables, because the three
+  others here were `return nil` and two were imported by nothing.
+- `api/internal/services/authz/` — the roles-and-permissions model, an adapted
+  copy of examples/auth's; that copy's comments explain every decision. Note the
+  one name spelled out in it: `todo.claim` is the key rig derived from the
+  custom endpoint, and a derived key nobody grants is a 403 on a working button.
+- `api/internal/services/outbox/` — one ring buffer implementing both
+  interfaces rig ships no transport for: `account.Notifier` (the links auth
+  mints) and `notify.Sender` (the email copy of an inbox line). It records
+  instead of sending, which is the thing a real one must never do, and the front
+  end says so where it shows them.
 - `api/internal/app/demo.go` — the only hand-written HTTP here:
   `GET /_demo/outbox`, `GET /_demo/tour`, and the sync switch
   (`GET /_demo/sync`, `POST /_demo/sync/stop`, `POST /_demo/sync/start`).
@@ -259,15 +268,16 @@ Beyond the todo example's layout, seven directories and one file:
   indistinguishable from the outage the switch exists to demonstrate. The pill
   reads "Sync moved" and the strip names both ports.
 - **The notification devices and settings have no service layer**, and nothing
-  under `api/services/` at all. They are the two notification tables a person owns
-  rather than reads, projected as `NotificationDevice` and `NotificationSetting`
-  by `notifications: expose: true`; `api/internal/app` builds each with
-  `api.NewDefault<Name>Service(repo, api.<Name>Contract{})`, which is the
-  documented way to say there are no rules to add. `internal/compile` makes both
-  owner-scoped on `account_id`, so reads and updates are narrowed before any code
-  here runs, and the create — the one write with no row to narrow by — is checked
-  in the generated writer. That check used to be a hand-written validator in each
-  of these two directories, the same eleven lines twice.
+  under `api/internal/services/` at all. They are the two notification tables a
+  person owns rather than reads, projected as `NotificationDevice` and
+  `NotificationSetting` by `notifications: expose: true`; `api/internal/app`
+  builds each with `api.NewDefault<Name>Service(repo, api.<Name>Contract{})`,
+  which is the documented way to say there are no rules to add.
+  `internal/compile` makes both owner-scoped on `account_id`, so reads and
+  updates are narrowed before any code here runs, and the create — the one write
+  with no row to narrow by — is checked in the generated writer. That check used
+  to be a hand-written validator in each of these two directories, the same
+  eleven lines twice.
 
 The `/auth/*` screens are worth knowing about before adding another: `web/src/`
 already covers sign-in, registration, the picker, reset, invitations (send,
@@ -284,11 +294,11 @@ its own over `app.Pool`.
 
 **None of the shutdown arithmetic is in this directory.**
 `api.ShutdownBudget()` is forty-five seconds, and it is forty-five because
-`api/internal/api/process.gen.go` adds up the five steps rig registers for this
-project's blocks — fifteen for the engine, five each for the live subscriptions,
-the trace flush, the sweeper and the auth cache's channel — and leaves ten for
-the requests in flight. A sixth block would change the number without anything
-here being edited.
+`api/internal/generated/api/process.gen.go` adds up the five steps rig registers
+for this project's blocks — fifteen for the engine, five each for the live
+subscriptions, the trace flush, the sweeper and the auth cache's channel — and
+leaves ten for the requests in flight. A sixth block would change the number
+without anything here being edited.
 
 `api/main.go` states both halves of the total: `DrainDelay` of two seconds and
 `MaxShutdown` of forty-seven, which is the budget plus that delay. Nothing

@@ -12,7 +12,7 @@
 RIG := $(CURDIR)/../../bin/rig
 
 # The Go module. rig.yaml stays here, above both halves; everything Go lives
-# under this, including the migrations, because api/main.go embeds them.
+# under this, including api/internal/migrations, because api/main.go embeds it.
 API := $(CURDIR)/api
 
 # What the demonstration needs at run time and the build cannot know.
