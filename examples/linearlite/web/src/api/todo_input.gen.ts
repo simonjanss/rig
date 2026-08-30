@@ -5,7 +5,7 @@
 import type { TodoPriority } from "./todo_priority.gen.js";
 import type { TodoFilter } from "./todo_query.gen.js";
 import type { TodoStatus } from "./todo_status.gen.js";
-import type { FieldError } from "@rig/client";
+import type { FieldError } from "@rig-ts/client";
 
 /**
  * TodoListQuery is the query string listTodos takes.

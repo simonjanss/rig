@@ -18,7 +18,7 @@ import type {
     TodoUpdateInput,
 } from "./todo_input.gen.js";
 import type { TodoFilter } from "./todo_query.gen.js";
-import type { CallOptions, RigError, Runtime, Upload } from "@rig/client";
+import type { CallOptions, RigError, Runtime, Upload } from "@rig-ts/client";
 
 import {
     METHOD_QUERY,
@@ -29,7 +29,7 @@ import {
     sendContent,
     sendNoContent,
     setParam,
-} from "@rig/client";
+} from "@rig-ts/client";
 
 /**
  * TodoClient is what `client.todos` is, and what a test writes to stand in for

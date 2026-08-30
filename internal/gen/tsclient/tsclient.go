@@ -12,8 +12,8 @@
 //
 // What it does not generate is everything underneath the methods: the request,
 // the credential, the failure, the pagination. That is the same in every project
-// and lives, hand-written, in the `@rig/client` package — and the streaming half
-// lives in `@rig/electric`, which is a separate package because the sync client
+// and lives, hand-written, in the `@rig-ts/client` package — and the streaming half
+// lives in `@rig-ts/electric`, which is a separate package because the sync client
 // and TanStack DB come with it and a project that streams nothing should install
 // nothing.
 //
@@ -46,14 +46,14 @@ func init() { gen.Register(New()) }
 
 // DefaultClientModule is the hand-written half of the SDK, which the generated
 // half calls into.
-const DefaultClientModule = "@rig/client"
+const DefaultClientModule = "@rig-ts/client"
 
 // DefaultElectricModule is the hand-written half of the streaming layer. It is
 // only ever imported by a project that has a table with `electric: {enabled:
 // true}`, so a project without one never has to install it.
-const DefaultElectricModule = "@rig/electric"
+const DefaultElectricModule = "@rig-ts/electric"
 
-// defaultRevisionHeader matches the `@rig/client` default and rig.yaml's
+// defaultRevisionHeader matches the `@rig-ts/client` default and rig.yaml's
 // api.revision_header, for a document compiled before the setting existed.
 const defaultRevisionHeader = "API-Revision"
 

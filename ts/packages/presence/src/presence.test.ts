@@ -1,4 +1,4 @@
-import type { Runtime } from "@rig/client";
+import type { Runtime } from "@rig-ts/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { PresenceRow } from "./types.js";
@@ -9,7 +9,7 @@ import { createPresence } from "./presence.js";
  * The four members the presence transport touches, and no more.
  *
  * A cast rather than a real `Runtime`, because `make ts` runs the suite without
- * running the build: `@rig/client` resolves to its `dist`, which is not there on
+ * running the build: `@rig-ts/client` resolves to its `dist`, which is not there on
  * a fresh clone. The type import above is erased, so nothing here loads it.
  */
 function runtimeStub(answer: () => Promise<Response>): Runtime {

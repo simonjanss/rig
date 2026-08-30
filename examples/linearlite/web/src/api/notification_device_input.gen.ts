@@ -3,7 +3,7 @@
 // This file is rewritten on every run. Put changes in the code that calls it.
 
 import type { NotificationChannel } from "./notification_channel.gen.js";
-import type { FieldError } from "@rig/client";
+import type { FieldError } from "@rig-ts/client";
 
 /**
  * NotificationDeviceListQuery is the query string listNotificationDevices

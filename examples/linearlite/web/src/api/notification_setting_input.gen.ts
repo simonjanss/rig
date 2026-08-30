@@ -4,7 +4,7 @@
 
 import type { NotificationChannel } from "./notification_channel.gen.js";
 import type { NotificationDigest } from "./notification_digest.gen.js";
-import type { FieldError } from "@rig/client";
+import type { FieldError } from "@rig-ts/client";
 
 /**
  * NotificationSettingListQuery is the query string listNotificationSettings

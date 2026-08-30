@@ -1,6 +1,6 @@
-import type { Runtime, TokenPair } from "@rig/client";
+import type { Runtime, TokenPair } from "@rig-ts/client";
 
-import { send, sendNoContent } from "@rig/client";
+import { send, sendNoContent } from "@rig-ts/client";
 
 import type {
     AccountView,

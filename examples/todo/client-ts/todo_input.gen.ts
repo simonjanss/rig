@@ -4,7 +4,7 @@
 
 import type { TodoPriority } from "./todo_priority.gen.js";
 import type { TodoFilter } from "./todo_query.gen.js";
-import type { FieldError, Upload } from "@rig/client";
+import type { FieldError, Upload } from "@rig-ts/client";
 
 /**
  * TodoCreateFiles is the files a create carries with it.

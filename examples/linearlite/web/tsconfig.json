@@ -11,14 +11,14 @@
         // TypeScript resolves their imports by walking up from where the file
         // is, which leaves the workspace. So every dependency of an aliased
         // source is named, the same rule vite.config.ts states at length —
-        // "react" is here because @rig/presence/react imports it and `make
+        // "react" is here because @rig-ts/presence/react imports it and `make
         // linearlite-web` never installs ts/, so there would be nothing there
         // to find.
         "paths": {
-            "@rig/client": ["../../../ts/packages/client/src/index.ts"],
-            "@rig/electric": ["../../../ts/packages/electric/src/index.ts"],
-            "@rig/presence": ["../../../ts/packages/presence/src/index.ts"],
-            "@rig/presence/react": [
+            "@rig-ts/client": ["../../../ts/packages/client/src/index.ts"],
+            "@rig-ts/electric": ["../../../ts/packages/electric/src/index.ts"],
+            "@rig-ts/presence": ["../../../ts/packages/presence/src/index.ts"],
+            "@rig-ts/presence/react": [
                 "../../../ts/packages/presence/src/react.ts"
             ],
             "react": ["./node_modules/@types/react"],

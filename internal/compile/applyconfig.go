@@ -968,7 +968,7 @@ func applyNotificationTable(res *ir.Resource, t *ir.Table, opt ConfigOptions) {
 // feature *is* the freshness. It is also the one that would come out right
 // anyway — the heartbeat is a REST call an outage does not touch, so it goes on
 // supplying a fresh reading of the server's clock while the streamed rows sit
-// still, and @rig/presence ages them out at the TTL. A fallback here would buy a
+// still, and @rig-ts/presence ages them out at the TTL. A fallback here would buy a
 // minute of ghosts and then the empty room it already shows.
 //
 // Here rather than in every project's configuration, for the reason the owner

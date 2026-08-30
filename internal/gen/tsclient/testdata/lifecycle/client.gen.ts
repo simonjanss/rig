@@ -8,15 +8,15 @@
  * One method per endpoint, grouped by resource: `createClient(config)` and then
  * `client.<resource>.<operation>(…)`. The types are this directory's;
  * everything underneath a method — the request, the credential, the failure
- * — is @rig/client's, and a failure arrives as a `RigError` whose `code` says
- * which of them it was.
+ * — is @rig-ts/client's, and a failure arrives as a `RigError` whose `code`
+ * says which of them it was.
  */
 
 import type { LessonClient } from "./lesson_client.gen.js";
-import type { Config } from "@rig/client";
+import type { Config } from "@rig-ts/client";
 
 import { createLessonClient } from "./lesson_client.gen.js";
-import { Runtime } from "@rig/client";
+import { Runtime } from "@rig-ts/client";
 
 /**
  * The prefix every route sits under.

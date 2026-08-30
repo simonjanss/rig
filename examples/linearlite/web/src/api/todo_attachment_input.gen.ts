@@ -3,7 +3,7 @@
 // This file is rewritten on every run. Put changes in the code that calls it.
 
 import type { TodoAttachmentFilter } from "./todo_attachment_query.gen.js";
-import type { FieldError, Upload } from "@rig/client";
+import type { FieldError, Upload } from "@rig-ts/client";
 
 /**
  * TodoAttachmentCreateFiles is the files a create carries with it.

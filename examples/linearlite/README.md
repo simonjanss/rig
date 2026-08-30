@@ -95,10 +95,10 @@ twice.
 
 `web/` is a React application, deliberately plain: Vite, react-router,
 dnd-kit for the drag, hand-written CSS, and no state library — the state is
-the database, and TanStack DB (which `@rig/electric` is built on) keeps the
+the database, and TanStack DB (which `@rig-ts/electric` is built on) keeps the
 board a live view of it. The generated client lives in `web/src/api`, written
-by `rig generate` like everything else, and imports `@rig/client`,
-`@rig/electric` and `@rig/presence` from this repository's `ts/` packages.
+by `rig generate` like everything else, and imports `@rig-ts/client`,
+`@rig-ts/electric` and `@rig-ts/presence` from this repository's `ts/` packages.
 
 Two boundaries are worth reading before copying anything:
 

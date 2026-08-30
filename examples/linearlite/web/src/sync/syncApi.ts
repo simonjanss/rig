@@ -1,6 +1,6 @@
-import type { Runtime } from "@rig/client";
+import type { Runtime } from "@rig-ts/client";
 
-import { send } from "@rig/client";
+import { send } from "@rig-ts/client";
 
 /**
  * The switch that takes the sync service down, at `/_demo/sync`.
@@ -57,7 +57,7 @@ export function readSync(rt: Runtime): Promise<SyncState> {
  * Both answer with the state afterwards, so nothing here needs a second request
  * to know what it did.
  *
- * Neither carries an idempotency key, deliberately: `@rig/client` will not
+ * Neither carries an idempotency key, deliberately: `@rig-ts/client` will not
  * repeat a POST without one, and a stop that the network swallowed is better
  * reported than silently sent twice.
  */

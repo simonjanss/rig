@@ -86,7 +86,7 @@ Next:
   callback and not automatic pacing: a client that silently slept because
   `Remaining` was low would turn a batch job's throughput into a mystery, and it
   cannot know whether the caller would rather go slower or fail sooner. No
-  generator change — the generated `createClient` already takes `@rig/client`'s
+  generator change — the generated `createClient` already takes `@rig-ts/client`'s
   own `Config`.
 - ~~**M9** — tracing.~~ Shipped: an `observe/` module that is where
   OpenTelemetry lives so that nothing else has to depend on it, a one-key
@@ -5173,7 +5173,7 @@ with no socket to run and no service to add.
 `presence:` in rig.yaml with five keys, `ir.Presence`, `applyPresenceTable`, a
 `PartPresence` the scaffold vendors, `internal/gen/servergo/presence.go` writing
 `NewPresence`/`PresenceTargets`/`NewPresenceSweeper`/`PresenceSweep`, and a third
-npm package, `@rig/presence`, with a React entry point behind an optional peer
+npm package, `@rig-ts/presence`, with a React entry point behind an optional peer
 dependency. `docs/presence.md` is new. **No example wires it up** — that is a
 follow-up, deliberately: presence landed as a module, a config block, a generator
 and a package, and putting it into linearlite is a change to one project rather
@@ -5306,7 +5306,7 @@ an append-only migration. Both want a real tenant to answer.
 
 ### Honest gaps
 
-- **`@rig/presence` is the first rig package that runs when nobody called it** — a
+- **`@rig-ts/presence` is the first rig package that runs when nobody called it** — a
   timer, two window listeners, a `keepalive` fetch on teardown. Also the first
   with a second entry point and an optional peer dependency. Both are precedents.
 - ~~**Nothing runs the browser half against a real server.**~~ Closed in M15.1:
@@ -5439,10 +5439,10 @@ The third was not predicted, and it is the more general one:
 
 > **Every dependency of an aliased `ts/` source has to be named in the app.**
 
-`examples/linearlite/web` aliases `@rig/client` and `@rig/electric` to their
+`examples/linearlite/web` aliases `@rig-ts/client` and `@rig-ts/electric` to their
 sources in `ts/`, and pins the three sync packages to its own `node_modules` by
 absolute path — with a comment explaining that `resolve.dedupe` cannot reach
-imports resolved from outside the project root. `@rig/presence/react` imports
+imports resolved from outside the project root. `@rig-ts/presence/react` imports
 `react`, which made that comment's rule apply to a fourth package, and the failure
 is worse than the two-copies one it was written for: `make linearlite-web` never
 installs `ts/`, so there is no `react` there at all and `tsc` says "cannot find
@@ -5452,9 +5452,9 @@ that imports something new needs the same line, and the root `AGENTS.md` says so
 ### Two things it found that were already broken
 
 **`make ts` could not run on a fresh clone.** `ts-typecheck` depended on
-`ts-deps` and not `ts-build`, and `@rig/electric` resolves `@rig/client` through
+`ts-deps` and not `ts-build`, and `@rig-ts/electric` resolves `@rig-ts/client` through
 `node_modules` — which reaches its `exports`, which reach `dist/`, which is
-gitignored. So a new checkout got seven "cannot find module `@rig/client`" errors
+gitignored. So a new checkout got seven "cannot find module `@rig-ts/client`" errors
 that read like a broken workspace rather than a missing build. One prerequisite.
 It matters more now that `check` has a second pnpm target: the whole TypeScript
 half of `check` was unreachable on any machine that had not built `ts/` by hand.
@@ -5567,7 +5567,7 @@ subscriber is already parsing), and a `jsonb` is compared as a document
   matters for the others. The fallbacks are the opposite: three shapes, three
   reads, and a trash route quietly answering with live rows is the worst outcome
   available. Nil stays nil.
-- **No client change.** `@rig/electric` does not surface the header, so nothing
+- **No client change.** `@rig-ts/electric` does not surface the header, so nothing
   renders a "reconnecting" banner. The test that matters is there instead —
   `ts/packages/electric/src/fallback.test.ts` drives a real `ShapeStream` over
   the exact bytes the Go side writes, because the envelope is rig's invention and
@@ -5915,7 +5915,7 @@ are already broken.
   **There is no test-support entry point.** The `harness()` in
   `ts/packages/client/src/transport.test.ts` — a scripted `fetch` that records
   every attempt, with a fixed clock and no backoff — is the thing every consumer
-  will write for themselves, badly. A `@rig/client/testing` export is the obvious
+  will write for themselves, badly. A `@rig-ts/client/testing` export is the obvious
   home, and it is new public surface, so it wants a design pass rather than a
   lift-and-shift.
 

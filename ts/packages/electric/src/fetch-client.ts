@@ -1,4 +1,4 @@
-import type { Runtime } from "@rig/client";
+import type { Runtime } from "@rig-ts/client";
 
 /**
  * The fetch every stream goes out through.

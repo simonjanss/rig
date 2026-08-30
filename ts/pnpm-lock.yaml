@@ -42,7 +42,7 @@ importers:
         specifier: 0.3.15
         version: 0.3.15(typescript@5.9.3)
     devDependencies:
-      '@rig/client':
+      '@rig-ts/client':
         specifier: workspace:*
         version: link:../client
       tsdown:
@@ -54,10 +54,10 @@ importers:
 
   packages/presence:
     devDependencies:
-      '@rig/client':
+      '@rig-ts/client':
         specifier: workspace:*
         version: link:../client
-      '@rig/electric':
+      '@rig-ts/electric':
         specifier: workspace:*
         version: link:../electric
       '@types/react':
@@ -75,13 +75,13 @@ importers:
 
   typecheck-fixture:
     dependencies:
-      '@rig/client':
+      '@rig-ts/client':
         specifier: workspace:*
         version: link:../packages/client
-      '@rig/electric':
+      '@rig-ts/electric':
         specifier: workspace:*
         version: link:../packages/electric
-      '@rig/presence':
+      '@rig-ts/presence':
         specifier: workspace:*
         version: link:../packages/presence
     devDependencies:

@@ -3,7 +3,7 @@
 // This file is rewritten on every run. Put changes in the code that calls it.
 
 import type { RigFileFilter } from "./rig_file_query.gen.js";
-import type { FieldError } from "@rig/client";
+import type { FieldError } from "@rig-ts/client";
 
 /**
  * RigFileListQuery is the query string listRigFiles takes.

@@ -4,7 +4,5 @@ go 1.26.6
 
 require (
 	github.com/google/uuid v1.6.0
-	github.com/simonjanss/rig/runtime v0.0.0
+	github.com/simonjanss/rig/runtime v0.1.0
 )
-
-replace github.com/simonjanss/rig/runtime => ../runtime

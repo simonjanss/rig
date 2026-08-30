@@ -12,7 +12,7 @@
 // than rebuilt because `Client.runtime` is a real `Runtime` and `createClient`
 // does no I/O.
 
-import { ErrorCode, FieldCode, RigError } from "@rig/client";
+import { ErrorCode, FieldCode, RigError } from "@rig-ts/client";
 
 import {
     createClient,

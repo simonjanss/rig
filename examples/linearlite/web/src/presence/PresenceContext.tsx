@@ -1,7 +1,7 @@
-import type { Person, PresenceHandle } from "@rig/presence";
+import type { Person, PresenceHandle } from "@rig-ts/presence";
 import type { ReactNode } from "react";
 
-import { createPresence } from "@rig/presence";
+import { createPresence } from "@rig-ts/presence";
 import { createContext, useContext, useEffect, useState } from "react";
 
 import { createPresenceStream } from "../api/electric.gen.js";

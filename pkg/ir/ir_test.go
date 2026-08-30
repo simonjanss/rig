@@ -146,6 +146,33 @@ func TestHashTracksContent(t *testing.T) {
 	}
 }
 
+// A release of rig is not a change to anybody's API. The tool that produced a
+// document is written into it and must not be compared by it, or upgrading the
+// generator would move every project's revision and tell every client the API
+// had changed on a day it did not.
+func TestHashIgnoresTheTool(t *testing.T) {
+	t.Parallel()
+
+	doc := sample()
+	doc.Tool = "rig v0.1.0"
+	before, err := doc.Hash()
+	if err != nil {
+		t.Fatalf("hash: %v", err)
+	}
+
+	doc.Tool = "rig v0.2.0"
+	after, err := doc.Hash()
+	if err != nil {
+		t.Fatalf("hash: %v", err)
+	}
+	if after != before {
+		t.Fatalf("a new rig moved the hash: %s then %s", before, after)
+	}
+	if doc.Tool != "rig v0.2.0" {
+		t.Fatalf("Tool = %q, want it left on the document", doc.Tool)
+	}
+}
+
 // The revision is derived from the hash, so a hash that saw it would never
 // settle: stamping would move the hash, which would move the revision.
 func TestHashIgnoresTheRevision(t *testing.T) {

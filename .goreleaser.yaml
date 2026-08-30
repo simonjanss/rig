@@ -1,0 +1,89 @@
+# The release build of the rig binary.
+#
+# `go install github.com/simonjanss/rig/cmd/rig@latest` is the other way in and
+# needs nothing here; this exists for the machines that should not pay for a Go
+# toolchain and a compile to run one command — CI, mostly, through
+# .github/actions/setup-rig.
+version: 2
+
+project_name: rig
+
+before:
+  hooks:
+    - go mod download
+
+builds:
+  - id: rig
+    main: ./cmd/rig
+    binary: rig
+    # A version stamp, because a release archive is built from a checkout: the
+    # module version in its build info says "(devel)", and the tag is the only
+    # place the real answer exists. internal/version prefers this over the
+    # build info for exactly that reason.
+    # `v{{ .Version }}` and not `{{ .Version }}`: goreleaser strips the leading
+    # v, and a rig that reports "0.1.0" is a rig whose version cannot be handed
+    # to `go get` — which is exactly what the tutorial does with it.
+    ldflags:
+      - -s -w -X github.com/simonjanss/rig/internal/version.stamped=v{{ .Version }}
+    env:
+      - CGO_ENABLED=0
+    goos: [linux, darwin]
+    goarch: [amd64, arm64]
+
+archives:
+  # The name setup-rig constructs. Changing it breaks every pipeline pinned to
+  # an older tag of that action, so it is a decision rather than a default.
+  - name_template: "rig_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    files:
+      - LICENSE
+      - README.md
+
+checksum:
+  name_template: checksums.txt
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
+
+changelog:
+  use: github
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+
+release:
+  # A prerelease tag is a rehearsal, and marking it as one is the whole reason
+  # it is cheap: GitHub's /releases/latest skips prereleases, and that endpoint
+  # is what .github/actions/setup-rig reads to resolve `version: latest`. The
+  # default here is false, which would make v0.1.0-rc.1 the binary every
+  # pipeline downloads.
+  prerelease: auto
+
+  # rig is ten modules and a release tags all ten, so the notes say which
+  # versions to pin — the whole point of releasing them in lockstep.
+  footer: |
+    ## Install
+
+    ```bash
+    go install github.com/simonjanss/rig/cmd/rig@{{ .Tag }}
+    ```
+
+    In a GitHub Actions workflow:
+
+    ```yaml
+    - uses: simonjanss/rig/.github/actions/setup-rig@{{ .Tag }}
+    ```
+
+    The libraries a generated application imports are released at this same
+    version:
+
+    ```bash
+    go get github.com/simonjanss/rig/runtime@{{ .Tag }}
+    go get github.com/simonjanss/rig/migrate@{{ .Tag }}
+    ```

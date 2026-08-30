@@ -145,7 +145,7 @@ package B2 created rather than a new `runtime/httparg`, as filed.
   JSON envelope. Live rather than latent: the fallback runs whenever `OnError` is
   nil, and `examples/linearlite/main.go:443` constructs
   `genelectric.Server{Proxy, GetClaims}` with no `OnError`, which is the only
-  real application in the repository. `@rig/client`'s `readError` decodes a flat
+  real application in the repository. `@rig-ts/client`'s `readError` decodes a flat
   JSON body, against which text is an empty code — so `isUnauthorized()` answered
   false about a 401 from a stream route, which is exactly the failure B2 found in
   the nested envelope. It is `httpx.Fail` now, and `docs/electric.md` says so.
@@ -858,7 +858,7 @@ worth extracting; it was just its own item. See the note under C3.
   it exists. **Risk:** low-medium (retry engine) — all 18 of
   `transport.test.ts` pass unchanged, which is what the risk was about.
 
-### D2. Trim `@rig/client`'s public surface `[x]`
+### D2. Trim `@rig-ts/client`'s public surface `[x]`
 
 Sixteen exports gone: `asPost`, `isIdempotent`, `writes`, `isBindable`,
 `readError`, `parseRetryAfter`, `formatParam`, `retryable`, `retryDelayMs`, the
@@ -871,7 +871,7 @@ surface, not the package's internals.
   string literals. Three sources, all of them checked. `b.Import` and
   `b.ImportType` call sites in `internal/gen/tsclient/*.go` — ten values and six
   types, and `emitter.ref`/`refValue` only ever name the project's own generated
-  modules, never `@rig/client`. Every `from "@rig/client"` block in the goldens
+  modules, never `@rig-ts/client`. Every `from "@rig-ts/client"` block in the goldens
   and in `examples/linearlite/web` — the same set plus `Session`, `TokenPair`,
   `isConflict`. And `docs/`, where `fraction` and `fieldsAs` appear and none of
   the sixteen do. The generated `index.ts` names `RigError`, `Session` and

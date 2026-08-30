@@ -4,7 +4,7 @@ go 1.26.6
 
 require (
 	github.com/google/uuid v1.6.0
-	github.com/simonjanss/rig/runtime v0.0.0-00010101000000-000000000000
+	github.com/simonjanss/rig/runtime v0.1.0
 	golang.org/x/crypto v0.50.0
 )
 
@@ -21,5 +21,3 @@ require (
 	golang.org/x/sys v0.43.0 // indirect
 	golang.org/x/text v0.36.0 // indirect
 )
-
-replace github.com/simonjanss/rig/runtime => ../runtime

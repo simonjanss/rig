@@ -131,8 +131,8 @@ generators:
       default_base_url: http://localhost:8080
 
   # The same client for a browser, from the same document. Two packages
-  # underneath it rather than one: @rig/client is the request, the
-  # credential and the failure and has no dependencies, and @rig/electric
+  # underneath it rather than one: @rig-ts/client is the request, the
+  # credential and the failure and has no dependencies, and @rig-ts/electric
   # is the live-sync collections and brings TanStack DB with it. A project
   # with no streamed table never gets the second file and never installs
   # the second package.

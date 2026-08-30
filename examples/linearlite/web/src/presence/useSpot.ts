@@ -1,4 +1,4 @@
-import type { PresenceActivity, PresenceTarget } from "@rig/presence";
+import type { PresenceActivity, PresenceTarget } from "@rig-ts/presence";
 
 import { useEffect } from "react";
 

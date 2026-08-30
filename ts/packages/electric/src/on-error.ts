@@ -1,8 +1,8 @@
 import type { ShapeStreamOptions } from "@electric-sql/client";
-import type { Runtime } from "@rig/client";
+import type { Runtime } from "@rig-ts/client";
 
 import { FetchError } from "@electric-sql/client";
-import { isReauthorizer } from "@rig/client";
+import { isReauthorizer } from "@rig-ts/client";
 
 type ErrorHandler = NonNullable<ShapeStreamOptions["onError"]>;
 

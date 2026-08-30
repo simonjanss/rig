@@ -1,6 +1,6 @@
-import type { Runtime } from "@rig/client";
+import type { Runtime } from "@rig-ts/client";
 
-import { send, sendNoContent } from "@rig/client";
+import { send, sendNoContent } from "@rig-ts/client";
 
 /** The inbox's write half; reads come off the live stream. */
 

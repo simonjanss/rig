@@ -14,21 +14,17 @@ that is the place to look when you want to go further.
 
 ## Install rig
 
-rig is in early development and the repository is private, so there is no `go
-install` from a proxy yet. Clone it and build:
-
 ```bash
-git clone https://github.com/simonjanss/rig
-cd rig
-make build          # writes ./bin/rig
+go install github.com/simonjanss/rig/cmd/rig@latest
+rig version
 ```
 
-Put `bin/` on your `PATH`, or use the full path below.
+That puts `rig` in `$(go env GOPATH)/bin`, which you may need on your `PATH`.
 
-Your application will also need to depend on `rig/runtime`. Until the repository
-is public that means either a `replace` directive pointing at your clone, or
-`GOPRIVATE=github.com/simonjanss/rig` with git credentials configured. This
-tutorial uses `replace`, and says where.
+Your application will also depend on two libraries, `rig/runtime` and
+`rig/migrate`. They are released together with the command, at the same version
+— the code rig generates imports them, so a mismatch is not a combination worth
+having. `rig version` is that version, and step 7 pins it.
 
 ---
 
@@ -321,23 +317,18 @@ You now have, for one table:
 
 ## 7. Wire it up
 
-Two files you write by hand. First `go.mod` — this is the `replace` mentioned at
-the top; point it at your rig clone:
+Two files you write by hand. First `go.mod`:
 
+```bash
+go mod init example.com/todo
+go get github.com/google/uuid
+go get github.com/simonjanss/rig/runtime@$(rig version)
+go get github.com/simonjanss/rig/migrate@$(rig version)
 ```
-module example.com/todo
 
-go 1.26
-
-require (
-	github.com/google/uuid v1.6.0
-	github.com/simonjanss/rig/migrate v0.0.0
-	github.com/simonjanss/rig/runtime v0.0.0
-)
-
-replace github.com/simonjanss/rig/runtime => /path/to/rig/runtime
-replace github.com/simonjanss/rig/migrate => /path/to/rig/migrate
-```
+Asking `rig version` for the version rather than taking `@latest` is the point:
+the generated code under `internal/` was written by *this* rig, against the
+runtime API of *this* release.
 
 Then `main.go`:
 

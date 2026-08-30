@@ -2,6 +2,11 @@
 
 The checks, and which ones need Docker. `make help` lists every target.
 
+**Releasing is different from everything else in here.** It publishes tags that
+cannot be moved, deleted or fixed afterwards, so it is not something to do
+because main looks ready — read [Releasing](#releasing) before deciding to, and
+do not cut one you were not asked for.
+
 ## Before pushing
 
 ```bash
@@ -20,6 +25,7 @@ make test        # the fast suite
 make deps        # go mod tidy, then fail if anything changed
 make lint        # golangci-lint, pinned, installed into ./bin
 make vulncheck   # govulncheck, likewise
+make release-check # goreleaser's config validates and builds
 make ts          # the TypeScript workspace; needs pnpm
 make test-docker # needs Docker
 make examples    # needs Docker; a few minutes on its own
@@ -172,16 +178,16 @@ of the files above is edited. It reminds; it does not gate.
 ## The TypeScript workspace
 
 `ts/` is a pnpm workspace holding the packages a front end imports —
-`@rig/client`, `@rig/electric` and `@rig/presence` — plus `typecheck-fixture`,
+`@rig-ts/client`, `@rig-ts/electric` and `@rig-ts/presence` — plus `typecheck-fixture`,
 which is not published and exists only to be compiled.
 
 The third one is not like the other two, and it is worth knowing why before
-adding a fourth. `@rig/client` retries and `@rig/electric` maps; neither does
-anything until it is called. `@rig/presence` owns a timer, two window listeners
+adding a fourth. `@rig-ts/client` retries and `@rig-ts/electric` maps; neither does
+anything until it is called. `@rig-ts/presence` owns a timer, two window listeners
 and a `keepalive` fetch on teardown — **it is the first thing rig ships that runs
 when nobody called it**, which is why it is a package of its own rather than part
-of `@rig/electric`, and why it is the one place a side effect is expected. It is
-also the only package with a second entry point (`@rig/presence/react`, behind an
+of `@rig-ts/electric`, and why it is the one place a side effect is expected. It is
+also the only package with a second entry point (`@rig-ts/presence/react`, behind an
 optional `react` peer dependency), so that a project which does not use React
 never has `react` reachable from the module it imports.
 
@@ -208,13 +214,13 @@ golden files and by nothing else.
 generator emits the bytes it emitted last time, which stays true after a runtime
 signature moves underneath it. `typecheck-fixture` is what closes that: its
 `tsconfig.json` includes the golden directories and `examples/todo/client-ts`
-directly — not copies — and maps `@rig/client`, `@rig/electric` and
-`@rig/presence` to their `src`, so it checks what the packages say now rather than
+directly — not copies — and maps `@rig-ts/client`, `@rig-ts/electric` and
+`@rig-ts/presence` to their `src`, so it checks what the packages say now rather than
 what the last build said. A new golden goes in that list, or the emitter can start
 writing something that does not compile and every check will stay green.
 
 **And a fixture that never mounts anything cannot check a package that runs on
-its own.** `@rig/presence` owns a timer and two window listeners, and the
+its own.** `@rig-ts/presence` owns a timer and two window listeners, and the
 mistakes that surface there are about *where in a component tree* it is built:
 six of the eight bugs review found in it were in the browser half. That is why
 `make linearlite-web` is in `make check` — `examples/linearlite/web` is the one
@@ -230,7 +236,9 @@ approved once per clone.
 
 `runtime/`, `auth/`, `authmodel/`, `files/`, `notify/`, `observe/`, `presence/`,
 `migrate/` and `rigclient/` are separate modules
-that a generated application imports. Their godoc is the only documentation
+that a generated application imports, and `pkg/` is the root module's own
+published surface — the IR and the generator interface, which is what somebody
+writing a generator against rig imports. Their godoc is the only documentation
 their Go surface has: `docs/` covers what somebody writes — `rig.yaml`, a
 migration, a service — and never what they call. So a doc comment there is
 documentation, not commentary, and `make godoc-check` fails on an exported
@@ -275,6 +283,136 @@ test`, which is the point: an example that has to compile and produce the stated
 output cannot quietly stop being true. The seven packages that have them are all
 in `runtime/` and all pure — one needing Postgres or a live server has no
 deterministic output, and a compile-only example is a weaker promise than none.
+
+## Releasing
+
+### When — read this before deciding to
+
+**Do not cut a release unless you were asked to cut this one, now.** Everything
+else in this file describes work that can be revised; this is the one procedure
+that cannot. A tag the module proxy has fetched is in the checksum database
+permanently: it cannot be moved, deleted, or fixed, only superseded by a higher
+number. Propose a release, name the version you would use, and wait.
+
+**What makes one necessary.** Merging to main releases nothing. Until a release,
+a change to a published module's exported surface — `runtime`, `auth`,
+`authmodel`, `files`, `migrate`, `notify`, `observe`, `presence`, `rigclient` —
+or to what a generator emits is invisible to everyone outside this repository.
+So the question is never "is main ahead of the last tag", it is "is somebody
+waiting for something that is only on main".
+
+**Which number.** rig is v0, where the rule is not semver's:
+
+| The change | The bump |
+|---|---|
+| a signature moved, a config key changed meaning, generated output stopped compiling against the last release | minor — `v0.3.1` → `v0.4.0` |
+| anything else — a fix, an addition, a new generator | patch — `v0.3.1` → `v0.3.2` |
+
+There is no v1 until the Go surface is meant to be stable, and that is a
+decision to raise rather than take: from v2 on, Go requires the major in the
+import path, so every one of the ten modules would need a `/v2` suffix and every
+generated import in every user's project would change.
+
+**Rehearse a first-of-anything with a prerelease.** `v0.4.0-rc.1` is not what
+`@latest` selects and not what the setup-rig action installs, so it exercises
+the whole mechanism at no cost. Use one whenever the release itself is the risky
+part rather than the code in it.
+
+**Four things never to do.** Move or delete a published tag. Release from a
+branch. Hand-edit a version in a `go.mod` or a `package.json` — that is `make
+release`'s job, and doing it by hand is how the ten drift apart. Add an
+`NPM_TOKEN`; publishing is tokenless by design and a secret appearing in the
+release workflow means somebody misread it.
+
+`internal/release` enforces what it can: it refuses to run off main, off a stale
+main, on a dirty tree, onto a version that is already tagged, or from a module
+that has grown a `replace` back.
+
+### How
+
+Ten modules, one version, one commit. `make release VERSION=v0.1.0` rewrites
+every intra-repository requirement to that version, commits, and creates ten
+tags: `v0.1.0` for the root module and `runtime/v0.1.0`, `auth/v0.1.0` and so on
+for the rest, which is how Go names a version of a module in a subdirectory.
+`make release-dry VERSION=v0.1.0` prints it without writing it.
+
+**Lockstep is not tidiness.** The binary links `auth`, `files`, `migrate`,
+`notify`, `presence` and `runtime` — it embeds their foundation schemas and
+generates imports against them. A rig released at a different number from the
+runtime it generates against is a rig that produces code nobody can build, so
+the ten numbers are one number.
+
+**No published module may `replace` a sibling.** `go install pkg@version`
+refuses a module whose `go.mod` carries one, and a consumer resolving a
+dependency ignores the replace and asks the proxy for a version that was never
+published. Local resolution is `go.work`'s job and only `go.work`'s job.
+`internal/release` refuses to run when a replace comes back.
+
+The examples keep theirs. They are not published, and they exist to compile
+against the working tree — that is what makes `make examples` a regression test
+rather than a test of the last release. Same for the temporary module
+`internal/gen/gentest/compile.go` writes.
+
+### The order, which is not the obvious one
+
+```bash
+make release VERSION=v0.1.0
+git push origin --tags      # first
+make check                  # now that `make deps` can resolve them
+git push origin main        # last
+```
+
+Tags before the branch, because `make deps` runs `go mod tidy`, and `go mod
+tidy` is a single-module operation that resolves from the proxy and ignores the
+workspace. Between the rewrite and the tag it is being asked for a version that
+does not exist yet, and it fails. Push the branch first and the pre-push hook
+fails on exactly that.
+
+**A tag the proxy has seen cannot be changed.** Not moved, not deleted — the
+checksum database has it. A bad release is superseded by the next patch version
+and never repaired. That is what `v0.1.0-rc.1` is for: a prerelease is not what
+`@latest` selects, so it is a rehearsal with the same mechanics.
+
+### What a release cannot be checked by
+
+Nothing inside this repository. `go.work` resolves every sibling to the working
+tree, so a `go.mod` that no outsider could resolve builds perfectly here and
+fails the moment somebody runs `go get`. The `consumable` job in
+`.github/workflows/release.yaml` is the check: after the tags are pushed it
+installs rig from the proxy in an empty directory and builds a module that
+imports four of the libraries. It runs on the tag, which means it runs after the
+release exists — the earliest anything can.
+
+### The npm packages go out on the same tag
+
+`ts/packages/{client,electric,presence}` publish as `@rig-ts/client`,
+`@rig-ts/electric` and `@rig-ts/presence`, at the tag with its `v` stripped —
+npm has no leading v. `make release` sets those three versions in the same
+commit that sets the Go ones, and the `npm` job in the release workflow refuses
+to publish if a package.json and the tag disagree.
+
+Why lockstep here too: `rig generate` emits `import ... from "@rig-ts/client"`,
+so the generator and the package it generates imports of have to agree, exactly
+as the binary and `runtime` do.
+
+**There is no NPM_TOKEN.** The job publishes through npm's trusted publishing,
+which mints a short-lived credential from the workflow's OIDC identity — hence
+`id-token: write` and no secret anywhere. Each package needs its trusted
+publisher registered once on npm, pointing at this repository and
+`release.yaml`.
+
+It packs with pnpm and publishes with npm, and it takes both: only `pnpm pack`
+rewrites the `workspace:^` peer dependencies into real ranges, and only `npm
+publish` speaks OIDC. `client` publishes first, because the other two depend on
+it.
+
+### Pushing a tag builds binaries
+
+`.github/workflows/release.yaml` triggers on `v*`, which matches the root tag
+and none of the nine others — a glob does not cross a slash, and `runtime/v0.1.0`
+does not start with a `v` anyway. It runs goreleaser for linux and darwin on
+amd64 and arm64, and `.github/actions/setup-rig` is what a pipeline elsewhere
+uses to download one of those instead of paying for `go install`.
 
 ## CI
 

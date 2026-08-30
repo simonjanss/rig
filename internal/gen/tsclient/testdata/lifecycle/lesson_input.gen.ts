@@ -4,7 +4,7 @@
 
 import type { LessonFilter } from "./lesson_query.gen.js";
 import type { LessonStatus } from "./lesson_status.gen.js";
-import type { FieldError } from "@rig/client";
+import type { FieldError } from "@rig-ts/client";
 
 /**
  * LessonListQuery is the query string listLessons takes.

@@ -16,7 +16,7 @@ const rigSrc = (pkg: string, entry = "index") =>
 // absolute path, and there are two independent reasons, both of which have
 // already cost somebody an afternoon.
 //
-// The sync stack must exist exactly once. @rig/electric's aliased sources live
+// The sync stack must exist exactly once. @rig-ts/electric's aliased sources live
 // in ts/, where module resolution finds ts/'s own installs of these three —
 // same versions, different files — and a collection built by one copy of
 // @tanstack/db is invisible to a live query run by the other: the board
@@ -25,7 +25,7 @@ const rigSrc = (pkg: string, entry = "index") =>
 // left.
 //
 // react is the same rule reaching a package that only just started needing
-// it. @rig/presence/react imports useSyncExternalStore from "react", and
+// it. @rig-ts/presence/react imports useSyncExternalStore from "react", and
 // resolved out of ts/ that import finds ts/'s devDependency — a different
 // build of a different patch version, which is two Reacts and therefore
 // "Invalid hook call" rather than a presence bug. It is also the harder
@@ -46,14 +46,14 @@ export default defineConfig({
     plugins: [react()],
     resolve: {
         alias: {
-            "@rig/client": rigSrc("client"),
-            "@rig/electric": rigSrc("electric"),
+            "@rig-ts/client": rigSrc("client"),
+            "@rig-ts/electric": rigSrc("electric"),
             // The subpath first. An alias whose `find` is a string also
             // matches `find + "/"` and then substitutes by replacement, so a
-            // bare "@rig/presence" entry alone would rewrite
-            // "@rig/presence/react" to ".../src/index.ts/react".
-            "@rig/presence/react": rigSrc("presence", "react"),
-            "@rig/presence": rigSrc("presence"),
+            // bare "@rig-ts/presence" entry alone would rewrite
+            // "@rig-ts/presence/react" to ".../src/index.ts/react".
+            "@rig-ts/presence/react": rigSrc("presence", "react"),
+            "@rig-ts/presence": rigSrc("presence"),
             react: ownDir("react"),
             "react-dom": ownDir("react-dom"),
             "@tanstack/db": own("@tanstack/db"),

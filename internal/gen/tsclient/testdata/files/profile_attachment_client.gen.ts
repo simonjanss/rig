@@ -19,7 +19,7 @@ import type {
     ProfileAttachmentFilter,
 } from "./profile_attachment_query.gen.js";
 import type { RigFile } from "./rig_file.gen.js";
-import type { CallOptions, RigError, Runtime, Upload } from "@rig/client";
+import type { CallOptions, RigError, Runtime, Upload } from "@rig-ts/client";
 
 import {
     METHOD_QUERY,
@@ -30,7 +30,7 @@ import {
     sendContent,
     sendNoContent,
     setParam,
-} from "@rig/client";
+} from "@rig-ts/client";
 
 /**
  * ProfileAttachmentClient is what `client.profileAttachments` is, and what a

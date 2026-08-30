@@ -87,7 +87,7 @@ export async function send<T>(
     const out = await sendOptional<T>(rt, op, opts);
     if (out === undefined) {
         throw new Error(
-            `@rig/client: ${op.method} ${op.path} answered with no body, ` +
+            `@rig-ts/client: ${op.method} ${op.path} answered with no body, ` +
                 "but the API document says it has one",
         );
     }
@@ -115,7 +115,7 @@ export async function sendOptional<T>(
         return JSON.parse(raw) as T;
     } catch (cause) {
         throw new Error(
-            `@rig/client: reading the response to ${op.method} ${op.path}`,
+            `@rig-ts/client: reading the response to ${op.method} ${op.path}`,
             { cause },
         );
     }
@@ -356,7 +356,7 @@ async function attemptOnce(
 ): Promise<Response> {
     if (op.body !== undefined && op.form !== undefined) {
         throw new Error(
-            `@rig/client: ${op.method} ${op.path} carries both a JSON body and a form; ` +
+            `@rig-ts/client: ${op.method} ${op.path} carries both a JSON body and a form; ` +
                 "a generated method sends one or the other",
         );
     }

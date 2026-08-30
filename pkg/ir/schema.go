@@ -18,6 +18,7 @@ type Schema struct {
 // their introspection shape.
 type TableKind string
 
+// The relation kinds rig introspects.
 const (
 	TableKindBase             TableKind = "Base"
 	TableKindView             TableKind = "View"

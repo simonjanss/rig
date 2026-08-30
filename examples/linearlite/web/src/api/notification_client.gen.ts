@@ -7,9 +7,9 @@ import type {
     NotificationListResponse,
 } from "./notification.gen.js";
 import type { NotificationListQuery } from "./notification_input.gen.js";
-import type { CallOptions, Runtime } from "@rig/client";
+import type { CallOptions, Runtime } from "@rig-ts/client";
 
-import { pathValue, send, setParam } from "@rig/client";
+import { pathValue, send, setParam } from "@rig-ts/client";
 
 /**
  * NotificationClient is what `client.notifications` is, and what a test writes

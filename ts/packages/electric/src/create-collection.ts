@@ -1,5 +1,5 @@
 import type { Row } from "@electric-sql/client";
-import type { Runtime } from "@rig/client";
+import type { Runtime } from "@rig-ts/client";
 
 import { createCollection } from "@tanstack/db";
 import { electricCollectionOptions } from "@tanstack/electric-db-collection";

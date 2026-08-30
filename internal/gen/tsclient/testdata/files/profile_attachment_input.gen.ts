@@ -5,7 +5,7 @@
 import type {
     ProfileAttachmentFilter,
 } from "./profile_attachment_query.gen.js";
-import type { FieldError, Upload } from "@rig/client";
+import type { FieldError, Upload } from "@rig-ts/client";
 
 /**
  * ProfileAttachmentCreateFiles is the files a create carries with it.

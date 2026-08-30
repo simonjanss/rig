@@ -19,10 +19,10 @@
  */
 
 import type { TodoRow } from "./todo.gen.js";
-import type { Runtime } from "@rig/client";
+import type { Runtime } from "@rig-ts/client";
 
-import { pathValue } from "@rig/client";
-import { createCollectionCache, createRigCollection } from "@rig/electric";
+import { pathValue } from "@rig-ts/client";
+import { createCollectionCache, createRigCollection } from "@rig-ts/electric";
 
 /**
  * NotificationRecipientRow is a NotificationRecipient as a live-sync stream

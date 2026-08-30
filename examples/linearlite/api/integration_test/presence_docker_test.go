@@ -164,7 +164,7 @@ func TestPresence(t *testing.T) {
 // presencePerson is one row as GET /presence answers it.
 //
 // camelCase whatever api.json_case says, for the reason /auth/* is: these
-// routes are rig's, they are identical in every project, and @rig/presence is
+// routes are rig's, they are identical in every project, and @rig-ts/presence is
 // compiled against them once. The live shape carries the same row under
 // Postgres column names, which is the seam that package exists to hide.
 type presencePerson struct {

@@ -3,7 +3,7 @@
   "info": {
     "title": "todo",
     "description": "The todo HTTP API.\n\nThe notification inbox endpoints are served by a hand-written module and are not described here.",
-    "version": "2026-08-27"
+    "version": "2026-08-30"
   },
   "servers": [
     {

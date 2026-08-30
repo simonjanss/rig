@@ -320,6 +320,7 @@ const (
 // frozen so no generator has to resolve names itself.
 type TypeKind string
 
+// The kinds a [Field.Type] resolves to.
 const (
 	TypeKindPrimitive TypeKind = "Primitive"
 	TypeKindEnum      TypeKind = "Enum"
@@ -506,6 +507,7 @@ func baseGoTypeName(goType string) string { return strings.TrimLeft(goType, "*[]
 // re-derived by every generator that touches the column.
 type ScanStrategy string
 
+// The strategies a column can be read and written by.
 const (
 	ScanDirect      ScanStrategy = "Direct"
 	ScanUUID        ScanStrategy = "UUID"
@@ -774,6 +776,7 @@ type Snapshot struct {
 // RelationKind is the cardinality of a [Relation].
 type RelationKind string
 
+// The cardinalities a [Relation] can have.
 const (
 	RelationBelongsTo  RelationKind = "BelongsTo"
 	RelationHasMany    RelationKind = "HasMany"
@@ -917,6 +920,7 @@ type ElectricParam struct {
 // configuration.
 type EndpointKind string
 
+// Where an endpoint came from.
 const (
 	EndpointGenerated EndpointKind = "Generated"
 	EndpointCustom    EndpointKind = "Custom"

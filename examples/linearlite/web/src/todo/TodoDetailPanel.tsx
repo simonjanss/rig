@@ -1,5 +1,5 @@
-import { isConflict } from "@rig/client";
-import { usePresence } from "@rig/presence/react";
+import { isConflict } from "@rig-ts/client";
+import { usePresence } from "@rig-ts/presence/react";
 import { useLiveQuery } from "@tanstack/react-db";
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router";

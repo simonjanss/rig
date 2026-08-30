@@ -17,7 +17,7 @@ import (
 // create a way for the two answers to disagree.
 //
 // This file is not emitted at all when no table opts in, which is the promise
-// server-go makes on the server side. It is what keeps `@rig/electric` — and
+// server-go makes on the server side. It is what keeps `@rig-ts/electric` — and
 // TanStack DB, and the sync client — out of a project that streams nothing.
 func (e *emitter) electricFile(streams []*ir.Resource) (gen.Artifact, error) {
 	b := e.open("electric.gen")

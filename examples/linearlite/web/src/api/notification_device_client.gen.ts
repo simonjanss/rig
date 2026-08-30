@@ -12,7 +12,7 @@ import type {
     NotificationDeviceGetQuery,
     NotificationDeviceListQuery,
 } from "./notification_device_input.gen.js";
-import type { CallOptions, RigError, Runtime } from "@rig/client";
+import type { CallOptions, RigError, Runtime } from "@rig-ts/client";
 
 import {
     isInvalid,
@@ -20,7 +20,7 @@ import {
     send,
     sendNoContent,
     setParam,
-} from "@rig/client";
+} from "@rig-ts/client";
 
 /**
  * NotificationDeviceClient is what `client.notificationDevices` is, and what a
