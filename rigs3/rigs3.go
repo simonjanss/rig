@@ -256,10 +256,10 @@ func tooShort(rules []types.LifecycleRule, window time.Duration) (int32, bool) {
 
 // windowDays is the restore window in whole days, rounded up.
 //
-// Up rather than down, which is the opposite of
-// [github.com/simonjanss/rig/internal/project.Files.RestoreWindowDays] and for
-// the same reason: there the row must stop being restorable before the bytes
-// go, and here the bytes must outlast the row.
+// Up rather than down, which is the opposite of how rig's compiler rounds the
+// same window into the one rig_file is given — and it is the opposite for the
+// same reason: there the row must stop being restorable before the bytes go,
+// and here the bytes must outlast the row.
 func windowDays(window time.Duration) int64 {
 	return int64(math.Ceil(window.Hours() / 24))
 }

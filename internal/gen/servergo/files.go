@@ -328,7 +328,7 @@ func (e *emitter) filesS3Constructor(b *gobuf.Buf, cfgIR *ir.Files, ctxPkg, file
 		"service with NewFilesWithStore instead.")
 	b.L("func NewFiles(ctx %s.Context, db %s.DB) (*%s.Service, error) {", ctxPkg, filesPkg, filesPkg)
 	b.L("store, err := %s.New(ctx, %s.Config{", rigs3Pkg, rigs3Pkg)
-	b.L("Bucket: %s,", s3Bucket(b, cfgIR.S3, osPkg))
+	b.L("Bucket: %s,", s3Bucket(cfgIR.S3, osPkg))
 	if cfgIR.S3.Region != "" {
 		b.L("Region: %s,", gobuf.Quote(cfgIR.S3.Region))
 	}
@@ -351,7 +351,7 @@ func (e *emitter) filesS3Constructor(b *gobuf.Buf, cfgIR *ir.Files, ctxPkg, file
 // which one, and a read of the environment when it named a variable instead —
 // which is what a bucket that differs per deployment needs. Validation refuses
 // a configuration that gives both, so there is no precedence to decide here.
-func s3Bucket(b *gobuf.Buf, cfg *ir.FilesS3, osPkg string) string {
+func s3Bucket(cfg *ir.FilesS3, osPkg string) string {
 	if cfg.BucketEnv != "" {
 		return fmt.Sprintf("%s.Getenv(%s)", osPkg, gobuf.Quote(cfg.BucketEnv))
 	}

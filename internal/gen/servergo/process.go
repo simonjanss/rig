@@ -209,6 +209,17 @@ func (e *emitter) tasksFunc(b *gobuf.Buf) {
 // task is a func(ctx, pool), and every one of these builds its service out of
 // the pool it is about to be given. Written by hand it is the same four lines in
 // every project, with the pool named three times.
+func (e *emitter) poolTask(b *gobuf.Buf, name, call string) {
+	var (
+		ctxPkg  = b.Import("context")
+		poolPkg = b.Import("github.com/jackc/pgx/v5/pgxpool")
+	)
+
+	b.L("%s: func(ctx %s.Context, pool *%s.Pool) error {", gobuf.Quote(name), ctxPkg, poolPkg)
+	b.L("return %s(ctx, pool)", call)
+	b.L("},")
+}
+
 // sweepFilesTask emits the sweeper subcommand, which is the one task whose
 // shape depends on where the bytes are kept.
 //
@@ -234,17 +245,6 @@ func (e *emitter) sweepFilesTask(b *gobuf.Buf) {
 	b.L("return err")
 	b.L("}")
 	b.L("return FileSweeper(svc)(ctx, pool)")
-	b.L("},")
-}
-
-func (e *emitter) poolTask(b *gobuf.Buf, name, call string) {
-	var (
-		ctxPkg  = b.Import("context")
-		poolPkg = b.Import("github.com/jackc/pgx/v5/pgxpool")
-	)
-
-	b.L("%s: func(ctx %s.Context, pool *%s.Pool) error {", gobuf.Quote(name), ctxPkg, poolPkg)
-	b.L("return %s(ctx, pool)", call)
 	b.L("},")
 }
 

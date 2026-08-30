@@ -58,7 +58,10 @@ func (s *Store) Put(ctx context.Context, key string, r io.Reader, opt blob.PutOp
 		in.ContentType = aws.String(opt.ContentType)
 	}
 	if _, err := s.uploader.UploadObject(ctx, in); err != nil {
-		return blob.Info{}, err
+		// Not s.wrap: a bucket that is not there answers a PutObject with a 404,
+		// and reporting that as blob.ErrNotFound would be this store claiming an
+		// object it was asked to write does not exist.
+		return blob.Info{}, fmt.Errorf("rigs3: write %s to bucket %s: %w", key, s.bucket, err)
 	}
 
 	checksum := hex.EncodeToString(counted.sum.Sum(nil))
