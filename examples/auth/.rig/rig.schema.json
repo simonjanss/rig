@@ -722,6 +722,40 @@
         "module"
       ]
     },
+    "Server": {
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]*$",
+          "description": "Name of the deployment: production, staging, local. It becomes an identifier in every generated SDK, so it is lower snake case."
+        },
+        "url": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Where the deployment answers, for example https://api.example.com. It is absolute, and the API's base_path is appended to it."
+        },
+        "description": {
+          "type": "string",
+          "description": "One line about what this deployment is for. It reaches the OpenAPI document and the doc comment on the generated constant."
+        },
+        "default": {
+          "type": "boolean",
+          "description": "The deployment a client that names no URL gets. At most one entry may set it; with none set, the first entry is the default."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "name",
+        "url"
+      ]
+    },
+    "Servers": {
+      "items": {
+        "$ref": "#/$defs/Server"
+      },
+      "type": "array"
+    },
     "Throttle": {
       "properties": {
         "enabled": {
@@ -911,6 +945,10 @@
     "api": {
       "$ref": "#/$defs/API",
       "description": "Shape of the generated HTTP API."
+    },
+    "servers": {
+      "$ref": "#/$defs/Servers",
+      "description": "The deployments this API answers on. Every SDK generator and the OpenAPI document read them, so the document and the clients cannot disagree about where the API is."
     },
     "database": {
       "$ref": "#/$defs/Database",

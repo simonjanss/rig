@@ -89,6 +89,22 @@ func rigYAML(opt ProjectOptions) string {
 	b.WriteString("api:\n")
 	b.WriteString("  version: v1\n")
 	b.WriteString("  base_path: /api/v1\n\n")
+	// Commented rather than filled in, because rig cannot know where this
+	// project will run — and written out in full rather than as a one-line
+	// example, because the shape is what somebody uncommenting it needs. The
+	// scaffold test parses this block with the `# ` stripped, so a suggestion
+	// that does not decode fails the build rather than the reader.
+	b.WriteString("# Where this API answers. Every SDK generator and the OpenAPI document\n")
+	b.WriteString("# read this one list, so a document saying the API is at api.example.com\n")
+	b.WriteString("# cannot ship beside a client pointing somewhere else. The entry marked\n")
+	b.WriteString("# default is what a client that names no URL gets; a caller pointing at a\n")
+	b.WriteString("# mock server passes their own, and nothing generated argues.\n")
+	b.WriteString("# servers:\n")
+	b.WriteString("#   - name: local\n")
+	b.WriteString("#     url: http://localhost:8080\n")
+	b.WriteString("#     default: true\n")
+	b.WriteString("#   - name: production\n")
+	b.WriteString("#     url: https://api.example.com\n\n")
 	if opt.Image != "" {
 		fmt.Fprintf(&b, "database:\n  image: %s\n\n", opt.Image)
 	}
@@ -178,9 +194,6 @@ func generatorsYAML(module string) string {
 	b.WriteString("    out_dir: docs\n")
 	b.WriteString("    options:\n")
 	b.WriteString("      formats: [json, yaml]\n")
-	b.WriteString("      # Name the deployment to make the document usable in a viewer.\n")
-	b.WriteString("      # Leave it out for anything that runs in more than one place.\n")
-	b.WriteString("      # servers: [\"https://api.example.com\"]\n")
 	return b.String()
 }
 

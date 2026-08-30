@@ -4,6 +4,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/simonjanss/rig/internal/gen/genutil"
 	"github.com/simonjanss/rig/internal/gen/tsbuf"
 	"github.com/simonjanss/rig/pkg/gen"
 	"github.com/simonjanss/rig/pkg/ir"
@@ -45,12 +46,7 @@ func (e *emitter) clientFile() (gen.Artifact, error) {
 	b.L("export const revisionHeader = %s;", tsbuf.Quote(e.revisionHeader()))
 	b.NL()
 
-	if e.cfg.DefaultBaseURL != "" {
-		b.Comment("Where this API runs in development, so a tool that only ever " +
-			"talks to that one can leave `baseUrl` out.")
-		b.L("export const defaultBaseUrl = %s;", tsbuf.Quote(e.cfg.DefaultBaseURL))
-		b.NL()
-	}
+	e.serverConstants(b, config)
 
 	resources := e.exposed()
 
@@ -70,13 +66,32 @@ func (e *emitter) clientFile() (gen.Artifact, error) {
 	b.L("};")
 	b.NL()
 
-	b.Comment("Builds a client.\n\n" +
-		"The only required setting is `baseUrl`, and in a browser served from the " +
-		"same origin as the API that is the empty string. A credential can be " +
-		"given here or installed later with `client.runtime.use(…)`.")
-	b.L("export function createClient(config: %s): Client {", config)
-	b.Indent()
-	b.L("const runtime = new %s(config, {", runtime)
+	_, hasDefault := genutil.DefaultServer(e.servers())
+	if hasDefault {
+		b.Comment("Builds a client.\n\n" +
+			"`baseUrl` is optional: left out it is `defaultBaseUrl`. In a browser " +
+			"served from the same origin as the API, pass `\"\"` — that is a base " +
+			"URL, not an absent one, and it resolves against the page. A credential " +
+			"can be given here or installed later with `client.runtime.use(…)`.")
+		b.L("export function createClient(config: ClientConfig = {}): Client {")
+		b.Indent()
+		b.L("const settings: %s = {", config)
+		b.Indent()
+		b.L("...config,")
+		b.L("baseUrl: config.baseUrl ?? defaultBaseUrl,")
+		b.Outdent()
+		b.L("};")
+		b.NL()
+		b.L("const runtime = new %s(settings, {", runtime)
+	} else {
+		b.Comment("Builds a client.\n\n" +
+			"The only required setting is `baseUrl`, and in a browser served from the " +
+			"same origin as the API that is the empty string. A credential can be " +
+			"given here or installed later with `client.runtime.use(…)`.")
+		b.L("export function createClient(config: %s): Client {", config)
+		b.Indent()
+		b.L("const runtime = new %s(config, {", runtime)
+	}
 	b.Indent()
 	b.L("basePath,")
 	b.L("revision,")
@@ -166,4 +181,87 @@ func (e *emitter) indexFile(artifacts []gen.Artifact) (gen.Artifact, error) {
 	}
 
 	return e.artifact("index.ts", b)
+}
+
+// servers are the deployments this client knows about.
+//
+// The project's list first. The deprecated default_base_url option is read only
+// when the project named none, and it arrives here as the nameless one-entry
+// case it always was: the constant it produces is the one it has always
+// produced. What it gains is an optional `baseUrl` that falls back to it, which
+// is what that constant has always implied and never delivered.
+func (e *emitter) servers() []ir.Server {
+	if named := genutil.Servers(e.doc); len(named) > 0 {
+		return named
+	}
+	if e.cfg.DefaultBaseURL == "" {
+		return nil
+	}
+	return []ir.Server{{URL: e.cfg.DefaultBaseURL, Default: true}}
+}
+
+// serverConstants emits the deployments, the default among them, and the config
+// shape that lets a caller leave `baseUrl` out.
+//
+// ClientConfig is emitted only when there is a default to fall back to, so a
+// client for a project that has named nowhere keeps requiring a `baseUrl` and
+// keeps the bytes it had.
+func (e *emitter) serverConstants(b *tsbuf.Buf, config string) {
+	servers := e.servers()
+	if len(servers) == 0 {
+		return
+	}
+
+	named := make([]ir.Server, 0, len(servers))
+	for _, s := range servers {
+		if s.Name != "" {
+			named = append(named, s)
+		}
+	}
+
+	if len(named) > 0 {
+		b.Comment("The deployments this API is served on, as rig.yaml names them.\n\n" +
+			"A caller that talks to one of them names it here rather than writing " +
+			"the URL down: the string is the project's, and it moves when the " +
+			"project does.")
+		b.L("export const servers = {")
+		b.Indent()
+		for _, s := range named {
+			b.Comment(serverDescription(s))
+			b.L("%s: %s,", s.Name, tsbuf.Quote(s.URL))
+		}
+		b.Outdent()
+		b.L("} as const;")
+		b.NL()
+	}
+
+	def, ok := genutil.DefaultServer(servers)
+	if !ok {
+		return
+	}
+	b.Comment("The deployment rig.yaml marks as the default, so a tool that only " +
+		"ever talks to that one can leave `baseUrl` out.")
+	if def.Name != "" {
+		b.L("export const defaultBaseUrl = servers.%s;", def.Name)
+	} else {
+		b.L("export const defaultBaseUrl = %s;", tsbuf.Quote(def.URL))
+	}
+	b.NL()
+
+	b.Comment("What `createClient` takes.\n\n" +
+		"The runtime's `Config` with `baseUrl` optional, because this project " +
+		"named a default. Leaving it out uses `defaultBaseUrl`; `\"\"` is not " +
+		"leaving it out — it is the same-origin answer a browser served by this " +
+		"API wants, and it is passed through untouched.")
+	b.L("export type ClientConfig = Omit<%s, \"baseUrl\"> & { baseUrl?: string };", config)
+	b.NL()
+}
+
+// serverDescription is the sentence a deployment carries, falling back to its
+// name so an entry with no prose still documents itself.
+func serverDescription(s ir.Server) string {
+	if s.Description != "" {
+		return s.Description
+	}
+	return "The " + s.Name + " deployment of this API."
 }

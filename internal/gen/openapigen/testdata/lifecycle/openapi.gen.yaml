@@ -4,7 +4,8 @@ info:
     description: The demo HTTP API.
     version: v1
 servers:
-    - url: https://api.example.test
+    - url: /
+      description: 'This server. Set servers: in rig.yaml to name the deployment instead.'
 paths:
     /api/v1/lesson/_deleted/_stream:
         get:

@@ -259,6 +259,17 @@ func (p *Project) applyDefaults() {
 		c.API.Permissions = PermissionsDerived
 	}
 
+	// A trailing slash is normalized rather than reported. Both client runtimes
+	// already trim one and the OpenAPI document does not, so it is the document
+	// that ends up describing "https://api.example.com//api/v1" — a bug report
+	// about rig, produced by a character nobody meant anything by.
+	for i := range c.Servers {
+		c.Servers[i].URL = strings.TrimSpace(c.Servers[i].URL)
+		if len(c.Servers[i].URL) > 1 {
+			c.Servers[i].URL = strings.TrimRight(c.Servers[i].URL, "/")
+		}
+	}
+
 	setDefault(&c.Database.Image, DefaultImage)
 	setDefault(&c.Database.Name, DefaultDBName)
 	setDefault(&c.Database.User, DefaultDBUser)
@@ -564,6 +575,8 @@ func (p *Project) check() diag.List {
 		seen[g.Name] = i
 	}
 
+	diags.Append(p.checkServers())
+	diags.Append(p.checkDeprecatedServerOptions())
 	diags.Append(p.checkAuth())
 	diags.Append(p.checkFiles())
 	diags.Append(p.checkNotifications())

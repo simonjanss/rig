@@ -5446,6 +5446,17 @@
       "abandoned_after_seconds": 86400,
       "restore_window_seconds": 604800
     },
+    "servers": [
+      {
+        "name": "production",
+        "url": "https://api.example.com",
+        "default": true
+      },
+      {
+        "name": "local",
+        "url": "http://localhost:8080"
+      }
+    ],
     "permissions": [
       {
         "key": "profile.banner_file.read",

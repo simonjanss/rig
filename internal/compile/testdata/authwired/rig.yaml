@@ -2,6 +2,21 @@ project:
   name: authwired
   module: example.com/authwired
 
+# Three deployments, with the default marked on an entry that is not the first —
+# so the golden proves the marker is read rather than the position, and proves
+# the OpenAPI document hoists the marked one to the front where a viewer's trial
+# request goes.
+servers:
+  - name: local
+    url: http://localhost:8080
+    description: A machine on somebody's desk.
+  - name: production
+    url: https://api.example.com
+    description: The deployment your customers reach.
+    default: true
+  - name: staging_eu
+    url: https://staging.eu.example.com
+
 # Everything the auth block can say, so the compiled document carries every field
 # and the generator's golden output exercises every branch. A real project sets a
 # handful of these and inherits the rest.

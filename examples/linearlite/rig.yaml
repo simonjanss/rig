@@ -34,6 +34,18 @@ api:
   # taken from its resource and operation, and services/authz decides who holds
   # which. examples/todo turns this off and says why.
 
+# Where this API answers. One list, read by both generated clients and by the
+# OpenAPI document, so the three cannot disagree about where the API is.
+#
+# One entry, because this example runs in exactly one place: web/ imports the
+# TypeScript client from here and api/import/ the Go one, and neither has to be
+# told a URL. A real project names production and staging beside it and marks one
+# default.
+servers:
+  - name: local
+    url: http://localhost:8084
+    description: This example, running on your machine.
+
 # The authentication foundation. Registration and tenant creation are both on,
 # because this example's front door is a sign-up form: a stranger registers,
 # lands in the picker, and finds an invitation to the seeded tenant already
@@ -261,17 +273,12 @@ generators:
     out_dir: api/client
     options:
       package: client
-      # Where this example runs, so the import job can build a client
-      # without naming the server. A real project leaves it out.
-      default_base_url: http://localhost:8084
 
   # The same client for a browser, from the same document — generated
   # straight into the front end's source tree, which is the layout
   # docs/clients.md recommends. web/ imports it like any of its own code.
   - name: ts-client
     out_dir: web/src/api
-    options:
-      default_base_url: http://localhost:8084
 
   # The OpenAPI document, written from the same compiled document the routes
   # above are, so it cannot describe an endpoint that does not exist.

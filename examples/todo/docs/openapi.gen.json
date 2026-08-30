@@ -7,8 +7,8 @@
   },
   "servers": [
     {
-      "url": "/",
-      "description": "This server. Set openapi.servers to name the deployment instead."
+      "url": "http://localhost:8080",
+      "description": "This example, running on your machine."
     }
   ],
   "paths": {

@@ -9,8 +9,8 @@ info:
         The notification inbox endpoints are served by a hand-written module and are not described here.
     version: "2026-08-30"
 servers:
-    - url: /
-      description: This server. Set openapi.servers to name the deployment instead.
+    - url: http://localhost:8084
+      description: This example, running on your machine.
 paths:
     /api/v1/accounts:
         get:

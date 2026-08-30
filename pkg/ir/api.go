@@ -85,6 +85,23 @@ type API struct {
 	// against something older than the server.
 	Cache *Cache `json:"cache,omitempty"`
 
+	// Servers are the deployments this API is served on, in the order the project
+	// named them.
+	//
+	// Here for the reason [API.Auth] is: the OpenAPI document, the Go client and
+	// the TypeScript client each have to say where the API is, and a generator
+	// reading it out of the document is what keeps the three from carrying their
+	// own copies of the answer. A language added later gets the deployments
+	// without growing an option of its own.
+	//
+	// Empty for a project that has named none, which is the honest state for an
+	// API that is not deployed anywhere yet: the document then describes a
+	// relative server and the clients ask their caller for a URL.
+	//
+	// Order is meaningful — a documentation viewer sends its trial request to the
+	// first entry — so nothing between here and an emitter sorts it.
+	Servers []Server `json:"servers,omitempty"`
+
 	// Tracing is the spans this API's generated code opens, or nil for a
 	// project that asked for none.
 	//
@@ -121,6 +138,32 @@ type API struct {
 	// to mean the same thing, and three places deriving it is three places to
 	// drift.
 	Permissions []Permission `json:"permissions"`
+}
+
+// Server is one deployment the API is served on.
+//
+// Named, because a client says which one it wants: production is a constant a
+// caller writes, not a string they copy out of a wiki.
+type Server struct {
+	// Name identifies the deployment, and becomes an identifier in every
+	// generated SDK: production is Go's ServerProduction and TypeScript's
+	// servers.production. Empty only for the one nameless entry a project still
+	// configuring the deprecated per-generator option produces.
+	Name string `json:"name,omitempty"`
+
+	// URL is where that deployment answers. The API's own base path is appended
+	// to it, so it is not repeated here.
+	URL string `json:"url"`
+
+	// Description is one line about what the deployment is for. It reaches the
+	// OpenAPI document and the doc comment beside the generated constant.
+	Description string `json:"description,omitempty"`
+
+	// Default marks the deployment a caller who names none receives, and exactly
+	// one entry in a document carries it. The project resolves "nobody claimed
+	// it, so the first one" before this is written, so three generators do not
+	// each implement the same rule.
+	Default bool `json:"default,omitempty"`
 }
 
 // Permission is one thing a caller may be allowed to do.

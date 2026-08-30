@@ -198,6 +198,13 @@ differently from the one the server answers on.
     formats: [json, yaml]
 ```
 
+The `servers:` list comes from [rig.yaml](rig-yaml.md#servers), not from this
+block — the same list the generated SDKs read, so the document cannot name a host
+the clients do not. The deployment marked `default:` is written first, because
+that is where a documentation viewer sends its trial request. A project that has
+named no deployment gets the relative server `/`, which is true of every
+deployment and is enough for a viewer.
+
 `docs/openapi.gen.json` and `docs/openapi.gen.yaml`, rewritten on every run.
 Every resource endpoint is there, including the trash, the snapshots, the file
 routes and your own custom endpoints; so are the live-sync shape routes, the

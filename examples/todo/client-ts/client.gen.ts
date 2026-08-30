@@ -45,10 +45,31 @@ export const revision = "2026-08-30";
 export const revisionHeader = "API-Revision";
 
 /**
- * Where this API runs in development, so a tool that only ever talks to that
- * one can leave `baseUrl` out.
+ * The deployments this API is served on, as rig.yaml names them.
+ *
+ * A caller that talks to one of them names it here rather than writing the URL
+ * down: the string is the project's, and it moves when the project does.
  */
-export const defaultBaseUrl = "http://localhost:8080";
+export const servers = {
+    /** This example, running on your machine. */
+    local: "http://localhost:8080",
+} as const;
+
+/**
+ * The deployment rig.yaml marks as the default, so a tool that only ever talks
+ * to that one can leave `baseUrl` out.
+ */
+export const defaultBaseUrl = servers.local;
+
+/**
+ * What `createClient` takes.
+ *
+ * The runtime's `Config` with `baseUrl` optional, because this project named a
+ * default. Leaving it out uses `defaultBaseUrl`; `""` is not leaving it out —
+ * it is the same-origin answer a browser served by this API wants, and it is
+ * passed through untouched.
+ */
+export type ClientConfig = Omit<Config, "baseUrl"> & { baseUrl?: string };
 
 /**
  * The API. One property per resource, so what a client can do is what the
@@ -70,12 +91,18 @@ export type Client = {
 /**
  * Builds a client.
  *
- * The only required setting is `baseUrl`, and in a browser served from the same
- * origin as the API that is the empty string. A credential can be given here or
- * installed later with `client.runtime.use(…)`.
+ * `baseUrl` is optional: left out it is `defaultBaseUrl`. In a browser served
+ * from the same origin as the API, pass `""` — that is a base URL, not an
+ * absent one, and it resolves against the page. A credential can be given here
+ * or installed later with `client.runtime.use(…)`.
  */
-export function createClient(config: Config): Client {
-    const runtime = new Runtime(config, {
+export function createClient(config: ClientConfig = {}): Client {
+    const settings: Config = {
+        ...config,
+        baseUrl: config.baseUrl ?? defaultBaseUrl,
+    };
+
+    const runtime = new Runtime(settings, {
         basePath,
         revision,
         revisionHeader,

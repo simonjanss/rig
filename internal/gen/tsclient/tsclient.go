@@ -68,9 +68,13 @@ type Options struct {
 	ElectricImport string `json:"electric_import"`
 
 	// DefaultBaseURL is emitted as a constant when it is set, so a development
-	// tool can build a client without naming the server. Leaving it out is right
-	// for anything that runs in more than one place — and in a browser the
-	// ordinary answer is the empty string, which resolves against the page.
+	// tool can build a client without naming the server.
+	//
+	// Deprecated: rig.yaml's top-level `servers:` block names the deployments
+	// for every SDK generator and for the OpenAPI document, so a real project
+	// ships an SDK that knows where its API is rather than one whose consumer
+	// has to be told. This is read only when that block is absent, and rig warns
+	// (RIG3010) when it is set.
 	DefaultBaseURL string `json:"default_base_url"`
 }
 
