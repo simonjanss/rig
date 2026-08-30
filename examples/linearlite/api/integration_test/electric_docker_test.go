@@ -12,8 +12,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/simonjanss/rig/examples/linearlite/internal/api"
 	"github.com/simonjanss/rig/examples/linearlite/internal/app"
+	"github.com/simonjanss/rig/examples/linearlite/internal/generated/api"
 	"github.com/simonjanss/rig/observe"
 	"github.com/simonjanss/rig/runtime/serve"
 )
