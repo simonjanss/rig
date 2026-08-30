@@ -23,7 +23,7 @@ export RIG_DB_ISOLATE := $(CURDIR)
 # vulnerability scanning and the Docker suite run over the first group only:
 # the examples are mostly generated output, and their Docker tests are already
 # run by `make examples`, which brings each example's own database up first.
-CORE_MODULES    := . ./runtime ./auth ./authmodel ./files ./notify ./observe ./presence ./migrate ./rigclient
+CORE_MODULES    := . ./runtime ./auth ./authmodel ./files ./notify ./observe ./presence ./migrate ./rigclient ./rigs3
 
 # linearlite names api/ rather than its own directory: it is the one example
 # with two halves, so rig.yaml sits above a Go module in api/ and a front end in
@@ -34,7 +34,7 @@ EXAMPLE_MODULES := ./examples/todo ./examples/fantasyfootball ./examples/auth ./
 # The core modules less the root: the ones a generated application imports, so
 # their godoc is the documentation for a Go surface somebody depends on rather
 # than commentary on it.
-PUBLIC_MODULES  := ./runtime ./auth ./authmodel ./files ./notify ./observe ./presence ./migrate ./rigclient
+PUBLIC_MODULES  := ./runtime ./auth ./authmodel ./files ./notify ./observe ./presence ./migrate ./rigclient ./rigs3
 
 # Everything godoc-check reads: the modules above, plus `pkg/` — the root
 # module's own published surface, which is what somebody writing a generator
@@ -95,7 +95,9 @@ build:
 test:
 	$(each) $(GO) test ./...) || exit 1; done
 
-## test-docker: run the suite that needs a Postgres container
+## test-docker: run the suites that need a container
+##              Mostly Postgres; rigs3 wants MinIO, because a store that talks
+##              to somebody else's server is only proven against one.
 ##              The examples are left to `make examples`, which starts the
 ##              database each of them expects before running the same tests.
 test-docker:

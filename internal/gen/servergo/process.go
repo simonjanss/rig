@@ -169,7 +169,7 @@ func (e *emitter) tasksFunc(b *gobuf.Buf) {
 		b.NL()
 		b.Comment("Uploads whose row never arrived, and file rows whose restore " +
 			"window has closed.")
-		e.poolTask(b, "sweep-files", "FileSweeper(NewFiles(pool))")
+		e.sweepFilesTask(b)
 	}
 
 	if e.hasPresence() {
@@ -209,6 +209,34 @@ func (e *emitter) tasksFunc(b *gobuf.Buf) {
 // task is a func(ctx, pool), and every one of these builds its service out of
 // the pool it is about to be given. Written by hand it is the same four lines in
 // every project, with the pool named three times.
+// sweepFilesTask emits the sweeper subcommand, which is the one task whose
+// shape depends on where the bytes are kept.
+//
+// A memory-backed NewFiles cannot fail and nests inside the call. A
+// bucket-backed one takes a context and returns an error, because reaching the
+// bucket is a thing that can go wrong — so the task builds the service in two
+// statements and hands the failure back, which is what makes a cron entry that
+// cannot reach the bucket exit non-zero rather than sweep nothing quietly.
+func (e *emitter) sweepFilesTask(b *gobuf.Buf) {
+	if e.doc.API.Files.Backend != backendS3 {
+		e.poolTask(b, "sweep-files", "FileSweeper(NewFiles(pool))")
+		return
+	}
+
+	var (
+		ctxPkg  = b.Import("context")
+		poolPkg = b.Import("github.com/jackc/pgx/v5/pgxpool")
+	)
+
+	b.L("%s: func(ctx %s.Context, pool *%s.Pool) error {", gobuf.Quote("sweep-files"), ctxPkg, poolPkg)
+	b.L("svc, err := NewFiles(ctx, pool)")
+	b.L("if err != nil {")
+	b.L("return err")
+	b.L("}")
+	b.L("return FileSweeper(svc)(ctx, pool)")
+	b.L("},")
+}
+
 func (e *emitter) poolTask(b *gobuf.Buf, name, call string) {
 	var (
 		ctxPkg  = b.Import("context")

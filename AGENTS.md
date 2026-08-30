@@ -80,7 +80,7 @@ tree, `make tidy` produced the change: commit it.
 Each of these runs per module — the repository is a Go workspace, and `./...`
 names one module's packages and nothing else. `make check` is a list of those
 per-module targets and nothing more: a target that ran `./...` once and called
-it "everything" would quietly skip nine modules out of ten.
+it "everything" would quietly skip ten modules out of eleven.
 
 ## The ones that need Docker
 
@@ -90,7 +90,8 @@ make examples      # check all five examples for drift and run them for real
 ```
 
 `make test-docker` covers `.`, `runtime`, `auth`, `authmodel`, `files`,
-`notify`, `observe`, `presence`, `migrate` and `rigclient`.
+`notify`, `observe`, `presence`, `migrate`, `rigclient` and `rigs3`. All of it
+wants Postgres except `rigs3`, which wants MinIO.
 Most of it starts its own Postgres on a port of its own and cleans up after
 itself. The `migrate` module is the exception: it expects a database at
 `localhost:55440`, or wherever `DATABASE_URL` points, and **skips itself
@@ -188,6 +189,7 @@ the same commit.** The pages are short and the mapping is mechanical:
 | `internal/project/tracing.go` — the `tracing:` block | `docs/observability.md`, `docs/rig-yaml.md` |
 | `internal/project/monitoring.go` — the `monitoring:` block | `docs/observability.md`, `docs/rig-yaml.md` |
 | `rigclient/`, `internal/gen/goclient` | `docs/clients.md` |
+| `rigs3/`, `internal/project/files.go` | `docs/rig-yaml.md` |
 | `ts/packages/*`, `internal/gen/tsclient` | `docs/clients.md` |
 
 Two rules that are easier to break than the table above:
@@ -268,7 +270,7 @@ approved once per clone.
 ## Godoc
 
 `runtime/`, `auth/`, `authmodel/`, `files/`, `notify/`, `observe/`, `presence/`,
-`migrate/` and `rigclient/` are separate modules
+`migrate/`, `rigclient/` and `rigs3/` are separate modules
 that a generated application imports, and `pkg/` is the root module's own
 published surface — the IR and the generator interface, which is what somebody
 writing a generator against rig imports. Their godoc is the only documentation
@@ -304,7 +306,7 @@ and reads fine where it is. Nothing catches this, so after a rename:
 
 ```bash
 grep -rn '^\s*//.*\[[A-Z][A-Za-z0-9_]*\.[a-z][A-Za-z0-9_]*\]' --include='*.go' \
-  runtime auth files notify observe presence migrate rigclient
+  runtime auth files notify observe presence migrate rigclient rigs3
 ```
 
 **A doc on a `const (` block covers every name in it**, so the block is where a
@@ -329,7 +331,8 @@ number. Propose a release, name the version you would use, and wait.
 
 **What makes one necessary.** Merging to main releases nothing. Until a release,
 a change to a published module's exported surface — `runtime`, `auth`,
-`authmodel`, `files`, `migrate`, `notify`, `observe`, `presence`, `rigclient` —
+`authmodel`, `files`, `migrate`, `notify`, `observe`, `presence`, `rigclient`,
+`rigs3` —
 or to what a generator emits is invisible to everyone outside this repository.
 So the question is never "is main ahead of the last tag", it is "is somebody
 waiting for something that is only on main".
@@ -343,7 +346,7 @@ waiting for something that is only on main".
 
 There is no v1 until the Go surface is meant to be stable, and that is a
 decision to raise rather than take: from v2 on, Go requires the major in the
-import path, so every one of the ten modules would need a `/v2` suffix and every
+import path, so every one of the eleven modules would need a `/v2` suffix and every
 generated import in every user's project would change.
 
 **Rehearse a first-of-anything with a prerelease.** `v0.4.0-rc.1` is not what
@@ -353,7 +356,7 @@ part rather than the code in it.
 
 **Four things never to do.** Move or delete a published tag. Release from a
 branch. Hand-edit a version in a `go.mod` or a `package.json` — that is `make
-release`'s job, and doing it by hand is how the ten drift apart. Add an
+release`'s job, and doing it by hand is how the eleven drift apart. Add an
 `NPM_TOKEN`; publishing is tokenless by design and a secret appearing in the
 release workflow means somebody misread it.
 
@@ -363,8 +366,8 @@ that has grown a `replace` back.
 
 ### How
 
-Ten modules, one version, one commit. `make release VERSION=v0.1.0` rewrites
-every intra-repository requirement to that version, commits, and creates ten
+Eleven modules, one version, one commit. `make release VERSION=v0.1.0` rewrites
+every intra-repository requirement to that version, commits, and creates eleven
 tags: `v0.1.0` for the root module and `runtime/v0.1.0`, `auth/v0.1.0` and so on
 for the rest, which is how Go names a version of a module in a subdirectory.
 `make release-dry VERSION=v0.1.0` prints it without writing it.
@@ -373,7 +376,7 @@ for the rest, which is how Go names a version of a module in a subdirectory.
 `notify`, `presence` and `runtime` — it embeds their foundation schemas and
 generates imports against them. A rig released at a different number from the
 runtime it generates against is a rig that produces code nobody can build, so
-the ten numbers are one number.
+the eleven numbers are one number.
 
 **No published module may `replace` a sibling.** `go install pkg@version`
 refuses a module whose `go.mod` carries one, and a consumer resolving a
@@ -410,10 +413,10 @@ for about half an hour *after* the tags are up. v0.2.0 was uninstallable for
 that long because the hook ran before the tags existed. Nothing else in the
 repository can poison a cache outside it.
 
-**`make release-push` sends the nine submodule tags, then the root tag alone.**
+**`make release-push` sends the ten submodule tags, then the root tag alone.**
 `git push origin --tags` is what this used to say, and it cannot work: GitHub
-creates no push event for a batch of more than three tags, so ten at once
-triggers no release workflow. v0.2.0 got ten correct tags, no binaries, no
+creates no push event for a batch of more than three tags, so all of them at
+once triggers no release workflow. v0.2.0 got ten correct tags, no binaries, no
 GitHub release and nothing on npm — and since a published tag cannot be moved,
 the only fix was v0.2.1. The root tag goes last, so that by the time anything
 reacts to `v*`, the versions its `go.mod` requires already resolve.
@@ -440,7 +443,7 @@ release exists — the earliest anything can.
 
 **And a workflow that never started looks exactly like one that succeeded.**
 That is what `make release-verify VERSION=v0.1.0` is for, and it is the last
-step rather than an optional one: it checks the ten tags on origin, the GitHub
+step rather than an optional one: it checks every tag on origin, the GitHub
 release and every file `checksums.txt` names, which release `latest` resolves
 to, the three npm versions, and a real `go install` of the binary. The three
 surfaces fail separately — v0.2.0 had tags and no build, v0.1.0 had a build and
@@ -483,7 +486,7 @@ it.
 ### Pushing a tag builds binaries
 
 `.github/workflows/release.yaml` triggers on `v*`, which matches the root tag
-and none of the nine others — a glob does not cross a slash, and `runtime/v0.1.0`
+and none of the ten others — a glob does not cross a slash, and `runtime/v0.1.0`
 does not start with a `v` anyway. It runs goreleaser for linux and darwin on
 amd64 and arm64, and `.github/actions/setup-rig` is what a pipeline elsewhere
 uses to download one of those instead of paying for `go install`.

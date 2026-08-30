@@ -97,9 +97,11 @@ replace github.com/simonjanss/rig/migrate => %s
 replace github.com/simonjanss/rig/presence => %s
 
 replace github.com/simonjanss/rig/authmodel => %s
+
+replace github.com/simonjanss/rig/rigs3 => %s
 `, moduleDir(t, "runtime"), moduleDir(t, "auth"), moduleDir(t, "rigclient"), moduleDir(t, "files"),
 		moduleDir(t, "notify"), moduleDir(t, "observe"), moduleDir(t, "migrate"),
-		moduleDir(t, "presence"), moduleDir(t, "authmodel"))
+		moduleDir(t, "presence"), moduleDir(t, "authmodel"), moduleDir(t, "rigs3"))
 
 	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte(gomod), 0o644); err != nil {
 		t.Fatal(err)

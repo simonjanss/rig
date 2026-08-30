@@ -8,13 +8,13 @@ version: 2
 
 project_name: rig
 
-# A release tags ten modules, and nine of those tags begin with a module name
+# A release tags eleven modules, and ten of those tags begin with a module name
 # rather than a v — so `git describe` on any commit after one answers
 # auth/v0.1.0, which is not a semantic version and which goreleaser cannot
 # build a version out of. The release workflow already says so and passes
 # GORELEASER_CURRENT_TAG for the same reason; this is the other half, for
 # `goreleaser build --snapshot` in `make release-check`, where there is no tag
-# being pushed to name. Excluding the nine leaves the root tag, which is the
+# being pushed to name. Excluding the ten leaves the root tag, which is the
 # only one this configuration is about.
 git:
   ignore_tags:
@@ -77,7 +77,7 @@ release:
   # pipeline downloads.
   prerelease: auto
 
-  # rig is ten modules and a release tags all ten, so the notes say which
+  # rig is eleven modules and a release tags all eleven, so the notes say which
   # versions to pin — the whole point of releasing them in lockstep.
   footer: |
     ## Install

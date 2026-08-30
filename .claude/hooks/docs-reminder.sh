@@ -39,7 +39,7 @@ esac
 
 # First match wins, so the specific cases come before the directory ones.
 case "$rel" in
-internal/project/config.go) pages="docs/rig-yaml.md" ;;
+internal/project/config.go | internal/project/files.go) pages="docs/rig-yaml.md" ;;
 internal/project/auth.go) pages="docs/auth.md" ;;
 internal/project/tracing.go | internal/project/monitoring.go) pages="docs/observability.md docs/rig-yaml.md" ;;
 internal/project/notifications.go) pages="docs/notifications.md docs/rig-yaml.md" ;;
@@ -67,6 +67,8 @@ files/*) pages="docs/schema.md" ;;
 presence/*) pages="docs/presence.md" ;;
 ts/packages/*) pages="docs/clients.md" ;;
 rigclient/*) pages="docs/clients.md" ;;
+# rigs3 is a bucket, and the only thing a user writes about it is files.s3.
+rigs3/*) pages="docs/rig-yaml.md" ;;
 *) exit 0 ;;
 esac
 

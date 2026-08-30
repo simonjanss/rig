@@ -572,6 +572,124 @@ func TestFileHandlersCompile(t *testing.T) {
 	)
 }
 
+// The same handlers against the bucket-backed wiring.
+//
+// The generated file names a module that is not in this one's go.mod and that
+// no other fixture reaches for, so the compile is what proves the emitted call
+// matches rigs3.New's signature. A golden would prove only that the bytes have
+// not moved since the last time somebody was wrong about it.
+func TestTheS3WiringCompiles(t *testing.T) {
+	t.Parallel()
+
+	doc := gentest.LoadDocument(t, filepath.Join("testdata", "files_s3.ir.json"))
+
+	api := gentest.Run(t, servicego.New(), doc, gen.Options{Raw: map[string]any{
+		"package": "api", "model_import": "rigtest/model", "store_import": "rigtest/store",
+	}})
+	api = append(api, gentest.Run(t, servergo.New(), doc, opts())...)
+
+	gentest.MustCompileAll(t,
+		gentest.Package{
+			Dir: "model",
+			Artifacts: gentest.Run(t, modelgo.New(), doc,
+				gen.Options{Raw: map[string]any{"package": "model"}}),
+		},
+		gentest.Package{
+			Dir: "store",
+			Artifacts: gentest.Run(t, persistgo.New(), doc, gen.Options{Raw: map[string]any{
+				"package": "store", "model_import": "rigtest/model",
+			}}),
+		},
+		gentest.Package{Dir: "api", Artifacts: api},
+	)
+}
+
+// Every value the bucket is addressed with came out of rig.yaml, and the two
+// that are secrets came out of the environment instead.
+//
+// The distinction is the whole reason files.s3 names variables rather than
+// holding strings: a bucket name is configuration and belongs in the file
+// somebody commits, and an access key is not.
+func TestTheS3WiringReadsItsBucketFromTheDocument(t *testing.T) {
+	t.Parallel()
+
+	doc := gentest.LoadDocument(t, filepath.Join("testdata", "files_s3.ir.json"))
+	src := collapse(find(t, gentest.Run(t, servergo.New(), doc, opts()), "files.gen.go"))
+
+	for _, want := range []string{
+		`rigs3.New(ctx`,
+		`Bucket: os.Getenv("UPLOADS_BUCKET")`,
+		`Region: "eu-north-1"`,
+		`AccessKeyID: os.Getenv("AWS_ACCESS_KEY_ID")`,
+		`SecretAccessKey: os.Getenv("AWS_SECRET_ACCESS_KEY")`,
+		// The window the bucket's own lifecycle rule has to outlive, which is
+		// the one number the adapter needs and cannot work out for itself.
+		`RestoreWindow: 604800 * time.Second`,
+	} {
+		if !strings.Contains(src, want) {
+			t.Errorf("the wiring does not contain %s:\n%s", want, src)
+		}
+	}
+
+	if strings.Contains(src, "NewFilesWithStore(db, blob.NewMemory())") {
+		t.Error("a project that named a bucket got a map that a restart empties")
+	}
+}
+
+// A project on the memory backend must not so much as name the adapter, or
+// every application rig generates carries an AWS SDK in its go.mod for a
+// backend it does not use. That is the whole reason rigs3 is a module.
+func TestAMemoryProjectNeverNamesTheAdapter(t *testing.T) {
+	t.Parallel()
+
+	doc := gentest.LoadDocument(t, filepath.Join("testdata", "files.ir.json"))
+	for _, a := range gentest.Run(t, servergo.New(), doc, opts()) {
+		if strings.Contains(string(a.Content), "rigs3") {
+			t.Errorf("%s names the S3 adapter in a project whose backend is memory", a.Path)
+		}
+	}
+}
+
+// The seam a test of a bucket-backed project uses.
+//
+// An application that keeps its uploads in S3 still has to be runnable without
+// one, and NewFilesWithStore is how: same caps, same handlers, same sweeper,
+// against blob.Memory. It is emitted for both backends so that the seam does
+// not appear and disappear with a line in rig.yaml.
+func TestBothBackendsCanBeHandedAStore(t *testing.T) {
+	t.Parallel()
+
+	for _, fixture := range []string{"files.ir.json", "files_s3.ir.json"} {
+		t.Run(fixture, func(t *testing.T) {
+			t.Parallel()
+
+			doc := gentest.LoadDocument(t, filepath.Join("testdata", fixture))
+			src := collapse(find(t, gentest.Run(t, servergo.New(), doc, opts()), "files.gen.go"))
+
+			if !strings.Contains(src, "func NewFilesWithStore(db files.DB, store blob.Store) *files.Service") {
+				t.Errorf("no store-taking constructor, so this project cannot be tested without its backend:\n%s", src)
+			}
+		})
+	}
+}
+
+// The sweeper is a subcommand in a cron job, so a bucket it cannot reach has to
+// make it exit rather than sweep nothing quietly.
+func TestTheSweepTaskCarriesTheBucketFailureBack(t *testing.T) {
+	t.Parallel()
+
+	doc := gentest.LoadDocument(t, filepath.Join("testdata", "files_s3.ir.json"))
+	src := collapse(find(t, gentest.Run(t, servergo.New(), doc, opts()), "process.gen.go"))
+
+	task, ok := between(src, `"sweep-files"`, "},")
+	if !ok {
+		t.Fatal("no sweep-files task")
+	}
+	if !strings.Contains(task, "svc, err := NewFiles(ctx, pool)") || !strings.Contains(task, "return err") {
+		t.Errorf("the sweep task does not report a bucket it could not reach:\n%s", task)
+	}
+}
+
 // An upload route is not wrapped in an idempotency record, and a create that
 // carries a file is.
 //

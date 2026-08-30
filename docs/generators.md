@@ -41,6 +41,16 @@ beside the routes, a span per handler, and a span per repository call and per
 hook. Without each block, not one line about it is emitted, which is what keeps
 the corresponding module out of the application's `go.mod`.
 
+`files:` writes a `files.gen.go` beside them with two constructors in it.
+`NewFilesWithStore` takes the store, so a project can be run and tested against
+`blob.NewMemory()` whatever its configuration says; `NewFiles` builds the one
+`files.backend` named. On `memory` that cannot fail and returns the service. On
+`s3` it takes a context and returns an error, because it reaches the bucket
+before the first upload does — see [rig-yaml.md](rig-yaml.md#files) for what it
+checks there and why the two signatures differ. Only the `s3` form imports
+`rig/rigs3`, which is what keeps an AWS SDK out of the `go.mod` of a project
+that does not use one.
+
 `process.gen.go` is where those blocks meet the process your `main` runs.
 `tracing:` and `monitoring:` give it a `Process` — the log sink, the provider and
 the page, built in the order they depend on each other; `files:`, `presence:` and

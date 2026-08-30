@@ -31,7 +31,7 @@ In a GitHub Actions workflow:
 - run: rig validate --strict
 ```
 
-rig is ten Go modules released together at one version, because the CLI
+rig is eleven Go modules released together at one version, because the CLI
 generates code that imports the runtime and the two have to agree. `rig version`
 is the version to pin the libraries to:
 
@@ -103,6 +103,7 @@ pre-push hook that runs the checks. [AGENTS.md](AGENTS.md) has the rest.
 | `observe/` | a separate module: OpenTelemetry, for the projects that ask for it |
 | `migrate/` | a separate module: apply the project's migrations from its own binary |
 | `rigclient/` | a separate module: the half of a generated Go client that is not generated |
+| `rigs3/` | a separate module: the S3 adapter for uploads, so a project on the memory backend carries no AWS SDK |
 | `ts/` | a pnpm workspace: the half of a generated TypeScript client that is not generated |
 
 A generated application depends on `rig/runtime` (and optionally `rig/auth` and

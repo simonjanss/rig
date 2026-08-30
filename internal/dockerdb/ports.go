@@ -20,7 +20,9 @@ package dockerdb
 // The examples are the exception and are listed rather than used: each one's
 // port lives in its own rig.yaml and main.go, in a module that cannot import
 // this one. They are named here so the numbers are still allocated from one
-// list, and TestPortsAreUnique holds them to the same rule.
+// list, and TestPortsAreUnique holds them to the same rule. PortS3MinIO is
+// there for the same reason from the other direction — rigs3 is published, and
+// a published module that imported this one would require the CLI to build.
 const (
 	// PortDefault is what `rig init` writes into a new project, so it is the one
 	// number here a real project sees. Not a suite's, and not to be taken by one.
@@ -45,6 +47,12 @@ const (
 	// PortFiles is internal/filestest: uploads, the tenancy around them, and the
 	// sweeper.
 	PortFiles = 55494
+	// PortS3MinIO is the MinIO container rigs3's suite runs against, and it is
+	// the second exception to this file's rule: rigs3 is a published module and
+	// cannot import this one, so the number lives in its test and is only
+	// declared here. Listed for the reason the examples are — so that every port
+	// a suite in this repository takes is allocated from one list.
+	PortS3MinIO = 55446
 	// PortIdempotency is internal/idemtest, where two transactions contend for
 	// one key. Its own container because the contention is the test: a suite
 	// sharing a database with one that holds locks of its own would fail as a
@@ -104,6 +112,7 @@ var ports = map[string]int{
 	"examples/linearlite":            PortExampleLinearlite,
 	"examples/linearlite (electric)": PortExampleLinearliteElectric,
 	"internal/filestest":             PortFiles,
+	"rigs3 (minio)":                  PortS3MinIO,
 	"internal/idemtest":              PortIdempotency,
 	"internal/throttletest":          PortThrottle,
 	"internal/electrictest (sync)":   PortElectricSync,
