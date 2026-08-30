@@ -9,6 +9,15 @@ api:
   version: v1
   base_path: /api/v1
 
+# Where this API answers, so the generated client carries the URL instead of
+# making its consumer type one. examples/sdk is the consumer, and before this
+# block existed its auth demo was the one of four that hardcoded a host — the
+# other three read the constant a sibling example's rig.yaml produced.
+servers:
+  - name: local
+    url: http://localhost:8082
+    description: This example, running on your machine.
+
 # The authentication foundation. Everything with a fixed answer is here rather
 # than in main.go, because the documentation and the client libraries are
 # generated from this file: a token lifetime written in a Go literal is a token

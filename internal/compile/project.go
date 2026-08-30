@@ -42,6 +42,9 @@ type ProjectOptions struct {
 	// Monitoring is the resolved monitoring block, or nil for a project with no
 	// page. Never set without Tracing; the config check is what guarantees it.
 	Monitoring *ir.Monitoring
+	// Servers are the deployments this API is served on, in the order the
+	// project named them, or nil for a project that has named none.
+	Servers []ir.Server
 
 	// Tracing is the resolved tracing block, or nil for a project that emits no
 	// spans.
@@ -77,6 +80,7 @@ func Project(schema ir.Schema, opt ProjectOptions) (ir.API, diag.List) {
 		Cache:          opt.Cache,
 		Tracing:        opt.Tracing,
 		Monitoring:     opt.Monitoring,
+		Servers:        opt.Servers,
 
 		// Who keeps rig's own migrations. Carried from here to the generators
 		// untouched: it is a fact about the project, not about the schema.

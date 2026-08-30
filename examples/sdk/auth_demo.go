@@ -17,7 +17,7 @@ import (
 // access token expires — using the lifetimes in AuthProfile, which the generator
 // took from the same rig.yaml the server enforces.
 func authDemo(ctx context.Context, args []string) error {
-	baseURL := "http://localhost:8082"
+	baseURL := client.DefaultBaseURL
 	set := flags("auth", args, &baseURL)
 	email := set.String("email", "ada@example.com", "who to sign in as")
 	password := set.String("password", "correct horse battery staple", "their password")

@@ -60,10 +60,12 @@ type Options struct {
 	// Formats are the renderings to write: json, yaml, or both.
 	Formats []string `json:"formats"`
 
-	// Servers are the origins the API answers on. The default is a single
-	// relative server, which is true of every deployment and is what keeps a
-	// specification usable in a documentation viewer without naming a host the
-	// project may not have.
+	// Servers are the origins the API answers on.
+	//
+	// Deprecated: rig.yaml's top-level `servers:` block names the deployments
+	// for every SDK generator as well as for this one, so the document and the
+	// clients cannot disagree about where the API is. This is read only when
+	// that block is absent, and rig warns (RIG3010) when it is set.
 	Servers []Server `json:"servers"`
 
 	// Electric says whether the live-sync shape routes are described. They are
@@ -73,6 +75,8 @@ type Options struct {
 }
 
 // Server is one origin the API answers on.
+//
+// Deprecated: see [Options.Servers].
 type Server struct {
 	URL         string `json:"url"`
 	Description string `json:"description"`
@@ -116,10 +120,15 @@ func (g *Generator) Generate(
 			return nil, fmt.Errorf("openapi: format %q is not one of json, yaml", f)
 		}
 	}
-	if len(cfg.Servers) == 0 {
+	if len(doc.API.Servers) == 0 && len(cfg.Servers) == 0 {
+		// A relative server: true of every deployment, and what keeps a
+		// specification usable in a documentation viewer for a project that has
+		// not named a host. It stays here rather than moving into the project
+		// block because it is a fact about documents and not about projects —
+		// a Go client cannot call it at all.
 		cfg.Servers = []Server{{
 			URL:         "/",
-			Description: "This server. Set openapi.servers to name the deployment instead.",
+			Description: "This server. Set servers: in rig.yaml to name the deployment instead.",
 		}}
 	}
 	if cfg.Electric == nil {

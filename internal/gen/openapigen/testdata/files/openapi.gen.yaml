@@ -4,7 +4,10 @@ info:
     description: The demo HTTP API.
     version: v1
 servers:
-    - url: https://api.example.test
+    - url: https://api.example.com
+      description: The production deployment of this API.
+    - url: http://localhost:8080
+      description: The local deployment of this API.
 paths:
     /api/v1/profile-attachments:
         get:

@@ -128,6 +128,74 @@ picks one.
 
 ---
 
+## `servers`
+
+Where this API answers. Off by default, and what makes a generated SDK carry the
+URL instead of making its consumer type one.
+
+```yaml
+servers:
+  - name: production
+    url: https://api.example.com
+    description: The deployment your customers reach.
+    default: true
+
+  - name: staging
+    url: https://staging.example.com
+
+  - name: local
+    url: http://localhost:8080
+```
+
+| Key | |
+|---|---|
+| `name` | What the deployment is called. It becomes an identifier in every generated SDK, so it is lower snake case: `staging_eu` is Go's `ServerStagingEu` and TypeScript's `servers.staging_eu`. |
+| `url` | Where it answers. Absolute, and the [`api.base_path`](#api) is appended to it, so it is not repeated here. A trailing slash is trimmed. |
+| `description` | One line about what the deployment is for. It reaches the OpenAPI document and the doc comment beside the generated constant. |
+| `default` | The deployment a client that names no URL gets. At most one entry may set it; **with none set, the first entry is the default**, so a project naming one deployment writes no marker. |
+
+**One list, not one per generator.** `go-client`, `ts-client` and `openapi` all
+have to say where the API is, and three copies of that answer are three things to
+keep in step — a document claiming `api.example.com` shipping beside an SDK
+pointing somewhere else is not a mistake anybody notices from either half. A
+language added later gets the deployments without growing an option of its own.
+
+What each generator does with it:
+
+- **`go-client`** emits a constant per deployment — `ServerProduction`,
+  `ServerStaging` — and `DefaultBaseURL` for the marked one. A caller who leaves
+  `Config.BaseURL` empty gets it.
+- **`ts-client`** emits `servers` and `defaultBaseUrl`, and `baseUrl` becomes
+  optional in `createClient`.
+- **`openapi`** lists them under `servers:`, default first, because that is where
+  a documentation viewer sends its trial request.
+
+**Naming none is a real answer, not an omission.** A project that has not decided
+where it runs gets an OpenAPI document describing the relative server `/` — true
+of every deployment, and enough for a viewer — and clients that go on asking
+their caller for a URL. That is the right shape for a library, and for anything
+generated before there is a host to name.
+
+**And naming one is not a cage.** Every generated constructor still takes a URL,
+and what you pass wins: a mock server in a test, a local build, a deployment this
+SDK was not generated against. In a browser, `baseUrl: ""` is the same-origin
+answer and the default never replaces it — see
+[clients.md](clients.md#where-the-client-points).
+
+**There is no `url_env`.** `auth.oauth.base_url_env` exists because a *server*
+reads its own origin when it starts, and `tracing:` argues the same way about
+where spans go. These are the opposite case: they are constants compiled into
+somebody else's program, which cannot see your deployment's environment. A URL
+that differs per deployment is a URL the caller passes.
+
+Two keys this block replaced, both of which still work and both of which warn
+(RIG3010): `default_base_url` on `go-client` and `ts-client`, and `servers` on
+`openapi`. Setting one beside this block is an error — they are two answers to
+the same question, and choosing between them quietly is the disagreement the
+block exists to prevent.
+
+---
+
 ## `database`
 
 Where rig runs your migrations and reads your schema from.
@@ -462,6 +530,11 @@ api:
   version: v1
   base_path: /api/v1
   permissions: none
+
+servers:
+  - name: local
+    url: http://localhost:8080
+    description: This example, running on your machine.
 
 database:
   image: postgres:17-alpine

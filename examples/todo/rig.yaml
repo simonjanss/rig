@@ -15,6 +15,19 @@ api:
   permissions: none
   base_path: /api/v1
 
+# Where this API answers. One list, read by both generated clients and by the
+# OpenAPI document, so the three cannot disagree about where the API is — and a
+# language added later gets the deployments without an option of its own.
+#
+# One entry here, because this example runs in exactly one place. A real project
+# names its deployments and marks one default; with only one, the marker is
+# implied. The escape hatch survives either way: examples/sdk passes -base-url
+# and the generated constructor takes it without arguing.
+servers:
+  - name: local
+    url: http://localhost:8080
+    description: This example, running on your machine.
+
 # A throwaway Postgres, created on demand. The port is explicit so this example
 # can run alongside another rig project without fighting over the default.
 database:
@@ -126,9 +139,6 @@ generators:
     out_dir: client
     options:
       package: client
-      # Where this example runs, so a demo can build a client without
-      # naming the server. A real project leaves it out.
-      default_base_url: http://localhost:8080
 
   # The same client for a browser, from the same document. Two packages
   # underneath it rather than one: @rig-ts/client is the request, the
@@ -142,8 +152,6 @@ generators:
   # front end the same way client/ is for somebody else's program.
   - name: ts-client
     out_dir: client-ts
-    options:
-      default_base_url: http://localhost:8080
 
   # The OpenAPI document, written from the same compiled document the routes
   # above are, so it cannot describe an endpoint that does not exist.

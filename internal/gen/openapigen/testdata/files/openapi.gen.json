@@ -7,7 +7,12 @@
   },
   "servers": [
     {
-      "url": "https://api.example.test"
+      "url": "https://api.example.com",
+      "description": "The production deployment of this API."
+    },
+    {
+      "url": "http://localhost:8080",
+      "description": "The local deployment of this API."
     }
   ],
   "paths": {

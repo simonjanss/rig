@@ -412,3 +412,43 @@ func between(src, open, close string) (string, bool) {
 	body, _, ok := strings.Cut(rest, close)
 	return body, ok
 }
+
+// The fallback that makes the constant mean something — and the one character
+// in it that matters.
+//
+// `??` and not `||`: the empty string is falsy and is the same-origin answer a
+// browser served by this API wants, so `||` would quietly repoint a front end
+// that passed `""` at whatever the project called its default. That is not a
+// hypothetical — examples/linearlite/web and the typecheck fixture both pass it.
+func TestTheDefaultBaseUrlIsUsedWithoutSwallowingTheEmptyString(t *testing.T) {
+	t.Parallel()
+
+	src := fileOf(t, load(t, filesFixture), "client.gen.ts")
+
+	if !strings.Contains(src, "baseUrl: config.baseUrl ?? defaultBaseUrl,") {
+		t.Errorf("createClient does not fall back to defaultBaseUrl:\n%s", src)
+	}
+	if strings.Contains(src, "config.baseUrl || defaultBaseUrl") {
+		t.Error(`|| would take the same-origin "" away from a browser; use ??`)
+	}
+	if !strings.Contains(src, "export const defaultBaseUrl = servers.production;") {
+		t.Error("the default is not the deployment rig.yaml marked")
+	}
+	if !strings.Contains(src, `export type ClientConfig = Omit<Config, "baseUrl"> & { baseUrl?: string };`) {
+		t.Error("baseUrl did not become optional, so the fallback is unreachable")
+	}
+}
+
+// A project that named no deployment keeps the client it had: no constants, and
+// a createClient that goes on requiring a baseUrl.
+func TestAClientForAProjectWithNoDeploymentsAsksForABaseUrl(t *testing.T) {
+	t.Parallel()
+
+	src := fileOf(t, load(t, fixture), "client.gen.ts")
+	if strings.Contains(src, "defaultBaseUrl") || strings.Contains(src, "ClientConfig") {
+		t.Error("a project that named nowhere got a default anyway")
+	}
+	if !strings.Contains(src, "export function createClient(config: Config): Client {") {
+		t.Error("a client with no default stopped requiring a baseUrl")
+	}
+}

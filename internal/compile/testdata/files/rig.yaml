@@ -2,6 +2,14 @@ project:
   name: demo
   module: example.com/demo
 
+# Two deployments and no `default:` marker, so the golden proves the other half
+# of the rule: with nobody claiming it, the first entry is the default.
+servers:
+  - name: production
+    url: https://api.example.com
+  - name: local
+    url: http://localhost:8080
+
 # Exposed, so rig_file is a resource here and its restore window is resolved
 # from this block rather than from a `restore_window_days` in its table
 # configuration. Deliberately not the default: seven days is a number that can

@@ -32,6 +32,50 @@ The generated half is the wire types and one method per endpoint. The other half
 `rig/rigclient` module, which your client imports. A program that *calls* a rig
 application depends on `rig/rigclient`; it never depends on rig itself.
 
+## Where the client points
+
+An SDK that cannot say where its API is has handed the question back to whoever
+imports it. Name the deployments in
+[`rig.yaml`'s `servers:` block](rig-yaml.md#servers) and both clients carry them:
+
+```yaml
+servers:
+  - name: production
+    url: https://api.example.com
+    default: true
+  - name: local
+    url: http://localhost:8080
+```
+
+```go
+c, err := client.New(rigclient.Config{})            // production
+c, err := client.New(rigclient.Config{BaseURL: client.ServerLocal})
+c, err := client.New(rigclient.Config{BaseURL: mock.URL})
+```
+
+An empty `BaseURL` is the deployment marked `default:` — that is what
+`DefaultBaseURL` is, and it is a constant you can read rather than a rule hidden
+in the constructor. Anything you pass wins, which is what keeps a mock server and
+a local build reachable.
+
+The same three in TypeScript, where `baseUrl` becomes optional:
+
+```ts
+const client = createClient({});                    // production
+const client = createClient({ baseUrl: servers.local });
+const client = createClient({ baseUrl: mockUrl });
+```
+
+**`""` is not "leave it out".** It is the same-origin answer — a front end served
+by its own API names no host at all — and the default never replaces it. That is
+why `createClient` reads `config.baseUrl ?? defaultBaseUrl` and not `||`: the
+empty string is falsy, and the difference between the two operators is a browser
+app quietly calling somebody's laptop.
+
+A project that names no deployment gets neither constant, and both constructors
+go on requiring a URL. That is the right shape for a client generated before
+there is a host to name.
+
 ## When a call is refused
 
 Every method that sends a body has a reader of its own, named after the call. It
@@ -493,7 +537,9 @@ error decoding. It has no dependencies of its own and nothing in it is React.
 import { createClient } from "./api";
 
 // The empty string is the ordinary same-origin case: it resolves against the
-// page, so a front end served beside its API names no host at all.
+// page, so a front end served beside its API names no host at all. It is a base
+// URL rather than an absent one, so a project that named a default deployment
+// keeps getting the page's own origin here.
 const client = createClient({ baseUrl: "" });
 
 const page = await client.todos.list({ limit: 20 });

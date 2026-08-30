@@ -404,3 +404,56 @@ func TestFileMethodsCompile(t *testing.T) {
 
 	gentest.MustCompile(t, gentest.Run(t, goclient.New(), doc, opts()), "client")
 }
+
+// The fallback that makes the constant mean something.
+//
+// The doc comment beside DefaultBaseURL has always promised that a tool talking
+// only to one deployment can leave Config.BaseURL empty, and until this existed
+// the constructor handed the empty string straight to rigclient, which refuses
+// it. A regression here — dropping the branch, or reaching for the constant
+// somewhere the caller's own value could not win — puts the lie back.
+func TestTheDefaultBaseURLIsActuallyUsed(t *testing.T) {
+	t.Parallel()
+
+	doc := gentest.LoadDocument(t, filepath.Join("testdata", "authwired.ir.json"))
+	src := fileNamed(t, gentest.Run(t, goclient.New(), doc, opts()), "client.gen.go")
+
+	if !strings.Contains(src, "if cfg.BaseURL == \"\" {\n\t\tcfg.BaseURL = DefaultBaseURL\n\t}") {
+		t.Errorf("New does not fall back to DefaultBaseURL:\n%s", src)
+	}
+	if !strings.Contains(src, `const DefaultBaseURL = ServerProduction`) {
+		t.Error("the default is not the deployment rig.yaml marked")
+	}
+	for _, name := range []string{"ServerLocal", "ServerProduction", "ServerStagingEu"} {
+		if !strings.Contains(src, "\t"+name+" = ") {
+			t.Errorf("no constant for %s", name)
+		}
+	}
+}
+
+// A project that named no deployment keeps the client it had: no constants, and
+// a constructor that goes on requiring a URL from its caller.
+func TestAClientForAProjectWithNoDeploymentsAsksForAURL(t *testing.T) {
+	t.Parallel()
+
+	doc := gentest.LoadDocument(t, filepath.Join("testdata", fixture))
+	src := fileNamed(t, gentest.Run(t, goclient.New(), doc, opts()), "client.gen.go")
+	if strings.Contains(src, "DefaultBaseURL") {
+		t.Error("a project that named nowhere got a default anyway")
+	}
+	if strings.Contains(src, "cfg.BaseURL =") {
+		t.Error("a client with no default still rewrites the caller's BaseURL")
+	}
+}
+
+// fileNamed is one artifact's content.
+func fileNamed(t *testing.T, artifacts []gen.Artifact, name string) string {
+	t.Helper()
+	for _, a := range artifacts {
+		if a.Path == name {
+			return string(a.Content)
+		}
+	}
+	t.Fatalf("no %s among the artifacts", name)
+	return ""
+}

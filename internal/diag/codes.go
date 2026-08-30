@@ -152,6 +152,13 @@ var (
 			"Set `monitoring: addr: 127.0.0.1:9090`, and widen it deliberately if "+
 			"something other than this machine has to reach it.")
 
+	CodeConfigDeprecated = newCode("RIG3010", SeverityWarning,
+		"A rig.yaml key still works, and has been replaced by another.",
+		"The message names the replacement. A deprecated key keeps working, so a "+
+			"project is never broken by an upgrade it did not ask for — but the two "+
+			"spellings will not both be here forever, and the one that is going away "+
+			"is the one rig can no longer teach anybody about.")
+
 	CodeUnmentionedColumn = newCode("RIG3100", SeverityWarning,
 		"A column exists in the database but is not mentioned in the table configuration.",
 		"Run `rig sync` to add it, then replace the placeholder comment.")

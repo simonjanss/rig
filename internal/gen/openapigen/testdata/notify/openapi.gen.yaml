@@ -9,7 +9,8 @@ info:
         The notification inbox endpoints are served by a hand-written module and are not described here.
     version: v1
 servers:
-    - url: https://api.example.test
+    - url: /
+      description: 'This server. Set servers: in rig.yaml to name the deployment instead.'
 paths:
     /api/v1/blog-posts:
         get:

@@ -9,6 +9,7 @@ import (
 
 	"github.com/simonjanss/rig/internal/gen/genutil"
 	"github.com/simonjanss/rig/pkg/gen"
+	"github.com/simonjanss/rig/pkg/ir"
 )
 
 // document assembles the whole model.
@@ -90,12 +91,57 @@ func (e *emitter) undescribed() string {
 }
 
 // servers are the origins the API answers on.
+//
+// The project's `servers:` block first: the document and every generated SDK
+// have to agree about where the API is, and that block is the one place that
+// says so. The deprecated openapi.servers option is read only when the project
+// named none, and the relative fallback only when neither did.
+//
+// The default deployment is emitted first, whatever its position in the file. A
+// viewer sends its trial request to the first entry, and a document whose "try
+// it" went to staging while the SDK beside it defaulted to production would be
+// exactly the disagreement the block exists to prevent.
 func (e *emitter) servers() []*v3.Server {
-	out := make([]*v3.Server, 0, len(e.cfg.Servers))
-	for _, s := range e.cfg.Servers {
-		out = append(out, &v3.Server{URL: s.URL, Description: s.Description})
+	named := genutil.Servers(e.doc)
+	if len(named) == 0 {
+		out := make([]*v3.Server, 0, len(e.cfg.Servers))
+		for _, s := range e.cfg.Servers {
+			out = append(out, &v3.Server{URL: s.URL, Description: s.Description})
+		}
+		return out
+	}
+
+	ordered := make([]ir.Server, 0, len(named))
+	for _, s := range named {
+		if s.Default {
+			ordered = append(ordered, s)
+		}
+	}
+	for _, s := range named {
+		if !s.Default {
+			ordered = append(ordered, s)
+		}
+	}
+
+	out := make([]*v3.Server, 0, len(ordered))
+	for _, s := range ordered {
+		out = append(out, &v3.Server{URL: s.URL, Description: serverDescription(s)})
 	}
 	return out
+}
+
+// serverDescription is what the document says about a deployment.
+//
+// It falls back to the name, so `- name: staging` with no prose still reads as
+// something in a viewer rather than as a bare URL.
+func serverDescription(s ir.Server) string {
+	if s.Description != "" {
+		return s.Description
+	}
+	if s.Name == "" {
+		return ""
+	}
+	return "The " + s.Name + " deployment of this API."
 }
 
 // tags group the operations, one per resource that produced any.

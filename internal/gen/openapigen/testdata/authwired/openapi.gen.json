@@ -7,7 +7,16 @@
   },
   "servers": [
     {
-      "url": "https://api.example.test"
+      "url": "https://api.example.com",
+      "description": "The deployment your customers reach."
+    },
+    {
+      "url": "http://localhost:8080",
+      "description": "A machine on somebody's desk."
+    },
+    {
+      "url": "https://staging.eu.example.com",
+      "description": "The staging_eu deployment of this API."
     }
   ],
   "paths": {

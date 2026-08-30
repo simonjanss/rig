@@ -111,6 +111,7 @@ func ApplyConfig(api ir.API, schema ir.Schema, set *tableconf.Set, opt ConfigOpt
 		Cache:              api.Cache,
 		Tracing:            api.Tracing,
 		Monitoring:         api.Monitoring,
+		Servers:            api.Servers,
 		EmbeddedFoundation: api.EmbeddedFoundation,
 	}
 

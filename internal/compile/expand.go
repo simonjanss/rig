@@ -58,6 +58,7 @@ func Expand(api ir.API, opt ExpandOptions) (ir.API, diag.List) {
 		Cache:              api.Cache,
 		Tracing:            api.Tracing,
 		Monitoring:         api.Monitoring,
+		Servers:            api.Servers,
 		EmbeddedFoundation: api.EmbeddedFoundation,
 	}
 

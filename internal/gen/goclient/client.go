@@ -1,6 +1,8 @@
 package goclient
 
 import (
+	"strings"
+
 	"github.com/simonjanss/rig/internal/gen/genutil"
 	"github.com/simonjanss/rig/internal/gen/gobuf"
 	"github.com/simonjanss/rig/pkg/gen"
@@ -44,12 +46,7 @@ func (e *emitter) clientFile() (gen.Artifact, error) {
 	b.L("const RevisionHeader = %s", gobuf.Quote(genutil.RevisionHeader(e.doc)))
 	b.NL()
 
-	if e.cfg.DefaultBaseURL != "" {
-		b.Comment("DefaultBaseURL is where this API runs in development, so a " +
-			"tool that only ever talks to that one can leave Config.BaseURL empty.")
-		b.L("const DefaultBaseURL = %s", gobuf.Quote(e.cfg.DefaultBaseURL))
-		b.NL()
-	}
+	e.serverConstants(b)
 
 	e.clientStruct(b, rig)
 	e.errorVocabulary(b, rig)
@@ -89,10 +86,25 @@ func (e *emitter) clientStruct(b *gobuf.Buf, rig string) {
 	b.L("}")
 	b.NL()
 
-	b.Comment("New builds a client.\n\n" +
-		"The only required setting is Config.BaseURL. A credential can be given " +
-		"here or installed later by signing in.")
+	_, hasDefault := genutil.DefaultServer(e.servers())
+	if hasDefault {
+		b.Comment("New builds a client.\n\n" +
+			"Config.BaseURL is optional: left empty it is DefaultBaseURL, the " +
+			"deployment rig.yaml marks as the default. A caller pointing somewhere " +
+			"else — a mock server, a local build — sets it and gets exactly what " +
+			"they set. A credential can be given here or installed later by " +
+			"signing in.")
+	} else {
+		b.Comment("New builds a client.\n\n" +
+			"The only required setting is Config.BaseURL. A credential can be given " +
+			"here or installed later by signing in.")
+	}
 	b.L("func New(cfg %s.Config) (*Client, error) {", rig)
+	if hasDefault {
+		b.L("if cfg.BaseURL == \"\" {")
+		b.L("cfg.BaseURL = DefaultBaseURL")
+		b.L("}")
+	}
 	b.L("rt, err := %s.New(cfg, %s.API{", rig, rig)
 	b.L("BasePath: BasePath,")
 	b.L("Revision: Revision,")
@@ -156,3 +168,102 @@ func (e *emitter) errorVocabulary(b *gobuf.Buf, rig string) {
 // errorCodeEnum is the closed set of failure reasons, or nil for a document that
 // somehow has none.
 func (e *emitter) errorCodeEnum() *ir.Enum { return e.doc.Enum("ErrorCode") }
+
+// servers are the deployments this client knows about.
+//
+// The project's list first. The deprecated default_base_url option is read only
+// when the project named none, and it arrives here as the nameless one-entry
+// case it always was: the constant it produces is the one it has always
+// produced. What it gains is the fallback in New — the comment beside
+// DefaultBaseURL has always said a caller can leave Config.BaseURL empty, and
+// now that is true wherever the default came from.
+func (e *emitter) servers() []ir.Server {
+	if named := genutil.Servers(e.doc); len(named) > 0 {
+		return named
+	}
+	if e.cfg.DefaultBaseURL == "" {
+		return nil
+	}
+	return []ir.Server{{URL: e.cfg.DefaultBaseURL, Default: true}}
+}
+
+// serverConstants emits the deployments and the default among them.
+//
+// One comment per constant rather than one over the block: a doc comment above
+// several one-line declarations documents only the first, and the rest arrive on
+// pkg.go.dev undocumented.
+func (e *emitter) serverConstants(b *gobuf.Buf) {
+	servers := e.servers()
+	if len(servers) == 0 {
+		return
+	}
+
+	named := make([]ir.Server, 0, len(servers))
+	for _, s := range servers {
+		if s.Name != "" {
+			named = append(named, s)
+		}
+	}
+
+	if len(named) > 0 {
+		b.Comment("The deployments this API is served on, as rig.yaml names them.\n\n" +
+			"A caller that talks to one of them names it here rather than writing " +
+			"the URL down: the string is the project's, and it moves when the " +
+			"project does. A caller pointing at a mock server or a local build " +
+			"passes their own Config.BaseURL, and nothing here argues.")
+		b.L("const (")
+		for i, s := range named {
+			if i > 0 {
+				b.NL()
+			}
+			b.Comment(serverDescription(s))
+			b.L("%s = %s", serverConstName(s.Name), gobuf.Quote(s.URL))
+		}
+		b.L(")")
+		b.NL()
+	}
+
+	def, ok := genutil.DefaultServer(servers)
+	if !ok {
+		return
+	}
+	b.Comment("DefaultBaseURL is the deployment rig.yaml marks as the default, so " +
+		"a tool that only ever talks to that one can leave Config.BaseURL empty.")
+	if def.Name != "" {
+		b.L("const DefaultBaseURL = %s", serverConstName(def.Name))
+	} else {
+		b.L("const DefaultBaseURL = %s", gobuf.Quote(def.URL))
+	}
+	b.NL()
+}
+
+// serverConstName is what a deployment is called in Go.
+//
+// The Server prefix groups the set in godoc and in an editor's completion list,
+// and keeps a deployment named after a resource from colliding with the
+// generated type of the same name.
+func serverConstName(name string) string {
+	var out strings.Builder
+	out.WriteString("Server")
+	for _, word := range strings.Split(name, "_") {
+		if word == "" {
+			continue
+		}
+		out.WriteString(strings.ToUpper(word[:1]))
+		out.WriteString(word[1:])
+	}
+	return out.String()
+}
+
+// serverDescription is the sentence a deployment's constant carries.
+//
+// The project's own prose when it wrote any, standing on its own rather than
+// spliced after the constant's name — the same way a resource's comment is used,
+// and the reason ST1020 is off in .golangci.yml. A derived sentence otherwise,
+// so an entry with no prose still documents itself.
+func serverDescription(s ir.Server) string {
+	if s.Description != "" {
+		return s.Description
+	}
+	return "The " + s.Name + " deployment of this API."
+}

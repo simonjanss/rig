@@ -33,6 +33,27 @@ const Revision = ""
 // generated from this document reads.
 const RevisionHeader = "API-Revision"
 
+// The deployments this API is served on, as rig.yaml names them.
+//
+// A caller that talks to one of them names it here rather than writing the URL
+// down: the string is the project's, and it moves when the project does. A
+// caller pointing at a mock server or a local build passes their own
+// Config.BaseURL, and nothing here argues.
+const (
+	// A machine on somebody's desk.
+	ServerLocal = "http://localhost:8080"
+
+	// The deployment your customers reach.
+	ServerProduction = "https://api.example.com"
+
+	// The staging_eu deployment of this API.
+	ServerStagingEu = "https://staging.eu.example.com"
+)
+
+// DefaultBaseURL is the deployment rig.yaml marks as the default, so a tool
+// that only ever talks to that one can leave Config.BaseURL empty.
+const DefaultBaseURL = ServerProduction
+
 // Client is the API. One field per resource, so what a client can do is what
 // the schema says it can, and reaching for a resource that does not exist is a
 // compile error rather than a 404.
@@ -50,9 +71,14 @@ type Client struct {
 
 // New builds a client.
 //
-// The only required setting is Config.BaseURL. A credential can be given here
-// or installed later by signing in.
+// Config.BaseURL is optional: left empty it is DefaultBaseURL, the deployment
+// rig.yaml marks as the default. A caller pointing somewhere else — a mock
+// server, a local build — sets it and gets exactly what they set. A
+// credential can be given here or installed later by signing in.
 func New(cfg rigclient.Config) (*Client, error) {
+	if cfg.BaseURL == "" {
+		cfg.BaseURL = DefaultBaseURL
+	}
 	rt, err := rigclient.New(cfg, rigclient.API{
 		BasePath:       BasePath,
 		Revision:       Revision,

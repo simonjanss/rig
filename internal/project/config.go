@@ -33,6 +33,7 @@ type Config struct {
 	Project    ProjectInfo `yaml:"project" json:"project" jsonschema_description:"Identity of the application being generated."`
 	Layout     Layout      `yaml:"layout,omitempty" json:"layout,omitempty" jsonschema_description:"Where table configuration and generated code live."`
 	API        API         `yaml:"api,omitempty" json:"api,omitempty" jsonschema_description:"Shape of the generated HTTP API."`
+	Servers    Servers     `yaml:"servers,omitempty" json:"servers,omitempty" jsonschema_description:"The deployments this API answers on. Every SDK generator and the OpenAPI document read them, so the document and the clients cannot disagree about where the API is."`
 	Database   Database    `yaml:"database,omitempty" json:"database,omitempty" jsonschema_description:"Where to run migrations and read the schema from."`
 	Migrations Migrations  `yaml:"migrations,omitempty" json:"migrations,omitempty" jsonschema_description:"Migration file location."`
 	Auth       Auth        `yaml:"auth,omitempty" json:"auth,omitempty" jsonschema_description:"How the authentication foundation's tables are treated."`

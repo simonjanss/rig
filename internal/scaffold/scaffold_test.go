@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/simonjanss/rig/internal/project"
 	"github.com/simonjanss/rig/internal/scaffold"
 )
 
@@ -253,4 +254,52 @@ func nonEmptyLines(s string) []string {
 		out = append(out, l)
 	}
 	return out
+}
+
+// Every commented suggestion in the scaffolded rig.yaml has to decode when it is
+// uncommented, which is the whole point of putting it there.
+//
+// The `servers:` block used to be scaffolded as `# servers: ["https://…"]`, a
+// list of strings where the loader wanted a list of objects — so following rig's
+// own suggestion produced an error from rig. Nothing noticed, because nothing
+// had ever parsed what the scaffold suggests.
+func TestTheCommentedSuggestionsInRigYAMLDecode(t *testing.T) {
+	t.Parallel()
+
+	var cfg string
+	for _, f := range scaffold.Project(scaffold.ProjectOptions{
+		Name:   "fantasyfootball",
+		Module: "github.com/you/ff",
+	}) {
+		if f.Path == "rig.yaml" {
+			cfg = f.Content
+		}
+	}
+
+	uncommented := uncomment(cfg)
+	if !strings.Contains(uncommented, "servers:") {
+		t.Fatalf("no servers block was suggested:\n%s", cfg)
+	}
+
+	if _, diags := project.Parse("rig.yaml", []byte(uncommented)); diags.HasErrors() {
+		t.Errorf("uncommenting what rig suggested does not decode:\n%s\n\n%s",
+			diags.String(), uncommented)
+	}
+}
+
+// uncomment strips the leading "# " from every commented configuration line,
+// leaving prose comments — which are followed by a blank line rather than by
+// more configuration — alone by way of the indentation rig writes.
+func uncomment(cfg string) string {
+	var b strings.Builder
+	for _, line := range strings.Split(cfg, "\n") {
+		switch {
+		case strings.HasPrefix(line, "# servers:"), strings.HasPrefix(line, "#   "):
+			b.WriteString(strings.TrimPrefix(strings.TrimPrefix(line, "#"), " "))
+		default:
+			b.WriteString(line)
+		}
+		b.WriteByte('\n')
+	}
+	return b.String()
 }

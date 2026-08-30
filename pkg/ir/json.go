@@ -119,6 +119,11 @@ func (d *Document) Hash() (string, error) {
 	unstamped.API.EmbeddedFoundation = false
 	unstamped.API.Monitoring = nil
 	unstamped.API.Cache = nil
+	// Where the API is deployed is not what the API answers. A project that
+	// names a staging host, or adds one, has told no client anything: the
+	// revision is the question "how old is the oldest caller still calling",
+	// and a deployment appearing must not make every client look stale.
+	unstamped.API.Servers = nil
 	if slices.ContainsFunc(unstamped.API.Resources, func(r Resource) bool { return r.Cached }) {
 		// A copy for the reason the two below take one: the shallow copy above
 		// shares the backing array, and clearing in place would reach the

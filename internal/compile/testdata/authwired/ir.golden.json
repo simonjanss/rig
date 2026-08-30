@@ -1643,6 +1643,23 @@
       "channel": "rig_cache_authwired",
       "max_entries": 25000
     },
+    "servers": [
+      {
+        "name": "local",
+        "url": "http://localhost:8080",
+        "description": "A machine on somebody's desk."
+      },
+      {
+        "name": "production",
+        "url": "https://api.example.com",
+        "description": "The deployment your customers reach.",
+        "default": true
+      },
+      {
+        "name": "staging_eu",
+        "url": "https://staging.eu.example.com"
+      }
+    ],
     "permissions": [
       {
         "key": "todo.delete",

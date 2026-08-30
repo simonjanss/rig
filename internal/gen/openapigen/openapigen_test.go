@@ -34,6 +34,12 @@ var fixtures = []string{"lifecycle", "files", "authwired", "ownerscope", "notify
 const primary = "lifecycle"
 
 func opts() gen.Options {
+	return gen.Options{OutDir: "."}
+}
+
+// deprecatedServersOpts is the superseded per-generator option, which is read
+// only by a project that named no deployment of its own.
+func deprecatedServersOpts() gen.Options {
 	return gen.Options{OutDir: ".", Raw: map[string]any{
 		"servers": []any{map[string]any{"url": "https://api.example.test"}},
 	}}
@@ -902,4 +908,71 @@ func findOperation(t *testing.T, m *v3.Document, id string) *v3.Operation {
 		}
 	}
 	return nil
+}
+
+// The project's servers block is what the document lists, and the deployment it
+// marks as the default comes first — because that is where a viewer sends its
+// trial request, and a document whose "try it" went somewhere the SDK beside it
+// does not default to is the disagreement the block exists to prevent.
+//
+// The authwired fixture marks its default on the second of three entries, so
+// the order below cannot come from the file's order.
+func TestTheProjectsServersReachTheDocumentDefaultFirst(t *testing.T) {
+	t.Parallel()
+
+	m := model(t, run(t, "authwired"))
+	var got []string
+	for _, s := range m.Servers {
+		got = append(got, s.URL)
+	}
+
+	want := []string{
+		"https://api.example.com",
+		"http://localhost:8080",
+		"https://staging.eu.example.com",
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("servers = %v, want %v", got, want)
+	}
+	if d := m.Servers[2].Description; d != "The staging_eu deployment of this API." {
+		t.Errorf("an entry with no description said %q rather than naming itself", d)
+	}
+}
+
+// A project that names no deployment gets the relative server, which is true of
+// every deployment and is what keeps the document usable in a viewer for a
+// project that has not named a host.
+func TestAProjectThatNamesNoDeploymentGetsARelativeServer(t *testing.T) {
+	t.Parallel()
+
+	m := model(t, run(t, primary))
+	if len(m.Servers) != 1 || m.Servers[0].URL != "/" {
+		t.Fatalf("want a single relative server, got %#v", m.Servers)
+	}
+}
+
+// The superseded option still works, so a project that has not migrated is not
+// broken by an upgrade it did not ask for. It is read only when the project
+// named no deployment of its own; the refusal to set both lives in
+// internal/project, which is the only place that can see both.
+func TestTheDeprecatedServersOptionStillWorks(t *testing.T) {
+	t.Parallel()
+
+	artifacts := gentest.Run(t, openapigen.New(), load(t, primary), deprecatedServersOpts())
+	m := model(t, artifacts)
+	if len(m.Servers) != 1 || m.Servers[0].URL != "https://api.example.test" {
+		t.Fatalf("the deprecated option was ignored: %#v", m.Servers)
+	}
+}
+
+// And the project's block wins over it, so the two can never both describe the
+// document.
+func TestTheProjectsServersWinOverTheDeprecatedOption(t *testing.T) {
+	t.Parallel()
+
+	artifacts := gentest.Run(t, openapigen.New(), load(t, "authwired"), deprecatedServersOpts())
+	m := model(t, artifacts)
+	if len(m.Servers) != 3 {
+		t.Fatalf("want the project's three deployments, got %#v", m.Servers)
+	}
 }
