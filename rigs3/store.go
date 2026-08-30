@@ -101,11 +101,21 @@ func (h *hashed) Write(p []byte) (int, error) {
 // make scrubbing a video a conversation. The bytes are fetched on the first
 // read after a seek, as one ranged GET.
 func (s *Store) Get(ctx context.Context, key string) (io.ReadSeekCloser, error) {
-	info, err := s.Stat(ctx, key)
+	// A head rather than a Stat, because the only thing a reader needs is how
+	// long the object is. Stat would also fetch the tags for a checksum nothing
+	// on this path reads — the ETag a download answers with comes off the
+	// rig_file row, not off the bucket — and that would be a second round trip
+	// on every download of every file.
+	head, err := s.head(ctx, key)
 	if err != nil {
 		return nil, err
 	}
-	return &object{ctx: ctx, api: s.api, bucket: s.bucket, key: key, size: info.Size}, nil
+
+	var size int64
+	if head.ContentLength != nil {
+		size = *head.ContentLength
+	}
+	return &object{ctx: ctx, api: s.api, bucket: s.bucket, key: key, size: size}, nil
 }
 
 // Stat reports what the bucket knows about the object without opening it.
@@ -115,12 +125,9 @@ func (s *Store) Get(ctx context.Context, key string) (io.ReadSeekCloser, error) 
 // [github.com/simonjanss/rig/files] calls this; it is here because a store that
 // could not answer it would be a store a range request had to guess at.
 func (s *Store) Stat(ctx context.Context, key string) (blob.Info, error) {
-	head, err := s.api.HeadObject(ctx, &s3.HeadObjectInput{
-		Bucket: aws.String(s.bucket),
-		Key:    aws.String(key),
-	})
+	head, err := s.head(ctx, key)
 	if err != nil {
-		return blob.Info{}, s.wrap(key, err)
+		return blob.Info{}, err
 	}
 
 	tags, err := s.tags(ctx, key)
@@ -192,6 +199,20 @@ func (s *Store) SignUpload(ctx context.Context, key string, expires time.Duratio
 		return "", fmt.Errorf("rigs3: sign an upload of %s: %w", key, err)
 	}
 	return req.URL, nil
+}
+
+// head asks for the object's headers, and reports a missing one the way the
+// interface asks: HeadObject has no body to put an error document in, so the
+// answer is a bare 404 rather than the NoSuchKey a GET would model.
+func (s *Store) head(ctx context.Context, key string) (*s3.HeadObjectOutput, error) {
+	out, err := s.api.HeadObject(ctx, &s3.HeadObjectInput{
+		Bucket: aws.String(s.bucket),
+		Key:    aws.String(key),
+	})
+	if err != nil {
+		return nil, s.wrap(key, err)
+	}
+	return out, nil
 }
 
 // tags reads the object's tag set as a map, and reports a missing object the

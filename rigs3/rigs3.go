@@ -147,6 +147,15 @@ func New(ctx context.Context, cfg Config) (*Store, error) {
 		region = defaultRegion
 	}
 
+	// Half a pair is a deployment that set one environment variable and not the
+	// other, and the default chain would then be tried and fail somewhere else
+	// entirely — as a signature mismatch on the first upload, or as a timeout
+	// waiting for an instance metadata service that is not there.
+	if (cfg.AccessKeyID == "") != (cfg.SecretAccessKey == "") {
+		return nil, errors.New("rigs3: an access key without its secret, or the other way round; " +
+			"set both, or neither for the AWS default credential chain")
+	}
+
 	opts := []func(*awsconfig.LoadOptions) error{awsconfig.WithRegion(region)}
 	if cfg.AccessKeyID != "" || cfg.SecretAccessKey != "" {
 		opts = append(opts, awsconfig.WithCredentialsProvider(

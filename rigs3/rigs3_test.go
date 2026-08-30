@@ -162,6 +162,18 @@ func TestNewRefusesAConfigItCannotUse(t *testing.T) {
 			cfg:  Config{Bucket: "uploads"},
 			says: "no region",
 		},
+		{
+			// One environment variable set and not the other, which would
+			// otherwise fail somewhere else entirely.
+			name: "an access key with no secret",
+			cfg:  Config{Bucket: "uploads", Region: "eu-north-1", AccessKeyID: "AKIA"},
+			says: "set both",
+		},
+		{
+			name: "a secret with no access key",
+			cfg:  Config{Bucket: "uploads", Region: "eu-north-1", SecretAccessKey: "shhh"},
+			says: "set both",
+		},
 	}
 
 	for _, c := range cases {
