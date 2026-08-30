@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sort"
 	"strings"
 	"time"
 
@@ -34,6 +35,11 @@ type App struct {
 	// checks are the dependencies readiness asks about, beyond the pool.
 	checks []check
 
+	// limits are [Config.Shutdown]'s numbers, keyed by step name, and they
+	// replace whatever registers a step of that name. Nil is the ordinary case
+	// and means every step keeps the limit it was registered with.
+	limits map[string]time.Duration
+
 	// until is the deadline for the whole stop sequence, set when it begins.
 	until time.Time
 	// closed guards against tearing down twice, since the teardown runs from a
@@ -41,14 +47,57 @@ type App struct {
 	closed bool
 }
 
-type step struct {
-	name string
-	fn   func(context.Context) error
+// Step is one shutdown step named, and how long it may take.
+//
+// It is what [Shutdown] is a set of, and what [Config.Shutdown] carries: a
+// number in it replaces the one whatever registered that step asked for. The
+// name is the one given to [App.Drain], [App.DrainWithin], [App.Close] or
+// [App.CloseWithin] — for rig's own steps, "traces", "notifications",
+// "presence", "shapes" and "auth", which the generated api package's Shutdown
+// spells as fields rather than as strings.
+type Step struct {
+	// Name is the step this is about, and a name nothing registers is refused
+	// before the server listens rather than silently doing nothing.
+	Name string
 
-	// timeout caps this step on its own, over and above the budget for the
-	// whole sequence. Zero means the sequence's remaining time is the only
-	// limit.
-	timeout time.Duration
+	// Timeout is how long that step may take. Zero leaves it alone, which is
+	// what makes a partly-filled set mean "these, and the rest as generated".
+	Timeout time.Duration
+}
+
+// Shutdown is how long each of rig's own shutdown steps may take, for a
+// deployment that wants numbers other than the ones it was generated with.
+//
+// An interface rather than a slice field so that the thing filling it can be a
+// struct with a field per step this project actually registers — which is what
+// the generated api package emits, and what makes a step name a compile error
+// rather than a string that quietly matches nothing:
+//
+//	serve.Config{
+//		MaxShutdown: 47 * time.Second,
+//		Shutdown: api.Shutdown{
+//			Notifications: 10 * time.Second,
+//			Presence:      2 * time.Second,
+//		},
+//	}
+//
+// It belongs to the deployment rather than to rig.yaml for the reason the span
+// destination and the monitoring address do: one binary runs on a laptop, in CI
+// and in production, and how long a stop may take is usually decided by a
+// terminationGracePeriodSeconds somebody else set. A number here is one an
+// environment can supply.
+type Shutdown interface {
+	// Steps is the set, and only the steps it names are affected.
+	Steps() []Step
+}
+
+type step struct {
+	// Step is the name, and the limit this step is capped at on its own, over
+	// and above the budget for the whole sequence. A zero limit means the
+	// sequence's remaining time is the only one.
+	Step
+
+	fn func(context.Context) error
 }
 
 // check is one dependency ReadinessPath asks about.
@@ -107,7 +156,7 @@ func (a *App) Drain(name string, f func(ctx context.Context) error) {
 // long poll — so that the rest of the shutdown is not spent waiting on it.
 func (a *App) DrainWithin(name string, timeout time.Duration, f func(ctx context.Context) error) {
 	if f != nil {
-		a.drain = append(a.drain, step{name: name, fn: f, timeout: timeout})
+		a.drain = append(a.drain, step{Step: a.within(name, timeout), fn: f})
 	}
 }
 
@@ -135,7 +184,44 @@ func (a *App) Close(name string, f func(ctx context.Context) error) {
 // steps after it will need.
 func (a *App) CloseWithin(name string, timeout time.Duration, f func(ctx context.Context) error) {
 	if f != nil {
-		a.stop = append(a.stop, step{name: name, fn: f, timeout: timeout})
+		a.stop = append(a.stop, step{Step: a.within(name, timeout), fn: f})
+	}
+}
+
+// within is what a step is registered as, once [Config.Shutdown] has had its
+// say about the name.
+//
+// The deployment's number wins over the caller's, which is the whole point of
+// the field: what registers rig's own steps is generated code, so there is
+// nowhere else for a project to disagree with it. A step nobody named keeps
+// what it asked for, and the names that were named but never registered are
+// answered for in [App.checkShutdown] — here there is nothing yet to compare
+// them against.
+func (a *App) within(name string, timeout time.Duration) Step {
+	if d, ok := a.limits[name]; ok {
+		timeout = d
+	}
+	return Step{Name: name, Timeout: timeout}
+}
+
+// limit records what [Config.Shutdown] said, before the mount function
+// registers anything.
+//
+// Zero timeouts are dropped rather than recorded: a set is a struct with a
+// field per step, so most of its fields are zero most of the time, and a zero
+// that overrode a real limit would make "I did not say" mean "no limit at all".
+func (a *App) limit(shutdown Shutdown) {
+	if shutdown == nil {
+		return
+	}
+	for _, s := range shutdown.Steps() {
+		if s.Timeout <= 0 {
+			continue
+		}
+		if a.limits == nil {
+			a.limits = make(map[string]time.Duration)
+		}
+		a.limits[s.Name] = s.Timeout
 	}
 }
 
@@ -180,8 +266,8 @@ func (a *App) runDrain(ctx context.Context) error {
 	var failed error
 	for _, s := range a.drain {
 		if err := a.run(ctx, s); err != nil {
-			a.log().ErrorContext(ctx, "draining failed", "step", s.name, "error", err)
-			failed = errors.Join(failed, fmt.Errorf("drain %s: %w", s.name, err))
+			a.log().ErrorContext(ctx, "draining failed", "step", s.Name, "error", err)
+			failed = errors.Join(failed, fmt.Errorf("drain %s: %w", s.Name, err))
 		}
 	}
 	return failed
@@ -213,8 +299,8 @@ func (a *App) runClose(ctx context.Context, timeout time.Duration) error {
 	for i := len(a.stop) - 1; i >= 0; i-- {
 		s := a.stop[i]
 		if err := a.run(closing, s); err != nil {
-			a.log().ErrorContext(closing, "shutdown failed", "step", s.name, "error", err)
-			failed = errors.Join(failed, fmt.Errorf("close %s: %w", s.name, err))
+			a.log().ErrorContext(closing, "shutdown failed", "step", s.Name, "error", err)
+			failed = errors.Join(failed, fmt.Errorf("close %s: %w", s.Name, err))
 		}
 	}
 	return failed
@@ -228,9 +314,9 @@ func (a *App) runClose(ctx context.Context, timeout time.Duration) error {
 // happens the goroutine is left behind — which is a leak in a process that is
 // about to stop existing, and the better of the two outcomes.
 func (a *App) run(ctx context.Context, s step) error {
-	if s.timeout > 0 {
+	if s.Timeout > 0 {
 		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, s.timeout)
+		ctx, cancel = context.WithTimeout(ctx, s.Timeout)
 		defer cancel()
 	}
 
@@ -261,15 +347,15 @@ func (a *App) declared(drainDelay time.Duration) (time.Duration, []string) {
 		parts = append(parts, fmt.Sprintf("drain delay %s", drainDelay))
 	}
 	for _, s := range a.drain {
-		if s.timeout > 0 {
-			total += s.timeout
-			parts = append(parts, fmt.Sprintf("drain %s %s", s.name, s.timeout))
+		if s.Timeout > 0 {
+			total += s.Timeout
+			parts = append(parts, fmt.Sprintf("drain %s %s", s.Name, s.Timeout))
 		}
 	}
 	for _, s := range a.stop {
-		if s.timeout > 0 {
-			total += s.timeout
-			parts = append(parts, fmt.Sprintf("close %s %s", s.name, s.timeout))
+		if s.Timeout > 0 {
+			total += s.Timeout
+			parts = append(parts, fmt.Sprintf("close %s %s", s.Name, s.Timeout))
 		}
 	}
 	return total, parts
@@ -288,9 +374,58 @@ func (a *App) declared(drainDelay time.Duration) (time.Duration, []string) {
 func (a *App) reserved() time.Duration {
 	var total time.Duration
 	for _, s := range a.stop {
-		total += s.timeout
+		total += s.Timeout
 	}
 	return total
+}
+
+// checkLimits refuses a [Config.Shutdown] that named a step nothing registered.
+//
+// It is the same failure the configuration blocks are refused for: a number
+// somebody set and believed in, read by nothing. Here it is worth more than
+// elsewhere, because the belief is about a shutdown — the one part of a
+// deployment nobody watches until the day it drops requests, and by then the
+// evidence is a process that was killed rather than a value that did nothing.
+//
+// It can only be asked once the mount function has run, which is why it is part
+// of [App.checkShutdown] rather than of the configuration's own checks: what a
+// project registers depends on what its wiring built. A nil engine means no
+// notification step, so a set that sizes one is a set describing a server this
+// is not.
+func (a *App) checkLimits() error {
+	if len(a.limits) == 0 {
+		return nil
+	}
+
+	registered := make(map[string]bool, len(a.drain)+len(a.stop))
+	names := make([]string, 0, len(a.drain)+len(a.stop))
+	for _, steps := range [][]step{a.drain, a.stop} {
+		for _, s := range steps {
+			if !registered[s.Name] {
+				registered[s.Name] = true
+				names = append(names, s.Name)
+			}
+		}
+	}
+
+	var unread []string
+	for name := range a.limits {
+		if !registered[name] {
+			unread = append(unread, name)
+		}
+	}
+	if len(unread) == 0 {
+		return nil
+	}
+	sort.Strings(unread)
+
+	had := "nothing registered a shutdown step at all"
+	if len(names) > 0 {
+		had = "what this server registered is " + strings.Join(names, ", ")
+	}
+	return fmt.Errorf(
+		"serve: Config.Shutdown sizes %s, which nothing here registers, so the number is read by nobody: %s",
+		strings.Join(unread, ", "), had)
 }
 
 // checkShutdown refuses a shutdown whose parts do not fit inside its whole, and
@@ -313,6 +448,10 @@ func (a *App) reserved() time.Duration {
 // somebody has to write into a deployment, and the only alternative to reading
 // it here is adding up constants across three files.
 func (a *App) checkShutdown(ctx context.Context, max, drainDelay time.Duration) error {
+	if err := a.checkLimits(); err != nil {
+		return err
+	}
+
 	total, parts := a.declared(drainDelay)
 
 	if max <= 0 {

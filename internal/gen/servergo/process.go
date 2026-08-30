@@ -57,12 +57,35 @@ const (
 	headroomConst      = "shutdownHeadroom"
 )
 
+// The names each step is registered under, which are the strings serve keys
+// [Shutdown] on. Spelled once here for the reason the constant names beside
+// them are: the register call and the field that sizes it have to agree, and
+// they are written by different emitters.
+const (
+	tracesStep        = "traces"
+	notificationsStep = "notifications"
+	presenceStep      = "presence"
+	shapesStep        = "shapes"
+	authStep          = "auth"
+)
+
+// tracesField is the emitted Shutdown's field for the flush, named here as well
+// as in [emitter.shutdownSteps] because the process methods read it directly:
+// the flush is the one step with a half that never sees an App.
+const tracesField = "Traces"
+
 // shutdownStep is one of rig's own closers: what it is called in the generated
 // source, how long it gets, and what to say about it.
 type shutdownStep struct {
 	name  string
 	took  time.Duration
 	about string
+
+	// step is what the closer is registered under, and field is what the
+	// emitted Shutdown calls it. Two spellings of one step, because one of them
+	// is a string serve matches on and the other is a field a compiler checks.
+	step  string
+	field string
 }
 
 // shutdownSteps are the closers this project's configuration registers, in the
@@ -75,19 +98,19 @@ type shutdownStep struct {
 func (e *emitter) shutdownSteps() []shutdownStep {
 	var steps []shutdownStep
 	if e.tracing() {
-		steps = append(steps, shutdownStep{tracesConst, tracesFlush, "the trace flush"})
+		steps = append(steps, shutdownStep{tracesConst, tracesFlush, "the trace flush", tracesStep, tracesField})
 	}
 	if e.hasNotifications() {
-		steps = append(steps, shutdownStep{notificationsConst, notificationsStop, "the notification engine"})
+		steps = append(steps, shutdownStep{notificationsConst, notificationsStop, "the notification engine", notificationsStep, "Notifications"})
 	}
 	if e.hasPresence() {
-		steps = append(steps, shutdownStep{presenceConst, presenceStop, "the presence sweeper"})
+		steps = append(steps, shutdownStep{presenceConst, presenceStop, "the presence sweeper", presenceStep, "Presence"})
 	}
 	if e.hasShapes() {
-		steps = append(steps, shutdownStep{shapesConst, shapesDrain, "the live subscriptions"})
+		steps = append(steps, shutdownStep{shapesConst, shapesDrain, "the live subscriptions", shapesStep, "Shapes"})
 	}
 	if e.hasAuth() {
-		steps = append(steps, shutdownStep{authConst, authClose, "the auth cache's invalidation channel"})
+		steps = append(steps, shutdownStep{authConst, authClose, "the auth cache's invalidation channel", authStep, "Auth"})
 	}
 	return steps
 }
@@ -127,6 +150,7 @@ func (e *emitter) processFile() (gen.Artifact, error) {
 
 	e.shutdownConstants(b)
 	e.shutdownBudgetFunc(b)
+	e.shutdownType(b)
 
 	if e.tracing() {
 		e.processType(b)
@@ -320,6 +344,125 @@ func (e *emitter) shutdownBudgetFunc(b *gobuf.Buf) {
 	b.NL()
 }
 
+// shutdownType emits the one thing above that a deployment can disagree with.
+//
+// A struct with a field per step this project registers, rather than a map
+// keyed on the names serve matches: the names are strings inside generated code
+// and they should stay there, because a misspelled key is a number somebody set
+// and nothing read. What a field costs to get wrong is a compilation.
+//
+// Nothing is emitted for a project with no steps of rig's. There would be no
+// fields to put in it, and the headroom is deliberately not one: it is what is
+// left for the requests in flight rather than a step, and it is the one number
+// here whose being wrong is dropped requests rather than a truncated flush.
+func (e *emitter) shutdownType(b *gobuf.Buf) {
+	steps := e.shutdownSteps()
+	if len(steps) == 0 {
+		return
+	}
+
+	var (
+		cmpPkg   = b.Import("cmp")
+		timePkg  = b.Import("time")
+		servePkg = b.Import(runtimeModule + "/serve")
+	)
+
+	names := make([]string, 0, len(steps))
+	for _, s := range steps {
+		names = append(names, s.field)
+	}
+
+	b.Comment("Shutdown is how long each of this project's own shutdown steps may " +
+		"take, for a deployment the generated numbers do not suit.\n\n" +
+		"\tapi.Main(serve.Config{\n" +
+		"\t\t// ...\n" +
+		"\t\tShutdown: api.Shutdown{" + steps[0].field + ": " +
+		duration("time", steps[0].took/2) + "},\n" +
+		"\t}, build)\n\n" +
+		"A field left zero keeps what the step was registered with, which is what " +
+		"[ShutdownBudget] is the sum of — so the ordinary case is not to write one " +
+		"of these at all. It is here because those numbers are rig's answer to what " +
+		"a step costs in general, and how long a stop may take is usually decided " +
+		"by a terminationGracePeriodSeconds somebody else set. That is a property " +
+		"of where this binary runs rather than of what it is, which is why it is a " +
+		"field on the serve.Config a main function builds and not a key in " +
+		"rig.yaml: the same build runs where the answer is thirty seconds and " +
+		"where it is five, and this one can come from the environment.\n\n" +
+		func() string {
+			if len(names) == 1 {
+				return "The only field is " + names[0] + ", because that is the one step "
+			}
+			return "The fields are " + english(names) + ", and there are no others because " +
+				"those are the steps "
+		}() +
+		"this project's configuration registers. That is the " +
+		"whole reason this is generated: a step this server does not have is one " +
+		"there is no way to write a number for, and " +
+		"[github.com/simonjanss/rig/runtime/serve.Config.Shutdown] takes it as an " +
+		"interface so that the type checked here is the one this project has.\n\n" +
+		"It does not raise [ShutdownBudget]. serve adds up what was actually " +
+		"registered before the server listens and refuses a MaxShutdown they do " +
+		"not fit inside, so a number raised here without the total following it is " +
+		"a process that will not start and says which part no longer fits. " +
+		"[Shutdown.Budget] is that total, for a main function that would rather " +
+		"compute it than read it off.")
+	b.L("type Shutdown struct {")
+	for i, s := range steps {
+		if i > 0 {
+			b.NL()
+		}
+		b.Comment(strings.ToUpper(s.about[:1]) + s.about[1:] + ", " +
+			duration("time", s.took) + " as generated.")
+		b.L("%s %s.Duration", s.field, timePkg)
+	}
+	b.L("}")
+	b.NL()
+
+	b.Comment("Steps is how serve reads this, and the reason the fields above are " +
+		"the only spelling of a step a main function ever writes.\n\n" +
+		"A field left zero is not in what comes back. It has to be left out rather " +
+		"than sent as nothing, because a zero step means \"bounded only by what is " +
+		"left of the budget\" — so a set that carried its zeroes would turn every " +
+		"step it did not mention into an unbounded one.")
+	b.L("func (s Shutdown) Steps() []%s.Step {", servePkg)
+	b.L("var steps []%s.Step", servePkg)
+	for _, s := range steps {
+		b.L("if s.%s > 0 {", s.field)
+		b.L("steps = append(steps, %s.Step{Name: %s, Timeout: s.%s})",
+			servePkg, gobuf.Quote(s.step), s.field)
+		b.L("}")
+	}
+	b.L("return steps")
+	b.L("}")
+	b.NL()
+
+	b.Comment("Budget is [ShutdownBudget] with this Shutdown's numbers in place of " +
+		"the ones it leaves alone:\n\n" +
+		"\tshutdown := api.Shutdown{" + steps[0].field + ": " +
+		duration("time", steps[0].took/2) + "}\n" +
+		"\tapi.Main(serve.Config{\n" +
+		"\t\tMaxShutdown: shutdown.Budget(),\n" +
+		"\t\tShutdown:    shutdown,\n" +
+		"\t}, build)\n\n" +
+		"Which is the one place an expression beats the literal [ShutdownBudget]'s " +
+		"documentation asks for. That literal is worth writing because an operator " +
+		"has to read the number off the struct; a project that has already decided " +
+		"to size its own steps has the numbers in front of it either way, and two " +
+		"of them to keep in step by hand is one too many.\n\n" +
+		"The headroom is in it and cannot be changed. What is left for the requests " +
+		"in flight is not a step and is not this struct's to shorten.")
+	b.L("func (s Shutdown) Budget() %s.Duration {", timePkg)
+	b.L("return %s", strings.Join(func() []string {
+		terms := make([]string, 0, len(steps)+1)
+		for _, s := range steps {
+			terms = append(terms, cmpPkg+".Or(s."+s.field+", "+s.name+")")
+		}
+		return append(terms, headroomConst)
+	}(), " + "))
+	b.L("}")
+	b.NL()
+}
+
 // processType emits what a main function holds on to between the two ends of
 // the process.
 func (e *emitter) processType(b *gobuf.Buf) {
@@ -366,6 +509,11 @@ func (e *emitter) processType(b *gobuf.Buf) {
 		"not the only one it allows.")
 	b.L("type Process struct {")
 	b.L("tracing *%s.Provider", obsPkg)
+	b.Comment("How long the flush may take, which is " + tracesConst +
+		" unless the serve.Config given to [Process.Configure] said otherwise. " +
+		"It is held here because the other half of the flush — [Process.Close], " +
+		"which is the half a task run reaches — has no App to have read it from.")
+	b.L("traces %s.Duration", b.Import("time"))
 	b.L("logs *%s.Logs", obsPkg)
 	if e.monitoring() {
 		b.L("page *%s.Page", obsPkg)
@@ -460,6 +608,7 @@ func (e *emitter) newProcessFunc(b *gobuf.Buf) {
 
 	b.L("return &Process{")
 	b.L("tracing: tracing,")
+	b.L("traces: %s,", tracesConst)
 	b.L("logs: logs,")
 	if e.monitoring() {
 		b.L("page: page,")
@@ -565,6 +714,22 @@ func (e *emitter) configureMethod(b *gobuf.Buf) {
 	b.L("if cfg.OnExit == nil {")
 	b.L("cfg.OnExit = p.Close")
 	b.L("}")
+	b.NL()
+	b.Comment("Shutdown is not filled in — it is the deployment's — but it is read " +
+		"here, because the flush has two halves and only one of them has an App " +
+		"to have been sized through. [Process.Attach] registers the server's " +
+		"half on one; [Process.Close] is what a task run reaches, and this is " +
+		"where it learns the same number.\n\n" +
+		"Read through the interface rather than by asserting [Shutdown] back out " +
+		"of it, so that a project filling the field with something of its own is " +
+		"sized here too.")
+	b.L("if cfg.Shutdown != nil {")
+	b.L("for _, s := range cfg.Shutdown.Steps() {")
+	b.L("if s.Name == %s && s.Timeout > 0 {", gobuf.Quote(tracesStep))
+	b.L("p.traces = s.Timeout")
+	b.L("}")
+	b.L("}")
+	b.L("}")
 	b.L("return cfg")
 	b.L("}")
 	b.NL()
@@ -586,7 +751,7 @@ func (e *emitter) attachMethod(b *gobuf.Buf) {
 	b.Comment("A limit of its own, because a flush to a collector that is not " +
 		"answering must not spend the whole shutdown budget. [Process.Close] is " +
 		"the other half of the pair — the half a task run reaches.")
-	b.L("app.CloseWithin(%s, %s, p.tracing.Shutdown)", gobuf.Quote("traces"), tracesConst)
+	b.L("app.CloseWithin(%s, p.traces, p.tracing.Shutdown)", gobuf.Quote(tracesStep))
 	b.NL()
 
 	if e.monitoring() {
@@ -648,7 +813,7 @@ func (e *emitter) processCloseMethod(b *gobuf.Buf) {
 		"failure goes to the logger [Process.Configure] hands the server, which is " +
 		"stderr and the log file both.")
 	b.L("func (p *Process) Close() {")
-	b.L("flushing, cancel := %s.WithTimeout(%s.Background(), %s)", ctxPkg, ctxPkg, tracesConst)
+	b.L("flushing, cancel := %s.WithTimeout(%s.Background(), p.traces)", ctxPkg, ctxPkg)
 	b.L("defer cancel()")
 	b.NL()
 	b.L("if err := p.tracing.Shutdown(flushing); err != nil {")

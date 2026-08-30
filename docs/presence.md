@@ -102,6 +102,9 @@ starts it, and registers its shutdown — and merges a `sweep-presence` subcomma
 into `Tasks` for an operator who would rather it were a cron job than a
 goroutine. Running both is not a mistake; see below. `api.StartPresenceSweeper`
 is the call behind the first, exported for a project keeping the sequence itself.
+Its shutdown is five seconds, and
+`serve.Config.Shutdown: api.Shutdown{Presence: ...}` is how a deployment asks
+for another — see [services.md](services.md).
 
 Skipping both costs space and a slower first fetch, and nothing else — who is
 present is still right.

@@ -147,7 +147,10 @@ answering must not spend the whole shutdown budget. `Configure` also sets
 `serve.Config.OnExit` to `process.Close`, which is the same flush for every other
 way out: a `Tasks:` entry never reaches the mount closure, and the three paths
 that end in `os.Exit` reach no `defer` at all. `Provider.Shutdown` is idempotent,
-so the server path running both halves costs nothing.
+so the server path running both halves costs nothing. Five seconds, and
+`serve.Config.Shutdown: api.Shutdown{Traces: ...}` is how a deployment asks for
+another — `Configure` reads it, so the cron half is sized with it too. See
+[services.md](services.md).
 
 `store.Config` needs no `Tracer`: the generated `store.New` settles a nil one to
 `observe.Tracer()`, which is the value the provider installed. A task that never

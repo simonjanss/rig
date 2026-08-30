@@ -202,7 +202,7 @@ func (e *emitter) presenceStarter(b *gobuf.Buf) {
 	b.L("func StartPresenceSweeper(app *%s.App) {", servePkg)
 	b.L("sweeper := NewPresenceSweeper(NewPresence(app.Pool))")
 	b.L("sweeper.Start()")
-	b.L("app.CloseWithin(%s, %s, sweeper.Close)", gobuf.Quote("presence"), presenceConst)
+	b.L("app.CloseWithin(%s, %s, sweeper.Close)", gobuf.Quote(presenceStep), presenceConst)
 	b.L("}")
 	b.NL()
 }

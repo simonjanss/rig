@@ -5,6 +5,7 @@
 package api
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"log/slog"
@@ -104,6 +105,84 @@ func ShutdownBudget() time.Duration {
 	return tracesShutdown + shapesShutdown + shutdownHeadroom
 }
 
+// Shutdown is how long each of this project's own shutdown steps may take, for
+// a deployment the generated numbers do not suit.
+//
+//	api.Main(serve.Config{
+//		// ...
+//		Shutdown: api.Shutdown{Traces: 2 * time.Second},
+//	}, build)
+//
+// A field left zero keeps what the step was registered with, which is what
+// [ShutdownBudget] is the sum of — so the ordinary case is not to write one
+// of these at all. It is here because those numbers are rig's answer to what a
+// step costs in general, and how long a stop may take is usually decided by a
+// terminationGracePeriodSeconds somebody else set. That is a property of where
+// this binary runs rather than of what it is, which is why it is a field on
+// the serve.Config a main function builds and not a key in rig.yaml: the same
+// build runs where the answer is thirty seconds and where it is five, and this
+// one can come from the environment.
+//
+// The fields are Traces and Shapes, and there are no others because those are
+// the steps this project's configuration registers. That is the whole reason
+// this is generated: a step this server does not have is one there is no way
+// to write a number for, and
+// [github.com/simonjanss/rig/runtime/serve.Config.Shutdown] takes it as an
+// interface so that the type checked here is the one this project has.
+//
+// It does not raise [ShutdownBudget]. serve adds up what was actually
+// registered before the server listens and refuses a MaxShutdown they do not
+// fit inside, so a number raised here without the total following it is a
+// process that will not start and says which part no longer fits.
+// [Shutdown.Budget] is that total, for a main function that would rather
+// compute it than read it off.
+type Shutdown struct {
+	// The trace flush, 5 * time.Second as generated.
+	Traces time.Duration
+
+	// The live subscriptions, 5 * time.Second as generated.
+	Shapes time.Duration
+}
+
+// Steps is how serve reads this, and the reason the fields above are the only
+// spelling of a step a main function ever writes.
+//
+// A field left zero is not in what comes back. It has to be left out rather
+// than sent as nothing, because a zero step means "bounded only by what is
+// left of the budget" — so a set that carried its zeroes would turn every
+// step it did not mention into an unbounded one.
+func (s Shutdown) Steps() []serve.Step {
+	var steps []serve.Step
+	if s.Traces > 0 {
+		steps = append(steps, serve.Step{Name: "traces", Timeout: s.Traces})
+	}
+	if s.Shapes > 0 {
+		steps = append(steps, serve.Step{Name: "shapes", Timeout: s.Shapes})
+	}
+	return steps
+}
+
+// Budget is [ShutdownBudget] with this Shutdown's numbers in place of the ones
+// it leaves alone:
+//
+//	shutdown := api.Shutdown{Traces: 2 * time.Second}
+//	api.Main(serve.Config{
+//		MaxShutdown: shutdown.Budget(),
+//		Shutdown:    shutdown,
+//	}, build)
+//
+// Which is the one place an expression beats the literal [ShutdownBudget]'s
+// documentation asks for. That literal is worth writing because an operator
+// has to read the number off the struct; a project that has already decided to
+// size its own steps has the numbers in front of it either way, and two of
+// them to keep in step by hand is one too many.
+//
+// The headroom is in it and cannot be changed. What is left for the requests
+// in flight is not a step and is not this struct's to shorten.
+func (s Shutdown) Budget() time.Duration {
+	return cmp.Or(s.Traces, tracesShutdown) + cmp.Or(s.Shapes, shapesShutdown) + shutdownHeadroom
+}
+
 // Process is what this application's rig.yaml says about the process around
 // its server: where the log lines go and where the spans go.
 //
@@ -130,8 +209,13 @@ func ShutdownBudget() time.Duration {
 // arrangement rig.yaml describes, not the only one it allows.
 type Process struct {
 	tracing *observe.Provider
-	logs    *observe.Logs
-	logger  *slog.Logger
+	// How long the flush may take, which is tracesShutdown unless the serve.Config
+	// given to [Process.Configure] said otherwise. It is held here because the
+	// other half of the flush — [Process.Close], which is the half a task run
+	// reaches — has no App to have read it from.
+	traces time.Duration
+	logs   *observe.Logs
+	logger *slog.Logger
 }
 
 // NewProcess opens the log file and installs the tracer provider.
@@ -168,6 +252,7 @@ func NewProcess() (*Process, error) {
 
 	return &Process{
 		tracing: tracing,
+		traces:  tracesShutdown,
 		logs:    logs,
 		// Stderr, and the file behind it. The two keep their own levels: this one
 		// stays at whatever the default handler is set to, and the file keeps debug
@@ -223,6 +308,23 @@ func (p *Process) Configure(cfg serve.Config) serve.Config {
 	if cfg.OnExit == nil {
 		cfg.OnExit = p.Close
 	}
+
+	// Shutdown is not filled in — it is the deployment's — but it is read
+	// here, because the flush has two halves and only one of them has an App to
+	// have been sized through. [Process.Attach] registers the server's half on
+	// one; [Process.Close] is what a task run reaches, and this is where it learns
+	// the same number.
+	//
+	// Read through the interface rather than by asserting [Shutdown] back out of
+	// it, so that a project filling the field with something of its own is sized
+	// here too.
+	if cfg.Shutdown != nil {
+		for _, s := range cfg.Shutdown.Steps() {
+			if s.Name == "traces" && s.Timeout > 0 {
+				p.traces = s.Timeout
+			}
+		}
+	}
 	return cfg
 }
 
@@ -239,7 +341,7 @@ func (p *Process) Attach(app *serve.App) {
 	// A limit of its own, because a flush to a collector that is not answering
 	// must not spend the whole shutdown budget. [Process.Close] is the other half
 	// of the pair — the half a task run reaches.
-	app.CloseWithin("traces", tracesShutdown, p.tracing.Shutdown)
+	app.CloseWithin("traces", p.traces, p.tracing.Shutdown)
 
 	// Said rather than left to be discovered. A log file is a deployment's to ask
 	// for, so a missing one is not a failure: it is an environment saying it does
@@ -274,7 +376,7 @@ func (p *Process) Attach(app *serve.App) {
 // goes to the logger [Process.Configure] hands the server, which is stderr and
 // the log file both.
 func (p *Process) Close() {
-	flushing, cancel := context.WithTimeout(context.Background(), tracesShutdown)
+	flushing, cancel := context.WithTimeout(context.Background(), p.traces)
 	defer cancel()
 
 	if err := p.tracing.Shutdown(flushing); err != nil {

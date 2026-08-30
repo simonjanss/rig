@@ -487,8 +487,18 @@ func (e *emitter) mainFunc(b *gobuf.Buf) {
 		"that is what this one prints. Neither is the other's duplicate; " +
 		"removing either loses the half it names.")
 	b.L("if cfg.MaxShutdown == 0 {")
+	b.L("budget := ShutdownBudget()")
+	if len(e.shutdownSteps()) > 0 {
+		b.Comment("The number this deployment would actually need, which is not " +
+			"[ShutdownBudget] when it sized its own steps. Telling somebody to " +
+			"write a total that does not match the config they are looking at is " +
+			"worse than telling them nothing.")
+		b.L("if s, ok := cfg.Shutdown.(Shutdown); ok {")
+		b.L("budget = s.Budget()")
+		b.L("}")
+	}
 	b.L("%s.Error(\"MaxShutdown is required: state it in the serve.Config above\",", slogPkg)
-	b.L("\"budget\", ShutdownBudget(), \"drain delay\", cfg.DrainDelay, \"write\", ShutdownBudget()+cfg.DrainDelay)")
+	b.L("\"budget\", budget, \"drain delay\", cfg.DrainDelay, \"write\", budget+cfg.DrainDelay)")
 	b.L("%s.Exit(2)", osPkg)
 	b.L("}")
 	b.NL()

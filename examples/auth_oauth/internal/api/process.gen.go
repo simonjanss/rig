@@ -5,6 +5,7 @@
 package api
 
 import (
+	"cmp"
 	"time"
 
 	"github.com/simonjanss/rig/runtime/serve"
@@ -96,4 +97,75 @@ const (
 // maximum, so counting a step that is not there costs nothing but headroom.
 func ShutdownBudget() time.Duration {
 	return authShutdown + shutdownHeadroom
+}
+
+// Shutdown is how long each of this project's own shutdown steps may take, for
+// a deployment the generated numbers do not suit.
+//
+//	api.Main(serve.Config{
+//		// ...
+//		Shutdown: api.Shutdown{Auth: 2 * time.Second},
+//	}, build)
+//
+// A field left zero keeps what the step was registered with, which is what
+// [ShutdownBudget] is the sum of — so the ordinary case is not to write one
+// of these at all. It is here because those numbers are rig's answer to what a
+// step costs in general, and how long a stop may take is usually decided by a
+// terminationGracePeriodSeconds somebody else set. That is a property of where
+// this binary runs rather than of what it is, which is why it is a field on
+// the serve.Config a main function builds and not a key in rig.yaml: the same
+// build runs where the answer is thirty seconds and where it is five, and this
+// one can come from the environment.
+//
+// The only field is Auth, because that is the one step this project's
+// configuration registers. That is the whole reason this is generated: a step
+// this server does not have is one there is no way to write a number for, and
+// [github.com/simonjanss/rig/runtime/serve.Config.Shutdown] takes it as an
+// interface so that the type checked here is the one this project has.
+//
+// It does not raise [ShutdownBudget]. serve adds up what was actually
+// registered before the server listens and refuses a MaxShutdown they do not
+// fit inside, so a number raised here without the total following it is a
+// process that will not start and says which part no longer fits.
+// [Shutdown.Budget] is that total, for a main function that would rather
+// compute it than read it off.
+type Shutdown struct {
+	// The auth cache's invalidation channel, 5 * time.Second as generated.
+	Auth time.Duration
+}
+
+// Steps is how serve reads this, and the reason the fields above are the only
+// spelling of a step a main function ever writes.
+//
+// A field left zero is not in what comes back. It has to be left out rather
+// than sent as nothing, because a zero step means "bounded only by what is
+// left of the budget" — so a set that carried its zeroes would turn every
+// step it did not mention into an unbounded one.
+func (s Shutdown) Steps() []serve.Step {
+	var steps []serve.Step
+	if s.Auth > 0 {
+		steps = append(steps, serve.Step{Name: "auth", Timeout: s.Auth})
+	}
+	return steps
+}
+
+// Budget is [ShutdownBudget] with this Shutdown's numbers in place of the ones
+// it leaves alone:
+//
+//	shutdown := api.Shutdown{Auth: 2 * time.Second}
+//	api.Main(serve.Config{
+//		MaxShutdown: shutdown.Budget(),
+//		Shutdown:    shutdown,
+//	}, build)
+//
+// Which is the one place an expression beats the literal [ShutdownBudget]'s
+// documentation asks for. That literal is worth writing because an operator
+// has to read the number off the struct; a project that has already decided to
+// size its own steps has the numbers in front of it either way, and two of
+// them to keep in step by hand is one too many.
+//
+// The headroom is in it and cannot be changed. What is left for the requests
+// in flight is not a step and is not this struct's to shorten.
+func (s Shutdown) Budget() time.Duration {
+	return cmp.Or(s.Auth, authShutdown) + shutdownHeadroom
 }

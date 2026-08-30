@@ -269,6 +269,30 @@ type Config struct {
 	// and each part named. That refusal is where the number to write comes from.
 	MaxShutdown time.Duration
 
+	// Shutdown sizes the individual steps inside MaxShutdown, for a deployment
+	// that wants numbers other than the ones they were registered with.
+	//
+	// The generated api package's Shutdown is what fills it, and it is a struct
+	// with a field per step this project actually registers:
+	//
+	//	Shutdown: api.Shutdown{
+	//		Notifications: 10 * time.Second,
+	//		Presence:      2 * time.Second,
+	//	},
+	//
+	// Optional, and the ordinary case is to leave it out: the numbers a step is
+	// registered with are rig's answer to what that step costs, and MaxShutdown
+	// is already the sum of them. This is for the deployment those numbers do
+	// not suit — most often one whose terminationGracePeriodSeconds was decided
+	// by somebody else, which is exactly the fact rig.yaml cannot carry because
+	// the same build runs where it is thirty seconds and where it is five.
+	//
+	// It does not raise MaxShutdown. The parts are checked against the whole
+	// before the server listens either way, so a set that outgrows the budget is
+	// a process that refuses to start and names what no longer fits, and a step
+	// named here that nothing registers is refused there too.
+	Shutdown Shutdown
+
 	// OnListen is called with the address actually bound, which is the only
 	// way to learn it when Addr asks for port zero.
 	OnListen func(net.Addr)
@@ -504,6 +528,9 @@ func Run(ctx context.Context, cfg Config, mount Mount) (err error) {
 	}
 
 	app := &App{Pool: pool, Logger: cfg.Logger}
+	// Before the mount function, because a step's limit is decided where it is
+	// registered and everything that registers one runs inside it.
+	app.limit(cfg.Shutdown)
 
 	// Whatever the mount function built is taken apart, whether or not the
 	// server ever started. Failing halfway through startup is when a half-built

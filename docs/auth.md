@@ -587,7 +587,8 @@ return api.Parts{Handler: mux, Auth: front}, nil
 ```
 
 `api.Main` closes it, within the five seconds `api.ShutdownBudget` already counts
-for it. It used to be `app.CloseWithin("auth", 5*time.Second, front.Close)` in
+for it — `serve.Config.Shutdown: api.Shutdown{Auth: ...}` is how a deployment
+asks for another, see [services.md](services.md). It used to be `app.CloseWithin("auth", 5*time.Second, front.Close)` in
 every `main.go`, which was exactly the wrong shape for something that costs a
 connection rather than correctness: leave it out with no cache configured and
 nothing happens at all, until the day somebody turns the cache on.

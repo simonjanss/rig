@@ -417,7 +417,7 @@ func (e *authEmitter) attachFunc(b *gobuf.Buf) {
 		"is not live reads through and holds nothing — so the requests still " +
 		"being answered are answered correctly, from the database.")
 	b.L("func AttachAuth(app *%s.App, a *%s.Auth) {", servePkg, authPkg)
-	b.L("app.CloseWithin(%s, %s, a.Close)", gobuf.Quote("auth"), authConst)
+	b.L("app.CloseWithin(%s, %s, a.Close)", gobuf.Quote(authStep), authConst)
 	b.L("}")
 	b.NL()
 }

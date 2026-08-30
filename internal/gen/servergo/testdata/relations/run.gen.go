@@ -133,8 +133,9 @@ func Main(cfg serve.Config, build Build) {
 	// prints. Neither is the other's duplicate; removing either loses the half it
 	// names.
 	if cfg.MaxShutdown == 0 {
+		budget := ShutdownBudget()
 		slog.Error("MaxShutdown is required: state it in the serve.Config above",
-			"budget", ShutdownBudget(), "drain delay", cfg.DrainDelay, "write", ShutdownBudget()+cfg.DrainDelay)
+			"budget", budget, "drain delay", cfg.DrainDelay, "write", budget+cfg.DrainDelay)
 		os.Exit(2)
 	}
 

@@ -239,7 +239,9 @@ serving — deliberately not a fallback snapshot, since this process is going aw
 and the next attempt is somebody else's to answer. Nothing is lost, because a
 poll that had not answered had nothing in it yet.
 
-Its five seconds are already in `api.ShutdownBudget()`.
+Its five seconds are already in `api.ShutdownBudget()`, and
+`serve.Config.Shutdown: api.Shutdown{Shapes: ...}` is how a deployment asks for
+another — see [services.md](services.md).
 
 In a deployment, run Electric as a service of its own against your real
 database and point the proxy's URL at it. Nothing else changes: the proxy is

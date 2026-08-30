@@ -191,8 +191,16 @@ func Main(cfg serve.Config, build Build) {
 	// prints. Neither is the other's duplicate; removing either loses the half it
 	// names.
 	if cfg.MaxShutdown == 0 {
+		budget := ShutdownBudget()
+		// The number this deployment would actually need, which is not
+		// [ShutdownBudget] when it sized its own steps. Telling somebody to write a
+		// total that does not match the config they are looking at is worse than
+		// telling them nothing.
+		if s, ok := cfg.Shutdown.(Shutdown); ok {
+			budget = s.Budget()
+		}
 		slog.Error("MaxShutdown is required: state it in the serve.Config above",
-			"budget", ShutdownBudget(), "drain delay", cfg.DrainDelay, "write", ShutdownBudget()+cfg.DrainDelay)
+			"budget", budget, "drain delay", cfg.DrainDelay, "write", budget+cfg.DrainDelay)
 		os.Exit(2)
 	}
 

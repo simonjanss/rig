@@ -182,6 +182,40 @@ that will not finish spends what is left over and not their share of it —
 `serve.App` adds the parts up before the server listens and refuses a
 `MaxShutdown` that cannot hold them.
 
+**Sizing a step rather than the whole.** The numbers each of rig's own steps is
+registered with — the trace flush, the notification engine, the presence
+sweeper, the live subscriptions, the auth cache's invalidation channel — are
+what `api.ShutdownBudget()` adds up, and the ordinary case is to leave them
+alone. For the deployment they do not suit, `Shutdown` is the field:
+
+```go
+api.Main(serve.Config{
+    // ...
+    MaxShutdown: 47 * time.Second,
+    Shutdown: api.Shutdown{
+        Notifications: 10 * time.Second,
+        Presence:      2 * time.Second,
+        Traces:        2 * time.Second,
+    },
+}, build)
+```
+
+`api.Shutdown` is generated, and it has a field per step **this** project
+registers and no others — so a name that does not apply here is a compile error
+rather than a number nothing reads, and one that applies but was never
+registered is refused before the server listens. A field left zero keeps what
+the step was generated with.
+
+It is a `serve.Config` field rather than a `rig.yaml` key on purpose. How long
+a stop may take is usually decided by a `terminationGracePeriodSeconds`
+somebody else set, and the same build runs where that is thirty seconds and
+where it is five — so this is a number an environment can supply, next to
+`DatabaseURL` and `Addr`. Lowering a step leaves the budget with room to spare;
+raising one past `MaxShutdown` is a process that refuses to start and names
+what no longer fits. `api.Shutdown{...}.Budget()` is the total with your
+numbers in it, for a `MaxShutdown` you would rather compute than copy. What is
+left for the requests in flight is not a step and is not settable.
+
 A project with live sync ends its subscriptions in that same sequence, because
 a subscription is a request the server is deliberately not answering yet and
 nothing else can end it. It is not a `Parts` field: the proxy is named in
