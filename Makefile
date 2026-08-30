@@ -234,6 +234,21 @@ release:
 release-dry:
 	@$(GO) run ./internal/release $(VERSION) --dry-run
 
+## release-push: push the tags `make release` created, in the order that works
+##               The nine submodule tags first, then the root tag by itself:
+##               GitHub creates no push event for a batch of more than three
+##               tags, so `git push origin --tags` fires no release workflow.
+release-push:
+	@$(GO) run ./internal/release $(VERSION) --push
+
+## release-verify: check the tag actually produced a release
+##                 Tags, the GitHub release and its archives, the three npm
+##                 packages, and a real `go install` — the three surfaces fail
+##                 separately, and a workflow that never ran looks exactly like
+##                 one that succeeded. Needs `gh` and `npm`.
+release-verify:
+	@$(GO) run ./internal/release $(VERSION) --verify
+
 ## release-check: validate .goreleaser.yaml and build the binaries it would ship
 ##                Part of `check`, because the alternative is finding out on a
 ##                tag push — and a tag the proxy has seen cannot be taken back.
@@ -328,4 +343,4 @@ vulncheck:
 	@GOBIN=$(CURDIR)/bin $(GO) install golang.org/x/vuln/cmd/govulncheck@$(GOVULNCHECK_VERSION)
 	$(eachcore) $(CURDIR)/bin/govulncheck ./...) || exit 1; done
 
-.PHONY: help check hooks build test test-docker examples db-down update-schema update-golden update-examples vet godoc-check fmt fmt-check tidy deps lint openapi-lint vulncheck ts ts-deps ts-build ts-typecheck ts-test ts-fmt ts-fmt-check linearlite-web release release-dry release-check
+.PHONY: help check hooks build test test-docker examples db-down update-schema update-golden update-examples vet godoc-check fmt fmt-check tidy deps lint openapi-lint vulncheck ts ts-deps ts-build ts-typecheck ts-test ts-fmt ts-fmt-check linearlite-web release release-dry release-push release-verify release-check

@@ -4,18 +4,46 @@ name: release
 # runtime/v0.1.0, auth/v0.1.0 and so on for the rest — and `v*` matches the
 # first and none of the others, because a glob does not cross a slash and the
 # submodule tags do not begin with a v. So one release, one run.
+#
+# workflow_dispatch is the way back in when the push event never arrives, which
+# is not hypothetical: GitHub creates no push event for a batch of more than
+# three tags, and v0.2.0 pushed all ten at once and triggered nothing. Since a
+# published tag cannot be moved or re-pushed, the alternative was superseding a
+# perfectly good version to get a build out of it. `make release-push` now
+# pushes the root tag alone so this stays a fallback — and it only rescues
+# releases cut after it lands, because a dispatch runs the workflow file from
+# the ref it is given.
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
 
 permissions:
   contents: write
 
 jobs:
+  # A dispatch takes any ref, and every job below names the release after
+  # `github.ref_name` — so dispatching this on main would build archives called
+  # `rig_main_linux_amd64.tar.gz` and try to publish `main` to npm. Ten seconds
+  # here rather than that.
+  guard:
+    name: Triggered on a tag
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Refuse anything that is not a tag
+        run: |
+          if [ "${{ github.ref_type }}" != "tag" ]; then
+            echo "::error::release runs on a tag; ${{ github.ref_name }} is a ${{ github.ref_type }}"
+            exit 1
+          fi
+          echo "releasing ${{ github.ref_name }}"
+
   goreleaser:
     name: Binaries
     runs-on: ubuntu-24.04
     timeout-minutes: 20
+    needs: guard
 
     steps:
       - uses: actions/checkout@v4
@@ -55,6 +83,7 @@ jobs:
     name: npm packages
     runs-on: ubuntu-24.04
     timeout-minutes: 15
+    needs: guard
 
     permissions:
       contents: read

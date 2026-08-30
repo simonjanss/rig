@@ -357,16 +357,38 @@ rather than a test of the last release. Same for the temporary module
 
 ```bash
 make release VERSION=v0.1.0
-git push origin --tags      # first
-make check                  # now that `make deps` can resolve them
-git push origin main        # last
+make release-push VERSION=v0.1.0   # first
+make tidy && git commit -am "go.sum: record the v0.1.0 sibling hashes"
+make check                         # now that `make deps` can resolve them
+git push origin main               # last
+make release-verify VERSION=v0.1.0 # did the tag produce anything?
 ```
 
 Tags before the branch, because `make deps` runs `go mod tidy`, and `go mod
 tidy` is a single-module operation that resolves from the proxy and ignores the
 workspace. Between the rewrite and the tag it is being asked for a version that
-does not exist yet, and it fails. Push the branch first and the pre-push hook
-fails on exactly that.
+does not exist yet, and it fails.
+
+**The pre-push hook skips a tags-only push**, which is what makes that order
+possible at all. It used to run `make check` on one, and the failure was not the
+expensive part: `go mod tidy` asks proxy.golang.org for each sibling at the new
+version, the proxy caches the miss, and it keeps answering "unknown revision"
+for about half an hour *after* the tags are up. v0.2.0 was uninstallable for
+that long because the hook ran before the tags existed. Nothing else in the
+repository can poison a cache outside it.
+
+**`make release-push` sends the nine submodule tags, then the root tag alone.**
+`git push origin --tags` is what this used to say, and it cannot work: GitHub
+creates no push event for a batch of more than three tags, so ten at once
+triggers no release workflow. v0.2.0 got ten correct tags, no binaries, no
+GitHub release and nothing on npm — and since a published tag cannot be moved,
+the only fix was v0.2.1. The root tag goes last, so that by the time anything
+reacts to `v*`, the versions its `go.mod` requires already resolve.
+
+**`make tidy` belongs between the tags and the check**, not after a failure.
+The release commit rewrites the requirements; the hashes for them cannot be
+computed until the tags exist, so they land in a commit of their own every
+time. `make deps` will tell you the same thing, one `make check` later.
 
 **A tag the proxy has seen cannot be changed.** Not moved, not deleted — the
 checksum database has it. A bad release is superseded by the next patch version
@@ -382,6 +404,19 @@ fails the moment somebody runs `go get`. The `consumable` job in
 installs rig from the proxy in an empty directory and builds a module that
 imports four of the libraries. It runs on the tag, which means it runs after the
 release exists — the earliest anything can.
+
+**And a workflow that never started looks exactly like one that succeeded.**
+That is what `make release-verify VERSION=v0.1.0` is for, and it is the last
+step rather than an optional one: it checks the ten tags on origin, the GitHub
+release and every file `checksums.txt` names, which release `latest` resolves
+to, the three npm versions, and a real `go install` of the binary. The three
+surfaces fail separately — v0.2.0 had tags and no build, v0.1.0 had a build and
+an npm job that failed — and nothing said so until somebody tried to install it.
+
+It asks `checksums.txt` which archives shipped rather than listing them here,
+because those names are a contract: `.github/actions/setup-rig` downloads
+`rig_${version}_${os}_${arch}.tar.gz` by name, and a second copy of that
+template is a second thing to keep right.
 
 ### The npm packages go out on the same tag
 

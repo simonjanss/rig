@@ -18,14 +18,24 @@
 //     root, <dir>/vX.Y.Z for the rest. A version already in place is not a
 //     version already released — the tags are what release it.
 //
-// It does not push and it does not tidy. Not tidying is not an oversight: `go
-// mod tidy` is a single-module operation that resolves from the proxy and
-// ignores the workspace, so between the rewrite and the tag it would be asked
-// for a version that does not exist yet and would fail. The order is rewrite,
-// tag, push the tags, and only then tidy — which is what `make release` prints
-// at the end.
+// It does not tidy, and that is not an oversight: `go mod tidy` is a
+// single-module operation that resolves from the proxy and ignores the
+// workspace, so between the rewrite and the tag it would be asked for a version
+// that does not exist yet and would fail. The order is rewrite, tag, push the
+// tags, and only then tidy — which is what `make release` prints at the end.
 //
-//	go run ./internal/release v0.1.0 [--dry-run]
+// Pushing and verifying are separate modes rather than separate commands,
+// because both need the same list of modules this reads out of go.work:
+//
+//	--push     the submodule tags in one push, then the root tag by itself.
+//	           GitHub creates no push event for a batch of more than three
+//	           tags, so pushing all ten fires no release workflow at all.
+//	--verify   whether the tag produced a release: the tags on origin, the
+//	           GitHub release and its archives, npm, and a real `go install`.
+//	           A workflow that never started looks exactly like one that
+//	           succeeded, and nothing else here would notice.
+//
+//	go run ./internal/release v0.1.0 [--dry-run | --push | --verify]
 package main
 
 import (
@@ -86,9 +96,11 @@ Which number, on v0:
 
 Then, in this order — the tags go before the branch:
 
-  git push origin --tags     nothing resolves the new versions until they exist
-  make check                 now that ` + "`make deps`" + ` can tidy against them
-  git push origin main       last, so a failure above costs a tag, not a release
+  make release-push VERSION=v0.1.0   the submodule tags, then the root tag alone
+  make tidy && git commit            the hashes, which only now resolve
+  make check                         now that ` + "`make deps`" + ` can tidy against them
+  git push origin main               last, so a failure costs a tag, not a release
+  make release-verify VERSION=v0.1.0 what the tag was supposed to produce
 
 Releasing in AGENTS.md has the reasoning.
 `
@@ -130,10 +142,16 @@ func main() {
 func run(args []string) error {
 	var version string
 	dryRun := false
+	pushing := false
+	verifying := false
 	for _, a := range args {
 		switch {
 		case a == "--dry-run":
 			dryRun = true
+		case a == "--push":
+			pushing = true
+		case a == "--verify":
+			verifying = true
 		case strings.HasPrefix(a, "-"):
 			return fmt.Errorf("unknown flag %s", a)
 		case version != "":
@@ -153,6 +171,20 @@ func run(args []string) error {
 	mods, err := modules()
 	if err != nil {
 		return err
+	}
+
+	// Both of these run after a release rather than making one, so none of the
+	// guards below apply: the tags they are asking about are exactly the ones
+	// `checkTags` refuses to let a release overwrite, and verifying is a
+	// read-only question about a version that is already published.
+	if pushing && verifying {
+		return fmt.Errorf("--push and --verify are separate steps: push, tidy, check, push main, then verify")
+	}
+	if pushing {
+		return pushTags(mods, version)
+	}
+	if verifying {
+		return verifyRelease(mods, version)
 	}
 
 	// A replace left in a published module is the failure this whole scheme
@@ -252,14 +284,281 @@ func run(args []string) error {
 	fmt.Printf(`
 Tagged %s across %d modules. Next, in this order:
 
-  git push origin --tags     the versions have to exist before anything resolves them
-  make check                 now that `+"`make deps`"+` can tidy against them
-  git push origin main       last, so a failure above costs a tag and not a release
+  make release-push VERSION=%s
+  make tidy && git commit -am "go.sum: record the %s sibling hashes"
+  make check
+  git push origin main
+  make release-verify VERSION=%s
 
 A tag the proxy has seen cannot be changed. If `+"`make check`"+` fails after the
 push, release the fix as the next patch version rather than moving %s.
-`, version, len(mods), version)
+`, version, len(mods), version, version, version, version)
 	return nil
+}
+
+// pushTags pushes what `make release` created: the submodule tags in one push,
+// and then the root tag by itself.
+//
+// The order is the whole point, and it is not tidiness. GitHub creates no push
+// event for a batch of more than three tags, and `release.yaml` triggers on
+// `v*` — so `git push origin --tags`, which is what this command used to print,
+// sends all ten at once and fires nothing. The tags land, the release looks
+// done, and there are no binaries, no GitHub release and nothing on npm. That
+// is what happened to v0.2.0, which had to be superseded by v0.2.1 to get a
+// build.
+//
+// Pushing the root tag alone, last, makes the trigger a single-ref event no
+// batching rule can swallow. Last rather than first because the nine are what
+// the root's go.mod requires: by the time anything reacts to `v*`, the versions
+// it resolves are already there.
+func pushTags(mods []mod, version string) error {
+	root, siblings, err := tagsToPush(mods, version)
+	if err != nil {
+		return err
+	}
+	for _, tag := range append(siblings, root) {
+		if err := exec.Command("git", "rev-parse", "--verify", "--quiet", "refs/tags/"+tag).Run(); err != nil {
+			return fmt.Errorf("no tag %s — run `make release VERSION=%s` first", tag, version)
+		}
+	}
+
+	fmt.Printf("pushing %d submodule tags\n", len(siblings))
+	if err := git("git", append([]string{"push", "origin"}, siblings...)...); err != nil {
+		return err
+	}
+
+	fmt.Printf("\npushing %s on its own — this is what triggers release.yaml\n", root)
+	if err := git("git", "push", "origin", root); err != nil {
+		return err
+	}
+
+	fmt.Printf(`
+Pushed. The release workflow runs on %s; `+"`make release-verify VERSION=%s`"+` says
+whether it produced anything.
+
+Next: `+"`make tidy`"+` and commit the hashes — they resolve now and did not before.
+`, root, version)
+	return nil
+}
+
+// tagsToPush separates the tag that triggers the release workflow from the ones
+// that only have to exist before it does.
+//
+// Kept apart from the pushing so the rule that matters can be tested without a
+// remote: the root tag is pushed by itself, and it is pushed second.
+func tagsToPush(mods []mod, version string) (root string, siblings []string, err error) {
+	for _, m := range mods {
+		if m.Dir == "." {
+			root = m.Tag(version)
+			continue
+		}
+		siblings = append(siblings, m.Tag(version))
+	}
+	if root == "" {
+		return "", nil, fmt.Errorf("go.work names no root module, so there is no tag to trigger the release workflow")
+	}
+	return root, siblings, nil
+}
+
+// verifyRelease answers the question the release procedure never asked: did the
+// tag produce anything?
+//
+// Everything up to `git push origin main` proves the repository is consistent,
+// and none of it proves a release exists. What publishes rig is a GitHub
+// Actions run reacting to a tag, and a run that never started looks exactly
+// like a run that succeeded — v0.2.0 has ten correct tags, is installable from
+// the proxy, and has no binaries, no GitHub release and nothing on npm,
+// because nothing ever triggered. This is what would have said so in seconds.
+//
+// It checks the three surfaces a release has, because they fail separately: the
+// proxy (which the tags alone satisfy), the GitHub release (goreleaser), and
+// npm (trusted publishing, which was misconfigured for v0.1.0 and silently
+// worked around by hand). Every failure is collected rather than returned, so
+// one run names everything that is wrong.
+func verifyRelease(mods []mod, version string) error {
+	var root mod
+	for _, m := range mods {
+		if m.Dir == "." {
+			root = m
+		}
+	}
+	if root.Path == "" {
+		return fmt.Errorf("go.work names no root module")
+	}
+
+	var failed []string
+	fail := func(format string, a ...any) {
+		msg := fmt.Sprintf(format, a...)
+		failed = append(failed, msg)
+		fmt.Printf("  FAIL  %s\n", msg)
+	}
+	ok := func(format string, a ...any) {
+		fmt.Printf("  ok    %s\n", fmt.Sprintf(format, a...))
+	}
+
+	fmt.Printf("tags on origin\n")
+	remote, err := output("git", "ls-remote", "--tags", "origin")
+	if err != nil {
+		return err
+	}
+	for _, m := range mods {
+		if strings.Contains(string(remote), "refs/tags/"+m.Tag(version)+"\n") {
+			ok("%s", m.Tag(version))
+		} else {
+			fail("%s is not on origin", m.Tag(version))
+		}
+	}
+
+	fmt.Printf("\nGitHub release\n")
+	verifyGitHubRelease(version, ok, fail)
+
+	fmt.Printf("\nnpm\n")
+	want := strings.TrimPrefix(version, "v")
+	for _, p := range tsPackages {
+		name := "@rig-ts/" + filepath.Base(filepath.Dir(p))
+		out, err := quiet("npm", "view", name+"@"+want, "version")
+		if err != nil || strings.TrimSpace(string(out)) != want {
+			fail("%s is not published at %s", name, want)
+			continue
+		}
+		ok("%s@%s", name, want)
+	}
+
+	fmt.Printf("\ninstallable from the proxy\n")
+	verifyInstall(root.Path, version, ok, fail)
+
+	fmt.Println()
+	if len(failed) > 0 {
+		return fmt.Errorf("%d checks failed — %s is not fully released; "+
+			"a missing GitHub release or npm package is fixed by the next version, never by moving this tag",
+			len(failed), version)
+	}
+	fmt.Printf("%s is released: tags, binaries and npm all agree.\n", version)
+	return nil
+}
+
+// verifyGitHubRelease checks what goreleaser was supposed to leave behind.
+//
+// The assets are checked against checksums.txt rather than against a list
+// written here, because the archive names are a compatibility contract —
+// `.github/actions/setup-rig` downloads `rig_${version}_${os}_${arch}.tar.gz`
+// by name — and a second copy of that template would be a second thing to keep
+// right. checksums.txt names exactly what shipped, so asking whether every file
+// in it is an asset asks the contract about itself.
+func verifyGitHubRelease(version string, ok, fail func(string, ...any)) {
+	out, err := quiet("gh", "release", "view", version, "--json", "isDraft,isPrerelease,assets")
+	if err != nil {
+		fail("no GitHub release for %s — the release workflow did not run, or did not finish", version)
+		return
+	}
+	var rel struct {
+		IsDraft      bool
+		IsPrerelease bool
+		Assets       []struct{ Name string }
+	}
+	if err := json.Unmarshal(out, &rel); err != nil {
+		fail("reading the release: %v", err)
+		return
+	}
+	if rel.IsDraft {
+		fail("the release is a draft, so nothing can download it")
+	}
+
+	assets := map[string]bool{}
+	for _, a := range rel.Assets {
+		assets[a.Name] = true
+	}
+	if !assets["checksums.txt"] {
+		fail("the release has no checksums.txt, so there is nothing to verify an archive against")
+		return
+	}
+
+	dir, err := os.MkdirTemp("", "rig-release-verify")
+	if err != nil {
+		fail("%v", err)
+		return
+	}
+	defer os.RemoveAll(dir)
+	if err := git("gh", "release", "download", version, "--pattern", "checksums.txt", "--dir", dir); err != nil {
+		fail("downloading checksums.txt: %v", err)
+		return
+	}
+	sums, err := os.ReadFile(filepath.Join(dir, "checksums.txt"))
+	if err != nil {
+		fail("%v", err)
+		return
+	}
+
+	named := 0
+	for line := range strings.SplitSeq(string(sums), "\n") {
+		// `<sha256>  <filename>`, which is what shasum -c reads.
+		fields := strings.Fields(line)
+		if len(fields) != 2 {
+			continue
+		}
+		named++
+		if assets[fields[1]] {
+			ok("%s", fields[1])
+		} else {
+			fail("checksums.txt names %s, which is not on the release", fields[1])
+		}
+	}
+	if named == 0 {
+		fail("checksums.txt names no files")
+	}
+
+	// A prerelease is meant not to be `latest`: it is the rehearsal, and
+	// `setup-rig` resolves `latest` through this endpoint.
+	latest, err := output("gh", "api", "repos/{owner}/{repo}/releases/latest", "--jq", ".tag_name")
+	if err != nil {
+		fail("asking which release is latest: %v", err)
+		return
+	}
+	switch got := strings.TrimSpace(string(latest)); {
+	case rel.IsPrerelease && got == version:
+		fail("%s is a prerelease and is also `latest`, which is what setup-rig installs", version)
+	case rel.IsPrerelease:
+		ok("a prerelease, and `latest` is still %s", got)
+	case got != version:
+		fail("`latest` is %s, not %s — setup-rig would install the older one", got, version)
+	default:
+		ok("`latest` is %s", version)
+	}
+}
+
+// verifyInstall installs the binary the way somebody outside this repository
+// would, into a directory of its own, and asks it what version it is.
+//
+// It is the local half of the `consumable` job, and worth having twice: that
+// job runs on the tag, so a release whose workflow never started never runs it
+// either. The version has to be the tag exactly, because the documented way to
+// pin the libraries is `go get .../runtime@$(rig version)`.
+func verifyInstall(rootPath, version string, ok, fail func(string, ...any)) {
+	dir, err := os.MkdirTemp("", "rig-release-install")
+	if err != nil {
+		fail("%v", err)
+		return
+	}
+	defer os.RemoveAll(dir)
+
+	install := exec.Command("go", "install", rootPath+"/cmd/rig@"+version)
+	install.Env = append(os.Environ(), "GOBIN="+dir, "GOFLAGS=")
+	install.Stderr = os.Stderr
+	if err := install.Run(); err != nil {
+		fail("go install %s/cmd/rig@%s: %v", rootPath, version, err)
+		return
+	}
+
+	out, err := output(filepath.Join(dir, "rig"), "version")
+	if err != nil {
+		fail("running the installed binary: %v", err)
+		return
+	}
+	if got := strings.TrimSpace(string(out)); got != version {
+		fail("the installed binary says %s, not %s", got, version)
+		return
+	}
+	ok("go install %s/cmd/rig@%s, and it says %s", rootPath, version, version)
 }
 
 // modules reads go.work and returns the modules a release covers: the ones this
@@ -434,6 +733,20 @@ func output(name string, args ...string) ([]byte, error) {
 	cmd := exec.Command(name, args...)
 	cmd.Stderr = os.Stderr
 	out, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("%s %s: %w", name, strings.Join(args, " "), err)
+	}
+	return out, nil
+}
+
+// quiet is output for a question whose answer may well be no.
+//
+// `npm view` on an unpublished version prints nine lines about a 404, and
+// `gh release view` on a tag with no release prints its own — which is the
+// ordinary case during a verify, and letting it through buries the report it
+// is part of under the noise of the thing it just found.
+func quiet(name string, args ...string) ([]byte, error) {
+	out, err := exec.Command(name, args...).Output()
 	if err != nil {
 		return nil, fmt.Errorf("%s %s: %w", name, strings.Join(args, " "), err)
 	}
