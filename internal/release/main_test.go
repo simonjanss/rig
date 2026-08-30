@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -65,5 +66,90 @@ func TestSetNPMVersionRefusesAFileWithout(t *testing.T) {
 	}
 	if err := setNPMVersion(path, "0.2.0"); err == nil {
 		t.Fatal("no error for a package.json with no version field")
+	}
+}
+
+// The rule this proves is the one that cost a version. `git push origin --tags`
+// sends all ten at once, GitHub creates no push event for a batch of more than
+// three, and v0.2.0 landed ten correct tags that triggered nothing — no
+// binaries, no GitHub release, nothing on npm. A published tag cannot be
+// re-pushed, so the only way to get a build was v0.2.1.
+func TestTagsToPushKeepsTheRootTagOnItsOwn(t *testing.T) {
+	t.Parallel()
+
+	mods := []mod{
+		{Dir: ".", Path: modulePrefix},
+		{Dir: "runtime", Path: modulePrefix + "/runtime"},
+		{Dir: "auth", Path: modulePrefix + "/auth"},
+	}
+
+	root, siblings, err := tagsToPush(mods, "v0.3.0")
+	if err != nil {
+		t.Fatalf("tagsToPush: %v", err)
+	}
+	if root != "v0.3.0" {
+		t.Errorf("root tag is %q, want v0.3.0 — this is the one release.yaml triggers on", root)
+	}
+	want := []string{"runtime/v0.3.0", "auth/v0.3.0"}
+	if len(siblings) != len(want) {
+		t.Fatalf("siblings are %v, want %v", siblings, want)
+	}
+	for i, w := range want {
+		if siblings[i] != w {
+			t.Errorf("sibling %d is %q, want %q", i, siblings[i], w)
+		}
+	}
+	for _, s := range siblings {
+		if s == root {
+			t.Errorf("the root tag is in the batch push, which is what stops it triggering anything")
+		}
+	}
+}
+
+// go.work naming no root module would leave a release with nine tags and
+// nothing to trigger the workflow — worth failing on rather than pushing.
+func TestTagsToPushNeedsARootModule(t *testing.T) {
+	t.Parallel()
+
+	_, _, err := tagsToPush([]mod{{Dir: "runtime", Path: modulePrefix + "/runtime"}}, "v0.3.0")
+	if err == nil {
+		t.Fatal("no error when go.work names no root module")
+	}
+}
+
+// A --dry-run that --push ignored would push tags for real, and a tag the proxy
+// has fetched cannot be moved — so the careful spelling would be the dangerous
+// one. Calling run is safe because the refusal comes before anything is read or
+// pushed, which is half of what this proves.
+func TestPushRefusesADryRun(t *testing.T) {
+	t.Parallel()
+
+	err := run([]string{"v0.3.0", "--push", "--dry-run"})
+	if err == nil {
+		t.Fatal("no error for --push --dry-run, so the tags were pushed for real")
+	}
+	if !strings.Contains(err.Error(), "--dry-run") {
+		t.Errorf("error is %q, which does not say the problem is --dry-run", err)
+	}
+}
+
+// What separates "this release failed" from "this machine has no gh": the
+// first line of what the command actually said. Reporting the second as the
+// first is how a verify tells you to supersede a release that is fine.
+func TestFirstLineIsTheSentenceNotTheBlankAboveIt(t *testing.T) {
+	t.Parallel()
+
+	for name, tc := range map[string]struct{ in, want string }{
+		"gh":     {"release not found\n", "release not found"},
+		"npm":    {"\nnpm error code E404\nnpm error 404 No match found\n", "npm error code E404"},
+		"silent": {"\n  \n", ""},
+		"empty":  {"", ""},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			if got := firstLine([]byte(tc.in)); got != tc.want {
+				t.Errorf("firstLine(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
 	}
 }

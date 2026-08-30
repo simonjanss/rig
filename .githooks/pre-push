@@ -14,13 +14,38 @@ cd "$(git rev-parse --show-toplevel)"
 # deleting a branch cannot break a build. Read it all either way, so git is
 # never writing into a closed pipe.
 deleting_only=yes
-while read -r _local_ref local_sha _remote_ref _remote_sha; do
+tags_only=yes
+while read -r _local_ref local_sha remote_ref _remote_sha; do
 	case "$local_sha" in
 	*[!0]*) deleting_only=no ;;
+	esac
+	case "$remote_ref" in
+	refs/tags/*) ;;
+	*) tags_only=no ;;
 	esac
 done
 
 if [ "$deleting_only" = yes ]; then
+	exit 0
+fi
+
+# A release pushes its tags before its branch, and `make check` cannot pass in
+# between: `make deps` runs `go mod tidy`, which resolves from the proxy and
+# ignores go.work, so between the version rewrite and the tags it asks for a
+# version that does not exist yet.
+#
+# Running it anyway does more than fail. `go mod tidy` asks proxy.golang.org
+# for each sibling at the new version, the proxy caches the miss, and it keeps
+# answering "unknown revision" for about half an hour after the tags are up —
+# so the release is uninstallable, and `make check` cannot pass either, long
+# after the thing it was waiting for arrived. The hook that was meant to
+# protect the push is what breaks it.
+#
+# So a tags-only push runs nothing. It moves no branch, and the commit under
+# those tags is checked by the `make check` that the release procedure runs
+# next, before the branch goes anywhere.
+if [ "$tags_only" = yes ]; then
+	echo "pre-push: tags only, so no check — the versions they name cannot resolve until they exist"
 	exit 0
 fi
 
