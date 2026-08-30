@@ -10,7 +10,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/simonjanss/rig/examples/linearlite/internal/app"
-	"github.com/simonjanss/rig/examples/linearlite/services/outbox"
+	"github.com/simonjanss/rig/examples/linearlite/internal/services/outbox"
 )
 
 // The two interfaces rig ships no transport for, over the wire.

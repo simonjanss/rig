@@ -10,7 +10,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/simonjanss/rig/examples/linearlite/internal/app"
-	"github.com/simonjanss/rig/examples/linearlite/services/todo"
+	"github.com/simonjanss/rig/examples/linearlite/internal/services/todo"
 )
 
 // The notification rule, over real SQL: a change reaches the item's

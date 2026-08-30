@@ -30,9 +30,9 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/simonjanss/rig/examples/linearlite/internal/api"
 	"github.com/simonjanss/rig/examples/linearlite/internal/app"
-	"github.com/simonjanss/rig/examples/linearlite/services/outbox"
+	"github.com/simonjanss/rig/examples/linearlite/internal/generated/api"
+	"github.com/simonjanss/rig/examples/linearlite/internal/services/outbox"
 	"github.com/simonjanss/rig/notify"
 	"github.com/simonjanss/rig/runtime/serve"
 )

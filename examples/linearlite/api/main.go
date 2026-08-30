@@ -21,23 +21,25 @@
 //     routes on this same mux, proxying the sync service `rig db up` runs;
 //     the browser subscribes through the generated TypeScript client in
 //     web/src/api and never talks to Electric directly.
-//   - A status change notifies the item's stakeholders — api/services/todo
-//     announces it inside the update's transaction, and the inbox reaches the
-//     browser over the rig_notification_recipient shape.
+//   - A status change notifies the item's stakeholders —
+//     api/internal/services/todo announces it inside the update's transaction,
+//     and the inbox reaches the browser over the rig_notification_recipient
+//     shape.
 //   - Who is here, and what they are looking at. `presence:` in rig.yaml is the
 //     whole configuration; a heartbeat is a write to rig_presence and the shape
 //     over it is how everybody else hears. web/src/presence owns the one
-//     heartbeat this application runs, and api/services/rig_presence is the scope
-//     stub that keeps the fan-out to a board rather than a tenant.
+//     heartbeat this application runs, and api/internal/services/rig_presence
+//     is the scope stub that keeps the fan-out to a board rather than a tenant.
 //   - web/ is a React application served from web/dist by this binary, same
 //     origin as the API, which is what keeps CORS and cookie stories out of a
 //     demonstration that is not about them.
 //   - api/import/ is a separate program driving the generated Go client with a
 //     personal API key, slowly, so the board visibly fills while it runs.
-//   - api/services/outbox is the mail this example would have sent: the links the
-//     auth package mints, and the email copy of an inbox line. rig ships no
-//     transport for either, so this is the shape a real one has with none of
-//     the substance, and /_demo/outbox is where the front end reads it.
+//   - api/internal/services/outbox is the mail this example would have sent:
+//     the links the auth package mints, and the email copy of an inbox line.
+//     rig ships no transport for either, so this is the shape a real one has
+//     with none of the substance, and /_demo/outbox is where the front end
+//     reads it.
 //   - Spans, and rig's own page over them at /_rig/monitor. This is the one
 //     example where tracing is on with authentication, uploads, the
 //     notification engine and the Electric proxy all running, which is the
@@ -67,19 +69,24 @@ import (
 	"os"
 	"time"
 
-	"github.com/simonjanss/rig/examples/linearlite/internal/api"
 	"github.com/simonjanss/rig/examples/linearlite/internal/app"
+	"github.com/simonjanss/rig/examples/linearlite/internal/generated/api"
 	"github.com/simonjanss/rig/migrate"
 	"github.com/simonjanss/rig/observe"
 	"github.com/simonjanss/rig/runtime/serve"
 )
 
-// migrations/ is inside this module rather than beside rig.yaml, and this line
-// is the reason: go:embed reads relative to the package directory and cannot
-// reach outside it. rig.yaml's `migrations.dir` is what points `rig db up` at
-// the same files, so the binary and the CLI apply one set rather than two.
+// internal/migrations/ is inside this module rather than beside rig.yaml, and
+// this line is the reason: go:embed reads relative to the package directory and
+// cannot reach outside it. It can descend, which is why the SQL sits under
+// internal/ with everything else that is neither a program nor a library other
+// modules import. rig.yaml's `migrations.dir` is what points `rig db up` at the
+// same files, so the binary and the CLI apply one set rather than two.
 //
-//go:embed migrations/*.sql
+// The embedded paths keep the pattern's prefix, which is why Dir below says
+// internal/migrations rather than migrations.
+//
+//go:embed internal/migrations/*.sql
 var migrations embed.FS
 
 // migrationSources is this example's migrations and rig's, in the order they have
@@ -88,10 +95,11 @@ var migrations embed.FS
 // `migrations.foundation: embedded` in rig.yaml is what makes this a list rather
 // than the one embed above: rig's dozen tables are carried by the modules that own
 // them — rig/auth, rig/files, rig/notify, rig/presence, rig/runtime — rather than
-// vendored into api/migrations/, and api.MigrationSources is the wiring `rig generate`
-// writes for that. It returns the module sets first and this example's last, which
-// is the order that matters: 00001_create_todo.sql references rig_tenant, and
-// 00003_roles_and_permissions.sql references rig_account.
+// vendored into api/internal/migrations/, and api.MigrationSources is the
+// wiring `rig generate` writes for that. It returns the module sets first and
+// this example's last, which is the order that matters: 00001_create_todo.sql
+// references rig_tenant, and 00003_roles_and_permissions.sql references
+// rig_account.
 //
 // Each set records itself in its own bookkeeping table, so `rig db up` here and a
 // deployment of this binary agree about what has run. Which is why the directory
@@ -102,7 +110,7 @@ func migrationSources() []migrate.Source {
 	return api.MigrationSources(migrate.Source{
 		Name:  "linearlite",
 		FS:    migrations,
-		Dir:   "migrations",
+		Dir:   "internal/migrations",
 		Table: migrate.DefaultTable,
 	})
 }
