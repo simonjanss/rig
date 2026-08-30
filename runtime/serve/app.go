@@ -286,7 +286,7 @@ func (a *App) log() *slog.Logger {
 func (a *App) runDrain(ctx context.Context) error {
 	var failed error
 	for _, s := range a.drain {
-		if err := a.run(ctx, s); err != nil {
+		if err := a.run(ctx, "drain", s); err != nil {
 			a.log().ErrorContext(ctx, "draining failed", "step", s.Name, "error", err)
 			failed = errors.Join(failed, fmt.Errorf("drain %s: %w", s.Name, err))
 		}
@@ -319,7 +319,7 @@ func (a *App) runClose(ctx context.Context, timeout time.Duration) error {
 	var failed error
 	for i := len(a.stop) - 1; i >= 0; i-- {
 		s := a.stop[i]
-		if err := a.run(closing, s); err != nil {
+		if err := a.run(closing, "close", s); err != nil {
 			a.log().ErrorContext(closing, "shutdown failed", "step", s.Name, "error", err)
 			failed = errors.Join(failed, fmt.Errorf("close %s: %w", s.Name, err))
 		}
@@ -334,7 +334,39 @@ func (a *App) runClose(ctx context.Context, timeout time.Duration) error {
 // outside kills it, and take the steps after it down with it. When that
 // happens the goroutine is left behind — which is a leak in a process that is
 // about to stop existing, and the better of the two outcomes.
-func (a *App) run(ctx context.Context, s step) error {
+//
+// The two debug lines around it are what makes "which step ate the budget"
+// answerable, and they are two rather than one for the case that most needs
+// them: a step that never returns is a process killed from outside, so the only
+// line naming it is the one written before it started. A step that came back has
+// a pair, the difference between the two is where the time went, and the second
+// one carries the error when it gave up — so "it took its whole two seconds" and
+// "it was cut off at two seconds" are not the same line.
+func (a *App) run(ctx context.Context, phase string, s step) (err error) {
+	// The context as it arrived, so that the line at the end is not written
+	// against the per-step deadline that may be what ended it.
+	outer := ctx
+
+	attrs := []any{"phase", phase, "step", s.Name}
+	if s.Timeout > 0 {
+		attrs = append(attrs, "timeout", s.Timeout)
+	}
+	a.log().DebugContext(outer, "shutdown step", attrs...)
+
+	began := time.Now()
+	defer func() {
+		// With the outcome, because a step that blew its own deadline returns
+		// here too: without it the pair reads the same for a step that
+		// finished and one that was abandoned halfway, which is the difference
+		// the pair exists to show.
+		done := []any{"phase", phase, "step", s.Name,
+			"in", time.Since(began).Round(time.Millisecond)}
+		if err != nil {
+			done = append(done, "error", err)
+		}
+		a.log().DebugContext(outer, "shutdown step finished", done...)
+	}()
+
 	if s.Timeout > 0 {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, s.Timeout)
@@ -513,6 +545,14 @@ func (a *App) checkShutdown(ctx context.Context, max, drainDelay time.Duration) 
 		a.log().WarnContext(ctx, "the shutdown budget is fully spoken for, leaving nothing for requests in flight",
 			"max", max, "declared", total)
 	}
+
+	// The arithmetic that has just been checked, written down while it is still
+	// arithmetic. It is the same numbers the two refusals above carry, and the
+	// reason to say them when nothing is wrong is that this is the only place
+	// the steps a process registered are ever listed: what it will tear down,
+	// and in how long, before it has to.
+	a.log().DebugContext(ctx, "the shutdown budget fits",
+		"max", max, "declared", total, "steps", parts)
 	return nil
 }
 

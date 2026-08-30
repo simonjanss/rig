@@ -120,7 +120,7 @@ api.Main(serve.Config{
     // Only the ones you can write. The housekeeping this project's blocks
     // already decided is merged in, and yours wins on a shared name.
     Tasks: map[string]serve.Task{
-        "migrate": migrate.Apply(migrations, migrate.Options{Log: os.Stdout}),
+        "migrate": migrate.Apply(migrations, migrate.Options{}),
     },
 }, func(ctx context.Context, app *serve.App) (api.Parts, error) {
     repos := store.New(app.Pool, store.Config{})

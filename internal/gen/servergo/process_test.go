@@ -208,7 +208,7 @@ func TestTheBackgroundLoopsAreStarted(t *testing.T) {
 		gentest.LoadDocument(t, filepath.Join("testdata", "presence.ir.json")), opts()), "presence.gen.go")
 	for _, want := range []string{
 		"func StartPresenceSweeper(app *serve.App) {",
-		"sweeper := NewPresenceSweeper(NewPresence(app.Pool))",
+		"sweeper := NewPresenceSweeper(NewPresence(app.Pool), app.Logger)",
 		"sweeper.Start()",
 	} {
 		if !strings.Contains(presence, want) {
@@ -227,6 +227,46 @@ func TestTheBackgroundLoopsAreStarted(t *testing.T) {
 		if !strings.Contains(notify, want) {
 			t.Errorf("the engine's wiring does not contain %q", want)
 		}
+	}
+}
+
+// The cron subcommands report at INFO, and the goroutines at DEBUG.
+//
+// Not a style rule. A task's logger is slog.Default, whose handler drops
+// anything below INFO, so a report written at DEBUG there is a report nobody
+// ever sees — and every one of these lines exists so that a pass which did
+// nothing can be told apart from a cron entry that never fired. The goroutines
+// are the other way round for the reason that is not a rule either: theirs is a
+// line per interval forever.
+func TestTheCronReportsAreVisibleWithoutTurningDebugOn(t *testing.T) {
+	t.Parallel()
+
+	notify := artifactNamed(t, gentest.Run(t, servergo.New(),
+		gentest.LoadDocument(t, filepath.Join("testdata", "notify.ir.json")), opts()), "notifications.gen.go")
+	presence := artifactNamed(t, gentest.Run(t, servergo.New(),
+		gentest.LoadDocument(t, filepath.Join("testdata", "presence.ir.json")), opts()), "presence.gen.go")
+	auth := artifactNamed(t, gentest.Run(t, servergo.New(),
+		gentest.LoadDocument(t, filepath.Join("testdata", "authwired.ir.json")), opts()), "auth.gen.go")
+
+	for _, c := range []struct{ what, src, want string }{
+		{"notifications resolved", notify, `logger.InfoContext(ctx, "notifications resolved"`},
+		{"notifications dispatched", notify, `logger.InfoContext(ctx, "notifications dispatched"`},
+		{"notifications pruned", notify, `logger.InfoContext(ctx, "notifications pruned", "counts", pruned.String())`},
+		{"the presence sweep", presence, `logger.InfoContext(ctx, "presence swept"`},
+		{"authentication mail dispatched", auth, `logger.InfoContext(ctx, "authentication mail dispatched"`},
+		{"authentication mail pruned", auth, `logger.InfoContext(ctx, "authentication mail pruned"`},
+	} {
+		if !strings.Contains(collapse(c.src), collapse(c.want)) {
+			t.Errorf("the report for %s is not written where an operator running the task would see it: no %q",
+				c.what, c.want)
+		}
+	}
+
+	// And the cron form of the sweep says it at all, which is the half that was
+	// missing: the sweeper's own line is written by the goroutine's pass, and
+	// the task does not run one.
+	if !strings.Contains(collapse(presence), collapse("report, err := sweeper.Sweep(ctx)")) {
+		t.Errorf("the sweep task discards its report:\n%s", presence)
 	}
 }
 

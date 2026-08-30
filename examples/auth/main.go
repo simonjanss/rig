@@ -114,7 +114,7 @@ func main() {
 		MaxShutdown: 35 * time.Second,
 
 		Tasks: map[string]serve.Task{
-			"migrate": migrate.Apply(migrations, migrate.Options{Log: os.Stdout}),
+			"migrate": migrate.Apply(migrations, migrate.Options{}),
 			// The guarantee behind the inbox. The engine the server runs is
 			// latency — it turns a notification into an inbox line in
 			// milliseconds rather than by the next tick — and this is what takes
@@ -189,7 +189,7 @@ func dispatchNotifications(ctx context.Context, pool *pgxpool.Pool) error {
 	// growing forever. This function used to call Resolve alone, so the sentence
 	// notify leans on hardest, that the task is the guarantee and the goroutine
 	// is only latency, was not true of anything shipped here.
-	return api.NotificationDispatcher(engine, os.Stdout)(ctx, pool)
+	return api.NotificationDispatcher(engine, slog.Default())(ctx, pool)
 }
 
 // newAPI is everything this server is made of.
@@ -226,7 +226,7 @@ func newAPI(ctx context.Context, pool *pgxpool.Pool, log *slog.Logger) (http.Han
 	// provider decision after that is one it would get wrong.
 	engine := api.NewNotificationEngine(pool, reg, map[notify.Channel]notify.Sender{
 		notify.ChannelEmail: mail.NotificationSender(),
-	})
+	}, log)
 
 	// The one read the `cache:` block in rig.yaml deliberately does not cover.
 	//
@@ -424,7 +424,7 @@ func dispatchAuthMail(ctx context.Context, pool *pgxpool.Pool) error {
 	if err != nil {
 		return err
 	}
-	return api.AuthMailDispatcher(front, os.Stdout)(ctx, pool)
+	return api.AuthMailDispatcher(front, slog.Default())(ctx, pool)
 }
 
 func pruneAuthLog(ctx context.Context, pool *pgxpool.Pool) error {

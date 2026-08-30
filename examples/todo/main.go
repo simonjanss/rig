@@ -14,6 +14,7 @@ import (
 	"cmp"
 	"context"
 	"embed"
+	"log/slog"
 	"net/http"
 	"os"
 	"time"
@@ -108,7 +109,7 @@ func main() {
 		// than goroutines, so each is a cron job rather than something racing
 		// itself in every replica.
 		Tasks: map[string]serve.Task{
-			"migrate": migrate.Apply(migrations, migrate.Options{Log: os.Stdout}),
+			"migrate": migrate.Apply(migrations, migrate.Options{}),
 			// The guarantee behind the inbox, for everything the in-process
 			// engine did not get to. It builds its own object graph because it
 			// needs the same one the server does: the audience is a method on a
@@ -188,7 +189,7 @@ func main() {
 		// Handed back as api.Parts.Engine rather than started here: api.Main
 		// starts it and registers both its shutdown steps, with the numbers the
 		// budget above counted for them.
-		engine := api.NewNotificationEngine(app.Pool, reg, nil)
+		engine := api.NewNotificationEngine(app.Pool, reg, nil, app.Logger)
 
 		// No Shapes, and that is a decision rather than an omission: this table
 		// says `electric: enabled`, so api.Shapes has a field per shape and the
@@ -306,5 +307,5 @@ func dispatchNotifications(ctx context.Context, pool *pgxpool.Pool) error {
 	// else — so dispatching finds no delivery rows and returns immediately; what
 	// is gained is the pruning, which was not happening at all.
 	return api.NotificationDispatcher(
-		api.NewNotificationEngine(pool, reg, nil), os.Stdout)(ctx, pool)
+		api.NewNotificationEngine(pool, reg, nil, nil), slog.Default())(ctx, pool)
 }

@@ -107,6 +107,85 @@ Logger: slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
 The liveness and readiness probes are not logged at any level. A check every
 second is not a request anybody wants a line about.
 
+## What the process says about itself
+
+Five lines at `INFO`, which is what a deployment keeps:
+
+```
+INFO migrating
+INFO monitoring  addr=127.0.0.1:9090
+INFO listening   addr=[::]:8080 started in=412ms
+INFO draining    cause="signal terminated" delay=2s timeout=30s
+INFO stopped     in=1.204s
+```
+
+`cause` is the one worth reading twice. `signal terminated` is a SIGTERM, which
+is an orchestrator taking the pod away; `signal interrupt` is somebody's `^C`;
+anything else is the context your own `main` cancelled, with whatever reason you
+cancelled it for. Without it, all three are one event.
+
+`stopped` is the last line, and it means the drain finished, every step you
+registered closed, and the pool went. A shutdown that did not finish does not
+write it — it writes `stopped, but not cleanly`, or the error that stopped it.
+
+Everything else the lifecycle says is `DEBUG`, and there is a lot more of it:
+
+| | |
+|---|---|
+| `starting` | the version, the commit and the Go toolchain, when the build recorded them |
+| `connected` | which database, on which host, with what pool size, in how long |
+| `migrated` / `not migrating` | and from `migrate` itself, at `INFO`: one `applied` line per migration, or `no migrations to apply` |
+| `mounted` | how long your `mount` function took out of `MaxStartup` |
+| `the shutdown budget fits` | every step this process registered and what each may take |
+| `shutdown step` / `shutdown step finished` | one pair per drain and close step, with its own duration, and the error when it gave up |
+| `the drain delay is over`, or that it was cut short | |
+| `the requests in flight are done` | in how long, out of how much was left |
+| `the database pool is closed` | |
+| `running` / `finished` | around a subcommand — `migrate`, `sweep-files`, `dispatch-notifications` |
+
+And the background work, which used to say nothing at all: a notification pass,
+a presence sweep and a file sweep each write one line per pass with every count
+in it, including the zeros — because a pass that did nothing cannot otherwise be
+told from a job that never ran. A pass that *failed* is `ERROR`, and a
+notification whose subject nothing is registered for is `WARN`.
+
+**Which level depends on which form runs it, and the split is the point.** The
+goroutines — the notification engine and the presence sweeper the server starts —
+write `DEBUG`, because that is a line per interval forever. The cron subcommands
+— `dispatch-notifications`, `dispatch-auth-mail`, `sweep-presence`, `sweep-files`
+and `migrate` — write `INFO`, because there the report is the whole output of a
+run that happened while nobody was watching, and `slog.Default()` drops `DEBUG`:
+a level you have to turn on in advance cannot answer "did the cron entry fire".
+
+So to see the goroutines' lines, either:
+
+- set `$RIG_LOG_FILE` — the file sink keeps `DEBUG` whatever stderr is set to,
+  which is what [the monitoring page](#the-logs) lists;
+- build a handler at `slog.LevelDebug` in `main.go`, exactly as for the request
+  line above.
+
+Each of those subsystems takes a `Logger` of its own, and **nil means
+`slog.Default()` rather than silence** — `migrate.Options`, `notify.EngineConfig`,
+`presence.SweeperConfig`, `files.Config`. The generated constructors for the two
+that run in the server take one, so hand them `app.Logger` and their lines go
+wherever everything else the server says goes:
+
+```go
+engine := api.NewNotificationEngine(app.Pool, reg, senders, app.Logger)
+api.StartPresenceSweeper(app) // passes app.Logger for you
+```
+
+That matters for a project with `tracing:` on, because the log file is teed into
+the logger the server was handed and not into `slog.Default()`. The subcommands
+are the other way round and deliberately so: a cron job's log is the terminal
+something started it from, which is what `slog.Default()` is.
+
+If you really want one of them quiet, say so:
+
+```go
+migrate.Options{Logger: slog.New(slog.DiscardHandler)}
+```
+
 ## Spans
 
 One line in `rig.yaml`:

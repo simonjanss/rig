@@ -93,7 +93,7 @@ func main() {
 		MaxShutdown: 15 * time.Second,
 
 		Tasks: map[string]serve.Task{
-			"migrate": migrate.Apply(migrations, migrate.Options{Log: os.Stdout}),
+			"migrate": migrate.Apply(migrations, migrate.Options{}),
 			// prune-idempotency is merged in by api.Main: records of writes
 			// nobody is going to send again, as a cron entry rather than a
 			// goroutine — one thing running rather than one per replica.

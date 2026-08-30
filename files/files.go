@@ -31,6 +31,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"log/slog"
 	"time"
 
 	"github.com/google/uuid"
@@ -186,6 +187,25 @@ type Config struct {
 
 	// Now is the clock, so a test can move it. Nil means time.Now.
 	Now func() time.Time
+
+	// Logger is where [Service.Sweep] says what it reaped.
+	//
+	// Nil is not silence: it is [log/slog.Default], the reading every other
+	// Logger in rig gives it. [SweepReport] exists for "the log line the task
+	// writes" and the generated task discards it, so what a project's
+	// housekeeping actually did has never been written anywhere.
+	//
+	// The line is INFO, unlike the per-interval lines rig's two background
+	// loops write. Nothing sweeps files in-process — [Service.Sweep] is reached
+	// from the generated `sweep-files` cron job and nowhere else — so this is
+	// the whole output of a run that happens when nobody is watching, and
+	// [log/slog.Default] drops DEBUG. A level that has to have been turned on
+	// in advance would leave a sweep that did nothing looking exactly like a
+	// cron entry that never fired.
+	//
+	// A sweep that failed is not logged here at all: the error is returned, and
+	// whatever ran the task reports it once.
+	Logger *slog.Logger
 }
 
 func (c Config) maxBytes() int64 {
@@ -214,6 +234,15 @@ func (c Config) restoreWindow() time.Duration {
 		return DefaultRestoreWindow
 	}
 	return c.RestoreWindow
+}
+
+// log is where a sweep says what it did, and [log/slog.Default] when the
+// configuration named nowhere.
+func (c Config) log() *slog.Logger {
+	if c.Logger != nil {
+		return c.Logger
+	}
+	return slog.Default()
 }
 
 func (c Config) now() time.Time {

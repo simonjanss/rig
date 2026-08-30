@@ -145,9 +145,14 @@ func (e *emitter) presenceSweeper(b *gobuf.Buf) {
 		"an audience twice costs a read and sending twice costs somebody a " +
 		"duplicate mail; deleting rows that have already expired is idempotent, " +
 		"so two replicas sweeping at once agree and the loser deletes nothing.")
-	b.L("func NewPresenceSweeper(svc *%s.Service) *%s.Sweeper {", presencePkg, presencePkg)
+	b.L("func NewPresenceSweeper(svc *%s.Service, logger *%s.Logger) *%s.Sweeper {",
+		presencePkg, b.Import("log/slog"), presencePkg)
 	b.L("return %s.NewSweeper(%s.SweeperConfig{", presencePkg, presencePkg)
 	b.L("Service: svc,")
+	b.Comment("app.Logger, so a sweep says what it deleted wherever the server " +
+		"says everything else. Nil is not silence — it is slog.Default, which is " +
+		"what the cron form below has and all it can have.")
+	b.L("Logger: logger,")
 	b.L("Interval: %d * %s.Second,", cfg.SweepSeconds, timePkg)
 	b.Comment("How long past the TTL a row survives. It is what keeps the two " +
 		"expiry mechanisms from disagreeing: a subscriber stops drawing a row at " +
@@ -167,10 +172,20 @@ func (e *emitter) presenceSweeper(b *gobuf.Buf) {
 		"and correctly within a second — this only keeps the table, and every new " +
 		"subscriber's first fetch, from carrying yesterday. Skipping it costs " +
 		"space.\n\n" +
-		"Register it in serve.Config.Tasks and run `<binary> sweep-presence`.")
-	b.L("func PresenceSweep(sweeper *%s.Sweeper) %s.Task {", presencePkg, servePkg)
+		"Register it in serve.Config.Tasks and run `<binary> sweep-presence`.\n\n" +
+		"The logger is where the pass's report goes, and it is written here " +
+		"rather than inside Sweep because the goroutine calls Sweep too and " +
+		"that one is a line per interval forever. A nil logger is not silence: " +
+		"it is slog.Default, which for a cron job is the terminal it was " +
+		"started from. At info, because slog.Default drops debug and a sweep " +
+		"nobody can see is one nobody can tell from a cron entry that never " +
+		"fired.")
+	b.L("func PresenceSweep(sweeper *%s.Sweeper, logger *%s.Logger) %s.Task {",
+		presencePkg, b.Import("log/slog"), servePkg)
+	b.L("if logger == nil { logger = %s.Default() }", b.Import("log/slog"))
 	b.L("return func(ctx %s.Context, _ *%s.Pool) error {", ctxPkg, poolPkg)
-	b.L("_, err := sweeper.Sweep(ctx)")
+	b.L("report, err := sweeper.Sweep(ctx)")
+	b.L(`logger.InfoContext(ctx, "presence swept", "counts", report.String())`)
 	b.L("return err")
 	b.L("}")
 	b.L("}")
@@ -200,7 +215,7 @@ func (e *emitter) presenceStarter(b *gobuf.Buf) {
 		"No Drain, because there is nothing in flight worth finishing: a pass " +
 		"interrupted mid-DELETE leaves rows that the next pass takes.")
 	b.L("func StartPresenceSweeper(app *%s.App) {", servePkg)
-	b.L("sweeper := NewPresenceSweeper(NewPresence(app.Pool))")
+	b.L("sweeper := NewPresenceSweeper(NewPresence(app.Pool), app.Logger)")
 	b.L("sweeper.Start()")
 	b.L("app.CloseWithin(%s, %s, sweeper.Close)", gobuf.Quote(presenceStep), presenceConst)
 	b.L("}")

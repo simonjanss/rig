@@ -132,7 +132,7 @@ func main() {
 		MaxShutdown: 15 * time.Second,
 
 		Tasks: map[string]serve.Task{
-			"migrate": migrate.ApplyAll(migrationSources(), migrate.Options{Log: os.Stdout}),
+			"migrate": migrate.ApplyAll(migrationSources(), migrate.Options{}),
 			// Two tenants and one person with a password, so both interesting
 			// sign-ins are reachable: a stranger joining, and an existing account
 			// being linked.

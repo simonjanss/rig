@@ -159,7 +159,7 @@ func newInboxWorld(t *testing.T) *inboxWorld {
 	inbox := api.NewNotifications(pool, reg)
 	w.svc = todo.New(repos.Todos, api.NewFiles(pool), nil, inbox, pool, nil)
 	reg.Register(api.NewTodoSubject(w.svc))
-	w.engine = api.NewNotificationEngine(pool, reg, nil)
+	w.engine = api.NewNotificationEngine(pool, reg, nil, nil)
 
 	mux := api.Register(api.Handlers{
 		Server:        api.Server{GetClaims: headerClaims, DB: w.pool},

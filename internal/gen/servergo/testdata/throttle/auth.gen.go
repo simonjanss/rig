@@ -10,7 +10,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -518,20 +517,28 @@ func AuthLogPruner(front *auth.Auth) serve.Task {
 // never sent.** With the queue off it claims nothing and returns, so
 // registering it either way costs nothing.
 //
-// The writer is where each pass's report goes, and os.Stdout is the answer for
-// a cron job — every count including the zeros, because a pass that sent
-// nothing is the ordinary case and the absence of a line cannot be told from
-// the job not running. A nil writer prints nothing and is for a test.
-func AuthMailDispatcher(front *auth.Auth, log io.Writer) serve.Task {
+// The logger is where each pass's report goes — every count including the
+// zeros, because a pass that sent nothing is the ordinary case and the absence
+// of a line cannot be told from the job not running. A nil logger is not
+// silence: it is slog.Default, the same reading every other Logger in rig
+// gives it, which for a cron job is the terminal it was started from.
+//
+// At info, because this is the whole output of a run that happens when nobody
+// is watching and slog.Default drops debug — a level that has to have been
+// turned on in advance would make this silent, which is the one thing the line
+// exists to prevent.
+func AuthMailDispatcher(front *auth.Auth, logger *slog.Logger) serve.Task {
+	if logger == nil {
+		logger = slog.Default()
+	}
 	return func(ctx context.Context, _ *pgxpool.Pool) error {
 		report, err := front.DispatchMail(ctx)
-		if log != nil {
-			fmt.Fprintln(log, report)
-		}
+		logger.InfoContext(ctx, "authentication mail dispatched", "counts", report.String())
 		if err != nil {
 			return err
 		}
-		_, err = front.PruneMail(ctx)
+		pruned, err := front.PruneMail(ctx)
+		logger.InfoContext(ctx, "authentication mail pruned", "count", pruned)
 		return err
 	}
 }

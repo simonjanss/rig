@@ -84,8 +84,8 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"io"
 	"io/fs"
+	"log/slog"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/jackc/pgx/v5/stdlib"
@@ -116,8 +116,23 @@ type Options struct {
 	// name here. They are the same bookkeeping.
 	Table string
 
-	// Log receives one line per migration applied.
-	Log io.Writer
+	// Logger receives one line per migration applied, and a line for a run that
+	// found nothing to do. Both at INFO.
+	//
+	// Nil is not silence. It is [log/slog.Default], which is the reading every
+	// other Logger in rig gives it, and it is the whole point of this field
+	// being a logger rather than the writer it used to be: the generated boot
+	// passes an Options with nothing in it, so which migrations a deployment
+	// applied went nowhere at all. A caller that wants silence says so, and
+	// then it is a decision somebody made rather than one nobody noticed:
+	//
+	//	migrate.Options{Logger: slog.New(slog.DiscardHandler)}
+	//
+	// INFO rather than the DEBUG most of what rig says about its own lifecycle
+	// goes at. Which migrations this database has had applied to it is a fact
+	// somebody goes looking for months later, and a level that has to have been
+	// turned on in advance cannot answer that.
+	Logger *slog.Logger
 
 	// Unlocked skips the advisory lock.
 	//
@@ -168,7 +183,7 @@ type Source struct {
 // need for anything cleverer.
 //
 // [Options.Dir] and [Options.Table] are ignored: those are per-set facts and each
-// [Source] carries its own. Log and Unlocked apply to every set.
+// [Source] carries its own. Logger and Unlocked apply to every set.
 //
 // Applying the sets one after another rather than together is not a weaker
 // arrangement. goose's advisory lock is a single fixed identifier, so several
@@ -218,8 +233,14 @@ func ApplyAll(srcs []Source, opt Options) func(ctx context.Context, pool *pgxpoo
 		if err != nil {
 			return err
 		}
-		if opt.Log != nil && len(applied) == 0 {
-			fmt.Fprintln(opt.Log, "no migrations to apply")
+		if len(applied) == 0 {
+			// INFO, like the applied lines and for the same reason. This is
+			// the ordinary outcome of every run after the first, and it is
+			// also the whole output of one: the doc comment on [Apply] wires
+			// it as a subcommand, and slog.Default drops DEBUG — so a level
+			// below this makes a migration job that found nothing and a cron
+			// entry that never fired the same silence.
+			opt.log().InfoContext(ctx, "no migrations to apply")
 		}
 		return nil
 	}
@@ -247,6 +268,15 @@ func RequireAll(srcs []Source, opt Options) func(ctx context.Context, pool *pgxp
 		}
 		return nil
 	}
+}
+
+// log is where this run says what it applied, and [log/slog.Default] when the
+// caller named nowhere.
+func (o Options) log() *slog.Logger {
+	if o.Logger != nil {
+		return o.Logger
+	}
+	return slog.Default()
 }
 
 // options is the per-set view of a run: the shared settings, with this set's own
@@ -318,9 +348,7 @@ func Up(ctx context.Context, db *sql.DB, fsys fs.FS, opt Options) ([]string, err
 	applied := make([]string, 0, len(results))
 	for _, r := range results {
 		applied = append(applied, r.Source.Path)
-		if opt.Log != nil {
-			fmt.Fprintf(opt.Log, "applied %s\n", r.Source.Path)
-		}
+		opt.log().InfoContext(ctx, "applied", "migration", r.Source.Path)
 	}
 
 	if err != nil {
@@ -356,7 +384,7 @@ func Pending(ctx context.Context, db *sql.DB, fsys fs.FS, opt Options) ([]string
 
 // Apply is Up as a one-argument function, for wiring straight into a server.
 //
-//	Tasks: map[string]serve.Task{"migrate": migrate.Apply(migrations, migrate.Options{Log: os.Stdout})},
+//	Tasks: map[string]serve.Task{"migrate": migrate.Apply(migrations, migrate.Options{})},
 //
 // It borrows the pool, applies what is pending, and hands the borrowed handle
 // back. That is three lines every project would otherwise write the same way,

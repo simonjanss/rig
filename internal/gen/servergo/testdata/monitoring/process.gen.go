@@ -19,7 +19,7 @@ import (
 // merged with the ones only this application can write.
 //
 //	Tasks: api.Tasks(map[string]serve.Task{
-//		"migrate": migrate.Apply(migrations, migrate.Options{Log: os.Stdout}),
+//		"migrate": migrate.Apply(migrations, migrate.Options{}),
 //	}),
 //
 // Same bargain as [MigrationSources]: the argument is this application's half
@@ -321,6 +321,15 @@ func (p *Process) LogHandler() slog.Handler { return p.logs.Handler() }
 // Logger is stderr and the file the page reads, both, each at its own level.
 // Set it yourself and the page has nothing to list unless [Process.LogHandler]
 // is teed into what you set.
+//
+// It does not become slog.Default, and that is a deliberate refusal rather
+// than an omission. The handler under this one is the default's own —
+// [NewProcess] borrows it so that the format stays whoever's main.go set it
+// — and log/slog.SetDefault points the log package's output at whatever it
+// is given, so installing this would route that output back through a handler
+// that writes to it. That is a process which dies at its first line with no
+// log to say why. Hand app.Logger to what needs it instead; the constructors
+// here that run something in the background take one.
 //
 // Pool is a span per statement, from the connection rather than from the
 // generated code — so a tracer sees every query, including the ones rig's

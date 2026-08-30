@@ -175,7 +175,7 @@ func (e *emitter) tasksFunc(b *gobuf.Buf) {
 	b.Comment("Tasks are the subcommands this project's configuration already " +
 		"decided, merged with the ones only this application can write.\n\n" +
 		"\tTasks: api.Tasks(map[string]serve.Task{\n" +
-		"\t\t\"migrate\": migrate.Apply(migrations, migrate.Options{Log: os.Stdout}),\n" +
+		"\t\t\"migrate\": migrate.Apply(migrations, migrate.Options{}),\n" +
 		"\t}),\n\n" +
 		"Same bargain as [MigrationSources]: the argument is this application's " +
 		"half and it wins, so a project that wants a different sweep registers " +
@@ -208,7 +208,11 @@ func (e *emitter) tasksFunc(b *gobuf.Buf) {
 			"guarantee behind anything: who is present is decided by whoever is " +
 			"reading, against the clock. This only keeps the table — and every " +
 			"new subscriber's first fetch — from carrying yesterday.")
-		e.poolTask(b, "sweep-presence", "PresenceSweep(NewPresenceSweeper(NewPresence(pool)))")
+		// Two nil loggers, and both are slog.Default rather than silence: a task
+		// is a cron job, and its log is the terminal something started it from.
+		// The sweeper's is for a goroutine this form never starts; the task's is
+		// the one that writes the report.
+		e.poolTask(b, "sweep-presence", "PresenceSweep(NewPresenceSweeper(NewPresence(pool), nil), nil)")
 	}
 
 	if e.throttleEnabled() {
@@ -722,6 +726,15 @@ func (e *emitter) configureMethod(b *gobuf.Buf) {
 			"Set it yourself and the file has nothing in it unless " +
 			"[Process.LogHandler] is teed into what you set.\n\n"
 	}
+	doc += "It does not become slog.Default, and that is a deliberate refusal " +
+		"rather than an omission. The handler under this one is the default's " +
+		"own — [NewProcess] borrows it so that the format stays whoever's " +
+		"main.go set it — and log/slog.SetDefault points the log package's " +
+		"output at whatever it is given, so installing this would route that " +
+		"output back through a handler that writes to it. That is a process " +
+		"which dies at its first line with no log to say why. Hand app.Logger " +
+		"to what needs it instead; the constructors here that run something in " +
+		"the background take one.\n\n"
 	doc += "Pool is a span per statement, from the connection rather than from the " +
 		"generated code — so a tracer sees every query, including the ones rig's " +
 		"own background work runs and the ones no generator wrote.\n\n" +

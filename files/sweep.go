@@ -55,6 +55,7 @@ func (r SweepReport) String() string {
 func (s *Service) Sweep(ctx context.Context) (SweepReport, error) {
 	var report SweepReport
 	if s.cfg.Store == nil {
+		s.cfg.log().InfoContext(ctx, "nothing to sweep: this service has no store")
 		return report, nil
 	}
 	now := s.cfg.now()
@@ -86,6 +87,7 @@ func (s *Service) Sweep(ctx context.Context) (SweepReport, error) {
 	// out of step in the safe direction, and this is what brings them back.
 	marker, ok := s.cfg.Store.(blob.Marker)
 	if !ok {
+		s.cfg.log().InfoContext(ctx, "a file sweep finished", "counts", report.String())
 		return report, nil
 	}
 	trashed, err := s.store.trashed(ctx, now.Add(-s.cfg.restoreWindow()), sweepBatch)
@@ -99,6 +101,7 @@ func (s *Service) Sweep(ctx context.Context) (SweepReport, error) {
 		report.Remarked++
 	}
 
+	s.cfg.log().InfoContext(ctx, "a file sweep finished", "counts", report.String())
 	return report, nil
 }
 

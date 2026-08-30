@@ -6,6 +6,7 @@ package api
 
 import (
 	"context"
+	"log/slog"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -77,9 +78,13 @@ func PresenceTargets() []string {
 // audience twice costs a read and sending twice costs somebody a duplicate
 // mail; deleting rows that have already expired is idempotent, so two replicas
 // sweeping at once agree and the loser deletes nothing.
-func NewPresenceSweeper(svc *presence.Service) *presence.Sweeper {
+func NewPresenceSweeper(svc *presence.Service, logger *slog.Logger) *presence.Sweeper {
 	return presence.NewSweeper(presence.SweeperConfig{
-		Service:  svc,
+		Service: svc,
+		// app.Logger, so a sweep says what it deleted wherever the server says
+		// everything else. Nil is not silence — it is slog.Default, which is what
+		// the cron form below has and all it can have.
+		Logger:   logger,
 		Interval: 60 * time.Second,
 		// How long past the TTL a row survives. It is what keeps the two expiry
 		// mechanisms from disagreeing: a subscriber stops drawing a row at the TTL and
@@ -100,9 +105,20 @@ func NewPresenceSweeper(svc *presence.Service) *presence.Sweeper {
 // subscriber's first fetch, from carrying yesterday. Skipping it costs space.
 //
 // Register it in serve.Config.Tasks and run `<binary> sweep-presence`.
-func PresenceSweep(sweeper *presence.Sweeper) serve.Task {
+//
+// The logger is where the pass's report goes, and it is written here rather
+// than inside Sweep because the goroutine calls Sweep too and that one is a
+// line per interval forever. A nil logger is not silence: it is slog.Default,
+// which for a cron job is the terminal it was started from. At info, because
+// slog.Default drops debug and a sweep nobody can see is one nobody can tell
+// from a cron entry that never fired.
+func PresenceSweep(sweeper *presence.Sweeper, logger *slog.Logger) serve.Task {
+	if logger == nil {
+		logger = slog.Default()
+	}
 	return func(ctx context.Context, _ *pgxpool.Pool) error {
-		_, err := sweeper.Sweep(ctx)
+		report, err := sweeper.Sweep(ctx)
+		logger.InfoContext(ctx, "presence swept", "counts", report.String())
 		return err
 	}
 }
@@ -128,7 +144,7 @@ func PresenceSweep(sweeper *presence.Sweeper) serve.Task {
 // No Drain, because there is nothing in flight worth finishing: a pass
 // interrupted mid-DELETE leaves rows that the next pass takes.
 func StartPresenceSweeper(app *serve.App) {
-	sweeper := NewPresenceSweeper(NewPresence(app.Pool))
+	sweeper := NewPresenceSweeper(NewPresence(app.Pool), app.Logger)
 	sweeper.Start()
 	app.CloseWithin("presence", presenceShutdown, sweeper.Close)
 }

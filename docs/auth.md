@@ -988,7 +988,7 @@ front, err := api.New(pool, api.Hooks{
 
 ```go
 serve.Config{Tasks: map[string]serve.Task{
-    "dispatch-auth-mail": api.AuthMailDispatcher(front, os.Stdout),
+    "dispatch-auth-mail": api.AuthMailDispatcher(front, slog.Default()),
 }}
 ```
 

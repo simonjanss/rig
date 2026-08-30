@@ -17,7 +17,7 @@ import (
 // merged with the ones only this application can write.
 //
 //	Tasks: api.Tasks(map[string]serve.Task{
-//		"migrate": migrate.Apply(migrations, migrate.Options{Log: os.Stdout}),
+//		"migrate": migrate.Apply(migrations, migrate.Options{}),
 //	}),
 //
 // Same bargain as [MigrationSources]: the argument is this application's half
@@ -41,7 +41,7 @@ func Tasks(own map[string]serve.Task) map[string]serve.Task {
 		// decided by whoever is reading, against the clock. This only keeps the table
 		// — and every new subscriber's first fetch — from carrying yesterday.
 		"sweep-presence": func(ctx context.Context, pool *pgxpool.Pool) error {
-			return PresenceSweep(NewPresenceSweeper(NewPresence(pool)))(ctx, pool)
+			return PresenceSweep(NewPresenceSweeper(NewPresence(pool), nil), nil)(ctx, pool)
 		},
 	}
 
