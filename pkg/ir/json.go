@@ -60,6 +60,14 @@ func Unmarshal(b []byte) (*Document, error) {
 // own it changes nothing anybody could observe over HTTP, so it must not spend a
 // revision saying otherwise.
 //
+// [Document.Tool] is cleared for that reason, and it is the one field here that
+// says nothing about the project at all: it is the build of rig that produced
+// the document. Left in, every release of rig would move every project's
+// revision — upgrading the generator would tell every client the API had
+// changed, on a day the API did not. The version belongs in the document, which
+// is why it is still written; it does not belong in what the document is
+// compared by.
+//
 // [API.Monitoring] is cleared for that same reason. rig's own page is mounted
 // beside the API rather than in it: it appears in no specification, no
 // generated client calls it, and a caller cannot tell whether it is there. A
@@ -106,6 +114,7 @@ func Unmarshal(b []byte) (*Document, error) {
 // can tell what they are, so they are cleared for the reason Monitoring is.
 func (d *Document) Hash() (string, error) {
 	unstamped := *d
+	unstamped.Tool = ""
 	unstamped.API.Revision = ""
 	unstamped.API.EmbeddedFoundation = false
 	unstamped.API.Monitoring = nil
