@@ -263,13 +263,19 @@ defaults exist because each one has bitten somebody.
 | `boolean_prefix` | A boolean reads as a predicate: `is_`, `has_`, `can_`, `should_`, `was_`, `allow_` |
 | `timestamp_suffix` | A column ending in `_at` is a `timestamptz`, and a timestamp column is named `_at` |
 | `date_suffix` | A column ending in `_date` is a `date`, and vice versa |
-| `fk_naming` | A foreign-key column is named after the table it points at: `player_id` |
+| `fk_naming` | A foreign-key column is named after the table it points at: `player_id`, or `tenant_id` for `rig_tenant` |
 | `fk_needs_index` | Every foreign key is covered by an index |
 | `tenant_id_leading_index` | Some index leads with `tenant_id` |
 | `cascade_delete` | No foreign key declares `ON DELETE CASCADE` |
 | `missing_comment` | Every table and column has a comment |
 | `unmentioned_column` | Every column is mentioned in the table configuration |
 | `migration_filename` | Files are named `NNNNN_snake_case.sql` |
+
+`fk_naming` is looser than it looks in one place: a foreign key to one of rig's
+own tables may drop the `rig_` prefix, so both `tenant_id` and `rig_tenant_id`
+satisfy it for a column pointing at `rig_tenant`. The prefix is there to tell
+rig's tables from yours in psql, not to be repeated by every key that points at
+one — and `tenant_id` is what you would have written had the table been your own.
 
 `timestamp_suffix` is stricter than it looks, and deliberately: an `_at` column
 must be `timestamptz`, not a bare `timestamp`. A name ending in `_at` claims the

@@ -10,6 +10,7 @@ import (
 	"github.com/google/go-cmp/cmp"
 
 	"github.com/simonjanss/rig/internal/compile"
+	"github.com/simonjanss/rig/internal/diag"
 	"github.com/simonjanss/rig/internal/project"
 	"github.com/simonjanss/rig/internal/tableconf"
 	"github.com/simonjanss/rig/pkg/ir"
@@ -1986,4 +1987,125 @@ func cmpOr(s, fallback string) string {
 		return fallback
 	}
 	return s
+}
+
+// The rig_ prefix is there so a project can tell rig's tables from its own in
+// psql, not so every foreign key to one has to repeat it. A project writing
+// tenant_id against rig_tenant is writing what it would have written had the
+// table been its own, and the rule used to answer that with rig_tenant_id.
+func TestAForeignKeyToRigsOwnTableMayDropThePrefix(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name   string
+		column string
+		target string
+		want   string // the message it should carry, or "" for no diagnostic
+	}{
+		{"the bare name", "tenant_id", "rig_tenant", ""},
+		{"the prefixed name", "rig_tenant_id", "rig_tenant", ""},
+		{"qualified, bare", "owner_tenant_id", "rig_tenant", ""},
+		{"qualified, prefixed", "owner_rig_tenant_id", "rig_tenant", ""},
+		// The two columns that had carve-outs of their own until this rule
+		// replaced them, so the replacement has to cover both.
+		{"the notification link", "notification_id", "rig_notification", ""},
+		{"the inbox owner", "account_id", "rig_account", ""},
+		// And the file column, which had one too: <role>_file_id is the ordinary
+		// <qualifier>_file_id spelling once rig_file may be named without the
+		// prefix, so the rule reaches it without an exemption of its own.
+		{"a file column", "profile_image_file_id", "rig_file", ""},
+		{"named after nothing", "org_id", "rig_tenant",
+			"named tenant_id or rig_tenant_id, either with a <qualifier>_ prefix"},
+		{"an ordinary table still wants its own name", "player_id", "player", ""},
+		{"and still says so when it does not get it", "athlete_id", "player",
+			"named player_id or <qualifier>_player_id"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			doc, p, set := docWithForeignKey(t, tc.column, tc.target)
+			got := foreignKeyNaming(compile.Validate(doc, set, p))
+
+			switch {
+			case tc.want == "" && got != "":
+				t.Errorf("%s -> %s should be accepted, got: %s", tc.column, tc.target, got)
+			case tc.want != "" && !strings.Contains(got, tc.want):
+				t.Errorf("want a message containing %q, got: %s", tc.want, got)
+			}
+		})
+	}
+}
+
+// foreignKeyNaming is the one RIG6030 message in a list, so an unrelated rule
+// firing on the fixture cannot be read as this one passing or failing.
+func foreignKeyNaming(diags diag.List) string {
+	for _, d := range diags.All() {
+		if d.Code.ID == "RIG6030" {
+			return d.Message
+		}
+	}
+	return ""
+}
+
+// docWithForeignKey builds the smallest document the foreign-key naming rule
+// can run against: the table under test, the table it points at, and only that
+// rule turned on.
+func docWithForeignKey(t *testing.T, column, target string) (*ir.Document, *project.Project, *tableconf.Set) {
+	t.Helper()
+
+	schema := ir.Schema{
+		Name: "public",
+		Tables: []ir.Table{
+			{
+				Name: "lesson", Kind: ir.TableKindBase, Comment: "A lesson.",
+				Columns: []ir.Column{
+					{Name: "id", SQLType: "uuid", Ordinal: 1, IsPrimaryKey: true, Comment: "The identifier."},
+					{Name: column, SQLType: "uuid", Ordinal: 2, Nullable: true, Comment: "What it points at."},
+				},
+				PrimaryKey: []string{"id"},
+				ForeignKeys: []ir.ForeignKey{{
+					Name:    "lesson_" + column + "_fkey",
+					Columns: []string{column}, ForeignTable: target, ForeignColumns: []string{"id"},
+				}},
+			},
+			{
+				Name: target, Kind: ir.TableKindBase, Comment: "What it points at.",
+				Columns: []ir.Column{
+					{Name: "id", SQLType: "uuid", Ordinal: 1, IsPrimaryKey: true, Comment: "The identifier."},
+				},
+				PrimaryKey: []string{"id"},
+			},
+		},
+	}
+
+	p := &project.Project{Config: &project.Config{
+		Validate: project.Validate{
+			ForeignKeyNaming:     "error",
+			TimestampSuffix:      "off",
+			UnmentionedColumn:    "off",
+			MissingComment:       "off",
+			ForeignKeyNotIndexed: "off",
+			TenantIndexLeading:   "off",
+			BooleanPrefix:        "off",
+			DateSuffix:           "off",
+			CascadeDelete:        "off",
+			MigrationFilename:    "off",
+		},
+	}}
+
+	// Through Normalize rather than straight into Freeze: denormalizing a
+	// single-column key onto its column is what puts the reference where this
+	// rule reads it, and a fixture that set Column.ForeignKey by hand would pass
+	// whether or not the pipeline still does that.
+	normalized, ndiags := compile.Normalize(schema, compile.NormalizeOptions{})
+	if ndiags.HasErrors() {
+		t.Fatalf("the fixture itself should normalize:\n%s", ndiags.String())
+	}
+
+	doc, diags := compile.Freeze(ir.API{Name: "Demo", BasePath: "/api/v1"}, normalized,
+		compile.Meta{Tool: "test"})
+	if diags.HasErrors() {
+		t.Fatalf("the fixture itself should compile:\n%s", diags.String())
+	}
+	return doc, p, &tableconf.Set{}
 }
