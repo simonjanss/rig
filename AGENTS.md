@@ -185,7 +185,7 @@ the same commit.** The pages are short and the mapping is mechanical:
 | `notify/`, `internal/project/notifications.go` | `docs/notifications.md`, `docs/rig-yaml.md` |
 | `presence/`, `internal/project/presence.go` | `docs/presence.md`, `docs/rig-yaml.md` |
 | `runtime/cache`, `internal/project/cache.go` | `docs/rig-yaml.md`, `docs/auth.md` |
-| `runtime/serve`, `runtime/dbhook`, `runtime/apibase` | `docs/services.md` |
+| `runtime/serve`, `runtime/dbhook`, `runtime/apibase`, `runtime/apidoc` | `docs/services.md` |
 | `runtime/reqlog`, `observe/`, or what a generator emits about logging or spans | `docs/observability.md` |
 | `internal/project/tracing.go` — the `tracing:` block | `docs/observability.md`, `docs/rig-yaml.md` |
 | `internal/project/monitoring.go` — the `monitoring:` block | `docs/observability.md`, `docs/rig-yaml.md` |

@@ -331,6 +331,58 @@ func TestAShapeRouteSitsUnderTheBasePathAndIsCheckedAgainstIt(t *testing.T) {
 	}
 }
 
+// The document's own two routes are expanded against the same base path every
+// other route is, and land in the same namespace — so a resource that already
+// serves one of them is a `rig check` failure rather than a duplicate-pattern
+// panic when api.Register mounts the mux.
+func TestTheOpenAPIRoutesSitUnderTheBasePathAndAreCheckedAgainstIt(t *testing.T) {
+	t.Parallel()
+
+	api := simpleAPI()
+	api.OpenAPI = &ir.OpenAPI{}
+
+	// The bare schema this helper is paired with produces column diagnostics of
+	// its own, which is not what this test is about — what matters is that
+	// serving the document adds none.
+	doc, diags := compile.Freeze(api, ir.Schema{Name: "public"}, compile.Meta{Tool: "test"})
+	if strings.Contains(diags.String(), "already served by") {
+		t.Fatalf("the document's own routes collided with nothing:\n%s", diags.String())
+	}
+	if got, want := doc.API.OpenAPI.JSONPath, "/api/v1/openapi.json"; got != want {
+		t.Errorf("json path = %q, want %q", got, want)
+	}
+	if got, want := doc.API.OpenAPI.YAMLPath, "/api/v1/openapi.yaml"; got != want {
+		t.Errorf("yaml path = %q, want %q", got, want)
+	}
+
+	// The whole reason the paths are computed here rather than in the generator
+	// that mounts them: this is where the namespace is.
+	clash := simpleAPI()
+	clash.OpenAPI = &ir.OpenAPI{}
+	clash.Resources[0].PathSegment = "openapi.json"
+	clash.Resources[0].Operations = nil
+	clash.Resources[0].Endpoints = []ir.Endpoint{
+		{Name: "List", Method: "GET", Path: "", Impl: ir.EndpointImpl{HandlerName: "List"}},
+	}
+
+	_, diags = compile.Freeze(clash, ir.Schema{Name: "public"}, compile.Meta{Tool: "test"})
+	if !strings.Contains(diags.String(), "already served by") {
+		t.Errorf("a resource on the document's own route should be reported:\n%s",
+			diags.String())
+	}
+}
+
+// Nil is the absence, and it stays nil: a project that keeps the document a file
+// carries no paths for a generator to mount.
+func TestNoOpenAPIBlockLeavesNoRoutes(t *testing.T) {
+	t.Parallel()
+
+	doc, _ := compile.Freeze(simpleAPI(), ir.Schema{Name: "public"}, compile.Meta{Tool: "test"})
+	if doc.API.OpenAPI != nil {
+		t.Errorf("want nil, got %#v", doc.API.OpenAPI)
+	}
+}
+
 func TestFreezeRejectsDuplicateRoutes(t *testing.T) {
 	t.Parallel()
 

@@ -58,7 +58,7 @@ rig generate   # 4. compile to one IR, fan out to generators
 | `persist-go` | the repository interface and its pgx implementation |
 | `service-go` | API types, service interfaces, and a working default implementation |
 | `server-go` | net/http routing, request decoding, the handler registration struct, the live-sync shape endpoints with their tenant and lifecycle filters built in, and the delete propagation |
-| `openapi` | an OpenAPI 3.1 document: every endpoint, schema and status the API answers with |
+| `openapi` | an OpenAPI 3.1 document: every endpoint, schema and status the API answers with, optionally served by the API at `<base_path>/openapi.json` |
 | `go-client` | a typed Go client: the wire types and one method per endpoint |
 | `ts-client` | a typed TypeScript client: the wire types, one method per endpoint, and the live-sync collections |
 

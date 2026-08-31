@@ -375,6 +375,10 @@ func (e *emitter) mountFunc(b *gobuf.Buf) {
 		b.NL()
 	}
 
+	if e.servesOpenAPI() {
+		e.openAPIAnnounce(b)
+	}
+
 	b.L("return parts.Handler, nil")
 	b.L("}")
 	b.L("}")

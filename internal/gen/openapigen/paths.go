@@ -128,6 +128,10 @@ func (e *emitter) paths() *v3.Paths {
 		}
 	}
 
+	for _, r := range e.specRoutes() {
+		add(r.route, r.op)
+	}
+
 	keys := make([]string, 0, len(items))
 	for k := range items {
 		keys = append(keys, k)

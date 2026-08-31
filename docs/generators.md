@@ -102,7 +102,7 @@ Every generator takes `out_dir` and an `options` block. The common ones:
 | `stub_package` | `service-go`, `server-go` | Package a stub declares. Empty uses the table name |
 | `electric_url` | `server-go` | The sync service to proxy to |
 | `electric_required` | `server-go` | Whether a sync service that is not answering stops the server starting, instead of a warning at boot. Off by default |
-| `formats` | `openapi` | Which renderings to write: `json`, `yaml`, or both. Both by default |
+| `formats` | `openapi` | Which renderings to write: `json`, `yaml`, or both. Both by default. Also decides which of the document's own routes are described when [`api.openapi.serve`](rig-yaml.md#openapiserve) is on |
 | `electric` | `openapi` | Whether the live-sync routes are described. On by default |
 | `client_import` | `go-client`, `ts-client` | Import path, or npm specifier, of the SDK runtime. For a fork or a vendored copy |
 | `electric_import` | `ts-client` | npm specifier of the streaming runtime. Same reasons |
@@ -115,6 +115,16 @@ document read — so the three cannot disagree about where the API is, and a
 generator added later gets the deployments without an option of its own. Both
 keys still work when there is no `servers:` block, and rig warns (RIG3010) when
 it sees one.
+
+**Whether the document is served is not an option here either**, and neither is
+where the router finds it. It is a route, so it is
+[`api.openapi.serve`](rig-yaml.md#openapiserve) in rig.yaml — read by this
+generator, which describes the two routes and writes the embed that carries
+them, and by `server-go`, which imports that package and mounts them. The import
+path is `project.module` joined to this generator's `out_dir`: one right answer,
+both ends already written down, so rig joins them rather than adding an option
+whose only wrong value is a typo. What stays here is `formats`, because that is
+about which files get written; see [api.md](api.md#serving-it).
 
 ## The two clients
 

@@ -6,16 +6,11 @@ package api
 
 import (
 	"net/http"
+	"rigtest/docs"
 	"sync"
 
-	"github.com/simonjanss/rig/examples/todo/docs"
-	"github.com/simonjanss/rig/examples/todo/internal/model"
-	"github.com/simonjanss/rig/files"
-	"github.com/simonjanss/rig/notify"
-	"github.com/simonjanss/rig/notify/notifyhttp"
 	"github.com/simonjanss/rig/runtime/apibase"
 	"github.com/simonjanss/rig/runtime/apidoc"
-	"github.com/simonjanss/rig/runtime/dbhook"
 	"github.com/simonjanss/rig/runtime/httpx"
 )
 
@@ -115,14 +110,7 @@ type Handlers struct {
 	// leaves both undone. See [Shapes].
 	Shapes Shapes
 
-	// Notifications is this project's inbox. Setting it mounts the routes under
-	// /notifications and lets a delete of a notifiable row take its notifications
-	// with it — a nil one leaves both undone, which is why it is a field here
-	// rather than something reached for.
-	Notifications *notify.Service
-
-	Todo           TodoService
-	TodoAttachment TodoAttachmentService
+	Lesson LessonService
 }
 
 // Register mounts every route and returns the mux.
@@ -178,29 +166,8 @@ func Register(h Handlers) *http.ServeMux {
 
 	mux := http.NewServeMux()
 
-	if h.Todo != nil {
-		registerTodo(mux, h.Server, h.Todo)
-	}
-	if h.TodoAttachment != nil {
-		registerTodoAttachment(mux, h.Server, h.TodoAttachment)
-	}
-
-	// The inbox, on the same mux. Hand-written rather than generated, because the
-	// tables are rig's own and are the same in every project — there is nothing
-	// here for a generator to vary.
-	if h.Notifications != nil {
-		notifyhttp.New(h.Notifications, notifyhttp.Options{
-			// The server's own answer to "who is calling", so an inbox route identifies
-			// its caller exactly the way every other route does.
-			Claims: h.Server.GetClaims,
-			Fail: func(w http.ResponseWriter, r *http.Request, err error) {
-				// The project's own error shape, so an inbox route's 404 looks like every
-				// other route's — and its own metadata, so the line an inbox 500 writes says
-				// which request it was rather than nothing at all. These routes do not go
-				// through resolve, so the context is built here.
-				fail(h.Server, w, r, requestContext(h.Server, r), err)
-			},
-		}).Mount(mux)
+	if h.Lesson != nil {
+		registerLesson(mux, h.Server, h.Lesson)
 	}
 
 	// The live-sync shapes, on the same mux as everything else. Nil mounts
@@ -209,21 +176,16 @@ func Register(h Handlers) *http.ServeMux {
 	if h.Shapes.Proxy != nil {
 		// A derived shape falls back to the live shape's scope. Nil stays nil: a table
 		// nobody scoped is scoped by tenant and lifecycle on all three of its routes.
-		if h.Shapes.NotificationRecipientDeleted == nil {
-			h.Shapes.NotificationRecipientDeleted = NotificationRecipientDeletedScope(h.Shapes.NotificationRecipient)
+		if h.Shapes.LessonDeleted == nil {
+			h.Shapes.LessonDeleted = LessonDeletedScope(h.Shapes.Lesson)
 		}
-		if h.Shapes.TodoDeleted == nil {
-			h.Shapes.TodoDeleted = TodoDeletedScope(h.Shapes.Todo)
-		}
-		if h.Shapes.TodoVersions == nil {
-			h.Shapes.TodoVersions = versionsFromLiveTodo(h.Shapes.Todo)
+		if h.Shapes.LessonVersions == nil {
+			h.Shapes.LessonVersions = versionsFromLiveLesson(h.Shapes.Lesson)
 		}
 
-		mux.HandleFunc("GET /api/v1/rig_notification_recipient/_stream", handleNotificationRecipientShape(h.Server, h.Shapes))
-		mux.HandleFunc("GET /api/v1/rig_notification_recipient/_deleted/_stream", handleNotificationRecipientDeletedShape(h.Server, h.Shapes))
-		mux.HandleFunc("GET /api/v1/todo/_stream", handleTodoShape(h.Server, h.Shapes))
-		mux.HandleFunc("GET /api/v1/todo/_deleted/_stream", handleTodoDeletedShape(h.Server, h.Shapes))
-		mux.HandleFunc("GET /api/v1/todo/{id}/_versions/_stream", handleTodoVersionsShape(h.Server, h.Shapes))
+		mux.HandleFunc("GET /api/v1/lesson/_stream", handleLessonShape(h.Server, h.Shapes))
+		mux.HandleFunc("GET /api/v1/lesson/_deleted/_stream", handleLessonDeletedShape(h.Server, h.Shapes))
+		mux.HandleFunc("GET /api/v1/lesson/{id}/_versions/_stream", handleLessonVersionsShape(h.Server, h.Shapes))
 
 		// And the ending, which is the whole of what there is to register: nothing is
 		// started, unlike the sweeper and the engine beside it, because a shape route
@@ -277,25 +239,9 @@ func Register(h Handlers) *http.ServeMux {
 // appended to. A resource whose field is nil is skipped, and a parent whose
 // children are all nil adopts an empty list, which is what it had before.
 func Link(h Handlers) {
-	if h.Todo != nil {
-		var cs TodoChildDeletes
-		// The row's own notifications, which are a child of it in every way that
-		// matters: they point at it, they have to be told, and the telling is inside
-		// the same transaction.
-		if h.Notifications != nil {
-			cs = append(cs, notifyTodoDeletes(h.Notifications))
-		}
-		if h.TodoAttachment != nil {
-			p := h.TodoAttachment.ParentHooks()
-			cs = append(cs, dbhook.ChildDelete[model.TodoDeleteInput, model.Todo]{
-				Child:    "todo_attachment",
-				Deleting: p.TodoDeleting,
-				Deleted:  p.TodoDeleted,
-			})
-		}
-		h.Todo.AdoptChildren(cs)
-	}
-
+	// No table here references another one rig writes a service for, so there is
+	// nothing to propagate.
+	_ = h
 }
 
 // DefaultErrorMapper turns an error into a response.
@@ -320,14 +266,4 @@ func DefaultErrorMapper(w http.ResponseWriter, _ *http.Request, rc RequestContex
 		RequestID: rc.RequestID,
 		Fields:    answer.Fields,
 	})
-}
-
-// hasPart reports whether a form carried the named file.
-func hasPart(pending []*files.Pending, name string) bool {
-	for _, p := range pending {
-		if p.Part == name {
-			return true
-		}
-	}
-	return false
 }

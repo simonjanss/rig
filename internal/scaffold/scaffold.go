@@ -88,7 +88,18 @@ func rigYAML(opt ProjectOptions) string {
 	fmt.Fprintf(&b, "project:\n  name: %q\n  module: %q\n\n", opt.Name, opt.Module)
 	b.WriteString("api:\n")
 	b.WriteString("  version: v1\n")
-	b.WriteString("  base_path: /api/v1\n\n")
+	b.WriteString("  base_path: /api/v1\n")
+	// Commented for the reason `servers:` below is: it is a decision rather than
+	// a default. Serving the document turns the openapi generator's out_dir into
+	// a Go package, which is a thing to have chosen rather than to discover — and
+	// a project that has not decided yet still gets the document as a file.
+	b.WriteString("  # The document describing this API, served beside the routes it\n")
+	b.WriteString("  # describes, at /api/v1/openapi.json and /api/v1/openapi.yaml.\n")
+	b.WriteString("  # Nothing else to write: the openapi generator embeds it beside the\n")
+	b.WriteString("  # document and the router imports that package. What it costs is that\n")
+	b.WriteString("  # the generator's out_dir becomes a Go package. See docs/api.md.\n")
+	b.WriteString("  # openapi:\n")
+	b.WriteString("  #   serve: true\n\n")
 	// Commented rather than filled in, because rig cannot know where this
 	// project will run — and written out in full rather than as a one-line
 	// example, because the shape is what somebody uncommenting it needs. The

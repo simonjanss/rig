@@ -249,6 +249,13 @@ func main() {
 		// Anything else this server answers is a Handle call on the same mux,
 		// the way ui.Mount above is: static files, a second API, a webhook
 		// receiver.
+		//
+		// The OpenAPI document is not one of them, and that is worth noticing
+		// here rather than in the diff that would have added it: `api.openapi.
+		// serve` in rig.yaml puts it on /api/v1/openapi.json and
+		// /api/v1/openapi.yaml, embedded in this binary, with nothing in this
+		// file. The document is a fact about the API rather than a decision this
+		// wiring makes, so there was nothing to hand over.
 
 		// Anything that has to see the response rather than only the request —
 		// tracing, a duration, a panic — wraps the handler instead:

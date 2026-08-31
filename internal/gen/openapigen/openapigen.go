@@ -21,6 +21,10 @@
 // hand-written and reach no IR endpoint, so they are absent here and said to be
 // absent in info.description — an omission a reader can see beats one they
 // discover.
+//
+// The two routes the document is itself served on are the exception that proves
+// the rule: a project that turns `api.openapi.serve` on gets them described here
+// as well, because they are routes the same mux answers. See spec.go.
 package openapigen
 
 import (
@@ -133,6 +137,14 @@ func (g *Generator) Generate(
 	}
 	if cfg.Electric == nil {
 		cfg.Electric = boolPtr(true)
+	}
+	if o := doc.API.OpenAPI; o != nil && o.Package == "" {
+		// Derived by the compiler from `out_dir` and the module path, because the
+		// router that imports this package and the package clause written here
+		// have to be the same word. A document carrying neither is one nothing
+		// produced.
+		return nil, fmt.Errorf("openapi: this document serves its own specification " +
+			"and names no package to embed it in; it was not produced by this version of rig")
 	}
 
 	e := &emitter{doc: doc, cfg: cfg, extra: map[string]*base.Schema{}}

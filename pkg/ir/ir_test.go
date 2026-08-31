@@ -259,6 +259,51 @@ func TestHashIgnoresWhatTheServerReplicates(t *testing.T) {
 	}
 }
 
+// Two routes are a surface. The directory they are embedded from is not.
+func TestHashIgnoresWhereTheDocumentIsEmbedded(t *testing.T) {
+	t.Parallel()
+
+	doc := sample()
+	doc.API.OpenAPI = &ir.OpenAPI{
+		JSONPath: "/api/v1/openapi.json",
+		YAMLPath: "/api/v1/openapi.yaml",
+		Import:   "example.com/demo/docs",
+		Package:  "docs",
+	}
+	before, err := doc.Hash()
+	if err != nil {
+		t.Fatalf("hash: %v", err)
+	}
+
+	// Somebody moves the generator's out_dir. No client can tell, and telling
+	// every one of them they are a revision behind would be a lie.
+	doc.API.OpenAPI.Import = "example.com/demo/internal/apispec"
+	doc.API.OpenAPI.Package = "apispec"
+	after, err := doc.Hash()
+	if err != nil {
+		t.Fatalf("hash: %v", err)
+	}
+	if after != before {
+		t.Fatalf("moving the embed moved the hash: %s then %s", before, after)
+	}
+
+	// Cleared for the hash, left on the caller's document: the generators read
+	// these after the hash is taken.
+	if doc.API.OpenAPI.Import == "" || doc.API.OpenAPI.Package == "" {
+		t.Fatal("hashing erased the import from the caller's document")
+	}
+
+	// But the routes are a surface, and starting to serve them is a change.
+	doc.API.OpenAPI = nil
+	unserved, err := doc.Hash()
+	if err != nil {
+		t.Fatalf("hash: %v", err)
+	}
+	if unserved == before {
+		t.Fatal("a document that stopped being served has the same hash as one that is")
+	}
+}
+
 func TestUnmarshalRejectsUnknownFields(t *testing.T) {
 	t.Parallel()
 

@@ -129,6 +129,13 @@ func (g *Generator) Generate(_ context.Context, doc *ir.Document, opts gen.Optio
 		// the next run leaves it exactly as it is.
 		return nil, fmt.Errorf("api_import is required alongside stub_dir: a shape's scoping stub names the scope type this package declares")
 	}
+	if o := doc.API.OpenAPI; o != nil && (o.Import == "" || o.Package == "") {
+		// Nothing a project can have got wrong: rig.yaml says where the openapi
+		// generator writes and what this module is called, and the compiler joins
+		// them. A document carrying neither is one nothing produced.
+		return nil, fmt.Errorf("this document serves its own specification and names no " +
+			"package to embed it in; it was not produced by this version of rig")
+	}
 
 	e := &emitter{doc: doc, cfg: cfg, root: opts.Root, namer: naming.New(naming.Config{})}
 

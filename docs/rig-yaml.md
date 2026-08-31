@@ -97,6 +97,7 @@ api:
 | `description` | — | What this API is for. |
 | `permissions` | `derived` | `derived` or `none`. See below. |
 | `search_method` | `both` | `query`, `post`, or `both`. |
+| `openapi.serve` | off | Serve the generated document at `<base_path>/openapi.json` and `<base_path>/openapi.yaml`. See below. |
 
 ### `permissions`
 
@@ -113,6 +114,38 @@ is granted something.
 deciding. It is deliberately the thing you have to write down, because being
 unprotected should be a decision somebody made rather than a default nobody
 noticed.
+
+### `openapi.serve`
+
+```yaml
+api:
+  openapi:
+    serve: true
+```
+
+Two routes under `base_path` — `openapi.json` and `openapi.yaml` — answering the
+document the [`openapi`](generators.md) generator writes.
+
+This block is about **routes**. Which renderings get written, and where to, is
+the generator's own `formats` and `out_dir`, which are about **files**. The two
+are separate on purpose: a project can write the document without serving it, and
+rig refuses (RIG3011) if you ask to serve one it was never asked to write.
+
+One line, and nothing anywhere else. The document is embedded in the binary, and
+where the embed lives is decided by a rule of Go's: an embed directive cannot
+climb out of the directory of the file it is written in. So the `openapi`
+generator writes one beside the document it produces, in a package of its own,
+and the generated router imports it — at `project.module` joined to that
+generator's `out_dir`, which rig works out rather than asking you to repeat.
+
+The one thing that follows: `out_dir` becomes a Go package, so its name has to be
+one Go would accept. `docs` and `internal/spec` are fine; `api-docs` and the
+project root are not, and rig refuses (RIG3011) rather than leaving it to a build.
+
+The server says where the routes went as it starts.
+
+[api.md](api.md#serving-it) has the rest — the ETag, what `formats` decides, and
+how to gate the routes.
 
 `public:` on a resource or an endpoint is the per-endpoint escape hatch, and
 works either way.

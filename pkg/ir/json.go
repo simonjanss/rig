@@ -189,6 +189,21 @@ func (d *Document) Hash() (string, error) {
 		visible.GraceSeconds = 0
 		unstamped.API.Presence = &visible
 	}
+	if o := unstamped.API.OpenAPI; o != nil {
+		// The two routes stay: they are routes, and a document that started or
+		// stopped being served is a surface that changed. Which package it is
+		// embedded in is not — that is a directory name in somebody's repository,
+		// invisible over HTTP, and renaming it must not tell every client it is
+		// a revision behind.
+		//
+		// A copy, for the reason the two above take one: the shallow copy shares
+		// the pointer, and the caller's document must not come back with its
+		// import path erased.
+		visible := *o
+		visible.Import = ""
+		visible.Package = ""
+		unstamped.API.OpenAPI = &visible
+	}
 
 	b, err := Marshal(&unstamped)
 	if err != nil {

@@ -109,15 +109,22 @@ second is not a request anybody wants a line about.
 
 ## What the process says about itself
 
-Five lines at `INFO`, which is what a deployment keeps:
+Six lines at `INFO`, which is what a deployment keeps:
 
 ```
 INFO migrating
+INFO serving the OpenAPI document  at="[/api/v1/openapi.json /api/v1/openapi.yaml]"
 INFO monitoring  addr=127.0.0.1:9090
 INFO listening   addr=[::]:8080 started in=412ms
 INFO draining    cause="signal terminated" delay=2s timeout=30s
 INFO stopped     in=1.204s
 ```
+
+The second one only appears for a project that turned
+[`api.openapi.serve`](rig-yaml.md#openapiserve) on, and it is there for the same
+reason `monitoring` is: a thing this process serves that nobody can find by
+guessing. `at` is what was actually mounted rather than what was configured, so a
+project writing one rendering is not told about a route it does not serve.
 
 `cause` is the one worth reading twice. `signal terminated` is a SIGTERM, which
 is an orchestrator taking the pod away; `signal interrupt` is somebody's `^C`;
