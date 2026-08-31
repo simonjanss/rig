@@ -107,6 +107,8 @@ Every generator takes `out_dir` and an `options` block. The common ones:
 | `client_import` | `go-client`, `ts-client` | Import path, or npm specifier, of the SDK runtime. For a fork or a vendored copy |
 | `electric_import` | `ts-client` | npm specifier of the streaming runtime. Same reasons |
 | `request_id_header` | `server-go` | Header a caller may name its own request in. Read on every route, `/auth/*` included |
+| `openapi_import` | `server-go` | Import path of the package the `openapi` generator writes the document into — its `out_dir` under your module path. Required when [`api.openapi.serve`](rig-yaml.md#openapiserve) is on, so the router can serve what that generator embedded |
+| `package` | `openapi` | Package the embed file declares. Defaults to the `out_dir`'s name; only matters when `api.openapi.serve` is on |
 
 **Two options are not in that table, because they left it.** `servers` on
 `openapi` and `default_base_url` on the two clients both moved to rig.yaml's
@@ -118,10 +120,11 @@ it sees one.
 
 **Whether the document is served is not an option here either.** It is a route,
 so it is [`api.openapi.serve`](rig-yaml.md#openapiserve) in rig.yaml — read by
-this generator, which describes the two routes, and by `server-go`, which mounts
-them. An option on this block could not reach the generator that does the
-mounting. What stays here is `formats`, because that is about which files get
-written; see [api.md](api.md#serving-it).
+this generator, which describes the two routes and writes the `go:embed` that
+carries them, and by `server-go`, which imports that package and mounts them. An
+option on this block could not reach the generator that does the mounting. What
+stays here is `formats`, because that is about which files get written; see
+[api.md](api.md#serving-it).
 
 ## The two clients
 

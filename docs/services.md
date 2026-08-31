@@ -249,38 +249,37 @@ See [electric.md](electric.md) for what a drained proxy tells a subscriber.
 
 ### Serving the OpenAPI document
 
-`Handlers.OpenAPI` is another field a `rig.yaml` block adds — the
-[`api.openapi.serve`](rig-yaml.md#openapiserve) one — and the only one whose
-value is a file rather than an object:
+There is no `Handlers` field for it, and that is the point:
+[`api.openapi.serve`](rig-yaml.md#openapiserve) plus `server-go`'s
+`openapi_import` is the whole wiring, and `api.Register` mounts the two routes
+with nothing passed in. The document is embedded in the package the `openapi`
+generator writes it to — a `go:embed` directive cannot climb out of the directory
+of the file it is written in — and the generated router imports that package the
+same way it imports the model and the store.
+
+It says where the routes went as the server comes up, beside the address it is
+listening on:
+
+```
+INFO serving the OpenAPI document at="[/api/v1/openapi.json /api/v1/openapi.yaml]"
+```
+
+`rig/runtime/apidoc` is what does the serving, and it is directly usable: leave
+`serve` off and mount it yourself when the routes need a credential, a CORS
+header, or a path of their own.
 
 ```go
 //go:embed docs/openapi.gen.json docs/openapi.gen.yaml
 var apidocs embed.FS
 
-mux := api.Register(api.Handlers{
-	Server:  api.Server{...},
-	OpenAPI: apidocs,
-	Todo:    todos,
-})
-```
-
-`go:embed` cannot reach out of the package it is written in, and the document is
-written to the `openapi` generator's `out_dir` rather than beside the generated
-router — so this is the one route rig can mount for you and cannot supply the
-bytes for. Nil leaves both routes unmounted, and an embed pointing at a directory
-with no document in it is a panic from `api.Register` naming what it looked for,
-rather than two routes answering nothing.
-
-`rig/runtime/apidoc` is what does the serving, and it is directly usable: leave
-the field nil and mount it yourself when the routes need a credential, a CORS
-header, or a path of their own.
-
-```go
 docs, err := apidoc.New(apidocs, apidoc.Options{
-	JSONPath: api.OpenAPIJSONPath,
-	YAMLPath: api.OpenAPIYAMLPath,
+	JSONPath: "/api/v1/openapi.json",
+	YAMLPath: "/api/v1/openapi.yaml",
 })
 ```
+
+It finds the renderings by name anywhere in the filesystem you hand it, so the
+directory you embedded from is not its business.
 
 [api.md](api.md#serving-it) has the rest — the ETag, what `formats` decides, and
 why the document describes these two routes as well as your own.

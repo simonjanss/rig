@@ -138,6 +138,14 @@ func Mount(build Build) serve.Mount {
 			app.Logger.InfoContext(ctx, "no sync service in this server", "cost", "no shape route is mounted and nothing on this server live-syncs")
 		}
 
+		// Said once, at info, the way the monitoring page says where it listens. A
+		// specification is no use to somebody who cannot find it, and where it went is
+		// a base path away from what anybody would guess.
+		//
+		// What was actually mounted rather than the two constants above, so a project
+		// writing only one rendering is not told about a route it does not serve.
+		app.Logger.InfoContext(ctx, "serving the OpenAPI document", "at", openAPIDocs().Paths())
+
 		return parts.Handler, nil
 	}
 }

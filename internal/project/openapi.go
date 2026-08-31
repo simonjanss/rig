@@ -11,11 +11,12 @@ import "github.com/simonjanss/rig/internal/diag"
 // document, neither of which can say whether some other generator was
 // configured.
 //
-// A warning and not a refusal. The route is generated whether or not the file
-// exists, and a project wiring this up in the other order — key first,
-// generator second — is not broken, just unfinished. What it would cost to be
-// wrong is a build that will not compile, because the go:embed line names a
-// file nobody wrote; that is loud enough on its own.
+// A warning and not a refusal. A project wiring this up in the other order — key
+// first, generator second — is not broken, just unfinished, and what it costs to
+// leave it wrong is loud enough on its own: server-go refuses to emit a router
+// with no `openapi_import`, and an import naming a package no generator writes
+// is a build that fails. This is the earliest and cheapest of the three, not the
+// only one.
 func (p *Project) checkOpenAPIServed() diag.List {
 	var diags diag.List
 

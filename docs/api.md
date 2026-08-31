@@ -244,52 +244,54 @@ A file in `docs/` is not something a client can reach. Turn it into two routes:
 api:
   openapi:
     serve: true
+
+generators:
+  - name: server-go
+    out_dir: internal/api
+    options:
+      openapi_import: github.com/you/yourapp/docs   # the openapi out_dir
 ```
 
-That gives you `GET /api/v1/openapi.json` and `GET /api/v1/openapi.yaml` —
-under `base_path`, expanded against it exactly the way every other route is, and
-checked against every other route, so a resource that lands on one of those paths
-fails `rig check` rather than taking the mux down at startup.
+That is the whole of it. `GET /api/v1/openapi.json` and `GET
+/api/v1/openapi.yaml`, embedded in the binary, with nothing in your `main.go`.
+The server says where they went as it starts:
 
-It takes one line in `main.go` as well, and that is the trade rather than an
-oversight:
-
-```go
-//go:embed docs/openapi.gen.json docs/openapi.gen.yaml
-var apidocs embed.FS
-
-mux := api.Register(api.Handlers{
-	Server:  api.Server{...},
-	OpenAPI: apidocs,
-	Todo:    svc,
-})
+```
+INFO serving the OpenAPI document at="[/api/v1/openapi.json /api/v1/openapi.yaml]"
 ```
 
-`go:embed` cannot reach out of the package it is written in, and the document is
-written to this generator's `out_dir` rather than beside the router — so rig
-cannot embed it for you. What you get instead is the embed where your migrations
-already are, and the same property behind it: **what this build serves is what
-this build describes.** A client reading the document off a running server is
-reading that deployment, not whatever is on a branch.
+The paths sit under `base_path`, expanded against it exactly the way every other
+route is, and checked against every other route — so a resource that lands on one
+of them fails `rig check` rather than taking the mux down at startup.
 
-The consequences of doing it this way, all four worth knowing:
+**Why the second line.** A `go:embed` directive cannot climb out of the directory
+of the file it is written in, and the document is written to the `openapi`
+generator's `out_dir` rather than beside the router. So that generator writes the
+embed beside the document it produced, in a package of its own, and the router
+imports it — the same kind of line as the `model_import` and `store_import`
+already on the generators above it. `rig generate` refuses rather than emitting a
+router that cannot build, and names what to write.
 
-- **The field is nilable, and nil mounts nothing.** A project that has turned the
-  key on and not embedded the file yet serves nothing at those paths, rather than
-  two routes answering 404.
-- **A wrong embed path is a refusal at startup.** rig cannot check the path,
-  because `out_dir` is yours — so `api.Register` panics naming both filenames it
-  looked for rather than mounting routes that answer nothing.
+What the embed buys is the property your migrations already have: **what this
+build serves is what this build describes.** A client reading the document off a
+running server is reading that deployment, not whatever is on a branch.
+
+Three consequences worth knowing:
+
 - **Only the renderings you wrote are mounted.** `formats: [json]` writes one
-  file, so the document describes one route and the server mounts one. Neither
-  half had to be told what the other was configured with.
+  file, so the embed names one, the server mounts one, and the document describes
+  one. No half of that had to be told what the others were configured with.
 - **The document describes these two routes.** It has to: this generator's claim
   is that it describes every route the server answers, and a specification that
   omitted the route it is fetched over would be the one omission it cannot excuse.
+- **`out_dir` becomes a Go package.** One generated file, `openapi.gen.go`,
+  holding the embed and nothing else. The package name comes from the directory —
+  `docs` from `docs`, `apidocs` from `api-docs` — or from a `package` option when
+  the directory name is not one a package can be derived from.
 
 The routes read no claims and check no permission. What the document says is what
 every generated client was built against, and a specification nobody may fetch is
-one nobody can use. To gate it, leave `OpenAPI` nil and mount
+one nobody can use. To gate it, leave `serve` off and mount
 [`runtime/apidoc`](services.md#serving-the-openapi-document) yourself behind
 whatever you gate the rest with — that is also where the CORS header goes if a
 viewer on another origin has to read it.

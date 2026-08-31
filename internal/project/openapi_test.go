@@ -52,8 +52,9 @@ func TestOpenAPIServeIsRead(t *testing.T) {
 
 // The key mounts a route for a document rig was never asked to write. It is a
 // warning rather than a refusal — the generator can be added second — but it has
-// to be said, because the failure otherwise arrives as a go:embed line naming a
-// file nobody wrote.
+// to be said here, because it is the earliest of the three places this goes
+// wrong: after it come server-go refusing to emit a router with no
+// openapi_import, and an import naming a package nothing writes.
 func TestOpenAPIServeWithoutTheGeneratorWarns(t *testing.T) {
 	t.Parallel()
 

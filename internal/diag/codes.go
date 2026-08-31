@@ -161,11 +161,12 @@ var (
 
 	CodeOpenAPINotServable = newCode("RIG3011", SeverityWarning,
 		"`api.openapi.serve` is on and no `openapi` generator is configured.",
-		"The key mounts a route for a document rig was never asked to write, so the "+
-			"route is one the project cannot fill: there is no file to embed. Add the "+
-			"generator — `- name: openapi` with an `out_dir` — or drop the key. A "+
-			"warning rather than a refusal, because the generator can be added in "+
-			"either order and a project part-way through wiring this up is not broken.")
+		"The key mounts a route for a document rig was never asked to write, so there "+
+			"is nothing to embed and nothing to serve. Add the generator — `- name: "+
+			"openapi` with an `out_dir` — or drop the key. A warning rather than a "+
+			"refusal, because the generator can be added in either order and a project "+
+			"part-way through wiring this up is not broken; server-go refuses outright "+
+			"if it is still missing when the router is written.")
 
 	CodeUnmentionedColumn = newCode("RIG3100", SeverityWarning,
 		"A column exists in the database but is not mentioned in the table configuration.",

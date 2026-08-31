@@ -446,12 +446,13 @@ type APIOpenAPI struct {
 	// Serve mounts the document beside the routes it describes, at
 	// <base_path>/openapi.json and <base_path>/openapi.yaml.
 	//
-	// The bytes are the application's to supply: go:embed cannot reach out of
-	// the package it is written in, and the document is written to the
-	// generator's out_dir rather than beside the router. So this makes the route
-	// and the field to fill it, and the project embeds the file. See
-	// docs/api.md.
-	Serve bool `yaml:"serve,omitempty" json:"serve,omitempty" jsonschema_description:"Mount the document at <base_path>/openapi.json and <base_path>/openapi.yaml. The project embeds the file itself; see docs/api.md."`
+	// Nothing in main.go. An embed directive resolves against the directory of
+	// the file it is written in and cannot climb out of it, and the document is
+	// written to the openapi generator's out_dir rather than beside the router —
+	// so that generator writes the embed beside the document, in a package of
+	// its own, and server-go's `openapi_import` is how the router reaches it.
+	// See docs/api.md.
+	Serve bool `yaml:"serve,omitempty" json:"serve,omitempty" jsonschema_description:"Mount the document at <base_path>/openapi.json and <base_path>/openapi.yaml. Needs server-go's openapi_import as well; see docs/api.md."`
 }
 
 // Database says where rig runs migrations and reads the schema.

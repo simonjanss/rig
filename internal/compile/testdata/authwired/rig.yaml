@@ -17,19 +17,6 @@ servers:
   - name: staging_eu
     url: https://staging.eu.example.com
 
-# The document as a route as well as a file, in the fixture that has an auth
-# block — so the golden proves the two operations opt out of the document-level
-# credential requirement rather than inheriting it. `formats` is the openapi
-# generator's own option and stays there; this is about routes.
-api:
-  openapi:
-    serve: true
-
-# Only so that the key above has something to serve; see RIG3011.
-generators:
-  - name: openapi
-    out_dir: docs
-
 # Everything the auth block can say, so the compiled document carries every field
 # and the generator's golden output exercises every branch. A real project sets a
 # handful of these and inherits the rest.

@@ -76,6 +76,14 @@ type Options struct {
 	// routes of this API and are documented by default; a project that would
 	// rather not publish a proxied protocol turns them off here.
 	Electric *bool `json:"electric"`
+
+	// Package is the Go package the embed file declares, for a project whose
+	// `api.openapi.serve` is on.
+	//
+	// It only matters then: a project that keeps the document a file gets no Go
+	// file at all. Empty derives it from the output directory's name, which is
+	// what `out_dir: docs` wants and what every scaffold writes.
+	Package string `json:"package"`
 }
 
 // Server is one origin the API answers on.
@@ -137,6 +145,14 @@ func (g *Generator) Generate(
 	}
 	if cfg.Electric == nil {
 		cfg.Electric = boolPtr(true)
+	}
+	if doc.API.OpenAPI != nil && cfg.Package == "" {
+		cfg.Package = packageFor(opts.OutDir)
+		if cfg.Package == "" {
+			return nil, fmt.Errorf("openapi: this project serves the document, so this "+
+				"generator writes a Go file beside it — and %q is not a directory name a "+
+				"Go package can be derived from; set the package option", opts.OutDir)
+		}
 	}
 
 	e := &emitter{doc: doc, cfg: cfg, extra: map[string]*base.Schema{}}

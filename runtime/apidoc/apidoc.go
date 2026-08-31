@@ -7,21 +7,25 @@
 // generator or a contract test had to be pointed at the repository rather than
 // at the API, and a deployed build carried no statement of what it answers.
 //
-// What it does not do is hold the bytes. go:embed cannot reach out of the
-// package it is written in, and the document is written to the openapi
-// generator's out_dir — `docs/` by convention — rather than beside the router.
-// So the application embeds the file and hands the [io/fs.FS] over, exactly as
-// it already does with its migrations, and this package finds the document
-// inside it. That is also what makes the embed path the project's business: a
-// project with `out_dir: api/docs` writes a different go:embed line and nothing
-// here changes.
+// What it does not do is hold the bytes. An embed directive resolves against the
+// directory of the file it is written in and cannot climb out of it, and the
+// document is written to the openapi generator's out_dir — `docs/` by
+// convention — rather than beside the router. So that generator writes the embed
+// beside the document, in a package of its own, and hands the [io/fs.FS] here.
+// This package finds the renderings inside it by name, which is what makes the
+// directory somebody else's business: a project with `out_dir: api/docs` changes
+// nothing here.
+//
+// A project doing it by hand embeds the same directory the same way. What is
+// looked for is [JSONName] and [YAMLName] anywhere in the filesystem given, so
+// an embed.FS rooted at the module is as good as one rooted at the document.
 //
 // The routes are public. No claims are read and no permission is checked, for
 // the reason a health probe reads none: what the document says is what every
 // client was generated against, and a specification nobody may fetch is a
-// specification nobody can use. A project that has to gate it leaves the
-// generated router's field unset and mounts this itself, behind whatever it
-// gates the rest with.
+// specification nobody can use. A project that has to gate it turns
+// `api.openapi.serve` off and mounts this itself, behind whatever it gates the
+// rest with.
 //
 // No CORS header, deliberately. A viewer served from another origin needs one,
 // and which origins may read this API is a decision about the whole API rather
@@ -42,9 +46,14 @@ import (
 
 // Names of the two renderings, as the openapi generator writes them.
 //
-// A project's own directory prefix is not here: the FS handed to [New] is
-// whatever the application embedded, and it is searched by these names rather
-// than by a path this package guessed.
+// A directory prefix is not here: the filesystem handed to [New] is whatever was
+// embedded, and it is searched by these names rather than by a path this package
+// guessed.
+//
+// The generator carries the same pair. It cannot import them from here — rig's
+// root module requires a released `runtime`, and `go mod tidy` resolves that
+// from the module proxy rather than from the workspace, so a package added since
+// the last release is not there to import — so a rename has to touch both.
 const (
 	// JSONName is the JSON rendering's filename.
 	JSONName = "openapi.gen.json"

@@ -102,8 +102,8 @@ func TestRefusesAFilesystemWithNoDocument(t *testing.T) {
 	if err == nil {
 		t.Fatal("New: no error")
 	}
-	// The message has to name what it looked for, because the one cause is a
-	// go:embed line pointing at the wrong directory.
+	// The message has to name what it looked for, because the one cause is an
+	// embed directive pointing at the wrong directory.
 	for _, want := range []string{apidoc.JSONName, apidoc.YAMLName, "go:embed"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error %q does not mention %q", err, want)

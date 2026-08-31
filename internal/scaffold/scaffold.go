@@ -90,14 +90,15 @@ func rigYAML(opt ProjectOptions) string {
 	b.WriteString("  version: v1\n")
 	b.WriteString("  base_path: /api/v1\n")
 	// Commented for the reason `servers:` below is: turning it on is only half
-	// the wiring — the other half is a go:embed line in main.go, which this
-	// scaffold does not write — so an uncommented key would name a route the
-	// project cannot fill yet. docs/api.md has both halves.
+	// the wiring. The other half is server-go's openapi_import, which needs this
+	// project's module path joined to the openapi generator's out_dir — and a
+	// key on by default whose partner is missing would make `rig generate`
+	// refuse the first time anybody ran it. docs/api.md has both halves.
 	b.WriteString("  # The document describing this API, served beside the routes it\n")
 	b.WriteString("  # describes, at /api/v1/openapi.json and /api/v1/openapi.yaml. It\n")
-	b.WriteString("  # takes a line in main.go too: go:embed cannot reach out of the\n")
-	b.WriteString("  # package it is written in, so the bytes are yours to hand over.\n")
-	b.WriteString("  # See docs/api.md.\n")
+	b.WriteString("  # needs server-go's openapi_import as well, because the document is\n")
+	b.WriteString("  # embedded in the package the openapi generator writes it to. Nothing\n")
+	b.WriteString("  # in main.go. See docs/api.md.\n")
 	b.WriteString("  # openapi:\n")
 	b.WriteString("  #   serve: true\n\n")
 	// Commented rather than filled in, because rig cannot know where this

@@ -181,10 +181,13 @@ func (e *emitter) tags() []*base.Tag {
 	return out
 }
 
-// render writes the document in each configured format.
+// render writes the document in each configured format, and — for a project
+// that serves it — the Go file that carries it into the binary.
 //
-// Both come from one model. Building it twice would be two chances to differ,
-// and the difference would be invisible until somebody compared the files.
+// Both renderings come from one model. Building it twice would be two chances to
+// differ, and the difference would be invisible until somebody compared the
+// files. The embed file is written last because its go:embed list has to name
+// the files that were actually produced.
 func (e *emitter) render(model *v3.Document) ([]gen.Artifact, error) {
 	var out []gen.Artifact
 	for _, format := range e.cfg.Formats {
@@ -195,7 +198,7 @@ func (e *emitter) render(model *v3.Document) ([]gen.Artifact, error) {
 				return nil, fmt.Errorf("openapi: render yaml: %w", err)
 			}
 			out = append(out, gen.Artifact{
-				Path: "openapi.gen.yaml", Content: newlineTerminated(b), Mode: gen.Overwrite,
+				Path: yamlFile, Content: newlineTerminated(b), Mode: gen.Overwrite,
 			})
 		case "json":
 			b, err := model.RenderJSON("  ")
@@ -203,9 +206,17 @@ func (e *emitter) render(model *v3.Document) ([]gen.Artifact, error) {
 				return nil, fmt.Errorf("openapi: render json: %w", err)
 			}
 			out = append(out, gen.Artifact{
-				Path: "openapi.gen.json", Content: newlineTerminated(b), Mode: gen.Overwrite,
+				Path: jsonFile, Content: newlineTerminated(b), Mode: gen.Overwrite,
 			})
 		}
+	}
+
+	if e.serves() {
+		embed, err := e.embedFile()
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, embed)
 	}
 	return out, nil
 }

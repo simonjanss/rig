@@ -14,6 +14,7 @@ func (e *emitter) serverFile() (gen.Artifact, error) {
 	e.serverAliases(b)
 	if e.servesOpenAPI() {
 		e.openAPIPaths(b)
+		e.openAPIResolver(b)
 	}
 	e.handlersStruct(b)
 	e.registerFunc(b)
@@ -211,9 +212,6 @@ func (e *emitter) handlersStruct(b *gobuf.Buf) {
 			"rest of the API.")
 		b.L("Presence *%s.Service", b.Import(presenceModule))
 		b.NL()
-	}
-	if e.servesOpenAPI() {
-		e.openAPIField(b)
 	}
 	for _, res := range e.resources() {
 		b.L("%s %sService", res.Name, res.Name)

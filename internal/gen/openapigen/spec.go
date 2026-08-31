@@ -1,10 +1,16 @@
 package openapigen
 
 import (
+	"path/filepath"
+	"strings"
+	"unicode"
+
 	"github.com/pb33f/libopenapi/datamodel/high/base"
 	v3 "github.com/pb33f/libopenapi/datamodel/high/v3"
 	"github.com/pb33f/libopenapi/orderedmap"
 
+	"github.com/simonjanss/rig/internal/gen/gobuf"
+	"github.com/simonjanss/rig/pkg/gen"
 	"github.com/simonjanss/rig/pkg/ir"
 )
 
@@ -140,4 +146,103 @@ func (e *emitter) specTagDescription() *base.Tag {
 		Description: "This document, served by the API it describes. The renderings " +
 			"listed are the ones this project asked the generator to write.",
 	}
+}
+
+// The two renderings' filenames.
+//
+// [github.com/simonjanss/rig/runtime/apidoc] carries the same pair, as JSONName
+// and YAMLName, because it is what searches an embedded filesystem for them.
+// They are not imported from there and cannot be: the root module requires a
+// released `runtime`, and `go mod tidy` resolves that from the proxy rather than
+// from the workspace — so importing a package added since the last release
+// breaks `make deps` until there is one. Two copies of two strings, and a rename
+// has to touch both.
+const (
+	jsonFile = "openapi.gen.json"
+	yamlFile = "openapi.gen.yaml"
+)
+
+// embedName is the variable the embed file declares, and what the generated
+// router passes to rig/runtime/apidoc.
+const embedName = "Document"
+
+// embedFile is the Go file that carries the document into the binary.
+//
+// It is written here, beside the renderings, because an embed directive
+// resolves against the directory of the file it is written in and cannot climb
+// out of it — and this generator's out_dir is not the router's. So the document
+// gets a package of its own and the generated router imports it, which is what
+// makes serving the document nothing but a rig.yaml key with no line in
+// anybody's main.go.
+//
+// The embed list is the formats actually written. A pattern that matches no file
+// is a compile error, so `formats: [json]` must not name the YAML rendering —
+// and because both come from this one function, it cannot.
+func (e *emitter) embedFile() (gen.Artifact, error) {
+	b := gobuf.New(e.cfg.Package)
+	b.Doc("Package " + e.cfg.Package + " carries the OpenAPI document describing this " +
+		"API, so that the generated router can serve it. There is nothing to call " +
+		"here: the router imports this package, reads " + embedName + ", and mounts " +
+		"the routes. A project that would rather serve the document some other way " +
+		"turns api.openapi.serve off and does it in main.go instead.")
+
+	var names []string
+	for _, f := range e.cfg.Formats {
+		switch f {
+		case "json":
+			names = append(names, jsonFile)
+		case "yaml":
+			names = append(names, yamlFile)
+		}
+	}
+
+	b.Comment(embedName + " is this API's OpenAPI document, in every rendering this " +
+		"project asked for.\n\n" +
+		"Embedded rather than read from disk, so what a build serves is what that " +
+		"build was generated from: a deployment cannot answer with a document " +
+		"describing an API it is not the one running.")
+	b.L("//go:embed %s", strings.Join(names, " "))
+	b.L("var %s %s.FS", embedName, b.Import("embed"))
+
+	content, err := b.Bytes()
+	if err != nil {
+		return gen.Artifact{}, err
+	}
+	return gen.Artifact{Path: "openapi.gen.go", Content: content, Mode: gen.Overwrite}, nil
+}
+
+// packageFor derives a package name from the output directory.
+//
+// Lowercased and stripped to letters and digits, because a directory may be
+// called `api-docs` and a package may not. A name that cannot survive that —
+// one that is empty, or starts with a digit — is not guessed at: the caller
+// asks for the option instead, because a package name nobody chose is one that
+// turns up in an import block looking like a mistake.
+func packageFor(outDir string) string {
+	base := filepath.Base(filepath.Clean(outDir))
+
+	var out strings.Builder
+	for _, r := range strings.ToLower(base) {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			out.WriteRune(r)
+		}
+	}
+	name := out.String()
+	if name == "" || unicode.IsDigit(rune(name[0])) {
+		return ""
+	}
+	// A package named for a Go keyword parses as anything but a package.
+	if keywords[name] {
+		return ""
+	}
+	return name
+}
+
+// keywords are the names a package cannot have.
+var keywords = map[string]bool{
+	"break": true, "case": true, "chan": true, "const": true, "continue": true,
+	"default": true, "defer": true, "else": true, "fallthrough": true, "for": true,
+	"func": true, "go": true, "goto": true, "if": true, "import": true,
+	"interface": true, "map": true, "package": true, "range": true, "return": true,
+	"select": true, "struct": true, "switch": true, "type": true, "var": true,
 }

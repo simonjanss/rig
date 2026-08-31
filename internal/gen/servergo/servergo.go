@@ -88,6 +88,18 @@ type Options struct {
 	// APIImport is the import path of this generated package, so a shape stub in
 	// another directory can name the scope type it satisfies.
 	APIImport string `json:"api_import"`
+
+	// OpenAPIImport is the import path of the package the openapi generator
+	// writes the document into — its out_dir, which is `docs` by convention.
+	//
+	// It is needed because a go:embed directive cannot climb out of the directory
+	// of the file it is written in, so the document is embedded beside itself and
+	// this package imports it. That is what makes serving the specification a
+	// rig.yaml key rather than a line in every project's main.go.
+	//
+	// It only matters for a project whose `api.openapi.serve` is on, and it is
+	// refused missing then rather than producing a file that does not build.
+	OpenAPIImport string `json:"openapi_import"`
 }
 
 // Generator emits the HTTP layer.
@@ -128,6 +140,17 @@ func (g *Generator) Generate(_ context.Context, doc *ir.Document, opts gen.Optio
 		// without a path to it is a file that does not build — and CreateOnce means
 		// the next run leaves it exactly as it is.
 		return nil, fmt.Errorf("api_import is required alongside stub_dir: a shape's scoping stub names the scope type this package declares")
+	}
+	if doc.API.OpenAPI != nil && cfg.OpenAPIImport == "" {
+		// Before anything is written, for the reason above. The document is
+		// embedded beside itself — a go:embed directive cannot climb out of the
+		// directory of the file it is written in — so this package imports it,
+		// and a router emitted with no path to it is a router that does not
+		// build.
+		return nil, fmt.Errorf("openapi_import is required because api.openapi.serve is " +
+			"on: the document is embedded in the package the openapi generator writes " +
+			"it to, and this router imports it — set openapi_import to that generator's " +
+			"out_dir under your module path, for example <module>/docs")
 	}
 
 	e := &emitter{doc: doc, cfg: cfg, root: opts.Root, namer: naming.New(naming.Config{})}

@@ -46,19 +46,6 @@ import (
 //go:embed migrations/*.sql
 var migrations embed.FS
 
-// And the document travels with it, for the same reason: what this build serves
-// is what this build describes. `api.openapi.serve` in rig.yaml makes the routes
-// and the Handlers field below; this is the half rig cannot write, because
-// go:embed cannot reach out of the package it is written in and the document is
-// written to the `openapi` generator's out_dir rather than beside the router.
-//
-// Both renderings, because rig.yaml asks for both. A project writing only JSON
-// names only that file — a go:embed pattern that matches nothing is a build
-// error, which is the right way round.
-//
-//go:embed docs/openapi.gen.json docs/openapi.gen.yaml
-var apidocs embed.FS
-
 // localDSN is what `rig db url` prints for this project, so `rig db up` and
 // then `go run .` is the whole setup. $DATABASE_URL wins when it is set.
 const localDSN = "postgres://rig:rig@localhost:55440/rig?sslmode=disable"
@@ -241,11 +228,6 @@ func main() {
 				// and comes out regardless, which is the one worth having.
 				Logger: app.Logger,
 			},
-			// The document describing everything below, at
-			// /api/v1/openapi.json and /api/v1/openapi.yaml. Nil would leave
-			// both unmounted, which is what a project that has not embedded it
-			// yet gets: nothing, rather than two routes answering 404.
-			OpenAPI:        apidocs,
 			Todo:           svc,
 			TodoAttachment: attachments,
 			Notifications:  inbox,
@@ -267,6 +249,13 @@ func main() {
 		// Anything else this server answers is a Handle call on the same mux,
 		// the way ui.Mount above is: static files, a second API, a webhook
 		// receiver.
+		//
+		// The OpenAPI document is not one of them, and that is worth noticing
+		// here rather than in the diff that would have added it: `api.openapi.
+		// serve` in rig.yaml puts it on /api/v1/openapi.json and
+		// /api/v1/openapi.yaml, embedded in this binary, with nothing in this
+		// file. The document is a fact about the API rather than a decision this
+		// wiring makes, so there was nothing to hand over.
 
 		// Anything that has to see the response rather than only the request —
 		// tracing, a duration, a panic — wraps the handler instead:

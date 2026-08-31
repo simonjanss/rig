@@ -1,6 +1,7 @@
 package openapigen_test
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
 	"net/http"
@@ -867,6 +868,140 @@ func TestElectricShapesAreDocumentedUnlessTurnedOff(t *testing.T) {
 	}
 }
 
+// servedDoc is the primary fixture with the document turned into a route.
+//
+// Set here rather than in a fixture of its own: it is an `api:` key and reaches
+// the IR through Freeze, which internal/compile tests directly. The paths are
+// the ones Freeze computes from this fixture's base path.
+func servedDoc(t *testing.T) *ir.Document {
+	t.Helper()
+
+	doc := load(t, primary)
+	doc.API.OpenAPI = &ir.OpenAPI{
+		JSONPath: "/api/v1/openapi.json",
+		YAMLPath: "/api/v1/openapi.yaml",
+	}
+	return doc
+}
+
+// servedOpts is opts() with somewhere for the embed file to go. Serving the
+// document means writing a Go package beside it, and a package needs a
+// directory with a name — "." is the project root and cannot have one.
+func servedOpts() gen.Options {
+	return gen.Options{OutDir: filepath.Join("project", "docs")}
+}
+
+// TestOpenAPIEmbedGolden is the Go file this generator writes beside the
+// document for a project that serves it.
+//
+// Only that file, because the two renderings are already goldened five times
+// over and what is new here is one declaration and the directive above it.
+func TestOpenAPIEmbedGolden(t *testing.T) {
+	t.Parallel()
+
+	artifacts := gentest.Run(t, openapigen.New(), servedDoc(t),
+		gen.Options{OutDir: filepath.Join("project", "docs")})
+
+	var only []gen.Artifact
+	for _, a := range artifacts {
+		if a.Path == "openapi.gen.go" {
+			only = append(only, a)
+		}
+	}
+	if len(only) != 1 {
+		t.Fatalf("want one openapi.gen.go, got %d", len(only))
+	}
+
+	gentest.Golden(t, filepath.Join("testdata", "openapi"), only, *update)
+}
+
+// The embed is the mechanism, and the reason the document is served with no line
+// in anybody's main.go: a go:embed directive cannot climb out of the directory
+// of the file it is written in, so it is written beside the renderings and the
+// generated router imports the package.
+func TestTheEmbedNamesEveryRenderingWritten(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		formats []any
+		want    string
+	}{
+		{nil, "//go:embed openapi.gen.json openapi.gen.yaml"},
+		{[]any{"json"}, "//go:embed openapi.gen.json"},
+		{[]any{"yaml"}, "//go:embed openapi.gen.yaml"},
+	} {
+		raw := map[string]any{}
+		if tc.formats != nil {
+			raw["formats"] = tc.formats
+		}
+		artifacts := gentest.Run(t, openapigen.New(), servedDoc(t),
+			gen.Options{OutDir: filepath.Join("project", "docs"), Raw: raw})
+
+		src := ""
+		for _, a := range artifacts {
+			if a.Path == "openapi.gen.go" {
+				src = string(a.Content)
+			}
+		}
+		if src == "" {
+			t.Fatalf("formats %v: no openapi.gen.go", tc.formats)
+		}
+		if !strings.Contains(src, tc.want+"\n") {
+			t.Errorf("formats %v: want the directive %q, got:\n%s", tc.formats, tc.want, src)
+		}
+	}
+}
+
+// The package the embed file declares comes from the directory it lands in,
+// because that is what an import of it will be called.
+func TestTheEmbedPackageFollowsTheOutputDirectory(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct{ outDir, pkg string }{
+		{filepath.Join("project", "docs"), "package docs"},
+		{filepath.Join("project", "api-docs"), "package apidocs"},
+		{filepath.Join("project", "internal", "spec"), "package spec"},
+	} {
+		artifacts := gentest.Run(t, openapigen.New(), servedDoc(t),
+			gen.Options{OutDir: tc.outDir})
+
+		var src string
+		for _, a := range artifacts {
+			if a.Path == "openapi.gen.go" {
+				src = string(a.Content)
+			}
+		}
+		if !strings.Contains(src, tc.pkg) {
+			t.Errorf("out_dir %q: want %q, got:\n%s", tc.outDir, tc.pkg, src)
+		}
+	}
+
+	// And a name that cannot be derived is asked for rather than invented, so a
+	// package nobody chose never turns up in an import block.
+	_, err := openapigen.New().Generate(context.Background(), servedDoc(t),
+		gen.Options{OutDir: filepath.Join("project", "123")})
+	if err == nil {
+		t.Fatal("no error for a directory no package name can come from")
+	}
+	if !strings.Contains(err.Error(), "package option") {
+		t.Errorf("error = %q, want it to name the option", err)
+	}
+
+	// Stated explicitly, it wins.
+	artifacts := gentest.Run(t, openapigen.New(), servedDoc(t),
+		gen.Options{OutDir: filepath.Join("project", "123"),
+			Raw: map[string]any{"package": "apispec"}})
+	var src string
+	for _, a := range artifacts {
+		if a.Path == "openapi.gen.go" {
+			src = string(a.Content)
+		}
+	}
+	if !strings.Contains(src, "package apispec") {
+		t.Errorf("the package option was not used:\n%s", src)
+	}
+}
+
 // A document that is served describes the routes it is served on. Anything else
 // would be this generator's one claim failing on itself: the specification is
 // supposed to describe every route the server answers, and these two are routes
@@ -874,12 +1009,7 @@ func TestElectricShapesAreDocumentedUnlessTurnedOff(t *testing.T) {
 func TestTheServedDocumentDescribesItsOwnRoutes(t *testing.T) {
 	t.Parallel()
 
-	doc := load(t, primary)
-	if doc.API.OpenAPI == nil {
-		t.Fatal("the primary fixture no longer serves the document")
-	}
-
-	m := model(t, run(t, primary))
+	m := model(t, gentest.Run(t, openapigen.New(), servedDoc(t), servedOpts()))
 
 	for _, tc := range []struct{ path, id, mediaType string }{
 		{"/api/v1/openapi.json", "getOpenAPIJSON", "application/json"},
@@ -938,15 +1068,19 @@ func TestTheServedDocumentDescribesItsOwnRoutes(t *testing.T) {
 func TestOnlyTheFormatsWrittenAreDescribed(t *testing.T) {
 	t.Parallel()
 
-	artifacts := gentest.Run(t, openapigen.New(), load(t, primary),
-		gen.Options{OutDir: ".", Raw: map[string]any{"formats": []any{"json"}}})
+	artifacts := gentest.Run(t, openapigen.New(), servedDoc(t),
+		gen.Options{OutDir: filepath.Join("project", "docs"),
+			Raw: map[string]any{"formats": []any{"json"}}})
 
-	body := ""
+	var body string
 	for _, a := range artifacts {
-		if a.Path != "openapi.gen.json" {
+		switch a.Path {
+		case "openapi.gen.json":
+			body = string(a.Content)
+		case "openapi.gen.go":
+		default:
 			t.Fatalf("unexpected artifact %s", a.Path)
 		}
-		body = string(a.Content)
 	}
 	if !strings.Contains(body, "/api/v1/openapi.json") {
 		t.Error("the JSON route is not described")
@@ -962,7 +1096,13 @@ func TestOnlyTheFormatsWrittenAreDescribed(t *testing.T) {
 func TestTheServedDocumentNeedsNoCredential(t *testing.T) {
 	t.Parallel()
 
-	m := model(t, run(t, "authwired"))
+	doc := load(t, "authwired")
+	doc.API.OpenAPI = &ir.OpenAPI{
+		JSONPath: "/api/v1/openapi.json",
+		YAMLPath: "/api/v1/openapi.yaml",
+	}
+
+	m := model(t, gentest.Run(t, openapigen.New(), doc, servedOpts()))
 	if m.Security == nil {
 		t.Fatal("authwired no longer requires a credential document-wide")
 	}
@@ -982,16 +1122,19 @@ func TestTheServedDocumentNeedsNoCredential(t *testing.T) {
 }
 
 // The negative: a project that keeps the document a file has no routes for it,
-// and no tag for routes that do not exist.
+// no tag for routes that do not exist, and no Go file at all — its out_dir stays
+// a directory of documents rather than becoming a package.
 func TestADocumentThatIsNotServedDescribesNoRoutes(t *testing.T) {
 	t.Parallel()
 
-	doc := load(t, "ownerscope")
-	if doc.API.OpenAPI != nil {
-		t.Fatal("ownerscope serves the document; it is the negative case")
+	artifacts := run(t, primary)
+	for _, a := range artifacts {
+		if a.Path == "openapi.gen.go" {
+			t.Error("a project that does not serve the document got an embed file")
+		}
 	}
 
-	body := yamlOf(t, run(t, "ownerscope"))
+	body := yamlOf(t, artifacts)
 	for _, absent := range []string{"openapi.json:", "openapi.yaml:", "getOpenAPIJSON"} {
 		if strings.Contains(body, absent) {
 			t.Errorf("emitted %q for a project that does not serve the document", absent)

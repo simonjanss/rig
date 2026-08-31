@@ -88,11 +88,11 @@ curl http://127.0.0.1:8080/api/v1/openapi.json
 curl http://127.0.0.1:8080/api/v1/openapi.yaml
 ```
 
-That one is half a line in this file — the `go:embed` beside the migrations. rig
-mounts the routes and cannot supply the bytes: `go:embed` does not reach out of
-the package it is written in, and the document is written to `docs/` rather than
-beside the generated router. What the embed buys is that what this build serves
-is what this build describes.
+That one is no lines in this file at all. The `openapi` generator writes a
+`go:embed` beside the document it produces — a directive cannot climb out of the
+directory of the file it is written in, and `docs/` is not `internal/api/` — and
+`server-go`'s `openapi_import` is how the router reaches it. What the embed buys
+is that what this build serves is what this build describes.
 
 Anything with a shutdown of its own — a queue consumer, an exporter, a client
 with its own pool — is registered where it is built. `notify` is this example's
