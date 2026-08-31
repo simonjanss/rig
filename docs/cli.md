@@ -12,9 +12,9 @@ The commands, in the order you meet them:
 | | |
 |---|---|
 | `rig init [dir]` | Start a new project |
-| `rig migration new <name>` | Write a new migration file |
+| `rig migration new <name>` | Write a new migration file. `--publish-shapes` writes the publication and replica identity every streaming table needs, reading the database to add only what is missing |
 | `rig migration check` | Check migration version numbers — no database, so it runs on a bare checkout |
-| `rig db up` / `down` / `reset` / `url` / `psql` | Manage the throwaway local database — and, with `database.electric.enabled`, the sync service beside it |
+| `rig db up` / `down` / `reset` / `url` / `psql` | Manage the throwaway local database — and, with `database.electric.enabled`, the sync service beside it. `rig db url --electric` prints the sync service's address |
 | `rig sync` | Bring table configuration in step with the database |
 | `rig validate` | Check the schema and its configuration |
 | `rig generate` | Write the code |
@@ -189,8 +189,9 @@ is the obvious choice — and rig gives each one a container of its own:
 
 ```bash
 export RIG_DB_ISOLATE=$PWD
-rig db up          # todo-db-88c55d79, on a port the kernel picked
-rig db url         # the only thing that knows which port that was
+rig db up             # todo-db-88c55d79, on a port the kernel picked
+rig db url            # the only thing that knows which port that was
+rig db url --electric # and the sync service's, which moved for the same reason
 ```
 
 The name keeps them apart and the port stops them queueing for one number. Leave
@@ -200,3 +201,11 @@ Two things follow from the port being the kernel's. `rig db url` starts the
 database to answer, because there is no port until a container has one. And
 whatever you point at it needs telling — `DATABASE_URL=$(rig db url) go test
 ./...` rather than a connection string with the number typed into it.
+
+The sync service moved too, and `--electric` is how you ask where to. A Makefile
+with `ELECTRIC_URL=http://localhost:55451` in it is repeating a number out of
+rig.yaml, and under isolation it is repeating the wrong one:
+
+```bash
+ELECTRIC_URL=$(rig db url --electric) DATABASE_URL=$(rig db url) go run ./api
+```

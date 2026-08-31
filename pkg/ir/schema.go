@@ -38,7 +38,43 @@ type Publication struct {
 	// AllTables is a publication declared FOR ALL TABLES, which carries every
 	// table in the database including ones created after it.
 	AllTables bool `json:"all_tables,omitempty"`
+	// Owned says this publication belongs to the role rig connected as, which is
+	// the role that runs migrations.
+	//
+	// It is the one fact that tells a publication a migration wrote from one the
+	// sync service created for itself, and the two are worth telling apart even
+	// when they share a name. The sync service makes
+	// `electric_publication_default` on first connection and owns it; a migration
+	// that creates the same publication first owns it instead, and that is the
+	// arrangement that makes live sync work for a role owning no tables. Only the
+	// owner distinguishes them.
+	Owned bool `json:"owned,omitempty"`
 }
+
+// ReplicaIdentity is a table's pg_class.relreplident, spelled out.
+//
+// Four values rather than a bool, because the three that are not
+// [ReplicaIdentityFull] fail live sync for three different reasons and a rule
+// worth reading says which: nothing carries no old row at all, index means
+// somebody chose a covering index on purpose, and default — the Postgres default
+// — carries the primary key and nothing else.
+type ReplicaIdentity string
+
+// The replica identities Postgres records.
+const (
+	// ReplicaIdentityDefault carries the primary key of the old row, which is
+	// what a table has unless somebody changed it.
+	ReplicaIdentityDefault ReplicaIdentity = "default"
+	// ReplicaIdentityFull carries the whole old row, and is what live sync needs:
+	// a subscriber matching an update against the row it replaces has only the
+	// old values to match on.
+	ReplicaIdentityFull ReplicaIdentity = "full"
+	// ReplicaIdentityNothing carries nothing, so an update or a delete reaches a
+	// subscriber with no way to say which row it was.
+	ReplicaIdentityNothing ReplicaIdentity = "nothing"
+	// ReplicaIdentityIndex carries the columns of a nominated unique index.
+	ReplicaIdentityIndex ReplicaIdentity = "index"
+)
 
 // TableKind distinguishes real tables from the read-only relations that share
 // their introspection shape.
@@ -72,6 +108,14 @@ type Table struct {
 	// Unlogged is a table whose relpersistence is 'u'. It writes no WAL, so
 	// logical replication cannot see it at all.
 	Unlogged bool `json:"unlogged,omitempty"`
+	// ReplicaIdentity is what an UPDATE or a DELETE on this table puts in the
+	// WAL for the row as it was. Live sync needs [ReplicaIdentityFull].
+	//
+	// Empty means nobody looked — a schema dump written before rig read this, or
+	// a hand-written fixture — which is what lets the rule over it be an error
+	// rather than a guess. Same convention as [Schema.Replication], one level
+	// down.
+	ReplicaIdentity ReplicaIdentity `json:"replica_identity,omitempty"`
 
 	// LinkTable is set when this table is a pure many-to-many join: its primary
 	// key is exactly two foreign-key columns. Such tables become relations on

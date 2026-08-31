@@ -167,6 +167,19 @@ func foundationParts(p *project.Project) ([]string, error) {
 			Files:         p.Config.Files.Enabled,
 			Notifications: p.Config.Notifications.Enabled,
 			Presence:      p.Config.Presence.Enabled,
+			// `database.electric.enabled` rather than "does any table stream",
+			// which is the finer answer the generators use and is not available
+			// here: this is read before `rig db up` applies anything, so there is
+			// no schema to compile and no shape endpoints to count.
+			//
+			// The two are allowed to disagree, and it costs nothing when they do.
+			// The set creates a role and no table, records in a bookkeeping table
+			// of its own, and every statement in it is idempotent — so whichever
+			// of `rig db up` and the running application gets there first applies
+			// it, and the other finds it done. A local sync service and a project
+			// that streams are the same case in practice; where they are not, the
+			// union of the two answers is the safe side to be on.
+			Electric: p.Config.Database.Electric.Enabled,
 		}.Parts(), nil
 	}
 

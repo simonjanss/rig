@@ -9,6 +9,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/simonjanss/rig/internal/compile"
+	"github.com/simonjanss/rig/internal/project"
 	"github.com/simonjanss/rig/internal/scaffold"
 )
 
@@ -73,6 +74,7 @@ func newSetupProjectCmd(e *env) *cobra.Command {
 				ConfigPath:    p.TableConfigPath,
 				Existing:      existing,
 				ConfigsOnly:   embedded,
+				Want:          wantedHere(p),
 			})
 
 			if dryRun {
@@ -259,4 +261,25 @@ func normalizeSkip(skip []string) ([]string, error) {
 		}
 	}
 	return out, nil
+}
+
+// wantedHere is the parts in [scaffold.OptionalParts] this project asks for.
+//
+// One part, one question: the sync service's Postgres role, asked as
+// `database.electric.enabled`. That is a coarser reading than the one the
+// generators use — they know which tables stream, because they have compiled the
+// document — and the difference is unavoidable here rather than a choice. This
+// command runs before there are tables to ask about; a project reaches it to get
+// the foundation, and its own schema comes after.
+//
+// So the answer is "you configured a sync service, so you mean to sync", and the
+// case it gets wrong is a project that turns on streaming later. That project
+// runs `rig setup-project` again and gets the migration at the next free number,
+// which is the same upgrade path a module gaining a migration already takes —
+// see [scaffold.FoundationOptions.Existing].
+func wantedHere(p *project.Project) []string {
+	if p.Config.Database.Electric.Enabled {
+		return []string{scaffold.PartElectricRole}
+	}
+	return nil
 }

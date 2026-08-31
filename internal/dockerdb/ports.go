@@ -96,6 +96,17 @@ const (
 	// one of those tests kills a backend, and a suite sharing the database would
 	// see it as its own connection dying.
 	PortCache = 55486
+
+	// PortElectricRoleDB and PortElectricRoleSync are internal/electrictest's
+	// least-privilege case: the sync service connecting as the `electric` role
+	// rig's foundation creates rather than as the superuser `rig db up` hands it.
+	//
+	// Its own pair rather than a case in the suite next door, because the
+	// container's DATABASE_URL is what the test is about — it has to be a
+	// different sync service, and one whose Postgres has been through the role
+	// migration.
+	PortElectricRoleDB   = 55485
+	PortElectricRoleSync = 55484
 )
 
 // ports is every number above, with the name a failure should mention.
@@ -103,27 +114,29 @@ const (
 // It is written out rather than derived, because the point is to have one list
 // that a person reads and a test checks.
 var ports = map[string]int{
-	"default (rig init)":             PortDefault,
-	"default electric (rig db up)":   PortDefaultElectric,
-	"examples/todo":                  PortExampleTodo,
-	"examples/fantasyfootball":       PortExampleFantasyFootball,
-	"examples/auth":                  PortExampleAuth,
-	"examples/auth_oauth":            PortExampleAuthOAuth,
-	"examples/linearlite":            PortExampleLinearlite,
-	"examples/linearlite (electric)": PortExampleLinearliteElectric,
-	"internal/filestest":             PortFiles,
-	"rigs3 (minio)":                  PortS3MinIO,
-	"internal/idemtest":              PortIdempotency,
-	"internal/throttletest":          PortThrottle,
-	"internal/electrictest (sync)":   PortElectricSync,
-	"internal/introspect":            PortIntrospect,
-	"internal/electrictest (db)":     PortElectricDB,
-	"internal/cli (e2e)":             PortCLIEndToEnd,
-	"internal/cli (setup)":           PortCLISetup,
-	"internal/cli (setup, own)":      PortCLISetupOwn,
-	"internal/cli (electric db)":     PortCLIElectricDB,
-	"internal/cli (electric sync)":   PortCLIElectricSync,
-	"internal/authtest":              PortAuth,
-	"internal/presencetest":          PortPresence,
-	"internal/cachetest":             PortCache,
+	"default (rig init)":                PortDefault,
+	"default electric (rig db up)":      PortDefaultElectric,
+	"examples/todo":                     PortExampleTodo,
+	"examples/fantasyfootball":          PortExampleFantasyFootball,
+	"examples/auth":                     PortExampleAuth,
+	"examples/auth_oauth":               PortExampleAuthOAuth,
+	"examples/linearlite":               PortExampleLinearlite,
+	"examples/linearlite (electric)":    PortExampleLinearliteElectric,
+	"internal/filestest":                PortFiles,
+	"rigs3 (minio)":                     PortS3MinIO,
+	"internal/idemtest":                 PortIdempotency,
+	"internal/throttletest":             PortThrottle,
+	"internal/electrictest (sync)":      PortElectricSync,
+	"internal/introspect":               PortIntrospect,
+	"internal/electrictest (db)":        PortElectricDB,
+	"internal/cli (e2e)":                PortCLIEndToEnd,
+	"internal/cli (setup)":              PortCLISetup,
+	"internal/cli (setup, own)":         PortCLISetupOwn,
+	"internal/cli (electric db)":        PortCLIElectricDB,
+	"internal/cli (electric sync)":      PortCLIElectricSync,
+	"internal/authtest":                 PortAuth,
+	"internal/presencetest":             PortPresence,
+	"internal/cachetest":                PortCache,
+	"internal/electrictest (role db)":   PortElectricRoleDB,
+	"internal/electrictest (role sync)": PortElectricRoleSync,
 }

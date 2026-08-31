@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -164,31 +165,7 @@ func newDBCmd(e *env) *cobra.Command {
 				return nil
 			},
 		},
-		&cobra.Command{
-			Use:   "url",
-			Short: "Print the connection string",
-			Long: "The port is the one in rig.yaml, so this answers without touching Docker.\n" +
-				"Under " + dockerdb.IsolateEnv + " there is no port until a container has one, so\n" +
-				"this starts the database the same way `rig db up` would.",
-			Args: cobra.NoArgs,
-			RunE: func(cmd *cobra.Command, _ []string) error {
-				p, err := e.mustProject()
-				if err != nil {
-					return err
-				}
-				if !dockerdb.Isolated() || !p.UsesContainer() {
-					fmt.Fprintln(e.out, p.DatabaseURL())
-					return nil
-				}
-
-				url, err := e.database(cmd.Context(), p)
-				if err != nil {
-					return err
-				}
-				fmt.Fprintln(e.out, url)
-				return nil
-			},
-		},
+		urlCmd(e),
 		&cobra.Command{
 			Use:   "psql",
 			Short: "Open a psql session against the database",
@@ -225,4 +202,83 @@ func containerFor(ctx context.Context, e *env, p *project.Project) (*dockerdb.DB
 	cfg := containerConfig(p)
 	cfg.Log = e.errOut
 	return dockerdb.Attach(ctx, cfg)
+}
+
+// urlCmd prints an address something else has to be pointed at.
+//
+// Two of them, because a project with live sync has two: `$DATABASE_URL` and
+// `$ELECTRIC_URL`. Before --electric existed the second was a number a Makefile
+// repeated out of rig.yaml — which is a duplicate of something rig already knows,
+// and wrong under `RIG_DB_ISOLATE`, where the sync service's port is assigned
+// when its container starts rather than written in a file.
+func urlCmd(e *env) *cobra.Command {
+	var electric bool
+
+	cmd := &cobra.Command{
+		Use:   "url",
+		Short: "Print the connection string",
+		Long: "The port is the one in rig.yaml, so this answers without touching Docker.\n" +
+			"Under " + dockerdb.IsolateEnv + " there is no port until a container has one, so\n" +
+			"this starts the database the same way `rig db up` would.\n\n" +
+			"With --electric, prints the sync service's address instead — what the\n" +
+			"generated shape proxy forwards to, and what $ELECTRIC_URL is for.",
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			p, err := e.mustProject()
+			if err != nil {
+				return err
+			}
+			if electric {
+				url, err := e.electricURL(cmd.Context(), p)
+				if err != nil {
+					return err
+				}
+				fmt.Fprintln(e.out, url)
+				return nil
+			}
+			if !dockerdb.Isolated() || !p.UsesContainer() {
+				fmt.Fprintln(e.out, p.DatabaseURL())
+				return nil
+			}
+
+			url, err := e.database(cmd.Context(), p)
+			if err != nil {
+				return err
+			}
+			fmt.Fprintln(e.out, url)
+			return nil
+		},
+	}
+
+	cmd.Flags().BoolVar(&electric, "electric", false, "print the sync service's address instead")
+	return cmd
+}
+
+// electricURL is where this project's local sync service answers.
+//
+// Outside isolation the port is in rig.yaml and this touches nothing, which is
+// what lets a Makefile call it on every target. Under isolation there is no port
+// until a container has one, so it brings the pair up exactly as `rig db up`
+// would — the database first, because the sync service is pointed at its
+// published port.
+func (e *env) electricURL(ctx context.Context, p *project.Project) (string, error) {
+	if !p.Config.Database.Electric.Enabled {
+		return "", errors.New("database.electric is not enabled, so this project has no sync service to name; " +
+			"enable it in rig.yaml, or point $ELECTRIC_URL at a sync service you run yourself")
+	}
+	if !dockerdb.Isolated() {
+		return dockerdb.ElectricURL(dockerdb.HostPort(p.Config.Database.Electric.Port)), nil
+	}
+
+	db, err := e.startDatabase(ctx, p)
+	if err != nil {
+		return "", err
+	}
+	cfg := electricConfig(p, db)
+	cfg.Log = e.errOut
+	el, err := dockerdb.StartElectric(ctx, cfg)
+	if err != nil {
+		return "", err
+	}
+	return el.URL(), nil
 }

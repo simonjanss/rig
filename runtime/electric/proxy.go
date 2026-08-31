@@ -132,6 +132,34 @@ type Config struct {
 	// Headers are added to every upstream request, for the same reason.
 	Headers http.Header
 
+	// Secret authorises this proxy to the sync service.
+	//
+	// It is why the sync service can stay off the load balancer. Electric reads it from
+	// the query string, so whatever holds it has to be something a browser is not —
+	// which is this proxy, and is the arrangement Electric's own documentation asks
+	// for. A client's own credential is separate and is never forwarded; see
+	// [Proxy.Serve].
+	//
+	// Empty leaves it off the request entirely rather than sending an empty one, which
+	// a secured sync service reads as a wrong one. That is the service `rig db up`
+	// starts, which runs without a secret at all.
+	//
+	// A field of its own rather than an entry in [Config.Extra], and the reason is not
+	// tidiness: this package has to know the value in order to take it back out of what
+	// it reports. The credential is on the URL of every upstream request, and a
+	// transport failure is an *url.Error, which renders that URL — so without this
+	// field the secret reaches [Config.OnError] and then a log. Naming it here is what
+	// lets every error this proxy reports have it removed.
+	//
+	// Setting both this and an Extra["secret"] is refused by [New]: two answers to one
+	// question, one of which would be silently dropped.
+	//
+	// A secret stated only in Extra — which is where one had to go before this field
+	// existed — is sent from there and redacted all the same. The redaction is not
+	// what this field is for, and a project doing that is the one already logging its
+	// credential, so it would be the wrong place to hold the line.
+	Secret string
+
 	// DB answers a shape when the sync service cannot be reached, by running the
 	// shape's own filter against the database the sync service reads.
 	//
@@ -337,6 +365,13 @@ type Proxy struct {
 	client  *http.Client
 	extra   url.Values
 	headers http.Header
+	// secret is what goes on a request; hidden is what comes back out of what
+	// this proxy reports. They are the same value except for a project that
+	// still states its secret in [Config.Extra], where there is nothing to add
+	// to the request — it is already on it — and still a credential to keep out
+	// of a log. See credential in secret.go.
+	secret  string
+	hidden  string
 	initial time.Duration
 	maxRows int
 	db      DB
@@ -359,6 +394,48 @@ type Proxy struct {
 	mu       sync.RWMutex
 	draining bool
 	polling  sync.WaitGroup
+}
+
+// Defaults fills in the five values [New] will not invent, from the Default constants this
+// package documents as the answers to write, and returns the Config.
+//
+// [New] refusing them is deliberate and stands: each governs what a subscriber sees while
+// the sync service is away, and a value this package chose for a caller who said nothing
+// would be a value nobody chose, found the first time a sync service goes away. Calling
+// this is choosing them — explicitly, in one line, at the call site, where a reader can
+// see that the answer is "whatever rig recommends" rather than a considered number.
+//
+// So it is not a default. It is the documented answer, applied on request:
+//
+//	proxy, err := electric.New(electric.Config{
+//		URL: cfg.ElectricURL,
+//		DB:  pool,
+//	}.Defaults())
+//
+// Anything already set is left alone, including a negative — each of the five documents
+// what its negative means, and this is not the place that decides one was a mistake. So a
+// caller can take the recommendations and override one:
+//
+//	electric.Config{URL: u, MaxSnapshotRows: 200}.Defaults()
+func (c Config) Defaults() Config {
+	if c.InitialTimeout == 0 {
+		c.InitialTimeout = DefaultInitialTimeout
+	}
+	if c.MaxSnapshotRows == 0 {
+		c.MaxSnapshotRows = DefaultMaxSnapshotRows
+	}
+	if c.SnapshotTimeout == 0 {
+		c.SnapshotTimeout = DefaultSnapshotTimeout
+	}
+	if c.BreakerThreshold == 0 {
+		c.BreakerThreshold = DefaultBreakerThreshold
+	}
+	// The one with no negative to carry: a cooldown below zero has no meaning, so
+	// [New] refuses it rather than reading it as an answer, and this fills it in.
+	if c.BreakerCooldown <= 0 {
+		c.BreakerCooldown = DefaultBreakerCooldown
+	}
+	return c
 }
 
 // New builds a proxy.
@@ -424,7 +501,22 @@ func New(cfg Config) (*Proxy, error) {
 			strings.Join(missing, ", "))
 	}
 
+	// Two answers to one question. Whichever this package happened to apply second
+	// would win, and the other would be silently ignored — and the one that loses may
+	// be the one somebody meant, since Extra is where a secret had to go before
+	// Config.Secret existed.
+	if cfg.Secret != "" && cfg.Extra.Has("secret") {
+		return nil, errors.New("electric: the secret is set both in Config.Secret and in Config.Extra; " +
+			"state it once, in Config.Secret, which is the one this package can keep out of what it reports")
+	}
+
 	life, retire := context.WithCancel(context.Background())
+
+	// What to keep out of what this proxy reports, which is a wider question than
+	// what to put on a request: a secret stated in Extra reaches the upstream URL
+	// by the same route and would otherwise be redacted by nothing. See credential
+	// in secret.go.
+	hidden := credential(cfg)
 
 	return &Proxy{
 		base:    base,
@@ -433,11 +525,15 @@ func New(cfg Config) (*Proxy, error) {
 		retire:  retire,
 		extra:   cfg.Extra,
 		headers: cfg.Headers,
+		secret:  cfg.Secret,
+		hidden:  hidden,
 		initial: cfg.InitialTimeout,
 		maxRows: cfg.MaxSnapshotRows,
 		db:      cfg.DB,
 		snapTTL: cfg.SnapshotTimeout,
-		onError: cfg.OnError,
+		// Wrapped once here rather than at each site that can carry the URL. See
+		// reporting in secret.go.
+		onError: reporting(cfg.OnError, hidden),
 		onState: cfg.OnSyncState,
 		breaker: &breaker{threshold: cfg.BreakerThreshold, cooldown: cfg.BreakerCooldown},
 	}, nil
@@ -485,13 +581,28 @@ func (p *Proxy) Health(ctx context.Context) error {
 	target := *p.base
 	target.Path = strings.TrimRight(target.Path, "/") + "/v1/health"
 
+	// The same credentials a shape request carries, on the query string as well as in
+	// the headers. The headers were once the whole of this, and a sync service
+	// authorising on the query string — which is how Electric's own secret arrives —
+	// then turned away the boot check and the monitoring page while every shape worked.
+	if len(p.extra) > 0 || p.secret != "" {
+		q := target.Query()
+		for name, values := range p.extra {
+			for _, v := range values {
+				q.Add(name, v)
+			}
+		}
+		if p.secret != "" {
+			q.Set("secret", p.secret)
+		}
+		target.RawQuery = q.Encode()
+	}
+
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target.String(), nil)
 	if err != nil {
-		return fmt.Errorf("electric: %w", err)
+		// Not %w: the URL this failed to parse is the one carrying the secret.
+		return redacting(fmt.Errorf("electric: %w", err), p.hidden)
 	}
-	// The same credentials a shape request carries. A deployment with something
-	// in front of the sync service would otherwise have a probe that fails for a
-	// reason the shapes never hit.
 	for name, values := range p.headers {
 		for _, v := range values {
 			req.Header.Add(name, v)
@@ -500,7 +611,10 @@ func (p *Proxy) Health(ctx context.Context) error {
 
 	res, err := p.client.Do(req)
 	if err != nil {
-		return fmt.Errorf("electric: cannot reach the sync service at %s: %w", p.base, err)
+		// Redacted here rather than by the wrapper around OnError: this error is
+		// returned to the caller — a readiness check, a monitoring page — and reaches
+		// a log through whoever asked rather than through this proxy.
+		return redacting(fmt.Errorf("electric: cannot reach the sync service at %s: %w", p.base, err), p.hidden)
 	}
 	defer res.Body.Close()
 
@@ -1040,6 +1154,9 @@ func (p *Proxy) request(ctx context.Context, r *http.Request, s Shape) (*http.Re
 		for _, v := range values {
 			q.Add(name, v)
 		}
+	}
+	if p.secret != "" {
+		q.Set("secret", p.secret)
 	}
 
 	// Ours, always. A request that could set these could read any table there

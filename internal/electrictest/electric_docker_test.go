@@ -32,27 +32,11 @@ import (
 	"github.com/simonjanss/rig/runtime/electric"
 )
 
-// newProxy is electric.New with every value it refuses to invent filled in from
-// the constants the package documents as the answer to write, leaving anything
-// the case set alone. Five fields per case that are not what the case is about
-// would bury the one that is.
+// newProxy is electric.New with the recommended answers to the five values it refuses to
+// invent, leaving anything the case set alone. Five fields per case that are not what the
+// case is about would bury the one that is.
 func newProxy(cfg electric.Config) (*electric.Proxy, error) {
-	if cfg.InitialTimeout == 0 {
-		cfg.InitialTimeout = electric.DefaultInitialTimeout
-	}
-	if cfg.MaxSnapshotRows == 0 {
-		cfg.MaxSnapshotRows = electric.DefaultMaxSnapshotRows
-	}
-	if cfg.SnapshotTimeout == 0 {
-		cfg.SnapshotTimeout = electric.DefaultSnapshotTimeout
-	}
-	if cfg.BreakerThreshold == 0 {
-		cfg.BreakerThreshold = electric.DefaultBreakerThreshold
-	}
-	if cfg.BreakerCooldown == 0 {
-		cfg.BreakerCooldown = electric.DefaultBreakerCooldown
-	}
-	return electric.New(cfg)
+	return electric.New(cfg.Defaults())
 }
 
 const (

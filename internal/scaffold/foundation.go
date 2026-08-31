@@ -10,6 +10,7 @@ import (
 	notifyfnd "github.com/simonjanss/rig/notify/foundation"
 	presencefnd "github.com/simonjanss/rig/presence/foundation"
 	"github.com/simonjanss/rig/runtime/dbschema"
+	electricfnd "github.com/simonjanss/rig/runtime/electric/foundation"
 	runtimefnd "github.com/simonjanss/rig/runtime/foundation"
 )
 
@@ -36,6 +37,10 @@ const (
 	PartPresence             = "presence"
 	PartIdempotency          = "idempotency"
 	PartThrottle             = "throttle"
+	// PartElectricRole is the Postgres role the sync service connects as. The one
+	// part that creates no table: what it creates is a role and its grants. It
+	// arrives only for a project that streams — see [Wanted.Electric].
+	PartElectricRole = "electric_role"
 )
 
 // Sets are the foundation's migration sets, in the order they apply.
@@ -59,9 +64,17 @@ const (
 // belongs. A project that vendored the foundation before one existed then finds
 // it as a migration to add rather than as a renumbering of the ones it has
 // already applied.
+//
+// electric is last, and here that is more than convention. It creates no table —
+// it grants the sync service's role SELECT on the schema, with ALTER DEFAULT
+// PRIVILEGES for whatever is created next — so where it sits decides what those
+// two statements cover. Last among rig's sets and before the project's own is
+// exactly the seam: ON ALL TABLES takes every table rig has already created, and
+// the default privileges take every one the project adds after.
 func Sets() []dbschema.Set {
 	return []dbschema.Set{
 		authfnd.Set(), filesfnd.Set(), notifyfnd.Set(), runtimefnd.Set(), presencefnd.Set(),
+		electricfnd.Set(),
 	}
 }
 
@@ -79,6 +92,26 @@ func Parts() []string {
 		}
 	}
 	return out
+}
+
+// OptionalParts are the parts [Foundation] writes only when asked for by name.
+//
+// Everything else in the foundation creates tables, and a table a project never
+// reads costs it nothing — which is why `--skip` is the only gate the rest need:
+// the default is "write it", and skipping is the unusual answer.
+//
+// This one creates a Postgres **role**. A role is cluster-scoped: it outlives the
+// database, it may already exist because something else on the same instance made
+// it, and it cannot be dropped while the sync service holds a slot open through
+// it. So it is the first part where scaffolded-and-unused is not free, and the
+// first where the default has to be the other way round.
+//
+// [Wanted] is the same decision read off a project's configuration. This is the
+// list [Foundation] checks, because [Foundation] is handed [FoundationOptions]
+// rather than a [Wanted] — it writes what a project *may* have, and the parts a
+// project asks for are [FoundationOptions.Want].
+func OptionalParts() []string {
+	return []string{PartElectricRole}
 }
 
 // SetOf names the set that carries a part, and whether any does.
@@ -166,6 +199,15 @@ type Wanted struct {
 	Notifications bool
 	// Presence is `presence.enabled`.
 	Presence bool
+	// Electric is a project that streams: a table with live sync, or a sync
+	// service configured for one.
+	//
+	// The only feature here whose part creates no table. What it brings is the
+	// Postgres role the sync service connects as, and it is conditional for the
+	// reason the others are not: a role holding SELECT on every table is not
+	// something to create in the database of a project that will never sync from
+	// it. See [github.com/simonjanss/rig/runtime/electric/foundation].
+	Electric bool
 
 	// There is no Idempotency field. Every project brings that part — see
 	// [Wanted.Parts] — so a bool here could only ever be true, and a knob with
@@ -225,6 +267,9 @@ func (w Wanted) Parts() []string {
 	if w.Presence {
 		add(PartPresence)
 	}
+	if w.Electric {
+		add(PartElectricRole)
+	}
 
 	// Unconditionally, and it is the only part that is. Every generated project
 	// has write endpoints, and what rig_idempotency does for them is engaged by
@@ -265,6 +310,13 @@ func inApplyOrder(want map[string]bool) []string {
 type FoundationOptions struct {
 	// Skip names parts to leave out.
 	Skip []string
+	// Want names the parts in [OptionalParts] this project asks for.
+	//
+	// Only those. Every other part is written unless [FoundationOptions.Skip]
+	// names it, and listing one here is neither required nor an error — the two
+	// fields answer different questions, and conflating them would make `--skip`
+	// mean "skip, except the ones that are off by default anyway".
+	Want []string
 	// Expose names foundation tables to write a table configuration for.
 	//
 	// Empty is the ordinary case and writes none. The foundation's tables belong
@@ -333,6 +385,12 @@ func Foundation(opt FoundationOptions) []File {
 
 	for _, part := range Parts() {
 		if slices.Contains(opt.Skip, part) {
+			continue
+		}
+		// Off unless asked for, which is the opposite of the rule above and
+		// applies to [OptionalParts] alone. See there for why a role is not a
+		// table.
+		if slices.Contains(OptionalParts(), part) && !slices.Contains(opt.Want, part) {
 			continue
 		}
 		p := foundationPart(part)
