@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
-	"strconv"
 	"strings"
+
+	"github.com/simonjanss/rig/internal/migcheck"
 )
 
 // MigrationOptions describe a new migration.
@@ -21,10 +21,6 @@ type MigrationOptions struct {
 	Snapshot bool
 }
 
-// migrationName matches the filename format rig requires: a five-digit
-// sequence, then a snake_case description.
-var migrationName = regexp.MustCompile(`^(\d{5})_([a-z0-9_]+)\.sql$`)
-
 // NextMigrationNumber reads the directory and returns the number after the
 // highest one present.
 //
@@ -32,28 +28,28 @@ var migrationName = regexp.MustCompile(`^(\d{5})_([a-z0-9_]+)\.sql$`)
 // and the order obvious. It does mean two people adding a migration on the same
 // day will collide — which is the point: a merge conflict on the filename is a
 // far better outcome than two migrations silently interleaving.
+//
+// The highest is read with [migcheck.Version] rather than by rig's own naming
+// rule, so a file rig would not have written still counts. 25_by_hand.sql is
+// version 25 to goose whatever rig thinks of the name, and numbering the next
+// migration 1 because the rule did not recognize it would produce the one thing
+// this function exists to avoid.
 func NextMigrationNumber(dir string) (int, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return 0, fmt.Errorf("read %s: %w", dir, err)
 	}
 
-	highest := 0
+	var highest int64
 	for _, entry := range entries {
 		if entry.IsDir() {
 			continue
 		}
-		m := migrationName.FindStringSubmatch(entry.Name())
-		if m == nil {
-			continue
+		if n, ok := migcheck.Version(entry.Name()); ok {
+			highest = max(highest, n)
 		}
-		n, err := strconv.Atoi(m[1])
-		if err != nil {
-			continue
-		}
-		highest = max(highest, n)
 	}
-	return highest + 1, nil
+	return int(highest) + 1, nil
 }
 
 // MigrationFilename builds the path for a new migration.

@@ -9,6 +9,7 @@ import (
 
 	"github.com/simonjanss/rig/internal/compile"
 	"github.com/simonjanss/rig/internal/diag"
+	"github.com/simonjanss/rig/internal/migcheck"
 	"github.com/simonjanss/rig/internal/project"
 	"github.com/simonjanss/rig/internal/scaffold"
 	"github.com/simonjanss/rig/internal/tableconf"
@@ -113,6 +114,7 @@ func compileFrom(p *project.Project, schema ir.Schema) (*ir.Document, diag.List)
 		diags.Append(addFoundationConfigs(set, schema, foundation, ignore))
 	}
 	diags.Append(checkFoundationMode(p))
+	diags.Append(checkMigrationFiles(p))
 	diags.Append(checkFoundationPresent(p))
 	for _, block := range foundationBlocks(p) {
 		diags.Append(checkFoundationBlock(p, block))
@@ -344,6 +346,41 @@ func checkFoundationMode(p *project.Project) diag.List {
 				"and fail on a table that already exists",
 			p.Config.Migrations.Dir, strings.Join(applied, ", "))
 	}
+	return diags
+}
+
+// checkMigrationFiles reports the migration names in this project that goose or
+// rig will not read the way somebody meant them.
+//
+// Both rules are answerable from the directory listing alone, which is why they
+// run here rather than waiting for `rig db up`: a duplicate version is a
+// migration that never runs, and it surfaces at a fresh replay on somebody
+// else's machine, weeks later, as a table that is not there.
+//
+// The third rule — a version at or below what the base branch already has —
+// is not here. It needs a git ref, and `rig validate` cannot assume it is in a
+// repository, let alone which ref this branch is aimed at. That one is
+// `rig migration check --base`.
+//
+// Under `migrations.foundation: embedded` there is still exactly one directory
+// to check, and it is still the project's own: the modules carry their own sets,
+// each numbered from one in a namespace of its own, and a project's numbering
+// has nothing to say about them.
+func checkMigrationFiles(p *project.Project) diag.List {
+	var diags diag.List
+
+	names, err := migrationNames(p.MigrationsDir())
+	if err != nil {
+		// No directory is a project between `rig init` and its first migration,
+		// which has nothing to check. Any other read error is foundationTables'
+		// to report, so that one unreadable directory is one diagnostic.
+		return diags
+	}
+
+	dir := p.Config.Migrations.Dir
+	diags.Append(migcheck.CheckNames(dir, names,
+		p.Severity(p.Config.Validate.MigrationFilename, diag.CodeMigrationFilename)))
+	diags.Append(migcheck.CheckDuplicates(dir, names))
 	return diags
 }
 

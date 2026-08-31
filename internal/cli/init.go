@@ -10,6 +10,8 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/simonjanss/rig/internal/compile"
+	"github.com/simonjanss/rig/internal/diag"
+	"github.com/simonjanss/rig/internal/migcheck"
 	"github.com/simonjanss/rig/internal/project"
 	"github.com/simonjanss/rig/internal/scaffold"
 )
@@ -181,7 +183,138 @@ func newMigrationCmd(e *env) *cobra.Command {
 	newCmd.Flags().BoolVar(&snapshot, "snapshot", false, "add the snapshot columns, keeping prior versions")
 
 	cmd.AddCommand(newCmd)
+	cmd.AddCommand(newMigrationCheckCmd(e))
 	return cmd
+}
+
+// newMigrationCheckCmd is the pipeline half of migration validation.
+//
+// It reads rig.yaml and the migrations directory and stops there: no database,
+// no container, no introspection, no generators. That is the point of it being a
+// command of its own rather than a flag on `rig validate`, which compiles
+// against a live schema and therefore wants a Postgres that a pull-request check
+// has no reason to start. Everything this asks is answerable from the names on
+// disk in about a millisecond, on a bare checkout.
+//
+// The two file rules run with or without --base, so the command is also the
+// quick local answer to "did I number this right". --base adds the third, which
+// is the one nothing else in rig can ask: goose reports an out-of-order
+// migration at boot, against a database that already has the higher version
+// applied, which is to say after the merge that caused it.
+func newMigrationCheckCmd(e *env) *cobra.Command {
+	var (
+		base   string
+		strict bool
+	)
+
+	cmd := &cobra.Command{
+		Use:   "check",
+		Short: "Check migration version numbers",
+		Long: "Reports migrations rig or goose will not read the way you meant them: a name\n" +
+			"that is not NNNNN_snake_case.sql, and two files claiming one version number.\n" +
+			"Reads no database and starts no container, so it runs on a bare checkout.\n\n" +
+			"--base also compares what this branch adds against a git ref, and refuses a\n" +
+			"migration numbered at or below what that ref already has. Merged as it is,\n" +
+			"goose has stepped past the number and reports it as missing rather than\n" +
+			"applying it. Give it the branch this one merges into, fetched:\n\n" +
+			"  rig migration check --base origin/main\n\n" +
+			"The comparison is against that ref's tip, so a migration somebody else merged\n" +
+			"while you were working counts. --format github turns any of it into pull\n" +
+			"request annotations.",
+		Args: cobra.NoArgs,
+		RunE: func(_ *cobra.Command, _ []string) error {
+			p, err := e.mustProject()
+			if err != nil {
+				return err
+			}
+
+			diags := checkMigrationFiles(p)
+
+			if base != "" {
+				d, err := checkMigrationOrder(p, base)
+				if err != nil {
+					return err
+				}
+				diags.Append(d)
+			}
+
+			// The same bargain --strict makes everywhere else in rig: the only
+			// rule here that can be a warning is the naming one, and a warning
+			// nobody ever fails on is a warning nobody ever fixes.
+			if strict && diags.Count(diag.SeverityWarning) > 0 && !diags.HasErrors() {
+				fmt.Fprintf(e.errOut, "\n%d warnings, and --strict was given\n",
+					diags.Count(diag.SeverityWarning))
+				_ = e.report(&diags)
+				return ErrDiagnostics
+			}
+
+			if err := e.report(&diags); err != nil {
+				return err
+			}
+			if diags.Len() > 0 {
+				// Warnings were reported and did not fail the run. Saying
+				// "no problems found" underneath them would be a lie.
+				return nil
+			}
+
+			fmt.Fprintf(e.errOut, "%s: %d migrations, no problems found\n",
+				p.Config.Migrations.Dir, countMigrations(p))
+			return nil
+		},
+	}
+
+	cmd.Flags().StringVar(&base, "base", "",
+		"also refuse migrations numbered at or below this git ref, for example origin/main")
+	cmd.Flags().BoolVar(&strict, "strict", false, "treat warnings as failures")
+	return cmd
+}
+
+// countMigrations is how many files in the project's migrations directory goose
+// would apply — which is not how many files are in it. A README beside them is
+// not a migration, and a summary that counted it would be reporting on a
+// directory listing rather than on a schema.
+func countMigrations(p *project.Project) int {
+	names, err := migrationNames(p.MigrationsDir())
+	if err != nil {
+		return 0
+	}
+	n := 0
+	for _, name := range names {
+		if _, ok := migcheck.Version(name); ok {
+			n++
+		}
+	}
+	return n
+}
+
+// checkMigrationOrder asks git what base already has, and refuses anything this
+// branch adds below it.
+//
+// Every git command runs in the project root, which is what makes the relative
+// pathspec mean this project's migrations and not some outer repository's. See
+// [git] for why that is not the process's own directory.
+//
+// A branch that adds no migration is not asked what the ceiling is. The ceiling
+// is only interesting when something has to clear it, so the ordinary case — a
+// pull request that touches no migration — stops after the two calls
+// [addedMigrations] makes rather than paying for a third.
+func checkMigrationOrder(p *project.Project, base string) (diag.List, error) {
+	dir := p.Config.Migrations.Dir
+
+	added, err := addedMigrations(p.Root, base, dir)
+	if err != nil {
+		return diag.List{}, err
+	}
+	if len(added) == 0 {
+		return diag.List{}, nil
+	}
+
+	names, err := baseMigrations(p.Root, base, dir)
+	if err != nil {
+		return diag.List{}, err
+	}
+
+	return migcheck.CheckOutOfOrder(added, base, migcheck.MaxVersion(names)), nil
 }
 
 func rel(base, path string) string {

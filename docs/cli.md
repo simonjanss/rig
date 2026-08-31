@@ -13,6 +13,7 @@ The commands, in the order you meet them:
 |---|---|
 | `rig init [dir]` | Start a new project |
 | `rig migration new <name>` | Write a new migration file |
+| `rig migration check` | Check migration version numbers — no database, so it runs on a bare checkout |
 | `rig db up` / `down` / `reset` / `url` / `psql` | Manage the throwaway local database — and, with `database.electric.enabled`, the sync service beside it |
 | `rig sync` | Bring table configuration in step with the database |
 | `rig validate` | Check the schema and its configuration |
@@ -89,6 +90,89 @@ migration nobody ran `rig sync` for looks like.
 `--only` narrows the run to some generators, and suppresses the leftover check
 while it does: a file the generators you named did not produce may well belong
 to one you held back.
+
+## Checking migration numbers
+
+A migration's file name decides two things: which version it is, and what order
+it runs in. goose reads both from the number in front, and reports a problem with
+either at boot, against a database that has already had everything before it
+applied. That is late, and it is on the wrong machine.
+
+`rig migration check` asks the same questions from the names on disk:
+
+```bash
+rig migration check
+```
+
+It reads `rig.yaml` and your migrations directory and stops there — no database,
+no container, no generators. That is why it is a command of its own rather than a
+flag on `rig validate`, which compiles against a live schema. It runs in
+milliseconds on a bare checkout.
+
+Two rules need nothing but the directory:
+
+| | |
+|---|---|
+| [RIG6050](diagnostics.md) | A file is not named `NNNNN_snake_case.sql` |
+| [RIG6051](diagnostics.md) | Two files claim the same version number |
+
+RIG6050 is the one rule here you can configure — it is `migration_filename` in
+[the `validate` block](rig-yaml.md), and it is a convention. The other is not:
+goose records one row per version, so a second file on the same number never runs
+and never will, and padding does not separate them. `00025_a.sql` and `25_b.sql`
+are both version 25.
+
+Both also run inside `rig validate` and `rig check`, so a project that never
+types this command still finds out.
+
+### The one that needs the base branch
+
+The third rule cannot be asked from your directory alone, because it is about
+somebody else's:
+
+```bash
+rig migration check --base origin/main
+```
+
+A migration numbered at or below what `origin/main` already has is
+[RIG6052](diagnostics.md). Merged as it is, goose has stepped past that number
+and reports it as a *missing* migration rather than applying it — which is the
+`detected 3 missing (out-of-order) migrations` further down this page, arriving
+after the merge that caused it instead of before.
+
+The comparison is against that ref's **tip**, deliberately. The case worth
+guarding is two branches cut from the same commit that both took the next free
+number; the first merges, and the second is now numbered below main without
+anything on it having changed. Comparing against the merge base would miss
+exactly that, because at the merge base the number really was free.
+
+What it compares that tip against is your working tree, not your last commit, so
+a migration you wrote a moment ago and have not committed counts the same as one
+you have. That is the same directory the other two rules read, and it is the
+answer you want while the fix is still a rename.
+
+The ref has to be there, and the default checkout does not have it: it fetches
+one commit, so there is no base branch and no commit the two branches share. Ask
+for the history instead of fetching the tip on its own — two shallow histories
+have no merge base, and the comparison needs one.
+
+```yaml
+- uses: actions/checkout@v4
+  with:
+    fetch-depth: 0
+- run: rig migration check --base origin/${{ github.base_ref }} --format github
+```
+
+`--format github` turns each finding into an annotation on the offending file, so
+it shows up on the diff rather than in the log. `--strict` fails on warnings too,
+which matters only if you set `migration_filename: warn`.
+
+If your rig project is not at the repository root, give the step a
+`working-directory`. rig runs git from the project root and every path it
+reports, git's included, is relative to that root — which is what an editor
+wants, and one directory short of what GitHub resolves an annotation against. A
+project below the repository root gets the findings but not the marks on the
+diff.
 
 ## Two checkouts of one project
 

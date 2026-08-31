@@ -271,6 +271,13 @@ defaults exist because each one has bitten somebody.
 | `unmentioned_column` | Every column is mentioned in the table configuration |
 | `migration_filename` | Files are named `NNNNN_snake_case.sql` |
 
+Two more rules about migration files are not in that list, because they are not
+conventions and there is nothing to configure: no two files may claim the same
+version number, and a migration added on a branch must be numbered above what the
+base branch already has. Both are checked by
+[`rig migration check`](cli.md#checking-migration-numbers), and the first of them
+by `rig validate` as well.
+
 `fk_naming` is looser than it looks in one place: a foreign key to one of rig's
 own tables may drop the `rig_` prefix, so both `tenant_id` and `rig_tenant_id`
 satisfy it for a column pointing at `rig_tenant`. The prefix is there to tell

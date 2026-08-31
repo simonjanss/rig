@@ -359,6 +359,13 @@ var (
 
 // Convention validation: RIG6xxx. Severity comes from the `validate` block of
 // the project configuration; the value here is the default.
+//
+// Two of them are the exception and have no key: RIG6051 and RIG6052 are about
+// migration version numbers, and a version number is not a matter of taste. A
+// duplicate is a migration that never runs and an out-of-order one is a
+// migration goose refuses, so there is nothing for a project to prefer. They sit
+// here rather than among the structural rules only because they are about the
+// files beside the schema rather than about the schema.
 var (
 	CodeMissingTableComment = newCode("RIG6001", SeverityError,
 		"A table has no comment.",
@@ -399,11 +406,23 @@ var (
 
 	CodeMigrationFilename = newCode("RIG6050", SeverityError,
 		"A migration file is not named NNNNN_snake_case.sql.",
-		"")
+		"Five digits, so the directory lists in the order it applies: a directory "+
+			"holding 9_a.sql and 10_b.sql shows the second one first everywhere "+
+			"anybody reads it.")
 
 	CodeMigrationDuplicate = newCode("RIG6051", SeverityError,
 		"Two migrations share the same numeric prefix.",
-		"")
+		"goose records one row per version, so the second file never runs and never "+
+			"will. Padding does not separate them: 00025_a.sql and 25_b.sql are both "+
+			"version 25. Renumber one of them.")
+
+	CodeMigrationOutOfOrder = newCode("RIG6052", SeverityError,
+		"A migration added on this branch is numbered at or below the highest on the base ref.",
+		"Renumber it above the base ref's highest version. Merged as it is, goose has "+
+			"already stepped past that number and reports it as a missing "+
+			"(out-of-order) migration rather than applying it. Reported by "+
+			"`rig migration check --base`, which is the only thing that knows what the "+
+			"base ref has.")
 )
 
 // Internal consistency: RIG9xxx. These report a bug in rig, not in the project.
