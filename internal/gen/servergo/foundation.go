@@ -36,7 +36,30 @@ func (e *foundationEmitter) wanted() scaffold.Wanted {
 		Files:         api.Files != nil && api.Files.Enabled,
 		Notifications: api.Notifications != nil && api.Notifications.Enabled,
 		Presence:      api.Presence != nil && api.Presence.Enabled,
+		Electric:      streams(api),
 	}
+}
+
+// streams says whether any resource in this API has a live-sync shape, which is
+// what brings the Postgres role the sync service connects as.
+//
+// The document rather than `database.electric.enabled`, and the two are not the
+// same question. That key says a sync service runs beside the database on a
+// laptop; this says a table is streamed, which is what needs a role with SELECT
+// on the schema wherever the project is deployed. A project that streams and runs
+// its sync service some other way still needs the role, and one that enabled the
+// container and streams nothing does not.
+//
+// The same predicate [emitter.shapes] uses, including Storage: a resource with no
+// table behind it has nothing to replicate.
+func streams(api ir.API) bool {
+	for i := range api.Resources {
+		res := &api.Resources[i]
+		if res.Electric != nil && res.Storage != nil {
+			return true
+		}
+	}
+	return false
 }
 
 // sets are the module sets this project needs, in apply order.

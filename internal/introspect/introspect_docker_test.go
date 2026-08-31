@@ -337,7 +337,12 @@ func TestReplicationFacts(t *testing.T) {
 		t.Errorf("wal_level is %q, want replica", s.Replication.WALLevel)
 	}
 
-	want := []ir.Publication{{Name: "corpus_publication"}}
+	// Owned, because the corpus migrations created it as the role this reads back as.
+	// That flag is what tells a publication a project's migrations wrote from one the
+	// sync service created for itself, and RIG5090 turns on it — so a read that
+	// silently stopped reporting it would make the rule accept the thing it exists to
+	// refuse.
+	want := []ir.Publication{{Name: "corpus_publication", Owned: true}}
 	if diff := gocmp.Diff(want, s.Replication.Publications); diff != "" {
 		t.Errorf("publications (-want +got):\n%s", diff)
 	}
@@ -354,6 +359,14 @@ func TestReplicationFacts(t *testing.T) {
 	}
 	if findTable(t, s, "lesson").Unlogged {
 		t.Error("lesson is a logged table and was reported as UNLOGGED")
+	}
+
+	// The replica identity, read off the same pg_class row as Unlogged. The corpus sets
+	// none, so every table carries Postgres's own default — which is the value RIG5093
+	// refuses for a table that streams, and reading it back is what lets that rule be
+	// an error rather than a guess.
+	if got := findTable(t, s, "lesson").ReplicaIdentity; got != ir.ReplicaIdentityDefault {
+		t.Errorf("lesson's replica identity is %q, want %q", got, ir.ReplicaIdentityDefault)
 	}
 }
 

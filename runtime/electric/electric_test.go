@@ -22,22 +22,7 @@ import (
 // what the case is about, so they are written once, here, from the constants the
 // package documents as the answer to write.
 func newProxy(cfg electric.Config) (*electric.Proxy, error) {
-	if cfg.InitialTimeout == 0 {
-		cfg.InitialTimeout = electric.DefaultInitialTimeout
-	}
-	if cfg.MaxSnapshotRows == 0 {
-		cfg.MaxSnapshotRows = electric.DefaultMaxSnapshotRows
-	}
-	if cfg.SnapshotTimeout == 0 {
-		cfg.SnapshotTimeout = electric.DefaultSnapshotTimeout
-	}
-	if cfg.BreakerThreshold == 0 {
-		cfg.BreakerThreshold = electric.DefaultBreakerThreshold
-	}
-	if cfg.BreakerCooldown == 0 {
-		cfg.BreakerCooldown = electric.DefaultBreakerCooldown
-	}
-	return electric.New(cfg)
+	return electric.New(cfg.Defaults())
 }
 
 func TestWhereBindsEveryValue(t *testing.T) {

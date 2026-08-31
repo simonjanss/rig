@@ -100,21 +100,33 @@ func newMigrationCmd(e *env) *cobra.Command {
 	}
 
 	var (
-		table      string
-		softDelete bool
-		snapshot   bool
+		table         string
+		softDelete    bool
+		snapshot      bool
+		publishShapes bool
 	)
 
 	newCmd := &cobra.Command{
 		Use:   "new <name>",
 		Short: "Write a new migration file",
 		Long: "Numbers the file after the highest one present. With --table, scaffolds a\n" +
-			"CREATE TABLE carrying the columns rig recognizes by name.",
+			"CREATE TABLE carrying the columns rig recognizes by name. With\n" +
+			"--publish-shapes, writes the publication and replica identity every table\n" +
+			"that streams needs — reading the database to add only what is missing.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			p, err := e.mustProject()
 			if err != nil {
 				return err
+			}
+
+			// Two different files. --table scaffolds a CREATE TABLE for a table
+			// that does not exist yet; --publish-shapes reads the tables that do.
+			if publishShapes && table != "" {
+				return errors.New("--publish-shapes and --table write different migrations; run the command twice")
+			}
+			if publishShapes {
+				return e.publishShapes(cmd.Context(), p, args[0])
 			}
 
 			// Before anything is created. The same rule `rig validate` enforces,
@@ -179,6 +191,8 @@ func newMigrationCmd(e *env) *cobra.Command {
 	newCmd.Flags().StringVar(&table, "table", "", "scaffold a CREATE TABLE with the conventional columns")
 	newCmd.Flags().BoolVar(&softDelete, "soft-delete", false, "add deleted_at, making the table soft-deletable")
 	newCmd.Flags().BoolVar(&snapshot, "snapshot", false, "add the snapshot columns, keeping prior versions")
+	newCmd.Flags().BoolVar(&publishShapes, "publish-shapes", false,
+		"publish the tables that stream, and give them REPLICA IDENTITY FULL")
 
 	cmd.AddCommand(newCmd)
 	return cmd

@@ -44,25 +44,32 @@ wants: a warning nobody ever fails on is a warning nobody ever fixes.
 `--format github` emits annotations, so a failure lands on the offending line in
 a pull request. `--format json` is for anything else that has to read them.
 
-## The three that read the database rather than your files
+## The four that read the database rather than your files
 
-`RIG5090`, `RIG5091` and `RIG5092` are the only rules that report a fact about
-the server instead of a fact about your schema or configuration, and they all
-say the same kind of thing: this table asks for a live-sync shape, and the
-database is not arranged to give it one.
+`RIG5090` to `RIG5093` are the only rules that report a fact about the server
+instead of a fact about your schema or configuration, and they all say the same
+kind of thing: this table asks for a live-sync shape, and the database is not
+arranged to give it one.
 
 | Code | What the database said | If you ignore it |
 |---|---|---|
-| `RIG5090` | No publication a migration wrote carries the table. Publish it in one — `ALTER PUBLICATION rig_publication ADD TABLE todo`. The publication Electric maintains for itself does not count | The sync service will try to publish it on the first subscription, and can only do so from a role that owns the table — otherwise the subscription fails as an access error |
+| `RIG5090` | No publication a migration wrote carries the table. Publish it in one — `rig migration new <name> --publish-shapes` writes it. It has to be the sync service's own publication, `electric_publication_default`, created by your migration so your migrations own it; a publication under a name of your own is never read — that one, created by the sync service and owned by it, does not count | The sync service will try to publish it on the first subscription, and can only do so from a role that owns the table — otherwise the subscription fails as an access error |
 | `RIG5091` | The table is `UNLOGGED`, so it writes no WAL | Nothing can ever follow it. The shape answers `200` with no rows, forever |
 | `RIG5092` | The server runs with `wal_level` other than `logical`. Reported once, not once per table. `database.electric.enabled` sets it on the local container; a project with shapes and no local sync service writes `wal_level=logical` under `database.settings` instead | No publication on it can be decoded, so every shape in the project is empty |
+| `RIG5093` | The table's replica identity is not `full`, so an update or a delete puts only the primary key in the WAL — `ALTER TABLE todo REPLICA IDENTITY FULL` | A subscriber hears that a row changed and has no old row to match against the one it is holding. Inserts are fine, which is what makes this survive a demo |
 
-Two of those are absolute and one is not, which is worth knowing before you
+Two of those are absolute and two are not, which is worth knowing before you
 reach for a workaround. `RIG5091` and `RIG5092` describe streams that cannot
-exist. `RIG5090` describes a stream whose existence depends on the sync service
-having privileges it may not have in production — an error because "it works on
-my machine and fails in the deployment with least privilege" is the worst place
+exist. `RIG5090` and `RIG5093` describe streams whose correctness depends on
+privileges the sync service may not have in production — errors because "it works
+on my machine and fails in the deployment with least privilege" is the worst place
 to find that out, not because the stream is certainly empty.
+
+`RIG5090` and `RIG5093` are two halves of one job, which is why they read
+alike: Postgres gates publishing a table and setting its replica identity on the
+same thing, owning it. A migration that does one and not the other has moved half
+of what a least-privilege deployment cannot do for itself. `rig migration new
+<name> --publish-shapes` writes both, for every table that streams.
 
 They need a database to have been read, which means they are silent under
 `rig validate --schema dump.json` when the dump was written before rig read
@@ -77,4 +84,4 @@ the reason not to leave it to the sync service.
 - [schema.md](schema.md#naming-rules-rig-checks) — what the convention rules want
 - [schema.md](schema.md#names-rig-reserves) — the names and the table prefix that are rig's
 - [rig-yaml.md](rig-yaml.md#validate) — setting severities
-- [electric.md](electric.md#the-table-has-to-be-published) — what `RIG5090` wants
+- [electric.md](electric.md#the-table-has-to-be-published) — what `RIG5090` and `RIG5093` want

@@ -85,7 +85,7 @@ func Validate(doc *ir.Document, set *tableconf.Set, p *project.Project) diag.Lis
 // route mounted, the caller authenticated, the tenant predicate built — and
 // there still be nothing behind it.
 //
-// The two halves are refused for different reasons, and only one of them is
+// The three halves are refused for different reasons, and only one of them is
 // absolute. An UNLOGGED table can never be followed by anything. An unpublished
 // table usually can be, because the sync service publishes it on the first
 // subscription — but only from a role that owns it, since Postgres wants
@@ -101,6 +101,15 @@ func Validate(doc *ir.Document, set *tableconf.Set, p *project.Project) diag.Lis
 // project depending on. Counting it would leave the rule silent on every
 // developer's machine and loud only where nobody has run the app, which is the
 // wrong way round for a rule about what happens somewhere else.
+//
+// The replica identity is the second half of the publication's job and is gated on
+// exactly the same privilege, which is why it is checked here rather than
+// somewhere of its own: Postgres wants ownership to publish a table and to set its
+// replica identity, so a migration that does one and not the other has moved half
+// of what a least-privilege deployment cannot do for itself. It is read off the
+// table rather than the server, so it has a nil check of its own — empty means
+// nobody looked, and a rule reported on evidence nobody collected is the failure
+// the paragraph below is about.
 //
 // This is the only rule here that reads the schema's replication block, and the
 // nil check is the whole reason it can be an error. Nil means nobody looked: a
@@ -128,8 +137,19 @@ func checkElectricReplication(doc *ir.Document, t *ir.Table, res *ir.Resource,
 				"would stream nothing", t.Name)
 	}
 
+	// Reported whatever the publication says, and before it, because the two are one
+	// job: publishing a table and giving it an identity are both gated on ownership,
+	// so a project that did one is a project that could have done the other. Silent on
+	// an empty value, which is a schema nobody read this off — see above.
+	if t.ReplicaIdentity != "" && t.ReplicaIdentity != ir.ReplicaIdentityFull {
+		diags.Add(diag.CodeElectricReplicaIdentity, where,
+			"table %q asks for live sync and its replica identity is %s: %s, so a subscriber "+
+				"has nothing to match an updated or deleted row against",
+			t.Name, t.ReplicaIdentity, replicaIdentityCost(t.ReplicaIdentity))
+	}
+
 	if slices.ContainsFunc(t.Publications, func(name string) bool {
-		return !syncServicePublication(name)
+		return migrationOwned(doc.Schema.Replication, name)
 	}) {
 		return diags
 	}
@@ -143,9 +163,9 @@ func checkElectricReplication(doc *ir.Document, t *ir.Table, res *ir.Resource,
 	switch names := publicationNames(doc.Schema.Replication); {
 	case len(t.Publications) > 0:
 		diags.Add(diag.CodeElectricNotPublished, where,
-			"table %q asks for live sync, and the only publication carrying it is the sync "+
-				"service's own (%s): Electric added it there itself, which it can only do "+
-				"where its database role owns the table",
+			"table %q asks for live sync, and the only publication carrying it (%s) is one the "+
+				"sync service created and owns: it added the table there itself, which it can "+
+				"only do where its database role owns the table",
 			t.Name, strings.Join(t.Publications, ", "))
 	case len(names) == 0:
 		diags.Add(diag.CodeElectricNotPublished, where,
@@ -161,15 +181,84 @@ func checkElectricReplication(doc *ir.Document, t *ir.Table, res *ir.Resource,
 	return diags
 }
 
-// syncServicePublication reports whether a publication is the one Electric keeps
-// for itself rather than one a migration wrote.
+// replicaIdentityCost says what this identity puts in the WAL for the row as it
+// was, which is the fact the three non-FULL values differ on.
 //
-// The name is `electric_publication_` followed by the sync service's replication
-// stream id, which is "default" unless a deployment sets one. Matching the
-// prefix rather than the whole name is what keeps this true under a deployment
-// that does.
-func syncServicePublication(name string) bool {
+// Three sentences rather than one, because the next step differs: `default` is
+// what a table has when nobody has done anything, `index` is somebody's
+// deliberate choice that live sync cannot use, and `nothing` is a table that
+// cannot report a change at all.
+func replicaIdentityCost(id ir.ReplicaIdentity) string {
+	switch id {
+	case ir.ReplicaIdentityDefault:
+		return "the default carries the primary key of the old row and no other column"
+	case ir.ReplicaIdentityIndex:
+		return "an index identity carries only that index's columns, which live sync cannot use"
+	case ir.ReplicaIdentityNothing:
+		return "nothing carries no old row at all"
+	default:
+		return "live sync needs the whole old row"
+	}
+}
+
+// SyncServicePublication reports whether a publication carries the name the sync
+// service uses for its own.
+//
+// The name is `electric_publication_` followed by the replication stream id, which
+// is "default" unless a deployment sets one. Matching the prefix rather than the
+// whole name is what keeps this true under a deployment that does.
+//
+// The name alone does not say who made it, which is the whole of
+// [migrationOwned]: the sync service is not the only thing that may create this
+// publication, and a migration that creates it first is the arrangement that makes
+// live sync work for a role owning no tables.
+//
+// Exported because two things have to agree about it and they are in different
+// packages: this package reports a table as unpublished, and `rig migration new
+// --publish-shapes` writes the migration that publishes it. A copy of the rule
+// beside the fix is a way for the fix to write nothing where the rule fires.
+func SyncServicePublication(name string) bool {
 	return strings.HasPrefix(name, "electric_publication_")
+}
+
+// migrationOwned reports whether a publication is one this project's migrations
+// wrote, which is the only kind that answers RIG5090.
+//
+// Two ways to qualify, and the second is the one that took a real server to work
+// out. A publication under a name of the project's own — `rig_publication` — was
+// obviously written by a migration. And a publication under the sync service's own
+// name qualifies too, **if the role that runs migrations owns it**, because that
+// means a migration created it before the sync service ever connected.
+//
+// That second case is not a loophole. The sync service reads only its own
+// publication: a `rig_publication` is never consulted, so a table published there
+// and nowhere else streams nothing for a role that owns no tables — the very
+// deployment this rule exists for. Creating that publication in a migration, ahead
+// of the service, and running the service with
+// ELECTRIC_MANUAL_TABLE_PUBLISHING=true, is what actually works. Refusing it would
+// mean refusing the answer.
+//
+// What stays refused is the publication the sync service made for itself. Owned by
+// its own role, created on first connection, and a table in it got there because
+// the service had privileges it will not have elsewhere — which is the dependency
+// this rule is about, and the reason the owner rather than the name is what
+// decides.
+//
+// A publication under a third role — some other tool's — is not evidence either,
+// on the same reasoning: whatever maintains it is not this project's migrations.
+func migrationOwned(rep *ir.Replication, name string) bool {
+	if !SyncServicePublication(name) {
+		return true
+	}
+	if rep == nil {
+		return false
+	}
+	for _, p := range rep.Publications {
+		if p.Name == name {
+			return p.Owned
+		}
+	}
+	return false
 }
 
 // checkElectricWALLevel refuses live sync on a server that cannot decode a

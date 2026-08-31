@@ -177,6 +177,24 @@ func (e *Electric) create(ctx context.Context) error {
 		// The throwaway pair has no TLS and no API secret, exactly like the
 		// database beside it. Nothing about this is a deployment.
 		"--env", "ELECTRIC_INSECURE=true",
+		// The publication is the migrations' to maintain, here as everywhere.
+		//
+		// Without this the sync service reconciles its own publication on boot and on
+		// every subscription — adding tables a shape needs, and **dropping every table
+		// no shape currently needs**. So a migration that published three tables has
+		// its work undone the moment this container starts, and RIG5090 then fires on a
+		// project that did everything right.
+		//
+		// It is also the setting a deployment must have, for a different reason: there
+		// the service authenticates as a role owning no tables and cannot maintain the
+		// publication at all. Setting it locally is what makes the two the same
+		// arrangement rather than two that happen to agree.
+		//
+		// The cost is that a table with a shape and no publication migration does not
+		// stream on a laptop either. That is the point — it does not stream in a
+		// deployment, and RIG5090 already refuses the project. `rig migration new
+		// --publish-shapes` writes the file.
+		"--env", "ELECTRIC_MANUAL_TABLE_PUBLISHING=true",
 		e.cfg.Image,
 	)
 	if err != nil {
@@ -218,7 +236,16 @@ func (e *Electric) Port() int { return e.port }
 
 // URL is where the shape proxy should forward to.
 func (e *Electric) URL() string {
-	return fmt.Sprintf("http://127.0.0.1:%d", e.port)
+	return ElectricURL(e.port)
+}
+
+// ElectricURL is where a sync service on this port answers.
+//
+// Spelled once, because two callers build it: this handle, which knows the port a
+// container actually published, and `rig db url --electric`, which answers from
+// rig.yaml without starting anything.
+func ElectricURL(port int) string {
+	return fmt.Sprintf("http://127.0.0.1:%d", port)
 }
 
 // Stop stops the container without removing it.

@@ -274,7 +274,8 @@
       ],
       "publications": [
         "corpus_publication"
-      ]
+      ],
+      "replica_identity": "default"
     },
     {
       "name": "lesson_tag",
@@ -344,7 +345,8 @@
           "on_delete": "NO ACTION",
           "on_update": "RESTRICT"
         }
-      ]
+      ],
+      "replica_identity": "default"
     },
     {
       "name": "published_lesson",
@@ -374,7 +376,8 @@
           "nullable": true,
           "ordinal": 3
         }
-      ]
+      ],
+      "replica_identity": "nothing"
     },
     {
       "name": "scratch",
@@ -435,7 +438,8 @@
           "method": "btree"
         }
       ],
-      "unlogged": true
+      "unlogged": true,
+      "replica_identity": "default"
     },
     {
       "name": "tag",
@@ -495,7 +499,8 @@
           ],
           "method": "btree"
         }
-      ]
+      ],
+      "replica_identity": "default"
     }
   ],
   "enums": [
@@ -529,7 +534,8 @@
     "wal_level": "replica",
     "publications": [
       {
-        "name": "corpus_publication"
+        "name": "corpus_publication",
+        "owned": true
       }
     ]
   }

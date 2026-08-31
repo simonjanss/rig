@@ -114,8 +114,9 @@ func Unmarshal(b []byte) (*Document, error) {
 // can tell what they are, so they are cleared for the reason Monitoring is.
 //
 // [Schema.Replication] is cleared for Monitoring's reason too, together with the
-// two facts hung on each table for it — [Table.Publications] and
-// [Table.Unlogged]. It is the only thing in the document that nobody wrote: it
+// three facts hung on each table for it — [Table.Publications],
+// [Table.Unlogged] and [Table.ReplicaIdentity]. It is the only thing in the
+// document that nobody wrote: it
 // is read off the server, so it can differ between two machines holding the same
 // files and change on one of them while nobody is looking. The sync service adds
 // a table to its own publication the first time somebody subscribes, so a
@@ -123,6 +124,13 @@ func Unmarshal(b []byte) (*Document, error) {
 // again on the day an unrelated tool published something. What a publication
 // carries decides whether a shape streams, which is why validation reads it —
 // but no response says it, so it is not what a revision is for.
+//
+// [Table.ReplicaIdentity] is the same argument reached from the other end. Unlike
+// a publication nothing moves it behind your back — it takes an ALTER TABLE — but
+// it is still read off the server rather than written in a file, and a project
+// whose revision moved because somebody finally set REPLICA IDENTITY FULL would
+// be telling every client it was built against something older, for a change no
+// client can observe.
 func (d *Document) Hash() (string, error) {
 	unstamped := *d
 	unstamped.Tool = ""
@@ -137,7 +145,7 @@ func (d *Document) Hash() (string, error) {
 	unstamped.API.Servers = nil
 	unstamped.Schema.Replication = nil
 	if slices.ContainsFunc(unstamped.Schema.Tables, func(t Table) bool {
-		return t.Unlogged || len(t.Publications) > 0
+		return t.Unlogged || len(t.Publications) > 0 || t.ReplicaIdentity != ""
 	}) {
 		// A copy for the reason the three below take one: the shallow copy above
 		// shares the backing array, and clearing in place would reach the
@@ -146,6 +154,7 @@ func (d *Document) Hash() (string, error) {
 		for i := range plain {
 			plain[i].Publications = nil
 			plain[i].Unlogged = false
+			plain[i].ReplicaIdentity = ""
 		}
 		unstamped.Schema.Tables = plain
 	}
