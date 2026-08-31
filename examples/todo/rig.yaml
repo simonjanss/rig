@@ -15,10 +15,11 @@ api:
   permissions: none
   base_path: /api/v1
   # The document as a route as well as a file, at /api/v1/openapi.json and
-  # /api/v1/openapi.yaml. Nothing in main.go: the `openapi` generator writes a
-  # go:embed beside the document it produces — a directive cannot climb out of
-  # the directory of the file it is written in — and server-go's openapi_import
-  # below is how the router reaches it.
+  # /api/v1/openapi.yaml. One line, and nothing anywhere else: the `openapi`
+  # generator writes an embed beside the document it produces — a directive
+  # cannot climb out of the directory of the file it is written in — and the
+  # router imports that package. Which package is `project.module` joined to
+  # that generator's out_dir, so there was nothing here to say twice.
   openapi:
     serve: true
 
@@ -143,10 +144,6 @@ generators:
       # Where your extra shape scoping goes, beside the service layer for the
       # same table. Written once, then yours.
       stub_dir: services/{table}
-      # The package the OpenAPI document is embedded in, so the router can serve
-      # it. It is `docs` below, and this is the same kind of line as the imports
-      # above: a generated package this one has to name.
-      openapi_import: github.com/simonjanss/rig/examples/todo/docs
 
   # A typed Go client for this API: the wire types, and one method per
   # endpoint. It is generated from the same document the router is, so

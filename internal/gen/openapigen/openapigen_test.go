@@ -1,7 +1,6 @@
 package openapigen_test
 
 import (
-	"context"
 	"encoding/json"
 	"flag"
 	"net/http"
@@ -876,19 +875,24 @@ func TestElectricShapesAreDocumentedUnlessTurnedOff(t *testing.T) {
 func servedDoc(t *testing.T) *ir.Document {
 	t.Helper()
 
-	doc := load(t, primary)
+	return serveDoc(t, load(t, primary))
+}
+
+// serveDoc turns any fixture's document into one that serves itself.
+//
+// Import and Package are what the compiler joins out of the module path and the
+// openapi generator's out_dir; there is no option for either, so there is
+// nothing here for a project to state or a test to configure.
+func serveDoc(t *testing.T, doc *ir.Document) *ir.Document {
+	t.Helper()
+
 	doc.API.OpenAPI = &ir.OpenAPI{
 		JSONPath: "/api/v1/openapi.json",
 		YAMLPath: "/api/v1/openapi.yaml",
+		Import:   "example.com/demo/docs",
+		Package:  "docs",
 	}
 	return doc
-}
-
-// servedOpts is opts() with somewhere for the embed file to go. Serving the
-// document means writing a Go package beside it, and a package needs a
-// directory with a name — "." is the project root and cannot have one.
-func servedOpts() gen.Options {
-	return gen.Options{OutDir: filepath.Join("project", "docs")}
 }
 
 // TestOpenAPIEmbedGolden is the Go file this generator writes beside the
@@ -952,53 +956,30 @@ func TestTheEmbedNamesEveryRenderingWritten(t *testing.T) {
 	}
 }
 
-// The package the embed file declares comes from the directory it lands in,
-// because that is what an import of it will be called.
-func TestTheEmbedPackageFollowsTheOutputDirectory(t *testing.T) {
+// The package the embed file declares is the one the router will import it as.
+// Where that name comes from is internal/project's — a directory name Go could
+// not use is refused when rig.yaml is read — so what is left here is that the
+// document's answer is the one written down.
+func TestTheEmbedDeclaresThePackageTheDocumentNames(t *testing.T) {
 	t.Parallel()
 
-	for _, tc := range []struct{ outDir, pkg string }{
-		{filepath.Join("project", "docs"), "package docs"},
-		{filepath.Join("project", "api-docs"), "package apidocs"},
-		{filepath.Join("project", "internal", "spec"), "package spec"},
-	} {
-		artifacts := gentest.Run(t, openapigen.New(), servedDoc(t),
-			gen.Options{OutDir: tc.outDir})
+	doc := servedDoc(t)
+	doc.API.OpenAPI.Package = "apispec"
 
-		var src string
-		for _, a := range artifacts {
-			if a.Path == "openapi.gen.go" {
-				src = string(a.Content)
-			}
-		}
-		if !strings.Contains(src, tc.pkg) {
-			t.Errorf("out_dir %q: want %q, got:\n%s", tc.outDir, tc.pkg, src)
-		}
-	}
+	artifacts := gentest.Run(t, openapigen.New(), doc,
+		gen.Options{OutDir: filepath.Join("project", "docs")})
 
-	// And a name that cannot be derived is asked for rather than invented, so a
-	// package nobody chose never turns up in an import block.
-	_, err := openapigen.New().Generate(context.Background(), servedDoc(t),
-		gen.Options{OutDir: filepath.Join("project", "123")})
-	if err == nil {
-		t.Fatal("no error for a directory no package name can come from")
-	}
-	if !strings.Contains(err.Error(), "package option") {
-		t.Errorf("error = %q, want it to name the option", err)
-	}
-
-	// Stated explicitly, it wins.
-	artifacts := gentest.Run(t, openapigen.New(), servedDoc(t),
-		gen.Options{OutDir: filepath.Join("project", "123"),
-			Raw: map[string]any{"package": "apispec"}})
 	var src string
 	for _, a := range artifacts {
 		if a.Path == "openapi.gen.go" {
 			src = string(a.Content)
 		}
 	}
+	// Not "docs", which is what the output directory is called: the name has to
+	// be the one the router qualifies its reference with, and only the compiled
+	// document knows that.
 	if !strings.Contains(src, "package apispec") {
-		t.Errorf("the package option was not used:\n%s", src)
+		t.Errorf("want package apispec, got:\n%s", src)
 	}
 }
 
@@ -1009,7 +990,7 @@ func TestTheEmbedPackageFollowsTheOutputDirectory(t *testing.T) {
 func TestTheServedDocumentDescribesItsOwnRoutes(t *testing.T) {
 	t.Parallel()
 
-	m := model(t, gentest.Run(t, openapigen.New(), servedDoc(t), servedOpts()))
+	m := model(t, gentest.Run(t, openapigen.New(), servedDoc(t), opts()))
 
 	for _, tc := range []struct{ path, id, mediaType string }{
 		{"/api/v1/openapi.json", "getOpenAPIJSON", "application/json"},
@@ -1096,13 +1077,7 @@ func TestOnlyTheFormatsWrittenAreDescribed(t *testing.T) {
 func TestTheServedDocumentNeedsNoCredential(t *testing.T) {
 	t.Parallel()
 
-	doc := load(t, "authwired")
-	doc.API.OpenAPI = &ir.OpenAPI{
-		JSONPath: "/api/v1/openapi.json",
-		YAMLPath: "/api/v1/openapi.yaml",
-	}
-
-	m := model(t, gentest.Run(t, openapigen.New(), doc, servedOpts()))
+	m := model(t, gentest.Run(t, openapigen.New(), serveDoc(t, load(t, "authwired")), opts()))
 	if m.Security == nil {
 		t.Fatal("authwired no longer requires a credential document-wide")
 	}

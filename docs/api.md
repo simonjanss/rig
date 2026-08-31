@@ -244,17 +244,11 @@ A file in `docs/` is not something a client can reach. Turn it into two routes:
 api:
   openapi:
     serve: true
-
-generators:
-  - name: server-go
-    out_dir: internal/api
-    options:
-      openapi_import: github.com/you/yourapp/docs   # the openapi out_dir
 ```
 
 That is the whole of it. `GET /api/v1/openapi.json` and `GET
-/api/v1/openapi.yaml`, embedded in the binary, with nothing in your `main.go`.
-The server says where they went as it starts:
+/api/v1/openapi.yaml`, embedded in the binary, with nothing in your `main.go` and
+nothing else in `rig.yaml`. The server says where they went as it starts:
 
 ```
 INFO serving the OpenAPI document at="[/api/v1/openapi.json /api/v1/openapi.yaml]"
@@ -264,13 +258,14 @@ The paths sit under `base_path`, expanded against it exactly the way every other
 route is, and checked against every other route — so a resource that lands on one
 of them fails `rig check` rather than taking the mux down at startup.
 
-**Why the second line.** A `go:embed` directive cannot climb out of the directory
-of the file it is written in, and the document is written to the `openapi`
-generator's `out_dir` rather than beside the router. So that generator writes the
-embed beside the document it produced, in a package of its own, and the router
-imports it — the same kind of line as the `model_import` and `store_import`
-already on the generators above it. `rig generate` refuses rather than emitting a
-router that cannot build, and names what to write.
+**How the bytes get there, and why you do not have to care.** An embed directive
+resolves against the directory of the file it is written in and cannot climb out
+of it, and the document is written to the `openapi` generator's `out_dir` rather
+than beside the router. So that generator writes the embed beside the document,
+in a package of its own, and the generated router imports it. Which package that
+is, rig works out: `project.module` joined to the generator's `out_dir`. There is
+exactly one right answer and both ends of it are already in `rig.yaml`, so
+there is nothing to state.
 
 What the embed buys is the property your migrations already have: **what this
 build serves is what this build describes.** A client reading the document off a
@@ -278,16 +273,22 @@ running server is reading that deployment, not whatever is on a branch.
 
 Three consequences worth knowing:
 
+- **`out_dir` becomes a Go package.** One generated file, `openapi.gen.go`,
+  holding the embed and nothing else. So the directory's name has to be one Go
+  would accept — `docs` and `internal/spec` are fine, `api-docs` and the project
+  root are not, and `rig validate` says so (RIG3011) rather than leaving it to a
+  build that will not compile.
 - **Only the renderings you wrote are mounted.** `formats: [json]` writes one
   file, so the embed names one, the server mounts one, and the document describes
   one. No half of that had to be told what the others were configured with.
 - **The document describes these two routes.** It has to: this generator's claim
   is that it describes every route the server answers, and a specification that
   omitted the route it is fetched over would be the one omission it cannot excuse.
-- **`out_dir` becomes a Go package.** One generated file, `openapi.gen.go`,
-  holding the embed and nothing else. The package name comes from the directory —
-  `docs` from `docs`, `apidocs` from `api-docs` — or from a `package` option when
-  the directory name is not one a package can be derived from.
+
+Moving the directory is not a change to your API. The revision is the answer to
+"how old is the oldest client still calling", and a package name is invisible over
+HTTP — so renaming `docs/` leaves the revision alone. Turning `serve` on or off
+does move it, because two routes appeared.
 
 The routes read no claims and check no permission. What the document says is what
 every generated client was built against, and a specification nobody may fetch is

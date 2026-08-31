@@ -131,21 +131,18 @@ the generator's own `formats` and `out_dir`, which are about **files**. The two
 are separate on purpose: a project can write the document without serving it, and
 rig warns (RIG3011) if you ask to serve one it was never asked to write.
 
-Nothing in your `main.go`. The document is embedded in the binary, and where the
-embed lives is decided by a rule of Go's: a `go:embed` directive cannot climb out
-of the directory of the file it is written in. So the `openapi` generator writes
-one beside the document it produces, in a package of its own, and `server-go`
-imports it — which is the one other line this needs:
+One line, and nothing anywhere else. The document is embedded in the binary, and
+where the embed lives is decided by a rule of Go's: an embed directive cannot
+climb out of the directory of the file it is written in. So the `openapi`
+generator writes one beside the document it produces, in a package of its own,
+and the generated router imports it — at `project.module` joined to that
+generator's `out_dir`, which rig works out rather than asking you to repeat.
 
-```yaml
-generators:
-  - name: server-go
-    options:
-      openapi_import: github.com/you/yourapp/docs   # the openapi out_dir
-```
+The one thing that follows: `out_dir` becomes a Go package, so its name has to be
+one Go would accept. `docs` and `internal/spec` are fine; `api-docs` and the
+project root are not, and rig refuses (RIG3011) rather than leaving it to a build.
 
-`rig generate` refuses rather than emitting a router that cannot build, and the
-message names what to write. The server says where the routes went as it starts.
+The server says where the routes went as it starts.
 
 [api.md](api.md#serving-it) has the rest — the ETag, what `formats` decides, and
 how to gate the routes.

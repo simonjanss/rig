@@ -1,9 +1,7 @@
 package openapigen
 
 import (
-	"path/filepath"
 	"strings"
-	"unicode"
 
 	"github.com/pb33f/libopenapi/datamodel/high/base"
 	v3 "github.com/pb33f/libopenapi/datamodel/high/v3"
@@ -179,8 +177,8 @@ const embedName = "Document"
 // is a compile error, so `formats: [json]` must not name the YAML rendering —
 // and because both come from this one function, it cannot.
 func (e *emitter) embedFile() (gen.Artifact, error) {
-	b := gobuf.New(e.cfg.Package)
-	b.Doc("Package " + e.cfg.Package + " carries the OpenAPI document describing this " +
+	b := gobuf.New(e.doc.API.OpenAPI.Package)
+	b.Doc("Package " + e.doc.API.OpenAPI.Package + " carries the OpenAPI document describing this " +
 		"API, so that the generated router can serve it. There is nothing to call " +
 		"here: the router imports this package, reads " + embedName + ", and mounts " +
 		"the routes. A project that would rather serve the document some other way " +
@@ -209,40 +207,4 @@ func (e *emitter) embedFile() (gen.Artifact, error) {
 		return gen.Artifact{}, err
 	}
 	return gen.Artifact{Path: "openapi.gen.go", Content: content, Mode: gen.Overwrite}, nil
-}
-
-// packageFor derives a package name from the output directory.
-//
-// Lowercased and stripped to letters and digits, because a directory may be
-// called `api-docs` and a package may not. A name that cannot survive that —
-// one that is empty, or starts with a digit — is not guessed at: the caller
-// asks for the option instead, because a package name nobody chose is one that
-// turns up in an import block looking like a mistake.
-func packageFor(outDir string) string {
-	base := filepath.Base(filepath.Clean(outDir))
-
-	var out strings.Builder
-	for _, r := range strings.ToLower(base) {
-		if unicode.IsLetter(r) || unicode.IsDigit(r) {
-			out.WriteRune(r)
-		}
-	}
-	name := out.String()
-	if name == "" || unicode.IsDigit(rune(name[0])) {
-		return ""
-	}
-	// A package named for a Go keyword parses as anything but a package.
-	if keywords[name] {
-		return ""
-	}
-	return name
-}
-
-// keywords are the names a package cannot have.
-var keywords = map[string]bool{
-	"break": true, "case": true, "chan": true, "const": true, "continue": true,
-	"default": true, "defer": true, "else": true, "fallthrough": true, "for": true,
-	"func": true, "go": true, "goto": true, "if": true, "import": true,
-	"interface": true, "map": true, "package": true, "range": true, "return": true,
-	"select": true, "struct": true, "switch": true, "type": true, "var": true,
 }

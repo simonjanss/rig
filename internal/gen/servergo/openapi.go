@@ -58,7 +58,7 @@ const openAPIDocsVar = "openAPIDocs"
 // 404 forever would be found by whoever tried to use it.
 func (e *emitter) openAPIResolver(b *gobuf.Buf) {
 	apidocPkg := b.Import(apidocModule)
-	docsPkg := b.Import(e.cfg.OpenAPIImport)
+	docsPkg := b.Import(e.doc.API.OpenAPI.Import)
 	syncPkg := b.Import("sync")
 
 	b.Comment(openAPIDocsVar + " is the OpenAPI document describing this API, ready to " +

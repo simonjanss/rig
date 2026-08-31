@@ -1046,15 +1046,13 @@ func servedDoc(t *testing.T) *ir.Document {
 	doc.API.OpenAPI = &ir.OpenAPI{
 		JSONPath: "/api/v1/openapi.json",
 		YAMLPath: "/api/v1/openapi.yaml",
+		// What the compiler joins out of the module path and the openapi
+		// generator's out_dir. There is no option for it, so there is nothing
+		// here for a project to state or a test to configure.
+		Import:  "rigtest/docs",
+		Package: "docs",
 	}
 	return doc
-}
-
-// servedOpts adds the one option serving the document needs.
-func servedOpts() gen.Options {
-	o := opts()
-	o.Raw["openapi_import"] = "rigtest/docs"
-	return o
 }
 
 // serverArtifact is the one file the openapi wiring lands in.
@@ -1078,7 +1076,7 @@ func serverArtifact(t *testing.T, artifacts []gen.Artifact) []gen.Artifact {
 func TestOpenAPIGolden(t *testing.T) {
 	t.Parallel()
 
-	artifacts := gentest.Run(t, servergo.New(), servedDoc(t), servedOpts())
+	artifacts := gentest.Run(t, servergo.New(), servedDoc(t), opts())
 
 	gentest.Golden(t, filepath.Join("testdata", "openapi"),
 		serverArtifact(t, artifacts), *update)
@@ -1092,7 +1090,7 @@ func TestTheOpenAPIRoutesAreMounted(t *testing.T) {
 	t.Parallel()
 
 	src := collapse(find(t,
-		gentest.Run(t, servergo.New(), servedDoc(t), servedOpts()), "server.gen.go"))
+		gentest.Run(t, servergo.New(), servedDoc(t), opts()), "server.gen.go"))
 
 	for _, want := range []string{
 		`OpenAPIJSONPath = "/api/v1/openapi.json"`,
@@ -1121,13 +1119,13 @@ func TestTheOpenAPIRoutesAreAnnounced(t *testing.T) {
 	t.Parallel()
 
 	src := collapse(find(t,
-		gentest.Run(t, servergo.New(), servedDoc(t), servedOpts()), "server.gen.go"))
+		gentest.Run(t, servergo.New(), servedDoc(t), opts()), "server.gen.go"))
 
 	// In Mount, not in Register: Register builds a mux and is called by a test
 	// and by a task reaching a service through it, and neither of those is a
 	// server starting up.
 	mount := collapse(find(t,
-		gentest.Run(t, servergo.New(), servedDoc(t), servedOpts()), "run.gen.go"))
+		gentest.Run(t, servergo.New(), servedDoc(t), opts()), "run.gen.go"))
 
 	want := `app.Logger.InfoContext(ctx, "serving the OpenAPI document", ` +
 		`"at", openAPIDocs().Paths())`
@@ -1155,7 +1153,7 @@ func TestTheServedDocumentCompiles(t *testing.T) {
 	api := gentest.Run(t, servicego.New(), doc, gen.Options{Raw: map[string]any{
 		"package": "api", "model_import": "rigtest/model", "store_import": "rigtest/store",
 	}})
-	api = append(api, gentest.Run(t, servergo.New(), doc, servedOpts())...)
+	api = append(api, gentest.Run(t, servergo.New(), doc, opts())...)
 
 	gentest.MustCompileAll(t,
 		gentest.Package{
@@ -1180,18 +1178,18 @@ func TestTheServedDocumentCompiles(t *testing.T) {
 	)
 }
 
-// Serving the document needs a path to the package it is embedded in, and a
-// router emitted without one would not build. Refused before anything is
-// written, the way stub_dir refuses a missing api_import.
-func TestServingWithoutAnImportIsRefused(t *testing.T) {
+// A document that says it is served and names no package to be embedded in is
+// incoherent rather than under-configured — nothing a project writes can produce
+// it — so it is refused before anything is written.
+func TestServingWithNoPackageIsRefused(t *testing.T) {
 	t.Parallel()
 
-	_, err := servergo.New().Generate(context.Background(), servedDoc(t), opts())
-	if err == nil {
+	doc := servedDoc(t)
+	doc.API.OpenAPI.Import = ""
+	doc.API.OpenAPI.Package = ""
+
+	if _, err := servergo.New().Generate(context.Background(), doc, opts()); err == nil {
 		t.Fatal("no error")
-	}
-	if !strings.Contains(err.Error(), "openapi_import") {
-		t.Errorf("error = %q, want it to name openapi_import", err)
 	}
 }
 

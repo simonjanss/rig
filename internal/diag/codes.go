@@ -159,14 +159,16 @@ var (
 			"spellings will not both be here forever, and the one that is going away "+
 			"is the one rig can no longer teach anybody about.")
 
-	CodeOpenAPINotServable = newCode("RIG3011", SeverityWarning,
-		"`api.openapi.serve` is on and no `openapi` generator is configured.",
-		"The key mounts a route for a document rig was never asked to write, so there "+
-			"is nothing to embed and nothing to serve. Add the generator — `- name: "+
-			"openapi` with an `out_dir` — or drop the key. A warning rather than a "+
-			"refusal, because the generator can be added in either order and a project "+
-			"part-way through wiring this up is not broken; server-go refuses outright "+
-			"if it is still missing when the router is written.")
+	CodeOpenAPINotServable = newCode("RIG3011", SeverityError,
+		"`api.openapi.serve` is on and there is nowhere to serve the document from.",
+		"Either no `openapi` generator is configured — so there is no document — or the "+
+			"one that is writes somewhere that cannot hold a Go package. Serving turns "+
+			"that directory into one: the embed has to sit beside the document, because "+
+			"an embed directive cannot climb out of the directory of the file it is "+
+			"written in, and the generated router imports it. `out_dir: docs` is the "+
+			"usual answer. An error rather than a warning because there is no "+
+			"half-configured state that builds — the router would import a package "+
+			"nothing writes.")
 
 	CodeUnmentionedColumn = newCode("RIG3100", SeverityWarning,
 		"A column exists in the database but is not mentioned in the table configuration.",

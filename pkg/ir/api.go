@@ -169,6 +169,24 @@ type OpenAPI struct {
 	JSONPath string `json:"json_path"`
 	// YAMLPath is where the YAML rendering is served.
 	YAMLPath string `json:"yaml_path"`
+
+	// Import is the package the document is embedded in: the project's module
+	// path joined to the openapi generator's output directory.
+	//
+	// Derived rather than configured, because there is exactly one right answer
+	// and both ends of it are already in rig.yaml. A generator reads it instead
+	// of asking the project, which is what keeps the package that declares the
+	// embed and the router that imports it from being told two different things.
+	Import string `json:"import"`
+
+	// Package is the name that package declares, which is [Import]'s last
+	// segment.
+	//
+	// Stored rather than derived twice: the generator that writes the package
+	// clause and the generator that qualifies a reference with it have to agree,
+	// and a directory name Go could not use as a package name is refused when
+	// the configuration is read rather than discovered by a build.
+	Package string `json:"package"`
 }
 
 // Server is one deployment the API is served on.

@@ -89,16 +89,15 @@ func rigYAML(opt ProjectOptions) string {
 	b.WriteString("api:\n")
 	b.WriteString("  version: v1\n")
 	b.WriteString("  base_path: /api/v1\n")
-	// Commented for the reason `servers:` below is: turning it on is only half
-	// the wiring. The other half is server-go's openapi_import, which needs this
-	// project's module path joined to the openapi generator's out_dir — and a
-	// key on by default whose partner is missing would make `rig generate`
-	// refuse the first time anybody ran it. docs/api.md has both halves.
+	// Commented for the reason `servers:` below is: it is a decision rather than
+	// a default. Serving the document turns the openapi generator's out_dir into
+	// a Go package, which is a thing to have chosen rather than to discover — and
+	// a project that has not decided yet still gets the document as a file.
 	b.WriteString("  # The document describing this API, served beside the routes it\n")
-	b.WriteString("  # describes, at /api/v1/openapi.json and /api/v1/openapi.yaml. It\n")
-	b.WriteString("  # needs server-go's openapi_import as well, because the document is\n")
-	b.WriteString("  # embedded in the package the openapi generator writes it to. Nothing\n")
-	b.WriteString("  # in main.go. See docs/api.md.\n")
+	b.WriteString("  # describes, at /api/v1/openapi.json and /api/v1/openapi.yaml.\n")
+	b.WriteString("  # Nothing else to write: the openapi generator embeds it beside the\n")
+	b.WriteString("  # document and the router imports that package. What it costs is that\n")
+	b.WriteString("  # the generator's out_dir becomes a Go package. See docs/api.md.\n")
 	b.WriteString("  # openapi:\n")
 	b.WriteString("  #   serve: true\n\n")
 	// Commented rather than filled in, because rig cannot know where this

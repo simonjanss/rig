@@ -250,12 +250,12 @@ See [electric.md](electric.md) for what a drained proxy tells a subscriber.
 ### Serving the OpenAPI document
 
 There is no `Handlers` field for it, and that is the point:
-[`api.openapi.serve`](rig-yaml.md#openapiserve) plus `server-go`'s
-`openapi_import` is the whole wiring, and `api.Register` mounts the two routes
-with nothing passed in. The document is embedded in the package the `openapi`
-generator writes it to — a `go:embed` directive cannot climb out of the directory
-of the file it is written in — and the generated router imports that package the
-same way it imports the model and the store.
+[`api.openapi.serve`](rig-yaml.md#openapiserve) is the whole wiring, and
+`api.Register` mounts the two routes with nothing passed in. The document is
+embedded in the package the `openapi` generator writes it to — an embed directive
+cannot climb out of the directory of the file it is written in — and the
+generated router imports that package, at a path rig joined out of your module
+and that generator's `out_dir`.
 
 It says where the routes went as the server comes up, beside the address it is
 listening on:
