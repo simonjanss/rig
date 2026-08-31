@@ -27,13 +27,21 @@ services/todo/todo.yaml
 | `RIG3xxx` | Configuration: invalid YAML, a key that does not match the schema, a key that has been replaced by another, a block that cannot work without another one, a column or enum the configuration names that no longer exists |
 | `RIG4xxx` | Notes: a hand-written endpoint replacing a generated one |
 | `RIG5xxx` | Structure: no primary key, a partial snapshot triple, a missing `restore_window_days`, an enum nullable in one place and not another, an `on_delete.order` rig cannot resolve, a live-sync table the database will not replicate |
-| `RIG6xxx` | Conventions: missing comments, unindexed foreign keys, naming rules, `ON DELETE CASCADE`, migration filenames |
+| `RIG6xxx` | Conventions: missing comments, unindexed foreign keys, naming rules, `ON DELETE CASCADE`, migration filenames — and, at the end of the range, the two migration rules that are not conventions at all |
 | `RIG9xxx` | Internal invariants. Seeing one of these is a bug in rig |
 
 ## Severity
 
 `RIG6xxx` codes and a few others are configurable — set each to `off`, `warn`,
 or `error` in the `validate:` block of [rig.yaml](rig-yaml.md#validate).
+
+`RIG6051` and `RIG6052` are the exception in that range. A version number is not
+a matter of taste: two files claiming one number is a migration goose never runs,
+and a migration numbered below the base branch is one goose has already stepped
+past and reports as missing. There is nothing for a project to prefer, so there
+is no key. Both come from
+[`rig migration check`](cli.md#checking-migration-numbers), and `RIG6051` from
+`rig validate` as well.
 
 Structural rules are not configurable. A schema that breaks one cannot be
 generated from at all, so there is no severity to set.
