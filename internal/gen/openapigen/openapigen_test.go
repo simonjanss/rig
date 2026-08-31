@@ -867,6 +867,138 @@ func TestElectricShapesAreDocumentedUnlessTurnedOff(t *testing.T) {
 	}
 }
 
+// A document that is served describes the routes it is served on. Anything else
+// would be this generator's one claim failing on itself: the specification is
+// supposed to describe every route the server answers, and these two are routes
+// the same mux answers.
+func TestTheServedDocumentDescribesItsOwnRoutes(t *testing.T) {
+	t.Parallel()
+
+	doc := load(t, primary)
+	if doc.API.OpenAPI == nil {
+		t.Fatal("the primary fixture no longer serves the document")
+	}
+
+	m := model(t, run(t, primary))
+
+	for _, tc := range []struct{ path, id, mediaType string }{
+		{"/api/v1/openapi.json", "getOpenAPIJSON", "application/json"},
+		{"/api/v1/openapi.yaml", "getOpenAPIYAML", "application/yaml"},
+	} {
+		item, ok := m.Paths.PathItems.Get(tc.path)
+		if !ok {
+			t.Errorf("no path item for %s", tc.path)
+			continue
+		}
+		op := item.Get
+		if op == nil {
+			t.Errorf("%s has no GET", tc.path)
+			continue
+		}
+		if op.OperationId != tc.id {
+			t.Errorf("%s: operationId = %q, want %q", tc.path, op.OperationId, tc.id)
+		}
+		if !slices.Contains(op.Tags, "openapi") {
+			t.Errorf("%s: tags = %v, want the openapi tag", tc.path, op.Tags)
+		}
+		ok2, found := op.Responses.Codes.Get("200")
+		if !found {
+			t.Errorf("%s: no 200", tc.path)
+			continue
+		}
+		if _, found := ok2.Content.Get(tc.mediaType); !found {
+			t.Errorf("%s: 200 does not answer %s", tc.path, tc.mediaType)
+		}
+		// The conditional request is the whole reason the runtime hashes the
+		// document, so a reader has to be told the header exists.
+		if _, found := ok2.Headers.Get("ETag"); !found {
+			t.Errorf("%s: 200 declares no ETag", tc.path)
+		}
+		if _, found := op.Responses.Codes.Get("304"); !found {
+			t.Errorf("%s: no 304, so If-None-Match is undocumented", tc.path)
+		}
+	}
+
+	// A tag nothing defines is a lint finding, and this one is referenced twice.
+	var described bool
+	for _, tag := range m.Tags {
+		if tag.Name == "openapi" {
+			described = tag.Description != ""
+		}
+	}
+	if !described {
+		t.Error("the openapi tag is referenced and not defined with a description")
+	}
+}
+
+// One route per rendering the generator writes, which is what keeps the document
+// and the server in step without either half of the wiring being told what the
+// other was configured with: the runtime mounts a route per document it finds
+// embedded, and only the formats listed here are ever written.
+func TestOnlyTheFormatsWrittenAreDescribed(t *testing.T) {
+	t.Parallel()
+
+	artifacts := gentest.Run(t, openapigen.New(), load(t, primary),
+		gen.Options{OutDir: ".", Raw: map[string]any{"formats": []any{"json"}}})
+
+	body := ""
+	for _, a := range artifacts {
+		if a.Path != "openapi.gen.json" {
+			t.Fatalf("unexpected artifact %s", a.Path)
+		}
+		body = string(a.Content)
+	}
+	if !strings.Contains(body, "/api/v1/openapi.json") {
+		t.Error("the JSON route is not described")
+	}
+	if strings.Contains(body, "/api/v1/openapi.yaml") {
+		t.Error("a YAML route is described and no YAML document is written")
+	}
+}
+
+// A project with an auth block requires a credential document-wide. These two
+// routes read none, and inheriting the default would describe one that is never
+// checked.
+func TestTheServedDocumentNeedsNoCredential(t *testing.T) {
+	t.Parallel()
+
+	m := model(t, run(t, "authwired"))
+	if m.Security == nil {
+		t.Fatal("authwired no longer requires a credential document-wide")
+	}
+
+	item, ok := m.Paths.PathItems.Get("/api/v1/openapi.json")
+	if !ok {
+		t.Fatal("no path item for the document's own route")
+	}
+	// One empty requirement, and nothing beside it: OpenAPI's spelling of "no
+	// authentication here". An absent key would inherit the default instead.
+	if n := len(item.Get.Security); n != 1 {
+		t.Fatalf("security has %d requirements, want 1 (the empty one)", n)
+	}
+	if got := item.Get.Security[0].Requirements; got != nil && got.Len() != 0 {
+		t.Errorf("the requirement names %d schemes, want none", got.Len())
+	}
+}
+
+// The negative: a project that keeps the document a file has no routes for it,
+// and no tag for routes that do not exist.
+func TestADocumentThatIsNotServedDescribesNoRoutes(t *testing.T) {
+	t.Parallel()
+
+	doc := load(t, "ownerscope")
+	if doc.API.OpenAPI != nil {
+		t.Fatal("ownerscope serves the document; it is the negative case")
+	}
+
+	body := yamlOf(t, run(t, "ownerscope"))
+	for _, absent := range []string{"openapi.json:", "openapi.yaml:", "getOpenAPIJSON"} {
+		if strings.Contains(body, absent) {
+			t.Errorf("emitted %q for a project that does not serve the document", absent)
+		}
+	}
+}
+
 func TestBothFormatsAreEmitted(t *testing.T) {
 	t.Parallel()
 

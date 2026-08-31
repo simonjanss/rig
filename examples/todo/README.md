@@ -80,6 +80,20 @@ curl -i http://127.0.0.1:8080/livez    # is the process running
 curl -i http://127.0.0.1:8080/readyz   # should it be sent traffic
 ```
 
+And it serves the document describing everything below, because `rig.yaml` says
+`api.openapi.serve: true`:
+
+```bash
+curl http://127.0.0.1:8080/api/v1/openapi.json
+curl http://127.0.0.1:8080/api/v1/openapi.yaml
+```
+
+That one is half a line in this file — the `go:embed` beside the migrations. rig
+mounts the routes and cannot supply the bytes: `go:embed` does not reach out of
+the package it is written in, and the document is written to `docs/` rather than
+beside the generated router. What the embed buys is that what this build serves
+is what this build describes.
+
 Anything with a shutdown of its own — a queue consumer, an exporter, a client
 with its own pool — is registered where it is built. `notify` is this example's
 one of those: it collects a line per created todo and writes them in batches.

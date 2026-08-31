@@ -236,6 +236,70 @@ than generating them — which means they reach nothing the document is written
 from. `info.description` says as much, so a reader can tell the omission is
 deliberate. [auth.md](auth.md) documents them in full.
 
+### Serving it
+
+A file in `docs/` is not something a client can reach. Turn it into two routes:
+
+```yaml
+api:
+  openapi:
+    serve: true
+```
+
+That gives you `GET /api/v1/openapi.json` and `GET /api/v1/openapi.yaml` —
+under `base_path`, expanded against it exactly the way every other route is, and
+checked against every other route, so a resource that lands on one of those paths
+fails `rig check` rather than taking the mux down at startup.
+
+It takes one line in `main.go` as well, and that is the trade rather than an
+oversight:
+
+```go
+//go:embed docs/openapi.gen.json docs/openapi.gen.yaml
+var apidocs embed.FS
+
+mux := api.Register(api.Handlers{
+	Server:  api.Server{...},
+	OpenAPI: apidocs,
+	Todo:    svc,
+})
+```
+
+`go:embed` cannot reach out of the package it is written in, and the document is
+written to this generator's `out_dir` rather than beside the router — so rig
+cannot embed it for you. What you get instead is the embed where your migrations
+already are, and the same property behind it: **what this build serves is what
+this build describes.** A client reading the document off a running server is
+reading that deployment, not whatever is on a branch.
+
+The consequences of doing it this way, all four worth knowing:
+
+- **The field is nilable, and nil mounts nothing.** A project that has turned the
+  key on and not embedded the file yet serves nothing at those paths, rather than
+  two routes answering 404.
+- **A wrong embed path is a refusal at startup.** rig cannot check the path,
+  because `out_dir` is yours — so `api.Register` panics naming both filenames it
+  looked for rather than mounting routes that answer nothing.
+- **Only the renderings you wrote are mounted.** `formats: [json]` writes one
+  file, so the document describes one route and the server mounts one. Neither
+  half had to be told what the other was configured with.
+- **The document describes these two routes.** It has to: this generator's claim
+  is that it describes every route the server answers, and a specification that
+  omitted the route it is fetched over would be the one omission it cannot excuse.
+
+The routes read no claims and check no permission. What the document says is what
+every generated client was built against, and a specification nobody may fetch is
+one nobody can use. To gate it, leave `OpenAPI` nil and mount
+[`runtime/apidoc`](services.md#serving-the-openapi-document) yourself behind
+whatever you gate the rest with — that is also where the CORS header goes if a
+viewer on another origin has to read it.
+
+Both routes carry an `ETag` over the document's content and answer `304` to a
+matching `If-None-Match`, so polling for a change costs a request and no body.
+`Cache-Control` is `no-cache`: the document moves when the API does, which is
+when a build is deployed, and a cached copy that outlived the deploy is a client
+generated against an API that has moved.
+
 ## See also
 
 - [tables.md](tables.md) — choosing which operations exist, and adding your own

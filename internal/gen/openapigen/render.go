@@ -175,6 +175,9 @@ func (e *emitter) tags() []*base.Tag {
 		}
 		out = append(out, &base.Tag{Name: res.Plural, Description: desc})
 	}
+	if t := e.specTagDescription(); t != nil {
+		out = append(out, t)
+	}
 	return out
 }
 

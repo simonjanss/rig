@@ -5,10 +5,12 @@
 package api
 
 import (
+	"io/fs"
 	"net/http"
 
 	"github.com/simonjanss/rig/observe"
 	"github.com/simonjanss/rig/runtime/apibase"
+	"github.com/simonjanss/rig/runtime/apidoc"
 	"github.com/simonjanss/rig/runtime/httpx"
 )
 
@@ -65,6 +67,18 @@ var writeResult = apibase.WriteResult
 var decodeBody = apibase.DecodeBody
 var decodeReader = apibase.DecodeReader
 
+// Where the OpenAPI document answers. Both come from the compiled document,
+// expanded against the same base path every other route was and checked
+// against every other route for a collision — so these agree with the
+// specification that describes them by construction rather than by somebody
+// keeping two strings in step.
+const (
+	// OpenAPIJSONPath is where the JSON rendering answers.
+	OpenAPIJSONPath = "/api/v1/openapi.json"
+	// OpenAPIYAMLPath is where the YAML rendering answers.
+	OpenAPIYAMLPath = "/api/v1/openapi.yaml"
+)
+
 // Handlers is every resource's service, plus the shared behavior.
 //
 // One field per resource is deliberate: adding a table and forgetting to wire
@@ -77,6 +91,27 @@ type Handlers struct {
 	// endpoint per table that asked for one and registers their drain; a zero one
 	// leaves both undone. See [Shapes].
 	Shapes Shapes
+
+	// OpenAPI is the document describing this API, embedded. Setting it mounts
+	// [OpenAPIJSONPath] and [OpenAPIYAMLPath]; a nil one leaves them unmounted, so
+	// a project that has not embedded it yet serves nothing rather than two routes
+	// answering 404.
+	//
+	// It is a filesystem rather than bytes because that is what go:embed produces,
+	// and it is the application's to supply because go:embed cannot reach out of
+	// the package it is written in — the document is written to the openapi
+	// generator's out_dir, not beside this file. In main.go, beside the
+	// migrations:
+	//
+	//	//go:embed docs/openapi.gen.json docs/openapi.gen.yaml
+	//	var apidocs embed.FS
+	//
+	// Only the renderings present are mounted, so `formats: [json]` gives one
+	// route and not two. Nothing reads claims on the way in: what the document
+	// says is what every client was generated against, and a specification nobody
+	// may fetch is one nobody can use. A project that has to gate it leaves this
+	// nil and mounts [github.com/simonjanss/rig/runtime/apidoc.Handler] itself.
+	OpenAPI fs.FS
 
 	Lesson LessonService
 }
@@ -173,6 +208,20 @@ func Register(h Handlers) *http.ServeMux {
 		} else if h.Server.Logger != nil {
 			h.Server.Logger.Info("live-sync shapes are mounted with no App to drain them", "cost", "a shape route on this server holds an open subscription until the shutdown budget runs out")
 		}
+	}
+
+	// The document describing this API, on the same mux as the routes it
+	// describes. Hand-written rather than generated, for the reason the inbox is:
+	// serving two documents is the same in every project.
+	if h.OpenAPI != nil {
+		docs, err := apidoc.New(h.OpenAPI, apidoc.Options{
+			JSONPath: OpenAPIJSONPath,
+			YAMLPath: OpenAPIYAMLPath,
+		})
+		if err != nil {
+			panic("api.Register: " + err.Error())
+		}
+		docs.Mount(mux)
 	}
 
 	// After the resources, so a pattern collision between the two is a panic

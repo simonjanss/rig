@@ -40,6 +40,20 @@
         "revision_header": {
           "type": "string",
           "description": "Header carrying the API revision, in both directions. Defaults to API-Revision."
+        },
+        "openapi": {
+          "$ref": "#/$defs/APIOpenAPI",
+          "description": "Whether the generated OpenAPI document is served by the API as well as written to disk."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
+    },
+    "APIOpenAPI": {
+      "properties": {
+        "serve": {
+          "type": "boolean",
+          "description": "Mount the document at \u003cbase_path\u003e/openapi.json and \u003cbase_path\u003e/openapi.yaml. The project embeds the file itself; see docs/api.md."
         }
       },
       "additionalProperties": false,

@@ -88,7 +88,18 @@ func rigYAML(opt ProjectOptions) string {
 	fmt.Fprintf(&b, "project:\n  name: %q\n  module: %q\n\n", opt.Name, opt.Module)
 	b.WriteString("api:\n")
 	b.WriteString("  version: v1\n")
-	b.WriteString("  base_path: /api/v1\n\n")
+	b.WriteString("  base_path: /api/v1\n")
+	// Commented for the reason `servers:` below is: turning it on is only half
+	// the wiring — the other half is a go:embed line in main.go, which this
+	// scaffold does not write — so an uncommented key would name a route the
+	// project cannot fill yet. docs/api.md has both halves.
+	b.WriteString("  # The document describing this API, served beside the routes it\n")
+	b.WriteString("  # describes, at /api/v1/openapi.json and /api/v1/openapi.yaml. It\n")
+	b.WriteString("  # takes a line in main.go too: go:embed cannot reach out of the\n")
+	b.WriteString("  # package it is written in, so the bytes are yours to hand over.\n")
+	b.WriteString("  # See docs/api.md.\n")
+	b.WriteString("  # openapi:\n")
+	b.WriteString("  #   serve: true\n\n")
 	// Commented rather than filled in, because rig cannot know where this
 	// project will run — and written out in full rather than as a one-line
 	// example, because the shape is what somebody uncommenting it needs. The

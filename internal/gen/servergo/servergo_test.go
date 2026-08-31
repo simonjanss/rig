@@ -1024,3 +1024,49 @@ func TestThrottleIsWiredOnlyWhereItExists(t *testing.T) {
 // not have to remember to. Where in a request the check runs — after the claims,
 // so it can key on who is calling — is runtime/apibase's, and
 // TestTheThrottleChecksAfterTheClaims is where that ordering is held.
+
+// The document's own routes are mounted from the compiled document, so the
+// constants, the field and the mount all come from one place and cannot name
+// three different paths.
+func TestTheOpenAPIRoutesAreMounted(t *testing.T) {
+	t.Parallel()
+
+	doc := gentest.LoadDocument(t, filepath.Join("testdata", fixture))
+	if doc.API.OpenAPI == nil {
+		t.Fatal("the fixture no longer serves the document")
+	}
+
+	src := collapse(find(t, gentest.Run(t, servergo.New(), doc, opts()), "server.gen.go"))
+
+	for _, want := range []string{
+		`OpenAPIJSONPath = "/api/v1/openapi.json"`,
+		`OpenAPIYAMLPath = "/api/v1/openapi.yaml"`,
+		`OpenAPI fs.FS`,
+		`if h.OpenAPI != nil {`,
+		`docs, err := apidoc.New(h.OpenAPI, apidoc.Options{ JSONPath: OpenAPIJSONPath, YAMLPath: OpenAPIYAMLPath, })`,
+		`docs.Mount(mux)`,
+	} {
+		if !strings.Contains(src, want) {
+			t.Errorf("missing:\n%s", want)
+		}
+	}
+}
+
+// And a project that keeps the document a file gets none of it — not the field,
+// not the constants, and no import of a package it never calls.
+func TestADocumentThatIsNotServedMountsNothing(t *testing.T) {
+	t.Parallel()
+
+	doc := gentest.LoadDocument(t, filepath.Join("testdata", "ownerscope.ir.json"))
+	if doc.API.OpenAPI != nil {
+		t.Fatal("the fixture serves the document; it is the negative case")
+	}
+
+	src := find(t, gentest.Run(t, servergo.New(), doc, opts()), "server.gen.go")
+
+	for _, absent := range []string{"OpenAPIJSONPath", "OpenAPI fs.FS", "apidoc"} {
+		if strings.Contains(src, absent) {
+			t.Errorf("emitted %q for a project that does not serve the document", absent)
+		}
+	}
+}

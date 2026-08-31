@@ -863,6 +863,59 @@ paths:
                 "500":
                     $ref: '#/components/responses/Internal'
             x-rig-permission: lesson.read
+    /api/v1/openapi.json:
+        get:
+            tags:
+                - openapi
+            summary: The OpenAPI document, as JSON.
+            description: |-
+                The OpenAPI document, as JSON.
+
+                It is generated from the same compiled schema the routes are, so it cannot describe an endpoint this API does not serve. What the running server answers here is the document that build was generated with, embedded in the binary — so a client reading it is reading this deployment rather than whatever is on a branch.
+
+                No credential is read. What this document says is what every generated client was built against, and a specification nobody may fetch is one nobody can use.
+            operationId: getOpenAPIJSON
+            responses:
+                "200":
+                    description: This document.
+                    headers:
+                        ETag:
+                            description: The document's content hash. Send it back as If-None-Match and an unchanged document answers 304 with no body.
+                            schema:
+                                type: string
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                additionalProperties: true
+                "304":
+                    description: The document has not changed since the ETag sent as If-None-Match was issued.
+    /api/v1/openapi.yaml:
+        get:
+            tags:
+                - openapi
+            summary: The OpenAPI document, as YAML.
+            description: |-
+                The OpenAPI document, as YAML.
+
+                It is generated from the same compiled schema the routes are, so it cannot describe an endpoint this API does not serve. What the running server answers here is the document that build was generated with, embedded in the binary — so a client reading it is reading this deployment rather than whatever is on a branch.
+
+                No credential is read. What this document says is what every generated client was built against, and a specification nobody may fetch is one nobody can use.
+            operationId: getOpenAPIYAML
+            responses:
+                "200":
+                    description: This document.
+                    headers:
+                        ETag:
+                            description: The document's content hash. Send it back as If-None-Match and an unchanged document answers 304 with no body.
+                            schema:
+                                type: string
+                    content:
+                        application/yaml:
+                            schema:
+                                type: string
+                "304":
+                    description: The document has not changed since the ETag sent as If-None-Match was issued.
 components:
     schemas:
         Error:
@@ -1751,3 +1804,5 @@ components:
 tags:
     - name: Lessons
       description: A single scheduled teaching occasion.
+    - name: openapi
+      description: This document, served by the API it describes. The renderings listed are the ones this project asked the generator to write.

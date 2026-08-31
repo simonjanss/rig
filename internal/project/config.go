@@ -430,6 +430,28 @@ type API struct {
 	// It is configurable because it is a name in a namespace rig does not own:
 	// a gateway in front of the server may already mean something else by it.
 	RevisionHeader string `yaml:"revision_header,omitempty" json:"revision_header,omitempty" jsonschema_description:"Header carrying the API revision, in both directions. Defaults to API-Revision."`
+
+	// OpenAPI says whether the generated document is a route as well as a file.
+	OpenAPI APIOpenAPI `yaml:"openapi,omitempty" json:"openapi,omitempty" jsonschema_description:"Whether the generated OpenAPI document is served by the API as well as written to disk."`
+}
+
+// APIOpenAPI is where the generated document is reachable from.
+//
+// This block is about routes. Which renderings are written, and where they are
+// written to, is the `openapi` generator's own `formats` option and `out_dir` —
+// that block is about files. The two are easy to confuse and do different
+// things: turning `serve` on without the generator configured leaves nothing to
+// serve, which is what RIG3011 says.
+type APIOpenAPI struct {
+	// Serve mounts the document beside the routes it describes, at
+	// <base_path>/openapi.json and <base_path>/openapi.yaml.
+	//
+	// The bytes are the application's to supply: go:embed cannot reach out of
+	// the package it is written in, and the document is written to the
+	// generator's out_dir rather than beside the router. So this makes the route
+	// and the field to fill it, and the project embeds the file. See
+	// docs/api.md.
+	Serve bool `yaml:"serve,omitempty" json:"serve,omitempty" jsonschema_description:"Mount the document at <base_path>/openapi.json and <base_path>/openapi.yaml. The project embeds the file itself; see docs/api.md."`
 }
 
 // Database says where rig runs migrations and reads the schema.

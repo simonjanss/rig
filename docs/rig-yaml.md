@@ -97,6 +97,7 @@ api:
 | `description` | — | What this API is for. |
 | `permissions` | `derived` | `derived` or `none`. See below. |
 | `search_method` | `both` | `query`, `post`, or `both`. |
+| `openapi.serve` | off | Serve the generated document at `<base_path>/openapi.json` and `<base_path>/openapi.yaml`. See below. |
 
 ### `permissions`
 
@@ -113,6 +114,38 @@ is granted something.
 deciding. It is deliberately the thing you have to write down, because being
 unprotected should be a decision somebody made rather than a default nobody
 noticed.
+
+### `openapi.serve`
+
+```yaml
+api:
+  openapi:
+    serve: true
+```
+
+Two routes under `base_path` — `openapi.json` and `openapi.yaml` — answering the
+document the [`openapi`](generators.md) generator writes.
+
+This block is about **routes**. Which renderings get written, and where to, is
+the generator's own `formats` and `out_dir`, which are about **files**. The two
+are separate on purpose: a project can write the document without serving it, and
+rig warns (RIG3011) if you ask to serve one it was never asked to write.
+
+Turning it on is half the wiring. The other half is a `go:embed` line in your
+`main.go`, because `go:embed` cannot reach out of the package it is written in and
+the document is written to the generator's `out_dir` rather than beside the
+router — so the bytes are yours to hand over:
+
+```go
+//go:embed docs/openapi.gen.json docs/openapi.gen.yaml
+var apidocs embed.FS
+
+mux := api.Register(api.Handlers{OpenAPI: apidocs, ...})
+```
+
+What that buys is the property the migration embed already has: what this build
+serves is what this build describes. [api.md](api.md#serving-it) has the whole of
+it, including what a wrong embed path does and how to gate the routes.
 
 `public:` on a resource or an endpoint is the per-endpoint escape hatch, and
 works either way.

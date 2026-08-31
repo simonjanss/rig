@@ -45,6 +45,10 @@ type ProjectOptions struct {
 	// Servers are the deployments this API is served on, in the order the
 	// project named them, or nil for a project that has named none.
 	Servers []ir.Server
+	// ServeOpenAPI is `api.openapi.serve` — the generated document is a route as
+	// well as a file. The paths are not here: they are computed at freeze,
+	// against the same base path every other route is.
+	ServeOpenAPI bool
 
 	// Tracing is the resolved tracing block, or nil for a project that emits no
 	// spans.
@@ -85,6 +89,13 @@ func Project(schema ir.Schema, opt ProjectOptions) (ir.API, diag.List) {
 		// Who keeps rig's own migrations. Carried from here to the generators
 		// untouched: it is a fact about the project, not about the schema.
 		EmbeddedFoundation: opt.EmbeddedFoundation,
+	}
+
+	// Empty rather than absent: the paths belong to the route namespace, and
+	// that is computed once at freeze so nothing else has to know how a base
+	// path is joined.
+	if opt.ServeOpenAPI {
+		api.OpenAPI = &ir.OpenAPI{}
 	}
 
 	// Enums come first so field types can name them.

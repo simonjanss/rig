@@ -12,6 +12,9 @@ func (e *emitter) serverFile() (gen.Artifact, error) {
 	b := gobuf.New(e.cfg.Package)
 
 	e.serverAliases(b)
+	if e.servesOpenAPI() {
+		e.openAPIPaths(b)
+	}
 	e.handlersStruct(b)
 	e.registerFunc(b)
 	e.throttleWiring(b)
@@ -209,6 +212,9 @@ func (e *emitter) handlersStruct(b *gobuf.Buf) {
 		b.L("Presence *%s.Service", b.Import(presenceModule))
 		b.NL()
 	}
+	if e.servesOpenAPI() {
+		e.openAPIField(b)
+	}
 	for _, res := range e.resources() {
 		b.L("%s %sService", res.Name, res.Name)
 	}
@@ -352,6 +358,10 @@ func (e *emitter) registerFunc(b *gobuf.Buf) {
 
 	if e.hasShapes() {
 		e.shapesMount(b)
+	}
+
+	if e.servesOpenAPI() {
+		e.openAPIMount(b)
 	}
 
 	b.NL()

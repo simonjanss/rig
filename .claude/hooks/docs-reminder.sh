@@ -56,7 +56,7 @@ internal/cli/*) pages="docs/cli.md" ;;
 internal/diag/*) pages="docs/diagnostics.md" ;;
 runtime/electric/*) pages="docs/electric.md" ;;
 runtime/reqlog/* | observe/*) pages="docs/observability.md" ;;
-runtime/serve/* | runtime/dbhook/*) pages="docs/services.md" ;;
+runtime/serve/* | runtime/dbhook/* | runtime/apidoc/*) pages="docs/services.md" ;;
 runtime/cache/*) pages="docs/rig-yaml.md docs/auth.md" ;;
 auth/*) pages="docs/auth.md" ;;
 # These four were missing, and the comment at the top of this file is why that

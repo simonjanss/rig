@@ -1,0 +1,18 @@
+project:
+  name: demo
+  module: example.com/demo
+
+# The document as a route as well as a file, in the fixture with no auth block —
+# so the golden proves the two operations carry no security key at all. The
+# with-auth half is authwired, where the document-level default requires a
+# credential and these two routes have to opt back out of it.
+api:
+  openapi:
+    serve: true
+
+# Only so that the key above has something to serve. RIG3011 is the check that
+# `api.openapi.serve` and this list agree, and a fixture that tripped it would be
+# a golden diagnostics file nobody meant to write.
+generators:
+  - name: openapi
+    out_dir: docs

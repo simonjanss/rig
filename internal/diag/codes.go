@@ -159,6 +159,14 @@ var (
 			"spellings will not both be here forever, and the one that is going away "+
 			"is the one rig can no longer teach anybody about.")
 
+	CodeOpenAPINotServable = newCode("RIG3011", SeverityWarning,
+		"`api.openapi.serve` is on and no `openapi` generator is configured.",
+		"The key mounts a route for a document rig was never asked to write, so the "+
+			"route is one the project cannot fill: there is no file to embed. Add the "+
+			"generator — `- name: openapi` with an `out_dir` — or drop the key. A "+
+			"warning rather than a refusal, because the generator can be added in "+
+			"either order and a project part-way through wiring this up is not broken.")
+
 	CodeUnmentionedColumn = newCode("RIG3100", SeverityWarning,
 		"A column exists in the database but is not mentioned in the table configuration.",
 		"Run `rig sync` to add it, then replace the placeholder comment.")

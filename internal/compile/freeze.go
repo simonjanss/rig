@@ -229,6 +229,27 @@ func computeRoutes(doc *ir.Document) diag.List {
 		seen[pattern] = r.Name + ".electric"
 	}
 
+	// The document's own two routes, expanded against the same base and checked
+	// against the same namespace. A resource whose path segment is
+	// `openapi.json` is unlikely and not impossible, and without this it would
+	// take the mux down at Register with a duplicate-pattern panic rather than
+	// failing `rig check`.
+	if o := doc.API.OpenAPI; o != nil {
+		o.JSONPath = base + "/openapi.json"
+		o.YAMLPath = base + "/openapi.yaml"
+
+		for _, path := range []string{o.JSONPath, o.YAMLPath} {
+			pattern := "GET " + path
+			if prev, dup := seen[pattern]; dup {
+				diags.Add(diag.CodeInvalidEndpoint, diag.At("api.openapi"),
+					"the OpenAPI document is served at %q, which is already served by %s",
+					pattern, prev)
+				continue
+			}
+			seen[pattern] = "api.openapi"
+		}
+	}
+
 	return diags
 }
 

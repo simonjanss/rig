@@ -21,6 +21,10 @@
 // hand-written and reach no IR endpoint, so they are absent here and said to be
 // absent in info.description — an omission a reader can see beats one they
 // discover.
+//
+// The two routes the document is itself served on are the exception that proves
+// the rule: a project that turns `api.openapi.serve` on gets them described here
+// as well, because they are routes the same mux answers. See spec.go.
 package openapigen
 
 import (

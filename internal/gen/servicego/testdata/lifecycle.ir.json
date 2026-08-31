@@ -2876,6 +2876,10 @@
         }
       }
     ],
+    "openapi": {
+      "json_path": "/api/v1/openapi.json",
+      "yaml_path": "/api/v1/openapi.yaml"
+    },
     "permissions": [
       {
         "key": "lesson.delete",

@@ -14,6 +14,14 @@ api:
   # stand-in. See examples/auth for the other half.
   permissions: none
   base_path: /api/v1
+  # The document as a route as well as a file, at /api/v1/openapi.json and
+  # /api/v1/openapi.yaml. It takes a line in main.go too, and that is not an
+  # oversight: go:embed cannot reach out of the package it is written in, and the
+  # document is written to the `openapi` generator's out_dir below rather than
+  # beside the router — so the bytes are the application's to hand over. See the
+  # embed beside the migrations in main.go.
+  openapi:
+    serve: true
 
 # Where this API answers. One list, read by both generated clients and by the
 # OpenAPI document, so the three cannot disagree about where the API is — and a
