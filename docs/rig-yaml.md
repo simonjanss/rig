@@ -129,7 +129,7 @@ document the [`openapi`](generators.md) generator writes.
 This block is about **routes**. Which renderings get written, and where to, is
 the generator's own `formats` and `out_dir`, which are about **files**. The two
 are separate on purpose: a project can write the document without serving it, and
-rig warns (RIG3011) if you ask to serve one it was never asked to write.
+rig refuses (RIG3011) if you ask to serve one it was never asked to write.
 
 One line, and nothing anywhere else. The document is embedded in the binary, and
 where the embed lives is decided by a rule of Go's: an embed directive cannot

@@ -53,7 +53,7 @@
       "properties": {
         "serve": {
           "type": "boolean",
-          "description": "Mount the document at \u003cbase_path\u003e/openapi.json and \u003cbase_path\u003e/openapi.yaml. Needs server-go's openapi_import as well; see docs/api.md."
+          "description": "Mount the document at \u003cbase_path\u003e/openapi.json and \u003cbase_path\u003e/openapi.yaml. Turns the openapi generator's out_dir into a Go package; see docs/api.md."
         }
       },
       "additionalProperties": false,
