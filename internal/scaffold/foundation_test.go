@@ -14,12 +14,55 @@ import (
 	"github.com/simonjanss/rig/internal/tableconf"
 )
 
+// options is a project that asks for everything, optional parts included, so that
+// the cases below can go on asserting over the whole foundation. The parts that
+// are off by default get their own case — see
+// [TestAnOptionalPartIsNotWrittenUnlessAsked].
 func options() scaffold.FoundationOptions {
 	return scaffold.FoundationOptions{
 		MigrationsDir: "migrations",
 		ConfigPath: func(table string) string {
 			return filepath.Join("services", table, table+".yaml")
 		},
+		Want: scaffold.OptionalParts(),
+	}
+}
+
+// The default for an optional part is not to write it, which is the opposite of
+// every other part's. A Postgres role is cluster-scoped and outlives the database,
+// so `rig setup-project` on a project that does not stream must not leave one
+// behind — and `--skip` is the wrong gate for that, because it would mean the
+// role arrives for anybody who never read about it.
+func TestAnOptionalPartIsNotWrittenUnlessAsked(t *testing.T) {
+	t.Parallel()
+
+	optional := scaffold.OptionalParts()
+	if len(optional) == 0 {
+		t.Skip("no optional parts")
+	}
+
+	bare := options()
+	bare.Want = nil
+
+	for _, part := range optional {
+		want := "_rig_" + part + ".sql"
+		for _, f := range scaffold.Foundation(bare) {
+			if strings.HasSuffix(filepath.Base(f.Path), want) {
+				t.Errorf("%s was written by a project that did not ask for it", f.Path)
+			}
+		}
+
+		asked := options()
+		asked.Want = []string{part}
+		var found bool
+		for _, f := range scaffold.Foundation(asked) {
+			if strings.HasSuffix(filepath.Base(f.Path), want) {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("%s asked for %s and did not get it", "the project", part)
+		}
 	}
 }
 
@@ -520,6 +563,7 @@ func TestWantedExpandsToPartsInOrder(t *testing.T) {
 			"everything",
 			scaffold.Wanted{
 				Auth: true, OAuth: true, Files: true, Notifications: true, Presence: true,
+				Electric: true,
 			},
 			scaffold.Parts(),
 		},

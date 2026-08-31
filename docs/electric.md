@@ -2,8 +2,9 @@
 
 > **Partly written.** The shapes a table gets are below, running the sync
 > service is [its own section](#running-electric-alongside-your-application),
-> and what a client does with the shapes is in
-> [clients.md](clients.md#live-sync). Still to come: the scoping function.
+> deploying it is [the one after
+> that](#deploying-the-sync-service), and what a client does with the shapes is
+> in [clients.md](clients.md#live-sync). Still to come: the scoping function.
 >
 > Until it exists, the `electric:` block in [tables.md](tables.md#electric) is
 > the complete configuration reference, and `server-go`'s `electric_url` and
@@ -157,11 +158,15 @@ Four settings in four places have to agree, and each names a different thing:
 | `server-go`'s `electric_url` | where the generated proxy forwards |
 | `electric: {enabled: true}` in a table's yaml | that the table has shapes at all |
 | `ALTER PUBLICATION` in a migration | that Postgres will replicate the table |
+| the role in the sync service's `DATABASE_URL` | who it connects to Postgres as |
 
 So a project on port 55445 writes `electric_url: http://localhost:55445`, or
 overrides it at runtime the way the examples do, with an environment variable
-read in `main.go`. The fourth is [the next
-section](#the-table-has-to-be-published).
+read in `main.go`. `rig db url --electric` prints the address rather than making a
+Makefile repeat the port — and it is the only correct answer under
+`RIG_DB_ISOLATE`, where the port is assigned when the container starts. The
+fourth is [the next section](#the-table-has-to-be-published), and the fifth is
+[deploying it](#deploying-the-sync-service).
 
 What happens to a subscription while that service is unreachable is
 [its own section](#when-the-sync-service-is-down).
@@ -267,19 +272,31 @@ filter in front of that stream. The sync service will publish a table for you �
 that part is covered below, and it is why this is easy to never think about — but
 it can only do so where its database role owns the table, which is exactly the
 privilege a production deployment tends not to grant it. Say it in a migration
-and the answer stops varying by environment:
+and the answer stops varying by environment.
+
+rig writes that migration, because rig is what knows which tables stream:
+
+```
+$ rig migration new publish_shapes --publish-shapes
+created migrations/00007_publish_shapes.sql
+  publishing:        rig_notification_recipient, rig_presence, todo
+  identity to FULL:  rig_notification_recipient, rig_presence, todo
+```
+
+What it writes is the two statements Postgres gates on ownership, for every table
+with a shape:
 
 ```sql
 -- Postgres has no CREATE PUBLICATION IF NOT EXISTS, hence the block.
 DO $$
 BEGIN
-    IF NOT EXISTS (SELECT 1 FROM pg_publication WHERE pubname = 'rig_publication') THEN
-        CREATE PUBLICATION rig_publication;
+    IF NOT EXISTS (SELECT 1 FROM pg_publication WHERE pubname = 'electric_publication_default') THEN
+        CREATE PUBLICATION electric_publication_default;
     END IF;
 END
 $$;
 
-ALTER PUBLICATION rig_publication ADD TABLE todo;
+ALTER PUBLICATION electric_publication_default ADD TABLE todo;
 
 -- The second half of the same job. Electric wants the whole old row on an
 -- update or a delete, and Postgres gates this on ownership exactly as it gates
@@ -288,10 +305,28 @@ ALTER PUBLICATION rig_publication ADD TABLE todo;
 ALTER TABLE todo REPLICA IDENTITY FULL;
 ```
 
+**It reads the database, so running it twice is not writing the same file
+twice.** A table that gains a shape six months later gets a migration adding that
+one table to the publication that is already there — not a rewrite of the one that
+is already applied, which goose would refuse anyway. It says what it left alone,
+on the terminal and in the file. And when nothing is missing it writes nothing:
+
+```
+$ rig migration new publish_shapes --publish-shapes
+every streaming table is already published with REPLICA IDENTITY FULL; nothing to write
+```
+
+
+The publication is the sync service's own — `electric_publication_default` — and
+that is deliberate rather than a collision: it reads only that one. [Deploying the
+sync service](#the-publication-has-to-be-the-sync-services-own) is why, and it is
+worth reading before the first deployment rather than after.
+
 `rig validate` refuses a table that streams and is in no publication
-([`RIG5090`](diagnostics.md#the-three-that-read-the-database-rather-than-your-files)),
-one that is `UNLOGGED` and therefore writes no WAL at all (`RIG5091`), and a
-server whose `wal_level` is not `logical` (`RIG5092`). All three read the
+([`RIG5090`](diagnostics.md#the-four-that-read-the-database-rather-than-your-files)),
+one whose replica identity is not `full` (`RIG5093`), one that is `UNLOGGED` and
+therefore writes no WAL at all (`RIG5091`), and a server whose `wal_level` is not
+`logical` (`RIG5092`). All four read the
 database `rig generate` already reads — after your migrations have been applied,
 which is why the migration is where the answer belongs.
 
@@ -331,6 +366,192 @@ neither of which you asked for — a client reads its inbox and who else is here
 as streams, or not at all. So a project with either block has a table to publish
 even if none of its own tables mention live sync. `examples/auth` is that case
 and its migration publishes exactly one table.
+
+## Deploying the sync service
+
+Everything above is true on a laptop, where `rig db up` hands the sync service the
+superuser of a throwaway database. A deployment is the same three facts and one
+more: **who the sync service connects to Postgres as.**
+
+It should not be the owner of your tables, and it certainly should not be the
+master user. What it needs is narrow — replication, `CONNECT`, `CREATE` on the
+database, and `SELECT` on what it streams — and rig carries the migration that
+creates exactly that role:
+
+```
+electric      LOGIN, REPLICATION      (or a member of rds_replication)
+              CONNECT, CREATE ON DATABASE current_database()
+              USAGE ON SCHEMA public
+              SELECT ON ALL TABLES, and on every table added after
+```
+
+You do not write it. A project with a table that streams gets
+`rig/runtime/electric`'s migration set alongside `rig/auth` and the rest — the
+generated `MigrationSources` names it, so `rig generate` is the whole of adopting
+it. `CREATE` is on the list because the sync service creates its own publication
+and replication slot on first connection, and `CREATE PUBLICATION` is a
+database-level privilege.
+
+Two things about that migration are worth knowing rather than rediscovering:
+
+- **It branches on the database, not on an environment variable.** Setting the
+  `REPLICATION` attribute needs a true superuser, and a managed Postgres gives
+  nobody one — on RDS the master user has `CREATEROLE` and not `rolsuper`. So the
+  migration grants `rds_replication` where that role exists and sets the attribute
+  where it does not. Nothing to remember to configure.
+- **The `SELECT` grant has to be a migration.** `ALTER DEFAULT PRIVILEGES` is
+  recorded per grantor and per schema: it covers tables created by the role that
+  ran it and no others. Run it from anywhere but the role that runs your
+  migrations and it covers what existed at the time and nothing added later — and
+  the way that fails is a shape that comes back **empty** rather than one that says
+  why.
+
+### The role has no password
+
+Deliberately: the migration is a file in git, so nothing in it can be a
+credential. Give it one at boot, out of the same secret the sync service itself
+reads as `DATABASE_URL` — one secret with two readers rather than a second holding
+a duplicate that drifts:
+
+```go
+Migrate: func(ctx context.Context, pool *pgxpool.Pool) error {
+	if err := migrate.RequireAll(srcs, migrate.Options{})(ctx, pool); err != nil {
+		return err
+	}
+	// Empty everywhere there is no sync service, where this does nothing.
+	_, err := electric.SetRolePassword(ctx, pool,
+		os.Getenv("ELECTRIC_DATABASE_URL"), electric.Role)
+	return err
+},
+```
+
+It sends a SCRAM-SHA-256 verifier rather than the password, and that is the point
+rather than an optimisation. A managed Postgres commonly logs DDL and captures
+statement text for performance insight, and Postgres redacts a `PASSWORD` literal
+in neither — which is why `psql` has `\password`. A verifier holds `StoredKey`,
+which lets a server check a proof but not produce one, so unlike an MD5 hash it is
+not password-equivalent and cannot be replayed to log in. No error it returns
+carries the connection string, the password or the verifier.
+
+The password has to be ASCII alphanumeric. SCRAM normalisation is the identity map
+on that alphabet and not in general, so anything outside it would need normalising
+before hashing or the verifier would not match — and rather than normalise
+silently, this refuses. Whatever generates the password stays inside the alphabet.
+
+### The secret goes on the proxy, not on the browser
+
+A deployed sync service takes a secret, and it takes it as a **query parameter** —
+which is why Electric's own documentation says it must never be sent from a
+client, and why the sync service does not belong on a public load balancer at all.
+The thing that holds the secret is rig's proxy:
+
+```go
+proxy, err := electric.New(electric.Config{
+	URL:    os.Getenv("ELECTRIC_URL"),
+	Secret: os.Getenv("ELECTRIC_SECRET"),
+	DB:     pool,
+}.Defaults())
+```
+
+So the browser calls your API, your API calls the sync service on a private
+address, and shape data comes back as your API's response. A client's own
+`Authorization` header is never forwarded upstream.
+
+`Secret` is a field rather than an entry in `Extra` because the proxy has to know
+the value in order to take it back out of what it reports. The credential is on
+the URL of every upstream request, a transport failure is an `*url.Error`, and
+that renders the URL it was given — so without this the secret reaches your
+`OnError` and then your log the first time the sync service is unreachable. With
+it, every error the proxy reports has both the plain and the percent-encoded
+spelling replaced by `[redacted]`, and `errors.Is` still reaches what failed.
+
+A secret you already had in `Extra["secret"]` — the only place there was before
+this field — is redacted the same way, so nothing has to change for the leak to
+stop. Setting both is refused rather than reconciled: one of the two would be
+silently dropped, and it may be the one you meant.
+
+### The publication has to be the sync service's own
+
+This is the part of least privilege that is not finished, and it is worth stating exactly
+because none of the errors say it.
+
+**The sync service reads only its own publication.** It is named
+`electric_publication_<replication stream id>` — `electric_publication_default` unless the
+deployment sets one — and it creates it on first connection if nothing else has. A
+publication under a name of your own is *never consulted*, so a table published only there
+satisfies nothing at run time however green `rig validate` is.
+
+The two ways that fails, verified against a real server, since neither mentions a
+publication the project never named:
+
+```
+must be owner of table lesson
+```
+
+with the default settings — the service trying to add the table to its own publication and
+lacking the ownership Postgres requires. And:
+
+```
+Database table "public.lesson" is missing from the publication
+"electric_publication_default" and the ELECTRIC_MANUAL_TABLE_PUBLISHING setting
+prevents Electric from adding it
+```
+
+with `ELECTRIC_MANUAL_TABLE_PUBLISHING=true`, which does not mean "use the publication my
+migrations wrote". It means "the table must already be in *mine*, and I will not add it".
+
+**What works,** end to end, with the least-privileged role and no table ownership anywhere:
+have the migration create the publication the service is going to look for, before it ever
+runs. That is what `rig migration new --publish-shapes` writes, and it is why the ordering
+inside `rig db up` matters — migrations first, then the sync service.
+
+```sql
+CREATE PUBLICATION electric_publication_default;
+ALTER PUBLICATION electric_publication_default ADD TABLE todo;
+ALTER TABLE todo REPLICA IDENTITY FULL;
+```
+
+The publication is then owned by the role that runs migrations rather than by the sync
+service. That is not a detail: adding a table needs the publication's owner, and it is also
+the one fact that tells this apart from the service having built the publication itself.
+`RIG5090` reads exactly that — it accepts an Electric publication your migrations own, and
+still refuses the same publication owned by the service, because a table in *that* one got
+there on privileges the service will not have elsewhere.
+
+**The deployment has to set `ELECTRIC_MANUAL_TABLE_PUBLISHING=true`,** and the reason is
+sharper than "otherwise it tries and fails". Left on its default the service reconciles its
+publication on boot and on every subscription — adding tables a shape needs, and *dropping
+every table no shape currently needs*. So a migration that published three tables has its
+work silently undone the moment the service starts. `rig db up` sets it on the local
+container for the same reason, which is what makes the local arrangement the same one rather
+than a second one that happens to agree.
+
+**One state to hand over first.** A database where the service created the publication
+before any migration did — which is every deployment that was running before the project had
+this migration. `--publish-shapes` refuses rather than writing an `ALTER PUBLICATION` that
+Postgres would deny, and says how to get out of it. On a managed database, one statement:
+
+```sql
+ALTER PUBLICATION electric_publication_default OWNER TO <the role that runs migrations>;
+```
+
+It loses nothing — the sync service keeps running, rebuilds its slot if it has to, and a
+publication it no longer owns is one it will not empty. Then run the command again. On a
+throwaway database `rig db reset` does the same thing by dropping the publication with the
+database and letting the migration create it first.
+
+### Two traps that are not rig's to fix
+
+Worth writing down because both cost an afternoon:
+
+- **`/v1/health` answers `202` while it is starting**, with
+  `{"status":"starting"}`. A container health check using `curl -f` calls that
+  healthy and routes traffic to a service that will hang the first shape request.
+  Match on `200` specifically. rig's own probe does — it requires a 200 *and*
+  `active` in the body — which is what `CheckSyncService` reports at boot.
+- **`ELECTRIC_TCP_READ_TIMEOUT` must exceed any load balancer's idle timeout.** A
+  live shape request is a long poll that deliberately hangs; rig's own
+  `PollDeadline` is five minutes.
 
 ## When the sync service is down
 
@@ -584,3 +805,6 @@ working around it.
 - [tables.md](tables.md#electric) — the configuration keys
 - [api.md](api.md) — what a shape route answers with, including the two failures
 - [generators.md](generators.md) — `electric_url`, `stub_dir`
+- [cli.md](cli.md) — `rig db url --electric`, `rig migration new --publish-shapes`
+- [diagnostics.md](diagnostics.md#the-four-that-read-the-database-rather-than-your-files) —
+  `RIG5090` to `RIG5093`, the four rules that read the database

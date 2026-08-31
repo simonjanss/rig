@@ -1028,6 +1028,54 @@ func TestThrottleIsWiredOnlyWhereItExists(t *testing.T) {
 // so it can key on who is calling — is runtime/apibase's, and
 // TestTheThrottleChecksAfterTheClaims is where that ordering is held.
 
+// The sync service's Postgres role is a foundation set like any other, and which
+// projects get it is decided here: a project that streams. So the generated
+// migration wiring names it for the presence fixture, whose rig_presence table is
+// only ever read as a shape, and not for the relations fixture, which streams
+// nothing.
+//
+// It matters because the role is the half of live sync rig used to leave to the
+// project. A project that streams and does not apply this set has a sync service
+// that authenticates as whatever happens to own the tables — which works on a
+// laptop, where that is the superuser, and is exactly the privilege a deployment
+// withholds.
+func TestTheElectricRoleArrivesOnlyForAProjectThatStreams(t *testing.T) {
+	t.Parallel()
+
+	const set = `Name: "rig/runtime/electric"`
+
+	for _, c := range []struct {
+		fixture string
+		want    bool
+	}{
+		{"presence.ir.json", true},
+		{"lifecycle.ir.json", true},
+		{"relations.ir.json", false},
+		{"files.ir.json", false},
+	} {
+		t.Run(c.fixture, func(t *testing.T) {
+			doc := gentest.LoadDocument(t, filepath.Join("testdata", c.fixture))
+			// The file is written for `migrations.foundation: embedded` and only
+			// then — a vendored project's migrations are already files of its own.
+			doc.API.EmbeddedFoundation = true
+
+			var wiring string
+			for _, a := range gentest.Run(t, servergo.New(), doc, opts()) {
+				if filepath.Base(a.Path) == "foundation.gen.go" {
+					wiring = string(a.Content)
+				}
+			}
+			if wiring == "" {
+				t.Fatal("no foundation.gen.go was written")
+			}
+
+			if got := strings.Contains(wiring, set); got != c.want {
+				t.Errorf("names the electric set = %v, want %v", got, c.want)
+			}
+		})
+	}
+}
+
 // servedDoc is the primary fixture with the document turned into a route.
 //
 // The block is set here rather than in a fixture of its own on purpose. It is an

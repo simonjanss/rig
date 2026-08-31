@@ -336,10 +336,18 @@ var (
 			"Doing both in a migration — `ALTER PUBLICATION <publication> ADD TABLE "+
 			"<table>` and `ALTER TABLE <table> REPLICA IDENTITY FULL` — depends on none of "+
 			"that, and publishing without the second leaves the deployment failing on the "+
-			"half this rule cannot see. Or remove the table's `electric` block. "+
-			"The publication Electric maintains for itself, `electric_publication_default`, "+
-			"does not count as an answer here and is not somewhere to add a table by hand: "+
-			"membership in it is what this rule is asking a project not to depend on.")
+			"half RIG5093 is about. `rig migration new <name> --publish-shapes` writes both, "+
+			"for every table that streams. Or remove the table's `electric` block.\n\n"+
+			"Which publication matters, and it is not obvious: the sync service reads only "+
+			"its own, `electric_publication_<replication stream id>`. A publication under a "+
+			"name of your own is never consulted, so a table published only there streams "+
+			"nothing for a role that owns no tables. What works is a migration creating that "+
+			"publication itself, before the service first connects, with "+
+			"ELECTRIC_MANUAL_TABLE_PUBLISHING=true on the service — and this rule accepts it, "+
+			"because the role that runs migrations owns it. What it still refuses is the same "+
+			"publication created by the sync service and owned by its own role: a table got in "+
+			"there on privileges the service will not have elsewhere, which is the dependency "+
+			"this rule is about. The owner is what tells the two apart.")
 
 	CodeElectricUnlogged = newCode("RIG5091", SeverityError,
 		"A table with live sync is UNLOGGED.",
@@ -355,6 +363,19 @@ var (
 			"pointed at a deployment, say — says it directly instead, with "+
 			"`wal_level=logical` under `database.settings`. A managed database sets it "+
 			"in its own parameter group.")
+
+	CodeElectricReplicaIdentity = newCode("RIG5093", SeverityError,
+		"A table with live sync does not have REPLICA IDENTITY FULL.",
+		"The identity is what an UPDATE or a DELETE puts in the WAL for the row as it "+
+			"was, and the default is the primary key and nothing else — so a subscriber "+
+			"hears that something changed and has no old row to match against the one it "+
+			"is holding. `ALTER TABLE <table> REPLICA IDENTITY FULL` in a migration, "+
+			"beside the ALTER PUBLICATION: Postgres gates both on owning the table, so "+
+			"they are one job and a least-privilege deployment can do neither for itself. "+
+			"This is the half RIG5090 mentions and used to be unable to see. Not free — "+
+			"a full identity puts every column of the old row in the WAL on every update, "+
+			"which on a table written to as often as it is read is real volume — so the "+
+			"other answer is to remove the table's `electric` block.")
 )
 
 // Convention validation: RIG6xxx. Severity comes from the `validate` block of

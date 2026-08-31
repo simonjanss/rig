@@ -60,6 +60,7 @@ SELECT
     c.relname                                       AS name,
     c.relkind                                       AS kind,
     c.relpersistence = 'u'                          AS unlogged,
+    c.relreplident                                  AS replica_identity,
     coalesce(obj_description(c.oid, 'pg_class'), '') AS comment
 FROM pg_class c
 JOIN pg_namespace n ON n.oid = c.relnamespace
@@ -83,20 +84,41 @@ func readTables(ctx context.Context, q Querier, schema string, includeViews bool
 	var out []ir.Table
 	for rows.Next() {
 		var (
-			name, kind, comment string
-			unlogged            bool
+			name, kind, replident, comment string
+			unlogged                       bool
 		)
-		if err := rows.Scan(&name, &kind, &unlogged, &comment); err != nil {
+		if err := rows.Scan(&name, &kind, &unlogged, &replident, &comment); err != nil {
 			return nil, err
 		}
 		out = append(out, ir.Table{
-			Name:     name,
-			Kind:     tableKind(kind),
-			Comment:  comment,
-			Unlogged: unlogged,
+			Name:            name,
+			Kind:            tableKind(kind),
+			Comment:         comment,
+			Unlogged:        unlogged,
+			ReplicaIdentity: replicaIdentity(replident),
 		})
 	}
 	return out, rows.Err()
+}
+
+// replicaIdentity spells out pg_class.relreplident.
+//
+// The four codes are Postgres's own and there is no fifth, so an unknown one is a
+// server this does not understand rather than a case to guess at — it comes back
+// empty, which every reader already treats as "nobody looked".
+func replicaIdentity(relreplident string) ir.ReplicaIdentity {
+	switch relreplident {
+	case "d":
+		return ir.ReplicaIdentityDefault
+	case "f":
+		return ir.ReplicaIdentityFull
+	case "n":
+		return ir.ReplicaIdentityNothing
+	case "i":
+		return ir.ReplicaIdentityIndex
+	default:
+		return ""
+	}
 }
 
 func tableKind(relkind string) ir.TableKind {
@@ -358,8 +380,9 @@ const walLevelQuery = `SELECT current_setting('wal_level')`
 // diagnostic reads very differently when it can say so.
 const publicationQuery = `
 SELECT
-    p.pubname      AS name,
-    p.puballtables AS all_tables
+    p.pubname                          AS name,
+    p.puballtables                     AS all_tables,
+    p.pubowner = current_user::regrole AS owned
 FROM pg_publication p
 ORDER BY p.pubname
 `
@@ -438,7 +461,7 @@ func readPublications(ctx context.Context, q Querier) ([]ir.Publication, error) 
 	var out []ir.Publication
 	for rows.Next() {
 		var p ir.Publication
-		if err := rows.Scan(&p.Name, &p.AllTables); err != nil {
+		if err := rows.Scan(&p.Name, &p.AllTables, &p.Owned); err != nil {
 			return nil, err
 		}
 		out = append(out, p)

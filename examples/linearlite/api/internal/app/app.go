@@ -200,23 +200,19 @@ func New(ctx context.Context, cfg Config) (api.Parts, error) {
 	// No address, no proxy, and then no shape route: what a caller that serves
 	// nothing wants, and what it used to get instead was a connection pool
 	// aimed at whatever main.go's default happened to be.
+	//
+	// Defaults() at the end is the five values electric.New refuses to invent — how long
+	// a subscriber waits before an outage counts as one, how many rows a snapshot may
+	// hand it, when this proxy stops asking. The package will not choose them for a
+	// caller who said nothing, because a value nobody chose is one found the first time
+	// a sync service goes away; calling Defaults is choosing them, and it is what this
+	// example has to say about numbers it has no opinion on.
 	var proxy *electric.Proxy
 	if cfg.ElectricURL != "" {
 		proxy, err = electric.New(electric.Config{
 			URL: cfg.ElectricURL,
 
-			// Nothing below has a default. Each governs what a subscriber sees
-			// while the sync service is away — how long it waits before that counts
-			// as an outage, how many rows a snapshot may hand it, when this proxy
-			// stops asking — and a value the package chose would be one nobody
-			// chose, found the first time a sync service goes away. The Default
-			// constants beside them in electric are what these are.
-			InitialTimeout:   electric.DefaultInitialTimeout,
-			MaxSnapshotRows:  electric.DefaultMaxSnapshotRows,
-			SnapshotTimeout:  electric.DefaultSnapshotTimeout,
-			BreakerThreshold: electric.DefaultBreakerThreshold,
-			BreakerCooldown:  electric.DefaultBreakerCooldown,
-			// And what answers a shape when that sync service cannot be reached.
+			// What answers a shape when that sync service cannot be reached.
 			// One field, and every shape survives an outage on a snapshot of its
 			// own rows — the board, the trash, one row's history and the bell, each
 			// of which renders nothing without them.
@@ -250,7 +246,7 @@ func New(ctx context.Context, cfg Config) (api.Parts, error) {
 				}
 				log.WarnContext(ctx, "live sync is not answering; shapes with a fallback are serving snapshots")
 			},
-		})
+		}.Defaults())
 		if err != nil {
 			return api.Parts{}, err
 		}

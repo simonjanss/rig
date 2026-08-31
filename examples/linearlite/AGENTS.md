@@ -152,9 +152,9 @@ seed, front end, server — and every step of it is also its own target. It runs
 each step where that step belongs, which is `api/` for everything Go; by hand,
 `go run .` means `cd api` first. One caveat for working inside the rig
 repository: under `RIG_DB_ISOLATE` the sync service publishes on a
-kernel-chosen port rather than 55445, so export `ELECTRIC_URL` from the address
-`rig db up` printed before `go run .`, or the generated proxy points at the
-default and the streams answer 502.
+kernel-chosen port rather than 55445, so `export ELECTRIC_URL=$(rig db url
+--electric)` before `go run .`, or the generated proxy points at the default and
+the streams answer 502.
 
 ## This example's extras
 

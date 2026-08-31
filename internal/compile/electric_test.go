@@ -83,8 +83,13 @@ func TestReplicationNobodyReadIsNotReported(t *testing.T) {
 		s.Replication = nil
 		schemaTable(t, s, "todo").Publications = nil
 		schemaTable(t, s, "todo").Unlogged = true
+		// Left empty rather than set to something wrong, because empty is what a
+		// dump written before rig read this carries — and it is the whole reason
+		// the replica identity has a nil check of its own rather than riding on
+		// the schema's replication block.
+		schemaTable(t, s, "todo").ReplicaIdentity = ""
 	})
-	for _, code := range []string{"RIG5090", "RIG5091", "RIG5092"} {
+	for _, code := range []string{"RIG5090", "RIG5091", "RIG5092", "RIG5093"} {
 		if strings.Contains(out, code) {
 			t.Errorf("%s fired on a schema with no replication facts:\n%s", code, out)
 		}
@@ -136,7 +141,7 @@ func TestAnUnpublishedTableWithLiveSyncIsRefused(t *testing.T) {
 				s.Replication.Publications = []ir.Publication{{Name: "electric_publication_default"}}
 				schemaTable(t, s, "todo").Publications = []string{"electric_publication_default"}
 			},
-			want: "the only publication carrying it is the sync service's own",
+			want: "is one the sync service created and owns",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -241,5 +246,102 @@ func TestRigsOwnStreamedTablesNeedPublishingToo(t *testing.T) {
 	if !strings.Contains(out, "RIG5090") ||
 		!strings.Contains(out, "rig_notification_recipient") {
 		t.Errorf("want RIG5090 for the inbox:\n%s", out)
+	}
+}
+
+// The replica identity is the other half of publishing a table, gated on the same
+// privilege, and the three values that are not `full` fail for three different
+// reasons — so the message says which one this is rather than only that it is
+// wrong.
+func TestATableWithoutAFullReplicaIdentityIsRefused(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		identity ir.ReplicaIdentity
+		want     string
+	}{
+		{ir.ReplicaIdentityDefault, "the default carries the primary key of the old row"},
+		{ir.ReplicaIdentityIndex, "an index identity carries only that index's columns"},
+		{ir.ReplicaIdentityNothing, "nothing carries no old row at all"},
+	} {
+		t.Run(string(tc.identity), func(t *testing.T) {
+			out := compileElectric(t, "electricpublished", func(s *ir.Schema) {
+				schemaTable(t, s, "todo").ReplicaIdentity = tc.identity
+			})
+			if !strings.Contains(out, "RIG5093") {
+				t.Errorf("a %s replica identity was accepted:\n%s", tc.identity, out)
+			}
+			if !strings.Contains(out, tc.want) {
+				t.Errorf("the message does not say what this identity costs:\n%s", out)
+			}
+		})
+	}
+}
+
+func TestAFullReplicaIdentityIsAccepted(t *testing.T) {
+	t.Parallel()
+
+	out := compileElectric(t, "electricpublished", func(s *ir.Schema) {
+		schemaTable(t, s, "todo").ReplicaIdentity = ir.ReplicaIdentityFull
+	})
+	if out != "" {
+		t.Errorf("a published table with a full replica identity should compile clean:\n%s", out)
+	}
+}
+
+// Both halves at once, because they are one job: a project that published the
+// table and left the identity alone is the case RIG5090's own remedy text used to
+// have to describe in prose because nothing could see it.
+func TestAnUnpublishedTableWithoutAFullIdentityIsToldBoth(t *testing.T) {
+	t.Parallel()
+
+	out := compileElectric(t, "electricpublished", func(s *ir.Schema) {
+		schemaTable(t, s, "todo").Publications = nil
+		schemaTable(t, s, "todo").ReplicaIdentity = ir.ReplicaIdentityDefault
+	})
+	for _, code := range []string{"RIG5090", "RIG5093"} {
+		if !strings.Contains(out, code) {
+			t.Errorf("%s did not fire, so only half the job was reported:\n%s", code, out)
+		}
+	}
+}
+
+// The case the owner check exists for, and the one that took a real server to find.
+//
+// The sync service reads only its own publication, so a table published into
+// `rig_publication` and nowhere else streams nothing for a role that owns no tables.
+// What works is a migration creating `electric_publication_default` itself, before the
+// service ever connects — and the only thing telling that apart from the service having
+// made it is who owns it.
+func TestAnElectricPublicationAMigrationOwnsIsAccepted(t *testing.T) {
+	t.Parallel()
+
+	out := compileElectric(t, "electricpublished", func(s *ir.Schema) {
+		s.Replication.Publications = []ir.Publication{
+			{Name: "electric_publication_default", Owned: true},
+		}
+		schemaTable(t, s, "todo").Publications = []string{"electric_publication_default"}
+		schemaTable(t, s, "todo").ReplicaIdentity = ir.ReplicaIdentityFull
+	})
+	if out != "" {
+		t.Errorf("a publication this project's migrations own was refused:\n%s", out)
+	}
+}
+
+// And the same publication, same name, owned by the sync service instead. Refused,
+// because a table in it got there on privileges the service will not have elsewhere —
+// which is the dependency the rule is about.
+func TestAnElectricPublicationTheServiceOwnsIsStillRefused(t *testing.T) {
+	t.Parallel()
+
+	out := compileElectric(t, "electricpublished", func(s *ir.Schema) {
+		s.Replication.Publications = []ir.Publication{
+			{Name: "electric_publication_default", Owned: false},
+		}
+		schemaTable(t, s, "todo").Publications = []string{"electric_publication_default"}
+		schemaTable(t, s, "todo").ReplicaIdentity = ir.ReplicaIdentityFull
+	})
+	if !strings.Contains(out, "RIG5090") {
+		t.Errorf("the sync service's own publication was taken as an answer:\n%s", out)
 	}
 }
