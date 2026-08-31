@@ -115,6 +115,16 @@ type API struct {
 	// asked for none. Never set without Tracing.
 	Monitoring *Monitoring `json:"monitoring,omitempty"`
 
+	// OpenAPI is where this API serves the document describing it, or nil for a
+	// project that leaves the document a file.
+	//
+	// Here rather than in the openapi generator's options for the reason
+	// [API.Auth] is: two generators have to agree about it. The server mounts the
+	// routes and the document has to describe them, and a specification that
+	// omitted the routes it is fetched over would be the one omission this
+	// generator cannot excuse.
+	OpenAPI *OpenAPI `json:"openapi,omitempty"`
+
 	// EmbeddedFoundation says rig's own migrations are carried by the modules
 	// that own them rather than vendored into this project's migrations
 	// directory.
@@ -138,6 +148,45 @@ type API struct {
 	// to mean the same thing, and three places deriving it is three places to
 	// drift.
 	Permissions []Permission `json:"permissions"`
+}
+
+// OpenAPI is where the generated document is reachable from.
+//
+// The paths are computed once at freeze, against the same base path every route
+// is, and checked against every other route in the same namespace — so the mux
+// cannot be taken down at startup by a resource whose path segment happens to
+// be `openapi.json`.
+//
+// What is not here is the document itself. The bytes are the application's to
+// supply: go:embed cannot reach out of the package it is written in, and the
+// document is written to the openapi generator's out_dir rather than beside the
+// router. So a project embeds the file and hands it to the generated router,
+// which is also what makes the routes opt-in twice over — the key makes the
+// field, and the field makes the routes.
+type OpenAPI struct {
+	// JSONPath is where the JSON rendering is served, for example
+	// "/api/v1/openapi.json".
+	JSONPath string `json:"json_path"`
+	// YAMLPath is where the YAML rendering is served.
+	YAMLPath string `json:"yaml_path"`
+
+	// Import is the package the document is embedded in: the project's module
+	// path joined to the openapi generator's output directory.
+	//
+	// Derived rather than configured, because there is exactly one right answer
+	// and both ends of it are already in rig.yaml. A generator reads it instead
+	// of asking the project, which is what keeps the package that declares the
+	// embed and the router that imports it from being told two different things.
+	Import string `json:"import"`
+
+	// Package is the name that package declares, which is [Import]'s last
+	// segment.
+	//
+	// Stored rather than derived twice: the generator that writes the package
+	// clause and the generator that qualifies a reference with it have to agree,
+	// and a directory name Go could not use as a package name is refused when
+	// the configuration is read rather than discovered by a build.
+	Package string `json:"package"`
 }
 
 // Server is one deployment the API is served on.

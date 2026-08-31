@@ -14,6 +14,14 @@ api:
   # stand-in. See examples/auth for the other half.
   permissions: none
   base_path: /api/v1
+  # The document as a route as well as a file, at /api/v1/openapi.json and
+  # /api/v1/openapi.yaml. One line, and nothing anywhere else: the `openapi`
+  # generator writes an embed beside the document it produces — a directive
+  # cannot climb out of the directory of the file it is written in — and the
+  # router imports that package. Which package is `project.module` joined to
+  # that generator's out_dir, so there was nothing here to say twice.
+  openapi:
+    serve: true
 
 # Where this API answers. One list, read by both generated clients and by the
 # OpenAPI document, so the three cannot disagree about where the API is — and a

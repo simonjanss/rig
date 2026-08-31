@@ -1,6 +1,7 @@
 package servergo_test
 
 import (
+	"context"
 	"flag"
 	"path/filepath"
 	"strings"
@@ -8,10 +9,12 @@ import (
 
 	"github.com/simonjanss/rig/internal/gen/gentest"
 	"github.com/simonjanss/rig/internal/gen/modelgo"
+	"github.com/simonjanss/rig/internal/gen/openapigen"
 	"github.com/simonjanss/rig/internal/gen/persistgo"
 	"github.com/simonjanss/rig/internal/gen/servergo"
 	"github.com/simonjanss/rig/internal/gen/servicego"
 	"github.com/simonjanss/rig/pkg/gen"
+	"github.com/simonjanss/rig/pkg/ir"
 )
 
 var update = flag.Bool("update", false, "rewrite the golden files")
@@ -1024,3 +1027,187 @@ func TestThrottleIsWiredOnlyWhereItExists(t *testing.T) {
 // not have to remember to. Where in a request the check runs — after the claims,
 // so it can key on who is calling — is runtime/apibase's, and
 // TestTheThrottleChecksAfterTheClaims is where that ordering is held.
+
+// servedDoc is the primary fixture with the document turned into a route.
+//
+// The block is set here rather than in a fixture of its own on purpose. It is an
+// `api:` key and reaches the IR through Freeze, which internal/compile tests
+// directly; what is left for this package is what it emits given a document that
+// carries one, and a whole compiler fixture would buy that at the cost of every
+// other test in this file having to compile a second generator's package.
+//
+// The paths are the ones Freeze computes from this fixture's base path. If that
+// ever stops being true, TestTheOpenAPIRoutesSitUnderTheBasePathAndAreCheckedAgainstIt
+// in internal/compile is where it breaks.
+func servedDoc(t *testing.T) *ir.Document {
+	t.Helper()
+
+	doc := gentest.LoadDocument(t, filepath.Join("testdata", fixture))
+	doc.API.OpenAPI = &ir.OpenAPI{
+		JSONPath: "/api/v1/openapi.json",
+		YAMLPath: "/api/v1/openapi.yaml",
+		// What the compiler joins out of the module path and the openapi
+		// generator's out_dir. There is no option for it, so there is nothing
+		// here for a project to state or a test to configure.
+		Import:  "rigtest/docs",
+		Package: "docs",
+	}
+	return doc
+}
+
+// serverArtifact is the one file the openapi wiring lands in.
+func serverArtifact(t *testing.T, artifacts []gen.Artifact) []gen.Artifact {
+	t.Helper()
+
+	for _, a := range artifacts {
+		if a.Path == "server.gen.go" {
+			return []gen.Artifact{a}
+		}
+	}
+	t.Fatal("no server.gen.go was generated")
+	return nil
+}
+
+// TestOpenAPIGolden is the router for a project that serves its own
+// specification: the two path constants, the once-resolved handler, and the
+// mount. The line that says where it went is in run.gen.go and is checked by
+// TestTheOpenAPIRoutesAreAnnounced rather than goldened, because goldening it
+// would mean committing a second copy of a file this fixture already has.
+func TestOpenAPIGolden(t *testing.T) {
+	t.Parallel()
+
+	artifacts := gentest.Run(t, servergo.New(), servedDoc(t), opts())
+
+	gentest.Golden(t, filepath.Join("testdata", "openapi"),
+		serverArtifact(t, artifacts), *update)
+}
+
+// Nothing is passed in and nothing can be left out. The paths, the filesystem
+// and the mount all come from the compiled document and the generated package
+// beside it, so there is no wiring for a project to get wrong — which is the
+// whole reason the bytes are not main.go's problem.
+func TestTheOpenAPIRoutesAreMounted(t *testing.T) {
+	t.Parallel()
+
+	src := collapse(find(t,
+		gentest.Run(t, servergo.New(), servedDoc(t), opts()), "server.gen.go"))
+
+	for _, want := range []string{
+		`OpenAPIJSONPath = "/api/v1/openapi.json"`,
+		`OpenAPIYAMLPath = "/api/v1/openapi.yaml"`,
+		`var openAPIDocs = sync.OnceValue(func() *apidoc.Handler {`,
+		`resolved, err := apidoc.New(docs.Document, apidoc.Options{ ` +
+			`JSONPath: OpenAPIJSONPath, YAMLPath: OpenAPIYAMLPath, })`,
+		`openAPIDocs().Mount(mux)`,
+	} {
+		if !strings.Contains(src, want) {
+			t.Errorf("missing:\n%s", want)
+		}
+	}
+
+	// Nothing on Handlers, deliberately: there is nothing for a caller to
+	// decide, and a field would be one more thing to forget.
+	if strings.Contains(src, "OpenAPI fs.FS") {
+		t.Error("Handlers still carries an OpenAPI field")
+	}
+}
+
+// A specification is something somebody has to find, and the paths are one line
+// of configuration away from what anybody would guess. Said the way the
+// monitoring page says where it listens.
+func TestTheOpenAPIRoutesAreAnnounced(t *testing.T) {
+	t.Parallel()
+
+	src := collapse(find(t,
+		gentest.Run(t, servergo.New(), servedDoc(t), opts()), "server.gen.go"))
+
+	// In Mount, not in Register: Register builds a mux and is called by a test
+	// and by a task reaching a service through it, and neither of those is a
+	// server starting up.
+	mount := collapse(find(t,
+		gentest.Run(t, servergo.New(), servedDoc(t), opts()), "run.gen.go"))
+
+	want := `app.Logger.InfoContext(ctx, "serving the OpenAPI document", ` +
+		`"at", openAPIDocs().Paths())`
+	if !strings.Contains(mount, want) {
+		t.Errorf("missing from run.gen.go:\n%s", want)
+	}
+	if strings.Contains(src, "serving the OpenAPI document") {
+		t.Error("Register writes the startup line, so every mux built says it")
+	}
+	// The paths come from what was actually mounted rather than from the two
+	// constants, so a project writing only JSON is not told about a YAML route
+	// that does not exist.
+	if strings.Contains(mount, `"at", OpenAPIJSONPath`) {
+		t.Error("the line quotes the constants rather than what was mounted")
+	}
+}
+
+// The router really does import the package the document is embedded in, so the
+// check that matters is that the two compile together.
+func TestTheServedDocumentCompiles(t *testing.T) {
+	t.Parallel()
+
+	doc := servedDoc(t)
+
+	api := gentest.Run(t, servicego.New(), doc, gen.Options{Raw: map[string]any{
+		"package": "api", "model_import": "rigtest/model", "store_import": "rigtest/store",
+	}})
+	api = append(api, gentest.Run(t, servergo.New(), doc, opts())...)
+
+	gentest.MustCompileAll(t,
+		gentest.Package{
+			Dir: "model",
+			Artifacts: gentest.Run(t, modelgo.New(), doc,
+				gen.Options{Raw: map[string]any{"package": "model"}}),
+		},
+		gentest.Package{
+			Dir: "store",
+			Artifacts: gentest.Run(t, persistgo.New(), doc, gen.Options{Raw: map[string]any{
+				"package": "store", "model_import": "rigtest/model",
+			}}),
+		},
+		gentest.Package{Dir: "api", Artifacts: api},
+		// The document, and the go:embed line that carries it. Without this the
+		// import above resolves to nothing — which is the failure this proves
+		// cannot happen quietly.
+		gentest.Package{
+			Dir:       "docs",
+			Artifacts: gentest.Run(t, openapigen.New(), doc, gen.Options{OutDir: "docs"}),
+		},
+	)
+}
+
+// A document that says it is served and names no package to be embedded in is
+// incoherent rather than under-configured — nothing a project writes can produce
+// it — so it is refused before anything is written.
+func TestServingWithNoPackageIsRefused(t *testing.T) {
+	t.Parallel()
+
+	doc := servedDoc(t)
+	doc.API.OpenAPI.Import = ""
+	doc.API.OpenAPI.Package = ""
+
+	if _, err := servergo.New().Generate(context.Background(), doc, opts()); err == nil {
+		t.Fatal("no error")
+	}
+}
+
+// And a project that keeps the document a file gets none of it — not the
+// constants, not the mount, and no import of a package it never calls.
+func TestADocumentThatIsNotServedMountsNothing(t *testing.T) {
+	t.Parallel()
+
+	doc := gentest.LoadDocument(t, filepath.Join("testdata", fixture))
+	if doc.API.OpenAPI != nil {
+		t.Fatal("the fixture serves the document; it is the negative case")
+	}
+
+	src := find(t, gentest.Run(t, servergo.New(), doc, opts()), "server.gen.go")
+
+	for _, absent := range []string{"OpenAPIJSONPath", "apidoc", "openAPIDocs"} {
+		if strings.Contains(src, absent) {
+			t.Errorf("emitted %q for a project that does not serve the document", absent)
+		}
+	}
+}

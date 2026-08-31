@@ -75,6 +75,7 @@ func Compile(raw ir.Schema, set *tableconf.Set, opt Options) (*ir.Document, diag
 		Tracing:        cfg.Tracing.IR(cfg.Project.Name),
 		Monitoring:     cfg.Monitoring.IR(cfg.Project.Name),
 		Servers:        cfg.Servers.IR(),
+		OpenAPI:        p.OpenAPIIR(),
 
 		EmbeddedFoundation: !cfg.Migrations.Vendored(),
 	})

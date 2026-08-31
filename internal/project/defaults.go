@@ -584,6 +584,7 @@ func (p *Project) check() diag.List {
 	diags.Append(p.checkThrottle())
 	diags.Append(p.checkCache())
 	diags.Append(p.checkMonitoring())
+	diags.Append(p.checkOpenAPIServed())
 
 	return diags
 }

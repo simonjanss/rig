@@ -59,6 +59,7 @@ func Expand(api ir.API, opt ExpandOptions) (ir.API, diag.List) {
 		Tracing:            api.Tracing,
 		Monitoring:         api.Monitoring,
 		Servers:            api.Servers,
+		OpenAPI:            api.OpenAPI,
 		EmbeddedFoundation: api.EmbeddedFoundation,
 	}
 

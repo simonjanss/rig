@@ -116,6 +116,7 @@ func ApplyConfig(api ir.API, schema ir.Schema, set *tableconf.Set, opt ConfigOpt
 		Tracing:            api.Tracing,
 		Monitoring:         api.Monitoring,
 		Servers:            api.Servers,
+		OpenAPI:            api.OpenAPI,
 		EmbeddedFoundation: api.EmbeddedFoundation,
 	}
 
