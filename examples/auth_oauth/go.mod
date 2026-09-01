@@ -13,7 +13,7 @@ require (
 	github.com/jackc/pgx/v5 v5.10.0
 	github.com/simonjanss/rig/auth v0.0.0
 	github.com/simonjanss/rig/migrate v0.0.0
-	github.com/simonjanss/rig/runtime v0.2.1
+	github.com/simonjanss/rig/runtime v0.3.0
 	golang.org/x/oauth2 v0.36.0
 )
 

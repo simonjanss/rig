@@ -7,7 +7,7 @@ require (
 	github.com/simonjanss/rig/examples/auth v0.0.0
 	github.com/simonjanss/rig/examples/todo v0.0.0
 	github.com/simonjanss/rig/rigclient v0.0.0
-	github.com/simonjanss/rig/runtime v0.2.1
+	github.com/simonjanss/rig/runtime v0.3.0
 )
 
 replace github.com/simonjanss/rig/examples/auth => ../auth
