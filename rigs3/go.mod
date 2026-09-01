@@ -10,7 +10,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.109.1
 	github.com/aws/smithy-go v1.28.1
 	github.com/google/uuid v1.6.0
-	github.com/simonjanss/rig/files v0.2.1
+	github.com/simonjanss/rig/files v0.3.0
 )
 
 require (
