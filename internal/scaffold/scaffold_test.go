@@ -104,7 +104,7 @@ func TestNextMigrationNumber(t *testing.T) {
 		"00007_add_team.sql",
 		"00003_add_player.sql",
 		"notes.md",           // not a migration
-		"0008_bad_width.sql", // four digits, so not one either
+		"0008_bad_width.sql", // not rig's naming, but version 8 to goose
 	} {
 		if err := os.WriteFile(filepath.Join(dir, name), nil, 0o644); err != nil {
 			t.Fatal(err)
@@ -113,12 +113,18 @@ func TestNextMigrationNumber(t *testing.T) {
 
 	// The next number follows the highest present, not the count: a gap left by
 	// a deleted migration must not cause a collision.
+	//
+	// And "highest present" is goose's reading rather than rig's. 0008 is four
+	// digits, so RIG6050 refuses the name — but goose applies the file as
+	// version 8 regardless, and handing 8 back here would answer a badly named
+	// migration with a duplicate one. A file rig would not have written is still
+	// a number that is taken.
 	n, err := scaffold.NextMigrationNumber(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if n != 8 {
-		t.Errorf("next = %d, want 8", n)
+	if n != 9 {
+		t.Errorf("next = %d, want 9", n)
 	}
 }
 
