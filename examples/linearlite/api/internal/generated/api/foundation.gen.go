@@ -10,6 +10,7 @@ import (
 	"github.com/simonjanss/rig/migrate"
 	notifyfoundation "github.com/simonjanss/rig/notify/foundation"
 	presencefoundation "github.com/simonjanss/rig/presence/foundation"
+	electricfoundation "github.com/simonjanss/rig/runtime/electric/foundation"
 	runtimefoundation "github.com/simonjanss/rig/runtime/foundation"
 )
 
@@ -51,6 +52,7 @@ func MigrationSources(project migrate.Source) []migrate.Source {
 		{Name: "rig/notify", FS: notifyfoundation.Set().FS, Dir: notifyfoundation.Set().Dir, Table: notifyfoundation.Table},
 		{Name: "rig/runtime", FS: runtimefoundation.Set().FS, Dir: runtimefoundation.Set().Dir, Table: runtimefoundation.Table},
 		{Name: "rig/presence", FS: presencefoundation.Set().FS, Dir: presencefoundation.Set().Dir, Table: presencefoundation.Table},
+		{Name: "rig/runtime/electric", FS: electricfoundation.Set().FS, Dir: electricfoundation.Set().Dir, Table: electricfoundation.Table},
 		project,
 	}
 }
