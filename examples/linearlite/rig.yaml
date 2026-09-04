@@ -33,6 +33,16 @@ api:
   # Permissions are left at the default, `derived`: every endpoint checks a key
   # taken from its resource and operation, and services/authz decides who holds
   # which. examples/todo turns this off and says why.
+  #
+  # The document as a route as well as a file, at /api/v1/openapi.json and
+  # /api/v1/openapi.yaml. One line here, and one decision below: the `openapi`
+  # generator writes an embed beside the document it produces — a directive
+  # cannot climb out of the directory of the file it is written in — and the
+  # router imports that package. Which is why its out_dir is under api/ with
+  # everything else Go, and this example is the one that proves the import path
+  # comes out right when the module root is not this directory.
+  openapi:
+    serve: true
 
 # Where this API answers. One list, read by both generated clients and by the
 # OpenAPI document, so the three cannot disagree about where the API is.
@@ -282,7 +292,15 @@ generators:
 
   # The OpenAPI document, written from the same compiled document the routes
   # above are, so it cannot describe an endpoint that does not exist.
+  #
+  # Under api/ because `api.openapi.serve` is on above, which makes this
+  # directory a Go package the router imports — and a package has to be inside
+  # the module, which begins at api/go.mod. It is the same rule that puts
+  # api/internal/migrations/ where it is. The import rig derives for it is
+  # .../examples/linearlite/docs, one segment shorter than the path here: out_dir
+  # is a path from this file and an import path is a path from the module root,
+  # exactly as on every `*_import` above. rig reads that offset out of go.mod.
   - name: openapi
-    out_dir: docs
+    out_dir: api/docs
     options:
       formats: [json, yaml]

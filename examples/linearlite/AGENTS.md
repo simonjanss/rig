@@ -57,14 +57,13 @@ Two halves and the document that describes both:
 
     rig.yaml        the whole configuration — above both halves, because it
                     describes both
-    api/            the Go module: main.go, client/, importer/, import/,
-                    integration/, and internal/, which holds generated/,
-                    services/, migrations/ and app/
+    api/            the Go module: main.go, client/, docs/, importer/,
+                    import/, integration/, and internal/, which holds
+                    generated/, services/, migrations/ and app/
     web/            the React front end, including its generated client
-    docs/           the generated OpenAPI document
 
 Every path in `rig.yaml` is relative to `rig.yaml`, which is what puts the Go
-module root a directory below it. Three consequences worth knowing before moving
+module root a directory below it. Four consequences worth knowing before moving
 anything:
 
 - **`api/internal/migrations/` is under the module because `api/main.go`
@@ -73,10 +72,14 @@ anything:
   can reach downwards, which is why the SQL sits under `internal/`: the embed
   pattern and the `Dir:` on the `migrate.Source` both name
   `internal/migrations`.
+- **`api/docs/` is under the module for the same reason.** `api.openapi.serve`
+  is on, so the generated router imports the package the document is embedded
+  in, and the openapi generator writes that embed beside the document it
+  produced. A directory outside the module could not be imported at all.
 - **Everything `rig generate` writes under `api/` lands in
-  `api/internal/generated/`**, bar `api/client/`. The split is the point —
-  `generated/` is rewritten on every run, and every other directory under
-  `api/internal/` is yours.
+  `api/internal/generated/`**, bar `api/client/` and `api/docs/`. The split is
+  the point — `generated/` is rewritten on every run, and every other directory
+  under `api/internal/` is yours.
 - **`go` commands run in `api/`; `rig` commands run anywhere.** rig walks up to
   the first `rig.yaml`, so `rig check` and `rig db url` work from either
   directory. `go build ./...` does not: run from here it matches no packages,
@@ -86,6 +89,13 @@ anything:
 The module path is `github.com/simonjanss/rig/examples/linearlite`, without the
 `api`. `api/go.mod` is where the module begins, so
 `api/internal/generated/model` is the package that path names.
+
+That offset is why this example is the one that catches rig#128. Every
+`*_import` in `rig.yaml` states it by hand, and the openapi embed cannot — rig
+derives that import, and deriving it by joining `project.module` to `out_dir`
+would produce `.../linearlite/api/docs` for a package whose path is
+`.../linearlite/docs`. rig reads the offset out of `api/go.mod` instead, and
+serving the document here is what proves it.
 
 ## Which files you may edit
 
@@ -100,9 +110,13 @@ The module path is `github.com/simonjanss/rig/examples/linearlite`, without the
 | `api/internal/services/<table>/<table>.go` | you |
 | `*.gen.go`, `*.gen.ts` | rig — rewritten on every run, never edit |
 
-`api/client/` is generated too, and is the one generated directory outside
-`api/internal/generated/`: it is the Go SDK for this API, and it exists to be
-imported by somebody else's program, which `internal/` would forbid. `api/import/` is that somebody: the CSV job that fills the board through it.
+`api/client/` and `api/docs/` are generated too, and are the two generated
+directories outside `api/internal/generated/`. Both are outside it for the same
+reason — something beyond this module has to be able to reach them. `api/client/`
+is the Go SDK for this API, and it exists to be imported by somebody else's
+program, which `internal/` would forbid; `api/import/` is that somebody, the CSV
+job that fills the board through it. `api/docs/` is the OpenAPI document and the
+embed that serves it, and a viewer or an SDK generator fetches it over HTTP.
 
 ## Migrations
 
