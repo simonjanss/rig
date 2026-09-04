@@ -182,6 +182,14 @@ func mountWith(page *observe.Page, build Build) serve.Mount {
 			app.Logger.InfoContext(ctx, "no auth foundation to close", "cost", "a configured auth cache holds its invalidation channel's connection until this process exits")
 		}
 
+		// Said once, at info, the way the monitoring page says where it listens. A
+		// specification is no use to somebody who cannot find it, and where it went is
+		// a base path away from what anybody would guess.
+		//
+		// What was actually mounted rather than the two constants above, so a project
+		// writing only one rendering is not told about a route it does not serve.
+		app.Logger.InfoContext(ctx, "serving the OpenAPI document", "at", openAPIDocs().Paths())
+
 		return parts.Handler, nil
 	}
 }

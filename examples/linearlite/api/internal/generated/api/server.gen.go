@@ -6,7 +6,9 @@ package api
 
 import (
 	"net/http"
+	"sync"
 
+	"github.com/simonjanss/rig/examples/linearlite/docs"
 	"github.com/simonjanss/rig/examples/linearlite/internal/generated/model"
 	"github.com/simonjanss/rig/files"
 	"github.com/simonjanss/rig/notify"
@@ -15,6 +17,7 @@ import (
 	"github.com/simonjanss/rig/presence"
 	"github.com/simonjanss/rig/presence/presencehttp"
 	"github.com/simonjanss/rig/runtime/apibase"
+	"github.com/simonjanss/rig/runtime/apidoc"
 	"github.com/simonjanss/rig/runtime/dbhook"
 	"github.com/simonjanss/rig/runtime/httpx"
 )
@@ -71,6 +74,36 @@ var writeJSON = apibase.WriteJSON
 var writeResult = apibase.WriteResult
 var decodeBody = apibase.DecodeBody
 var decodeReader = apibase.DecodeReader
+
+// Where the OpenAPI document answers. Both come from the compiled document,
+// expanded against the same base path every other route was and checked
+// against every other route for a collision — so these agree with the
+// specification that describes them by construction rather than by somebody
+// keeping two strings in step.
+const (
+	// OpenAPIJSONPath is where the JSON rendering answers.
+	OpenAPIJSONPath = "/api/v1/openapi.json"
+	// OpenAPIYAMLPath is where the YAML rendering answers.
+	OpenAPIYAMLPath = "/api/v1/openapi.yaml"
+)
+
+// openAPIDocs is the OpenAPI document describing this API, ready to serve.
+//
+// The bytes come from the package the openapi generator wrote them into,
+// because a go:embed directive cannot climb out of the directory of the file
+// it is written in and that generator's out_dir is not this one. Which is what
+// makes serving the specification a rig.yaml key rather than a line in
+// main.go.
+var openAPIDocs = sync.OnceValue(func() *apidoc.Handler {
+	resolved, err := apidoc.New(docs.Document, apidoc.Options{
+		JSONPath: OpenAPIJSONPath,
+		YAMLPath: OpenAPIYAMLPath,
+	})
+	if err != nil {
+		panic("api: " + err.Error())
+	}
+	return resolved
+})
 
 // Handlers is every resource's service, plus the shared behavior.
 //
@@ -264,6 +297,19 @@ func Register(h Handlers) *http.ServeMux {
 			h.Server.Logger.Info("live-sync shapes are mounted with no App to drain them", "cost", "a shape route on this server holds an open subscription until the shutdown budget runs out")
 		}
 	}
+
+	// The document describing this API, on the same mux as the routes it
+	// describes. Hand-written rather than generated, for the reason the inbox is:
+	// serving two documents is the same in every project.
+	//
+	// Only the renderings this project writes are mounted, so `formats: [json]`
+	// gives one route and not two — and the document describes one, because the
+	// generator that wrote it knew the same thing. Nothing reads claims here: what
+	// the document says is what every generated client was built against, and a
+	// specification nobody may fetch is one nobody can use. To gate it, turn
+	// `api.openapi.serve` off and mount
+	// [github.com/simonjanss/rig/runtime/apidoc.Handler] in main.go instead.
+	openAPIDocs().Mount(mux)
 
 	// After the resources, so a pattern collision between the two is a panic
 	// naming the auth route rather than the resource one — and the resource

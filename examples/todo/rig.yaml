@@ -19,7 +19,9 @@ api:
   # generator writes an embed beside the document it produces — a directive
   # cannot climb out of the directory of the file it is written in — and the
   # router imports that package. Which package is `project.module` joined to
-  # that generator's out_dir, so there was nothing here to say twice.
+  # that generator's out_dir, read from the module root: here go.mod sits beside
+  # this file so the two are the same path, and examples/linearlite is where they
+  # are not. Either way there was nothing here to say twice.
   openapi:
     serve: true
 
