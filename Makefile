@@ -277,12 +277,16 @@ lint:
 ##
 ##               It reads what is on disk rather than regenerating, the way
 ##               `lint` reads the source on disk. So it lints the five documents
-##               under examples/*/docs as committed, and `examples` is what
-##               proves those are what the generators produce.
+##               the examples commit as they are committed, and `examples` is
+##               what proves those are what the generators produce. Two globs
+##               because there are two layouts: examples/linearlite keeps its
+##               out_dir inside its module, which begins at api/, so its
+##               document sits a directory deeper than everybody else's.
 openapi-lint:
 	@GOBIN=$(CURDIR)/bin $(GO) install github.com/daveshanley/vacuum@$(VACUUM_VERSION)
 	@for f in internal/gen/openapigen/testdata/*/openapi.gen.yaml \
-	          examples/*/docs/openapi.gen.yaml; do \
+	          examples/*/docs/openapi.gen.yaml \
+	          examples/*/*/docs/openapi.gen.yaml; do \
 		[ -f "$$f" ] || continue; \
 		$(CURDIR)/bin/vacuum lint --ruleset .vacuum.yaml --fail-severity warn \
 			--ignore-array-circle-ref --ignore-polymorph-circle-ref \

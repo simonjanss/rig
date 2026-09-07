@@ -111,12 +111,15 @@ serving the document here is what proves it.
 | `*.gen.go`, `*.gen.ts` | rig — rewritten on every run, never edit |
 
 `api/client/` and `api/docs/` are generated too, and are the two generated
-directories outside `api/internal/generated/`. Both are outside it for the same
-reason — something beyond this module has to be able to reach them. `api/client/`
-is the Go SDK for this API, and it exists to be imported by somebody else's
-program, which `internal/` would forbid; `api/import/` is that somebody, the CSV
-job that fills the board through it. `api/docs/` is the OpenAPI document and the
-embed that serves it, and a viewer or an SDK generator fetches it over HTTP.
+directories outside `api/internal/generated/` — for different reasons.
+`api/client/` is the Go SDK for this API, and it exists to be imported by
+somebody else's program, which `internal/` would forbid; `api/import/` is that
+somebody, the CSV job that fills the board through it. `api/docs/` is not kept
+out by any rule of Go's: the only thing that imports it is the router, which is
+under `internal/` itself, so `internal/generated/docs` would have worked. It
+holds the document as well as the embed, and the document is a file people read
+— committed, diffed, opened in a viewer, handed to somebody else's generator —
+which is not what the directory named for what nobody reads is for.
 
 ## Migrations
 
