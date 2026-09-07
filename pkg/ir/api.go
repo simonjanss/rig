@@ -171,12 +171,16 @@ type OpenAPI struct {
 	YAMLPath string `json:"yaml_path"`
 
 	// Import is the package the document is embedded in: the project's module
-	// path joined to the openapi generator's output directory.
+	// path joined to the openapi generator's output directory, taken from the
+	// module root rather than from the directory holding rig.yaml. Those are the
+	// same directory in a flat project and are not in a two-half one, and the
+	// nearest go.mod is what says which.
 	//
 	// Derived rather than configured, because there is exactly one right answer
-	// and both ends of it are already in rig.yaml. A generator reads it instead
-	// of asking the project, which is what keeps the package that declares the
-	// embed and the router that imports it from being told two different things.
+	// and everything it needs is already written down. A generator reads it
+	// instead of asking the project, which is what keeps the package that
+	// declares the embed and the router that imports it from being told two
+	// different things.
 	Import string `json:"import"`
 
 	// Package is the name that package declares, which is [Import]'s last

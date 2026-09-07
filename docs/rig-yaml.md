@@ -136,11 +136,17 @@ where the embed lives is decided by a rule of Go's: an embed directive cannot
 climb out of the directory of the file it is written in. So the `openapi`
 generator writes one beside the document it produces, in a package of its own,
 and the generated router imports it — at `project.module` joined to that
-generator's `out_dir`, which rig works out rather than asking you to repeat.
+generator's `out_dir` taken from your module root, which rig works out rather
+than asking you to repeat.
 
-The one thing that follows: `out_dir` becomes a Go package, so its name has to be
-one Go would accept. `docs` and `internal/spec` are fine; `api-docs` and the
-project root are not, and rig refuses (RIG3011) rather than leaving it to a build.
+Two things follow. **`out_dir` becomes a Go package**, so its name has to be one
+Go would accept: `docs` and `internal/spec` are fine, `api-docs` and the module
+root are not. And **it has to be inside your module**, which is a real question
+only if `rig.yaml` does not sit beside your `go.mod` — with the module under
+`api/`, `out_dir: docs` is outside it and `out_dir: api/docs` is the package
+`<module>/docs`. rig reads where the module begins from the nearest `go.mod`, so
+the offset is not yours to state; it refuses (RIG3011) rather than leaving
+either to a build.
 
 The server says where the routes went as it starts.
 
@@ -502,7 +508,7 @@ generators:
 | Key | |
 |---|---|
 | `name` | A registered generator name. `rig generators` lists them. |
-| `out_dir` | Output directory, relative to the project root. |
+| `out_dir` | Output directory, relative to the directory holding `rig.yaml` — which is not the module root in a project laid out with `go.mod` under `api/`. The `*_import` options are the module-relative counterpart, and where the two differ is that offset. |
 | `options` | Generator-specific. Each generator publishes its own schema for this block. |
 
 Order matters only in that the model must be generated before the layers that

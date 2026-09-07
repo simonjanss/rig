@@ -255,7 +255,10 @@ There is no `Handlers` field for it, and that is the point:
 embedded in the package the `openapi` generator writes it to — an embed directive
 cannot climb out of the directory of the file it is written in — and the
 generated router imports that package, at a path rig joined out of your module
-and that generator's `out_dir`.
+and that generator's `out_dir`. It reads where your module begins from the
+nearest `go.mod`, so the `out_dir` has to be inside it: with `rig.yaml` above a
+module that starts at `api/`, that is `out_dir: api/docs` rather than
+`out_dir: docs`.
 
 It says where the routes went as the server comes up, beside the address it is
 listening on:

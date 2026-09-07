@@ -121,10 +121,13 @@ where the router finds it. It is a route, so it is
 [`api.openapi.serve`](rig-yaml.md#openapiserve) in rig.yaml — read by this
 generator, which describes the two routes and writes the embed that carries
 them, and by `server-go`, which imports that package and mounts them. The import
-path is `project.module` joined to this generator's `out_dir`: one right answer,
-both ends already written down, so rig joins them rather than adding an option
-whose only wrong value is a typo. What stays here is `formats`, because that is
-about which files get written; see [api.md](api.md#serving-it).
+path is `project.module` joined to this generator's `out_dir` taken from your
+module root — one right answer, everything it needs already written down, so rig
+joins them rather than adding an option whose only wrong value is a typo. Where
+the module root is comes from the nearest `go.mod`, so `out_dir: api/docs` in a
+project whose module begins at `api/` is the package `<module>/docs`, and an
+`out_dir` outside that module is refused (RIG3011). What stays here is `formats`,
+because that is about which files get written; see [api.md](api.md#serving-it).
 
 ## The two clients
 

@@ -450,10 +450,12 @@ type APIOpenAPI struct {
 	// the file it is written in and cannot climb out of it, and the document is
 	// written to the openapi generator's out_dir rather than beside the router —
 	// so that generator writes the embed beside the document, in a package of its
-	// own, and the router imports it at `project.module` joined to that out_dir.
+	// own, and the router imports it at `project.module` joined to that out_dir
+	// read from the module root, which the nearest go.mod is what locates.
 	//
-	// What it costs is that the directory becomes a Go package, so its name has
-	// to be one Go would accept. RIG3011 is where that is said.
+	// What it costs is that the directory becomes a Go package: its name has to
+	// be one Go would accept, and it has to be inside the module the router is
+	// generated into. RIG3011 is where both are said.
 	Serve bool `yaml:"serve,omitempty" json:"serve,omitempty" jsonschema_description:"Mount the document at <base_path>/openapi.json and <base_path>/openapi.yaml. Turns the openapi generator's out_dir into a Go package; see docs/api.md."`
 }
 

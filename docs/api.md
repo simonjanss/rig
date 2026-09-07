@@ -263,9 +263,18 @@ resolves against the directory of the file it is written in and cannot climb out
 of it, and the document is written to the `openapi` generator's `out_dir` rather
 than beside the router. So that generator writes the embed beside the document,
 in a package of its own, and the generated router imports it. Which package that
-is, rig works out: `project.module` joined to the generator's `out_dir`. There is
-exactly one right answer and both ends of it are already in `rig.yaml`, so
-there is nothing to state.
+is, rig works out: `project.module` joined to the generator's `out_dir` *taken
+from your module root*. There is exactly one right answer and nothing left to
+state.
+
+Those two are the same string in a project whose `rig.yaml` sits beside its
+`go.mod`, and they are not in a project where it does not. `out_dir` is a path
+from `rig.yaml` and an import path is a path from the module root, so a project
+laid out with `rig.yaml` above both halves and `go.mod` under `api/` has an
+offset between them — `out_dir: api/docs` is the package `<module>/docs`. rig
+reads that offset out of the nearest `go.mod` rather than assuming there is
+none. A project that has not run `go mod init` yet is assumed to have `rig.yaml`
+at its module root, which is the only thing left to assume.
 
 What the embed buys is the property your migrations already have: **what this
 build serves is what this build describes.** A client reading the document off a
@@ -275,9 +284,11 @@ Three consequences worth knowing:
 
 - **`out_dir` becomes a Go package.** One generated file, `openapi.gen.go`,
   holding the embed and nothing else. So the directory's name has to be one Go
-  would accept — `docs` and `internal/spec` are fine, `api-docs` and the project
-  root are not, and `rig validate` says so (RIG3011) rather than leaving it to a
-  build that will not compile.
+  would accept — `docs` and `internal/spec` are fine, `api-docs` and the module
+  root are not — and it has to be **inside the module the router is generated
+  into**, which a two-half layout makes a real question. `rig validate` says so
+  (RIG3011) either way, rather than leaving it to a build that will not
+  compile.
 - **Only the renderings you wrote are mounted.** `formats: [json]` writes one
   file, so the embed names one, the server mounts one, and the document describes
   one. No half of that had to be told what the others were configured with.
