@@ -84,6 +84,15 @@ type Config struct {
 	// path segment, a claim in a proxy's header. It is consulted only where a
 	// tenant cannot be known some other way: login, a password reset, the OAuth
 	// start. Once there is a session the tenant comes from the token.
+	//
+	// uuid.Nil is an ordinary answer at every one of those places and means
+	// "unspecified" rather than "none": a single sign-in page cannot know which
+	// tenants an address belongs to before somebody has proved they own it, so
+	// the sign-in resolves it afterwards. That is true of a provider sign-in as
+	// well as a password one — a header is not there when a provider sends the
+	// browser back, so a header-based deployment answers Nil at the OAuth start
+	// and the callback settles it. Which is why the default answers Nil for a
+	// missing header rather than refusing; see [TenantFromHeader].
 	Tenant func(*http.Request) (uuid.UUID, error)
 
 	// BasePath prefixes the endpoints. Default [DefaultBasePath].
@@ -313,6 +322,13 @@ type OAuth struct {
 	// the sort of decision this package cannot make: it depends on whether the
 	// client is a single-page application, a server-rendered one, or a mobile
 	// app catching a deep link.
+	//
+	// Whichever it is, it has to handle a sign-in with no tenant to land in:
+	// [oauth.SignIn.TenantID] is uuid.Nil whenever [Config.Tenant] answered Nil
+	// at the start, and issuing a session straight from that field would issue
+	// one into a tenant that does not exist. The default handles it by answering
+	// the way a login does — an identity token and the tenant list, so the
+	// picker can take over.
 	OnSignIn func(w http.ResponseWriter, r *http.Request, in oauth.SignIn) error
 }
 
@@ -590,9 +606,11 @@ func New(cfg Config) (*Auth, error) {
 		signIn := cfg.OAuth.OnSignIn
 		if signIn == nil {
 			// The same session every other endpoint issues, answered in the same
-			// shape a login is. It can be the default because a provider sign-in
-			// now resolves to one account in one tenant, which is all an issue
-			// needs.
+			// shape a login is — including when there is no tenant to land in,
+			// which is what makes it a default rather than a guess. It can be
+			// one because the question a provider sign-in cannot answer before
+			// the redirect is the same question a login answers after the
+			// password, and both go through one method to answer it.
 			signIn = endpoints.SignIn
 		}
 

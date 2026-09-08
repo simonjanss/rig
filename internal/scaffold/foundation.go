@@ -32,14 +32,23 @@ const (
 	// reason the table it queues for does: a project that mints links can always
 	// choose to queue them, and the choice is a Go one rather than a rig.yaml one.
 	PartVerificationDelivery = "verification_delivery"
-	PartFiles                = "files"
-	PartNotifications        = "notifications"
-	PartPresence             = "presence"
-	PartIdempotency          = "idempotency"
-	PartThrottle             = "throttle"
-	// PartElectricRole is the Postgres role the sync service connects as. The one
-	// part that creates no table: what it creates is a role and its grants. It
-	// arrives only for a project that streams — see [Wanted.Electric].
+	// PartLastTenant is the index behind "sign in and land back where you were".
+	// Its own part because it is its own migration, and it arrives with auth the
+	// way [PartVerificationDelivery] does: a set is applied whole, so having
+	// sessions is having this. Which is the point — a project with sessions and
+	// without it has a sign-in that works and a query that sorts the whole token
+	// table to answer where somebody was.
+	PartLastTenant    = "last_tenant"
+	PartFiles         = "files"
+	PartNotifications = "notifications"
+	PartPresence      = "presence"
+	PartIdempotency   = "idempotency"
+	PartThrottle      = "throttle"
+	// PartElectricRole is the Postgres role the sync service connects as. One of
+	// the two parts that create no table — the other is [PartLastTenant], which
+	// creates an index — and the only one that creates no schema object at all:
+	// what it creates is a role and its grants. It arrives only for a project
+	// that streams — see [Wanted.Electric].
 	PartElectricRole = "electric_role"
 )
 
@@ -541,6 +550,12 @@ func Requires(part string) []string {
 		return []string{PartTenancy, PartAPIKeys}
 	case PartAPIKeys, PartOAuth:
 		return []string{PartTenancy}
+	case PartLastTenant:
+		// It indexes rig_account_token, and nothing else. Naming only the part
+		// that creates that table keeps the message a reader gets accurate —
+		// what sessions in turn requires is sessions' own answer, and the
+		// callers that need the whole chain recurse.
+		return []string{PartSessions}
 	case PartVerificationDelivery:
 		// It references rig_identity_verification and alters it, both of which
 		// are the tenancy part.

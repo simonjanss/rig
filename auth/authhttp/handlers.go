@@ -182,26 +182,43 @@ func (h *Handler) resendVerification(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusAccepted)
 }
 
-// SignIn finishes a provider sign-in by issuing a session and answering with the
-// same body a login does.
+// SignIn finishes a provider sign-in with the same last step, and the same
+// body, a password login gets.
 //
 // It is the default [github.com/simonjanss/rig/auth/oauth.Config.OnSignIn], so
 // that a project which only wants "sign in with Google" to work does not have to
 // write the last step itself. A browser flow usually wants a cookie and a
 // redirect instead, which is exactly the sort of decision that stays with the
 // application.
+//
+// The work is [github.com/simonjanss/rig/auth/account.Service.SignInIdentity]
+// rather than a session issue of its own, and that is what lets a provider
+// sign-in reach the cases a login already answers: a tenant it named, one of
+// several the person belongs to, or none at all — in which case the answer is
+// 200 with an identity token, an empty tenant list and no session, and the
+// picker takes it from there.
+//
+// It issues through the manager the account service holds rather than
+// [Config.Sessions] directly. Through [github.com/simonjanss/rig/auth.New] those
+// are the same one.
 func (h *Handler) SignIn(w http.ResponseWriter, r *http.Request, in oauth.SignIn) error {
-	pair, err := h.cfg.Sessions.Issue(r.Context(), session.IssueInput{
-		TenantID:  in.TenantID,
-		AccountID: in.AccountID,
+	res, err := h.cfg.Accounts.SignInIdentity(r.Context(), account.SignInIdentityInput{
+		IdentityID: in.Link.IdentityID,
+		// Nil when the sign-in named no tenant, which is exactly what
+		// SignInIdentity reads as "wherever they belong".
+		TenantID: in.TenantID,
+		// A provider flow is a top-level browser navigation on the way out and
+		// a browser redirect on the way back, and it has nowhere to ask for a
+		// long session: there is no form to carry a "remember me" box.
 		Client:    session.ClientWeb,
 		IPAddress: h.addrString(r),
 		UserAgent: r.UserAgent(),
+		Method:    in.Provider,
 	})
 	if err != nil {
 		return err
 	}
-	httpx.WriteJSON(w, http.StatusOK, pairOf(pair))
+	httpx.WriteJSON(w, http.StatusOK, signInOf(res))
 	return nil
 }
 

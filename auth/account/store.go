@@ -294,8 +294,27 @@ type Store interface {
 	// not made from.
 	AccountsForIdentity(ctx context.Context, identityID uuid.UUID) ([]*Account, error)
 
+	// LastAccountForIdentity is the account a person most recently held a
+	// session for, or nil when there is no record of one.
+	//
+	// It is what makes a sign-in that names no tenant land where somebody was
+	// rather than where they started — see [Service.SignInIdentity]. The
+	// account rather than the tenant, because an account is a person in a
+	// tenant and the caller needs the row either way.
+	//
+	// It must skip an account or a tenant that is no longer active, for the
+	// same reason [Store.AccountsForIdentity]'s caller does: landing somebody
+	// somewhere [Store.TenantsForIdentity] will not list is worse than landing
+	// them nowhere.
+	LastAccountForIdentity(ctx context.Context, identityID uuid.UUID) (*Account, error)
+
 	// TenantsForIdentity is the same set with the tenant's name attached, for
 	// showing somebody where they can go.
+	//
+	// Ordered for a person to read rather than to match whichever account a
+	// sign-in landed in: which one that was is *marked* — see
+	// [SignInResult.TenantID] — so the two orderings have nothing to disagree
+	// about.
 	TenantsForIdentity(ctx context.Context, identityID uuid.UUID) ([]Membership, error)
 
 	// Insert writes a new account.

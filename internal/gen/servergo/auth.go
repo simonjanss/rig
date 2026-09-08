@@ -376,7 +376,12 @@ func (e *authEmitter) oauthHooks(b *gobuf.Buf) {
 		"with the same body a password login does.\n\n" +
 		"A browser flow usually wants a cookie and a redirect instead, and that " +
 		"depends on what the client is — a single-page application, a server-rendered " +
-		"one, a mobile app catching a deep link — which is why rig will not choose.")
+		"one, a mobile app catching a deep link — which is why rig will not choose.\n\n" +
+		"Whatever it does, it has to handle in.TenantID being the nil UUID: that is " +
+		"a sign-in whose tenant was not known before the redirect, and issuing a " +
+		"session from that field would issue one into a tenant that does not exist. " +
+		"Nil handles it the way a login does — an identity token and the tenant " +
+		"list, for the picker to take over.")
 	b.L("OnSignIn func(w %s.ResponseWriter, r *%s.Request, in %s.SignIn) error", httpPkg, httpPkg, oauthPkg)
 	b.NL()
 

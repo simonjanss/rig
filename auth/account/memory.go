@@ -28,6 +28,17 @@ type MemoryStore struct {
 	// store about the property under test is worse than no double.
 	accountOrder []uuid.UUID
 
+	// lastAccount is the account an identity most recently held a session for,
+	// which stands in for rig_account_token the way accountOrder stands in for
+	// created_at.
+	//
+	// Nothing here issues sessions — that is session.Manager, over its own store
+	// — so there are no token rows to read and no way for this double to notice
+	// one. [MemoryStore.SetLastAccount] is how a test says what the real query
+	// would have found. Unset is the honest default: it is what a first sign-in
+	// looks like, and it is the case [Service.accountFor] falls back for.
+	lastAccount map[uuid.UUID]uuid.UUID
+
 	// Domains are the allowed email domains per tenant, for the tests that care
 	// about provisioning. Absent means no restriction, which is what an ordinary
 	// tenant has.
@@ -197,8 +208,9 @@ func (s *MemoryStore) AccountForIdentity(_ context.Context, tenantID, identityID
 
 // AccountsForIdentity implements [Store].
 //
-// Oldest first, which is not decoration: signing in without naming a tenant puts
-// somebody in the one they joined first, so the order *is* the contract.
+// Oldest first, which is not decoration: a sign-in that names no tenant and has
+// no session history to read falls back to the tenant they joined first, so the
+// order *is* the contract.
 func (s *MemoryStore) AccountsForIdentity(_ context.Context, identityID uuid.UUID) ([]*Account, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -211,6 +223,37 @@ func (s *MemoryStore) AccountsForIdentity(_ context.Context, identityID uuid.UUI
 		}
 	})
 	return out, nil
+}
+
+// LastAccountForIdentity implements [Store].
+//
+// It answers from what [MemoryStore.SetLastAccount] was told and applies the
+// account half of what the real query filters, so a test that disables the
+// account sees the fallback rather than a landing nobody can use. The tenant
+// half it cannot: nothing here holds a tenant's active state, which is why the
+// tenant that went away is a case for the Postgres suite.
+func (s *MemoryStore) LastAccountForIdentity(_ context.Context, identityID uuid.UUID) (*Account, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	a := s.accounts[s.lastAccount[identityID]]
+	if a == nil || !a.IsActive || a.IdentityID == nil || *a.IdentityID != identityID {
+		return nil, nil
+	}
+	copied := *a
+	return &copied, nil
+}
+
+// SetLastAccount says which account an identity most recently held a session
+// for, standing in for the row rig_account_token would carry.
+func (s *MemoryStore) SetLastAccount(identityID, accountID uuid.UUID) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.lastAccount == nil {
+		s.lastAccount = map[uuid.UUID]uuid.UUID{}
+	}
+	s.lastAccount[identityID] = accountID
 }
 
 // TenantsForIdentity implements [Store].

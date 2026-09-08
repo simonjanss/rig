@@ -41,8 +41,10 @@ const Table = "rig_auth_migrations"
 // Tenancy first because everything here references it. API keys before sessions
 // because the token table and the log declare their key columns where they are
 // created rather than altering them afterwards, so rig_api_key has to exist by
-// then — the alternative is two shapes of the same table. OAuth last because
-// nothing depends on it.
+// then — the alternative is two shapes of the same table. OAuth after that
+// because nothing depends on it, and the two that follow it because they came
+// later: the set is append-only, so arrival order and dependency order are the
+// same order by construction.
 func Set() dbschema.Set {
 	return dbschema.Set{
 		Module: "rig/auth",
@@ -65,6 +67,10 @@ func Set() dbschema.Set {
 			{Number: 5, Name: "verification_delivery", Tables: []string{
 				"rig_identity_verification_delivery",
 			}},
+			// No tables at all. What it adds is one index on rig_account_token,
+			// which migration 3 created — the read behind "sign in and land back
+			// where you were" has no other way to be cheap.
+			{Number: 6, Name: "last_tenant"},
 		},
 	}
 }

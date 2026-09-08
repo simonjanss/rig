@@ -233,16 +233,39 @@ POST /auth/login   {emailAddress, password}          no X-Tenant-Id
   }
 ```
 
-Belonging to one or more tenants lands you in the oldest — predictable beats
-clever, and the rest are one `POST /auth/tenants/{id}/switch` away. Belonging to
-**none** is a 200 with no `accessToken` and an empty `tenants`, not a 403: that
-used to be a refusal and it made the flow above impossible.
+Belonging to one or more tenants lands you in **the one you were last in**, and
+the rest are one `POST /auth/tenants/{id}/switch` away. Belonging to **none** is
+a 200 with no `accessToken` and an empty `tenants`, not a 403: that used to be a
+refusal and it made the flow above impossible.
 
 Naming a tenant you are not in *is* still a 403. You asked for somewhere specific.
 
 The identity token comes back even when a session does, because switching tenant
 later is the same flow and the picker's endpoints are what answer "where else could
 I go".
+
+**"Where you were last" is the most recent session for any of your accounts**,
+read from `rig_account_token`'s family roots — one row per sign-in, indexed by
+auth's `last_tenant` migration. A project upgrading from an older rig picks that
+migration up the way it picks up any of them: `rig setup-project` writes the ones
+you do not have at the next free number, or nothing at all if you keep the
+foundation [`embedded`](rig-yaml.md#who-keeps-rigs-migrations). Without it the
+answer is still right and the query sorts every token an account has ever held.
+It changes
+only because you changed it, which is the property that makes it predictable
+rather than clever: switching tenant is a decision, and the next sign-in
+honouring it is the decision still holding. Somebody signing in for the first
+time has no last, and falls back to the tenant they joined first.
+
+Which one you landed in is **marked** rather than sorted first: `tenants` is
+ordered by name, because that is how somebody scans a list, and the one the
+session is for carries `current: true`. So the ordering and the landing have
+nothing to disagree about.
+
+**Every one of these answers is the same for a provider sign-in.** Not by
+coincidence — `POST /auth/login` and an OAuth callback go through one method to
+answer them, which is the only way two paths stay agreed about where somebody
+goes. See [Signing in with a provider](#signing-in-with-a-provider).
 
 ### Staying signed in
 
@@ -340,9 +363,10 @@ No table of pending sign-ins to clean up. `SigningKey` must be at least 32 bytes
 is free: a stolen authorization code is useless without the verifier, which never
 left the server.
 
-#### Then two questions, in order
+#### Then two questions, and only one of them is always asked
 
-**Who is this?** Answered globally, with no tenant involved:
+**Who is this?** Answered globally, with no tenant involved, and always answered
+here:
 
 1. `FindLink(provider, subject)` — the **subject**, always.
 2. Failing that, `FindIdentityByEmail` — so "sign in with Google" reaches the person
@@ -350,9 +374,16 @@ left the server.
    them.
 3. Failing that, `ProvisionIdentity` — but only under `AllowProvisioning`.
 
-**Do they belong here?** Answered per tenant from `FindAccount`, and answered **no**
-unless `AllowProvisioning` is on and `JoinTenant` accepts them — which must honour
-the tenant's allowed email domains.
+**Do they belong here?** Asked only when something named a tenant. Then it is
+answered per tenant from `FindAccount`, and answered **no** unless
+`AllowProvisioning` is on and `JoinTenant` accepts them — which must honour the
+tenant's allowed email domains.
+
+When nothing named one, the callback has nothing to answer it with and does not
+try: it hands on a sign-in with the first question answered and `tenantID` nil,
+and where that person goes is settled the way `POST /auth/login` settles it —
+from their own memberships. See [When nobody knows the tenant
+yet](#when-nobody-knows-the-tenant-yet).
 
 #### Three decisions worth more than the rest of the package
 
@@ -373,12 +404,16 @@ stranger to appear inside a customer's tenant — rarely what anyone wants and n
 what they expect. One switch gates both doors: creating the identity, and joining
 the tenant.
 
-#### The tenant is decided before the redirect
+The second door only exists when a tenant was named. So for a deployment that
+settles the tenant after the callback, this is the switch on "may a stranger
+become somebody here at all" — with it off, a provider sign-in works only for an
+address that already has an identity, and joining a tenant is the picker's job
+rather than the callback's.
 
-A provider sign-in has to know which tenant it is for **at the start**, because
-that is what the callback joins somebody to. `start` resolves it with
-`Config.Tenant` and seals it into the state cookie; `callback` reads it from there
-rather than asking again.
+#### The tenant is decided before the redirect, when it can be
+
+`start` resolves it with `Config.Tenant` and seals it into the state cookie;
+`callback` reads it from there rather than asking again.
 
 That is not an optimisation. The callback URL is registered with the provider and
 fixed, so it carries nothing an application's resolver could read — a header or a
@@ -389,6 +424,39 @@ anything else does.
 
 Carrying it also means a callback cannot be replayed against a different tenant
 than the one it started for.
+
+#### When nobody knows the tenant yet
+
+The paragraph above is also the reason a deployment with no host to read has no
+answer to give at `/start`. It is an anonymous browser GET: no session, no token,
+no profile, and nobody has proved they own an address yet — so the visitor cannot
+be asked which of their tenants they meant, because until the callback there is
+nobody to have tenants.
+
+`Config.Tenant` may therefore be nil, or answer `uuid.Nil`, and that means
+**settle it at the callback**. `auth.TenantFromHeader` — the default — already
+answers `uuid.Nil` for a request with no header, so a header-based deployment
+gets this without configuring anything.
+
+What the callback then hands `OnSignIn` is a sign-in with the identity resolved
+and `TenantID` nil. The default answers it from the person's own memberships,
+which is [the same three answers a password login
+gives](#somebody-who-already-has-an-account): the tenant they were last in, or
+their oldest, or a 200 with an identity token and an empty `tenants` and the
+picker taking over.
+
+The three answers a deployment used to have to pick between, all of them wrong,
+are worth naming because a project pinned to an older release is probably using
+one:
+
+| It answered | What happened |
+|---|---|
+| a fixed tenant | everybody signed into one tenant regardless of where they belonged — and with `allow_provisioning` on, an account created there for them |
+| a request-derived tenant (a query parameter) | the tenant became caller-supplied, so a crafted `/start` link joined a victim to a tenant of the attacker's choosing |
+| `uuid.Nil` | the round trip completed, an identity and a provider link were written, and then it died in `JoinTenant` with `no such tenant` |
+
+Note the last one used to *write* before it failed. If you are moving off it,
+that is what the rows are.
 
 **A host per tenant needs `OAuth.Origin`.** The callback URL is built from
 `BaseURL`, which is one origin — but the state cookie is host-only, so a sign-in
@@ -420,9 +488,11 @@ Google and Microsoft also refuse plain `http` for anything but `localhost` and
 
 ```go
 OnSignIn: func(w http.ResponseWriter, r *http.Request, in oauth.SignIn) error {
-    // in.Link, in.TenantID, in.AccountID, in.Profile, in.Provider
-    // in.New       — this sign-in created the account
-    // in.ReturnTo  — already checked against the allow-list
+    // in.Link, in.Profile, in.Provider
+    // in.TenantID, in.AccountID  — the session to issue, or BOTH NIL
+    // in.New          — this sign-in created the account in that tenant
+    // in.NewIdentity  — this sign-in created the person
+    // in.ReturnTo     — already checked against the allow-list
 }
 ```
 
@@ -430,12 +500,23 @@ It writes the response: set a cookie, redirect with a token, render a page. rig 
 not choose, because the choice depends on whether the client is a browser, a
 single-page application or a native app catching a deep link.
 
-Through `auth.New` it defaults to `authhttp.Handler.SignIn`, which issues the same
-pair a password login does — so a provider sign-in and a password sign-in produce
-the same credential and everything downstream is identical.
+**Whatever it does, it has to handle `TenantID` being nil.** That is a sign-in
+whose tenant was not knowable before the redirect, and calling `Sessions.Issue`
+straight from those two fields would issue a session into a tenant that does not
+exist. The work of handling it is
+`account.Service.SignInIdentity` — pass it `in.Link.IdentityID` and `in.TenantID`
+and it answers all three cases, which is what the default does.
+
+Through `auth.New` it defaults to `authhttp.Handler.SignIn`, which answers with
+the same **body** a password login does — the token pair, the identity token and
+the tenant list — so a provider sign-in and a password sign-in are identical
+downstream, including for somebody who has nowhere to land yet.
 
 `New` is true for somebody joining their **second** tenant as well as their first:
-the account is new either way, which is what onboarding is about.
+the account is new either way, which is what onboarding is about. It is therefore
+always false when no tenant was named, because there was no tenant to make an
+account in — `NewIdentity` is the half of the question that still has an answer
+there, and it is the half onboarding usually means.
 
 `returnTo` is bounded. A relative path on this origin always passes; anything else
 has to be in `AllowedReturnTo`. An unchecked `returnTo` is an open redirect, and an
@@ -539,6 +620,13 @@ The lockout check runs **before** password verification, so a locked request
 neither burns an argon2 hash nor extends its own window. Login is padded to a
 configurable floor (750ms) so response time does not reveal whether an account
 exists.
+
+**A provider sign-in counts as a success for `login_by_email`**, so signing in
+with Google lifts a lockout somebody earned mistyping their password. That is
+safe rather than a hole: clearing it takes control of the provider account, which
+is not something somebody guessing a password has. It has no lockout of its own —
+there is no credential being guessed, and the round trip to the provider is the
+bound.
 
 ---
 

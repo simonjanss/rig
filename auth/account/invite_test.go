@@ -391,8 +391,10 @@ func TestSigningInWithoutATenant(t *testing.T) {
 		t.Error("the session should be for the one tenant they belong to")
 	}
 
-	// With a second tenant it lands on the oldest, and the rest are one switch
-	// away — predictable beats clever when the interface shows them all as tabs.
+	// With a second tenant it lands on the one they were last in — which is also
+	// the one they joined first, so this case cannot tell the two rules apart.
+	// The one that can is in signin_test.go; what this asserts is that a second
+	// tenant does not turn a sign-in that named none into a refusal.
 	second := uuid.New()
 	if _, err := f.svc.Provision(ctx, account.ProvisionInput{
 		TenantID: second, EmailAddress: "sam@example.com",

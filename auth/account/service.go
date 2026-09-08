@@ -319,7 +319,6 @@ type LoginInput struct {
 	UserAgent string
 }
 
-// Login verifies a password and starts a session.
 // SignInResult is what a sign-in produced.
 //
 // Two credentials, because there are two states a signed-in person can be in.
@@ -338,7 +337,8 @@ type SignInResult struct {
 	TenantID uuid.UUID
 
 	// Session is the tenant session, or nil when there is no tenant to be
-	// in. When a tenant was named it is that one; otherwise the oldest.
+	// in. When a tenant was named it is that one; otherwise wherever they were
+	// last — see [Service.SignInIdentity].
 	Session *session.Pair
 	// Identity is always issued, including alongside a session: signing in and
 	// then switching tenants is one flow, and the picker needs a credential
@@ -365,6 +365,13 @@ func (s *Service) Login(ctx context.Context, in LoginInput) (SignInResult, error
 }
 
 func (s *Service) login(ctx context.Context, in LoginInput, email string) (SignInResult, error) {
+	at := signInAttempt{
+		tenantID:  in.TenantID,
+		email:     email,
+		ipAddress: in.IPAddress,
+		userAgent: in.UserAgent,
+	}
+
 	// Before the password, before the account lookup, before anything
 	// expensive. A locked request that still ran argon2 would let an attacker
 	// keep the server busy for free, and a locked request that still recorded a
@@ -415,7 +422,7 @@ func (s *Service) login(ctx context.Context, in LoginInput, email string) (SignI
 		return SignInResult{}, err
 	}
 	if !ok || ident == nil {
-		s.failLogin(ctx, in, email, nil, "wrong credentials")
+		s.failSignIn(ctx, at, nil, "wrong credentials")
 		return SignInResult{}, ErrInvalidCredentials
 	}
 
@@ -423,12 +430,130 @@ func (s *Service) login(ctx context.Context, in LoginInput, email string) (SignI
 	// the person. Refusing a disabled one before this point would answer
 	// "disabled" to anybody who guessed the address.
 	if !ident.IsActive {
-		s.failLogin(ctx, in, email, nil, "identity disabled")
+		s.failSignIn(ctx, at, nil, "identity disabled")
 		return SignInResult{}, rigerr.Forbidden("this account has been disabled")
 	}
+	// This gate stays on the password path rather than moving into
+	// [Service.SignInIdentity], and the reason is a gap rather than a principle:
+	// oauth's ProvisionIdentity stamps email_verified_at from what the provider
+	// said, but LinkIdentity does not, though it accepts the same evidence. So
+	// enforcing it for a provider sign-in would refuse exactly one population —
+	// somebody who registered with a password, never confirmed, and later linked
+	// a verified provider account — on the strength of a column rig failed to
+	// update rather than on anything they did.
 	if s.cfg.RequireVerifiedEmail && !ident.Verified() {
-		s.failLogin(ctx, in, email, nil, "email not verified")
+		s.failSignIn(ctx, at, nil, "email not verified")
 		return SignInResult{}, rigerr.Forbidden("confirm your email address before signing in")
+	}
+
+	if needsRehash {
+		// Best effort, and before the tenant is settled rather than after: this
+		// is the only moment the plaintext exists, so an upgrade that waited for
+		// somewhere to land would never happen for somebody who has nowhere.
+		// Failing the login over a bookkeeping write would be worse than leaving
+		// the hash where it is.
+		_ = s.storePassword(ctx, ident, in.Password)
+	}
+
+	return s.signInIdentity(ctx, ident, SignInIdentityInput{
+		IdentityID: ident.ID,
+		TenantID:   in.TenantID,
+		Remember:   in.Remember,
+		Client:     in.Client,
+		IPAddress:  in.IPAddress,
+		UserAgent:  in.UserAgent,
+	})
+}
+
+// SignInIdentityInput is a sign-in that already knows who somebody is.
+type SignInIdentityInput struct {
+	IdentityID uuid.UUID
+	// TenantID says which tenant the session is for, and may be uuid.Nil, which
+	// means "wherever they belong" — see [Service.SignInIdentity].
+	TenantID uuid.UUID
+
+	Remember  bool
+	Client    session.Client
+	IPAddress string
+	UserAgent string
+	// Method is how the person proved who they are — a provider name, "Google" —
+	// and lands in the audit entry's detail. Empty is a password, which is what
+	// the entry means when it says nothing.
+	Method string
+}
+
+// SignInIdentity is everything a sign-in does once it knows who somebody is.
+//
+// It is the whole tail of a sign-in: which of the person's accounts this session
+// is for, the tenant list the picker draws from, the identity token, the session
+// itself, and the audit entry. [Service.Login] calls it once the password has
+// been checked, and a provider sign-in calls it once the provider has said who
+// this is — which is what stops the two paths answering "where does this person
+// go" differently.
+//
+// Input.TenantID may be uuid.Nil, and that is an ordinary answer rather than a
+// missing one. Named: that tenant or a refusal. Nil: wherever they belong —
+// which is where they were last, or their oldest tenant, or, for somebody who
+// belongs nowhere yet, nowhere at all. The last case is a **success**:
+// [SignInResult.Session] is nil, [SignInResult.Identity] is issued anyway, and
+// where they go next is the picker's problem.
+//
+// What it does not do, because its caller does: no rate-limit check, no
+// credential of any kind, and no RequireVerifiedEmail. It does refuse an
+// identity that is gone or disabled, because a provider link outlives both — the
+// row in rig_identity_oauth carries no deleted_at and no is_active.
+//
+// Two things about the audit trail are worth knowing before wiring it to
+// something new. It writes EventLoginSucceeded and EventLoginFailed, which is
+// what [github.com/simonjanss/rig/runtime/throttle.Standard] counts and clears
+// — so a provider sign-in lifts the address's password lockout, which is safe
+// because it takes control of the provider account, and a refusal in here counts
+// towards that lockout. And it writes what the limiter counts without consulting
+// the limiter, which is right when there is nothing being guessed but means the
+// bound on calling this has to come from the caller.
+func (s *Service) SignInIdentity(ctx context.Context, in SignInIdentityInput) (SignInResult, error) {
+	// Read rather than accepted. The input carries an identifier and not a row,
+	// so that nobody can hand in an identity that says it is active.
+	ident, err := s.cfg.Store.FindIdentityByID(ctx, in.IdentityID)
+	if err != nil {
+		return SignInResult{}, err
+	}
+	if ident == nil {
+		// Unreachable from a password login, which returns before this. It is
+		// here for the provider path: a link in rig_identity_oauth survives the
+		// soft delete of the identity it hangs off.
+		s.failSignIn(ctx, signInAttempt{
+			tenantID:  in.TenantID,
+			ipAddress: in.IPAddress,
+			userAgent: in.UserAgent,
+			method:    in.Method,
+		}, nil, "no such identity")
+		return SignInResult{}, rigerr.Forbidden("this account is no longer active")
+	}
+	return s.signInIdentity(ctx, ident, in)
+}
+
+// signInIdentity is [Service.SignInIdentity] with the identity already read.
+//
+// The seam exists so that a password login pays for one read of rig_identity
+// rather than two: it has the row in hand by the time the password has been
+// checked.
+func (s *Service) signInIdentity(
+	ctx context.Context, ident *Identity, in SignInIdentityInput,
+) (SignInResult, error) {
+	at := signInAttempt{
+		tenantID:  in.TenantID,
+		email:     normalizeEmail(ident.EmailAddress),
+		ipAddress: in.IPAddress,
+		userAgent: in.UserAgent,
+		method:    in.Method,
+	}
+
+	// The identity's own state, checked here rather than only in login, because
+	// a provider sign-in never reads rig_identity on its way in.
+	if !ident.IsActive {
+		s.failSignIn(ctx, at, nil, "identity disabled")
+		return SignInResult{}, rigerr.Forbidden("this account has been disabled")
 	}
 
 	// Which of the person's accounts this session is for. Answering plainly is
@@ -441,11 +566,11 @@ func (s *Service) login(ctx context.Context, in LoginInput, email string) (SignI
 	if acct == nil && in.TenantID != uuid.Nil {
 		// A named tenant they are not in. Still a refusal: they asked for
 		// somewhere specific and the answer is no.
-		s.failLogin(ctx, in, email, nil, "no account in this tenant")
+		s.failSignIn(ctx, at, nil, "no account in this tenant")
 		return SignInResult{}, rigerr.Forbidden("you do not have access to this tenant")
 	}
 	if acct != nil && !acct.IsActive {
-		s.failLogin(ctx, in, email, acct, "account disabled")
+		s.failSignIn(ctx, at, acct, "account disabled")
 		return SignInResult{}, rigerr.Forbidden("this account has been disabled")
 	}
 
@@ -456,7 +581,7 @@ func (s *Service) login(ctx context.Context, in LoginInput, email string) (SignI
 	// where that constraint was dropped, because the consequence of being wrong
 	// is a way in that nobody is watching.
 	if acct != nil && acct.Kind == KindService {
-		s.failLogin(ctx, in, email, acct, "service account")
+		s.failSignIn(ctx, at, acct, "service account")
 		return SignInResult{}, rigerr.Forbidden("a service account cannot sign in; use its API key")
 	}
 
@@ -484,20 +609,12 @@ func (s *Service) login(ctx context.Context, in LoginInput, email string) (SignI
 
 	if acct == nil {
 		// Signed in and nowhere to be. Recorded as a success, because it is one:
-		// the password was right, and where they go next is the picker's problem.
-		s.write(ctx, authlog.Entry{
+		// they proved who they are, and where they go next is the picker's problem.
+		s.write(ctx, at.entry(authlog.Entry{
 			Event: authlog.EventLoginSucceeded, Outcome: authlog.Succeeded,
-			EmailAddress: email, IPAddress: in.IPAddress, UserAgent: in.UserAgent,
 			Detail: map[string]any{"tenants": 0},
-		})
+		}))
 		return out, nil
-	}
-
-	if needsRehash {
-		// Best effort. This is the only moment the plaintext exists, but
-		// failing the login over a bookkeeping write would be worse than
-		// leaving the hash where it is.
-		_ = s.storePassword(ctx, ident, in.Password)
 	}
 
 	pair, err := s.cfg.Sessions.Issue(ctx, session.IssueInput{
@@ -513,29 +630,44 @@ func (s *Service) login(ctx context.Context, in LoginInput, email string) (SignI
 	}
 	out.Session, out.TenantID = &pair, acct.TenantID
 
-	s.write(ctx, authlog.Entry{
+	e := at.entry(authlog.Entry{
 		Event: authlog.EventLoginSucceeded, Outcome: authlog.Succeeded,
-		TenantID: &acct.TenantID, AccountID: &acct.ID, EmailAddress: email,
-		IPAddress: in.IPAddress, UserAgent: in.UserAgent,
 		TokenRootID: &pair.RootTokenID,
 	})
+	e.TenantID, e.AccountID = &acct.TenantID, &acct.ID
+	s.write(ctx, e)
 	return out, nil
 }
 
 // accountFor is the account a sign-in is for.
 //
-// Named tenant: that one, or nothing. No tenant: whichever tenant they joined
-// first, skipping any they have been removed from. First rather than last because
-// it is stable — somebody's oldest tenant does not change under them — and
-// because the interface puts the rest one click away, so the choice only has to be
-// predictable rather than clever.
+// Named tenant: that one, or nothing. No tenant: wherever they were last, and
+// failing that whichever tenant they joined first, skipping any they have been
+// removed from.
+//
+// Last rather than oldest because it is what somebody expects: the tenant they
+// were in is the tenant they meant, and it only ever changes because they
+// changed it. Oldest is the fallback rather than the rule because it is the
+// answer for a first sign-in, where there is no "last" — and it is stable,
+// which is all the answer has to be when nobody has expressed a preference yet.
+//
+// Neither is the order the picker draws in. [Store.TenantsForIdentity] sorts by
+// name because that is how somebody scans a list, and which one was landed in is
+// *marked* rather than sorted first — so there is nothing here for the two
+// orderings to disagree about.
 func (s *Service) accountFor(ctx context.Context, tenantID, identityID uuid.UUID) (*Account, error) {
 	if tenantID != uuid.Nil {
-		acct, err := s.cfg.Store.AccountForIdentity(ctx, tenantID, identityID)
-		if err != nil || acct == nil {
-			return nil, err
-		}
-		return acct, nil
+		return s.cfg.Store.AccountForIdentity(ctx, tenantID, identityID)
+	}
+
+	// One query for the common case, and it is the common case: everybody past
+	// their first sign-in has a session in their history.
+	last, err := s.cfg.Store.LastAccountForIdentity(ctx, identityID)
+	if err != nil {
+		return nil, err
+	}
+	if last != nil {
+		return last, nil
 	}
 
 	accounts, err := s.cfg.Store.AccountsForIdentity(ctx, identityID)
@@ -552,23 +684,48 @@ func (s *Service) accountFor(ctx context.Context, tenantID, identityID uuid.UUID
 	return nil, nil
 }
 
-// failLogin records a refused sign-in.
+// signInAttempt is what an audit entry needs about a sign-in regardless of how
+// the person proved who they are.
+//
+// It exists because the tail of a sign-in is shared between a password and a
+// provider, and threading a LoginInput through it would have made the shared
+// half of the flow depend on the password half's shape.
+type signInAttempt struct {
+	tenantID  uuid.UUID
+	email     string
+	ipAddress string
+	userAgent string
+	method    string
+}
+
+// entry fills in what every sign-in entry carries.
+func (at signInAttempt) entry(e authlog.Entry) authlog.Entry {
+	e.EmailAddress = at.email
+	e.IPAddress, e.UserAgent = at.ipAddress, at.userAgent
+	// Only when there is one. A sign-in that named no tenant has no tenant to
+	// record, and the entry still has to be written: it is what the lockout counts.
+	if at.tenantID != uuid.Nil {
+		e.TenantID = &at.tenantID
+	}
+	if at.method != "" {
+		if e.Detail == nil {
+			e.Detail = map[string]any{}
+		}
+		e.Detail["method"] = at.method
+	}
+	return e
+}
+
+// failSignIn records a refused sign-in.
 //
 // The reason goes in the detail, never in the response. An operator reading the
 // log needs to know the difference between a wrong password and a disabled
 // account; the person at the keyboard is told the same thing either way.
-func (s *Service) failLogin(ctx context.Context, in LoginInput, email string, acct *Account, reason string) {
-	e := authlog.Entry{
+func (s *Service) failSignIn(ctx context.Context, at signInAttempt, acct *Account, reason string) {
+	e := at.entry(authlog.Entry{
 		Event: authlog.EventLoginFailed, Outcome: authlog.Failed,
-		EmailAddress: email,
-		IPAddress:    in.IPAddress, UserAgent: in.UserAgent,
 		Detail: map[string]any{"reason": reason},
-	}
-	// Only when there is one. A sign-in that named no tenant has no tenant to
-	// record, and the entry still has to be written: it is what the lockout counts.
-	if in.TenantID != uuid.Nil {
-		e.TenantID = &in.TenantID
-	}
+	})
 	if acct != nil {
 		e.AccountID = &acct.ID
 	}
