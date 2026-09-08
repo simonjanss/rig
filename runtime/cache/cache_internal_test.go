@@ -45,9 +45,8 @@ func TestTheRegisterOfLoadsInFlightEmptiesItself(t *testing.T) {
 // A loader that panics is the case the defer is for, and the only one where
 // leaving a registration behind is invisible: the process survives — a server
 // recovers per request, and [dbx] expects a swallowed panic to leave the process
-// running — so the entry stays, that key's every later load is told it was
-// forgotten by a load that will never finish, and the cache is quietly dead for
-// it.
+// running — so the registration stays for the life of the process, and the
+// bound that stands in for this map's eviction policy goes with it.
 func TestALoaderThatPanicsLeavesNothingInFlight(t *testing.T) {
 	t.Parallel()
 
@@ -69,7 +68,10 @@ func TestALoaderThatPanicsLeavesNothingInFlight(t *testing.T) {
 		t.Errorf("%d loads still registered after one panicked", registered)
 	}
 
-	// The consequence, which is the part worth asserting: the key still caches.
+	// Not the leak — the count above is the only witness to that — but whether
+	// the map came out of a panic usable at all. A loader that died with m.mu
+	// held is the other way this goes wrong, and it would hang here rather
+	// than fail.
 	asked := 0
 	load := func() (string, error) { asked++; return "v", nil }
 	for range 2 {

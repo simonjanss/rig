@@ -47,9 +47,10 @@ func BenchmarkLoadHit(b *testing.B) {
 // BenchmarkLoadMiss is the overhead a cache adds when it does not have the
 // answer, which is what it costs on the paths it does not help: the clock, the
 // read lock and the lookup that found nothing, then the write lock that
-// registers the load, and then the write lock again for the store.
+// registers the load, the write lock again for the store, and a third to drop
+// the registration.
 //
-// Two exclusive acquisitions rather than one, plus the sixteen bytes the
+// Three exclusive acquisitions rather than one, plus the sixteen bytes the
 // registration allocates, and both are what buy a forget on one key leaving
 // loads of every other key alone. It is the only allocation anywhere in this
 // package, and it is on the path that was about to go to the database — which is
