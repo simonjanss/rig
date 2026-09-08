@@ -301,8 +301,19 @@ func TestAZeroTTLHoldsNothing(t *testing.T) {
 	}
 }
 
-// Many goroutines asking at once get one answer, which is [cache.Map]'s property
-// and has to survive the wrapper. Run under -race.
+// Many goroutines asking at once all get the one answer, and one of them leaves
+// it held. Run under -race.
+//
+// What is not asserted is how many of them reached the store, and that is the
+// point rather than a gap: [cache.Map] says in as many words that it does not
+// deduplicate concurrent misses. A caller arriving while a flight is running
+// makes a call of its own and a caller arriving after it was stored is a hit,
+// and which of those any goroutine is, is the scheduler's to decide — all fifty
+// is a legal answer. So the old `want 1` here asserted the opposite of the
+// promise, and passed only for as long as fifty goroutines took longer to start
+// than one loader took to return; it lost that race under load, which is #135.
+// What is worth pinning is that nobody asks twice, that everybody is given the
+// same value, and that the storm ends with the key held.
 func TestManyGoroutinesGetOneAnswerThroughAKeyed(t *testing.T) {
 	t.Parallel()
 
@@ -315,19 +326,41 @@ func TestManyGoroutinesGetOneAnswerThroughAKeyed(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			_, _ = k.Load("a", func() (string, error) {
+			got, err := k.Load("a", func() (string, error) {
 				mu.Lock()
 				calls++
 				mu.Unlock()
 				return "v", nil
 			})
+			if err != nil {
+				t.Errorf("load: %v", err)
+				return
+			}
+			if got != "v" {
+				t.Errorf("got %q, want %q", got, "v")
+			}
 		}()
 	}
 	wg.Wait()
 
 	mu.Lock()
+	if calls < 1 || calls > 50 {
+		t.Errorf("fifty concurrent loads asked the store %d times, want between 1 and 50", calls)
+	}
+	before := calls
+	mu.Unlock()
+
+	// And the storm left the answer behind it, which is the half of this that is
+	// a cache rather than a mutex.
+	if _, err := k.Load("a", func() (string, error) {
+		return "", errors.New("keyed_test: the concurrent loads left nothing held")
+	}); err != nil {
+		t.Error(err)
+	}
+
+	mu.Lock()
 	defer mu.Unlock()
-	if calls != 1 {
-		t.Errorf("fifty concurrent loads asked the store %d times, want 1", calls)
+	if calls != before {
+		t.Errorf("asked the store again after fifty loads had settled")
 	}
 }

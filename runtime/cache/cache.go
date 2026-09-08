@@ -53,6 +53,11 @@
 // It does not deduplicate concurrent misses. Ten requests for one cold key make
 // ten calls, which is what the same ten requests cost today with no cache at
 // all — so this is a bound that was never improved rather than one made worse.
+// [Map.Load] does keep a register of the loads running right now, and that is
+// not a first step towards collapsing them: one shared answer would make one
+// caller's failure and one caller's deadline into everybody's, and a slow leader
+// into a queue. What the register is for is knowing which load an invalidation
+// was about.
 //
 // It is not a store. Nothing here is durable, nothing is shared, and a value put
 // in one replica is never read from another. The only thing that crosses the
@@ -96,9 +101,32 @@ type Map[V any] struct {
 
 	mu sync.RWMutex
 	m  map[string]entry[V]
-	// gen counts invalidations. It is what stops [Map.Load] storing an answer
-	// that was already stale when it arrived — see the comment there.
+	// gen counts clears, which are the invalidation that cannot name a key. It
+	// is half of what stops [Map.Load] storing an answer that was already stale
+	// when it arrived — see the comment there.
 	gen uint64
+	// flights is the loads running right now: one entry per key that has one and
+	// none otherwise, so this is bounded by concurrent misses and needs no
+	// eviction of its own.
+	//
+	// Exactly one flight exists per key at a time and only its last reader
+	// removes it. A second one for a key that already had a live flight would be
+	// a forget bumping a counter nobody is watching, which is the stale answer
+	// this whole mechanism is here to refuse — so nothing else may delete from
+	// this map. Clear in particular must not: it has gen for what it means.
+	flights map[string]*flight
+}
+
+// flight is the loads of one key that are running, and the forgets of that key
+// since each of them started.
+//
+// A counter rather than a flag, and the difference is a load that starts after a
+// forget while an earlier one is still running. That one read the new data and
+// may be kept, which a flag cannot express — it would go on discarding every
+// load of the key until the last of them had drained.
+type flight struct {
+	readers int
+	gen     uint64
 }
 
 // MapConfig is what a [Map] needs to know.
@@ -158,7 +186,11 @@ func NewMap[V any](cfg MapConfig) *Map[V] {
 	if cfg.Now == nil {
 		cfg.Now = time.Now
 	}
-	return &Map[V]{cfg: cfg, m: make(map[string]entry[V])}
+	return &Map[V]{
+		cfg:     cfg,
+		m:       make(map[string]entry[V]),
+		flights: make(map[string]*flight),
+	}
 }
 
 // Load answers from the map, or calls fn and keeps what it returns.
@@ -188,13 +220,29 @@ func NewMap[V any](cfg MapConfig) *Map[V] {
 // to be written into a map that has just been told to forget it. Nothing later
 // corrects that: the entry looks fresh and survives its full time-to-live, so the
 // one request that mattered is the one the cache gets wrong. Load closes it by
-// counting invalidations and declining to store anything across one.
+// registering the read before making it, and declining to store an answer an
+// invalidation has landed on since.
 //
-// The count is per map rather than per key, so an unrelated key being forgotten
-// also discards this answer. That is deliberate — the precise version needs a
-// second map of generations, with its own bound and its own eviction, to save
-// what a false discard actually costs, which is one extra call on a path that
-// was about to make one anyway.
+// It is the key's own invalidations that count, and not the map's. A [Bus]
+// delivers every replica the same notification, and most of them are for keys
+// this process has never held — so discarding on somebody else's key would be a
+// cache that stops filling in proportion to how busy the table is. Worst exactly
+// where it was wanted, and silent, because a cache that holds nothing and a
+// cache that works differ only in a number nobody is looking at. The register is
+// what makes per-key affordable: an entry in it exists only while a load of that
+// key is running, so it is bounded by concurrent misses rather than by anything
+// needing an eviction policy of its own.
+//
+// [Map.Clear] is the exception and stays map-wide, because it is what a bus does
+// on reconnecting and the one thing it knows then is that it cannot name what it
+// missed.
+//
+// The register is taken before fn is called, which is what makes the window
+// that remains safe rather than merely small: an invalidation applied before fn
+// starts is one fn's own read will see, so the answer it comes back with is the
+// new one. That holds for a loader that goes and reads, and not for one reading
+// inside a transaction opened earlier — which is why a generated Get consults
+// the cache only when there is no transaction in the context.
 func (m *Map[V]) Load(key string, fn func() (V, error)) (V, error) {
 	if m.cfg.TTL <= 0 || (m.cfg.Live != nil && !m.cfg.Live()) {
 		return fn()
@@ -204,12 +252,18 @@ func (m *Map[V]) Load(key string, fn func() (V, error)) (V, error) {
 
 	m.mu.RLock()
 	e, held := m.m[key]
-	gen := m.gen
 	m.mu.RUnlock()
 
 	if held && now.Before(e.until) {
 		return e.v, nil
 	}
+
+	// Released with a defer, because a loader that panics still has to leave the
+	// register as it found it: a registration that was never dropped is a load
+	// that stays in flight for the life of the process, and the bound this map
+	// claims is the reason it has no eviction of its own.
+	gen, f, keyGen := m.begin(key)
+	defer m.release(key, f)
 
 	v, err := fn()
 	if err != nil {
@@ -217,36 +271,71 @@ func (m *Map[V]) Load(key string, fn func() (V, error)) (V, error) {
 		return zero, err
 	}
 
+	// Answer the caller either way. What is in doubt is whether this may be
+	// reused, not whether it was true when it was read.
+	//
+	// Locked and unlocked by hand rather than deferred, because release above
+	// takes the same lock and a mutex that is not reentrant tolerates that only
+	// as long as this section has finished before it runs.
+	m.mu.Lock()
+	if m.gen == gen && f.gen == keyGen {
+		if len(m.m) >= m.cfg.MaxEntries {
+			clear(m.m)
+		}
+		m.m[key] = entry[V]{v: v, until: now.Add(m.cfg.TTL)}
+	}
+	m.mu.Unlock()
+	return v, nil
+}
+
+// begin registers a load, and reports what has to still be true at the end of it
+// for the answer to be worth keeping.
+func (m *Map[V]) begin(key string) (gen uint64, f *flight, keyGen uint64) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	// Answer the caller either way. What is in doubt is whether this may be
-	// reused, not whether it was true when it was read.
-	if m.gen != gen {
-		return v, nil
+	f, running := m.flights[key]
+	if !running {
+		f = &flight{}
+		m.flights[key] = f
 	}
-	if len(m.m) >= m.cfg.MaxEntries {
-		clear(m.m)
+	f.readers++
+	return m.gen, f, f.gen
+}
+
+// release drops one load's registration, and the flight with the last of them.
+func (m *Map[V]) release(key string, f *flight) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if f.readers--; f.readers == 0 {
+		delete(m.flights, key)
 	}
-	m.m[key] = entry[V]{v: v, until: now.Add(m.cfg.TTL)}
-	return v, nil
 }
 
 // Forget drops one key, so that the next [Map.Load] calls through.
 //
 // Forgetting something that was never held is not an error — a [Bus] delivers
 // every replica the same notification, and most of them will not have the key.
+// A load of this key that is in flight is told, and will not keep what it comes
+// back with. Loads of every other key are left alone — the method takes one key
+// and that is the whole of what it invalidates.
 func (m *Map[V]) Forget(key string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	delete(m.m, key)
-	m.gen++
+	if f, running := m.flights[key]; running {
+		f.gen++
+	}
 }
 
-// Clear drops everything.
+// Clear drops everything, the loads in flight included: what a caller is part
+// way through reading is as likely to be stale as what the map is holding.
 //
 // This is what a [Bus] calls when it has just connected, because whatever was
-// published while it was away is unrecoverable — see [Bus.Start].
+// published while it was away is unrecoverable — see [Bus.Start]. It is the one
+// invalidation that cannot name a key, and the only reason [Map.Load] still
+// counts anything for the map as a whole.
 func (m *Map[V]) Clear() {
 	m.mu.Lock()
 	defer m.mu.Unlock()

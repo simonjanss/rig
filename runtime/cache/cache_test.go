@@ -193,8 +193,8 @@ func TestForgettingAKeyMakesTheNextLoadAsk(t *testing.T) {
 		t.Errorf("asked %d times, want 3", asked)
 	}
 
-	// And the key nobody forgot is still there. Forget takes one key, even
-	// though it also discards loads in flight.
+	// And the key nobody forgot is still there. Forget takes one key, and that
+	// is now true of the loads it discards as well as of the entries it drops.
 	before := asked
 	if _, err := m.Load("kept", counted("a", &asked)); err != nil {
 		t.Fatalf("load: %v", err)
@@ -244,9 +244,15 @@ func TestClearingDropsEverything(t *testing.T) {
 
 // The race this cache exists to survive: a role changes while somebody is
 // reading the old answer, so the notification is applied before the read comes
-// back. Without the generation count the stale answer is written into a map that
-// has just been told to forget it and then survives its whole window — the one
-// request that mattered being the one the cache gets wrong.
+// back. Without the count this key's own load carries, the stale answer is
+// written into a map that has just been told to forget it and then survives its
+// whole window — the one request that mattered being the one the cache gets
+// wrong.
+//
+// The cold key here is also what refutes the tempting one-line version of
+// [cache.Map.Forget], which is to invalidate only when the key was actually
+// held: nothing is held on a first load, and a first load is exactly when one is
+// in flight.
 func TestAKeyForgottenDuringALoadIsNotKept(t *testing.T) {
 	t.Parallel()
 
@@ -424,5 +430,113 @@ func TestManyGoroutinesGetOneAnswer(t *testing.T) {
 	// matters is that it is bounded well under the 2048 loads.
 	if n := asked.Load(); n > 512 {
 		t.Errorf("asked %d times for 2048 loads of 4 keys, want far fewer", n)
+	}
+}
+
+// The failure #143 came in as, in one function: a read of one key losing its
+// answer because something forgot a different one while it ran.
+//
+// It is what a notification channel does to any process holding more than one
+// row. Every write to the topic reaches every replica, most of them for keys
+// this one has never seen — so a discard that is not about the key being read
+// is a cache that stops filling in proportion to how busy the table is.
+func TestAKeyForgottenDuringALoadOfAnotherIsKept(t *testing.T) {
+	t.Parallel()
+
+	m := cache.NewMap[string](cache.MapConfig{TTL: time.Minute, Now: newClock().now})
+
+	got, err := m.Load("a", func() (string, error) {
+		m.Forget("b")
+		return "fresh", nil
+	})
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if got != "fresh" {
+		t.Errorf("got %q, want %q", got, "fresh")
+	}
+	if m.Len() != 1 {
+		t.Fatalf("held %d entries, want 1: forgetting another key discarded this answer", m.Len())
+	}
+
+	asked := 0
+	again, err := m.Load("a", counted("stale", &asked))
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if again != "fresh" || asked != 0 {
+		t.Errorf("got %q after %d asks, want %q without asking", again, asked, "fresh")
+	}
+}
+
+// A clear during a load of another key *is* kept from being stored, which is the
+// asymmetry with the test above and the reason [cache.Map] still counts anything
+// for the map as a whole.
+//
+// A bus clears on connecting because LISTEN has no backlog, so the one thing it
+// knows is that it cannot name what it missed. Making this per key too would be
+// the obvious next simplification and would silently reintroduce the bug the
+// test above is about, from the one direction where a stale answer really is
+// unknowable.
+func TestAClearDuringALoadOfAnotherKeyIsAlsoNotKept(t *testing.T) {
+	t.Parallel()
+
+	m := cache.NewMap[string](cache.MapConfig{TTL: time.Minute, Now: newClock().now})
+
+	if _, err := m.Load("a", func() (string, error) {
+		m.Clear()
+		return "unknowable", nil
+	}); err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if m.Len() != 0 {
+		t.Errorf("held %d entries, want none", m.Len())
+	}
+}
+
+// What the count per key buys over a flag, in the one shape that tells them
+// apart: a second load of the same key starting *after* the forget, while the
+// first is still running.
+//
+// The second read is of data the forget has already been applied to, so its
+// answer is the current one and may be held; the first read predates the forget
+// and may not. A flag saying "this key was forgotten while somebody was loading
+// it" cannot say which of them it means, and would have to discard both — so on
+// a key under sustained concurrent misses one forget would keep it uncached for
+// as long as the misses kept overlapping. Delete the counter in favour of a
+// bool and this is the test that says so.
+func TestALoadStartedAfterTheForgetIsTheOneThatIsKept(t *testing.T) {
+	t.Parallel()
+
+	m := cache.NewMap[string](cache.MapConfig{TTL: time.Minute, Now: newClock().now})
+
+	outer, err := m.Load("k", func() (string, error) {
+		m.Forget("k")
+
+		// Nested rather than concurrent: Load holds no lock across the loader,
+		// so this is the same interleaving without a goroutine to synchronize.
+		inner, err := m.Load("k", func() (string, error) { return "fresh", nil })
+		if err != nil {
+			return "", err
+		}
+		if inner != "fresh" {
+			t.Errorf("the nested load got %q, want %q", inner, "fresh")
+		}
+		return "stale", nil
+	})
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if outer != "stale" {
+		t.Errorf("got %q, want %q", outer, "stale")
+	}
+
+	asked := 0
+	held, err := m.Load("k", counted("asked again", &asked))
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if held != "fresh" || asked != 0 {
+		t.Errorf("got %q after %d asks, want %q without asking", held, asked, "fresh")
 	}
 }
