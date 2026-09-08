@@ -1,0 +1,12 @@
+project:
+  name: demo
+  module: example.com/demo
+
+# Exposed, and nothing in this schema has a file column: a project storing
+# files that nothing has been pointed at yet. rig_file is a resource, so the
+# model declares the shape a client sees, and the API layer refers to that one
+# rather than declaring its own — while having no file column of its own to
+# convert, which is the combination this fixture exists for.
+files:
+  enabled: true
+  expose: true

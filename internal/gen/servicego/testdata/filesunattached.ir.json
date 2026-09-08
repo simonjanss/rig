@@ -1,0 +1,2841 @@
+{
+  "ir_version": 1,
+  "generated_by": "rig (test)",
+  "api": {
+    "name": "demo",
+    "version": "v1",
+    "base_path": "/api/v1",
+    "revision_header": "API-Revision",
+    "enums": [
+      {
+        "name": "ErrorCode",
+        "description": "Machine-readable reason a request failed.",
+        "values": [
+          {
+            "name": "BadRequest",
+            "wire": "BadRequest",
+            "description": "The request was malformed or a parameter could not be parsed."
+          },
+          {
+            "name": "Unauthorized",
+            "wire": "Unauthorized",
+            "description": "No valid session or API key was presented."
+          },
+          {
+            "name": "Forbidden",
+            "wire": "Forbidden",
+            "description": "The caller is known but not permitted to do this."
+          },
+          {
+            "name": "NotFound",
+            "wire": "NotFound",
+            "description": "No such resource, or it belongs to another tenant."
+          },
+          {
+            "name": "Conflict",
+            "wire": "Conflict",
+            "description": "The request conflicts with the current state of the resource."
+          },
+          {
+            "name": "UnprocessableEntity",
+            "wire": "UnprocessableEntity",
+            "description": "The request was well-formed but failed validation."
+          },
+          {
+            "name": "RateLimited",
+            "wire": "RateLimited",
+            "description": "Too many requests. Retry after the interval in the Retry-After header."
+          },
+          {
+            "name": "TooLarge",
+            "wire": "TooLarge",
+            "description": "The request body is larger than this endpoint accepts."
+          },
+          {
+            "name": "UnsupportedMediaType",
+            "wire": "UnsupportedMediaType",
+            "description": "The body's content type is not one this endpoint accepts."
+          },
+          {
+            "name": "UpgradeRequired",
+            "wire": "UpgradeRequired",
+            "description": "The client was built against an API revision this server no longer serves."
+          },
+          {
+            "name": "Internal",
+            "wire": "Internal",
+            "description": "Something went wrong on the server."
+          }
+        ]
+      }
+    ],
+    "objects": [
+      {
+        "name": "Error",
+        "description": "Returned whenever a request fails.",
+        "fields": [
+          {
+            "name": "Code",
+            "wire": "code",
+            "description": "Machine-readable reason the request failed.",
+            "type": "ErrorCode",
+            "type_kind": "Enum",
+            "go_type": "ErrorCode"
+          },
+          {
+            "name": "Message",
+            "wire": "message",
+            "description": "Human-readable explanation. Not intended for clients to parse.",
+            "type": "String",
+            "type_kind": "Primitive",
+            "go_type": "string"
+          },
+          {
+            "name": "RequestID",
+            "wire": "requestId",
+            "description": "Identifier of this request, for correlating with server logs.",
+            "type": "String",
+            "type_kind": "Primitive",
+            "go_type": "string",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "Fields",
+            "wire": "fields",
+            "description": "Present when the failure was validation. It is shaped like the request body that failed — one member per field, holding the problem with that field — so a client can put each message beside the control it belongs to.",
+            "type": "JSON",
+            "type_kind": "Primitive",
+            "go_type": "any",
+            "modifiers": [
+              "Nullable"
+            ]
+          }
+        ],
+        "origin": "Builtin"
+      },
+      {
+        "name": "Note",
+        "description": "The project's own table, so this is a project rather than a file store.",
+        "fields": [
+          {
+            "name": "ID",
+            "wire": "id",
+            "description": "Unique identifier for this row.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "uuid.UUID",
+            "read_only": true,
+            "column": {
+              "table": "note",
+              "name": "id",
+              "sql_type": "uuid",
+              "nullable": false,
+              "scan": "UUID"
+            }
+          },
+          {
+            "name": "TenantID",
+            "wire": "tenantId",
+            "description": "Tenant this row belongs to. Every query is scoped by it.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "uuid.UUID",
+            "read_only": true,
+            "column": {
+              "table": "note",
+              "name": "tenant_id",
+              "sql_type": "uuid",
+              "nullable": false,
+              "scan": "UUID"
+            }
+          },
+          {
+            "name": "CreatedAt",
+            "wire": "createdAt",
+            "description": "When this row was created. Set automatically and never changes.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "time.Time",
+            "read_only": true,
+            "column": {
+              "table": "note",
+              "name": "created_at",
+              "sql_type": "timestamptz",
+              "nullable": false,
+              "scan": "Timestamptz"
+            }
+          },
+          {
+            "name": "Body",
+            "wire": "body",
+            "description": "What was written.",
+            "type": "String",
+            "type_kind": "Primitive",
+            "go_type": "string",
+            "column": {
+              "table": "note",
+              "name": "body",
+              "sql_type": "text",
+              "nullable": false,
+              "scan": "Direct"
+            }
+          }
+        ],
+        "origin": "Projected"
+      },
+      {
+        "name": "NoteFilter",
+        "description": "Conditions a Note must satisfy to match a search.",
+        "fields": [
+          {
+            "name": "Equals",
+            "wire": "equals",
+            "description": "Fields that must equal the given value.",
+            "type": "NoteFilterEquals",
+            "type_kind": "Object",
+            "go_type": "*NoteFilterEquals",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "NotEquals",
+            "wire": "notEquals",
+            "description": "Fields that must not equal the given value.",
+            "type": "NoteFilterEquals",
+            "type_kind": "Object",
+            "go_type": "*NoteFilterEquals",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "GreaterThan",
+            "wire": "greaterThan",
+            "description": "Fields that must be greater than the given value.",
+            "type": "NoteFilterRange",
+            "type_kind": "Object",
+            "go_type": "*NoteFilterRange",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "SmallerThan",
+            "wire": "smallerThan",
+            "description": "Fields that must be less than the given value.",
+            "type": "NoteFilterRange",
+            "type_kind": "Object",
+            "go_type": "*NoteFilterRange",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "GreaterOrEqual",
+            "wire": "greaterOrEqual",
+            "description": "Fields that must be greater than or equal to the given value.",
+            "type": "NoteFilterRange",
+            "type_kind": "Object",
+            "go_type": "*NoteFilterRange",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "SmallerOrEqual",
+            "wire": "smallerOrEqual",
+            "description": "Fields that must be less than or equal to the given value.",
+            "type": "NoteFilterRange",
+            "type_kind": "Object",
+            "go_type": "*NoteFilterRange",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "Contains",
+            "wire": "contains",
+            "description": "Fields that must be one of the given values.",
+            "type": "NoteFilterContains",
+            "type_kind": "Object",
+            "go_type": "*NoteFilterContains",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "NotContains",
+            "wire": "notContains",
+            "description": "Fields that must not be one of the given values.",
+            "type": "NoteFilterContains",
+            "type_kind": "Object",
+            "go_type": "*NoteFilterContains",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "Like",
+            "wire": "like",
+            "description": "Text fields that must match the given pattern.",
+            "type": "NoteFilterLike",
+            "type_kind": "Object",
+            "go_type": "*NoteFilterLike",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "NotLike",
+            "wire": "notLike",
+            "description": "Text fields that must not match the given pattern.",
+            "type": "NoteFilterLike",
+            "type_kind": "Object",
+            "go_type": "*NoteFilterLike",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "Null",
+            "wire": "null",
+            "description": "Fields that must be null.",
+            "type": "NoteFilterNull",
+            "type_kind": "Object",
+            "go_type": "*NoteFilterNull",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "NotNull",
+            "wire": "notNull",
+            "description": "Fields that must not be null.",
+            "type": "NoteFilterNull",
+            "type_kind": "Object",
+            "go_type": "*NoteFilterNull",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "OrCondition",
+            "wire": "orCondition",
+            "description": "Combine this filter's conditions with OR instead of AND.",
+            "type": "Bool",
+            "type_kind": "Primitive",
+            "go_type": "bool"
+          },
+          {
+            "name": "NestedFilters",
+            "wire": "nestedFilters",
+            "description": "Sub-filters combined with this one, so that AND and OR can be mixed to any depth.",
+            "type": "NoteFilter",
+            "type_kind": "Object",
+            "go_type": "[]NoteFilter",
+            "modifiers": [
+              "Array"
+            ]
+          }
+        ],
+        "origin": "Filter"
+      },
+      {
+        "name": "NoteFilterContains",
+        "description": "Set-membership conditions on Note fields.",
+        "fields": [
+          {
+            "name": "ID",
+            "wire": "id",
+            "description": "Unique identifier for this row.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "[]uuid.UUID",
+            "modifiers": [
+              "Array"
+            ]
+          },
+          {
+            "name": "CreatedAt",
+            "wire": "createdAt",
+            "description": "When this row was created. Set automatically and never changes.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "[]time.Time",
+            "modifiers": [
+              "Array"
+            ]
+          },
+          {
+            "name": "Body",
+            "wire": "body",
+            "description": "What was written.",
+            "type": "String",
+            "type_kind": "Primitive",
+            "go_type": "[]string",
+            "modifiers": [
+              "Array"
+            ]
+          }
+        ],
+        "origin": "Filter"
+      },
+      {
+        "name": "NoteFilterEquals",
+        "description": "Exact-match conditions on Note fields.",
+        "fields": [
+          {
+            "name": "ID",
+            "wire": "id",
+            "description": "Unique identifier for this row.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "*uuid.UUID",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "CreatedAt",
+            "wire": "createdAt",
+            "description": "When this row was created. Set automatically and never changes.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "*time.Time",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "Body",
+            "wire": "body",
+            "description": "What was written.",
+            "type": "String",
+            "type_kind": "Primitive",
+            "go_type": "*string",
+            "modifiers": [
+              "Nullable"
+            ]
+          }
+        ],
+        "origin": "Filter"
+      },
+      {
+        "name": "NoteFilterLike",
+        "description": "Pattern conditions on Note text fields.",
+        "fields": [
+          {
+            "name": "Body",
+            "wire": "body",
+            "description": "What was written.",
+            "type": "String",
+            "type_kind": "Primitive",
+            "go_type": "*string",
+            "modifiers": [
+              "Nullable"
+            ]
+          }
+        ],
+        "origin": "Filter"
+      },
+      {
+        "name": "NoteFilterNull",
+        "description": "Presence conditions on nullable Note fields.",
+        "fields": null,
+        "origin": "Filter"
+      },
+      {
+        "name": "NoteFilterRange",
+        "description": "Ordering conditions on Note fields that can be compared.",
+        "fields": [
+          {
+            "name": "CreatedAt",
+            "wire": "createdAt",
+            "description": "When this row was created. Set automatically and never changes.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "*time.Time",
+            "modifiers": [
+              "Nullable"
+            ]
+          }
+        ],
+        "origin": "Filter"
+      },
+      {
+        "name": "NoteListResponse",
+        "description": "A page of Notes.",
+        "fields": [
+          {
+            "name": "Data",
+            "wire": "data",
+            "description": "The rows in this page.",
+            "type": "Note",
+            "type_kind": "Resource",
+            "go_type": "[]Note",
+            "modifiers": [
+              "Array"
+            ]
+          },
+          {
+            "name": "Pagination",
+            "wire": "pagination",
+            "description": "Where this page sits in the full result set.",
+            "type": "Pagination",
+            "type_kind": "Object",
+            "go_type": "Pagination"
+          }
+        ],
+        "origin": "Projected"
+      },
+      {
+        "name": "Pagination",
+        "description": "Where the returned page sits within the full result set.",
+        "fields": [
+          {
+            "name": "Offset",
+            "wire": "offset",
+            "description": "Number of rows skipped before this page.",
+            "type": "Int",
+            "type_kind": "Primitive",
+            "go_type": "int"
+          },
+          {
+            "name": "Limit",
+            "wire": "limit",
+            "description": "Maximum number of rows in this page.",
+            "type": "Int",
+            "type_kind": "Primitive",
+            "go_type": "int"
+          },
+          {
+            "name": "Total",
+            "wire": "total",
+            "description": "Total number of rows matching the query, ignoring pagination.",
+            "type": "Int64",
+            "type_kind": "Primitive",
+            "go_type": "int64"
+          }
+        ],
+        "origin": "Builtin"
+      },
+      {
+        "name": "RigFile",
+        "description": "One uploaded file. Metadata only — the bytes live in the blob store, and the storage key never leaves the server.",
+        "fields": [
+          {
+            "name": "ID",
+            "wire": "id",
+            "description": "Unique identifier for this row.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "uuid.UUID",
+            "read_only": true,
+            "column": {
+              "table": "rig_file",
+              "name": "id",
+              "sql_type": "uuid",
+              "nullable": false,
+              "scan": "UUID"
+            }
+          },
+          {
+            "name": "TenantID",
+            "wire": "tenantId",
+            "description": "Tenant this row belongs to. Every query is scoped by it.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "uuid.UUID",
+            "read_only": true,
+            "column": {
+              "table": "rig_file",
+              "name": "tenant_id",
+              "sql_type": "uuid",
+              "nullable": false,
+              "scan": "UUID"
+            }
+          },
+          {
+            "name": "StorageKey",
+            "wire": "storageKey",
+            "description": "Where the bytes are, derived from the identifier and never from a name.",
+            "type": "String",
+            "type_kind": "Primitive",
+            "go_type": "string",
+            "column": {
+              "table": "rig_file",
+              "name": "storage_key",
+              "sql_type": "text",
+              "nullable": false,
+              "scan": "Direct"
+            }
+          },
+          {
+            "name": "URL",
+            "wire": "url",
+            "description": "Where the file is served from, so a synced row can be rendered as it stands.",
+            "type": "String",
+            "type_kind": "Primitive",
+            "go_type": "string",
+            "column": {
+              "table": "rig_file",
+              "name": "url",
+              "sql_type": "text",
+              "nullable": false,
+              "scan": "Direct"
+            }
+          },
+          {
+            "name": "FileName",
+            "wire": "fileName",
+            "description": "What the file was called when it arrived.",
+            "type": "String",
+            "type_kind": "Primitive",
+            "go_type": "string",
+            "column": {
+              "table": "rig_file",
+              "name": "file_name",
+              "sql_type": "text",
+              "nullable": false,
+              "scan": "Direct"
+            }
+          },
+          {
+            "name": "ContentType",
+            "wire": "contentType",
+            "description": "What the bytes were sniffed to be, which is not what the client claimed.",
+            "type": "String",
+            "type_kind": "Primitive",
+            "go_type": "string",
+            "column": {
+              "table": "rig_file",
+              "name": "content_type",
+              "sql_type": "text",
+              "nullable": false,
+              "scan": "Direct"
+            }
+          },
+          {
+            "name": "SizeBytes",
+            "wire": "sizeBytes",
+            "description": "How large the object is.",
+            "type": "Int64",
+            "type_kind": "Primitive",
+            "go_type": "int64",
+            "column": {
+              "table": "rig_file",
+              "name": "size_bytes",
+              "sql_type": "bigint",
+              "nullable": false,
+              "scan": "Direct"
+            }
+          },
+          {
+            "name": "UploadedAt",
+            "wire": "uploadedAt",
+            "description": "When the bytes landed. Null means the row was inserted and the upload has not finished, which is what makes an abandoned upload reapable.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "*time.Time",
+            "modifiers": [
+              "Nullable"
+            ],
+            "column": {
+              "table": "rig_file",
+              "name": "uploaded_at",
+              "sql_type": "timestamptz",
+              "nullable": true,
+              "scan": "Timestamptz"
+            }
+          },
+          {
+            "name": "CreatedAt",
+            "wire": "createdAt",
+            "description": "When this row was created. Set automatically and never changes.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "time.Time",
+            "read_only": true,
+            "column": {
+              "table": "rig_file",
+              "name": "created_at",
+              "sql_type": "timestamptz",
+              "nullable": false,
+              "scan": "Timestamptz"
+            }
+          },
+          {
+            "name": "DeletedAt",
+            "wire": "deletedAt",
+            "description": "When this row was soft-deleted. Null while the row is live.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "*time.Time",
+            "modifiers": [
+              "Nullable"
+            ],
+            "read_only": true,
+            "column": {
+              "table": "rig_file",
+              "name": "deleted_at",
+              "sql_type": "timestamptz",
+              "nullable": true,
+              "scan": "Timestamptz"
+            }
+          }
+        ],
+        "origin": "Projected"
+      },
+      {
+        "name": "RigFileFilter",
+        "description": "Conditions a RigFile must satisfy to match a search.",
+        "fields": [
+          {
+            "name": "Equals",
+            "wire": "equals",
+            "description": "Fields that must equal the given value.",
+            "type": "RigFileFilterEquals",
+            "type_kind": "Object",
+            "go_type": "*RigFileFilterEquals",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "NotEquals",
+            "wire": "notEquals",
+            "description": "Fields that must not equal the given value.",
+            "type": "RigFileFilterEquals",
+            "type_kind": "Object",
+            "go_type": "*RigFileFilterEquals",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "GreaterThan",
+            "wire": "greaterThan",
+            "description": "Fields that must be greater than the given value.",
+            "type": "RigFileFilterRange",
+            "type_kind": "Object",
+            "go_type": "*RigFileFilterRange",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "SmallerThan",
+            "wire": "smallerThan",
+            "description": "Fields that must be less than the given value.",
+            "type": "RigFileFilterRange",
+            "type_kind": "Object",
+            "go_type": "*RigFileFilterRange",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "GreaterOrEqual",
+            "wire": "greaterOrEqual",
+            "description": "Fields that must be greater than or equal to the given value.",
+            "type": "RigFileFilterRange",
+            "type_kind": "Object",
+            "go_type": "*RigFileFilterRange",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "SmallerOrEqual",
+            "wire": "smallerOrEqual",
+            "description": "Fields that must be less than or equal to the given value.",
+            "type": "RigFileFilterRange",
+            "type_kind": "Object",
+            "go_type": "*RigFileFilterRange",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "Contains",
+            "wire": "contains",
+            "description": "Fields that must be one of the given values.",
+            "type": "RigFileFilterContains",
+            "type_kind": "Object",
+            "go_type": "*RigFileFilterContains",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "NotContains",
+            "wire": "notContains",
+            "description": "Fields that must not be one of the given values.",
+            "type": "RigFileFilterContains",
+            "type_kind": "Object",
+            "go_type": "*RigFileFilterContains",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "Like",
+            "wire": "like",
+            "description": "Text fields that must match the given pattern.",
+            "type": "RigFileFilterLike",
+            "type_kind": "Object",
+            "go_type": "*RigFileFilterLike",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "NotLike",
+            "wire": "notLike",
+            "description": "Text fields that must not match the given pattern.",
+            "type": "RigFileFilterLike",
+            "type_kind": "Object",
+            "go_type": "*RigFileFilterLike",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "Null",
+            "wire": "null",
+            "description": "Fields that must be null.",
+            "type": "RigFileFilterNull",
+            "type_kind": "Object",
+            "go_type": "*RigFileFilterNull",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "NotNull",
+            "wire": "notNull",
+            "description": "Fields that must not be null.",
+            "type": "RigFileFilterNull",
+            "type_kind": "Object",
+            "go_type": "*RigFileFilterNull",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "OrCondition",
+            "wire": "orCondition",
+            "description": "Combine this filter's conditions with OR instead of AND.",
+            "type": "Bool",
+            "type_kind": "Primitive",
+            "go_type": "bool"
+          },
+          {
+            "name": "NestedFilters",
+            "wire": "nestedFilters",
+            "description": "Sub-filters combined with this one, so that AND and OR can be mixed to any depth.",
+            "type": "RigFileFilter",
+            "type_kind": "Object",
+            "go_type": "[]RigFileFilter",
+            "modifiers": [
+              "Array"
+            ]
+          }
+        ],
+        "origin": "Filter"
+      },
+      {
+        "name": "RigFileFilterContains",
+        "description": "Set-membership conditions on RigFile fields.",
+        "fields": [
+          {
+            "name": "ID",
+            "wire": "id",
+            "description": "Unique identifier for this row.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "[]uuid.UUID",
+            "modifiers": [
+              "Array"
+            ]
+          },
+          {
+            "name": "StorageKey",
+            "wire": "storageKey",
+            "description": "Where the bytes are, derived from the identifier and never from a name.",
+            "type": "String",
+            "type_kind": "Primitive",
+            "go_type": "[]string",
+            "modifiers": [
+              "Array"
+            ]
+          },
+          {
+            "name": "URL",
+            "wire": "url",
+            "description": "Where the file is served from, so a synced row can be rendered as it stands.",
+            "type": "String",
+            "type_kind": "Primitive",
+            "go_type": "[]string",
+            "modifiers": [
+              "Array"
+            ]
+          },
+          {
+            "name": "FileName",
+            "wire": "fileName",
+            "description": "What the file was called when it arrived.",
+            "type": "String",
+            "type_kind": "Primitive",
+            "go_type": "[]string",
+            "modifiers": [
+              "Array"
+            ]
+          },
+          {
+            "name": "ContentType",
+            "wire": "contentType",
+            "description": "What the bytes were sniffed to be, which is not what the client claimed.",
+            "type": "String",
+            "type_kind": "Primitive",
+            "go_type": "[]string",
+            "modifiers": [
+              "Array"
+            ]
+          },
+          {
+            "name": "SizeBytes",
+            "wire": "sizeBytes",
+            "description": "How large the object is.",
+            "type": "Int64",
+            "type_kind": "Primitive",
+            "go_type": "[]int64",
+            "modifiers": [
+              "Array"
+            ]
+          },
+          {
+            "name": "UploadedAt",
+            "wire": "uploadedAt",
+            "description": "When the bytes landed. Null means the row was inserted and the upload has not finished, which is what makes an abandoned upload reapable.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "[]time.Time",
+            "modifiers": [
+              "Array"
+            ]
+          },
+          {
+            "name": "CreatedAt",
+            "wire": "createdAt",
+            "description": "When this row was created. Set automatically and never changes.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "[]time.Time",
+            "modifiers": [
+              "Array"
+            ]
+          },
+          {
+            "name": "DeletedAt",
+            "wire": "deletedAt",
+            "description": "When this row was soft-deleted. Null while the row is live.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "[]time.Time",
+            "modifiers": [
+              "Array"
+            ]
+          }
+        ],
+        "origin": "Filter"
+      },
+      {
+        "name": "RigFileFilterEquals",
+        "description": "Exact-match conditions on RigFile fields.",
+        "fields": [
+          {
+            "name": "ID",
+            "wire": "id",
+            "description": "Unique identifier for this row.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "*uuid.UUID",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "StorageKey",
+            "wire": "storageKey",
+            "description": "Where the bytes are, derived from the identifier and never from a name.",
+            "type": "String",
+            "type_kind": "Primitive",
+            "go_type": "*string",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "URL",
+            "wire": "url",
+            "description": "Where the file is served from, so a synced row can be rendered as it stands.",
+            "type": "String",
+            "type_kind": "Primitive",
+            "go_type": "*string",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "FileName",
+            "wire": "fileName",
+            "description": "What the file was called when it arrived.",
+            "type": "String",
+            "type_kind": "Primitive",
+            "go_type": "*string",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "ContentType",
+            "wire": "contentType",
+            "description": "What the bytes were sniffed to be, which is not what the client claimed.",
+            "type": "String",
+            "type_kind": "Primitive",
+            "go_type": "*string",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "SizeBytes",
+            "wire": "sizeBytes",
+            "description": "How large the object is.",
+            "type": "Int64",
+            "type_kind": "Primitive",
+            "go_type": "*int64",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "UploadedAt",
+            "wire": "uploadedAt",
+            "description": "When the bytes landed. Null means the row was inserted and the upload has not finished, which is what makes an abandoned upload reapable.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "*time.Time",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "CreatedAt",
+            "wire": "createdAt",
+            "description": "When this row was created. Set automatically and never changes.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "*time.Time",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "DeletedAt",
+            "wire": "deletedAt",
+            "description": "When this row was soft-deleted. Null while the row is live.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "*time.Time",
+            "modifiers": [
+              "Nullable"
+            ]
+          }
+        ],
+        "origin": "Filter"
+      },
+      {
+        "name": "RigFileFilterLike",
+        "description": "Pattern conditions on RigFile text fields.",
+        "fields": [
+          {
+            "name": "StorageKey",
+            "wire": "storageKey",
+            "description": "Where the bytes are, derived from the identifier and never from a name.",
+            "type": "String",
+            "type_kind": "Primitive",
+            "go_type": "*string",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "URL",
+            "wire": "url",
+            "description": "Where the file is served from, so a synced row can be rendered as it stands.",
+            "type": "String",
+            "type_kind": "Primitive",
+            "go_type": "*string",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "FileName",
+            "wire": "fileName",
+            "description": "What the file was called when it arrived.",
+            "type": "String",
+            "type_kind": "Primitive",
+            "go_type": "*string",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "ContentType",
+            "wire": "contentType",
+            "description": "What the bytes were sniffed to be, which is not what the client claimed.",
+            "type": "String",
+            "type_kind": "Primitive",
+            "go_type": "*string",
+            "modifiers": [
+              "Nullable"
+            ]
+          }
+        ],
+        "origin": "Filter"
+      },
+      {
+        "name": "RigFileFilterNull",
+        "description": "Presence conditions on nullable RigFile fields.",
+        "fields": [
+          {
+            "name": "UploadedAt",
+            "wire": "uploadedAt",
+            "description": "When the bytes landed. Null means the row was inserted and the upload has not finished, which is what makes an abandoned upload reapable.",
+            "type": "Bool",
+            "type_kind": "Primitive",
+            "go_type": "*bool",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "DeletedAt",
+            "wire": "deletedAt",
+            "description": "When this row was soft-deleted. Null while the row is live.",
+            "type": "Bool",
+            "type_kind": "Primitive",
+            "go_type": "*bool",
+            "modifiers": [
+              "Nullable"
+            ]
+          }
+        ],
+        "origin": "Filter"
+      },
+      {
+        "name": "RigFileFilterRange",
+        "description": "Ordering conditions on RigFile fields that can be compared.",
+        "fields": [
+          {
+            "name": "SizeBytes",
+            "wire": "sizeBytes",
+            "description": "How large the object is.",
+            "type": "Int64",
+            "type_kind": "Primitive",
+            "go_type": "*int64",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "UploadedAt",
+            "wire": "uploadedAt",
+            "description": "When the bytes landed. Null means the row was inserted and the upload has not finished, which is what makes an abandoned upload reapable.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "*time.Time",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "CreatedAt",
+            "wire": "createdAt",
+            "description": "When this row was created. Set automatically and never changes.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "*time.Time",
+            "modifiers": [
+              "Nullable"
+            ]
+          },
+          {
+            "name": "DeletedAt",
+            "wire": "deletedAt",
+            "description": "When this row was soft-deleted. Null while the row is live.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "*time.Time",
+            "modifiers": [
+              "Nullable"
+            ]
+          }
+        ],
+        "origin": "Filter"
+      },
+      {
+        "name": "RigFileListResponse",
+        "description": "A page of RigFiles.",
+        "fields": [
+          {
+            "name": "Data",
+            "wire": "data",
+            "description": "The rows in this page.",
+            "type": "RigFile",
+            "type_kind": "Resource",
+            "go_type": "[]RigFile",
+            "modifiers": [
+              "Array"
+            ]
+          },
+          {
+            "name": "Pagination",
+            "wire": "pagination",
+            "description": "Where this page sits in the full result set.",
+            "type": "Pagination",
+            "type_kind": "Object",
+            "go_type": "Pagination"
+          }
+        ],
+        "origin": "Projected"
+      }
+    ],
+    "resources": [
+      {
+        "name": "Note",
+        "plural": "Notes",
+        "path_segment": "notes",
+        "description": "The project's own table, so this is a project rather than a file store.",
+        "operations": [
+          "Create",
+          "Get",
+          "List",
+          "Search",
+          "Update",
+          "Delete"
+        ],
+        "fields": [
+          {
+            "name": "ID",
+            "wire": "id",
+            "description": "Unique identifier for this row.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "uuid.UUID",
+            "read_only": true,
+            "column": {
+              "table": "note",
+              "name": "id",
+              "sql_type": "uuid",
+              "nullable": false,
+              "scan": "UUID"
+            },
+            "operations": [
+              "Read"
+            ]
+          },
+          {
+            "name": "TenantID",
+            "wire": "tenantId",
+            "description": "Tenant this row belongs to. Every query is scoped by it.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "uuid.UUID",
+            "read_only": true,
+            "column": {
+              "table": "note",
+              "name": "tenant_id",
+              "sql_type": "uuid",
+              "nullable": false,
+              "scan": "UUID"
+            },
+            "operations": [
+              "Read"
+            ]
+          },
+          {
+            "name": "CreatedAt",
+            "wire": "createdAt",
+            "description": "When this row was created. Set automatically and never changes.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "time.Time",
+            "read_only": true,
+            "column": {
+              "table": "note",
+              "name": "created_at",
+              "sql_type": "timestamptz",
+              "nullable": false,
+              "scan": "Timestamptz"
+            },
+            "operations": [
+              "Read"
+            ]
+          },
+          {
+            "name": "Body",
+            "wire": "body",
+            "description": "What was written.",
+            "type": "String",
+            "type_kind": "Primitive",
+            "go_type": "string",
+            "column": {
+              "table": "note",
+              "name": "body",
+              "sql_type": "text",
+              "nullable": false,
+              "scan": "Direct"
+            },
+            "operations": [
+              "Read",
+              "Create",
+              "Update"
+            ]
+          }
+        ],
+        "endpoints": [
+          {
+            "name": "List",
+            "summary": "List Notes.",
+            "method": "GET",
+            "path": "",
+            "pattern": "GET /api/v1/notes",
+            "operation_id": "listNotes",
+            "permission": "note.read",
+            "request": {
+              "query_params": [
+                {
+                  "name": "Limit",
+                  "wire": "limit",
+                  "description": "Maximum rows to return.",
+                  "type": "Int",
+                  "type_kind": "Primitive",
+                  "go_type": "int",
+                  "default": "50"
+                },
+                {
+                  "name": "Offset",
+                  "wire": "offset",
+                  "description": "Rows to skip before the first returned row.",
+                  "type": "Int",
+                  "type_kind": "Primitive",
+                  "go_type": "int",
+                  "default": "0"
+                }
+              ]
+            },
+            "responses": [
+              {
+                "status_code": 200,
+                "description": "A page of Notes.",
+                "content_types": [
+                  "application/json"
+                ],
+                "body_object": "NoteListResponse"
+              }
+            ],
+            "errors": [
+              400,
+              401,
+              403,
+              429,
+              500
+            ],
+            "impl": {
+              "kind": "Generated",
+              "repo_method": "List",
+              "service_method": "List",
+              "handler_name": "ListNotes"
+            }
+          },
+          {
+            "name": "Create",
+            "summary": "Create a Note.",
+            "method": "POST",
+            "path": "",
+            "pattern": "POST /api/v1/notes",
+            "operation_id": "createNote",
+            "permission": "note.write",
+            "request": {
+              "content_types": [
+                "application/json"
+              ],
+              "body_params": [
+                {
+                  "name": "Body",
+                  "wire": "body",
+                  "description": "What was written.",
+                  "type": "String",
+                  "type_kind": "Primitive",
+                  "go_type": "string",
+                  "column": {
+                    "table": "note",
+                    "name": "body",
+                    "sql_type": "text",
+                    "nullable": false,
+                    "scan": "Direct"
+                  }
+                }
+              ]
+            },
+            "responses": [
+              {
+                "status_code": 201,
+                "description": "The created Note.",
+                "content_types": [
+                  "application/json"
+                ],
+                "body_object": "Note"
+              }
+            ],
+            "errors": [
+              400,
+              401,
+              403,
+              409,
+              422,
+              429,
+              500
+            ],
+            "impl": {
+              "kind": "Generated",
+              "repo_method": "Create",
+              "service_method": "Create",
+              "handler_name": "CreateNote"
+            }
+          },
+          {
+            "name": "Search",
+            "summary": "Search Notes with filters.",
+            "method": "QUERY",
+            "path": "",
+            "pattern": "QUERY /api/v1/notes",
+            "alias_patterns": [
+              "POST /api/v1/notes/_search"
+            ],
+            "operation_id": "searchNotes",
+            "permission": "note.read",
+            "request": {
+              "content_types": [
+                "application/json"
+              ],
+              "query_params": [
+                {
+                  "name": "Limit",
+                  "wire": "limit",
+                  "description": "Maximum rows to return.",
+                  "type": "Int",
+                  "type_kind": "Primitive",
+                  "go_type": "int",
+                  "default": "50"
+                },
+                {
+                  "name": "Offset",
+                  "wire": "offset",
+                  "description": "Rows to skip before the first returned row.",
+                  "type": "Int",
+                  "type_kind": "Primitive",
+                  "go_type": "int",
+                  "default": "0"
+                }
+              ],
+              "body_params": [
+                {
+                  "name": "Filter",
+                  "wire": "filter",
+                  "description": "Conditions rows must satisfy.",
+                  "type": "NoteFilter",
+                  "type_kind": "Object",
+                  "go_type": "NoteFilter"
+                }
+              ]
+            },
+            "responses": [
+              {
+                "status_code": 200,
+                "description": "A page of matching Notes.",
+                "content_types": [
+                  "application/json"
+                ],
+                "body_object": "NoteListResponse"
+              }
+            ],
+            "errors": [
+              400,
+              401,
+              403,
+              422,
+              429,
+              500
+            ],
+            "impl": {
+              "kind": "Generated",
+              "repo_method": "List",
+              "service_method": "Search",
+              "handler_name": "SearchNotes"
+            }
+          },
+          {
+            "name": "Delete",
+            "summary": "Delete a Note.",
+            "method": "DELETE",
+            "path": "/{id}",
+            "pattern": "DELETE /api/v1/notes/{id}",
+            "operation_id": "deleteNote",
+            "permission": "note.delete",
+            "request": {
+              "path_params": [
+                {
+                  "name": "ID",
+                  "wire": "id",
+                  "description": "Identifier of the Note.",
+                  "type": "UUID",
+                  "type_kind": "Primitive",
+                  "go_type": "uuid.UUID"
+                }
+              ]
+            },
+            "responses": [
+              {
+                "status_code": 204,
+                "description": "The Note was deleted."
+              }
+            ],
+            "errors": [
+              400,
+              401,
+              403,
+              404,
+              409,
+              429,
+              500
+            ],
+            "impl": {
+              "kind": "Generated",
+              "repo_method": "Delete",
+              "service_method": "Delete",
+              "handler_name": "DeleteNote"
+            }
+          },
+          {
+            "name": "Get",
+            "summary": "Fetch one Note by identifier.",
+            "method": "GET",
+            "path": "/{id}",
+            "pattern": "GET /api/v1/notes/{id}",
+            "operation_id": "getNote",
+            "permission": "note.read",
+            "request": {
+              "path_params": [
+                {
+                  "name": "ID",
+                  "wire": "id",
+                  "description": "Identifier of the Note.",
+                  "type": "UUID",
+                  "type_kind": "Primitive",
+                  "go_type": "uuid.UUID"
+                }
+              ]
+            },
+            "responses": [
+              {
+                "status_code": 200,
+                "description": "The requested Note.",
+                "content_types": [
+                  "application/json"
+                ],
+                "body_object": "Note"
+              }
+            ],
+            "errors": [
+              400,
+              401,
+              403,
+              404,
+              429,
+              500
+            ],
+            "impl": {
+              "kind": "Generated",
+              "repo_method": "Get",
+              "service_method": "Get",
+              "handler_name": "GetNote"
+            }
+          },
+          {
+            "name": "Update",
+            "summary": "Update a Note.",
+            "description": "Only the fields present in the body are changed. A field set to null is cleared; a field left out is left alone.",
+            "method": "PATCH",
+            "path": "/{id}",
+            "pattern": "PATCH /api/v1/notes/{id}",
+            "operation_id": "updateNote",
+            "permission": "note.write",
+            "request": {
+              "content_types": [
+                "application/json"
+              ],
+              "path_params": [
+                {
+                  "name": "ID",
+                  "wire": "id",
+                  "description": "Identifier of the Note.",
+                  "type": "UUID",
+                  "type_kind": "Primitive",
+                  "go_type": "uuid.UUID"
+                }
+              ],
+              "body_params": [
+                {
+                  "name": "Body",
+                  "wire": "body",
+                  "description": "What was written.",
+                  "type": "String",
+                  "type_kind": "Primitive",
+                  "go_type": "string",
+                  "column": {
+                    "table": "note",
+                    "name": "body",
+                    "sql_type": "text",
+                    "nullable": false,
+                    "scan": "Direct"
+                  }
+                }
+              ]
+            },
+            "responses": [
+              {
+                "status_code": 200,
+                "description": "The updated Note.",
+                "content_types": [
+                  "application/json"
+                ],
+                "body_object": "Note"
+              }
+            ],
+            "errors": [
+              400,
+              401,
+              403,
+              404,
+              409,
+              422,
+              429,
+              500
+            ],
+            "impl": {
+              "kind": "Generated",
+              "repo_method": "Update",
+              "service_method": "Update",
+              "handler_name": "UpdateNote"
+            }
+          }
+        ],
+        "storage": {
+          "table": "note",
+          "primary_key": [
+            "id"
+          ],
+          "tenant": {
+            "table": "note",
+            "name": "tenant_id",
+            "sql_type": "uuid",
+            "nullable": false,
+            "scan": "UUID"
+          },
+          "audit": {
+            "created_at": {
+              "table": "note",
+              "name": "created_at",
+              "sql_type": "timestamptz",
+              "nullable": false,
+              "scan": "Timestamptz"
+            }
+          },
+          "default_order": [
+            {
+              "column": "created_at",
+              "desc": true
+            },
+            {
+              "column": "id"
+            }
+          ],
+          "sortable": [
+            "id",
+            "tenant_id",
+            "created_at",
+            "body"
+          ],
+          "filterable": [
+            "id",
+            "tenant_id",
+            "created_at",
+            "body"
+          ]
+        }
+      },
+      {
+        "name": "RigFile",
+        "plural": "RigFiles",
+        "path_segment": "rig-files",
+        "description": "One uploaded file. Metadata only — the bytes live in the blob store, and the storage key never leaves the server.",
+        "foundation": true,
+        "operations": [
+          "Create",
+          "Get",
+          "List",
+          "Search",
+          "Update",
+          "Delete"
+        ],
+        "fields": [
+          {
+            "name": "ID",
+            "wire": "id",
+            "description": "Unique identifier for this row.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "uuid.UUID",
+            "read_only": true,
+            "column": {
+              "table": "rig_file",
+              "name": "id",
+              "sql_type": "uuid",
+              "nullable": false,
+              "scan": "UUID"
+            },
+            "operations": [
+              "Read"
+            ]
+          },
+          {
+            "name": "TenantID",
+            "wire": "tenantId",
+            "description": "Tenant this row belongs to. Every query is scoped by it.",
+            "type": "UUID",
+            "type_kind": "Primitive",
+            "go_type": "uuid.UUID",
+            "read_only": true,
+            "column": {
+              "table": "rig_file",
+              "name": "tenant_id",
+              "sql_type": "uuid",
+              "nullable": false,
+              "scan": "UUID"
+            },
+            "operations": [
+              "Read"
+            ]
+          },
+          {
+            "name": "StorageKey",
+            "wire": "storageKey",
+            "description": "Where the bytes are, derived from the identifier and never from a name.",
+            "type": "String",
+            "type_kind": "Primitive",
+            "go_type": "string",
+            "column": {
+              "table": "rig_file",
+              "name": "storage_key",
+              "sql_type": "text",
+              "nullable": false,
+              "scan": "Direct"
+            },
+            "operations": [
+              "Read",
+              "Create",
+              "Update"
+            ]
+          },
+          {
+            "name": "URL",
+            "wire": "url",
+            "description": "Where the file is served from, so a synced row can be rendered as it stands.",
+            "type": "String",
+            "type_kind": "Primitive",
+            "go_type": "string",
+            "column": {
+              "table": "rig_file",
+              "name": "url",
+              "sql_type": "text",
+              "nullable": false,
+              "scan": "Direct"
+            },
+            "operations": [
+              "Read",
+              "Create",
+              "Update"
+            ]
+          },
+          {
+            "name": "FileName",
+            "wire": "fileName",
+            "description": "What the file was called when it arrived.",
+            "type": "String",
+            "type_kind": "Primitive",
+            "go_type": "string",
+            "column": {
+              "table": "rig_file",
+              "name": "file_name",
+              "sql_type": "text",
+              "nullable": false,
+              "scan": "Direct"
+            },
+            "operations": [
+              "Read",
+              "Create",
+              "Update"
+            ]
+          },
+          {
+            "name": "ContentType",
+            "wire": "contentType",
+            "description": "What the bytes were sniffed to be, which is not what the client claimed.",
+            "type": "String",
+            "type_kind": "Primitive",
+            "go_type": "string",
+            "column": {
+              "table": "rig_file",
+              "name": "content_type",
+              "sql_type": "text",
+              "nullable": false,
+              "scan": "Direct"
+            },
+            "operations": [
+              "Read",
+              "Create",
+              "Update"
+            ]
+          },
+          {
+            "name": "SizeBytes",
+            "wire": "sizeBytes",
+            "description": "How large the object is.",
+            "type": "Int64",
+            "type_kind": "Primitive",
+            "go_type": "int64",
+            "column": {
+              "table": "rig_file",
+              "name": "size_bytes",
+              "sql_type": "bigint",
+              "nullable": false,
+              "scan": "Direct"
+            },
+            "operations": [
+              "Read",
+              "Create",
+              "Update"
+            ]
+          },
+          {
+            "name": "UploadedAt",
+            "wire": "uploadedAt",
+            "description": "When the bytes landed. Null means the row was inserted and the upload has not finished, which is what makes an abandoned upload reapable.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "*time.Time",
+            "modifiers": [
+              "Nullable"
+            ],
+            "column": {
+              "table": "rig_file",
+              "name": "uploaded_at",
+              "sql_type": "timestamptz",
+              "nullable": true,
+              "scan": "Timestamptz"
+            },
+            "operations": [
+              "Read",
+              "Create",
+              "Update"
+            ]
+          },
+          {
+            "name": "CreatedAt",
+            "wire": "createdAt",
+            "description": "When this row was created. Set automatically and never changes.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "time.Time",
+            "read_only": true,
+            "column": {
+              "table": "rig_file",
+              "name": "created_at",
+              "sql_type": "timestamptz",
+              "nullable": false,
+              "scan": "Timestamptz"
+            },
+            "operations": [
+              "Read"
+            ]
+          },
+          {
+            "name": "DeletedAt",
+            "wire": "deletedAt",
+            "description": "When this row was soft-deleted. Null while the row is live.",
+            "type": "Timestamp",
+            "type_kind": "Primitive",
+            "go_type": "*time.Time",
+            "modifiers": [
+              "Nullable"
+            ],
+            "read_only": true,
+            "column": {
+              "table": "rig_file",
+              "name": "deleted_at",
+              "sql_type": "timestamptz",
+              "nullable": true,
+              "scan": "Timestamptz"
+            },
+            "operations": [
+              "Read"
+            ]
+          }
+        ],
+        "endpoints": [
+          {
+            "name": "List",
+            "summary": "List RigFiles.",
+            "method": "GET",
+            "path": "",
+            "pattern": "GET /api/v1/rig-files",
+            "operation_id": "listRigFiles",
+            "permission": "rig_file.read",
+            "request": {
+              "query_params": [
+                {
+                  "name": "Limit",
+                  "wire": "limit",
+                  "description": "Maximum rows to return.",
+                  "type": "Int",
+                  "type_kind": "Primitive",
+                  "go_type": "int",
+                  "default": "50"
+                },
+                {
+                  "name": "Offset",
+                  "wire": "offset",
+                  "description": "Rows to skip before the first returned row.",
+                  "type": "Int",
+                  "type_kind": "Primitive",
+                  "go_type": "int",
+                  "default": "0"
+                }
+              ]
+            },
+            "responses": [
+              {
+                "status_code": 200,
+                "description": "A page of RigFiles.",
+                "content_types": [
+                  "application/json"
+                ],
+                "body_object": "RigFileListResponse"
+              }
+            ],
+            "errors": [
+              400,
+              401,
+              403,
+              429,
+              500
+            ],
+            "impl": {
+              "kind": "Generated",
+              "repo_method": "List",
+              "service_method": "List",
+              "handler_name": "ListRigFiles"
+            }
+          },
+          {
+            "name": "Create",
+            "summary": "Create a RigFile.",
+            "method": "POST",
+            "path": "",
+            "pattern": "POST /api/v1/rig-files",
+            "operation_id": "createRigFile",
+            "permission": "rig_file.write",
+            "request": {
+              "content_types": [
+                "application/json"
+              ],
+              "body_params": [
+                {
+                  "name": "StorageKey",
+                  "wire": "storageKey",
+                  "description": "Where the bytes are, derived from the identifier and never from a name.",
+                  "type": "String",
+                  "type_kind": "Primitive",
+                  "go_type": "string",
+                  "column": {
+                    "table": "rig_file",
+                    "name": "storage_key",
+                    "sql_type": "text",
+                    "nullable": false,
+                    "scan": "Direct"
+                  }
+                },
+                {
+                  "name": "URL",
+                  "wire": "url",
+                  "description": "Where the file is served from, so a synced row can be rendered as it stands.",
+                  "type": "String",
+                  "type_kind": "Primitive",
+                  "go_type": "string",
+                  "column": {
+                    "table": "rig_file",
+                    "name": "url",
+                    "sql_type": "text",
+                    "nullable": false,
+                    "scan": "Direct"
+                  }
+                },
+                {
+                  "name": "FileName",
+                  "wire": "fileName",
+                  "description": "What the file was called when it arrived.",
+                  "type": "String",
+                  "type_kind": "Primitive",
+                  "go_type": "string",
+                  "column": {
+                    "table": "rig_file",
+                    "name": "file_name",
+                    "sql_type": "text",
+                    "nullable": false,
+                    "scan": "Direct"
+                  }
+                },
+                {
+                  "name": "ContentType",
+                  "wire": "contentType",
+                  "description": "What the bytes were sniffed to be, which is not what the client claimed.",
+                  "type": "String",
+                  "type_kind": "Primitive",
+                  "go_type": "string",
+                  "column": {
+                    "table": "rig_file",
+                    "name": "content_type",
+                    "sql_type": "text",
+                    "nullable": false,
+                    "scan": "Direct"
+                  }
+                },
+                {
+                  "name": "SizeBytes",
+                  "wire": "sizeBytes",
+                  "description": "How large the object is.",
+                  "type": "Int64",
+                  "type_kind": "Primitive",
+                  "go_type": "int64",
+                  "column": {
+                    "table": "rig_file",
+                    "name": "size_bytes",
+                    "sql_type": "bigint",
+                    "nullable": false,
+                    "scan": "Direct"
+                  }
+                },
+                {
+                  "name": "UploadedAt",
+                  "wire": "uploadedAt",
+                  "description": "When the bytes landed. Null means the row was inserted and the upload has not finished, which is what makes an abandoned upload reapable.",
+                  "type": "Timestamp",
+                  "type_kind": "Primitive",
+                  "go_type": "*time.Time",
+                  "modifiers": [
+                    "Nullable"
+                  ],
+                  "column": {
+                    "table": "rig_file",
+                    "name": "uploaded_at",
+                    "sql_type": "timestamptz",
+                    "nullable": true,
+                    "scan": "Timestamptz"
+                  }
+                }
+              ]
+            },
+            "responses": [
+              {
+                "status_code": 201,
+                "description": "The created RigFile.",
+                "content_types": [
+                  "application/json"
+                ],
+                "body_object": "RigFile"
+              }
+            ],
+            "errors": [
+              400,
+              401,
+              403,
+              409,
+              422,
+              429,
+              500
+            ],
+            "impl": {
+              "kind": "Generated",
+              "repo_method": "Create",
+              "service_method": "Create",
+              "handler_name": "CreateRigFile"
+            }
+          },
+          {
+            "name": "Search",
+            "summary": "Search RigFiles with filters.",
+            "method": "QUERY",
+            "path": "",
+            "pattern": "QUERY /api/v1/rig-files",
+            "alias_patterns": [
+              "POST /api/v1/rig-files/_search"
+            ],
+            "operation_id": "searchRigFiles",
+            "permission": "rig_file.read",
+            "request": {
+              "content_types": [
+                "application/json"
+              ],
+              "query_params": [
+                {
+                  "name": "Limit",
+                  "wire": "limit",
+                  "description": "Maximum rows to return.",
+                  "type": "Int",
+                  "type_kind": "Primitive",
+                  "go_type": "int",
+                  "default": "50"
+                },
+                {
+                  "name": "Offset",
+                  "wire": "offset",
+                  "description": "Rows to skip before the first returned row.",
+                  "type": "Int",
+                  "type_kind": "Primitive",
+                  "go_type": "int",
+                  "default": "0"
+                }
+              ],
+              "body_params": [
+                {
+                  "name": "Filter",
+                  "wire": "filter",
+                  "description": "Conditions rows must satisfy.",
+                  "type": "RigFileFilter",
+                  "type_kind": "Object",
+                  "go_type": "RigFileFilter"
+                }
+              ]
+            },
+            "responses": [
+              {
+                "status_code": 200,
+                "description": "A page of matching RigFiles.",
+                "content_types": [
+                  "application/json"
+                ],
+                "body_object": "RigFileListResponse"
+              }
+            ],
+            "errors": [
+              400,
+              401,
+              403,
+              422,
+              429,
+              500
+            ],
+            "impl": {
+              "kind": "Generated",
+              "repo_method": "List",
+              "service_method": "Search",
+              "handler_name": "SearchRigFiles"
+            }
+          },
+          {
+            "name": "ListDeleted",
+            "summary": "List retired RigFiles.",
+            "description": "A deletion stamps the row rather than removing it, so this is what was deleted and can still be brought back. Only rows inside the 30-day restore window appear: past it a row is gone as far as anyone is concerned, so it is not in the trash either.",
+            "method": "GET",
+            "path": "/_deleted",
+            "pattern": "GET /api/v1/rig-files/_deleted",
+            "operation_id": "listDeletedRigFiles",
+            "permission": "rig_file.read",
+            "request": {
+              "query_params": [
+                {
+                  "name": "Limit",
+                  "wire": "limit",
+                  "description": "Maximum rows to return.",
+                  "type": "Int",
+                  "type_kind": "Primitive",
+                  "go_type": "int",
+                  "default": "50"
+                },
+                {
+                  "name": "Offset",
+                  "wire": "offset",
+                  "description": "Rows to skip before the first returned row.",
+                  "type": "Int",
+                  "type_kind": "Primitive",
+                  "go_type": "int",
+                  "default": "0"
+                }
+              ]
+            },
+            "responses": [
+              {
+                "status_code": 200,
+                "description": "A page of retired RigFiles.",
+                "content_types": [
+                  "application/json"
+                ],
+                "body_object": "RigFileListResponse"
+              }
+            ],
+            "errors": [
+              400,
+              401,
+              403,
+              429,
+              500
+            ],
+            "impl": {
+              "kind": "Generated",
+              "repo_method": "ListDeleted",
+              "service_method": "ListDeleted",
+              "handler_name": "ListDeletedRigFiles"
+            }
+          },
+          {
+            "name": "Delete",
+            "summary": "Delete a RigFile.",
+            "description": "The row is retired by stamping a deletion time; it stops appearing in reads but can be restored within the retention window.",
+            "method": "DELETE",
+            "path": "/{id}",
+            "pattern": "DELETE /api/v1/rig-files/{id}",
+            "operation_id": "deleteRigFile",
+            "permission": "rig_file.delete",
+            "request": {
+              "path_params": [
+                {
+                  "name": "ID",
+                  "wire": "id",
+                  "description": "Identifier of the RigFile.",
+                  "type": "UUID",
+                  "type_kind": "Primitive",
+                  "go_type": "uuid.UUID"
+                }
+              ]
+            },
+            "responses": [
+              {
+                "status_code": 204,
+                "description": "The RigFile was deleted."
+              }
+            ],
+            "errors": [
+              400,
+              401,
+              403,
+              404,
+              409,
+              429,
+              500
+            ],
+            "impl": {
+              "kind": "Generated",
+              "repo_method": "Delete",
+              "service_method": "Delete",
+              "handler_name": "DeleteRigFile"
+            }
+          },
+          {
+            "name": "Get",
+            "summary": "Fetch one RigFile by identifier.",
+            "method": "GET",
+            "path": "/{id}",
+            "pattern": "GET /api/v1/rig-files/{id}",
+            "operation_id": "getRigFile",
+            "permission": "rig_file.read",
+            "request": {
+              "path_params": [
+                {
+                  "name": "ID",
+                  "wire": "id",
+                  "description": "Identifier of the RigFile.",
+                  "type": "UUID",
+                  "type_kind": "Primitive",
+                  "go_type": "uuid.UUID"
+                }
+              ]
+            },
+            "responses": [
+              {
+                "status_code": 200,
+                "description": "The requested RigFile.",
+                "content_types": [
+                  "application/json"
+                ],
+                "body_object": "RigFile"
+              }
+            ],
+            "errors": [
+              400,
+              401,
+              403,
+              404,
+              429,
+              500
+            ],
+            "impl": {
+              "kind": "Generated",
+              "repo_method": "Get",
+              "service_method": "Get",
+              "handler_name": "GetRigFile"
+            }
+          },
+          {
+            "name": "Update",
+            "summary": "Update a RigFile.",
+            "description": "Only the fields present in the body are changed. A field set to null is cleared; a field left out is left alone.",
+            "method": "PATCH",
+            "path": "/{id}",
+            "pattern": "PATCH /api/v1/rig-files/{id}",
+            "operation_id": "updateRigFile",
+            "permission": "rig_file.write",
+            "request": {
+              "content_types": [
+                "application/json"
+              ],
+              "path_params": [
+                {
+                  "name": "ID",
+                  "wire": "id",
+                  "description": "Identifier of the RigFile.",
+                  "type": "UUID",
+                  "type_kind": "Primitive",
+                  "go_type": "uuid.UUID"
+                }
+              ],
+              "body_params": [
+                {
+                  "name": "StorageKey",
+                  "wire": "storageKey",
+                  "description": "Where the bytes are, derived from the identifier and never from a name.",
+                  "type": "String",
+                  "type_kind": "Primitive",
+                  "go_type": "string",
+                  "column": {
+                    "table": "rig_file",
+                    "name": "storage_key",
+                    "sql_type": "text",
+                    "nullable": false,
+                    "scan": "Direct"
+                  }
+                },
+                {
+                  "name": "URL",
+                  "wire": "url",
+                  "description": "Where the file is served from, so a synced row can be rendered as it stands.",
+                  "type": "String",
+                  "type_kind": "Primitive",
+                  "go_type": "string",
+                  "column": {
+                    "table": "rig_file",
+                    "name": "url",
+                    "sql_type": "text",
+                    "nullable": false,
+                    "scan": "Direct"
+                  }
+                },
+                {
+                  "name": "FileName",
+                  "wire": "fileName",
+                  "description": "What the file was called when it arrived.",
+                  "type": "String",
+                  "type_kind": "Primitive",
+                  "go_type": "string",
+                  "column": {
+                    "table": "rig_file",
+                    "name": "file_name",
+                    "sql_type": "text",
+                    "nullable": false,
+                    "scan": "Direct"
+                  }
+                },
+                {
+                  "name": "ContentType",
+                  "wire": "contentType",
+                  "description": "What the bytes were sniffed to be, which is not what the client claimed.",
+                  "type": "String",
+                  "type_kind": "Primitive",
+                  "go_type": "string",
+                  "column": {
+                    "table": "rig_file",
+                    "name": "content_type",
+                    "sql_type": "text",
+                    "nullable": false,
+                    "scan": "Direct"
+                  }
+                },
+                {
+                  "name": "SizeBytes",
+                  "wire": "sizeBytes",
+                  "description": "How large the object is.",
+                  "type": "Int64",
+                  "type_kind": "Primitive",
+                  "go_type": "int64",
+                  "column": {
+                    "table": "rig_file",
+                    "name": "size_bytes",
+                    "sql_type": "bigint",
+                    "nullable": false,
+                    "scan": "Direct"
+                  }
+                },
+                {
+                  "name": "UploadedAt",
+                  "wire": "uploadedAt",
+                  "description": "When the bytes landed. Null means the row was inserted and the upload has not finished, which is what makes an abandoned upload reapable.",
+                  "type": "Timestamp",
+                  "type_kind": "Primitive",
+                  "go_type": "*time.Time",
+                  "modifiers": [
+                    "Nullable"
+                  ],
+                  "column": {
+                    "table": "rig_file",
+                    "name": "uploaded_at",
+                    "sql_type": "timestamptz",
+                    "nullable": true,
+                    "scan": "Timestamptz"
+                  }
+                }
+              ]
+            },
+            "responses": [
+              {
+                "status_code": 200,
+                "description": "The updated RigFile.",
+                "content_types": [
+                  "application/json"
+                ],
+                "body_object": "RigFile"
+              }
+            ],
+            "errors": [
+              400,
+              401,
+              403,
+              404,
+              409,
+              422,
+              429,
+              500
+            ],
+            "impl": {
+              "kind": "Generated",
+              "repo_method": "Update",
+              "service_method": "Update",
+              "handler_name": "UpdateRigFile"
+            }
+          },
+          {
+            "name": "Restore",
+            "summary": "Bring a retired RigFile back.",
+            "description": "The deletion stamp is cleared and the row appears in reads again. It works for 30 days after the deletion; past that the row is no longer eligible and this answers 409.\n\nRestoring a row that was never deleted is not an error. It is already in the state the caller asked for, and answering otherwise would make a retry of a request whose response went missing look like a failure.\n\nThe request carries no fields. What to do when the world has moved on while the row was retired — a unique value taken by something created since — is the application's decision, and it is made in the restore hook: refuse, or change the row so that it fits.\n\nEvery rule then runs against whatever the hook settled on, not only the ones for fields it touched. The row was not live, so nothing about it has been checked against the world it is returning to.",
+            "method": "POST",
+            "path": "/{id}/_restore",
+            "pattern": "POST /api/v1/rig-files/{id}/_restore",
+            "operation_id": "restoreRigFile",
+            "permission": "rig_file.write",
+            "request": {
+              "path_params": [
+                {
+                  "name": "ID",
+                  "wire": "id",
+                  "description": "Identifier of the RigFile.",
+                  "type": "UUID",
+                  "type_kind": "Primitive",
+                  "go_type": "uuid.UUID"
+                }
+              ]
+            },
+            "responses": [
+              {
+                "status_code": 200,
+                "description": "The restored RigFile.",
+                "content_types": [
+                  "application/json"
+                ],
+                "body_object": "RigFile"
+              }
+            ],
+            "errors": [
+              400,
+              401,
+              403,
+              404,
+              409,
+              422,
+              429,
+              500
+            ],
+            "impl": {
+              "kind": "Generated",
+              "repo_method": "Restore",
+              "service_method": "Restore",
+              "handler_name": "RestoreRigFile"
+            }
+          }
+        ],
+        "storage": {
+          "table": "rig_file",
+          "primary_key": [
+            "id"
+          ],
+          "tenant": {
+            "table": "rig_file",
+            "name": "tenant_id",
+            "sql_type": "uuid",
+            "nullable": false,
+            "scan": "UUID"
+          },
+          "audit": {
+            "created_at": {
+              "table": "rig_file",
+              "name": "created_at",
+              "sql_type": "timestamptz",
+              "nullable": false,
+              "scan": "Timestamptz"
+            },
+            "deleted_at": {
+              "table": "rig_file",
+              "name": "deleted_at",
+              "sql_type": "timestamptz",
+              "nullable": true,
+              "scan": "Timestamptz"
+            }
+          },
+          "soft_delete": {
+            "column": {
+              "table": "rig_file",
+              "name": "deleted_at",
+              "sql_type": "timestamptz",
+              "nullable": true,
+              "scan": "Timestamptz"
+            },
+            "restore_window_days": 30
+          },
+          "default_order": [
+            {
+              "column": "created_at",
+              "desc": true
+            },
+            {
+              "column": "id"
+            }
+          ],
+          "sortable": [
+            "id",
+            "tenant_id",
+            "storage_key",
+            "url",
+            "file_name",
+            "content_type",
+            "size_bytes",
+            "uploaded_at",
+            "created_at",
+            "deleted_at"
+          ],
+          "filterable": [
+            "id",
+            "tenant_id",
+            "storage_key",
+            "url",
+            "file_name",
+            "content_type",
+            "size_bytes",
+            "uploaded_at",
+            "created_at",
+            "deleted_at"
+          ]
+        }
+      }
+    ],
+    "files": {
+      "enabled": true,
+      "expose": true,
+      "backend": "memory",
+      "max_bytes": 26214400,
+      "inline_types": [
+        "image/jpeg",
+        "image/png",
+        "image/gif",
+        "image/webp"
+      ],
+      "abandoned_after_seconds": 86400,
+      "restore_window_seconds": 2592000
+    },
+    "permissions": [
+      {
+        "key": "note.delete",
+        "name": "Delete notes",
+        "description": "Delete notes — The project's own table, so this is a project rather than a file store.",
+        "resource": "Note",
+        "action": "delete"
+      },
+      {
+        "key": "note.read",
+        "name": "Read notes",
+        "description": "Read notes — The project's own table, so this is a project rather than a file store.",
+        "resource": "Note",
+        "action": "read"
+      },
+      {
+        "key": "note.write",
+        "name": "Write notes",
+        "description": "Create and change notes — The project's own table, so this is a project rather than a file store.",
+        "resource": "Note",
+        "action": "write"
+      },
+      {
+        "key": "rig_file.delete",
+        "name": "Delete rigfiles",
+        "description": "Delete rigfiles — One uploaded file. Metadata only — the bytes live in the blob store, and the storage key never leaves the server.",
+        "resource": "RigFile",
+        "action": "delete"
+      },
+      {
+        "key": "rig_file.read",
+        "name": "Read rigfiles",
+        "description": "Read rigfiles — One uploaded file. Metadata only — the bytes live in the blob store, and the storage key never leaves the server.",
+        "resource": "RigFile",
+        "action": "read"
+      },
+      {
+        "key": "rig_file.write",
+        "name": "Write rigfiles",
+        "description": "Create and change rigfiles — One uploaded file. Metadata only — the bytes live in the blob store, and the storage key never leaves the server.",
+        "resource": "RigFile",
+        "action": "write"
+      }
+    ]
+  },
+  "schema": {
+    "name": "public",
+    "tables": [
+      {
+        "name": "note",
+        "comment": "The project's own table, so this is a project rather than a file store.",
+        "kind": "Base",
+        "columns": [
+          {
+            "name": "id",
+            "comment": "Unique identifier for this row.",
+            "comment_source": "auto",
+            "sql_type": "uuid",
+            "udt_name": "uuid",
+            "nullable": false,
+            "ordinal": 1,
+            "is_primary_key": true
+          },
+          {
+            "name": "tenant_id",
+            "comment": "Tenant this row belongs to. Every query is scoped by it.",
+            "comment_source": "auto",
+            "sql_type": "uuid",
+            "udt_name": "uuid",
+            "nullable": false,
+            "ordinal": 2
+          },
+          {
+            "name": "created_at",
+            "comment": "When this row was created. Set automatically and never changes.",
+            "comment_source": "auto",
+            "sql_type": "timestamptz",
+            "udt_name": "timestamptz",
+            "nullable": false,
+            "ordinal": 3
+          },
+          {
+            "name": "body",
+            "comment": "What was written.",
+            "comment_source": "config",
+            "sql_type": "text",
+            "udt_name": "text",
+            "nullable": false,
+            "ordinal": 4
+          }
+        ],
+        "primary_key": [
+          "id"
+        ],
+        "indexes": [
+          {
+            "name": "note_pkey",
+            "columns": [
+              "id"
+            ],
+            "unique": true,
+            "method": "btree"
+          },
+          {
+            "name": "note_tenant_idx",
+            "columns": [
+              "tenant_id"
+            ],
+            "method": "btree"
+          }
+        ]
+      },
+      {
+        "name": "rig_file",
+        "comment": "One uploaded file. Metadata only — the bytes live in the blob store, and the storage key never leaves the server.",
+        "kind": "Base",
+        "columns": [
+          {
+            "name": "id",
+            "comment": "Unique identifier for this row.",
+            "comment_source": "auto",
+            "sql_type": "uuid",
+            "udt_name": "uuid",
+            "nullable": false,
+            "ordinal": 1,
+            "is_primary_key": true
+          },
+          {
+            "name": "tenant_id",
+            "comment": "Tenant this row belongs to. Every query is scoped by it.",
+            "comment_source": "auto",
+            "sql_type": "uuid",
+            "udt_name": "uuid",
+            "nullable": false,
+            "ordinal": 2
+          },
+          {
+            "name": "storage_key",
+            "comment": "Where the bytes are, derived from the identifier and never from a name.",
+            "comment_source": "config",
+            "sql_type": "text",
+            "udt_name": "text",
+            "nullable": false,
+            "ordinal": 3
+          },
+          {
+            "name": "url",
+            "comment": "Where the file is served from, so a synced row can be rendered as it stands.",
+            "comment_source": "config",
+            "sql_type": "text",
+            "udt_name": "text",
+            "nullable": false,
+            "ordinal": 4
+          },
+          {
+            "name": "file_name",
+            "comment": "What the file was called when it arrived.",
+            "comment_source": "config",
+            "sql_type": "text",
+            "udt_name": "text",
+            "nullable": false,
+            "ordinal": 5
+          },
+          {
+            "name": "content_type",
+            "comment": "What the bytes were sniffed to be, which is not what the client claimed.",
+            "comment_source": "config",
+            "sql_type": "text",
+            "udt_name": "text",
+            "nullable": false,
+            "ordinal": 6
+          },
+          {
+            "name": "size_bytes",
+            "comment": "How large the object is.",
+            "comment_source": "config",
+            "sql_type": "bigint",
+            "udt_name": "bigint",
+            "nullable": false,
+            "ordinal": 7
+          },
+          {
+            "name": "uploaded_at",
+            "comment": "When the bytes landed. Null means the row was inserted and the upload has not finished, which is what makes an abandoned upload reapable.",
+            "comment_source": "config",
+            "sql_type": "timestamptz",
+            "udt_name": "timestamptz",
+            "nullable": true,
+            "ordinal": 8
+          },
+          {
+            "name": "created_at",
+            "comment": "When this row was created. Set automatically and never changes.",
+            "comment_source": "auto",
+            "sql_type": "timestamptz",
+            "udt_name": "timestamptz",
+            "nullable": false,
+            "ordinal": 9
+          },
+          {
+            "name": "deleted_at",
+            "comment": "When this row was soft-deleted. Null while the row is live.",
+            "comment_source": "auto",
+            "sql_type": "timestamptz",
+            "udt_name": "timestamptz",
+            "nullable": true,
+            "ordinal": 10
+          }
+        ],
+        "primary_key": [
+          "id"
+        ],
+        "uniques": [
+          [
+            "tenant_id",
+            "id"
+          ]
+        ],
+        "indexes": [
+          {
+            "name": "rig_file_pkey",
+            "columns": [
+              "id"
+            ],
+            "unique": true,
+            "method": "btree"
+          },
+          {
+            "name": "rig_file_tenant_id_key",
+            "columns": [
+              "tenant_id",
+              "id"
+            ],
+            "unique": true,
+            "method": "btree"
+          }
+        ]
+      }
+    ],
+    "enums": []
+  },
+  "valid": true
+}

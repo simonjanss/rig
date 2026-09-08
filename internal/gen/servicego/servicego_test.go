@@ -934,6 +934,31 @@ func TestFileEndpointsCompile(t *testing.T) {
 	})...)
 }
 
+// TestRigFileExposedWithNothingAttachedCompiles is the files document without
+// anything attached: rig_file exposed, and no table anywhere carrying a file
+// column — a project storing files that nothing has been pointed at yet.
+//
+// It is the one arrangement in which api.gen.go names the model nowhere. The
+// model owns the RigFile struct, so this package refers to theirs and declares
+// none; and with no file column there is no response helper either, which is
+// the only other thing in that file that would have qualified it. So this is
+// where the model import, collected while deciding which way that question
+// goes rather than while writing the answer, stops the package compiling.
+//
+// Both fixtures that expose rig_file attach a file to a table, and no example
+// exposes it at all — the two with files leave it managed and get a struct of
+// this package's own. Which is the only reason it survived.
+func TestRigFileExposedWithNothingAttachedCompiles(t *testing.T) {
+	t.Parallel()
+
+	doc := gentest.LoadDocument(t, filepath.Join("testdata", "filesunattached.ir.json"))
+
+	gentest.MustCompileAll(t, layers(t, doc, gentest.Package{
+		Dir:       "api",
+		Artifacts: gentest.Run(t, servicego.New(), doc, opts()),
+	})...)
+}
+
 // A notifiable table owes rig two answers, and an ordinary one owes it nothing.
 //
 // Both halves matter. The methods are required — that is the whole mechanism, a

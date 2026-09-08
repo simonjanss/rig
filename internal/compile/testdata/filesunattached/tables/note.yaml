@@ -1,0 +1,5 @@
+table: note
+comment: The project's own table, so this is a project rather than a file store.
+columns:
+  body:
+    comment: What was written.
