@@ -16,6 +16,7 @@ import (
 	"github.com/google/uuid"
 	xoauth2 "golang.org/x/oauth2"
 
+	"github.com/simonjanss/rig/auth/authlog"
 	"github.com/simonjanss/rig/auth/oauth"
 	"github.com/simonjanss/rig/runtime/rigerr"
 )
@@ -613,7 +614,6 @@ func TestConfigurationIsChecked(t *testing.T) {
 		"no providers":   func(c *oauth.Config) { c.Providers = nil },
 		"no base url":    func(c *oauth.Config) { c.BaseURL = "" },
 		"a short key":    func(c *oauth.Config) { c.SigningKey = []byte("too short") },
-		"no tenant":      func(c *oauth.Config) { c.Tenant = nil },
 		"no sign-in":     func(c *oauth.Config) { c.OnSignIn = nil },
 		"a duplicate":    func(c *oauth.Config) { c.Providers = append(c.Providers, oauth.Google("a", "b")) },
 		"an unnamed one": func(c *oauth.Config) { c.Providers = []oauth.Provider{{}} },
@@ -629,6 +629,15 @@ func TestConfigurationIsChecked(t *testing.T) {
 
 	if _, err := oauth.New(valid); err != nil {
 		t.Errorf("the valid configuration was refused: %v", err)
+	}
+
+	// Not in the table above, and it used to be. A deployment with no host to
+	// read a tenant from has no answer to give before the redirect, and
+	// demanding one made every answer it could give wrong.
+	noTenant := valid
+	noTenant.Tenant = nil
+	if _, err := oauth.New(noTenant); err != nil {
+		t.Errorf("a nil Tenant resolver should be accepted: %v", err)
 	}
 }
 
@@ -1104,4 +1113,203 @@ func TestTheTenantSurvivesTheRoundTrip(t *testing.T) {
 	if calls != 1 {
 		t.Errorf("the resolver was called %d times, want 1", calls)
 	}
+}
+
+// A sign-in that names no tenant is the shape a deployment with more than one
+// tenant and no host to read one from is stuck with. It used to be the shape
+// that could not work: the callback took the tenant as an input and had nothing
+// to answer with, so it either refused or joined somebody to the nil UUID.
+//
+// Now the callback answers the question it can — who is this — and hands the
+// other one on. The assertion that matters is joins == 0: nothing was decided
+// about where this person belongs.
+func TestASignInWithNoTenantDefersTheQuestion(t *testing.T) {
+	t.Parallel()
+
+	for name, tenant := range map[string]func(*http.Request) (uuid.UUID, error){
+		// The two ways of saying "not yet", which have to mean the same thing:
+		// a resolver that answers Nil is what auth.TenantFromHeader does for a
+		// request with no header, and a nil one is a deployment that never had
+		// a source to read.
+		"a resolver answering nil": func(*http.Request) (uuid.UUID, error) { return uuid.Nil, nil },
+		"no resolver at all":       nil,
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			f := setup(t, oauth.Profile{
+				Subject: "subject-1", EmailAddress: "grace@example.com",
+				EmailVerified: true, DisplayName: "Grace",
+			}, func(cfg *oauth.Config) {
+				cfg.AllowProvisioning = true
+				cfg.Tenant = tenant
+			})
+
+			res := f.signIn(t, "")
+			defer res.Body.Close()
+
+			if res.StatusCode != http.StatusNoContent {
+				body, _ := io.ReadAll(res.Body)
+				t.Fatalf("status %d: %s", res.StatusCode, body)
+			}
+			if f.signedIn == nil {
+				t.Fatal("no sign-in reached the application")
+			}
+			if f.signedIn.TenantID != uuid.Nil || f.signedIn.AccountID != uuid.Nil {
+				t.Errorf("tenant %s and account %s, want both nil",
+					f.signedIn.TenantID, f.signedIn.AccountID)
+			}
+			if f.signedIn.Link == nil || f.signedIn.Link.IdentityID == uuid.Nil {
+				t.Fatal("the one question a callback can answer went unanswered")
+			}
+			if f.signedIn.New {
+				t.Error("New is about an account in a tenant, and there was no tenant")
+			}
+			if !f.signedIn.NewIdentity {
+				t.Error("NewIdentity should report the person this sign-in created")
+			}
+			if f.store.joins != 0 {
+				t.Errorf("%d tenants joined, want 0: where somebody belongs is not this handler's answer",
+					f.store.joins)
+			}
+			if f.store.provisions != 1 {
+				t.Errorf("%d identities provisioned, want 1", f.store.provisions)
+			}
+		})
+	}
+}
+
+// The door AllowProvisioning is, with no tenant to be about.
+//
+// Half of the switch has no tenant to gate once the tenant is deferred, and the
+// half that is left is the half that matters: a stranger cannot become somebody
+// here from a sign-in page.
+func TestNoTenantStillRefusesATotalStranger(t *testing.T) {
+	t.Parallel()
+
+	f := setup(t, oauth.Profile{
+		Subject: "subject-1", EmailAddress: "stranger@example.com", EmailVerified: true,
+	}, func(cfg *oauth.Config) { cfg.Tenant = nil })
+
+	res := f.signIn(t, "")
+	defer res.Body.Close()
+
+	if res.StatusCode != http.StatusForbidden {
+		body, _ := io.ReadAll(res.Body)
+		t.Fatalf("status %d, want 403: %s", res.StatusCode, body)
+	}
+	if f.store.provisions != 0 {
+		t.Errorf("%d identities provisioned, want 0", f.store.provisions)
+	}
+	if f.signedIn != nil {
+		t.Error("nobody should have been signed in")
+	}
+}
+
+// The 403 that becomes a 200, deliberately.
+//
+// With provisioning off and a tenant named, somebody who is not in that tenant
+// is refused, and that is right. With no tenant named there is nothing to refuse
+// them from: they have an account, just not in the tenant nobody named. Where
+// they land is settled after this handler.
+func TestNoTenantSignsInSomebodyWhoAlreadyExists(t *testing.T) {
+	t.Parallel()
+
+	f := setup(t, oauth.Profile{
+		Subject: "subject-1", EmailAddress: "Ada@example.com", EmailVerified: true,
+	}, func(cfg *oauth.Config) { cfg.Tenant = nil })
+
+	identityID, _ := f.store.put(uuid.New(), "ada@example.com")
+
+	res := f.signIn(t, "")
+	defer res.Body.Close()
+
+	if res.StatusCode != http.StatusNoContent {
+		body, _ := io.ReadAll(res.Body)
+		t.Fatalf("status %d: %s", res.StatusCode, body)
+	}
+	if f.signedIn == nil {
+		t.Fatal("no sign-in reached the application")
+	}
+	if f.signedIn.Link.IdentityID != identityID {
+		t.Errorf("linked to %s, want the person who already had the address, %s",
+			f.signedIn.Link.IdentityID, identityID)
+	}
+	if f.signedIn.NewIdentity {
+		t.Error("NewIdentity should be false for somebody who already existed")
+	}
+	if f.store.joins != 0 || f.store.provisions != 0 {
+		t.Errorf("%d joins and %d provisions, want none of either",
+			f.store.joins, f.store.provisions)
+	}
+}
+
+// A pointer to the nil UUID is not "no tenant" — it is a tenant that does not
+// exist, and it would go in the column.
+func TestADeferredSignInIsLoggedWithoutATenant(t *testing.T) {
+	t.Parallel()
+
+	log := &recorder{}
+	f := setup(t, oauth.Profile{
+		Subject: "subject-1", EmailAddress: "grace@example.com", EmailVerified: true,
+	}, func(cfg *oauth.Config) {
+		cfg.Tenant = nil
+		cfg.AllowProvisioning = true
+		cfg.Log = log
+	})
+
+	res := f.signIn(t, "")
+	defer res.Body.Close()
+
+	if res.StatusCode != http.StatusNoContent {
+		body, _ := io.ReadAll(res.Body)
+		t.Fatalf("status %d: %s", res.StatusCode, body)
+	}
+
+	entries := log.of(authlog.EventOAuthSignIn)
+	if len(entries) != 1 {
+		t.Fatalf("%d OAuthSignIn entries, want 1", len(entries))
+	}
+	e := entries[0]
+	if e.Outcome != authlog.Succeeded {
+		t.Errorf("outcome %q, want a success: the provider did answer", e.Outcome)
+	}
+	if e.TenantID != nil {
+		t.Errorf("tenant %v, want none recorded", *e.TenantID)
+	}
+	if e.AccountID != nil {
+		t.Errorf("account %v, want none recorded", *e.AccountID)
+	}
+	if e.Detail["new_identity"] != true {
+		t.Errorf("detail = %v, want new_identity", e.Detail)
+	}
+}
+
+// recorder is an authlog.Log that keeps what it was handed.
+//
+// authlog.Memory cannot stand in here: its reader takes a tenant and an entry
+// with no tenant is invisible to it by design, which is exactly the entry these
+// tests are about.
+type recorder struct {
+	mu      sync.Mutex
+	entries []authlog.Entry
+}
+
+func (r *recorder) Write(_ context.Context, e authlog.Entry) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.entries = append(r.entries, e)
+}
+
+func (r *recorder) of(event string) []authlog.Entry {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	var out []authlog.Entry
+	for _, e := range r.entries {
+		if e.Event == event {
+			out = append(out, e)
+		}
+	}
+	return out
 }

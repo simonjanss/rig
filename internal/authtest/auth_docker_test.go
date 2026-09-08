@@ -2030,3 +2030,190 @@ func (h *harness) rebuild(t *testing.T) {
 	t.Helper()
 	h.mount(h.build(h.tenants))
 }
+
+// Where somebody was last, answered by the real query.
+//
+// This is the one thing the in-memory store cannot check: it holds no token
+// rows, so it stands the answer in and a test against it proves only that the
+// service asked. What can be wrong here is the SQL — the root-token predicate,
+// the ordering, the two joins that keep a landing usable — and the index the
+// last_tenant migration adds, without which the query is correct and grows
+// slower with every session anybody has ever had.
+func TestWhereSomebodyWasLastOverRealSQL(t *testing.T) {
+	h := setup(t)
+	ctx := context.Background()
+
+	// A second tenant, joined after the first. So "oldest" and "last" disagree
+	// about it, which is what makes the assertion mean something.
+	second, secondAccount := uuid.New(), uuid.New()
+	if _, err := h.pool.Exec(ctx,
+		`INSERT INTO rig_tenant (id, name, slug) VALUES ($1, $2, $3)`,
+		second, "Second", second.String()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.pool.Exec(ctx, `
+		INSERT INTO rig_account (id, tenant_id, identity_id, email_address, display_name)
+		VALUES ($1, $2, $3, $4, $5)`,
+		secondAccount, second, h.identity, h.email, "Sam"); err != nil {
+		t.Fatal(err)
+	}
+
+	// No session history yet, so the fallback: the tenant they joined first.
+	res, err := h.accounts.SignInIdentity(ctx, account.SignInIdentityInput{
+		IdentityID: h.identity, IPAddress: "203.0.113.10", Method: oauth.ProviderGoogle,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.TenantID != h.tenant {
+		t.Fatalf("a first sign-in landed in %s, want the oldest tenant %s", res.TenantID, h.tenant)
+	}
+	if res.Session == nil {
+		t.Fatal("there was somewhere to be")
+	}
+
+	// That sign-in wrote a session root, so it is now the history. A second one
+	// still lands in the same place — which is the boring half, and the half
+	// that would break if the query read the wrong end of the ordering.
+	if res, err = h.accounts.SignInIdentity(ctx, account.SignInIdentityInput{
+		IdentityID: h.identity, IPAddress: "203.0.113.10",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if res.TenantID != h.tenant {
+		t.Errorf("landed in %s, want %s", res.TenantID, h.tenant)
+	}
+
+	// Now a session in the second tenant — the way a switch or a named sign-in
+	// leaves one — and the next sign-in that names nothing follows it there.
+	if _, err := h.sessions.Issue(ctx, session.IssueInput{
+		TenantID: second, AccountID: secondAccount, IPAddress: "203.0.113.10",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if res, err = h.accounts.SignInIdentity(ctx, account.SignInIdentityInput{
+		IdentityID: h.identity, IPAddress: "203.0.113.10",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if res.TenantID != second {
+		t.Errorf("landed in %s, want the tenant they were last in, %s", res.TenantID, second)
+	}
+
+	// And a tenant that has been deactivated is not somewhere to land, even
+	// though it is where they were. The in-memory store models no tenant state,
+	// so this half only exists here.
+	if _, err := h.pool.Exec(ctx,
+		`UPDATE rig_tenant SET is_active = false WHERE id = $1`, second); err != nil {
+		t.Fatal(err)
+	}
+	if res, err = h.accounts.SignInIdentity(ctx, account.SignInIdentityInput{
+		IdentityID: h.identity, IPAddress: "203.0.113.10",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if res.TenantID != h.tenant {
+		t.Errorf("landed in %s, want the fallback %s: a tenant that is gone is not a landing",
+			res.TenantID, h.tenant)
+	}
+}
+
+// The index the query is shaped for.
+//
+// A plan is not a contract, so this asserts the weakest true thing: the planner
+// can use the index. That is what fails if the last_tenant migration is dropped
+// from a project's vendored set, which is the failure that would otherwise be
+// invisible — the query stays correct and quietly starts sorting the whole
+// token table.
+func TestTheLastTenantIndexIsUsable(t *testing.T) {
+	h := setup(t)
+	ctx := context.Background()
+
+	var exists bool
+	if err := h.pool.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM pg_indexes
+			 WHERE tablename = 'rig_account_token'
+			   AND indexname = 'rig_account_token_account_root_created_idx')`).Scan(&exists); err != nil {
+		t.Fatal(err)
+	}
+	if !exists {
+		t.Fatal("the last_tenant migration did not arrive")
+	}
+
+	// Planning with sequential scans forbidden. On an empty table the planner
+	// would take one every time otherwise, so this asks whether the index *can*
+	// answer the predicate rather than whether it is today's cheapest way.
+	if _, err := h.pool.Exec(ctx, `SET LOCAL enable_seqscan = off`); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := h.pool.Query(ctx, `
+		EXPLAIN SELECT t.account_id FROM rig_account_token t
+		 WHERE t.account_id = $1 AND t.root_token_id = t.id
+		 ORDER BY t.created_at DESC LIMIT 1`, h.account)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+
+	var plan strings.Builder
+	for rows.Next() {
+		var line string
+		if err := rows.Scan(&line); err != nil {
+			t.Fatal(err)
+		}
+		plan.WriteString(line + "\n")
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(plan.String(), "rig_account_token_account_root_created_idx") {
+		t.Errorf("the plan does not reach the index:\n%s", plan.String())
+	}
+}
+
+// A provider link outlives the person it hangs off.
+//
+// rig_identity_oauth carries no deleted_at and no is_active, and oauth's
+// callback never reads rig_identity at all — so before the shared last step
+// existed, a soft-deleted identity with a Google account still had a way in.
+// The refusal is in SignInIdentity, and it is invisible against a store that
+// cannot model a soft delete.
+func TestASoftDeletedIdentityCannotSignInThroughAProvider(t *testing.T) {
+	h := setup(t)
+	ctx := context.Background()
+	store := h.stores.OAuth()
+
+	profile := oauth.Profile{
+		Subject: "google-" + uuid.NewString(), EmailAddress: h.email,
+		EmailVerified: true, DisplayName: "Sam",
+	}
+	if _, err := store.LinkIdentity(ctx, oauth.LinkInput{
+		IdentityID: h.identity, Provider: oauth.ProviderGoogle, Profile: profile,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := h.pool.Exec(ctx,
+		`UPDATE rig_identity SET deleted_at = now() WHERE id = $1`, h.identity); err != nil {
+		t.Fatal(err)
+	}
+
+	// The link still resolves, which is the whole problem: this is what the
+	// callback would have handed on.
+	link, err := store.FindLink(ctx, oauth.ProviderGoogle, profile.Subject)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if link == nil || link.IdentityID != h.identity {
+		t.Fatal("the link should have survived the soft delete")
+	}
+
+	_, err = h.accounts.SignInIdentity(ctx, account.SignInIdentityInput{
+		IdentityID: link.IdentityID, IPAddress: "203.0.113.10",
+		Method: oauth.ProviderGoogle,
+	})
+	if rigerr.CodeOf(err) != rigerr.CodeForbidden {
+		t.Fatalf("err = %v, want a refusal", err)
+	}
+}

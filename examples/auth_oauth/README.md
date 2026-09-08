@@ -50,21 +50,23 @@ properly. Both are built and run on every `make check`.
 invitations, API keys, permissions, the log. It does not cover this one, because a
 provider sign-in is as much about deployment shape as about authentication.
 
-A sign-in has to know **which tenant** it is for before the redirect, because that
-is what the callback joins somebody to. And the callback URL is registered with the
-provider and fixed, so it carries nothing an application could read on the way
-back:
+A sign-in that *joins* somebody to a tenant has to know which tenant that is
+before the redirect. And the callback URL is registered with the provider and
+fixed, so it carries nothing an application could read on the way back:
 
 - a header does not survive the round trip,
 - a query parameter does not survive it,
 - a **host** does.
 
 So rig resolves the tenant once, at the start, and seals it into the signed state
-cookie. A subdomain per tenant is what makes that natural — and it is the only
-shape where "sign in with Google" needs no list of tenants on the page. Which is
-the other half: `examples/auth` could only offer a provider button per tenant by
-enumerating every tenant in the database to a stranger, which no real deployment
-would do.
+cookie. A subdomain per tenant is what makes that natural, and it is what this
+example is: three hosts, three tenants, and nothing on the page that names one.
+
+The other shape — one host, and the tenant settled after the callback from the
+person's own memberships — needs no host and no list of tenants on the page
+either, and `examples/auth` is where it belongs. This example stays about the
+half that a deployment shape decides, because that is the half nothing else
+demonstrates.
 
 ## What to try
 

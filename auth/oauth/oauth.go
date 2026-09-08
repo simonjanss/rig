@@ -155,7 +155,21 @@ type Config struct {
 	// no storage, and cannot be forged.
 	SigningKey []byte
 
-	// Tenant resolves which tenant is signing in.
+	// Tenant resolves which tenant is signing in, at the start of the flow, and
+	// may be left nil.
+	//
+	// Set it when the application already knows before the redirect — a host per
+	// tenant is the case that does. Leave it nil, or answer uuid.Nil, and the
+	// question is settled after the callback instead: the identity is resolved
+	// globally, and where that person goes is answered from their own
+	// memberships the way a password login answers it. That is the only answer
+	// available to a deployment with more than one tenant and no host to read
+	// it from — nobody can say which tenants an address belongs to before
+	// somebody has proved they own the address.
+	//
+	// A tenant it does name is carried through the round trip rather than
+	// resolved again; see the state cookie's own documentation for why it has
+	// to be.
 	Tenant func(*http.Request) (uuid.UUID, error)
 
 	// OnSignIn finishes the request once an identity is resolved.
@@ -177,6 +191,12 @@ type Config struct {
 	// Off by default. An open sign-in endpoint on a business application is a
 	// way for anybody with a Google account to appear inside a customer's
 	// tenant, which is rarely what anyone wants and never what they expect.
+	//
+	// It gates two doors: creating the person, and joining them to a tenant. The
+	// second only exists when a tenant was named — a sign-in that named none has
+	// no tenant to join and settles that question later — so for a deployment
+	// that leaves [Config.Tenant] nil, this is the switch on "may a stranger
+	// become somebody here at all".
 	AllowProvisioning bool
 
 	Log authlog.Log
@@ -200,6 +220,13 @@ type SignIn struct {
 	Link *Link
 	// TenantID and AccountID are the session to issue. The account is the
 	// person's row in this tenant, which is what claims are made of.
+	//
+	// **Both are uuid.Nil when the sign-in named no tenant.** That is not a
+	// failure: it means the provider has said who this is and where they go has
+	// not been decided yet, which is a question their own memberships answer.
+	// [Config.Tenant] is what decides whether a sign-in can arrive this way.
+	// The default OnSignIn handles it; a hand-written one that issues a session
+	// straight from these two fields has to check first.
 	TenantID  uuid.UUID
 	AccountID uuid.UUID
 
@@ -209,7 +236,19 @@ type SignIn struct {
 	// send a welcome message or run onboarding. It is true for somebody joining
 	// their second tenant as well as their first: the account is new either
 	// way, which is what onboarding is about.
+	//
+	// It is therefore always false when no tenant was named, because there was
+	// no tenant to make an account in. [SignIn.NewIdentity] is the half of the
+	// question that still has an answer there.
 	New bool
+	// NewIdentity reports that this sign-in created the *person* — nobody had
+	// this provider account or this address before.
+	//
+	// The other half of New, and the half that survives a sign-in with no
+	// tenant: somebody signing in for the first time anywhere is the case
+	// onboarding is actually about, and it is answerable before there is
+	// anywhere for them to be.
+	NewIdentity bool
 	// ReturnTo is where the caller asked to be sent afterwards, already
 	// checked against the allow-list. Empty when none was asked for.
 	ReturnTo string
@@ -237,8 +276,6 @@ func New(cfg Config) (*Handler, error) {
 		return nil, errors.New("oauth: a BaseURL is required; it must match what the provider has registered")
 	case len(cfg.SigningKey) < 32:
 		return nil, errors.New("oauth: a SigningKey of at least 32 bytes is required")
-	case cfg.Tenant == nil:
-		return nil, errors.New("oauth: a Tenant resolver is required")
 	case cfg.OnSignIn == nil:
 		return nil, errors.New("oauth: an OnSignIn is required; rig does not decide how a sign-in ends")
 	}
@@ -315,20 +352,33 @@ func (h *Handler) redirectURI(r *http.Request, p Provider) string {
 	return strings.TrimRight(base, "/") + h.base + "/" + strings.ToLower(p.Name) + "/callback"
 }
 
-// resolve turns a profile into a session to issue.
+// resolve turns a profile into a sign-in.
 //
-// Two questions in order, and the order is the point. Who is this — answered
-// globally, from the provider subject or the address. Then: do they belong to
-// this tenant — answered from rig_account, and answered no unless
+// Two questions, and the order is the point. Who is this — answered globally,
+// from the provider subject or the address, and always answered here. Then: do
+// they belong to this tenant — answered from rig_account, and answered no unless
 // provisioning is on and the tenant's domains say otherwise.
+//
+// The second question is only asked when a tenant was named. Otherwise it is not
+// this handler's to answer and there is nowhere for the answer to come from: the
+// only thing that could name a tenant at the callback is the sealed cookie, and
+// a deployment with no host to read one from has nothing to seal. So the sign-in
+// is handed on with the first question answered and the second left open, which
+// is the state [account.Service.SignInIdentity] takes as its input.
 func (h *Handler) resolve(ctx context.Context, tenantID uuid.UUID, p Provider, profile Profile) (SignIn, error) {
 	if profile.Subject == "" {
 		return SignIn{}, rigerr.Internal(nil, "%s returned no subject", p.Name)
 	}
 
-	link, err := h.identity(ctx, p, profile)
+	link, created, err := h.identity(ctx, p, profile)
 	if err != nil {
 		return SignIn{}, err
+	}
+
+	if tenantID == uuid.Nil {
+		return SignIn{
+			Link: link, Profile: profile, Provider: p.Name, NewIdentity: created,
+		}, nil
 	}
 
 	accountID, err := h.cfg.Store.FindAccount(ctx, tenantID, link.IdentityID)
@@ -338,7 +388,7 @@ func (h *Handler) resolve(ctx context.Context, tenantID uuid.UUID, p Provider, p
 	if accountID != uuid.Nil {
 		return SignIn{
 			Link: link, TenantID: tenantID, AccountID: accountID,
-			Profile: profile, Provider: p.Name,
+			Profile: profile, Provider: p.Name, NewIdentity: created,
 		}, nil
 	}
 
@@ -357,50 +407,60 @@ func (h *Handler) resolve(ctx context.Context, tenantID uuid.UUID, p Provider, p
 	}
 	return SignIn{
 		Link: link, TenantID: tenantID, AccountID: accountID,
-		Profile: profile, Provider: p.Name, New: true,
+		Profile: profile, Provider: p.Name, New: true, NewIdentity: created,
 	}, nil
 }
 
 // identity answers who is signing in, without reference to any tenant.
-func (h *Handler) identity(ctx context.Context, p Provider, profile Profile) (*Link, error) {
+//
+// The second return says the person did not exist until now, which is what
+// [SignIn.NewIdentity] reports.
+func (h *Handler) identity(ctx context.Context, p Provider, profile Profile) (*Link, bool, error) {
 	// The subject, always. An address is a display detail here.
 	link, err := h.cfg.Store.FindLink(ctx, p.Name, profile.Subject)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	if link != nil {
-		return link, nil
+		return link, false, nil
 	}
 
 	email := strings.ToLower(strings.TrimSpace(profile.EmailAddress))
 	if email == "" {
-		return nil, rigerr.BadRequest(
+		return nil, false, rigerr.BadRequest(
 			"%s did not share an email address, so there is no account to sign in to", p.Name)
 	}
 
 	identityID, err := h.cfg.Store.FindIdentityByEmail(ctx, email)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	if identityID != uuid.Nil {
 		// The check the whole package turns on. Anybody can register any
 		// address at some provider; only a verified one is evidence.
 		if !profile.EmailVerified {
-			return nil, rigerr.Forbidden(
+			return nil, false, rigerr.Forbidden(
 				"%s has not verified this address, so it cannot be linked to an existing account", p.Name)
 		}
-		return h.cfg.Store.LinkIdentity(ctx, LinkInput{
+		link, err := h.cfg.Store.LinkIdentity(ctx, LinkInput{
 			IdentityID: identityID, Provider: p.Name, Profile: profile,
 		})
+		return link, false, err
 	}
 
-	// Nobody has this address anywhere. Creating the person is gated by the same
-	// switch that gates joining a tenant, because on its own it would be a way to
-	// fill rig_identity from a sign-in page.
+	// Nobody has this address anywhere. Creating the person is gated by
+	// AllowProvisioning wherever it happens, because on its own it would be a
+	// way to fill rig_identity from a sign-in page — and it is the only half of
+	// that switch a sign-in with no named tenant reaches, since there is no
+	// tenant for the other half to be about.
 	if !h.cfg.AllowProvisioning {
-		return nil, rigerr.Forbidden("there is no account for this address")
+		return nil, false, rigerr.Forbidden("there is no account for this address")
 	}
-	return h.cfg.Store.ProvisionIdentity(ctx, ProvisionInput{Provider: p.Name, Profile: profile})
+	link, err = h.cfg.Store.ProvisionIdentity(ctx, ProvisionInput{Provider: p.Name, Profile: profile})
+	if err != nil {
+		return nil, false, err
+	}
+	return link, true, nil
 }
 
 func (h *Handler) fail(w http.ResponseWriter, r *http.Request, err error) {

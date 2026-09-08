@@ -61,10 +61,13 @@ func TestSetupProject(t *testing.T) {
 			// The queue for the links tenancy mints, which alters the table that
 			// holds them — so after it, and before anything that does not care.
 			"00005_rig_verification_delivery.sql",
-			"00006_rig_files.sql",
+			// An index over the table sessions created, so after it — the set is
+			// append-only, which makes arrival order the dependency order.
+			"00006_rig_last_tenant.sql",
+			"00007_rig_files.sql",
 			// Last, and after tenancy for a reason of its own: an inbox line
 			// names an account.
-			"00007_rig_notifications.sql",
+			"00008_rig_notifications.sql",
 		} {
 			if !strings.Contains(stderr, want) {
 				t.Errorf("expected %s to be written:\n%s", want, stderr)
@@ -260,10 +263,18 @@ func TestSetupProjectSkip(t *testing.T) {
 		t.Errorf("skipping keys but keeping sessions should be refused\n%s", stderr)
 	}
 
-	// A real skip: no OAuth, no roles, no keys — and so no sessions either. What
-	// is left still applies.
+	// The same rule one link further out: last_tenant is an index on the table
+	// sessions creates, so dropping sessions and keeping it is a CREATE INDEX on
+	// nothing.
 	if _, stderr, code := run(t, "setup-project", "-C", root,
-		"--skip", "oauth,apikeys,sessions"); code != 0 {
+		"--skip", "oauth,apikeys,sessions"); code == 0 {
+		t.Errorf("skipping sessions but keeping its index should be refused\n%s", stderr)
+	}
+
+	// A real skip: no OAuth, no roles, no keys — and so no sessions either, nor
+	// the index over them. What is left still applies.
+	if _, stderr, code := run(t, "setup-project", "-C", root,
+		"--skip", "oauth,apikeys,sessions,last_tenant"); code != 0 {
 		t.Fatalf("setup-project failed:\n%s", stderr)
 	}
 	for _, gone := range []string{"rig_oauth", "rig_apikeys", "rig_sessions"} {

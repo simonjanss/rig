@@ -172,6 +172,34 @@ func (s *AccountStore) AccountsForIdentity(ctx context.Context, identityID uuid.
 	return out, rows.Err()
 }
 
+// LastAccountForIdentity implements [account.Store].
+//
+// Session roots only — `root_token_id = id` — because a root is one per sign-in
+// where the rest of the family is one per rotation, and "where was I last" is a
+// question about sign-ins. That predicate is also what the partial index in the
+// last_tenant migration is on, so this is an index probe per account rather than
+// a sort over every token an account has ever held. Consumed tokens are kept
+// rather than deleted, so that difference only grows.
+//
+// The two joins filter what the caller would have to filter anyway: an account
+// or a tenant that has gone away is not somewhere to land, and answering with
+// one would land somebody where [AccountStore.TenantsForIdentity] does not list.
+func (s *AccountStore) LastAccountForIdentity(
+	ctx context.Context, identityID uuid.UUID,
+) (*account.Account, error) {
+	return s.oneAccount(ctx, `
+		SELECT `+prefixed("a.", accountColumns)+`
+		  FROM rig_account_token t
+		  JOIN rig_account a ON a.id = t.account_id
+		  JOIN rig_tenant  n ON n.id = a.tenant_id
+		 WHERE a.identity_id = $1
+		   AND t.root_token_id = t.id
+		   AND a.deleted_at IS NULL AND a.is_active
+		   AND n.deleted_at IS NULL AND n.is_active
+		 ORDER BY t.created_at DESC
+		 LIMIT 1`, identityID)
+}
+
 // TenantsForIdentity implements [account.Store].
 //
 // The one join in this package. It has no tenant predicate for the same reason

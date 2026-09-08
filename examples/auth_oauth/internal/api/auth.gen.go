@@ -174,6 +174,12 @@ type OAuthHooks struct {
 	// depends on what the client is — a single-page application, a
 	// server-rendered one, a mobile app catching a deep link — which is why rig
 	// will not choose.
+	//
+	// Whatever it does, it has to handle in.TenantID being the nil UUID: that is a
+	// sign-in whose tenant was not known before the redirect, and issuing a
+	// session from that field would issue one into a tenant that does not exist.
+	// Nil handles it the way a login does — an identity token and the tenant
+	// list, for the picker to take over.
 	OnSignIn func(w http.ResponseWriter, r *http.Request, in oauth.SignIn) error
 
 	// BaseURL is this application's own origin, and takes precedence over

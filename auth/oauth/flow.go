@@ -36,15 +36,23 @@ type pending struct {
 	Provider string `json:"p"`
 	ReturnTo string `json:"r,omitempty"`
 	// Tenant is which tenant the sign-in is for, decided at the start and carried
-	// rather than resolved again.
+	// rather than resolved again — or the nil UUID when nothing named one, which
+	// leaves the question to be settled after the callback.
 	//
 	// The callback URL is registered with the provider and fixed, so it cannot
 	// carry anything: whatever the application's resolver reads from a request —
 	// a header, a query parameter — is not there when the provider sends the
 	// browser back. Only a host survives, which is why a subdomain deployment
-	// never noticed. Carrying it in the sealed cookie means every deployment
-	// works, and it also stops a callback being replayed against a different
-	// tenant than the one it started for.
+	// never noticed and why a deployment with nothing but a header has no answer
+	// to give at the start at all. Carrying it in the sealed cookie is what makes
+	// the first kind work, and it also stops a callback being replayed against a
+	// different tenant than the one it started for.
+	//
+	// Written unconditionally, nil UUID and all, and with no omitempty: the
+	// field is the wire format of a cookie that outlives a deploy by up to
+	// StateTTL, and a cookie sealed by an older binary has to keep opening on a
+	// newer one. [Handler.callback] reads an empty string as nil for the same
+	// reason, from the other side.
 	Tenant  string `json:"t"`
 	Expires int64  `json:"e"`
 }
@@ -56,10 +64,16 @@ func (h *Handler) start(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, err)
 		return
 	}
-	tenantID, err := h.cfg.Tenant(r)
-	if err != nil {
-		h.fail(w, r, err)
-		return
+	// Nil means the application does not know yet, which is an ordinary answer
+	// rather than a missing one — see [Config.Tenant].
+	var tenantID uuid.UUID
+	if h.cfg.Tenant != nil {
+		id, err := h.cfg.Tenant(r)
+		if err != nil {
+			h.fail(w, r, err)
+			return
+		}
+		tenantID = id
 	}
 
 	returnTo, err := h.checkReturnTo(r.URL.Query().Get("returnTo"))
@@ -128,11 +142,16 @@ func (h *Handler) callback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// From the cookie, not from the request. The cookie is signed, so this is the
-	// tenant the sign-in actually started for and nobody can have changed it.
-	tenantID, err := uuid.Parse(state.Tenant)
-	if err != nil {
-		h.fail(w, r, rigerr.BadRequest("this sign-in did not start here"))
-		return
+	// tenant the sign-in actually started for and nobody can have changed it —
+	// and nil is a tenant this sign-in never had, which resolve settles later.
+	var tenantID uuid.UUID
+	if state.Tenant != "" {
+		id, err := uuid.Parse(state.Tenant)
+		if err != nil {
+			h.fail(w, r, rigerr.BadRequest("this sign-in did not start here"))
+			return
+		}
+		tenantID = id
 	}
 	// The double submit. A state that came back without a matching cookie is
 	// somebody else's sign-in being finished in this browser.
@@ -166,23 +185,40 @@ func (h *Handler) callback(w http.ResponseWriter, r *http.Request) {
 
 	in, err := h.resolve(r.Context(), tenantID, p, profile)
 	if err != nil {
-		h.write(r.Context(), authlog.Entry{
+		failed := authlog.Entry{
 			Event: authlog.EventOAuthSignIn, Outcome: authlog.Failed,
-			TenantID: &tenantID, EmailAddress: strings.ToLower(profile.EmailAddress),
-			IPAddress: remoteAddr(r), UserAgent: r.UserAgent(),
+			EmailAddress: strings.ToLower(profile.EmailAddress),
+			IPAddress:    remoteAddr(r), UserAgent: r.UserAgent(),
 			Detail: map[string]any{"provider": p.Name, "reason": err.Error()},
-		})
+		}
+		// Only when there was one. A pointer to the nil UUID is not "no tenant",
+		// it is a tenant that does not exist, and it would go in the column.
+		if tenantID != uuid.Nil {
+			failed.TenantID = &tenantID
+		}
+		h.write(r.Context(), failed)
 		h.fail(w, r, err)
 		return
 	}
 
-	h.write(r.Context(), authlog.Entry{
+	// Written before OnSignIn rather than after, so a sign-in whose last step
+	// fails still records that a provider authenticated somebody. The cost is
+	// that a refusal inside OnSignIn — a tenant they turn out not to belong to —
+	// reads as OAuthSignIn/Succeeded followed by LoginFailed/Failed. Those two
+	// are not in conflict: the first says Google answered, the second says a
+	// session was not issued.
+	done := authlog.Entry{
 		Event: authlog.EventOAuthSignIn, Outcome: authlog.Succeeded,
-		TenantID: &in.TenantID, AccountID: &in.AccountID,
 		EmailAddress: strings.ToLower(profile.EmailAddress),
 		IPAddress:    remoteAddr(r), UserAgent: r.UserAgent(),
-		Detail: map[string]any{"provider": p.Name, "provisioned": in.New},
-	})
+		Detail: map[string]any{
+			"provider": p.Name, "provisioned": in.New, "new_identity": in.NewIdentity,
+		},
+	}
+	if in.TenantID != uuid.Nil {
+		done.TenantID, done.AccountID = &in.TenantID, &in.AccountID
+	}
+	h.write(r.Context(), done)
 
 	in.ReturnTo = state.ReturnTo
 	if err := h.cfg.OnSignIn(w, r, in); err != nil {
