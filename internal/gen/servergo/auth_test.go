@@ -195,6 +195,42 @@ func TestDefaultsUseRigAuthsOwnResolver(t *testing.T) {
 	}
 }
 
+// TestTheOrdinaryOAuthDeploymentCompiles is the shape #130 arrived from: a
+// provider sign-in, no reverse proxy to trust, and insecure off because this is
+// not somebody's laptop.
+//
+// It is the one auth configuration in which nothing else in auth.gen.go emits a
+// fmt call, so it is where an import collected outside the branch that uses it
+// stops the package compiling. Every other oauth document in the repository
+// sets trusted_proxies or insecure and consumes fmt by accident — including
+// examples/auth_oauth, which is why make examples did not catch it either.
+func TestTheOrdinaryOAuthDeploymentCompiles(t *testing.T) {
+	t.Parallel()
+
+	doc := gentest.LoadDocument(t, filepath.Join("testdata", authFixture))
+	doc.API.Auth.TrustedProxies = nil
+
+	api := gentest.Run(t, servicego.New(), doc, gen.Options{Raw: map[string]any{
+		"package": "api", "model_import": "rigtest/model", "store_import": "rigtest/store",
+	}})
+	api = append(api, gentest.Run(t, servergo.New(), doc, authOpts())...)
+
+	gentest.MustCompileAll(t,
+		gentest.Package{
+			Dir: "model",
+			Artifacts: gentest.Run(t, modelgo.New(), doc,
+				gen.Options{Raw: map[string]any{"package": "model"}}),
+		},
+		gentest.Package{
+			Dir: "store",
+			Artifacts: gentest.Run(t, persistgo.New(), doc, gen.Options{Raw: map[string]any{
+				"package": "store", "model_import": "rigtest/model",
+			}}),
+		},
+		gentest.Package{Dir: "api", Artifacts: api},
+	)
+}
+
 // TestTheWiredAPICompiles builds the whole stack for a project that has
 // authentication, because the wiring and the handlers are now one package and
 // either can break the other.

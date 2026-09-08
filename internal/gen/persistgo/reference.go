@@ -167,7 +167,6 @@ func (e *emitter) visibilityFunc(b *gobuf.Buf, res *ir.Resource) {
 		dbxPkg  = b.Import(runtimeModule + "/dbx")
 		tenPkg  = b.Import(runtimeModule + "/tenancy")
 		errPkg  = b.Import(runtimeModule + "/rigerr")
-		fmtPkg  = b.Import("fmt")
 	)
 	s := res.Storage
 
@@ -192,13 +191,13 @@ func (e *emitter) visibilityFunc(b *gobuf.Buf, res *ir.Resource) {
 
 	if s.Tenant != nil {
 		b.L("args = append(args, claims.TenantID)")
-		b.L("where += %s.Sprintf(\" AND %s = $%%d\", len(args))", fmtPkg, s.Tenant.Name)
+		b.L("where += %s.Sprintf(\" AND %s = $%%d\", len(args))", b.Import("fmt"), s.Tenant.Name)
 	}
 	if s.IsOwnerScoped() {
 		b.Comment("The reason this function exists: a row inside the tenant that " +
 			"this caller was never allowed to know about.")
 		b.L("args = append(args, claims.AccountID)")
-		b.L("where += %s.Sprintf(\" AND %s = $%%d\", len(args))", fmtPkg, s.Owner.Name)
+		b.L("where += %s.Sprintf(\" AND %s = $%%d\", len(args))", b.Import("fmt"), s.Owner.Name)
 	}
 	if s.IsSoftDeletable() {
 		b.Comment("A row in the trash is not something to point new rows at: the " +
@@ -210,7 +209,7 @@ func (e *emitter) visibilityFunc(b *gobuf.Buf, res *ir.Resource) {
 			"names a version rather than the thing, which is never what a relation " +
 			"means.")
 		b.L("args = append(args, %s)", e.versionOriginal(b, res))
-		b.L("where += %s.Sprintf(\" AND %s = $%%d\", len(args))", fmtPkg, s.Snapshot.VersionType.Name)
+		b.L("where += %s.Sprintf(\" AND %s = $%%d\", len(args))", b.Import("fmt"), s.Snapshot.VersionType.Name)
 	}
 	b.NL()
 

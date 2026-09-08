@@ -79,6 +79,33 @@ func TestRelationFilterCompiles(t *testing.T) {
 	)
 }
 
+// TestUnscopedRelationTargetsCompile is the relation document without the
+// tenancy: one tenant, no owner column, no history, and a deleted_at on the two
+// tables the foreign keys point at.
+//
+// A table is worth a visibility check when it narrows reads at all, and soft
+// deletion is one of the four things that count — but it is the only one of the
+// four whose predicate is a constant string rather than a fmt.Sprintf. So this
+// is the shape where visibleX, the sole reason store.gen.go ever imports fmt,
+// emits none: an import collected outside the branch that uses it, and a
+// package that does not build.
+//
+// Every other fixture and every example has a tenant column on the tables their
+// foreign keys point at, which is the only reason it survived to #131.
+func TestUnscopedRelationTargetsCompile(t *testing.T) {
+	t.Parallel()
+
+	doc := gentest.LoadDocument(t, filepath.Join("testdata", "relationsunscoped.ir.json"))
+	gentest.MustCompileAll(t,
+		gentest.Package{
+			Dir: "model",
+			Artifacts: gentest.Run(t, modelgo.New(), doc,
+				gen.Options{Raw: map[string]any{"package": "model"}}),
+		},
+		gentest.Package{Dir: pkg, Artifacts: gentest.Run(t, persistgo.New(), doc, opts())},
+	)
+}
+
 // TestRelationFilterCompilesWithoutATenant covers the tables a project has
 // that are not tenant-scoped at all — the shared lookups: permissions, plans,
 // countries.
