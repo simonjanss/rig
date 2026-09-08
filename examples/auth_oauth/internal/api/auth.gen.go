@@ -57,14 +57,26 @@ const SigningKeyEnv = "OAUTH_SIGNING_KEY"
 // request.
 const OriginScheme = "http"
 
+// BaseURLEnv is where the origin comes from, for the deployment that has to
+// say which one this is. [BaseURL] reads it.
+//
+// A constant beside SigningKeyEnv rather than a string inside that function,
+// so what a deployment has to set is readable off the package — and so the
+// refusal for having not set it can name it.
+const BaseURLEnv = "BASE_URL"
+
 // BaseURL is this application's own origin, which a provider has registered as
 // the prefix of its callback URL.
 //
-// It is a function rather than a constant because the environment gets the
-// last word: the same binary is deployed at more than one origin, and the
-// configuration cannot know which.
-func BaseURL() string {
-	return strings.TrimRight(cmp.Or(os.Getenv("BASE_URL"), "http://acme.localhost:8083"), "/")
+// It is a function rather than a constant because the environment has a say:
+// the same binary is deployed at more than one origin, and the configuration
+// cannot know which.
+//
+// What the configuration and the environment say, which is not the whole
+// answer: [Hooks.OAuth] carries a BaseURL of its own, and [Config] prefers it
+// without asking here at all. This is what a project that supplied none gets.
+func BaseURL() (string, error) {
+	return strings.TrimRight(cmp.Or(os.Getenv(BaseURLEnv), "http://acme.localhost:8083"), "/"), nil
 }
 
 // Hooks are what a configuration file cannot hold: the functions this
@@ -164,6 +176,38 @@ type OAuthHooks struct {
 	// will not choose.
 	OnSignIn func(w http.ResponseWriter, r *http.Request, in oauth.SignIn) error
 
+	// BaseURL is this application's own origin, and takes precedence over
+	// everything rig.yaml said about one.
+	//
+	// Empty asks [BaseURL], which is what auth.oauth and the environment resolved,
+	// and that is the ordinary case. This is for the origin that arrives some
+	// other way: a test serving on an ephemeral port, or a deployment handed its
+	// configuration rather than given it in its own environment. A whole origin
+	// with a scheme, matching what the provider has registered exactly — a
+	// trailing slash is trimmed and nothing else is.
+	//
+	// auth.oauth.origin_from_host is set, so a callback URL is built from each
+	// request's Host and its scheme is OriginScheme — an origin named here moves
+	// neither. What it is still for is the origin rig/auth requires to exist at
+	// all, and the one a request that names no host falls back to.
+	BaseURL string
+
+	// SigningKey signs the cookie that carries the state and the PKCE verifier
+	// across a sign-in's round trip. At least 32 bytes, and the same bytes in
+	// every replica.
+	//
+	// Empty reads SigningKeyEnv, which is what a deployment ordinarily does. This
+	// is for the key that lives somewhere os.Getenv cannot reach: a secret
+	// manager, a mounted file, or a test that would rather not write to the
+	// process it is running in.
+	SigningKey []byte
+
+	// Credentials are the client id and secret for each provider this
+	// configuration offers, for an application whose secrets do not arrive in its
+	// environment. A zero field reads that provider's pair from there, which is
+	// the ordinary case and needs nothing written here.
+	Credentials OAuthCredentials
+
 	// Extra are providers this application builds itself: an in-house identity
 	// server, or a stand-in served by the application during development. They are
 	// appended to the configured ones.
@@ -176,6 +220,60 @@ type OAuthHooks struct {
 	// subdomain has one origin per tenant, and a list in a file cannot name a
 	// tenant that was created this morning.
 	ReturnTo []string
+}
+
+// OAuthCredentials are what each provider this application offers knows it by.
+//
+// A zero field reads that provider's pair from the environment, which is what
+// rig.yaml names it for and still the ordinary answer. What this is for is the
+// id and secret that arrive some other way — a secret manager, a mounted
+// file, a test fake — and for an application whose own configuration would
+// rather name what it needs than leave it to a README.
+//
+// The fields are Google, Microsoft and GitHub, and there are no others because
+// those are the providers auth.oauth lists.
+type OAuthCredentials struct {
+	// Google's pair. Empty reads GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET.
+	Google OAuthClient
+
+	// Microsoft's pair, and the directory it accepts sign-ins from. Empty reads
+	// MICROSOFT_CLIENT_ID and MICROSOFT_CLIENT_SECRET.
+	Microsoft OAuthMicrosoftClient
+
+	// GitHub's pair. Empty reads GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET.
+	GitHub OAuthClient
+}
+
+// OAuthClient is one provider's registration: the id it knows this application
+// by, and the secret that proves this application is the one asking.
+//
+// Each is read on its own, so an id can come from the environment and a secret
+// from here — which is the shape a project keeping only its secrets in a
+// manager already has, and the reason this is two fields rather than a pair
+// taken whole. What it accepts is the other order of that mistake: an id
+// supplied here beside a stale secret still in somebody's shell makes a pair
+// the provider rejects at its token endpoint, naming neither half.
+type OAuthClient struct {
+	ID     string
+	Secret string
+}
+
+// OAuthMicrosoftClient is Microsoft's registration, which carries one thing
+// more than anybody else's.
+//
+// A type of its own rather than a third field on OAuthClient: a directory
+// means nothing to Google or to GitHub, and a struct whose fields are the ones
+// this project can set is the whole reason this is generated rather than keyed
+// on a string.
+type OAuthMicrosoftClient struct {
+	ID     string
+	Secret string
+
+	// Tenant is Microsoft's own idea of a tenant, which has nothing to do with
+	// rig's: empty means common, which accepts any account, organizations excludes
+	// personal ones, and a directory id restricts sign-in to one organization.
+	// Empty reads MICROSOFT_TENANT.
+	Tenant string
 }
 
 // New assembles the authentication foundation over a pool.
@@ -254,13 +352,31 @@ func Config(pool *pgxpool.Pool, h Hooks) (auth.Config, error) {
 		return auth.Config{}, err
 	}
 	if len(configured) > 0 {
-		key, err := signingKey()
+		// The origin this application supplied, if it did. BaseURL is what rig.yaml
+		// and the environment resolved, and it is not asked at all when the field
+		// answers — so a deployment that named only auth.oauth.base_url_env and
+		// fills this in from Go never meets BaseURL's refusal.
+		//
+		// The two rules rig checked on auth.oauth.base_url when it read the file,
+		// applied to the one origin it could not see: a trailing slash is trimmed, and
+		// an origin with no scheme is refused rather than built into a callback URL
+		// that every provider rejects without saying why.
+		base := strings.TrimRight(h.OAuth.BaseURL, "/")
+		switch {
+		case base == "":
+			if base, err = BaseURL(); err != nil {
+				return auth.Config{}, err
+			}
+		case !strings.HasPrefix(base, "http://") && !strings.HasPrefix(base, "https://"):
+			return auth.Config{}, errors.New("api: Hooks.OAuth.BaseURL must be an absolute origin, for example https://app.example.com: a provider compares the callback URL built from it exactly")
+		}
+		key, err := signingKey(h.OAuth)
 		if err != nil {
 			return auth.Config{}, err
 		}
 		cfg.OAuth = auth.OAuth{
 			Providers: configured,
-			BaseURL:   BaseURL(),
+			BaseURL:   base,
 			// A callback comes back to the host it started at. Not a nicety: the state
 			// cookie carrying the PKCE verifier is set on that host, and a browser will
 			// not send it to a sibling subdomain — so with a tenant per host, every one
@@ -435,52 +551,68 @@ func AuthMailDispatcher(front *auth.Auth, logger *slog.Logger) serve.Task {
 // signingKey is the key that signs the cookie carrying the state and the PKCE
 // verifier across a sign-in's round trip.
 //
-// At least 32 bytes, from the environment, because it is a secret. It has to
-// be the same key in every replica: a callback may arrive at a different one
-// than the one that started the sign-in, and a key invented per process is a
-// sign-in that fails whenever a load balancer is doing its job.
-func signingKey() ([]byte, error) {
-	key := []byte(os.Getenv(SigningKeyEnv))
+// At least 32 bytes, because it is a secret, and it has to be the same key in
+// every replica: a callback may arrive at a different one than the one that
+// started the sign-in, and a key invented per process is a sign-in that fails
+// whenever a load balancer is doing its job.
+//
+// Hooks.OAuth.SigningKey first, then OAUTH_SIGNING_KEY, which is the ordinary
+// way a deployment hands one over.
+func signingKey(h OAuthHooks) ([]byte, error) {
+	// A key this application named and got wrong, reported as that rather than as
+	// an absence. It is not replaced by the variable, and where insecure is set it
+	// is not replaced by a development key either: substituting for a value
+	// somebody stated is how a sign-in works in one replica and not the next.
+	if n := len(h.SigningKey); n > 0 && n < 32 {
+		return nil, fmt.Errorf("api: Hooks.OAuth.SigningKey holds %d bytes and needs at least 32: it signs the OAuth state parameter, and every replica has to use the same one", n)
+	}
+	key := h.SigningKey
+	if len(key) == 0 {
+		key = []byte(os.Getenv(SigningKeyEnv))
+	}
 	switch {
 	case len(key) >= 32:
 		return key, nil
 	case len(key) == 0:
 		// auth.oauth.insecure is set, which says this is local development: one
 		// process serves everything and there is no replica to share a key with.
-		// A deployment reaches the error below instead.
+		// Reached only when nothing supplied one at all — a key this short is a
+		// mistake rather than an absence, and gets the error below.
 		key = make([]byte, 32)
 		if _, err := rand.Read(key); err != nil {
 			return nil, fmt.Errorf("api: generate a development signing key: %w", err)
 		}
 		return key, nil
 	}
-	return nil, errors.New("api: OAUTH_SIGNING_KEY must hold at least 32 bytes: it signs the OAuth state parameter, and every replica has to use the same one")
+	return nil, errors.New("api: a signing key of at least 32 bytes is required: set Hooks.OAuth.SigningKey or OAUTH_SIGNING_KEY — it signs the OAuth state parameter, and every replica has to use the same one")
 }
 
 // ConfiguredProviders are the providers this process has credentials for.
 //
 // A client secret is not configuration: it is a secret, so rig.yaml names the
-// environment variable and this reads it. A provider whose pair is absent is
-// skipped rather than mounted broken, which is what lets one binary offer
-// Google in a deployment and nothing at all on a laptop. A provider marked
-// required refuses to start instead.
+// environment variable and this reads it. [OAuthHooks.Credentials] is read
+// first, for an application that holds its secrets somewhere else, and a
+// provider named in neither place is skipped rather than mounted broken —
+// which is what lets one binary offer Google in a deployment and nothing at
+// all on a laptop. A provider marked required refuses to start instead,
+// whichever of the two it was waiting for.
 //
 // Exported so a sign-in page can draw a button per provider that actually
 // works, rather than one per provider somebody hoped for.
 func ConfiguredProviders(h OAuthHooks) ([]oauth.Provider, error) {
 	out := make([]oauth.Provider, 0, 4)
 
-	if id, secret := os.Getenv("GOOGLE_CLIENT_ID"), os.Getenv("GOOGLE_CLIENT_SECRET"); id != "" && secret != "" {
+	if id, secret := cmp.Or(h.Credentials.Google.ID, os.Getenv("GOOGLE_CLIENT_ID")), cmp.Or(h.Credentials.Google.Secret, os.Getenv("GOOGLE_CLIENT_SECRET")); id != "" && secret != "" {
 		out = append(out, oauth.Google(id, secret))
 	}
 
-	if id, secret := os.Getenv("MICROSOFT_CLIENT_ID"), os.Getenv("MICROSOFT_CLIENT_SECRET"); id != "" && secret != "" {
+	if id, secret := cmp.Or(h.Credentials.Microsoft.ID, os.Getenv("MICROSOFT_CLIENT_ID")), cmp.Or(h.Credentials.Microsoft.Secret, os.Getenv("MICROSOFT_CLIENT_SECRET")); id != "" && secret != "" {
 		// Microsoft's own idea of a tenant, which has nothing to do with
 		// rig's: empty means common, which accepts any account.
-		out = append(out, oauth.Microsoft(id, secret, os.Getenv("MICROSOFT_TENANT")))
+		out = append(out, oauth.Microsoft(id, secret, cmp.Or(h.Credentials.Microsoft.Tenant, os.Getenv("MICROSOFT_TENANT"))))
 	}
 
-	if id, secret := os.Getenv("GITHUB_CLIENT_ID"), os.Getenv("GITHUB_CLIENT_SECRET"); id != "" && secret != "" {
+	if id, secret := cmp.Or(h.Credentials.GitHub.ID, os.Getenv("GITHUB_CLIENT_ID")), cmp.Or(h.Credentials.GitHub.Secret, os.Getenv("GITHUB_CLIENT_SECRET")); id != "" && secret != "" {
 		out = append(out, oauth.GitHub(id, secret))
 	}
 

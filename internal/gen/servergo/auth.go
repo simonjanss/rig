@@ -129,6 +129,16 @@ func (e *authEmitter) constants(b *gobuf.Buf) {
 		b.L("const OriginScheme = %s", gobuf.Quote(e.originScheme()))
 		b.NL()
 
+		if o.BaseURLEnv != "" {
+			b.Comment("BaseURLEnv is where the origin comes from, for the deployment " +
+				"that has to say which one this is. [BaseURL] reads it.\n\n" +
+				"A constant beside SigningKeyEnv rather than a string inside that " +
+				"function, so what a deployment has to set is readable off the package " +
+				"— and so the refusal for having not set it can name it.")
+			b.L("const BaseURLEnv = %s", gobuf.Quote(o.BaseURLEnv))
+			b.NL()
+		}
+
 		e.baseURLFunc(b)
 	}
 }
@@ -151,28 +161,53 @@ func (e *authEmitter) originScheme() string {
 }
 
 // baseURLFunc emits the origin a provider redirects back to.
+//
+// It answers an error rather than the empty string. The one configuration that
+// can produce no origin at all is base_url_env alone with nothing in the
+// variable, and what used to happen then was an empty BaseURL travelling down
+// into rig/auth to be refused by oauth.New — several frames below anything the
+// project wrote, naming nothing it could set.
 func (e *authEmitter) baseURLFunc(b *gobuf.Buf) {
 	o := e.oauth()
 
-	b.Comment("BaseURL is this application's own origin, which a provider has " +
+	doc := "BaseURL is this application's own origin, which a provider has " +
 		"registered as the prefix of its callback URL.\n\n" +
-		"It is a function rather than a constant because the environment gets the " +
-		"last word: the same binary is deployed at more than one origin, and the " +
-		"configuration cannot know which.")
-	b.L("func BaseURL() string {")
+		"It is a function rather than a constant because the environment has a " +
+		"say: the same binary is deployed at more than one origin, and the " +
+		"configuration cannot know which."
+	if o.BaseURLEnv != "" && o.BaseURL == "" {
+		doc += " Which is also why it can fail: " + o.BaseURLEnv + " is the only " +
+			"thing this configuration names, so a deployment that forgot to set it " +
+			"has no origin, and the error says so here rather than inside rig/auth."
+	}
+	doc += "\n\nWhat the configuration and the environment say, which is not the " +
+		"whole answer: [Hooks.OAuth] carries a BaseURL of its own, and [Config] " +
+		"prefers it without asking here at all. This is what a project that " +
+		"supplied none gets."
+	b.Comment(doc)
+
+	b.L("func BaseURL() (string, error) {")
 	switch {
 	case o.BaseURLEnv != "" && o.BaseURL != "":
 		strPkg := b.Import("strings")
 		cmpPkg := b.Import("cmp")
 		osPkg := b.Import("os")
-		b.L("return %s.TrimRight(%s.Or(%s.Getenv(%s), %s), \"/\")",
-			strPkg, cmpPkg, osPkg, gobuf.Quote(o.BaseURLEnv), gobuf.Quote(o.BaseURL))
+		b.L("return %s.TrimRight(%s.Or(%s.Getenv(BaseURLEnv), %s), \"/\"), nil",
+			strPkg, cmpPkg, osPkg, gobuf.Quote(o.BaseURL))
 	case o.BaseURLEnv != "":
 		strPkg := b.Import("strings")
 		osPkg := b.Import("os")
-		b.L("return %s.TrimRight(%s.Getenv(%s), \"/\")", strPkg, osPkg, gobuf.Quote(o.BaseURLEnv))
+		errsPkg := b.Import("errors")
+		b.L("raw := %s.Getenv(BaseURLEnv)", osPkg)
+		b.L("if raw == \"\" {")
+		b.L("return \"\", %s.New(%s)", errsPkg, gobuf.Quote(e.failure(fmt.Sprintf(
+			"%s must name this application's own origin: a provider compares the "+
+				"callback URL built from it exactly, and Hooks.OAuth.BaseURL is the "+
+				"other way to supply it", o.BaseURLEnv))))
+		b.L("}")
+		b.L("return %s.TrimRight(raw, \"/\"), nil", strPkg)
 	default:
-		b.L("return %s", gobuf.Quote(o.BaseURL))
+		b.L("return %s, nil", gobuf.Quote(o.BaseURL))
 	}
 	b.L("}")
 	b.NL()
@@ -353,6 +388,54 @@ func (e *authEmitter) oauthHooks(b *gobuf.Buf) {
 		b.NL()
 	}
 
+	baseDoc := "BaseURL is this application's own origin, and takes precedence over " +
+		"everything rig.yaml said about one.\n\n" +
+		"Empty asks [BaseURL], which is what auth.oauth and the environment " +
+		"resolved, and that is the ordinary case. This is for the origin that " +
+		"arrives some other way: a test serving on an ephemeral port, or a " +
+		"deployment handed its configuration rather than given it in its own " +
+		"environment. A whole origin with a scheme, matching what the provider has " +
+		"registered exactly — a trailing slash is trimmed and nothing else is."
+	if hasOrigin {
+		baseDoc += "\n\nNot [OAuthHooks.Origin], which answers per request. This is " +
+			"the one origin the callback routes are built from, and it has to exist " +
+			"even where Origin overrides it."
+	} else {
+		baseDoc += "\n\nauth.oauth.origin_from_host is set, so a callback URL is " +
+			"built from each request's Host and its scheme is OriginScheme — an " +
+			"origin named here moves neither. What it is still for is the origin " +
+			"rig/auth requires to exist at all, and the one a request that names no " +
+			"host falls back to."
+	}
+	b.Comment(baseDoc)
+	b.L("BaseURL string")
+	b.NL()
+
+	keyDoc := "SigningKey signs the cookie that carries the state and the PKCE " +
+		"verifier across a sign-in's round trip. At least 32 bytes, and the same " +
+		"bytes in every replica.\n\n"
+	if e.oauth().SigningKeyEnv != "" {
+		keyDoc += "Empty reads SigningKeyEnv, which is what a deployment ordinarily " +
+			"does. This is for the key that lives somewhere os.Getenv cannot reach: " +
+			"a secret manager, a mounted file, or a test that would rather not write " +
+			"to the process it is running in."
+	} else {
+		keyDoc += "Required, and the only way in: auth.oauth.signing_key_env is blank, " +
+			"so this configuration names no variable to read one from."
+	}
+	b.Comment(keyDoc)
+	b.L("SigningKey []byte")
+	b.NL()
+
+	if len(e.oauth().Providers) > 0 {
+		b.Comment("Credentials are the client id and secret for each provider this " +
+			"configuration offers, for an application whose secrets do not arrive in " +
+			"its environment. A zero field reads that provider's pair from there, " +
+			"which is the ordinary case and needs nothing written here.")
+		b.L("Credentials OAuthCredentials")
+		b.NL()
+	}
+
 	b.Comment("Extra are providers this application builds itself: an in-house " +
 		"identity server, or a stand-in served by the application during " +
 		"development. They are appended to the configured ones.")
@@ -367,6 +450,148 @@ func (e *authEmitter) oauthHooks(b *gobuf.Buf) {
 	b.L("ReturnTo []string")
 	b.L("}")
 	b.NL()
+
+	e.oauthCredentials(b)
+}
+
+// providerField is what a configured provider is called on [OAuthCredentials].
+//
+// Two spellings of one provider — the name in rig.yaml and the field a main
+// function writes — so they are mapped in one place, beside the switch in
+// providersFunc that turns the same name into a constructor.
+func providerField(name string) string {
+	switch name {
+	case ir.ProviderMicrosoft:
+		return "Microsoft"
+	case ir.ProviderGitHub:
+		return "GitHub"
+	default:
+		return "Google"
+	}
+}
+
+// providerClient is the type a provider's pair is written as.
+//
+// Microsoft's carries a directory and nobody else's does, so it is a type of
+// its own rather than a third field two providers out of three would leave set
+// and unread — which is the failure a field per provider is here to prevent, one
+// level down.
+func providerClient(name string) string {
+	if name == ir.ProviderMicrosoft {
+		return "OAuthMicrosoftClient"
+	}
+	return "OAuthClient"
+}
+
+// oauthCredentials emits the half of a provider's configuration that is a
+// secret, and so was readable from the environment and nowhere else.
+//
+// A struct with a field per configured provider rather than a map keyed on the
+// name, for the reason [emitter.shutdownType] gives: a misspelled provider
+// should cost a compilation rather than being a value nothing reads, and a
+// project that does not offer Microsoft should have nowhere to name one.
+func (e *authEmitter) oauthCredentials(b *gobuf.Buf) {
+	o := e.oauth()
+	if len(o.Providers) == 0 {
+		return
+	}
+
+	var (
+		fields       = make([]string, 0, len(o.Providers))
+		hasMicrosoft bool
+		hasOther     bool
+	)
+	for _, p := range o.Providers {
+		fields = append(fields, providerField(p.Name))
+		if p.Name == ir.ProviderMicrosoft {
+			hasMicrosoft = true
+		} else {
+			hasOther = true
+		}
+	}
+
+	b.Comment("OAuthCredentials are what each provider this application offers knows " +
+		"it by.\n\n" +
+		"A zero field reads that provider's pair from the environment, which is " +
+		"what rig.yaml names it for and still the ordinary answer. What this is for " +
+		"is the id and secret that arrive some other way — a secret manager, a " +
+		"mounted file, a test fake — and for an application whose own " +
+		"configuration would rather name what it needs than leave it to a " +
+		"README.\n\n" +
+		func() string {
+			if len(fields) == 1 {
+				return "The only field is " + fields[0] + ", because that is the one " +
+					"provider auth.oauth lists."
+			}
+			return "The fields are " + english(fields) + ", and there are no others " +
+				"because those are the providers auth.oauth lists."
+		}())
+	b.L("type OAuthCredentials struct {")
+	for i, p := range o.Providers {
+		if i > 0 {
+			b.NL()
+		}
+		doc := providerField(p.Name) + "'s pair. Empty reads " + p.ClientIDEnv +
+			" and " + p.ClientSecretEnv + "."
+		if p.Name == ir.ProviderMicrosoft {
+			doc = "Microsoft's pair, and the directory it accepts sign-ins from. " +
+				"Empty reads " + p.ClientIDEnv + " and " + p.ClientSecretEnv + "."
+		}
+		b.Comment(doc)
+		b.L("%s %s", providerField(p.Name), providerClient(p.Name))
+	}
+	b.L("}")
+	b.NL()
+
+	if hasOther {
+		b.Comment("OAuthClient is one provider's registration: the id it knows this " +
+			"application by, and the secret that proves this application is the one " +
+			"asking.\n\n" +
+			"Each is read on its own, so an id can come from the environment and a " +
+			"secret from here — which is the shape a project keeping only its secrets " +
+			"in a manager already has, and the reason this is two fields rather than a " +
+			"pair taken whole. What it accepts is the other order of that mistake: an " +
+			"id supplied here beside a stale secret still in somebody's shell makes a " +
+			"pair the provider rejects at its token endpoint, naming neither half.")
+		b.L("type OAuthClient struct {")
+		b.L("ID string")
+		b.L("Secret string")
+		b.L("}")
+		b.NL()
+	}
+
+	if hasMicrosoft {
+		tenantEnv := ""
+		for _, p := range o.Providers {
+			if p.Name == ir.ProviderMicrosoft {
+				tenantEnv = p.TenantEnv
+			}
+		}
+
+		b.Comment("OAuthMicrosoftClient is Microsoft's registration, which carries one " +
+			"thing more than anybody else's.\n\n" +
+			"A type of its own rather than a third field on OAuthClient: a directory " +
+			"means nothing to Google or to GitHub, and a struct whose fields are the " +
+			"ones this project can set is the whole reason this is generated rather " +
+			"than keyed on a string.")
+		b.L("type OAuthMicrosoftClient struct {")
+		b.L("ID string")
+		b.L("Secret string")
+		b.NL()
+		tenantDoc := "Tenant is Microsoft's own idea of a tenant, which has nothing to " +
+			"do with rig's: empty means common, which accepts any account, " +
+			"organizations excludes personal ones, and a directory id restricts " +
+			"sign-in to one organization."
+		if tenantEnv != "" {
+			tenantDoc += " Empty reads " + tenantEnv + "."
+		} else {
+			tenantDoc += " The only way in: auth.oauth names no variable for it."
+		}
+		b.Comment(tenantDoc)
+		b.L("Tenant string")
+		b.L("}")
+		b.NL()
+	}
 }
 
 // newFunc is the call a main function makes.
@@ -597,6 +822,7 @@ func (e *authEmitter) oauthConfig(b *gobuf.Buf, fail string) {
 	var (
 		authPkg = b.Import(authModule)
 		httpPkg = b.Import("net/http")
+		strPkg  = b.Import("strings")
 	)
 
 	b.Comment("Providers are wired only when this process has credentials for at " +
@@ -607,15 +833,36 @@ func (e *authEmitter) oauthConfig(b *gobuf.Buf, fail string) {
 	b.L("%serr", fail)
 	b.L("}")
 	b.L("if len(configured) > 0 {")
-	if o.SigningKeyEnv != "" {
-		b.L("key, err := signingKey()")
-		b.L("if err != nil {")
-		b.L("%serr", fail)
-		b.L("}")
-	}
+
+	errsPkg := b.Import("errors")
+	b.Comment("The origin this application supplied, if it did. BaseURL is what " +
+		"rig.yaml and the environment resolved, and it is not asked at all when " +
+		"the field answers — so a deployment that named only " +
+		"auth.oauth.base_url_env and fills this in from Go never meets BaseURL's " +
+		"refusal.\n\n" +
+		"The two rules rig checked on auth.oauth.base_url when it read the file, " +
+		"applied to the one origin it could not see: a trailing slash is trimmed, " +
+		"and an origin with no scheme is refused rather than built into a callback " +
+		"URL that every provider rejects without saying why.")
+	b.L("base := %s.TrimRight(h.OAuth.BaseURL, \"/\")", strPkg)
+	b.L("switch {")
+	b.L("case base == \"\":")
+	b.L("if base, err = BaseURL(); err != nil {")
+	b.L("%serr", fail)
+	b.L("}")
+	b.L("case !%s.HasPrefix(base, \"http://\") && !%s.HasPrefix(base, \"https://\"):", strPkg, strPkg)
+	b.L("%s%s.New(%s)", fail, errsPkg, gobuf.Quote(e.failure(
+		"Hooks.OAuth.BaseURL must be an absolute origin, for example "+
+			"https://app.example.com: a provider compares the callback URL built "+
+			"from it exactly")))
+	b.L("}")
+	b.L("key, err := signingKey(h.OAuth)")
+	b.L("if err != nil {")
+	b.L("%serr", fail)
+	b.L("}")
 	b.L("cfg.OAuth = %s.OAuth{", authPkg)
 	b.L("Providers: configured,")
-	b.L("BaseURL: BaseURL(),")
+	b.L("BaseURL: base,")
 
 	if o.OriginFromHost {
 		b.Comment("A callback comes back to the host it started at. Not a nicety: the " +
@@ -627,9 +874,7 @@ func (e *authEmitter) oauthConfig(b *gobuf.Buf, fail string) {
 		b.L("Origin: h.OAuth.Origin,")
 	}
 
-	if o.SigningKeyEnv != "" {
-		b.L("SigningKey: key,")
-	}
+	b.L("SigningKey: key,")
 	b.L("StateTTL: %s,", genutil.GoDuration(b, o.StateTTL))
 	b.L("AllowProvisioning: %t,", o.AllowProvisioning)
 	b.P("AllowedReturnTo: append([]string{")
@@ -974,24 +1219,53 @@ func (e *authEmitter) mailDispatcherFunc(b *gobuf.Buf) {
 // It is a function rather than an expression because the failure is worth a
 // sentence: a missing key is the one configuration mistake here that produces a
 // sign-in which works on a laptop and fails behind a load balancer.
+//
+// It takes the hooks so that a key the application read itself wins over the
+// variable, and — where insecure is set — over the development key that branch
+// mints. A key supplied and too short reaches the refusal instead of either,
+// because what a project stated is not something to quietly substitute for.
 func (e *authEmitter) signingKeyFunc(b *gobuf.Buf) {
 	o := e.oauth()
-	if o == nil || o.SigningKeyEnv == "" {
+	if o == nil {
 		return
 	}
-	var (
-		osPkg   = b.Import("os")
-		errsPkg = b.Import("errors")
-	)
+	errsPkg := b.Import("errors")
 
-	b.Comment("signingKey is the key that signs the cookie carrying the state and the " +
+	doc := "signingKey is the key that signs the cookie carrying the state and the " +
 		"PKCE verifier across a sign-in's round trip.\n\n" +
-		"At least 32 bytes, from the environment, because it is a secret. It has to " +
-		"be the same key in every replica: a callback may arrive at a different one " +
-		"than the one that started the sign-in, and a key invented per process is a " +
-		"sign-in that fails whenever a load balancer is doing its job.")
-	b.L("func signingKey() ([]byte, error) {")
-	b.L("key := []byte(%s.Getenv(SigningKeyEnv))", osPkg)
+		"At least 32 bytes, because it is a secret, and it has to be the same key " +
+		"in every replica: a callback may arrive at a different one than the one " +
+		"that started the sign-in, and a key invented per process is a sign-in that " +
+		"fails whenever a load balancer is doing its job.\n\n"
+	if o.SigningKeyEnv != "" {
+		doc += "Hooks.OAuth.SigningKey first, then " + o.SigningKeyEnv + ", which is " +
+			"the ordinary way a deployment hands one over."
+	} else {
+		doc += "From Hooks.OAuth.SigningKey and nowhere else: " +
+			"auth.oauth.signing_key_env is blank, so this configuration names no " +
+			"variable to read."
+	}
+	b.Comment(doc)
+
+	b.L("func signingKey(h OAuthHooks) ([]byte, error) {")
+	b.Comment("A key this application named and got wrong, reported as that rather " +
+		"than as an absence. It is not replaced by the variable, and where insecure " +
+		"is set it is not replaced by a development key either: substituting for a " +
+		"value somebody stated is how a sign-in works in one replica and not the " +
+		"next.")
+	fmtPkg := b.Import("fmt")
+	b.L("if n := len(h.SigningKey); n > 0 && n < 32 {")
+	b.L("return nil, %s.Errorf(%q, n)", fmtPkg, e.failure(
+		"Hooks.OAuth.SigningKey holds %d bytes and needs at least 32: it signs the "+
+			"OAuth state parameter, and every replica has to use the same one"))
+	b.L("}")
+	b.L("key := h.SigningKey")
+	if o.SigningKeyEnv != "" {
+		osPkg := b.Import("os")
+		b.L("if len(key) == 0 {")
+		b.L("key = []byte(%s.Getenv(SigningKeyEnv))", osPkg)
+		b.L("}")
+	}
 	b.L("switch {")
 	b.L("case len(key) >= 32:")
 	b.L("return key, nil")
@@ -1002,7 +1276,8 @@ func (e *authEmitter) signingKeyFunc(b *gobuf.Buf) {
 		b.L("case len(key) == 0:")
 		b.L("// auth.oauth.insecure is set, which says this is local development: one")
 		b.L("// process serves everything and there is no replica to share a key with.")
-		b.L("// A deployment reaches the error below instead.")
+		b.L("// Reached only when nothing supplied one at all — a key this short is a")
+		b.L("// mistake rather than an absence, and gets the error below.")
 		b.L("key = make([]byte, 32)")
 		b.L("if _, err := %s.Read(key); err != nil {", randPkg)
 		b.L("return nil, %s.Errorf(%q, err)", fmtPkg, e.failure("generate a development signing key: %w"))
@@ -1011,46 +1286,66 @@ func (e *authEmitter) signingKeyFunc(b *gobuf.Buf) {
 	}
 
 	b.L("}")
-	b.L("return nil, %s.New(%s)", errsPkg, gobuf.Quote(e.failure(fmt.Sprintf(
-		"%s must hold at least 32 bytes: it signs the OAuth state parameter, "+
-			"and every replica has to use the same one", o.SigningKeyEnv))))
+	b.L("return nil, %s.New(%s)", errsPkg, gobuf.Quote(e.failure(
+		"a signing key of at least 32 bytes is required: set "+e.keySources()+
+			" — it signs the OAuth state parameter, and every replica has to use "+
+			"the same one")))
 	b.L("}")
 	b.NL()
 }
 
-// providersFunc emits provider construction from the environment.
+// keySources names the ways a signing key can arrive, for the refusal when none
+// of them did.
+//
+// Both, in the order they are consulted, because a message that named only the
+// variable is what sent somebody looking for a deployment problem in a project
+// that had decided to supply the key itself.
+func (e *authEmitter) keySources() string {
+	if env := e.oauth().SigningKeyEnv; env != "" {
+		return "Hooks.OAuth.SigningKey or " + env
+	}
+	return "Hooks.OAuth.SigningKey"
+}
+
+// providersFunc emits provider construction: what the hooks carry, and the
+// environment for whatever they left alone.
 func (e *authEmitter) providersFunc(b *gobuf.Buf) {
 	o := e.oauth()
-	var (
-		oauthPkg = b.Import(authModule + "/oauth")
-		osPkg    = b.Import("os")
-		errsPkg  = b.Import("errors")
-	)
+	oauthPkg := b.Import(authModule + "/oauth")
 
 	b.Comment("ConfiguredProviders are the providers this process has credentials for.\n\n" +
 		"A client secret is not configuration: it is a secret, so rig.yaml names the " +
-		"environment variable and this reads it. A provider whose pair is absent is " +
-		"skipped rather than mounted broken, which is what lets one binary offer " +
-		"Google in a deployment and nothing at all on a laptop. A provider marked " +
-		"required refuses to start instead.\n\n" +
+		"environment variable and this reads it. [OAuthHooks.Credentials] is read " +
+		"first, for an application that holds its secrets somewhere else, and a " +
+		"provider named in neither place is skipped rather than mounted broken — " +
+		"which is what lets one binary offer Google in a deployment and nothing at " +
+		"all on a laptop. A provider marked required refuses to start instead, " +
+		"whichever of the two it was waiting for.\n\n" +
 		"Exported so a sign-in page can draw a button per provider that actually " +
 		"works, rather than one per provider somebody hoped for.")
 	b.L("func ConfiguredProviders(h OAuthHooks) ([]%s.Provider, error) {", oauthPkg)
 	b.L("out := make([]%s.Provider, 0, %d)", oauthPkg, len(o.Providers)+1)
 
 	for _, p := range o.Providers {
+		var (
+			cmpPkg = b.Import("cmp")
+			osPkg  = b.Import("os")
+			field  = "h.Credentials." + providerField(p.Name)
+		)
+
 		b.NL()
-		b.L("if id, secret := %s.Getenv(%s), %s.Getenv(%s); id != \"\" && secret != \"\" {",
-			osPkg, gobuf.Quote(p.ClientIDEnv), osPkg, gobuf.Quote(p.ClientSecretEnv))
+		b.L("if id, secret := %s.Or(%s.ID, %s.Getenv(%s)), %s.Or(%s.Secret, %s.Getenv(%s)); id != \"\" && secret != \"\" {",
+			cmpPkg, field, osPkg, gobuf.Quote(p.ClientIDEnv),
+			cmpPkg, field, osPkg, gobuf.Quote(p.ClientSecretEnv))
 		switch p.Name {
 		case ir.ProviderMicrosoft:
+			b.L("// Microsoft's own idea of a tenant, which has nothing to do with")
+			b.L("// rig's: empty means common, which accepts any account.")
 			if p.TenantEnv != "" {
-				b.L("// Microsoft's own idea of a tenant, which has nothing to do with")
-				b.L("// rig's: empty means common, which accepts any account.")
-				b.L("out = append(out, %s.Microsoft(id, secret, %s.Getenv(%s)))",
-					oauthPkg, osPkg, gobuf.Quote(p.TenantEnv))
+				b.L("out = append(out, %s.Microsoft(id, secret, %s.Or(%s.Tenant, %s.Getenv(%s))))",
+					oauthPkg, cmpPkg, field, osPkg, gobuf.Quote(p.TenantEnv))
 			} else {
-				b.L("out = append(out, %s.Microsoft(id, secret, \"\"))", oauthPkg)
+				b.L("out = append(out, %s.Microsoft(id, secret, %s.Tenant))", oauthPkg, field)
 			}
 		case ir.ProviderGitHub:
 			b.L("out = append(out, %s.GitHub(id, secret))", oauthPkg)
@@ -1058,12 +1353,15 @@ func (e *authEmitter) providersFunc(b *gobuf.Buf) {
 			b.L("out = append(out, %s.Google(id, secret))", oauthPkg)
 		}
 		if p.Required {
+			errsPkg := b.Import("errors")
 			b.L("} else {")
 			b.L("// Marked required, so a deployment missing its credentials refuses to")
 			b.L("// start rather than quietly offering one provider fewer.")
 			b.L("return nil, %s.New(%s)", errsPkg,
-				gobuf.Quote(e.failure(fmt.Sprintf("provider %s is required, but %s and %s are not both set",
-					p.Name, p.ClientIDEnv, p.ClientSecretEnv))))
+				gobuf.Quote(e.failure(fmt.Sprintf(
+					"provider %s is required, but neither Hooks.OAuth.Credentials.%s nor "+
+						"%s and %s name a complete pair",
+					p.Name, providerField(p.Name), p.ClientIDEnv, p.ClientSecretEnv))))
 		}
 		b.L("}")
 	}

@@ -135,6 +135,22 @@ them per provider, and the defaults are `<PROVIDER>_CLIENT_ID` and
 `<PROVIDER>_CLIENT_SECRET`. Point `client_id_env` somewhere else and the generated
 code reads that instead.
 
+And the variable is a fallback rather than the only way in. The generated
+`api.OAuthHooks` carries `Credentials`, with a field per provider this
+configuration offers, and the field wins — which is what a deployment holding
+its secrets in a manager rather than in its own environment fills in:
+
+```go
+Credentials: api.OAuthCredentials{
+    Google: api.OAuthClient{ID: cfg.GoogleID, Secret: cfg.GoogleSecret},
+},
+```
+
+This example sets none of them and takes the variables, because that is the
+ordinary case. What it does supply is `BaseURL`, one field up: the origin a
+provider redirects back to, which a test on an ephemeral port has to be able to
+say without writing to the process it is running in.
+
 `MICROSOFT_TENANT` is Microsoft's idea of a tenant and has nothing to do with
 rig's: `common` accepts any account, `organizations` excludes personal ones, and a
 directory id restricts sign-in to one organization.
