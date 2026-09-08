@@ -981,7 +981,6 @@ func (e *authEmitter) signingKeyFunc(b *gobuf.Buf) {
 	}
 	var (
 		osPkg   = b.Import("os")
-		fmtPkg  = b.Import("fmt")
 		errsPkg = b.Import("errors")
 	)
 
@@ -999,6 +998,7 @@ func (e *authEmitter) signingKeyFunc(b *gobuf.Buf) {
 
 	if o.Insecure {
 		randPkg := b.Import("crypto/rand")
+		fmtPkg := b.Import("fmt")
 		b.L("case len(key) == 0:")
 		b.L("// auth.oauth.insecure is set, which says this is local development: one")
 		b.L("// process serves everything and there is no replica to share a key with.")

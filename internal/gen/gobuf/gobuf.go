@@ -11,7 +11,10 @@ package gobuf
 import (
 	"bytes"
 	"fmt"
+	"go/ast"
 	"go/format"
+	"go/parser"
+	"go/token"
 	"maps"
 	"path"
 	"slices"
@@ -260,7 +263,65 @@ func (b *Buf) Bytes() ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("generated source does not parse: %w\n\n%s", err, numbered(out.String()))
 	}
+
+	if unused, err := b.unusedImport(formatted); err != nil {
+		return nil, err
+	} else if unused != "" {
+		return nil, fmt.Errorf("generated source imports %q and never uses it: "+
+			"collect the import in the branch that needs it, the way the code it "+
+			"belongs to is already written\n\n%s", unused, numbered(string(formatted)))
+	}
 	return formatted, nil
+}
+
+// unusedImport returns the first import path nothing in the file qualifies, or
+// "" when every one of them is used.
+//
+// This package's promise is that an import is collected where it is used, so a
+// recorded one that nothing names means a b.Import hoisted out of the branch
+// that needed it — and the file it produces does not compile in somebody's
+// project, where it cannot be edited. gofmt cannot see this: an unused import
+// is a type error rather than a syntax error, so format.Source accepts it and
+// a golden file records it without complaint.
+//
+// It reads identifiers rather than resolving anything, which over-approximates
+// "used" — a qualifier shadowed by a local of the same name would be counted.
+// That is the safe direction: the check can miss a case, never invent one.
+func (b *Buf) unusedImport(src []byte) (string, error) {
+	if len(b.imports) == 0 {
+		return "", nil
+	}
+
+	file, err := parser.ParseFile(token.NewFileSet(), "", src, 0)
+	if err != nil {
+		return "", fmt.Errorf("re-reading the formatted source: %w", err)
+	}
+
+	used := make(map[string]bool)
+	for _, decl := range file.Decls {
+		// The import block names every qualifier by definition, so counting it
+		// would make the check vacuous.
+		if gd, ok := decl.(*ast.GenDecl); ok && gd.Tok == token.IMPORT {
+			continue
+		}
+		ast.Inspect(decl, func(n ast.Node) bool {
+			if id, ok := n.(*ast.Ident); ok {
+				used[id.Name] = true
+			}
+			return true
+		})
+	}
+
+	for _, imp := range slices.Sorted(maps.Keys(b.imports)) {
+		name := b.imports[imp]
+		if name == "" {
+			name = packageName(imp)
+		}
+		if !used[name] {
+			return imp, nil
+		}
+	}
+	return "", nil
 }
 
 // groupImports separates the standard library from everything else, which is

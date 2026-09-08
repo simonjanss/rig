@@ -41,6 +41,11 @@ func TestGoTypeImportsWhatItNames(t *testing.T) {
 			t.Errorf("GoType(%q) = %q, want %q", tc.goType, got, tc.want)
 		}
 
+		// A declaration of the type, because a buffer that records an import
+		// and writes nothing is a file gobuf now refuses — for the same reason
+		// this table exists, that an import nothing names does not compile.
+		b.L("var _ %s", got)
+
 		rendered := render(t, b)
 		if tc.import_ != "" && !strings.Contains(rendered, `"`+tc.import_+`"`) {
 			t.Errorf("GoType(%q) should have imported %s:\n%s", tc.goType, tc.import_, rendered)

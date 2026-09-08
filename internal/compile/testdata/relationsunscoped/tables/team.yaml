@@ -1,0 +1,10 @@
+table: team
+comment: A group of players that competes as a unit.
+restore_window_days: 30
+columns:
+  name:
+    comment: Display name of the team.
+relations:
+  team_player:
+    name: Players
+    embed: true

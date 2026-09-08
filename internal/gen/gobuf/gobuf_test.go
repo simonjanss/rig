@@ -41,10 +41,9 @@ func TestStdlibImportsComeFirst(t *testing.T) {
 	t.Parallel()
 
 	b := gobuf.New("store")
-	b.Import("github.com/google/uuid")
-	b.Import("time")
-	b.Import("context")
-	b.L("var _ = 1")
+	b.L("var _ %s.UUID", b.Import("github.com/google/uuid"))
+	b.L("var _ %s.Time", b.Import("time"))
+	b.L("var _ %s.Context", b.Import("context"))
 
 	out, _ := b.Bytes()
 	got := string(out)
@@ -53,6 +52,65 @@ func TestStdlibImportsComeFirst(t *testing.T) {
 	thirdStart := strings.Index(got, `"github.com/google/uuid"`)
 	if stdEnd < 0 || thirdStart < 0 || stdEnd > thirdStart {
 		t.Errorf("standard library should come first:\n%s", got)
+	}
+}
+
+// An import collected outside the branch that uses it is the one way this
+// package's promise gets broken, and the file it produces does not compile
+// where it lands — in somebody's project, under a DO NOT EDIT banner. gofmt
+// cannot see it: an unused import is a type error, not a syntax error.
+//
+// So Bytes refuses rather than quietly dropping the import. Pruning would hand
+// the user working code and leave the generator wrong, which is how the same
+// mistake reaches the next emitter.
+func TestAnImportNothingUsesIsRefused(t *testing.T) {
+	t.Parallel()
+
+	b := gobuf.New("store")
+	b.Import("fmt")
+	b.L("var _ = 1")
+
+	_, err := b.Bytes()
+	if err == nil {
+		t.Fatal("an unused import should not render")
+	}
+	if !strings.Contains(err.Error(), `imports "fmt"`) {
+		t.Errorf("the error should name the import: %v", err)
+	}
+}
+
+// The qualifier is what is looked for, not the path, so an aliased import is
+// judged by the name the body would actually write.
+func TestAnUnusedAliasedImportIsRefused(t *testing.T) {
+	t.Parallel()
+
+	b := gobuf.New("store")
+	first := b.Import("github.com/simonjanss/rig/runtime/query")
+	second := b.Import("example.com/other/query")
+	b.L("var _ = %s.Op(\"\")", first)
+
+	_, err := b.Bytes()
+	if err == nil {
+		t.Fatalf("the aliased import %q is unused and should not render", second)
+	}
+	if !strings.Contains(err.Error(), "example.com/other/query") {
+		t.Errorf("the error should name the unused import: %v", err)
+	}
+}
+
+// A name that appears only in a comment is not a use. The check reads the
+// syntax tree rather than the text, so prose about a package does not keep its
+// import alive.
+func TestAnImportNamedOnlyInACommentIsRefused(t *testing.T) {
+	t.Parallel()
+
+	b := gobuf.New("store")
+	b.Import("time")
+	b.Comment("This mentions time.Time and uses none of it.")
+	b.L("var _ = 1")
+
+	if _, err := b.Bytes(); err == nil {
+		t.Fatal("a comment is not a use")
 	}
 }
 

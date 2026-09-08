@@ -321,14 +321,29 @@ func (e *emitter) fileResponseHelper(b *gobuf.Buf) {
 // compiler injects it.
 const objectRigFile = "RigFile"
 
+// modelOwnsFileShape reports whether the project exposes rig_file, in which
+// case the ordinary generators have already emitted a struct for it and this
+// package refers to theirs rather than declaring one.
+//
+// Separate from fileShapeRef because asking the question is not the same as
+// writing the answer: fileShapeRef records the model import as it renders, and
+// a caller that only wants to know which way the answer goes would otherwise
+// leave that import behind in a file that never names it.
+func (e *emitter) modelOwnsFileShape() bool {
+	for i := range e.doc.API.Resources {
+		if e.doc.API.Resources[i].Name == objectRigFile {
+			return true
+		}
+	}
+	return false
+}
+
 // fileShapeRef is how this package names that shape in Go: the model's, when the
 // project exposes rig_file and the ordinary generators have already emitted a
 // struct for it, and this package's own otherwise.
 func (e *emitter) fileShapeRef(b *gobuf.Buf) string {
-	for i := range e.doc.API.Resources {
-		if e.doc.API.Resources[i].Name == objectRigFile {
-			return e.model(b) + "." + objectRigFile
-		}
+	if e.modelOwnsFileShape() {
+		return e.model(b) + "." + objectRigFile
 	}
 	return objectRigFile
 }
@@ -359,7 +374,7 @@ func fileFieldExpr(f ir.Field) (string, bool) {
 // rig_file and so has no model struct for it.
 func (e *emitter) fileShapeType(b *gobuf.Buf) {
 	obj := e.object(objectRigFile)
-	if obj == nil || e.fileShapeRef(b) != objectRigFile {
+	if obj == nil || e.modelOwnsFileShape() {
 		return
 	}
 
