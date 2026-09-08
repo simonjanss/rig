@@ -155,22 +155,19 @@ func main() {
 func newAPI(ctx context.Context, pool *pgxpool.Pool, base string, log *slog.Logger) (api.Parts, error) {
 	repos := store.New(pool, store.Config{})
 
-	// The origin this run answers at. It reaches the generated wiring through the
-	// environment, because that is what rig.yaml says reads it: `base_url_env`.
-	// One place decides, and a test on an ephemeral port can still say where it is.
-	if err := os.Setenv("BASE_URL", base); err != nil {
-		return api.Parts{}, err
-	}
-
 	// Every address this application answers at: one per tenant. Two different
 	// things need the same list — a provider, which registers each as a redirect
 	// URI, and what bounds where a finished sign-in may land.
 	origins := tenantOrigins(base)
 
 	// What this run offers. rig builds the three configured providers from the
-	// environment variables rig.yaml names; the stand-in is this example's own and
-	// appears only when no real credentials were set, so the example works the
-	// moment it is cloned.
+	// environment variables rig.yaml names, or from whatever the hooks carry; the
+	// stand-in is this example's own and appears only when no real credentials were
+	// set, so the example works the moment it is cloned.
+	//
+	// Empty hooks because this example names no credentials in Go. A project that
+	// does has to hand this the same hooks its Config gets, or it is asking about a
+	// different process than the one it is about to build.
 	//
 	// The prop is not a mock: single-use authorization codes, PKCE verified at the
 	// token endpoint, and a consent screen that lets you choose whether it says
@@ -208,6 +205,14 @@ func newAPI(ctx context.Context, pool *pgxpool.Pool, base string, log *slog.Logg
 		Logger: log,
 
 		OAuth: api.OAuthHooks{
+			// The origin a provider redirects back to, handed over rather than
+			// written into the environment. rig.yaml names `base_url_env` and the
+			// generated BaseURL still reads it, so a deployment sets BASE_URL and
+			// writes nothing here — but this run may be a test on an ephemeral
+			// port, and a field is how it says so without mutating the process it
+			// is running in.
+			BaseURL: base,
+
 			// The stand-in, when it is in use. A real deployment passes none of
 			// these: the provider is somebody else's server.
 			Extra: extra,
@@ -286,7 +291,10 @@ func newAPI(ctx context.Context, pool *pgxpool.Pool, base string, log *slog.Logg
 // comes from the host, so an origin with no tenant in it is an origin nothing can
 // sign in at.
 func baseURL() string {
-	if raw := os.Getenv("BASE_URL"); raw != "" {
+	// The variable rig.yaml named, spelled once: `base_url_env` put it on the
+	// generated package as a constant, so this and the generated BaseURL cannot
+	// end up reading two different names.
+	if raw := os.Getenv(api.BaseURLEnv); raw != "" {
 		return strings.TrimRight(raw, "/")
 	}
 	addr := cmp.Or(os.Getenv("ADDR"), "127.0.0.1:8083")

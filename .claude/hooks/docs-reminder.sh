@@ -50,6 +50,7 @@ internal/compile/convention.go) pages="docs/schema.md" ;;
 internal/compile/builtin.go) pages="docs/api.md" ;;
 internal/gen/openapigen/*) pages="docs/api.md docs/generators.md README.md" ;;
 internal/gen/servergo/shape*.go | internal/gen/servergo/electric.go) pages="docs/electric.md docs/generators.md" ;;
+internal/gen/servergo/auth.go) pages="docs/auth.md" ;;
 internal/gen/goclient/*) pages="docs/clients.md docs/generators.md" ;;
 internal/gen/*) pages="docs/generators.md README.md" ;;
 internal/cli/*) pages="docs/cli.md" ;;

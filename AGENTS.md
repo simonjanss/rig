@@ -178,7 +178,7 @@ the same commit.** The pages are short and the mapping is mechanical:
 | `internal/compile/convention.go` — a recognised column or rule | `docs/schema.md` |
 | `internal/compile/builtin.go` — the error codes, the pagination limits | `docs/api.md` |
 | `internal/diag` — a code added, or a severity changed | `docs/diagnostics.md` |
-| `auth/`, or `internal/project/auth.go` | `docs/auth.md` |
+| `auth/`, `internal/project/auth.go`, or `internal/gen/servergo/auth.go` | `docs/auth.md` |
 | `runtime/electric`, `runtime/electric/foundation`, the shape half of `internal/gen/servergo` | `docs/electric.md` |
 | `internal/scaffold/publish.go`, `internal/cli/publish.go` | `docs/electric.md`, `docs/cli.md` |
 | `internal/gen/openapigen` | `docs/api.md`, `docs/generators.md`, `README.md` |

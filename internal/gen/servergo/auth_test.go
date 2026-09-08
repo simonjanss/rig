@@ -260,6 +260,327 @@ func TestTheWiredAPICompiles(t *testing.T) {
 	)
 }
 
+// TestTheHooksSupplyEveryOAuthValue is #133: the origin, the signing key and
+// each provider's pair are all readable from the environment, and now all three
+// have a field in front of that read.
+//
+// Field first, the way serve.Config.fromEnvironment answers the same question
+// for DatabaseURL and Addr. What is checked here is that every one of the three
+// consults the hooks *before* os.Getenv, because a fallback in the other order
+// is not a fallback — it is the environment still winning.
+func TestTheHooksSupplyEveryOAuthValue(t *testing.T) {
+	t.Parallel()
+
+	doc := gentest.LoadDocument(t, filepath.Join("testdata", authFixture))
+	got := find(t, gentest.Run(t, servergo.New(), doc, authOpts()), "auth.gen.go")
+
+	for _, want := range []string{
+		// The fields themselves, and the struct a project names a provider on.
+		"BaseURL string",
+		"SigningKey []byte",
+		"Credentials OAuthCredentials",
+		"type OAuthCredentials struct {",
+		"type OAuthClient struct {",
+		"type OAuthMicrosoftClient struct {",
+
+		// The two rules rig checked on base_url when it read the file, applied to
+		// the origin it could not see, and the key it can only be handed.
+		"Hooks.OAuth.BaseURL must be an absolute origin",
+		"Hooks.OAuth.SigningKey holds %d bytes and needs at least 32",
+
+		// The origin: the field, then what rig.yaml and the environment resolved.
+		`base := strings.TrimRight(h.OAuth.BaseURL, "/")`,
+		"if base, err = BaseURL(); err != nil {",
+		"BaseURL:   base,",
+
+		// The key, which reaches the variable only when nothing supplied one.
+		"func signingKey(h OAuthHooks) ([]byte, error) {",
+		"key := h.SigningKey",
+		"key = []byte(os.Getenv(SigningKeyEnv))",
+
+		// And each pair, per provider, including Microsoft's own tenant.
+		`cmp.Or(h.Credentials.Google.ID, os.Getenv("GOOGLE_CLIENT_ID"))`,
+		`cmp.Or(h.Credentials.Google.Secret, os.Getenv("GOOGLE_CLIENT_SECRET"))`,
+		`cmp.Or(h.Credentials.Microsoft.ID, os.Getenv("MICROSOFT_CLIENT_ID"))`,
+		`cmp.Or(h.Credentials.Microsoft.Tenant, os.Getenv("WORK_DIRECTORY"))`,
+		`cmp.Or(h.Credentials.GitHub.ID, os.Getenv("GH_APP_ID"))`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("the generated wiring does not contain %q", want)
+		}
+	}
+
+	// The old shape, which is the one that had nowhere to disagree.
+	for _, gone := range []string{
+		"func signingKey() ([]byte, error) {",
+		"BaseURL:   BaseURL(),",
+		`if id, secret := os.Getenv("GOOGLE_CLIENT_ID")`,
+	} {
+		if strings.Contains(got, gone) {
+			t.Errorf("the generated wiring still reads the environment first: %q", gone)
+		}
+	}
+}
+
+// TestARequiredProviderIsSatisfiedByAHook is the half of #133 that is easy to
+// get wrong: `required` refuses to start when a provider's credentials are
+// absent, and a pair that arrived through the hooks is not absent.
+//
+// It holds because the refusal is the else arm of the same if that reads the
+// field, so there is no second condition to keep in step — which is what this
+// asserts, since a rule with one expression cannot drift.
+func TestARequiredProviderIsSatisfiedByAHook(t *testing.T) {
+	t.Parallel()
+
+	doc := gentest.LoadDocument(t, filepath.Join("testdata", authFixture))
+	got := find(t, gentest.Run(t, servergo.New(), doc, authOpts()), "auth.gen.go")
+
+	guard, _, ok := strings.Cut(got, "provider google is required")
+	if !ok {
+		t.Fatal("the authwired fixture marks google required, so a refusal should be emitted")
+	}
+	if i := strings.LastIndex(guard, "if id, secret :="); i < 0 ||
+		!strings.Contains(guard[i:], "h.Credentials.Google.ID") {
+		t.Error("the required refusal is reachable without the hooks having been asked, " +
+			"so a project that supplied the pair itself cannot start")
+	}
+	if !strings.Contains(got, "neither Hooks.OAuth.Credentials.Google nor "+
+		"GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET") {
+		t.Error("the refusal should name both ways in, the way serve's checkStated does")
+	}
+}
+
+// TestCredentialsCarryOnlyTheConfiguredProviders is why this is a struct rather
+// than a map keyed on the provider name, and it is the same reason the emitted
+// Shutdown has fields: a project that does not offer Microsoft should have
+// nowhere to name one, and a misspelling should cost a compilation.
+func TestCredentialsCarryOnlyTheConfiguredProviders(t *testing.T) {
+	t.Parallel()
+
+	doc := gentest.LoadDocument(t, filepath.Join("testdata", authFixture))
+	doc.API.Auth.OAuth.Providers = doc.API.Auth.OAuth.Providers[:1]
+
+	got := find(t, gentest.Run(t, servergo.New(), doc, authOpts()), "auth.gen.go")
+
+	if !strings.Contains(got, "Google OAuthClient") {
+		t.Error("the one configured provider should have a field")
+	}
+	for _, gone := range []string{
+		"Microsoft OAuthMicrosoftClient", "GitHub OAuthClient",
+		// The directory goes with the type that has it, so a project offering
+		// only Google has nowhere to name one at all.
+		"type OAuthMicrosoftClient struct {", "Tenant string",
+	} {
+		if strings.Contains(got, gone) {
+			t.Errorf("only google is configured, so %q should not be nameable", gone)
+		}
+	}
+	if !strings.Contains(got, "The only field is Google") {
+		t.Error("the struct should say why its field set is the one it has")
+	}
+}
+
+// TestMicrosoftsDirectoryIsOnMicrosoftsType is the field-per-provider rule one
+// level down.
+//
+// Microsoft accepts a directory and nobody else does. On a shared OAuthClient
+// that is Credentials.Google.Tenant: a field that compiles, that reads like a
+// setting, and that nothing anywhere consults — which is the exact failure a
+// struct with a field per provider was chosen over a keyed map to prevent.
+func TestMicrosoftsDirectoryIsOnMicrosoftsType(t *testing.T) {
+	t.Parallel()
+
+	doc := gentest.LoadDocument(t, filepath.Join("testdata", authFixture))
+	got := find(t, gentest.Run(t, servergo.New(), doc, authOpts()), "auth.gen.go")
+
+	if !strings.Contains(got, "Microsoft OAuthMicrosoftClient") ||
+		!strings.Contains(got, "Google OAuthClient") {
+		t.Fatal("Microsoft's registration should be a type of its own")
+	}
+	tenant := strings.Count(got, "Tenant string")
+	if tenant != 1 {
+		t.Errorf("the directory should be nameable exactly once, not %d times", tenant)
+	}
+	if i := strings.Index(got, "type OAuthMicrosoftClient struct {"); i < 0 ||
+		strings.Index(got, "Tenant string") < i {
+		t.Error("the directory is on the shared type, so Google and GitHub can name " +
+			"one and nothing will read it")
+	}
+}
+
+// TestAnUnsetOriginIsRefusedHere is the shape #133 was found in: base_url_env
+// alone, with nothing in the variable.
+//
+// What used to happen was an empty string travelling into rig/auth to be
+// refused by oauth.New — several frames below anything the project wrote, and
+// naming nothing it could set. No fixture in the repository generates this
+// branch, because all three set base_url as well.
+func TestAnUnsetOriginIsRefusedHere(t *testing.T) {
+	t.Parallel()
+
+	doc := gentest.LoadDocument(t, filepath.Join("testdata", authFixture))
+	doc.API.Auth.OAuth.BaseURL = ""
+
+	got := find(t, gentest.Run(t, servergo.New(), doc, authOpts()), "auth.gen.go")
+
+	if !strings.Contains(got, "func BaseURL() (string, error) {") {
+		t.Fatal("BaseURL should answer an error rather than the empty string")
+	}
+	if !strings.Contains(got, "BASE_URL must name this application's own origin") ||
+		!strings.Contains(got, "Hooks.OAuth.BaseURL is the other way to supply it") {
+		t.Error("the refusal should name the variable and the field, and come from here")
+	}
+	// And the field still short-circuits it: a project that supplies the origin
+	// in Go named only a variable in rig.yaml, and must not meet this refusal.
+	if !strings.Contains(got, `base := strings.TrimRight(h.OAuth.BaseURL, "/")`) {
+		t.Error("Config should prefer the field without asking BaseURL at all")
+	}
+
+	// Compiled rather than only read, because this is the branch whose imports
+	// differ: it takes errors and strings and, unlike the two-value shape, no
+	// cmp — and an import collected outside the branch that uses it is #130.
+	gentest.MustCompileAll(t,
+		gentest.Package{
+			Dir: "model",
+			Artifacts: gentest.Run(t, modelgo.New(), doc,
+				gen.Options{Raw: map[string]any{"package": "model"}}),
+		},
+		gentest.Package{
+			Dir: "store",
+			Artifacts: gentest.Run(t, persistgo.New(), doc, gen.Options{Raw: map[string]any{
+				"package": "store", "model_import": "rigtest/model",
+			}}),
+		},
+		gentest.Package{Dir: "api", Artifacts: append(
+			gentest.Run(t, servicego.New(), doc, gen.Options{Raw: map[string]any{
+				"package": "api", "model_import": "rigtest/model", "store_import": "rigtest/store",
+			}}),
+			gentest.Run(t, servergo.New(), doc, authOpts())...)},
+	)
+}
+
+// TestAProjectCanWriteTheOAuthHooksLiteral compiles the literal docs/auth.md
+// prints, in the package the generator wrote it for.
+//
+// A golden file cannot notice this. It proves the bytes have not changed, which
+// stays true after a field is renamed and every documented example of filling
+// one in stops building — and these fields exist to be written by hand, so the
+// hand-written form is the one worth checking.
+func TestAProjectCanWriteTheOAuthHooksLiteral(t *testing.T) {
+	t.Parallel()
+
+	doc := gentest.LoadDocument(t, filepath.Join("testdata", authFixture))
+
+	api := gentest.Run(t, servicego.New(), doc, gen.Options{Raw: map[string]any{
+		"package": "api", "model_import": "rigtest/model", "store_import": "rigtest/store",
+	}})
+	api = append(api, gentest.Run(t, servergo.New(), doc, authOpts())...)
+	api = append(api, gen.Artifact{Path: "hooks_literal.go", Content: []byte(
+		"package api\n\n" +
+			"// What docs/auth.md shows a main function writing.\n" +
+			"var _ = Hooks{OAuth: OAuthHooks{\n" +
+			"\tBaseURL:    \"https://app.example.com\",\n" +
+			"\tSigningKey: make([]byte, 32),\n" +
+			"\tCredentials: OAuthCredentials{\n" +
+			"\t\tGoogle:    OAuthClient{ID: \"id\", Secret: \"secret\"},\n" +
+			"\t\tMicrosoft: OAuthMicrosoftClient{ID: \"id\", Secret: \"secret\", Tenant: \"common\"},\n" +
+			"\t\tGitHub:    OAuthClient{ID: \"id\", Secret: \"secret\"},\n" +
+			"\t},\n" +
+			"}}\n")})
+
+	gentest.MustCompileAll(t,
+		gentest.Package{
+			Dir: "model",
+			Artifacts: gentest.Run(t, modelgo.New(), doc,
+				gen.Options{Raw: map[string]any{"package": "model"}}),
+		},
+		gentest.Package{
+			Dir: "store",
+			Artifacts: gentest.Run(t, persistgo.New(), doc, gen.Options{Raw: map[string]any{
+				"package": "store", "model_import": "rigtest/model",
+			}}),
+		},
+		gentest.Package{Dir: "api", Artifacts: api},
+	)
+}
+
+// TestASuppliedSigningKeyBeatsTheDevelopmentOne is the one precedence question
+// with two wrong answers rather than one.
+//
+// Under auth.oauth.insecure an empty key is minted per process. A key the
+// application supplied must win over that branch rather than race it — and a
+// supplied key that is too short must reach the refusal, because what a project
+// stated is not something to quietly substitute for.
+func TestASuppliedSigningKeyBeatsTheDevelopmentOne(t *testing.T) {
+	t.Parallel()
+
+	doc := gentest.LoadDocument(t, filepath.Join("testdata", authFixture))
+	doc.API.Auth.OAuth.Insecure = true
+
+	got := find(t, gentest.Run(t, servergo.New(), doc, authOpts()), "auth.gen.go")
+
+	key := got[strings.Index(got, "func signingKey(h OAuthHooks)"):]
+	mint := strings.Index(key, "case len(key) == 0:")
+	if mint < 0 {
+		t.Fatal("insecure is set, so a development key should be minted for an empty one")
+	}
+	if !strings.Contains(key[:mint], "key := h.SigningKey") {
+		t.Error("the development key is minted before the hooks are read, so a supplied " +
+			"key races the one this process invented")
+	}
+	// Which is what makes the mint unreachable for a short supplied key: the
+	// branch asks for nothing at all, not for something too small.
+	if !strings.Contains(key[:mint], "case len(key) >= 32:") {
+		t.Error("a supplied key of fewer than 32 bytes should reach the refusal")
+	}
+}
+
+// TestTheOriginHookAndTheOriginFieldAreBothEmitted covers the configuration no
+// fixture in the repository has: origin_from_host off, which is the only shape
+// where OAuthHooks carries both an Origin function and a BaseURL string.
+//
+// They are different questions — one origin the callback routes are built from,
+// and an override per request — so the emitted file has to say which is which,
+// and it has to compile with both on the struct.
+func TestTheOriginHookAndTheOriginFieldAreBothEmitted(t *testing.T) {
+	t.Parallel()
+
+	doc := gentest.LoadDocument(t, filepath.Join("testdata", authFixture))
+	doc.API.Auth.OAuth.OriginFromHost = false
+
+	api := gentest.Run(t, servicego.New(), doc, gen.Options{Raw: map[string]any{
+		"package": "api", "model_import": "rigtest/model", "store_import": "rigtest/store",
+	}})
+	api = append(api, gentest.Run(t, servergo.New(), doc, authOpts())...)
+
+	got := find(t, api, "auth.gen.go")
+	for _, want := range []string{
+		"Origin func(r *http.Request) string",
+		"BaseURL string",
+		"h.OAuth.Origin,",
+		"Not [OAuthHooks.Origin], which answers per request.",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("the generated wiring does not contain %q", want)
+		}
+	}
+
+	gentest.MustCompileAll(t,
+		gentest.Package{
+			Dir: "model",
+			Artifacts: gentest.Run(t, modelgo.New(), doc,
+				gen.Options{Raw: map[string]any{"package": "model"}}),
+		},
+		gentest.Package{
+			Dir: "store",
+			Artifacts: gentest.Run(t, persistgo.New(), doc, gen.Options{Raw: map[string]any{
+				"package": "store", "model_import": "rigtest/model",
+			}}),
+		},
+		gentest.Package{Dir: "api", Artifacts: api},
+	)
+}
+
 // defaultAuth is what `auth: {enabled: true}` and nothing else resolves to.
 //
 // It comes from the project loader rather than from a literal here, so this test

@@ -399,6 +399,10 @@ the cookie and is refused. `Origin` answers per request instead:
 Origin: func(r *http.Request) string { return "https://" + r.Host },
 ```
 
+`Origin` and `BaseURL` on those hooks are two different questions. `Origin`
+answers per request; `BaseURL` is the one origin rig/auth builds its routes from
+and requires to exist, so setting `Origin` does not remove the need for it.
+
 The constraint it lives inside is the provider's: a redirect URI is registered
 exactly, and few providers accept a wildcard — so every origin it can return has to
 be registered. A deployment with more subdomains than a console can hold keeps the
@@ -827,7 +831,7 @@ auth:
 
   oauth:
     base_url: https://app.example.com  # a provider compares this exactly
-    base_url_env: BASE_URL             # and the environment gets the last word
+    base_url_env: BASE_URL             # where a deployment says which one
     origin_from_host: false            # or derive it per request, see below
     signing_key_env: OAUTH_SIGNING_KEY # >= 32 bytes, the same in every replica
     state_ttl: 10m
@@ -847,6 +851,30 @@ A client secret is never in the file. The configuration names the environment
 variable and the generated code reads it, which is also what lets one binary
 offer Google in a deployment and nothing at all on a laptop: a provider whose
 pair is absent is skipped rather than mounted broken, unless it says `required`.
+
+**And the environment is a fallback, not the only way in.** Three of these
+values are things a deployment supplies rather than states — the origin, the
+signing key, and each provider's pair — so the generated `OAuthHooks` carries a
+field for each, and the field wins:
+
+| Field | Falls back to |
+|---|---|
+| `BaseURL` | `$BASE_URL`, then `base_url` |
+| `SigningKey` | `$OAUTH_SIGNING_KEY` |
+| `Credentials.Google` | `$GOOGLE_CLIENT_ID` / `$GOOGLE_CLIENT_SECRET` |
+
+Set none of them and nothing changes: the reads are the same reads. Set one and
+your `main.go` decides where that value came from — a secret manager, a mounted
+file, a test on an ephemeral port that would rather not write to the process it
+is running in. It is the same answer `serve.Config` gives for `DatabaseURL` and
+`Addr`, and it is what lets an application's own configuration struct name the
+values it needs rather than leaving them to a README.
+
+`Credentials` has one field per provider you configured and no others, so a
+provider you do not offer is one there is nowhere to name, and a misspelling is
+a compile error rather than a value nothing reads. `BaseURL()` beside it answers
+what `base_url` and `$BASE_URL` resolved to — and refuses, naming the variable,
+where they resolve to nothing.
 
 `client_id_env` and `client_secret_env` default to the provider's name in upper
 case, so `- name: google` already reads `GOOGLE_CLIENT_ID` and
@@ -929,8 +957,28 @@ front, err := api.New(pool, api.Hooks{
     },
 
     // How a provider sign-in ends, for a browser that wants a cookie and a
-    // redirect rather than JSON. Nil issues the same session a password login does.
-    OAuth: api.OAuthHooks{OnSignIn: nil},
+    // redirect rather than JSON. Nil issues the same session a password login
+    // does.
+    //
+    // The three values beside it are the ones rig.yaml can only name a variable
+    // for. Written out like this they are read where every other read in a main
+    // function already is; left out entirely, the generated code reads the same
+    // variables itself, which is the ordinary deployment.
+    OAuth: api.OAuthHooks{
+        OnSignIn: nil,
+
+        // The three values a file cannot hold. Each prefers what you set and
+        // reads the variable rig.yaml names when you set nothing, so a project
+        // that writes none of them behaves exactly as it did before they
+        // existed. Fill one in when the value lives where the environment
+        // cannot reach it — a secret manager, a mounted file, or a test on an
+        // ephemeral port whose address does not exist until it is listening.
+        BaseURL:    cfg.OAuthBaseURL,
+        SigningKey: cfg.OAuthSigningKey,
+        Credentials: api.OAuthCredentials{
+            Google: api.OAuthClient{ID: cfg.GoogleID, Secret: cfg.GoogleSecret},
+        },
+    },
 
     // Where the cause of a failed auth request is recorded. Nil uses
     // slog.Default(). Pass the same logger you give Server.Logger below: these
