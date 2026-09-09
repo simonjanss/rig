@@ -2,6 +2,7 @@ package dockerdb
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -199,6 +200,14 @@ func (e *Electric) create(ctx context.Context) error {
 		e.cfg.Image,
 	)
 	if err != nil {
+		// The port is worth naming for the same reason [DB.create] names the
+		// database's: a configured one is somebody's to move, and one the
+		// engine chose under isolation is not.
+		if e.cfg.Port != 0 && errors.Is(err, ErrPortInUse) {
+			return fmt.Errorf("cannot start the sync-service container on port %d: "+
+				"something else is holding it, and database.electric.port in rig.yaml is where to move it: %w",
+				e.cfg.Port, err)
+		}
 		return fmt.Errorf("cannot start the sync-service container: %w", err)
 	}
 	return nil

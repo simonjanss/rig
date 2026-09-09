@@ -3,6 +3,7 @@ package dockerdb
 import (
 	"context"
 	"errors"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -191,5 +192,30 @@ func TestAConfiguredPortIsNamedAndAChosenOneIsNot(t *testing.T) {
 	err = chosen.create(context.Background())
 	if err == nil || strings.Contains(err.Error(), "database.port") {
 		t.Errorf("error points at database.port for a port nobody configured: %v", err)
+	}
+
+	// And the sync service, which is the same rule under a different key. Both
+	// halves are here so neither can lose the pointer on its own.
+	fixedSync := &Electric{
+		cfg:        ElectricConfig{Name: "todo-electric", Image: "electricsql/electric:latest", Port: PortDefaultElectric},
+		runtime:    &scriptRuntime{results: []scriptResult{{stderr: theCIFailure}}},
+		retryDelay: noWait,
+	}
+	err = fixedSync.create(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "database.electric.port") {
+		t.Errorf("error does not point at database.electric.port: %v", err)
+	}
+	if !strings.Contains(err.Error(), strconv.Itoa(PortDefaultElectric)) {
+		t.Errorf("error does not name the sync service's port: %v", err)
+	}
+
+	chosenSync := &Electric{
+		cfg:        ElectricConfig{Name: "todo-electric", Image: "electricsql/electric:latest"},
+		runtime:    &scriptRuntime{results: []scriptResult{{stderr: theCIFailure}}},
+		retryDelay: noWait,
+	}
+	err = chosenSync.create(context.Background())
+	if err == nil || strings.Contains(err.Error(), "database.electric.port") {
+		t.Errorf("error points at database.electric.port for a port nobody configured: %v", err)
 	}
 }

@@ -114,11 +114,11 @@ func start() (*pgxpool.Pool, string, error) {
 	// Through dockerdb.Create rather than exec.Command, for the retry: under
 	// isolation this publish is the engine's port to choose, and it sometimes
 	// chooses one the kernel has already given away.
-	rt, err := dockerdb.FindRuntime(ctx, "")
-	if err != nil {
-		return nil, "", err
-	}
-	if err := dockerdb.Create(ctx, rt, os.Stderr, sync,
+	//
+	// On the database's engine, which is the one this suite is already talking
+	// to: asking for a second would probe for it again and could answer podman
+	// where everything else here says docker.
+	if err := dockerdb.Create(ctx, db.Runtime(), os.Stderr, sync,
 		"--publish", dockerdb.Publish("127.0.0.1", syncPort, 3000),
 		"--add-host", "host.docker.internal:host-gateway",
 		// The port the database really publishes, which under isolation is not

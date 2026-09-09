@@ -228,12 +228,9 @@ func TestTheSyncServiceRunsAsTheLeastPrivilegedRole(t *testing.T) {
 	// there first is the only arrangement that answers both.
 
 	// Step four: the sync service, as the role rather than as the superuser.
-	// Through dockerdb.Create for the retry it brings, as in the suite next door.
-	rt, err := dockerdb.FindRuntime(ctx, "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := dockerdb.Create(ctx, rt, os.Stderr, sync,
+	// Through dockerdb.Create for the retry it brings, on the database's own
+	// engine, as in the suite next door.
+	if err := dockerdb.Create(ctx, db.Runtime(), os.Stderr, sync,
 		"--publish", dockerdb.Publish("127.0.0.1", roleSyncPort, 3000),
 		"--add-host", "host.docker.internal:host-gateway",
 		"--env", "DATABASE_URL="+dsn,
