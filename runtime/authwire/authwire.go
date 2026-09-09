@@ -172,6 +172,12 @@ type RegisterRequest struct {
 	EmailAddress string `json:"emailAddress"`
 	DisplayName  string `json:"displayName"`
 	Password     string `json:"password"`
+	// Client is web, mobile or machine. Anything else is read as web.
+	//
+	// Here for the same reason it is on [LoginRequest]: a registration whose
+	// OnRegistered puts somebody in a tenant comes back with a session, and a
+	// session has to say what kind of client is holding it.
+	Client string `json:"client"`
 }
 
 // SessionView is one session, as somebody reviewing it sees it.

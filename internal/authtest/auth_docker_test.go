@@ -1742,6 +1742,52 @@ func TestOnRegisteredOverRealSQL(t *testing.T) {
 		}
 	})
 
+	t.Run("a hook that joins them for real answers with the tenant", func(t *testing.T) {
+		// The other body, and the one the hand-built response used to be blind
+		// to: an account rather than an invitation. The newcomer is in a real
+		// tenant by the time the transaction commits, so the answer is the one a
+		// login would give rather than an empty list saying they belong nowhere.
+		h.onRegistered = func(ctx context.Context, accounts *account.Service, in account.Registered) error {
+			_, err := accounts.Provision(ctx, account.ProvisionInput{
+				TenantID:     h.tenant,
+				EmailAddress: in.EmailAddress,
+				DisplayName:  in.DisplayName,
+			})
+			return err
+		}
+		h.mount(h.build(h.tenants))
+
+		address := "landed-" + uuid.New().String()[:8] + "@example.com"
+		res := register(t, address)
+		if res.status != http.StatusCreated {
+			t.Fatalf("register: %d %s", res.status, res.body)
+		}
+		var out struct {
+			AccessToken   string `json:"accessToken"`
+			IdentityToken string `json:"identityToken"`
+			Tenants       []struct {
+				TenantID uuid.UUID `json:"tenantId"`
+				Current  bool      `json:"current"`
+			} `json:"tenants"`
+		}
+		res.decode(t, &out)
+
+		if out.AccessToken == "" {
+			t.Error("no session, though the hook made them an account")
+		}
+		if out.IdentityToken == "" {
+			t.Error("the identity token is issued alongside a session, not instead of one")
+		}
+		if len(out.Tenants) != 1 || out.Tenants[0].TenantID != h.tenant || !out.Tenants[0].Current {
+			t.Fatalf("want the starter tenant marked current, got %s", res.body)
+		}
+
+		// And the session works, which is the whole point of being handed one.
+		if got := h.do(t, "GET", "/auth/tenants", out.AccessToken, ""); got.status != http.StatusOK {
+			t.Fatalf("the session the registration issued: %d %s", got.status, got.body)
+		}
+	})
+
 	t.Run("a hook error rolls the sign-up back", func(t *testing.T) {
 		h.onRegistered = func(context.Context, *account.Service, account.Registered) error {
 			return errors.New("no room")

@@ -190,6 +190,14 @@ export type RegisterRequest = {
     emailAddress: string;
     displayName: string;
     password: string;
+    /**
+     * `web`, `mobile` or `machine`. Anything else is read as `web`.
+     *
+     * Here for the same reason it is on {@link LoginRequest}: a registration
+     * whose `OnRegistered` puts somebody in a tenant comes back with a session,
+     * and a session has to say what kind of client is holding it.
+     */
+    client?: string;
 };
 
 /** One session, as somebody reviewing it sees it. */

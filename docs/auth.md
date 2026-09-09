@@ -225,6 +225,22 @@ with `Invite` set — so the picker the stranger lands in already lists an
 invitation to a starter tenant. The transaction is the point: a hook error
 rolls the whole sign-up back, so there is never an account that half-joined.
 
+**The answer follows what the hook did rather than assuming it.** With `Invite`
+set the response is the one above: an invitation is not a membership, so
+`tenants` is empty and there is no session. A hook that provisions *without*
+`Invite` puts somebody in a real tenant, and then step 1 answers the way a login
+does — the tenant list, the one they landed in marked `current`, and a session
+for it:
+
+```
+1  POST /auth/register            {emailAddress, displayName, password}
+   → 201  accessToken, refreshToken, identityToken,
+          tenants: [{…, current: true}]                  ← the hook put them there
+```
+
+Anything else would tell a newcomer they belong nowhere and make them sign in
+again to find the tenant they had just been put in.
+
 Accepting sends the invitation's **identifier**, not the token that was emailed.
 Being signed in as the person invited is the *stronger* claim of the two: a token
 proves somebody reached the address, a session proves who they are. That is why a
@@ -1269,6 +1285,9 @@ front, err := api.New(pool, api.Hooks{
     // ordinary body is Provision with Invite set, so the picker they land in
     // already has an invitation to a starter tenant waiting. Present only when
     // allow_registration is set; nil registers the person and nothing else.
+    //
+    // Leave out Invite and it is a real account rather than an invitation, and
+    // the registration answers with the tenant and a session for it.
     OnRegistered: func(ctx context.Context, accounts *account.Service, in account.Registered) error {
         _, err := accounts.Provision(ctx, account.ProvisionInput{
             TenantID:     starterTenant,
