@@ -61,16 +61,24 @@ type pending struct {
 func (h *Handler) start(w http.ResponseWriter, r *http.Request) {
 	p, err := h.provider(r)
 	if err != nil {
-		h.fail(w, r, err)
+		h.fail(w, r, &Failure{Reason: ReasonUnknownProvider, Err: err})
 		return
 	}
+	// Lowercased once, because that is how the sealed cookie and every failure
+	// below name a provider, and the route's own spelling is the caller's.
+	name := strings.ToLower(p.Name)
+
 	// Nil means the application does not know yet, which is an ordinary answer
 	// rather than a missing one — see [Config.Tenant].
 	var tenantID uuid.UUID
 	if h.cfg.Tenant != nil {
 		id, err := h.cfg.Tenant(r)
 		if err != nil {
-			h.fail(w, r, err)
+			// The application wrote this resolver, so it is the one failure here
+			// whose cause is not rig's — and the only reason it gets its own.
+			f := failure(err, ReasonTenant)
+			f.Provider = name
+			h.fail(w, r, f)
 			return
 		}
 		tenantID = id
@@ -78,24 +86,30 @@ func (h *Handler) start(w http.ResponseWriter, r *http.Request) {
 
 	returnTo, err := h.checkReturnTo(r.URL.Query().Get("returnTo"))
 	if err != nil {
-		h.fail(w, r, err)
+		h.fail(w, r, &Failure{Reason: ReasonReturnTo, Provider: name, Err: err})
 		return
 	}
 
 	state, err := randomString()
 	if err != nil {
-		h.fail(w, r, rigerr.Internal(err, "generate state"))
+		h.fail(w, r, &Failure{
+			Reason: ReasonInternal, Provider: name, TenantID: tenantID,
+			Err: rigerr.Internal(err, "generate state"),
+		})
 		return
 	}
 	verifier := oauth2.GenerateVerifier()
 
 	value, err := h.seal(pending{
-		State: state, Verifier: verifier, Provider: strings.ToLower(p.Name),
+		State: state, Verifier: verifier, Provider: name,
 		ReturnTo: returnTo, Tenant: tenantID.String(),
 		Expires: h.now().Add(h.cfg.StateTTL).Unix(),
 	})
 	if err != nil {
-		h.fail(w, r, rigerr.Internal(err, "seal state"))
+		h.fail(w, r, &Failure{
+			Reason: ReasonInternal, Provider: name, TenantID: tenantID,
+			ReturnTo: returnTo, Err: rigerr.Internal(err, "seal state"),
+		})
 		return
 	}
 	http.SetCookie(w, h.cookie(value, h.cfg.StateTTL))
@@ -112,33 +126,45 @@ func (h *Handler) start(w http.ResponseWriter, r *http.Request) {
 
 // callback finishes a sign-in.
 func (h *Handler) callback(w http.ResponseWriter, r *http.Request) {
-	p, err := h.provider(r)
-	if err != nil {
-		h.fail(w, r, err)
-		return
-	}
 	// Clear the cookie whatever happens next: it is single-use, and one left
-	// behind is a state somebody else could replay.
+	// behind is a state somebody else could replay. Above the provider lookup
+	// rather than below it, because "whatever happens next" includes a callback
+	// naming a provider this deployment does not have.
 	http.SetCookie(w, h.cookie("", -time.Second))
 
+	p, err := h.provider(r)
+	if err != nil {
+		h.fail(w, r, &Failure{Reason: ReasonUnknownProvider, Err: err})
+		return
+	}
+	name := strings.ToLower(p.Name)
+
 	query := r.URL.Query()
-	if reason := query.Get("error"); reason != "" {
+	if reported := query.Get("error"); reported != "" {
 		// Somebody pressed cancel, or the provider refused. Neither is a
 		// server failure, and neither should look like one.
 		//
-		// No tenant on the entry: it is in the cookie, and a refusal arrives
+		// access_denied is the cancel button and the provider sends it for
+		// nothing else, so it is the one value worth reading — matched exactly,
+		// and answered with a reason of rig's own rather than by passing the
+		// provider's word for it on to anybody.
+		//
+		// No tenant on the failure: it is in the cookie, and a refusal arrives
 		// before there is any reason to trust what came back.
-		h.write(r.Context(), authlog.Entry{
-			Event: authlog.EventOAuthSignIn, Outcome: authlog.Failed,
-			Detail: map[string]any{"provider": p.Name, "reason": reason},
+		reason := ReasonProviderRefused
+		if reported == "access_denied" {
+			reason = ReasonCancelled
+		}
+		h.fail(w, r, &Failure{
+			Reason: reason, Provider: name, ProviderError: reported,
+			Err: rigerr.BadRequest("%s did not complete the sign-in: %s", p.Name, reported),
 		})
-		h.fail(w, r, rigerr.BadRequest("%s did not complete the sign-in: %s", p.Name, reason))
 		return
 	}
 
 	state, err := h.open(r)
 	if err != nil {
-		h.fail(w, r, err)
+		h.fail(w, r, &Failure{Reason: ReasonState, Provider: name, Err: err})
 		return
 	}
 	// From the cookie, not from the request. The cookie is signed, so this is the
@@ -148,7 +174,10 @@ func (h *Handler) callback(w http.ResponseWriter, r *http.Request) {
 	if state.Tenant != "" {
 		id, err := uuid.Parse(state.Tenant)
 		if err != nil {
-			h.fail(w, r, rigerr.BadRequest("this sign-in did not start here"))
+			h.fail(w, r, &Failure{
+				Reason: ReasonState, Provider: name, ReturnTo: state.ReturnTo,
+				Err: rigerr.BadRequest("this sign-in did not start here"),
+			})
 			return
 		}
 		tenantID = id
@@ -156,48 +185,61 @@ func (h *Handler) callback(w http.ResponseWriter, r *http.Request) {
 	// The double submit. A state that came back without a matching cookie is
 	// somebody else's sign-in being finished in this browser.
 	if !hmac.Equal([]byte(state.State), []byte(query.Get("state"))) {
-		h.fail(w, r, rigerr.BadRequest("this sign-in did not start here"))
+		h.fail(w, r, &Failure{
+			Reason: ReasonState, Provider: name, TenantID: tenantID, ReturnTo: state.ReturnTo,
+			Err: rigerr.BadRequest("this sign-in did not start here"),
+		})
 		return
 	}
-	if state.Provider != strings.ToLower(p.Name) {
-		h.fail(w, r, rigerr.BadRequest("this sign-in started with a different provider"))
+	if state.Provider != name {
+		h.fail(w, r, &Failure{
+			Reason: ReasonState, Provider: name, TenantID: tenantID, ReturnTo: state.ReturnTo,
+			Err: rigerr.BadRequest("this sign-in started with a different provider"),
+		})
 		return
 	}
 
 	code := query.Get("code")
 	if code == "" {
-		h.fail(w, r, rigerr.BadRequest("%s returned no authorization code", p.Name))
+		h.fail(w, r, &Failure{
+			Reason: ReasonNoCode, Provider: name, TenantID: tenantID, ReturnTo: state.ReturnTo,
+			Err: rigerr.BadRequest("%s returned no authorization code", p.Name),
+		})
 		return
 	}
 
 	cfg := p.config(h.redirectURI(r, p))
 	token, err := cfg.Exchange(r.Context(), code, oauth2.VerifierOption(state.Verifier))
 	if err != nil {
-		h.fail(w, r, rigerr.BadRequest("%s refused the authorization code", p.Name))
+		// Wrapped rather than dropped. What the person is told is unchanged —
+		// the provider's own words here are an OAuth error document nobody can
+		// act on — but a wrong client secret refuses every sign-in identically,
+		// and without the cause underneath there is nothing anywhere to say so.
+		h.fail(w, r, &Failure{
+			Reason: ReasonExchange, Provider: name, TenantID: tenantID, ReturnTo: state.ReturnTo,
+			Err: rigerr.BadRequest("%s refused the authorization code", p.Name).Wrap(err),
+		})
 		return
 	}
 
 	profile, err := p.fetch(r.Context(), cfg, token)
 	if err != nil {
-		h.fail(w, r, err)
+		f := failure(err, ReasonProfile)
+		f.Provider, f.TenantID, f.ReturnTo = name, tenantID, state.ReturnTo
+		h.fail(w, r, f)
 		return
 	}
 
 	in, err := h.resolve(r.Context(), tenantID, p, profile)
 	if err != nil {
-		failed := authlog.Entry{
-			Event: authlog.EventOAuthSignIn, Outcome: authlog.Failed,
-			EmailAddress: strings.ToLower(profile.EmailAddress),
-			IPAddress:    remoteAddr(r), UserAgent: r.UserAgent(),
-			Detail: map[string]any{"provider": p.Name, "reason": err.Error()},
-		}
-		// Only when there was one. A pointer to the nil UUID is not "no tenant",
-		// it is a tenant that does not exist, and it would go in the column.
-		if tenantID != uuid.Nil {
-			failed.TenantID = &tenantID
-		}
-		h.write(r.Context(), failed)
-		h.fail(w, r, err)
+		// resolve says which refusal this was, because it is the only place that
+		// knows: from out here the four of them are four sentences, and telling
+		// them apart by reading one is a test that passes until somebody rewords
+		// it. A Store refusing is not one of the four, and is internal.
+		f := failure(err, ReasonInternal)
+		f.Provider, f.TenantID, f.ReturnTo = name, tenantID, state.ReturnTo
+		f.EmailAddress = profile.EmailAddress
+		h.fail(w, r, f)
 		return
 	}
 
@@ -222,7 +264,13 @@ func (h *Handler) callback(w http.ResponseWriter, r *http.Request) {
 
 	in.ReturnTo = state.ReturnTo
 	if err := h.cfg.OnSignIn(w, r, in); err != nil {
-		h.fail(w, r, err)
+		// The Succeeded entry above stays beside the Failed one this writes, and
+		// the two are not in conflict: the first says the provider answered, the
+		// second says a session was not issued.
+		f := failure(err, ReasonEnding)
+		f.Provider, f.TenantID, f.ReturnTo = name, tenantID, state.ReturnTo
+		f.EmailAddress = profile.EmailAddress
+		h.fail(w, r, f)
 	}
 }
 

@@ -288,3 +288,59 @@ func cmpOr(a, b string) string {
 	}
 	return b
 }
+
+// The provider routes are the only ones a person reaches with their address
+// bar, so they get their own error hook — and it has to survive the trip
+// through New, which is where every other oauth setting is assembled.
+//
+// It is deliberately not fed from Config.OnError. That one is the shape an API
+// answers failures in, and it answers them in JSON; a JSON envelope rendered
+// into an address bar is no more use to somebody than the plain page it would
+// replace. Two questions, two fields, and this is what says the second one
+// arrives.
+func TestTheProviderRoutesGetTheirOwnErrorHook(t *testing.T) {
+	t.Parallel()
+
+	var called bool
+	// A pool rather than the zero value: a refused sign-in writes an
+	// authentication-log entry now, which is the point of the change this tests
+	// the other half of, and that entry goes through the database.
+	front, err := auth.New(auth.Config{
+		Pool: unconnected(t),
+		OnError: func(http.ResponseWriter, *http.Request, error) {
+			t.Error("the API's error shape answered a browser navigation")
+		},
+		OAuth: auth.OAuth{
+			Providers:  []oauth.Provider{oauth.Google("id", "secret")},
+			BaseURL:    "https://app.example.com",
+			SigningKey: bytes.Repeat([]byte("k"), 32),
+			OnError: func(w http.ResponseWriter, r *http.Request, f *oauth.Failure) {
+				called = true
+				if f.Reason != oauth.ReasonCancelled {
+					t.Errorf("reason = %q, want %q", f.Reason, oauth.ReasonCancelled)
+				}
+				http.Redirect(w, r, "/login?error="+string(f.Reason), http.StatusSeeOther)
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	mux := http.NewServeMux()
+	front.Mount(mux)
+
+	res := httptest.NewRecorder()
+	mux.ServeHTTP(res, httptest.NewRequest(http.MethodGet,
+		"http://example.com/auth/oauth/google/callback?error=access_denied", nil))
+
+	if !called {
+		t.Fatal("OAuth.OnError never reached the handler")
+	}
+	if res.Code != http.StatusSeeOther {
+		t.Errorf("status = %d, want the hook's 303", res.Code)
+	}
+	if to := res.Header().Get("Location"); to != "/login?error=cancelled" {
+		t.Errorf("location = %q, want the sign-in page", to)
+	}
+}

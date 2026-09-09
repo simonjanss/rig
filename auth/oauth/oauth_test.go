@@ -31,6 +31,9 @@ type fakeProvider struct {
 	challenge string
 	// verifier is what the token request sent back.
 	verifier string
+	// refuseExchange makes the token endpoint refuse, the way it does when the
+	// client secret is wrong. Set it before driving the flow.
+	refuseExchange bool
 }
 
 func newFakeProvider(t *testing.T, profile oauth.Profile) *fakeProvider {
@@ -50,6 +53,13 @@ func newFakeProvider(t *testing.T, profile oauth.Profile) *fakeProvider {
 	mux.HandleFunc("/token", func(w http.ResponseWriter, r *http.Request) {
 		_ = r.ParseForm()
 		f.verifier = r.Form.Get("code_verifier")
+
+		if f.refuseExchange {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusUnauthorized)
+			_ = json.NewEncoder(w).Encode(map[string]any{"error": "invalid_client"})
+			return
+		}
 
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{

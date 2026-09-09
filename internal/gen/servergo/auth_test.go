@@ -459,6 +459,47 @@ func TestAnUnsetOriginIsRefusedHere(t *testing.T) {
 	)
 }
 
+// TestAFailedProviderSignInIsReachableFromTheHooks is rig#150's other half.
+//
+// oauth.Config.OnError is useless to a generated project unless the generated
+// hooks carry it: a project never calls auth.New itself, so a field rig does not
+// emit is a field nobody can set. OnSignIn has always been emitted this way and
+// this is the same two lines — which is exactly why it was easy to add the hook
+// and forget the wiring.
+func TestAFailedProviderSignInIsReachableFromTheHooks(t *testing.T) {
+	t.Parallel()
+
+	doc := gentest.LoadDocument(t, filepath.Join("testdata", authFixture))
+	got := find(t, gentest.Run(t, servergo.New(), doc, authOpts()), "auth.gen.go")
+
+	for _, want := range []string{
+		"OnError func(w http.ResponseWriter, r *http.Request, f *oauth.Failure)",
+		"OnError:           h.OAuth.OnError,",
+		// The one rule a project has to be told, because getting it wrong is a
+		// reflected-input bug rather than a compile error.
+		"Never render Failure.ProviderError",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("the generated hooks do not contain %q", want)
+		}
+	}
+
+	// And it goes exactly where OnSignIn goes, in both halves: the field is on
+	// the struct wherever that one is, and the assignment is behind the same
+	// condition. Two hooks emitted by two rules is one rule to get out of step.
+	doc.API.Auth.OAuth.Providers = nil
+	bare := find(t, gentest.Run(t, servergo.New(), doc, authOpts()), "auth.gen.go")
+	for _, pair := range [][2]string{
+		{"OnSignIn func(", "OnError func("},
+		{"OnSignIn:", "OnError:"},
+	} {
+		if strings.Contains(bare, pair[0]) != strings.Contains(bare, pair[1]) {
+			t.Errorf("with no providers, %q and %q are emitted by different rules",
+				pair[0], pair[1])
+		}
+	}
+}
+
 // TestAProjectCanWriteTheOAuthHooksLiteral compiles the literal docs/auth.md
 // prints, in the package the generator wrote it for.
 //
@@ -477,6 +518,7 @@ func TestAProjectCanWriteTheOAuthHooksLiteral(t *testing.T) {
 	api = append(api, gentest.Run(t, servergo.New(), doc, authOpts())...)
 	api = append(api, gen.Artifact{Path: "hooks_literal.go", Content: []byte(
 		"package api\n\n" +
+			"import (\n\t\"net/http\"\n\n\t\"github.com/simonjanss/rig/auth/oauth\"\n)\n\n" +
 			"// What docs/auth.md shows a main function writing.\n" +
 			"var _ = Hooks{OAuth: OAuthHooks{\n" +
 			"\tBaseURL:    \"https://app.example.com\",\n" +
@@ -485,6 +527,9 @@ func TestAProjectCanWriteTheOAuthHooksLiteral(t *testing.T) {
 			"\t\tGoogle:    OAuthClient{ID: \"id\", Secret: \"secret\"},\n" +
 			"\t\tMicrosoft: OAuthMicrosoftClient{ID: \"id\", Secret: \"secret\", Tenant: \"common\"},\n" +
 			"\t\tGitHub:    OAuthClient{ID: \"id\", Secret: \"secret\"},\n" +
+			"\t},\n" +
+			"\tOnError: func(w http.ResponseWriter, r *http.Request, f *oauth.Failure) {\n" +
+			"\t\thttp.Redirect(w, r, \"/login?error=\"+string(f.Reason), http.StatusSeeOther)\n" +
 			"\t},\n" +
 			"}}\n")})
 

@@ -210,6 +210,22 @@ type OAuthHooks struct {
 	// list, for the picker to take over.
 	OnSignIn func(w http.ResponseWriter, r *http.Request, in oauth.SignIn) error
 
+	// OnError renders a provider sign-in that did not finish, and it is a
+	// different question from the API's own error shape.
+	//
+	// The two provider routes are the only ones here a person reaches with their
+	// address bar. Every other route is called by script, which can read a status
+	// and a body; a browser mid-navigation renders whatever came back as a
+	// document, so rig's default is a bare text/plain page on this API's origin
+	// with no way back to the application.
+	//
+	// The oauth.Failure it gets says which of the ways this was — cancelled at
+	// the consent screen, an expired state cookie, an address the provider has not
+	// verified — so a front end can be sent to its own sign-in page with a code
+	// it has copy for. Never render Failure.ProviderError: it is text anybody can
+	// write. Nil keeps the default.
+	OnError func(w http.ResponseWriter, r *http.Request, f *oauth.Failure)
+
 	// BaseURL is this application's own origin, and takes precedence over
 	// everything rig.yaml said about one.
 	//
@@ -476,6 +492,7 @@ func Config(pool *pgxpool.Pool, h Hooks) (auth.Config, error) {
 			AllowProvisioning: true,
 			AllowedReturnTo:   append([]string{"https://app.example.com", "https://beta.example.com"}, h.OAuth.ReturnTo...),
 			OnSignIn:          h.OAuth.OnSignIn,
+			OnError:           h.OAuth.OnError,
 		}
 	}
 
