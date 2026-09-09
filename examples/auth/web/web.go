@@ -37,6 +37,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/simonjanss/rig/auth"
+	"github.com/simonjanss/rig/auth/account"
 	"github.com/simonjanss/rig/examples/auth/services/outbox"
 )
 
@@ -74,6 +75,13 @@ type Handler struct {
 	// nothing, which is a project with no `cache:` block.
 	grantsCache *auth.GrantsCache
 
+	// providers are the sign-in providers this run offers, from
+	// auth.Auth.Providers — the live list rather than what rig.yaml named,
+	// because the stand-in is supplied in Go and a real one is skipped when its
+	// credentials are absent. A page that read the configuration would offer
+	// buttons that cannot work and hide the one that can.
+	providers []string
+
 	// trace is the request log the curl panel shows.
 	trace *tracer
 	// lastKey holds a freshly minted secret for exactly one render.
@@ -83,6 +91,7 @@ type Handler struct {
 // New builds the UI.
 func New(
 	api http.Handler, pool *pgxpool.Pool, mail *outbox.Box, grants *auth.GrantsCache,
+	providers []string,
 ) (*Handler, error) {
 	tpl, err := template.New("").Funcs(helpers()).ParseFS(files, "templates/*.gohtml")
 	if err != nil {
@@ -90,7 +99,7 @@ func New(
 	}
 	return &Handler{
 		api: api, pool: pool, mail: mail, tpl: tpl, grantsCache: grants,
-		trace: &tracer{limit: 40},
+		providers: providers, trace: &tracer{limit: 40},
 	}, nil
 }
 
@@ -481,4 +490,47 @@ func helpers() template.FuncMap {
 			return out
 		},
 	}
+}
+
+// FinishProviderSignIn is how a provider sign-in ends here: a cookie and a
+// redirect to the page.
+//
+// It is the last step rig will not take, because it cannot. The default ending
+// answers with JSON, which is exactly right for a program and useless to a
+// browser mid-redirect — it renders as a document and there is no way back to
+// the application. Which of the two an application wants depends on what its
+// front end is, and only the application knows.
+//
+// A function rather than a method, and that is not tidiness. [New] needs the
+// mux, the mux needs the auth foundation, and the foundation needs this hook —
+// so a method would close the circle. Nothing here needs the handler: the
+// cookie is the same one every other action writes, and it is written by the
+// same [setCookie].
+//
+// **The result comes from account.Service.SignInIdentity, not from
+// Sessions.Issue.** A sign-in here names no tenant, so the SignIn's TenantID
+// and AccountID are both nil and issuing straight from them would put a session
+// in a tenant that does not exist. What arrives instead may have no session at
+// all — somebody who belongs nowhere yet — and the cookie carries only the
+// identity token, which is what puts the page into the picker.
+func FinishProviderSignIn(
+	w http.ResponseWriter, r *http.Request, res account.SignInResult, provider string,
+) error {
+	c := sessionCookie{Identity: res.Identity.Token, TenantID: res.TenantID}
+	if res.Session != nil {
+		c.Access, c.Refresh = res.Session.Access.Token, res.Session.Refresh.Token
+		c.Expires = res.Session.Access.ExpiresAt
+	}
+	setCookie(w, c)
+
+	// Two different things happened and the page should say which. Landing
+	// somewhere is the ordinary sign-in; landing nowhere is the state this
+	// example exists to show, and a person looking at an empty picker deserves
+	// to be told it is not a failure.
+	note := "signed in with " + provider
+	if res.Session == nil {
+		note += " — and belong to no tenant yet, so here is the picker"
+	}
+	http.Redirect(w, r, "/ui?flash="+url.QueryEscape(note), http.StatusFound)
+	return nil
 }

@@ -147,3 +147,30 @@ func TestTheDefaultProviderSignInIsUnchangedForANamedTenant(t *testing.T) {
 			tok.TenantID, tok.AccountID, f.tenant, f.account.ID)
 	}
 }
+
+// The remember-me box a provider sign-in has nowhere to draw.
+//
+// It is asked for with `?remember=` on the start route and carried across the
+// round trip in the sealed state cookie, so by the time the ending runs it is
+// an ordinary field. What it buys is the same thing it buys a password login:
+// RememberTTL instead of RefreshTTL.
+func TestARememberedProviderSignInGetsTheLongerSession(t *testing.T) {
+	t.Parallel()
+
+	f := setup(t)
+
+	ordinary, err := f.signIn(t, oauth.SignIn{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	remembered, err := f.signIn(t, oauth.SignIn{Remember: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	short := decodeSignIn(t, ordinary).RefreshExpiresAt
+	long := decodeSignIn(t, remembered).RefreshExpiresAt
+	if !long.After(short) {
+		t.Errorf("remembered session ends %s, no later than the ordinary one at %s", long, short)
+	}
+}

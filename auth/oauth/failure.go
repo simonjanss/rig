@@ -19,6 +19,12 @@ import (
 // own copy, so a value here is a contract rather than an implementation detail:
 // one reason per distinct thing a person or an operator could do about it, and
 // never two reasons for one branch.
+//
+// Closed does not mean it never grows. A value never changes meaning and never
+// disappears; a branch that turns out to be two branches gains a second value,
+// which is a switch that falls through to a default rather than one that starts
+// lying — and one branch answering for two facts is the failure this type
+// exists to prevent.
 type Reason string
 
 // The ways a provider sign-in does not finish.
@@ -72,9 +78,21 @@ const (
 	// exists. Trying again changes nothing.
 	ReasonUnverifiedAddress Reason = "unverified_address"
 	// ReasonNoAccount is somebody the provider authenticated and this
-	// application will not admit, because provisioning is off. Also not worth
+	// application has never heard of: no identity has that address, and
+	// provisioning is off, so there is nobody to sign in as. Also not worth
 	// suggesting a retry for.
 	ReasonNoAccount Reason = "no_account"
+	// ReasonNoTenantAccess is the other half of that, and the difference is
+	// worth two sentences of copy rather than one: this application does know
+	// them, they are simply not in the tenant this sign-in named, and joining
+	// is off. "We have never heard of you" and "you are not in this workspace"
+	// are answers a person can act on differently — the second one has somebody
+	// to ask.
+	//
+	// It is the same refusal a password login gives for the same fact, word for
+	// word, because a person who signs in two ways should not be told two
+	// different things about one situation.
+	ReasonNoTenantAccess Reason = "no_tenant_access"
 	// ReasonEnding is [Config.OnSignIn] returning an error — the provider said
 	// who this is and the last step refused. A tenant they turn out not to
 	// belong to is the usual one.

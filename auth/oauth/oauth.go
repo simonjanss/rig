@@ -14,8 +14,9 @@
 // And who somebody is, is a separate question from whether they belong here. The
 // first is global — one provider link, one identity, however many tenants — and
 // the second is per tenant and answered no by default. A provider will
-// authenticate anybody with a Google account, so joining a tenant is gated by
-// [Config.AllowProvisioning] and by the tenant's own list of allowed domains.
+// authenticate anybody with a Google account, so becoming somebody here is
+// gated by [Config.AllowProvisioning], joining a tenant a sign-in named by
+// [Config.AllowJoining], and both by the tenant's own list of allowed domains.
 package oauth
 
 import (
@@ -100,7 +101,25 @@ type Store interface {
 	// one beside them.
 	FindIdentityByEmail(ctx context.Context, lowercased string) (uuid.UUID, error)
 
-	// LinkIdentity records the connection.
+	// LinkIdentity records the connection, and records the evidence for it.
+	//
+	// A link is only ever offered on an address the provider says is verified —
+	// [Handler.identity] refuses otherwise — so an implementation must also
+	// mark the identity's address verified when [Profile.EmailVerified] and it
+	// is not already marked. That is the same evidence ProvisionIdentity acts
+	// on, and writing one without the other leaves somebody who signed up with
+	// a password and later signed in with Google unverified on the strength of
+	// a column rather than of anything they did.
+	//
+	// Already verified is left alone rather than restamped: the question is
+	// whether the address was ever proved, and the first answer is the true one.
+	//
+	// Called on every provider sign-in that carries a verified address, not
+	// only the first, so it has to be idempotent: an implementation upserts on
+	// (provider, subject) rather than inserting. Every sign-in rather than the
+	// first because a link made before rig recorded the evidence has no other
+	// occasion to be stamped, and because the address the provider reports is
+	// worth keeping current.
 	LinkIdentity(ctx context.Context, in LinkInput) (*Link, error)
 
 	// ProvisionIdentity creates the person and links them in one step.
@@ -212,18 +231,39 @@ type Config struct {
 	// redirect on a sign-in endpoint wears your domain in a phishing link.
 	AllowedReturnTo []string
 
-	// AllowProvisioning creates an account for somebody with no existing one.
+	// AllowProvisioning creates a person this application has never seen.
 	//
 	// Off by default. An open sign-in endpoint on a business application is a
 	// way for anybody with a Google account to appear inside a customer's
 	// tenant, which is rarely what anyone wants and never what they expect.
 	//
-	// It gates two doors: creating the person, and joining them to a tenant. The
-	// second only exists when a tenant was named — a sign-in that named none has
-	// no tenant to join and settles that question later — so for a deployment
-	// that leaves [Config.Tenant] nil, this is the switch on "may a stranger
+	// It is the first of two doors, and it is the only one a sign-in that named
+	// no tenant ever reaches — there is nowhere to join, and that question is
+	// settled later from the person's own memberships. So for a deployment that
+	// leaves [Config.Tenant] nil, this is the whole switch: "may a stranger
 	// become somebody here at all".
+	//
+	// [Config.AllowJoining] is the second door, and follows this one unless it
+	// is set.
 	AllowProvisioning bool
+
+	// AllowJoining creates an account in the tenant a sign-in named, for
+	// somebody who is not in it yet. Nil follows [Config.AllowProvisioning],
+	// which is what one switch did when it gated both doors.
+	//
+	// It is separate because the two doors are separate decisions, and a
+	// deployment can want opposite answers to them. "A provider may create a
+	// person, but only an invitation may put them in a tenant" is the ordinary
+	// one — with a tenant read from a request, the join is what a crafted
+	// /start link would abuse, and the person on its own reaches nothing. The
+	// reverse is ordinary too: a host-per-tenant deployment whose people come
+	// from a directory elsewhere may want to admit them to the tenant the host
+	// named and never invent one.
+	//
+	// It only ever applies to a sign-in that named a tenant. Where none was
+	// named, joining is the picker's job rather than the callback's, and this
+	// field is not consulted.
+	AllowJoining *bool
 
 	Log authlog.Log
 
@@ -278,6 +318,15 @@ type SignIn struct {
 	// ReturnTo is where the caller asked to be sent afterwards, already
 	// checked against the allow-list. Empty when none was asked for.
 	ReturnTo string
+	// Remember is the long-session request, from `?remember=` on the start
+	// route and carried across the round trip in the sealed cookie. Feed it to
+	// SignInIdentityInput.Remember, which the default ending does.
+	//
+	// It has no switch of its own, and does not need one: the two lengths it
+	// chooses between are RefreshTTL and RememberTTL, both of which the
+	// application configured. A deployment that does not want long provider
+	// sessions sets them equal and this becomes a no-op.
+	Remember bool
 }
 
 // DefaultStateTTL bounds a sign-in round trip.
@@ -289,6 +338,10 @@ type Handler struct {
 	base      string
 	providers map[string]Provider
 	now       func() time.Time
+	// joining is [Config.AllowJoining] with its default applied, resolved once
+	// in [New] rather than at every callback — the same thing New does for the
+	// log, the state TTL and the clock.
+	joining bool
 }
 
 // New builds a handler.
@@ -321,11 +374,17 @@ func New(cfg Config) (*Handler, error) {
 		base = "/auth/oauth"
 	}
 
+	joining := cfg.AllowProvisioning
+	if cfg.AllowJoining != nil {
+		joining = *cfg.AllowJoining
+	}
+
 	h := &Handler{
 		cfg:       cfg,
 		base:      strings.TrimRight(base, "/"),
 		providers: make(map[string]Provider, len(cfg.Providers)),
 		now:       cfg.Now,
+		joining:   joining,
 	}
 	for _, p := range cfg.Providers {
 		if p.Name == "" {
@@ -385,6 +444,11 @@ func (h *Handler) redirectURI(r *http.Request, p Provider) string {
 // they belong to this tenant — answered from rig_account, and answered no unless
 // provisioning is on and the tenant's domains say otherwise.
 //
+// Each question has a door of its own — [Config.AllowProvisioning] for the
+// first, [Config.AllowJoining] for the second — and they refuse differently,
+// because "we have never heard of you" and "you are not in this tenant" are
+// different answers.
+//
 // The second question is only asked when a tenant was named. Otherwise it is not
 // this handler's to answer and there is nowhere for the answer to come from: the
 // only thing that could name a tenant at the callback is the sealed cookie, and
@@ -424,10 +488,16 @@ func (h *Handler) resolve(ctx context.Context, tenantID uuid.UUID, p Provider, p
 	// They are somebody, but not somebody here. Joining a tenant is a decision,
 	// and an unchecked one would let anybody with a Google account appear inside
 	// a customer's tenant.
-	if !h.cfg.AllowProvisioning {
+	//
+	// The refusal is the one a password login gives for this exact situation,
+	// word for word. It used to be the sentence the identity lookup uses for
+	// somebody nobody has ever heard of, so one message answered two different
+	// facts — and left the person who was told it unable to tell whether to
+	// register or to ask somebody for an invitation.
+	if !h.joining {
 		return SignIn{}, &Failure{
-			Reason: ReasonNoAccount,
-			Err:    rigerr.Forbidden("there is no account for this address"),
+			Reason: ReasonNoTenantAccess,
+			Err:    rigerr.Forbidden("you do not have access to this tenant"),
 		}
 	}
 
@@ -447,6 +517,11 @@ func (h *Handler) resolve(ctx context.Context, tenantID uuid.UUID, p Provider, p
 //
 // The second return says the person did not exist until now, which is what
 // [SignIn.NewIdentity] reports.
+//
+// Every path through it that ends in a verified address writes the link, the
+// repeat sign-in included. Recording the evidence is not a thing the first
+// sign-in does and the rest skip, because a link older than the recording would
+// then have no occasion to catch up.
 func (h *Handler) identity(ctx context.Context, p Provider, profile Profile) (*Link, bool, error) {
 	// The subject, always. An address is a display detail here.
 	link, err := h.cfg.Store.FindLink(ctx, p.Name, profile.Subject)
@@ -454,7 +529,30 @@ func (h *Handler) identity(ctx context.Context, p Provider, profile Profile) (*L
 		return nil, false, err
 	}
 	if link != nil {
-		return link, false, nil
+		if !profile.EmailVerified {
+			// Nothing to record, and nothing to refuse either: the link is what
+			// authorises this sign-in, and it was made on evidence. A provider
+			// that has stopped asserting the address — GitHub, for somebody who
+			// removed the verified one — does not undo that.
+			return link, false, nil
+		}
+		// Recorded again, because the first time is not the only time it is
+		// true. LinkIdentity is what stamps the identity's address verified,
+		// and a link made before rig recorded that evidence would otherwise
+		// never be stamped at all: this branch is the only one a repeat sign-in
+		// takes, so the person it was meant to help — signed up with a
+		// password, never confirmed, linked a provider — would stay refused by
+		// RequireVerifiedEmail forever, on a column rather than on anything
+		// they did.
+		//
+		// The upsert is the same one a first link runs, on the same conflict
+		// target, so it lands on the row already here rather than a second one.
+		// Stamping only when the address is already unstamped is the store's,
+		// which is what keeps this from moving a timestamp on every sign-in.
+		link, err = h.cfg.Store.LinkIdentity(ctx, LinkInput{
+			IdentityID: link.IdentityID, Provider: p.Name, Profile: profile,
+		})
+		return link, false, err
 	}
 
 	email := strings.ToLower(strings.TrimSpace(profile.EmailAddress))

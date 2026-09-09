@@ -639,6 +639,11 @@ registration and tenant creation are open at all.
 caller assigns it. There is no counterpart for the callback, which answers with
 whatever the project's own `OnSignIn` writes.
 
+It also takes `{remember: true}`, which is where a provider sign-in's "stay
+signed in" box goes: the flow is a link out and a redirect back with no form in
+between, so the request is made in the URL and the server carries it across the
+round trip in its signed state cookie.
+
 A route the project does not mount is refused before the request goes out,
 naming the setting that would open it — `register` without
 `auth.allow_registration`, `createTenant` without `auth.allow_tenant_creation`.

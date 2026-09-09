@@ -221,9 +221,36 @@ belongs nowhere, and accepting an invitation requires being signed in.
 An application that wants every newcomer to land somewhere answers step 2
 itself: `OnRegistered` (under [What you decide](#what-you-decide)) runs inside
 the registration transaction, and its ordinary body is `accounts.Provision`
-with `Invite` set — so the picker the stranger lands in already lists an
-invitation to a starter tenant. The transaction is the point: a hook error
-rolls the whole sign-up back, so there is never an account that half-joined.
+into a starter tenant — usually with `Invite` set, which adds the verification
+link. The transaction is the point: a hook error rolls the whole sign-up back,
+so there is never an account that half-joined.
+
+**The answer follows what the hook did rather than assuming it.** A hook that
+provisions puts somebody in a real tenant, and then step 1 answers the way a
+login does — the tenant list, the one they landed in marked `current`, and a
+session for it:
+
+```
+1  POST /auth/register            {emailAddress, displayName, password}
+   → 201  accessToken, refreshToken, identityToken,
+          tenants: [{…, current: true}]                  ← the hook put them there
+```
+
+Anything else would tell a newcomer they belong nowhere and make them sign in
+again to find the tenant they had just been put in.
+
+**`Invite` does not change that, and the name is the trap.** `Provision` creates
+a live account whether or not it is set; what `Invite` adds is the verification
+link, so somebody brought in by an administrator can confirm the address and set
+a password. It is not a pending membership and there is no row that says
+"invited". So a hook that provisions *with* `Invite` answers exactly as one
+without it does — the difference is a mail, and `GET /auth/me/invitations` lists
+the link rather than a door they are waiting outside.
+
+If what you want is a newcomer who belongs nowhere until they act, do not
+provision them in the hook at all: leave `OnRegistered` nil, and let them accept
+an invitation somebody else left or create a tenant of their own. That is the
+sequence at the top of this section, and it is what happens with no hook.
 
 Accepting sends the invitation's **identifier**, not the token that was emailed.
 Being signed in as the person invited is the *stronger* claim of the two: a token
@@ -332,7 +359,7 @@ the hot path.
 Two routes, mounted only when `auth.Config.OAuth.Providers` is non-empty.
 
 ```
-GET /auth/oauth/google/start?returnTo=/dashboard
+GET /auth/oauth/google/start?returnTo=/dashboard&remember=1
 → 302 to Google
 
 GET /auth/oauth/google/callback?code=…&state=…
@@ -342,11 +369,20 @@ GET /auth/oauth/google/callback?code=…&state=…
 They sit **under the auth base**, so a custom `BasePath` moves them with everything
 else: `/api/auth` puts them at `/api/auth/oauth/{provider}/start`.
 
+`remember=1` is the "stay signed in" box a provider sign-in has nowhere to draw:
+`/start` is a link, the callback is a redirect, and there is no form in between.
+It buys what it buys a password login — `session.remember_ttl` instead of
+`session.refresh_ttl` — and needs no allow-list, because both of those are
+lengths you configured. Absent, empty, or unreadable all mean no; unlike
+`returnTo`, a value that cannot be read is not refused, because a `text/plain`
+dead end in front of somebody who has just clicked a button is a bad trade for a
+checkbox.
+
 A TypeScript front end gets the provider list from
 `client.auth.profile.oauthProviders` and the URL from
-`client.auth.oauthStartUrl("google", {returnTo: "/dashboard"})`, rather than
-writing either down: which providers exist is configuration, and a page that
-hardcodes one is a page that has to be edited to add a second.
+`client.auth.oauthStartUrl("google", {returnTo: "/dashboard", remember: true})`,
+rather than writing either down: which providers exist is configuration, and a
+page that hardcodes one is a page that has to be edited to add a second.
 
 Built in: `oauth.Google(id, secret)`, `oauth.Microsoft(id, secret, tenant)`,
 `oauth.GitHub(id, secret)`. The redirect URI is **built, not configured** — derived
@@ -360,7 +396,7 @@ exactly.
 HMAC-signed cookie:
 
 ```
-__Host-rig_oauth   {state, verifier, provider, returnTo, expires}
+__Host-rig_oauth   {state, verifier, provider, tenant, returnTo, remember, expires}
 ```
 
 The `__Host-` prefix is a browser-enforced promise: secure, path-scoped to `/`, and
@@ -390,8 +426,14 @@ here:
 
 **Do they belong here?** Asked only when something named a tenant. Then it is
 answered per tenant from `FindAccount`, and answered **no** unless
-`AllowProvisioning` is on and `JoinTenant` accepts them — which must honour the
+`AllowJoining` is on and `JoinTenant` accepts them — which must honour the
 tenant's allowed email domains.
+
+The two questions refuse differently, and the difference matters to whoever
+reads it: `no_account` is "we have never heard of you", `no_tenant_access` is
+"we know you, you are not in this one" — which is the same sentence
+`POST /auth/login` answers with, and the only one of the two a person can act
+on.
 
 When nothing named one, the callback has nothing to answer it with and does not
 try: it hands on a sign-in with the first question answered and `tenantID` nil,
@@ -412,17 +454,47 @@ whoever registers your address anywhere owns your account here. GitHub does not
 report verification on `/user`, so its provider fetches `/user/emails` and reads the
 primary address's flag.
 
-**`AllowProvisioning` is off by default.** A provider will authenticate anybody with
-a Google account. An open sign-in endpoint on a business application is a way for a
-stranger to appear inside a customer's tenant — rarely what anyone wants and never
-what they expect. One switch gates both doors: creating the identity, and joining
-the tenant.
+Because it is evidence, it is **recorded**: linking a verified provider address
+marks the identity's address verified, the same way provisioning through a
+provider does. So somebody who signed up with a password, never opened the
+confirmation mail, and later signed in with Google is verified from then on —
+and `require_verified_email` applies to a provider sign-in exactly as it applies
+to a login. An address the provider has *not* verified is not recorded as
+anything, which is the same rule from the other side.
+
+It is recorded on **every** sign-in that carries a verified address, not only
+the one that made the link. That is what a link made before rig recorded any of
+this depends on: a repeat sign-in matches on the subject and never takes the
+linking branch, so a first-link-only stamp would leave everybody already using a
+provider unverified, and `require_verified_email` would start refusing them the
+day it was turned on.
+
+**Both doors are shut by default.** A provider will authenticate anybody with a
+Google account. An open sign-in endpoint on a business application is a way for
+a stranger to appear inside a customer's tenant — rarely what anyone wants and
+never what they expect. There are two doors and a key for each:
+`allow_provisioning` creates the identity, `allow_joining` puts them in the
+tenant a sign-in named.
+
+`allow_joining` is unset by default and then follows `allow_provisioning`, which
+is what one key meant when it gated both. Set them apart when the answers
+differ, and the ordinary case is `allow_provisioning: true` with
+`allow_joining: false` — "a provider may create a person, but only an invitation
+may put them in a tenant". That is worth reaching for wherever the tenant comes
+from a **request** rather than from a host: `/start` is an anonymous browser
+GET, so a crafted link can name any tenant, and the join is the half of the
+sign-in that would act on it. An identity on its own reaches nothing.
+
+The reverse is ordinary too — `allow_joining: true` with provisioning off — for
+a deployment whose people come from a directory elsewhere: admit them to the
+tenant the host named, and never invent one.
 
 The second door only exists when a tenant was named. So for a deployment that
-settles the tenant after the callback, this is the switch on "may a stranger
-become somebody here at all" — with it off, a provider sign-in works only for an
-address that already has an identity, and joining a tenant is the picker's job
-rather than the callback's.
+settles the tenant after the callback, `allow_provisioning` is the whole switch:
+"may a stranger become somebody here at all". With it off, a provider sign-in
+works only for an address that already has an identity, and joining a tenant is
+the picker's job rather than the callback's — `allow_joining` is not consulted
+at all.
 
 #### The tenant is decided before the redirect, when it can be
 
@@ -458,6 +530,9 @@ which is [the same three answers a password login
 gives](#somebody-who-already-has-an-account): the tenant they were last in, or
 their oldest, or a 200 with an identity token and an empty `tenants` and the
 picker taking over.
+
+`examples/auth` is this, in a browser: a provider button that names nothing, and
+the page it comes back to drawing the picker.
 
 The three answers a deployment used to have to pick between, all of them wrong,
 are worth naming because a project pinned to an older release is probably using
@@ -693,6 +768,7 @@ rewords a sentence.
 | `no_address` | the provider shared no email address | no |
 | `unverified_address` | the provider has not verified the address | no |
 | `no_account` | nobody here has this address, and provisioning is off | no |
+| `no_tenant_access` | this application knows them; they are not in the tenant this sign-in named, and joining is off | no, but they can ask for an invitation |
 | `ending` | `OnSignIn` refused — a tenant they do not belong to | no |
 | `internal` | a failure on this side | yes |
 
@@ -1098,6 +1174,10 @@ auth:
   # something probeable.
   allow_registration: false
   allow_tenant_creation: false
+  # Refuses a sign-in — a password or a provider, the same rule for both — until
+  # the address has been confirmed. Registration itself is never refused by it:
+  # the address is one request old at that point. See Signing in with a provider
+  # for what counts as confirming one.
   require_verified_email: false
 
   # Only the numbers. Which event each limit counts is rig's — see Rate limits.
@@ -1133,7 +1213,9 @@ auth:
     origin_from_host: false            # or derive it per request, see below
     signing_key_env: OAUTH_SIGNING_KEY # >= 32 bytes, the same in every replica
     state_ttl: 10m
-    allow_provisioning: false
+    allow_provisioning: false          # may a provider create a person
+    # allow_joining: false             # may it put one in the tenant a sign-in
+                                       # named. Unset follows allow_provisioning
     allowed_return_to: [https://app.example.com]  # origins, never paths
     insecure: false                    # never set this in a deployment
     providers:
@@ -1254,9 +1336,13 @@ front, err := api.New(pool, api.Hooks{
 
     // What happens to a stranger who just signed themselves up, inside the
     // transaction that created them — an error rolls the sign-up back. The
-    // ordinary body is Provision with Invite set, so the picker they land in
-    // already has an invitation to a starter tenant waiting. Present only when
-    // allow_registration is set; nil registers the person and nothing else.
+    // ordinary body is Provision into a starter tenant. Present only when
+    // allow_registration is set; nil registers the person and nothing else,
+    // which is what leaves them in the picker.
+    //
+    // Provision creates a live account, so the registration answers with that
+    // tenant and a session for it. Invite adds the verification link; it is not
+    // a pending membership.
     OnRegistered: func(ctx context.Context, accounts *account.Service, in account.Registered) error {
         _, err := accounts.Provision(ctx, account.ProvisionInput{
             TenantID:     starterTenant,
@@ -1432,13 +1518,17 @@ rotation leeway a consumed token never leaves — rather than adjusting it quiet
 
 ## See also
 
-- `examples/auth` — every flow above except the provider sign-in, driven from a
-  browser, with a transcript panel showing the actual requests.
-- `examples/auth_oauth` — the provider sign-in, and the deployment shape it needs: a
-  tenant per subdomain, so the host names the tenant a sign-in is for. It works
-  with no credentials at all, because `services/idp` is a stand-in provider the
-  example serves itself — and not a mock: single-use authorization codes, PKCE
-  verified at the token endpoint, and a consent screen that lets you choose
+- `examples/auth` — every flow above, driven from a browser, with a transcript
+  panel showing the actual requests. Including the provider sign-in **with no
+  tenant named anywhere**: one button on one page, and the picker taking over
+  afterwards, which is the state described under [When nobody knows the tenant
+  yet](#when-nobody-knows-the-tenant-yet).
+- `examples/auth_oauth` — the same sign-in with the other answer: a tenant per
+  subdomain, so the host names the tenant before the redirect. Between them the
+  two cover both, which is the only choice a deployment actually has.
+- `examples/idp` — the stand-in provider both of them serve, which is why either
+  works with no credentials at all. Not a mock: single-use authorization codes,
+  PKCE verified at the token endpoint, and a consent screen that lets you choose
   whether it says the address is verified, so both branches of that check are
   reachable from a browser. Setting `GOOGLE_CLIENT_ID` and
   `GOOGLE_CLIENT_SECRET` replaces it with nothing else changing.

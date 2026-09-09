@@ -11,9 +11,13 @@ import { client } from "../lib/client.js";
 /**
  * The picker: signed in, belonging nowhere yet.
  *
- * A fresh registration lands here and finds the invitation the backend's
- * OnRegistered hook left — accepting it is what turns the identity session
- * into a tenant one. The other exit is a workspace of your own.
+ * A fresh registration does not land here, which is worth knowing before
+ * reading the rest: the backend's OnRegistered hook provisions every newcomer
+ * into the demo workspace, so registering answers with a session for it and
+ * `RequireIdentity` in App.tsx sends them to the board. What reaches this screen
+ * is somebody who signed in and belongs nowhere — no hook, or an account that
+ * was removed — and the two exits from that state are an invitation somebody
+ * else left, or a workspace of your own.
  */
 export function TenantPickerPage() {
     const { identityToken, signedIn, signOut } = useAuth();

@@ -29,7 +29,7 @@ CORE_MODULES    := . ./runtime ./auth ./authmodel ./files ./notify ./observe ./p
 # with two halves, so rig.yaml sits above a Go module in api/ and a front end in
 # web/. Getting this wrong is quiet rather than loud — see the note on the
 # `examples` target below.
-EXAMPLE_MODULES := ./examples/todo ./examples/fantasyfootball ./examples/auth ./examples/auth_oauth ./examples/linearlite/api ./examples/sdk
+EXAMPLE_MODULES := ./examples/todo ./examples/fantasyfootball ./examples/auth ./examples/auth_oauth ./examples/idp ./examples/linearlite/api ./examples/sdk
 
 # The core modules less the root: the ones a generated application imports, so
 # their godoc is the documentation for a Go surface somebody depends on rather

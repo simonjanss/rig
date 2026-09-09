@@ -12,12 +12,16 @@ import (
 	"github.com/simonjanss/rig/runtime/throttle"
 )
 
-// RegisterInput creates a person, and nothing else.
+// RegisterInput creates a person, and whatever [Config.OnRegistered] adds.
 type RegisterInput struct {
 	EmailAddress string
 	DisplayName  string
 	Password     string
 
+	// Client is what kind of thing will hold the session, if one is issued —
+	// which happens only when the hook put them in a tenant. The zero value is
+	// [session.ClientWeb].
+	Client    session.Client
 	IPAddress string
 	UserAgent string
 }
@@ -38,7 +42,8 @@ type Registered struct {
 	UserAgent string
 }
 
-// Register creates an identity with a password and no tenant at all.
+// Register creates an identity with a password, and answers with wherever that
+// left them.
 //
 // The counterpart to [Service.Provision], and the difference is who is asking.
 // Provision is an administrator or an integration adding somebody to a tenant
@@ -46,10 +51,35 @@ type Registered struct {
 // and sets no password. This is a stranger signing themselves up, so there is no
 // caller to check and nowhere to put them yet.
 //
-// What comes back is an identity session — the tenant-less credential — because
-// the next thing that happens is a tenant picker: they look at the invitations
-// waiting for them and either accept one or make a tenant of their own. No
-// tenant session is issued, because there is no tenant.
+// With no [Config.OnRegistered], what comes back is an identity session — the
+// tenant-less credential — and an empty tenant list, because the next thing
+// that happens is a tenant picker: they look at the invitations waiting for
+// them and either accept one or make a tenant of their own.
+//
+// With one, the answer follows what it did rather than assuming it. The last
+// step is the same [Service.SignInIdentity] a login and a provider sign-in run,
+// so somebody the hook put in a tenant comes back with the tenant list, the one
+// they landed in marked, and a session for it — rather than with an empty list
+// saying they belong nowhere and a second sign-in to find the tenant they were
+// just put in.
+//
+// That includes the hook's documented body, [Service.Provision] with Invite
+// set, and the name is the reason it is worth saying: Provision creates a live
+// account either way. Invite adds the verification link so the newcomer can
+// confirm the address; it is not a pending membership, and there is no row that
+// says "invited". An application that wants somebody to belong nowhere until
+// they act leaves the hook nil.
+//
+// It runs after the transaction commits, deliberately: it answers with what the
+// hook actually did rather than with an assumption about it, and a session
+// issued inside a transaction that then rolled back would be a credential for
+// an account that never existed.
+//
+// The gate [Config.RequireVerifiedEmail] puts on a sign-in is not applied here.
+// The address is one request old and the mail that would confirm it has not
+// been opened; refusing somebody the response to their own registration would
+// make the endpoint useless. The identity token has never been gated either —
+// accepting an invitation and creating a tenant both work unverified.
 //
 // Whether a stranger may do this at all is the application's decision, the same
 // way creating a tenant is. rig mounts the endpoint only when
@@ -138,24 +168,29 @@ func (s *Service) Register(ctx context.Context, in RegisterInput) (SignInResult,
 		return SignInResult{}, err
 	}
 
-	token, err := s.cfg.Identities.Issue(ctx, session.IdentityIssueInput{
-		IdentityID: ident.ID,
-		IPAddress:  in.IPAddress,
-		UserAgent:  in.UserAgent,
-	})
-	if err != nil {
-		return SignInResult{}, err
-	}
-
 	s.write(ctx, authlog.Entry{
 		Event: authlog.EventAccountProvisioned, Outcome: authlog.Succeeded,
 		EmailAddress: email, IPAddress: in.IPAddress, UserAgent: in.UserAgent,
 		Detail: map[string]any{"self_registered": true},
 	})
 
-	// Tenants is empty and Session is nil, which is the whole point of the
-	// state: they exist, they can prove it, and they are nowhere yet.
-	return SignInResult{IdentityID: ident.ID, Identity: token}, nil
+	// The unexported half, for two reasons. The identity is in hand, so the
+	// exported one's read of rig_identity would be a second read of a row that
+	// cannot have changed; and the exported one applies RequireVerifiedEmail,
+	// which nobody who registered a moment ago can satisfy.
+	//
+	// A second audit entry comes out of this — AccountProvisioned says a person
+	// was created, LoginSucceeded says a session was issued in tenant T — the
+	// way a provider sign-in already writes two. LoginSucceeded is what
+	// throttle.Standard clears, so a registration lifts that address's login
+	// lockout: harmless, because a locked-out address already has an identity
+	// and the conflict above returns before reaching here.
+	return s.signInIdentity(ctx, ident, SignInIdentityInput{
+		IdentityID: ident.ID,
+		Client:     in.Client,
+		IPAddress:  in.IPAddress,
+		UserAgent:  in.UserAgent,
+	})
 }
 
 // MyInvitations are the live invitations addressed to one person, in every

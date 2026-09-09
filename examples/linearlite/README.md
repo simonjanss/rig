@@ -57,9 +57,10 @@ without it the routes that stop and start that container are not registered. See
 
 Open [localhost:8084](http://localhost:8084) and sign in as
 `demo@linearlite.dev` / `correct horse battery staple` — or register a fresh
-account and watch requirement two happen: the picker you land in already lists
-an invitation to the demo workspace, left there by the `OnRegistered` hook in
-`api/internal/app` inside the very transaction that created you.
+account and watch requirement two happen: you arrive already inside the demo
+workspace, put there by the `OnRegistered` hook in `api/internal/app` inside the
+very transaction that created you, and the registration itself answers with the
+session for it.
 
 For the full effect, open a second browser (or a private window) as
 `alex@linearlite.dev` and put the two side by side: each window's header shows
@@ -74,7 +75,7 @@ twice.
 |---|---|
 | The board updates without a reload | `electric: {enabled: true}` in `api/internal/services/todo/todo.yaml`; the generated shape routes on the API's own mux (`api/internal/generated/api/*_shape.gen.go`, wired through `api.Shapes` in `api/internal/app` — the proxy authenticates every subscriber and builds the tenant filter); `createTodoStream` + `useLiveQuery` in `web/src/board/` |
 | Who else is here, on which card, in which field | `presence: {enabled: true}` in rig.yaml and three lines across `api/internal/app` and `api/main.go`; `api/internal/services/rig_presence/rig_presence_shape.go` narrows the shape to a scope, which is the one thing that makes the fan-out affordable; `web/src/presence/` is the browser half — one loop for the whole app, built in an effect because StrictMode would otherwise orphan it, and a `useSpot` that ends where the panel does |
-| Register → invited to the demo tenant | `auth.allow_registration` in rig.yaml, and `autoInvite()` in `api/internal/app`: the `OnRegistered` hook provisions the newcomer with an invitation and attaches the member role, all in the registration transaction |
+| Register → straight into the demo tenant | `auth.allow_registration` in rig.yaml, and `autoInvite()` in `api/internal/app`: the `OnRegistered` hook provisions the newcomer, attaches the member role and leaves a verification link, all in the registration transaction. `Invite` is that link and not a pending membership — the account is live, which is why the registration comes back with a session |
 | Create your own workspace | `auth.allow_tenant_creation`, with `authz.SeedFor` as `TenantOptions.OnCreated` — a new tenant gets its roles in the transaction that made it |
 | The item panel's History, and Revert | the snapshot triple in `api/internal/migrations/00002` — every update keeps the version it replaced, and `/todo/{id}/_versions/_stream` makes the panel grow while you edit |
 | The Trash, and Restore | `deleted_at` + `restore_window_days: 30`; the trash is a live shape too, so a delete visibly moves a card between windows |

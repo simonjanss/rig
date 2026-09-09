@@ -1074,6 +1074,82 @@ func TestOAuthIdentitiesOverRealSQL(t *testing.T) {
 	}
 }
 
+// What LinkIdentity records besides the link, and it can only be checked here:
+// the in-memory oauth store models rig_identity_oauth and not rig_identity, so
+// a column it never writes is a column nothing there can notice.
+//
+// The gap this closes: a person registers with a password, never opens the
+// confirmation mail, and later signs in with Google. Google says the address is
+// verified — which is the only reason the link is allowed at all — and before
+// this the identity kept its null. With require_verified_email set they were
+// then refused a sign-in on a column rig failed to update.
+func TestLinkingAVerifiedAddressMarksTheIdentityVerified(t *testing.T) {
+	h := setup(t)
+	ctx := context.Background()
+	store := h.stores.OAuth()
+
+	verifiedAt := func(id uuid.UUID) *time.Time {
+		t.Helper()
+		var at *time.Time
+		if err := h.pool.QueryRow(ctx,
+			`SELECT email_verified_at FROM rig_identity WHERE id = $1`, id).Scan(&at); err != nil {
+			t.Fatal(err)
+		}
+		return at
+	}
+
+	// The harness inserts its person with no email_verified_at, which is what
+	// somebody who registered and never confirmed looks like.
+	if verifiedAt(h.identity) != nil {
+		t.Fatal("the fixture person should start unverified")
+	}
+
+	// An unverified profile never reaches LinkIdentity through the handler —
+	// [oauth.Handler.identity] refuses first — but the store must not stamp on
+	// one either, or the check above it is the only thing standing between an
+	// address anybody can register and an account it can take over.
+	if _, err := store.LinkIdentity(ctx, oauth.LinkInput{
+		IdentityID: h.identity, Provider: oauth.ProviderGoogle,
+		Profile: oauth.Profile{
+			Subject: "unverified-" + uuid.NewString(), EmailAddress: h.email,
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if verifiedAt(h.identity) != nil {
+		t.Fatal("an unverified provider address is not evidence and must not be recorded as any")
+	}
+
+	if _, err := store.LinkIdentity(ctx, oauth.LinkInput{
+		IdentityID: h.identity, Provider: oauth.ProviderGoogle,
+		Profile: oauth.Profile{
+			Subject: "google-" + uuid.NewString(), EmailAddress: h.email,
+			EmailVerified: true, DisplayName: "Sam",
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	first := verifiedAt(h.identity)
+	if first == nil {
+		t.Fatal("a verified provider address should have been recorded as verifying the identity")
+	}
+
+	// And the second sign-in does not move it. When the address was proved is a
+	// fact about the address, not about the last time somebody signed in.
+	if _, err := store.LinkIdentity(ctx, oauth.LinkInput{
+		IdentityID: h.identity, Provider: oauth.ProviderGoogle,
+		Profile: oauth.Profile{
+			Subject: "google-" + uuid.NewString(), EmailAddress: h.email,
+			EmailVerified: true, DisplayName: "Sam",
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if second := verifiedAt(h.identity); second == nil || !second.Equal(*first) {
+		t.Errorf("email_verified_at moved from %v to %v", first, second)
+	}
+}
+
 // One person in two tenants, against the real schema.
 //
 // The in-memory suite proves the rules; what can only be wrong here is the SQL —
@@ -1606,9 +1682,13 @@ func TestLeavingThePicker(t *testing.T) {
 }
 
 // OnRegistered runs inside the transaction that creates a self-registered
-// identity. The canonical body — Provision with Invite — leaves an invitation
-// waiting in the picker the newcomer lands in, and a hook error takes the whole
-// sign-up with it, which only real SQL can prove.
+// identity, and a hook error takes the whole sign-up with it — which only real
+// SQL can prove.
+//
+// The two bodies below answer the same, and that is the point worth pinning.
+// Provision creates a live account whether or not Invite is set; Invite adds
+// the verification link. So both come back with the tenant and a session for
+// it, and the only difference is a mail.
 func TestOnRegisteredOverRealSQL(t *testing.T) {
 	h := setup(t)
 
@@ -1618,7 +1698,7 @@ func TestOnRegisteredOverRealSQL(t *testing.T) {
 			`{"emailAddress":"`+address+`","displayName":"Newcomer","password":"`+goodPassword+`"}`)
 	}
 
-	t.Run("the hook leaves an invitation the picker can accept", func(t *testing.T) {
+	t.Run("the hook leaves a verification link, and an account to use", func(t *testing.T) {
 		h.onRegistered = func(ctx context.Context, accounts *account.Service, in account.Registered) error {
 			_, err := accounts.Provision(ctx, account.ProvisionInput{
 				TenantID:     h.tenant,
@@ -1637,8 +1717,21 @@ func TestOnRegisteredOverRealSQL(t *testing.T) {
 		}
 		var signedUp struct {
 			IdentityToken string `json:"identityToken"`
+			AccessToken   string `json:"accessToken"`
+			Tenants       []struct {
+				TenantID uuid.UUID `json:"tenantId"`
+			} `json:"tenants"`
 		}
 		res.decode(t, &signedUp)
+
+		// Invite is a mail rather than a pending membership, so the answer says
+		// where the hook actually put them.
+		if signedUp.AccessToken == "" {
+			t.Errorf("no session, though Provision made a live account: %s", res.body)
+		}
+		if len(signedUp.Tenants) != 1 || signedUp.Tenants[0].TenantID != h.tenant {
+			t.Errorf("tenants = %s, want the starter tenant", res.body)
+		}
 
 		listed := h.do(t, "GET", "/auth/me/invitations", signedUp.IdentityToken, "")
 		var page struct {
@@ -1663,6 +1756,52 @@ func TestOnRegisteredOverRealSQL(t *testing.T) {
 		joined.decode(t, &out)
 		if out.AccessToken == "" {
 			t.Fatal("accepting the seeded invitation should hand back a tenant session")
+		}
+	})
+
+	t.Run("a hook that joins them for real answers with the tenant", func(t *testing.T) {
+		// The other body, and the one the hand-built response used to be blind
+		// to: an account rather than an invitation. The newcomer is in a real
+		// tenant by the time the transaction commits, so the answer is the one a
+		// login would give rather than an empty list saying they belong nowhere.
+		h.onRegistered = func(ctx context.Context, accounts *account.Service, in account.Registered) error {
+			_, err := accounts.Provision(ctx, account.ProvisionInput{
+				TenantID:     h.tenant,
+				EmailAddress: in.EmailAddress,
+				DisplayName:  in.DisplayName,
+			})
+			return err
+		}
+		h.mount(h.build(h.tenants))
+
+		address := "landed-" + uuid.New().String()[:8] + "@example.com"
+		res := register(t, address)
+		if res.status != http.StatusCreated {
+			t.Fatalf("register: %d %s", res.status, res.body)
+		}
+		var out struct {
+			AccessToken   string `json:"accessToken"`
+			IdentityToken string `json:"identityToken"`
+			Tenants       []struct {
+				TenantID uuid.UUID `json:"tenantId"`
+				Current  bool      `json:"current"`
+			} `json:"tenants"`
+		}
+		res.decode(t, &out)
+
+		if out.AccessToken == "" {
+			t.Error("no session, though the hook made them an account")
+		}
+		if out.IdentityToken == "" {
+			t.Error("the identity token is issued alongside a session, not instead of one")
+		}
+		if len(out.Tenants) != 1 || out.Tenants[0].TenantID != h.tenant || !out.Tenants[0].Current {
+			t.Fatalf("want the starter tenant marked current, got %s", res.body)
+		}
+
+		// And the session works, which is the whole point of being handed one.
+		if got := h.do(t, "GET", "/auth/tenants", out.AccessToken, ""); got.status != http.StatusOK {
+			t.Fatalf("the session the registration issued: %d %s", got.status, got.body)
 		}
 	})
 

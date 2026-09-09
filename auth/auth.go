@@ -172,7 +172,12 @@ type Config struct {
 	// to one dispatch interval late.
 	Mail MailOptions
 
-	// RequireVerifiedEmail refuses a login until the address is verified.
+	// RequireVerifiedEmail refuses a sign-in until the address is verified —
+	// a password and a provider alike, since linking a provider account
+	// requires a verified address and records it as one.
+	//
+	// It does not refuse a registration. The address is one request old there
+	// and the mail that would confirm it has not been opened.
 	RequireVerifiedEmail bool
 
 	// Grants answers what an account may do. Nil means nobody holds anything,
@@ -304,10 +309,16 @@ type OAuth struct {
 	// enough that a stolen state parameter is useless.
 	StateTTL time.Duration
 
-	// AllowProvisioning creates an account the first time somebody signs in
-	// with a provider. Without it a provider sign-in only works for an address
-	// that already has an account.
+	// AllowProvisioning creates a person the first time somebody signs in with
+	// a provider. Without it a provider sign-in only works for an address that
+	// already has an identity.
 	AllowProvisioning bool
+
+	// AllowJoining creates an account in the tenant a sign-in named, for
+	// somebody not in it yet. Nil follows AllowProvisioning, which is what one
+	// switch did when it gated both doors. See
+	// [github.com/simonjanss/rig/auth/oauth.Config.AllowJoining].
+	AllowJoining *bool
 
 	// AllowedReturnTo are the origins a sign-in may return to, each as
 	// scheme://host with nothing after the host. An open redirect is the
@@ -716,6 +727,7 @@ func New(cfg Config) (*Auth, error) {
 			Tenant:            tenant,
 			AllowedReturnTo:   allowedReturnTo,
 			AllowProvisioning: cfg.OAuth.AllowProvisioning,
+			AllowJoining:      cfg.OAuth.AllowJoining,
 			Insecure:          cfg.OAuth.Insecure,
 			Log:               stores.Log,
 			Now:               cfg.Now,

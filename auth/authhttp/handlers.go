@@ -266,9 +266,10 @@ func (h *Handler) signInIdentity(
 		// Nil when the sign-in named no tenant, which is exactly what
 		// SignInIdentity reads as "wherever they belong".
 		TenantID: in.TenantID,
-		// A provider flow is a top-level browser navigation on the way out and
-		// a browser redirect on the way back, and it has nowhere to ask for a
-		// long session: there is no form to carry a "remember me" box.
+		// A provider flow has no form to put a remember-me box on, so the
+		// request travels as `?remember=` on the start route and comes back
+		// sealed in the state cookie. False when nothing asked.
+		Remember:  in.Remember,
 		Client:    session.ClientWeb,
 		IPAddress: h.addrString(r),
 		UserAgent: r.UserAgent(),

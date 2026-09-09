@@ -160,10 +160,15 @@ type AuthOAuth struct {
 	// StateTTL bounds how long a sign-in round trip may take.
 	StateTTL Duration `json:"state_ttl"`
 
-	// AllowProvisioning creates an account the first time somebody signs in with
-	// a provider. Off means a provider sign-in only works for an address that
-	// already has one.
+	// AllowProvisioning creates an identity the first time somebody signs in
+	// with a provider. Off means a provider sign-in only works for an address
+	// that already has one.
 	AllowProvisioning bool `json:"allow_provisioning"`
+	// AllowJoining creates an account in the tenant a sign-in named, for
+	// somebody not in it yet. Resolved: the configuration's key is tri-state
+	// and defaults to AllowProvisioning, and that default is applied before it
+	// reaches here.
+	AllowJoining bool `json:"allow_joining"`
 	// AllowedReturnTo bounds where a finished sign-in may land. An open redirect
 	// is the classic mistake here.
 	AllowedReturnTo []string `json:"allowed_return_to,omitempty"`

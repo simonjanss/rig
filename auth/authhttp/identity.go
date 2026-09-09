@@ -60,6 +60,7 @@ func (h *Handler) register(w http.ResponseWriter, r *http.Request) {
 		EmailAddress: in.EmailAddress,
 		DisplayName:  in.DisplayName,
 		Password:     in.Password,
+		Client:       clientOf(in.Client),
 		IPAddress:    h.addrString(r),
 		UserAgent:    r.UserAgent(),
 	})

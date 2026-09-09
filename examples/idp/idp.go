@@ -1,4 +1,4 @@
-// Package idp is a stand-in identity provider, so this example's OAuth sign-in
+// Package idp is a stand-in identity provider, so an example's OAuth sign-in
 // works without registering an application with anybody.
 //
 // It is a prop, and it says so on the page it serves. What it is not is a mock:
@@ -13,7 +13,18 @@
 // that already has a password and watch it link; turn "verified" off and watch it
 // refuse to, which is the check the whole OAuth package turns on.
 //
-// Delete this package in a real project and pass oauth.Google(id, secret).
+// A module of its own rather than a package inside one example, because two of
+// them need it and they need it for opposite reasons: examples/auth_oauth is
+// about a tenant per host, and examples/auth is about a tenant nobody knows
+// until the callback. Two copies of an OAuth server would have been two places
+// for the flow to be subtly different.
+//
+// A consumer takes on one obligation with it. [Name] is written into
+// rig_identity_oauth.provider, which is a Postgres enum in every project's own
+// migrations — so an example that mounts this needs a migration adding that
+// label, and there is no way to share one.
+//
+// There is nothing here for a real project. Pass oauth.Google(id, secret).
 package idp
 
 import (
@@ -34,8 +45,8 @@ import (
 	"github.com/simonjanss/rig/auth/oauth"
 )
 
-// Name is the provider label. It has to be a value of the oauth_provider enum,
-// which migration 00007 adds.
+// Name is the provider label. It has to be a value of the rig_oauth_provider
+// enum, which each example adds in a migration of its own.
 const Name = "Demo"
 
 // Server is the stand-in.
@@ -298,7 +309,8 @@ var consent = template.Must(template.New("consent").Parse(`
 
 <h1>Demo provider</h1>
 <p class="prop">
-  This is not a real identity provider. It is served by this example so the OAuth
+  This is not a real identity provider. The application you came from serves it
+  itself, so the OAuth
   sign-in works without registering an application with Google — but the flow is
   the real one: this page hands back a single-use authorization code, and the token
   endpoint verifies the PKCE challenge before exchanging it.

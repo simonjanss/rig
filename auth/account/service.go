@@ -433,17 +433,8 @@ func (s *Service) login(ctx context.Context, in LoginInput, email string) (SignI
 		s.failSignIn(ctx, at, nil, "identity disabled")
 		return SignInResult{}, rigerr.Forbidden("this account has been disabled")
 	}
-	// This gate stays on the password path rather than moving into
-	// [Service.SignInIdentity], and the reason is a gap rather than a principle:
-	// oauth's ProvisionIdentity stamps email_verified_at from what the provider
-	// said, but LinkIdentity does not, though it accepts the same evidence. So
-	// enforcing it for a provider sign-in would refuse exactly one population —
-	// somebody who registered with a password, never confirmed, and later linked
-	// a verified provider account — on the strength of a column rig failed to
-	// update rather than on anything they did.
-	if s.cfg.RequireVerifiedEmail && !ident.Verified() {
-		s.failSignIn(ctx, at, nil, "email not verified")
-		return SignInResult{}, rigerr.Forbidden("confirm your email address before signing in")
+	if err := s.refuseUnverified(ctx, at, ident); err != nil {
+		return SignInResult{}, err
 	}
 
 	if needsRehash {
@@ -498,10 +489,25 @@ type SignInIdentityInput struct {
 // [SignInResult.Session] is nil, [SignInResult.Identity] is issued anyway, and
 // where they go next is the picker's problem.
 //
-// What it does not do, because its caller does: no rate-limit check, no
-// credential of any kind, and no RequireVerifiedEmail. It does refuse an
-// identity that is gone or disabled, because a provider link outlives both — the
-// row in rig_identity_oauth carries no deleted_at and no is_active.
+// What it does not do, because its caller does: no rate-limit check, and no
+// credential of any kind. What it does do is every refusal that is about the
+// person rather than about how they proved it — an identity that is gone or
+// disabled, because a provider link outlives both and the row in
+// rig_identity_oauth carries no deleted_at and no is_active, and
+// RequireVerifiedEmail.
+//
+// That last one used to be the password path's alone, because oauth's
+// LinkIdentity took a verified address as evidence and never wrote it down, so
+// enforcing it here would have refused somebody on a column rather than on
+// anything they did. LinkIdentity records it now, so the exception is gone and
+// a provider sign-in is held to the same rule a login is.
+//
+// [Service.Register] is not held to it, and that is deliberate rather than an
+// oversight: it calls the unexported half of this, because refusing somebody
+// the response to their own registration for not having confirmed an address
+// they have had for one request would make the endpoint useless. The identity
+// token it hands back has never been gated either — accepting an invitation
+// and creating a tenant both work unverified, and always have.
 //
 // Two things about the audit trail are worth knowing before wiring it to
 // something new. It writes EventLoginSucceeded and EventLoginFailed, which is
@@ -530,7 +536,33 @@ func (s *Service) SignInIdentity(ctx context.Context, in SignInIdentityInput) (S
 		}, nil, "no such identity")
 		return SignInResult{}, rigerr.Forbidden("this account is no longer active")
 	}
+	if err := s.refuseUnverified(ctx, signInAttempt{
+		tenantID:  in.TenantID,
+		email:     normalizeEmail(ident.EmailAddress),
+		ipAddress: in.IPAddress,
+		userAgent: in.UserAgent,
+		method:    in.Method,
+	}, ident); err != nil {
+		return SignInResult{}, err
+	}
 	return s.signInIdentity(ctx, ident, in)
+}
+
+// refuseUnverified is the RequireVerifiedEmail gate, in the two places a sign-in
+// can start: a password checked by [Service.login], and an identity somebody
+// else vouched for through [Service.SignInIdentity].
+//
+// Not in the shared tail both of them call, because [Service.Register] calls
+// that one too and a person who registered a moment ago has confirmed nothing.
+// The seam already existed for a different reason — a login has the identity
+// row in hand and should not read it twice — and this is the second thing it is
+// good for.
+func (s *Service) refuseUnverified(ctx context.Context, at signInAttempt, ident *Identity) error {
+	if !s.cfg.RequireVerifiedEmail || ident.Verified() {
+		return nil
+	}
+	s.failSignIn(ctx, at, nil, "email not verified")
+	return rigerr.Forbidden("confirm your email address before signing in")
 }
 
 // signInIdentity is [Service.SignInIdentity] with the identity already read.

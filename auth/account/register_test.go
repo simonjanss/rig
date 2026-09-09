@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/simonjanss/rig/auth/account"
+	"github.com/simonjanss/rig/auth/authlog"
 )
 
 // register signs a stranger up on whatever fixture it is handed.
@@ -65,9 +66,14 @@ func TestOnRegisteredErrorFailsTheSignUp(t *testing.T) {
 	// come back as the hook's own error rather than something laundered.
 }
 
+// The canonical body: provision the newcomer into a starter tenant, with the
+// verification link that lets them confirm the address.
+//
+// What it does *not* do is leave them outside. Provision creates a live account
+// whether or not Invite is set — the link is a mail, not a pending membership —
+// so the registration answers with that tenant and a session for it, exactly as
+// it does without Invite. The name is the only thing that suggests otherwise.
 func TestOnRegisteredCanLeaveAnInvitationWaiting(t *testing.T) {
-	// The canonical body: provision the newcomer into a starter tenant with an
-	// invitation, so the picker they land in has somewhere to go.
 	tenant := uuid.New()
 	f := setupWith(t, func(cfg *account.Config) {
 		cfg.OnRegistered = func(ctx context.Context, accounts *account.Service, in account.Registered) error {
@@ -97,6 +103,14 @@ func TestOnRegisteredCanLeaveAnInvitationWaiting(t *testing.T) {
 	if invitations[0].TenantID != tenant {
 		t.Errorf("invitation is for %s, not the starter tenant", invitations[0].TenantID)
 	}
+
+	// And they are already in it, which is what Provision did.
+	if res.Session == nil || res.TenantID != tenant {
+		t.Errorf("session = %v in %s, want one in the starter tenant", res.Session, res.TenantID)
+	}
+	if len(res.Tenants) != 1 || res.Tenants[0].TenantID != tenant {
+		t.Errorf("tenants = %v, want the starter tenant", res.Tenants)
+	}
 }
 
 func TestRegisterWithoutAHookStillWorks(t *testing.T) {
@@ -111,5 +125,95 @@ func TestRegisterWithoutAHookStillWorks(t *testing.T) {
 	}
 	if res.Identity.Token == "" {
 		t.Fatal("expected an identity session")
+	}
+}
+
+// RequireVerifiedEmail refuses a sign-in until the address is confirmed, and
+// registration is the one place that cannot be held to it: the address is one
+// request old and the mail that confirms it has not been opened yet.
+//
+// The identity token registration hands back has never been gated either, which
+// is what makes this consistent rather than an exception — accepting an
+// invitation and creating a tenant both work unverified, and always have.
+func TestRegisterIsNotHeldToTheVerifiedEmailGate(t *testing.T) {
+	f := setupWith(t, func(cfg *account.Config) { cfg.RequireVerifiedEmail = true })
+
+	res, err := register(f, "new@example.com")
+	if err != nil {
+		t.Fatalf("registering should not be refused for an unconfirmed address: %v", err)
+	}
+	if res.Identity.Token == "" {
+		t.Error("no identity token, so there is nothing to reach the picker with")
+	}
+}
+
+// A hook that provisions *without* an invitation puts somebody in a real tenant,
+// and the registration response has to say so.
+//
+// The documented body of OnRegistered is Provision with Invite set, and for that
+// an empty tenant list is the truth. This is the other one, and the answer used
+// to be built by hand on the assumption that it never happened: the newcomer
+// was told they belonged nowhere and had to sign in again to find the tenant
+// they had just been put in.
+func TestOnRegisteredCanLandSomebodySomewhere(t *testing.T) {
+	tenant := uuid.New()
+	f := setupWith(t, func(cfg *account.Config) {
+		cfg.OnRegistered = func(ctx context.Context, accounts *account.Service, in account.Registered) error {
+			_, err := accounts.Provision(ctx, account.ProvisionInput{
+				TenantID:     tenant,
+				EmailAddress: in.EmailAddress,
+				DisplayName:  in.DisplayName,
+			})
+			return err
+		}
+	})
+	f.store.TenantNames = map[uuid.UUID]string{tenant: "Starter"}
+
+	res, err := register(f, "new@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Session == nil {
+		t.Fatal("no session, though the hook put them in a tenant")
+	}
+	if res.TenantID != tenant {
+		t.Errorf("landed in %s, want the tenant the hook made an account in", res.TenantID)
+	}
+	if len(res.Tenants) != 1 || res.Tenants[0].TenantID != tenant {
+		t.Fatalf("tenants = %v, want the one they were put in", res.Tenants)
+	}
+	// The identity token is still issued alongside, because signing in and then
+	// switching tenants is one flow.
+	if res.Identity.Token == "" {
+		t.Error("the identity token should be issued whether or not there is a session")
+	}
+}
+
+// The state the two entries describe together: a person was created, and a
+// session was issued for them. Neither says the whole thing on its own.
+func TestRegisteringSomewhereRecordsBothHalves(t *testing.T) {
+	tenant := uuid.New()
+	f := setupWith(t, func(cfg *account.Config) {
+		cfg.OnRegistered = func(ctx context.Context, accounts *account.Service, in account.Registered) error {
+			_, err := accounts.Provision(ctx, account.ProvisionInput{
+				TenantID: tenant, EmailAddress: in.EmailAddress, DisplayName: in.DisplayName,
+			})
+			return err
+		}
+	})
+	f.store.TenantNames = map[uuid.UUID]string{tenant: "Starter"}
+
+	if _, err := register(f, "new@example.com"); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := f.log.last(authlog.EventAccountProvisioned); !ok {
+		t.Error("no AccountProvisioned entry, so nothing records the sign-up itself")
+	}
+	e, ok := f.log.last(authlog.EventLoginSucceeded)
+	if !ok {
+		t.Fatal("no LoginSucceeded entry, so nothing records the session")
+	}
+	if e.TokenRootID == nil {
+		t.Error("the entry should name the session family it created")
 	}
 }

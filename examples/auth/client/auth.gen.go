@@ -32,6 +32,8 @@ var AuthProfile = rigclient.AuthProfile{
 	HasTenantCreation:   true,
 	HasIdentitySessions: true,
 	HasAPIKeys:          true,
+
+	OAuthProviders: []string{"google"},
 }
 
 // The permissions this API's endpoints require. They are what an API key's

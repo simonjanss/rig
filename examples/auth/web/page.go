@@ -46,6 +46,10 @@ type data struct {
 	// widening it needs note.read.all.
 	NoteScope string
 
+	// Providers are the sign-in providers this run actually offers, so the
+	// buttons come from what is wired rather than from what was configured.
+	Providers []string
+
 	Outbox  []outbox.Message
 	LastKey string
 
@@ -188,12 +192,13 @@ func (k *keyHolder) Take() string {
 // screen is what the API says right now.
 func (h *Handler) page(w http.ResponseWriter, r *http.Request) {
 	d := data{
-		Flash:   r.URL.Query().Get("flash"),
-		Base:    "http://" + r.Host,
-		Trace:   h.trace.all(),
-		Outbox:  h.mail.Messages(),
-		LastKey: h.lastKey.Take(),
-		Refused: map[string]string{},
+		Flash:     r.URL.Query().Get("flash"),
+		Base:      "http://" + r.Host,
+		Providers: h.providers,
+		Trace:     h.trace.all(),
+		Outbox:    h.mail.Messages(),
+		LastKey:   h.lastKey.Take(),
+		Refused:   map[string]string{},
 
 		// From the page's own query string, so the two links in the panel are
 		// ordinary links and the browser's back button does the right thing. It is

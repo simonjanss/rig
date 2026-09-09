@@ -5,11 +5,16 @@
 package api
 
 import (
+	"cmp"
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
+	"os"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -17,6 +22,7 @@ import (
 	"github.com/simonjanss/rig/auth"
 	"github.com/simonjanss/rig/auth/account"
 	"github.com/simonjanss/rig/auth/authhttp"
+	"github.com/simonjanss/rig/auth/oauth"
 	"github.com/simonjanss/rig/auth/password"
 	"github.com/simonjanss/rig/auth/session"
 	"github.com/simonjanss/rig/runtime/rigerr"
@@ -35,6 +41,44 @@ const TenantHeader = "X-Tenant-Id"
 // travels in links and in logs, which is why it is rarely the right source in
 // a deployment.
 const TenantQuery = "tenant"
+
+// Providers are the sign-in providers this configuration offers, in order, for
+// a page that draws a button per name. A provider whose credentials are absent
+// is not offered, so ask ConfiguredProviders for what this process actually
+// has.
+var Providers = []string{"google"}
+
+// SigningKeyEnv holds the key that signs the state parameter. Empty generates
+// one per process, which is fine for one and wrong for several: a callback may
+// arrive at a different replica than the one that started the sign-in.
+const SigningKeyEnv = "OAUTH_SIGNING_KEY"
+
+// OriginScheme is the scheme a callback URL is built with. A provider compares
+// that URL exactly, so this follows the configured origin rather than the
+// request.
+const OriginScheme = "http"
+
+// BaseURLEnv is where the origin comes from, for the deployment that has to
+// say which one this is. [BaseURL] reads it.
+//
+// A constant beside SigningKeyEnv rather than a string inside that function,
+// so what a deployment has to set is readable off the package — and so the
+// refusal for having not set it can name it.
+const BaseURLEnv = "BASE_URL"
+
+// BaseURL is this application's own origin, which a provider has registered as
+// the prefix of its callback URL.
+//
+// It is a function rather than a constant because the environment has a say:
+// the same binary is deployed at more than one origin, and the configuration
+// cannot know which.
+//
+// What the configuration and the environment say, which is not the whole
+// answer: [Hooks.OAuth] carries a BaseURL of its own, and [Config] prefers it
+// without asking here at all. This is what a project that supplied none gets.
+func BaseURL() (string, error) {
+	return strings.TrimRight(cmp.Or(os.Getenv(BaseURLEnv), "http://localhost:8082"), "/"), nil
+}
 
 // Hooks are what a configuration file cannot hold: the functions this
 // application has to supply, and nothing else.
@@ -135,8 +179,124 @@ type Hooks struct {
 	// Server.Auth is then set to.
 	Logger *slog.Logger
 
+	// OAuth is what a provider sign-in needs beyond the configuration.
+	OAuth OAuthHooks
+
 	// Now is the clock, for tests.
 	Now func() time.Time
+}
+
+// OAuthHooks are the provider decisions that are code.
+type OAuthHooks struct {
+	// OnSignIn finishes a provider sign-in. Nil issues a session and answers with
+	// the same body a password login does.
+	//
+	// A browser flow usually wants a cookie and a redirect instead, and that
+	// depends on what the client is — a single-page application, a
+	// server-rendered one, a mobile app catching a deep link — which is why rig
+	// will not choose.
+	//
+	// Whatever it does, it has to handle in.TenantID being the nil UUID: that is a
+	// sign-in whose tenant was not known before the redirect, and issuing a
+	// session from that field would issue one into a tenant that does not exist.
+	// Nil handles it the way a login does — an identity token and the tenant
+	// list, for the picker to take over.
+	OnSignIn func(w http.ResponseWriter, r *http.Request, in oauth.SignIn) error
+
+	// OnError renders a provider sign-in that did not finish, and it is a
+	// different question from the API's own error shape.
+	//
+	// The two provider routes are the only ones here a person reaches with their
+	// address bar. Every other route is called by script, which can read a status
+	// and a body; a browser mid-navigation renders whatever came back as a
+	// document, so rig's default is a bare text/plain page on this API's origin
+	// with no way back to the application.
+	//
+	// The oauth.Failure it gets says which of the ways this was — cancelled at
+	// the consent screen, an expired state cookie, an address the provider has not
+	// verified — so a front end can be sent to its own sign-in page with a code
+	// it has copy for. Never render Failure.ProviderError: it is text anybody can
+	// write. Never render Failure.Error() on reason internal either: that one is a
+	// seal or a store failure, and rig's own default answers "something went
+	// wrong" rather than show it. Nil keeps the default.
+	OnError func(w http.ResponseWriter, r *http.Request, f *oauth.Failure)
+
+	// Origin overrides the configured origin for one request, for an application
+	// served at several. Setting auth.oauth.origin_from_host in rig.yaml is the
+	// declarative form of the usual answer.
+	Origin func(r *http.Request) string
+
+	// BaseURL is this application's own origin, and takes precedence over
+	// everything rig.yaml said about one.
+	//
+	// Empty asks [BaseURL], which is what auth.oauth and the environment resolved,
+	// and that is the ordinary case. This is for the origin that arrives some
+	// other way: a test serving on an ephemeral port, or a deployment handed its
+	// configuration rather than given it in its own environment. A whole origin
+	// with a scheme, matching what the provider has registered exactly — a
+	// trailing slash is trimmed and nothing else is.
+	//
+	// Not [OAuthHooks.Origin], which answers per request. This is the one origin
+	// the callback routes are built from, and it has to exist even where Origin
+	// overrides it.
+	BaseURL string
+
+	// SigningKey signs the cookie that carries the state and the PKCE verifier
+	// across a sign-in's round trip. At least 32 bytes, and the same bytes in
+	// every replica.
+	//
+	// Empty reads SigningKeyEnv, which is what a deployment ordinarily does. This
+	// is for the key that lives somewhere os.Getenv cannot reach: a secret
+	// manager, a mounted file, or a test that would rather not write to the
+	// process it is running in.
+	SigningKey []byte
+
+	// Credentials are the client id and secret for each provider this
+	// configuration offers, for an application whose secrets do not arrive in its
+	// environment. A zero field reads that provider's pair from there, which is
+	// the ordinary case and needs nothing written here.
+	Credentials OAuthCredentials
+
+	// Extra are providers this application builds itself: an in-house identity
+	// server, or a stand-in served by the application during development. They are
+	// appended to the configured ones.
+	Extra []oauth.Provider
+
+	// ReturnTo are further origins a finished sign-in may land on, added to the
+	// configured auth.oauth.allowed_return_to.
+	//
+	// For the deployment whose set is not fixed. An application with a tenant per
+	// subdomain has one origin per tenant, and a list in a file cannot name a
+	// tenant that was created this morning.
+	ReturnTo []string
+}
+
+// OAuthCredentials are what each provider this application offers knows it by.
+//
+// A zero field reads that provider's pair from the environment, which is what
+// rig.yaml names it for and still the ordinary answer. What this is for is the
+// id and secret that arrive some other way — a secret manager, a mounted
+// file, a test fake — and for an application whose own configuration would
+// rather name what it needs than leave it to a README.
+//
+// The only field is Google, because that is the one provider auth.oauth lists.
+type OAuthCredentials struct {
+	// Google's pair. Empty reads GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET.
+	Google OAuthClient
+}
+
+// OAuthClient is one provider's registration: the id it knows this application
+// by, and the secret that proves this application is the one asking.
+//
+// Each is read on its own, so an id can come from the environment and a secret
+// from here — which is the shape a project keeping only its secrets in a
+// manager already has, and the reason this is two fields rather than a pair
+// taken whole. What it accepts is the other order of that mistake: an id
+// supplied here beside a stale secret still in somebody's shell makes a pair
+// the provider rejects at its token endpoint, naming neither half.
+type OAuthClient struct {
+	ID     string
+	Secret string
 }
 
 // New assembles the authentication foundation over a pool.
@@ -236,6 +396,57 @@ func Config(pool *pgxpool.Pool, h Hooks) (auth.Config, error) {
 		Limits:           limits(),
 		LogRetention:     90 * 24 * time.Hour,
 		Now:              h.Now,
+	}
+
+	// Providers are wired only when this process has credentials for at least one.
+	// A deployment that has none mounts no provider routes, which is better than
+	// mounting a button that cannot work.
+	configured, err := ConfiguredProviders(h.OAuth)
+	if err != nil {
+		return auth.Config{}, err
+	}
+	if len(configured) > 0 {
+		// The origin this application supplied, if it did. BaseURL is what rig.yaml
+		// and the environment resolved, and it is not asked at all when the field
+		// answers — so a deployment that named only auth.oauth.base_url_env and
+		// fills this in from Go never meets BaseURL's refusal.
+		//
+		// The two rules rig checked on auth.oauth.base_url when it read the file,
+		// applied to the one origin it could not see: a trailing slash is trimmed, and
+		// an origin with no scheme is refused rather than built into a callback URL
+		// that every provider rejects without saying why.
+		base := strings.TrimRight(h.OAuth.BaseURL, "/")
+		switch {
+		case base == "":
+			if base, err = BaseURL(); err != nil {
+				return auth.Config{}, err
+			}
+		case !strings.HasPrefix(base, "http://") && !strings.HasPrefix(base, "https://"):
+			return auth.Config{}, errors.New("api: Hooks.OAuth.BaseURL must be an absolute origin, for example https://app.example.com: a provider compares the callback URL built from it exactly")
+		}
+		key, err := signingKey(h.OAuth)
+		if err != nil {
+			return auth.Config{}, err
+		}
+		// allow_joining, set apart from allow_provisioning: one of the two doors a
+		// provider sign-in opens is shut, and nil here would mean the other one's
+		// answer.
+		allowJoining := false
+		cfg.OAuth = auth.OAuth{
+			Providers:         configured,
+			BaseURL:           base,
+			Origin:            h.OAuth.Origin,
+			SigningKey:        key,
+			StateTTL:          10 * time.Minute,
+			AllowProvisioning: true,
+			AllowJoining:      &allowJoining,
+			AllowedReturnTo:   append([]string{"http://localhost:8082"}, h.OAuth.ReturnTo...),
+			// Plain HTTP, so the __Host- cookie a browser would insist on is
+			// unavailable. Never set anywhere real.
+			Insecure: true,
+			OnSignIn: h.OAuth.OnSignIn,
+			OnError:  h.OAuth.OnError,
+		}
 	}
 
 	// So an authentication failure looks like every other failure this API
@@ -371,4 +582,65 @@ func AuthMailDispatcher(front *auth.Auth, logger *slog.Logger) serve.Task {
 		logger.InfoContext(ctx, "authentication mail pruned", "count", pruned)
 		return err
 	}
+}
+
+// signingKey is the key that signs the cookie carrying the state and the PKCE
+// verifier across a sign-in's round trip.
+//
+// At least 32 bytes, because it is a secret, and it has to be the same key in
+// every replica: a callback may arrive at a different one than the one that
+// started the sign-in, and a key invented per process is a sign-in that fails
+// whenever a load balancer is doing its job.
+//
+// Hooks.OAuth.SigningKey first, then OAUTH_SIGNING_KEY, which is the ordinary
+// way a deployment hands one over.
+func signingKey(h OAuthHooks) ([]byte, error) {
+	// A key this application named and got wrong, reported as that rather than as
+	// an absence. It is not replaced by the variable, and where insecure is set it
+	// is not replaced by a development key either: substituting for a value
+	// somebody stated is how a sign-in works in one replica and not the next.
+	if n := len(h.SigningKey); n > 0 && n < 32 {
+		return nil, fmt.Errorf("api: Hooks.OAuth.SigningKey holds %d bytes and needs at least 32: it signs the OAuth state parameter, and every replica has to use the same one", n)
+	}
+	key := h.SigningKey
+	if len(key) == 0 {
+		key = []byte(os.Getenv(SigningKeyEnv))
+	}
+	switch {
+	case len(key) >= 32:
+		return key, nil
+	case len(key) == 0:
+		// auth.oauth.insecure is set, which says this is local development: one
+		// process serves everything and there is no replica to share a key with.
+		// Reached only when nothing supplied one at all — a key this short is a
+		// mistake rather than an absence, and gets the error below.
+		key = make([]byte, 32)
+		if _, err := rand.Read(key); err != nil {
+			return nil, fmt.Errorf("api: generate a development signing key: %w", err)
+		}
+		return key, nil
+	}
+	return nil, errors.New("api: a signing key of at least 32 bytes is required: set Hooks.OAuth.SigningKey or OAUTH_SIGNING_KEY — it signs the OAuth state parameter, and every replica has to use the same one")
+}
+
+// ConfiguredProviders are the providers this process has credentials for.
+//
+// A client secret is not configuration: it is a secret, so rig.yaml names the
+// environment variable and this reads it. [OAuthHooks.Credentials] is read
+// first, for an application that holds its secrets somewhere else, and a
+// provider named in neither place is skipped rather than mounted broken —
+// which is what lets one binary offer Google in a deployment and nothing at
+// all on a laptop. A provider marked required refuses to start instead,
+// whichever of the two it was waiting for.
+//
+// Exported so a sign-in page can draw a button per provider that actually
+// works, rather than one per provider somebody hoped for.
+func ConfiguredProviders(h OAuthHooks) ([]oauth.Provider, error) {
+	out := make([]oauth.Provider, 0, 2)
+
+	if id, secret := cmp.Or(h.Credentials.Google.ID, os.Getenv("GOOGLE_CLIENT_ID")), cmp.Or(h.Credentials.Google.Secret, os.Getenv("GOOGLE_CLIENT_SECRET")); id != "" && secret != "" {
+		out = append(out, oauth.Google(id, secret))
+	}
+
+	return append(out, h.Extra...), nil
 }

@@ -135,6 +135,14 @@
   button.ghost { background: transparent; color: var(--ink); border-color: var(--line); font-weight: 400; }
   button.tiny { padding: .15rem .45rem; font-size: .78rem; }
   button.danger { background: transparent; color: var(--bad); border-color: color-mix(in srgb, var(--bad) 35%, var(--line)); }
+  /* A provider sign-in is a navigation, not a form post, so its control is a
+     link wearing the button's clothes. */
+  a.button {
+    display: inline-block; text-decoration: none; cursor: pointer; width: auto;
+    background: var(--ink); color: var(--bg); border: 1px solid var(--ink);
+    border-radius: 7px; font-weight: 500; padding: .4rem .85rem;
+  }
+  a.button:hover { opacity: .88; }
   fieldset { border: 0; padding: 0; margin: 0 0 .6rem; }
   fieldset legend { font-size: .75rem; color: var(--dim); padding: 0; margin-bottom: .3rem; }
   .checks { display: flex; flex-wrap: wrap; gap: .35rem .8rem; }
@@ -445,22 +453,49 @@
     </div>
 
     <div class="panel">
-      <h2>Sign in with a provider <span class="right dim">elsewhere</span></h2>
+      <h2>Sign in with a provider <span class="right dim">no tenant named</span></h2>
       <div class="body">
+        {{if .Providers}}
         <p class="note">
-          Not here. A provider sign-in has to know the tenant <em>before</em> the
-          redirect, because that is what the callback joins somebody to — and the
-          callback URL is registered with the provider and fixed, so it carries
-          nothing on the way back. A header does not survive it. A host does.
+          Nothing here names a tenant. <code>/start</code> is an anonymous browser
+          GET — no session, no token, nobody having proved they own an address — so
+          there is nobody to have tenants yet. The callback resolves who you are
+          and the picker answers where you go, which is exactly what
+          <code>POST /auth/login</code> does after a password.
+        </p>
+        {{range .Providers}}
+        <p>
+          <a class="button" href="/auth/oauth/{{. | lower}}/start?returnTo=/ui&amp;remember=1">
+            Continue with {{.}}
+          </a>
+        </p>
+        {{end}}
+        <p class="note">
+          Sign in with an address nobody has and you land <em>in the picker</em>:
+          an identity, a provider link, an account nowhere, and an empty tenant
+          list. Use the address you registered with and the two are linked instead
+          — if the provider says it is verified, which the consent screen lets you
+          turn off.
         </p>
         <p class="note">
-          So it belongs in a deployment that has a host per tenant, which is
-          <code>examples/auth_oauth</code>: <code>acme.localhost</code> is one tenant,
-          <code>beta.localhost</code> is another, and the resolver is three lines.
-          Everything else about the flow — the sealed state cookie, PKCE, matching
-          on the provider's subject, refusing to link an unverified address — is the
-          same <code>auth/oauth</code> this example would have used.
+          <code>remember=1</code> is the checkbox this flow has nowhere to draw: a
+          link out and a redirect back, with no form in between. The server carries
+          it across the round trip in the signed state cookie.
         </p>
+        <p class="note">
+          The other shape is <code>examples/auth_oauth</code>: a host per tenant, so
+          the tenant <em>is</em> known before the redirect and is sealed into that
+          same cookie. Everything else about the flow — PKCE, matching on the
+          provider's subject, refusing to link an unverified address — is the same
+          <code>auth/oauth</code>.
+        </p>
+        {{else}}
+        <p class="note">
+          No provider is wired in this run. rig mounts the routes only for a
+          provider it has credentials for, which is what lets one binary offer
+          Google in a deployment and nothing at all on a laptop.
+        </p>
+        {{end}}
       </div>
     </div>
 

@@ -11,9 +11,17 @@ import (
 	"github.com/simonjanss/rig/examples/linearlite/internal/app"
 )
 
-// The flagship flow, end to end over real SQL: a stranger registers, finds the
-// invitation OnRegistered left, accepts it, and can use the board — which
-// proves the hook, the provisioning, and the role grant in one pass.
+// The flagship flow, end to end over real SQL: a stranger registers, is put in
+// the board's tenant by OnRegistered, finds the link it left, and can use the
+// board — which proves the hook, the provisioning, and the role grant in one
+// pass.
+//
+// Note what `Invite: true` does and does not do, because the name suggests
+// otherwise: Provision creates a live account either way, and Invite adds a
+// verification link so the newcomer can confirm the address. It is not a
+// pending membership. So the registration comes back with the tenant and a
+// session for it — the response says what the hook did — and the link is
+// something to use rather than something to wait for.
 func TestRegisteringLandsOnTheBoard(t *testing.T) {
 	api := newServer(t)
 	api.seed(t)
@@ -29,13 +37,25 @@ func TestRegisteringLandsOnTheBoard(t *testing.T) {
 	}
 	var signedUp struct {
 		IdentityToken string `json:"identityToken"`
-		Tenants       []any  `json:"tenants"`
+		AccessToken   string `json:"accessToken"`
+		Tenants       []struct {
+			TenantID uuid.UUID `json:"tenantId"`
+			Current  bool      `json:"current"`
+		} `json:"tenants"`
 	}
 	res.decode(t, &signedUp)
-	if len(signedUp.Tenants) != 0 {
-		t.Fatalf("registering must not join anything by itself: %s", res.body)
+	if len(signedUp.Tenants) != 1 || signedUp.Tenants[0].TenantID != uuid.MustParse(app.SeedTenantID) {
+		t.Fatalf("the hook put them in the board's tenant; the answer should say so: %s", res.body)
+	}
+	if !signedUp.Tenants[0].Current || signedUp.AccessToken == "" {
+		t.Fatalf("a live account is a session; nothing is pending: %s", res.body)
+	}
+	if signedUp.IdentityToken == "" {
+		t.Fatal("the identity token comes back alongside a session, not instead of one")
 	}
 
+	// The link the hook left, which is a verification link rather than a door
+	// they are waiting outside: they are already in.
 	listed := api.do(t, request{method: http.MethodGet, path: "/auth/me/invitations", token: signedUp.IdentityToken})
 	var page struct {
 		Data []struct {

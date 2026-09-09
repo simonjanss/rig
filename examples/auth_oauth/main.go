@@ -46,7 +46,7 @@ import (
 	"github.com/simonjanss/rig/examples/auth_oauth/internal/api"
 	"github.com/simonjanss/rig/examples/auth_oauth/internal/store"
 	"github.com/simonjanss/rig/examples/auth_oauth/services/bookmark"
-	"github.com/simonjanss/rig/examples/auth_oauth/services/idp"
+	"github.com/simonjanss/rig/examples/idp"
 	"github.com/simonjanss/rig/migrate"
 	"github.com/simonjanss/rig/runtime/serve"
 )

@@ -106,25 +106,27 @@ type store struct {
 	// per tenant, which is the point: one address is one person.
 	identities  map[string]uuid.UUID
 	memberships []membership
+	// verified is what the real store keeps in rig_identity.email_verified_at,
+	// modelled here because LinkIdentity owes it: a link is only ever offered on
+	// an address the provider verified, and recording the link without the
+	// evidence is what left a password registrant unverified forever.
+	verified map[uuid.UUID]bool
 
 	provisions int
 	joins      int
+	// linked counts calls to LinkIdentity rather than rows, because a repeat
+	// sign-in runs the upsert again and the row count would not move.
+	linked int
 }
 
 func newStore() *store {
-	return &store{identities: map[string]uuid.UUID{}}
+	return &store{identities: map[string]uuid.UUID{}, verified: map[uuid.UUID]bool{}}
 }
 
 func (s *store) FindLink(_ context.Context, provider, subject string) (*oauth.Link, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-
-	for _, l := range s.links {
-		if l.Provider == provider && l.Subject == subject {
-			return l, nil
-		}
-	}
-	return nil, nil
+	return s.link(provider, subject), nil
 }
 
 func (s *store) FindIdentityByEmail(_ context.Context, lowercased string) (uuid.UUID, error) {
@@ -133,17 +135,41 @@ func (s *store) FindIdentityByEmail(_ context.Context, lowercased string) (uuid.
 	return s.identities[lowercased], nil
 }
 
+// LinkIdentity upserts, because the real one does: the conflict target is
+// (provider, subject), which the foundation makes unique, and a repeat sign-in
+// runs this again rather than only the first one. A fake that appended would
+// hold two rows the schema forbids.
 func (s *store) LinkIdentity(_ context.Context, in oauth.LinkInput) (*oauth.Link, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	l := &oauth.Link{
-		ID: uuid.New(), IdentityID: in.IdentityID,
-		Provider: in.Provider, Subject: in.Profile.Subject,
-		EmailAddress: in.Profile.EmailAddress,
+	l := s.link(in.Provider, in.Profile.Subject)
+	if l == nil {
+		l = &oauth.Link{
+			ID: uuid.New(), IdentityID: in.IdentityID,
+			Provider: in.Provider, Subject: in.Profile.Subject,
+		}
+		s.links = append(s.links, l)
 	}
-	s.links = append(s.links, l)
+	s.linked++
+	l.EmailAddress = in.Profile.EmailAddress
+	// The contract [oauth.Store.LinkIdentity] states. Already verified is left
+	// alone, because when an address was proved is a fact about the address.
+	if in.Profile.EmailVerified {
+		s.verified[l.IdentityID] = true
+	}
 	return l, nil
+}
+
+// link is the lookup both FindLink and the upsert above need. The caller holds
+// the lock.
+func (s *store) link(provider, subject string) *oauth.Link {
+	for _, l := range s.links {
+		if l.Provider == provider && l.Subject == subject {
+			return l
+		}
+	}
+	return nil
 }
 
 func (s *store) ProvisionIdentity(ctx context.Context, in oauth.ProvisionInput) (*oauth.Link, error) {
@@ -206,12 +232,34 @@ type fixture struct {
 	store    *store
 	tenant   uuid.UUID
 	signedIn *oauth.SignIn
+	// failed is the last refusal, captured so a test can assert which one it
+	// was rather than reading the prose of the page — which is a test that
+	// passes until somebody rewords a sentence, and the reason Reason exists.
+	failed *oauth.Failure
+}
+
+// capturing records the refusal on the fixture, for a test that is about which
+// one it was. It is opt-in rather than always on, because the default rendering
+// is itself under test — an internal failure must not describe itself to the
+// caller — and a hook that replaced it everywhere would take that with it.
+func (f *fixture) capturing(c *oauth.Config) {
+	c.OnError = func(w http.ResponseWriter, _ *http.Request, fail *oauth.Failure) {
+		f.failed = fail
+		w.WriteHeader(rigerr.CodeOf(fail).HTTPStatus())
+	}
 }
 
 func setup(t *testing.T, profile oauth.Profile, tweak func(*oauth.Config)) *fixture {
 	t.Helper()
+	return setupInto(t, &fixture{}, profile, tweak)
+}
 
-	f := &fixture{provider: newFakeProvider(t, profile), store: newStore(), tenant: uuid.New()}
+// setupInto fills in a fixture the caller already holds, so that a tweak can
+// close over it — which [fixture.capturing] has to.
+func setupInto(t *testing.T, f *fixture, profile oauth.Profile, tweak func(*oauth.Config)) *fixture {
+	t.Helper()
+
+	f.provider, f.store, f.tenant = newFakeProvider(t, profile), newStore(), uuid.New()
 
 	cfg := oauth.Config{
 		Store:      f.store,
@@ -371,6 +419,98 @@ func TestAVerifiedAddressLinksAnExistingAccount(t *testing.T) {
 	}
 }
 
+// The evidence a link is made on is recorded, not just acted on.
+//
+// A link to somebody who already exists is only ever offered on an address the
+// provider says is verified — that claim is the whole reason it is allowed — so
+// a store that writes the link and drops the claim leaves the person unverified
+// on a column rather than on anything they did. That is what kept
+// RequireVerifiedEmail off this path until it was fixed.
+func TestLinkingRecordsThatTheAddressWasVerified(t *testing.T) {
+	t.Parallel()
+
+	f := setup(t, oauth.Profile{
+		Subject: "provider-subject-1", EmailAddress: "sam@example.com", EmailVerified: true,
+	}, nil)
+
+	identityID, _ := f.store.put(f.tenant, "sam@example.com")
+
+	f.signIn(t, "")
+	if f.signedIn == nil {
+		t.Fatal("the sign-in should have completed")
+	}
+	if !f.store.verified[identityID] {
+		t.Error("a verified provider address should have been recorded as verifying the identity")
+	}
+}
+
+// A link made before rig recorded the evidence, stamped on the next sign-in.
+//
+// This is the population the whole change is for, and the one a first-link-only
+// stamp misses: they signed up with a password, never confirmed the address,
+// linked a provider back when linking wrote nothing down, and have been signing
+// in with that provider ever since. A repeat sign-in matches on the subject and
+// never reaches the linking branch, so without this their identity keeps its
+// null — and RequireVerifiedEmail, which now applies to a provider sign-in,
+// refuses them on both paths with no way to ask for a verification mail.
+func TestASignInStampsALinkMadeBeforeTheEvidenceWasRecorded(t *testing.T) {
+	t.Parallel()
+
+	f := setup(t, oauth.Profile{
+		Subject: "provider-subject-1", EmailAddress: "sam@example.com", EmailVerified: true,
+	}, nil)
+
+	// The old row: a link, and an identity nothing ever marked verified.
+	identityID, _ := f.store.put(f.tenant, "sam@example.com")
+	f.store.links = append(f.store.links, &oauth.Link{
+		ID: uuid.New(), IdentityID: identityID,
+		Provider: oauth.ProviderGoogle, Subject: "provider-subject-1",
+		EmailAddress: "sam@example.com",
+	})
+
+	f.signIn(t, "")
+	if f.signedIn == nil {
+		t.Fatal("the sign-in should have completed")
+	}
+	if !f.store.verified[identityID] {
+		t.Error("the provider vouched for the address again; the sign-in should have recorded it")
+	}
+	if len(f.store.links) != 1 {
+		t.Errorf("%d links, want the existing one updated rather than a second", len(f.store.links))
+	}
+}
+
+// And a provider that has stopped vouching does not undo the link.
+//
+// The link is what authorises a repeat sign-in — it was made on evidence, and
+// GitHub reporting no verified address today says nothing about the day it was
+// made. So this writes nothing and refuses nothing.
+func TestARepeatSignInWithAnUnverifiedAddressRecordsNothing(t *testing.T) {
+	t.Parallel()
+
+	f := setup(t, oauth.Profile{
+		Subject: "provider-subject-1", EmailAddress: "sam@example.com",
+	}, nil)
+
+	identityID, _ := f.store.put(f.tenant, "sam@example.com")
+	f.store.links = append(f.store.links, &oauth.Link{
+		ID: uuid.New(), IdentityID: identityID,
+		Provider: oauth.ProviderGoogle, Subject: "provider-subject-1",
+		EmailAddress: "sam@example.com",
+	})
+
+	f.signIn(t, "")
+	if f.signedIn == nil {
+		t.Fatal("the existing link is what admits them, and it still does")
+	}
+	if f.store.verified[identityID] {
+		t.Error("an unverified address is not evidence and must not be recorded as any")
+	}
+	if f.store.linked != 0 {
+		t.Errorf("%d writes, want none — there is nothing to record", f.store.linked)
+	}
+}
+
 // Somebody who already works at one of your customers signing in to another.
 // The person is found — one Google account, one link, no second identity — and
 // then the tenant decides.
@@ -413,9 +553,10 @@ func TestAKnownPersonJoiningAnotherTenant(t *testing.T) {
 func TestAKnownPersonCannotJoinWithoutProvisioning(t *testing.T) {
 	t.Parallel()
 
-	f := setup(t, oauth.Profile{
+	f := &fixture{}
+	f = setupInto(t, f, oauth.Profile{
 		Subject: "provider-subject-1", EmailAddress: "sam@example.com", EmailVerified: true,
-	}, nil)
+	}, f.capturing)
 
 	f.store.put(uuid.New(), "sam@example.com")
 
@@ -428,6 +569,115 @@ func TestAKnownPersonCannotJoinWithoutProvisioning(t *testing.T) {
 	}
 	if f.store.joins != 0 {
 		t.Error("nothing should have joined this tenant")
+	}
+	// And it says which refusal it was. "We have never heard of you" is a
+	// different answer from "you are not in this tenant", and a person can only
+	// act on the second one — by asking somebody for an invitation.
+	if f.failed == nil || f.failed.Reason != oauth.ReasonNoTenantAccess {
+		t.Errorf("reason = %v, want %v", f.failed, oauth.ReasonNoTenantAccess)
+	}
+	if f.failed.Error() != "Forbidden: you do not have access to this tenant" {
+		t.Errorf("message = %q, want the one a password login gives", f.failed.Error())
+	}
+}
+
+// Nobody at all gets the other refusal, and this is the pair that makes the
+// split worth having: one sentence used to answer both.
+func TestATotalStrangerIsRefusedAsAStranger(t *testing.T) {
+	t.Parallel()
+
+	f := &fixture{}
+	f = setupInto(t, f, oauth.Profile{
+		Subject: "nobody-1", EmailAddress: "nobody@example.com", EmailVerified: true,
+	}, f.capturing)
+
+	f.signIn(t, "")
+	if f.failed == nil || f.failed.Reason != oauth.ReasonNoAccount {
+		t.Errorf("reason = %v, want %v", f.failed, oauth.ReasonNoAccount)
+	}
+}
+
+// The two doors, gated separately.
+//
+// A deployment can want a provider to be able to create a person and never to
+// put one in a tenant — with a tenant read from a request, the join is the half
+// a crafted /start link would abuse, and the person on their own reaches
+// nothing. One switch could not say it.
+func TestJoiningCanBeRefusedWhileProvisioningIsOn(t *testing.T) {
+	t.Parallel()
+
+	f := &fixture{}
+	f = setupInto(t, f, oauth.Profile{
+		Subject: "somebody-new", EmailAddress: "new@example.com", EmailVerified: true,
+	}, func(c *oauth.Config) {
+		c.AllowProvisioning = true
+		c.AllowJoining = new(bool)
+		f.capturing(c)
+	})
+
+	f.signIn(t, "")
+
+	if f.store.provisions != 1 {
+		t.Errorf("%d people created, want 1 — the first door is open", f.store.provisions)
+	}
+	if f.store.joins != 0 {
+		t.Errorf("%d tenants joined, want 0 — the second is not", f.store.joins)
+	}
+	if f.signedIn != nil {
+		t.Error("the sign-in named a tenant they cannot be in, so it should not have completed")
+	}
+	if f.failed == nil || f.failed.Reason != oauth.ReasonNoTenantAccess {
+		t.Errorf("reason = %v, want %v", f.failed, oauth.ReasonNoTenantAccess)
+	}
+}
+
+// And the other way round, which is just as ordinary: a deployment whose people
+// come from a directory elsewhere admits them to the tenant the host named and
+// never invents one.
+func TestJoiningCanBeAllowedWhileProvisioningIsOff(t *testing.T) {
+	t.Parallel()
+
+	joining := true
+	f := setup(t, oauth.Profile{
+		Subject: "provider-subject-1", EmailAddress: "sam@example.com", EmailVerified: true,
+	}, func(c *oauth.Config) { c.AllowJoining = &joining })
+
+	f.store.put(uuid.New(), "sam@example.com")
+
+	f.signIn(t, "")
+	if f.signedIn == nil {
+		t.Fatal("somebody who already exists should have been admitted")
+	}
+	if f.store.joins != 1 {
+		t.Errorf("%d tenants joined, want 1", f.store.joins)
+	}
+	if f.store.provisions != 0 {
+		t.Errorf("%d people created, want 0 — that door is shut", f.store.provisions)
+	}
+}
+
+// Nil is what one switch meant, in both directions. This is the test that says
+// the default did not move.
+func TestAllowJoiningFollowsAllowProvisioningWhenUnset(t *testing.T) {
+	t.Parallel()
+
+	for _, on := range []bool{false, true} {
+		t.Run(map[bool]string{false: "off", true: "on"}[on], func(t *testing.T) {
+			f := setup(t, oauth.Profile{
+				Subject: "provider-subject-1", EmailAddress: "sam@example.com", EmailVerified: true,
+			}, func(c *oauth.Config) { c.AllowProvisioning = on })
+
+			f.store.put(uuid.New(), "sam@example.com")
+			f.signIn(t, "")
+
+			want := 0
+			if on {
+				want = 1
+			}
+			if f.store.joins != want {
+				t.Errorf("%d tenants joined, want %d", f.store.joins, want)
+			}
+		})
 	}
 }
 
@@ -1322,4 +1572,58 @@ func (r *recorder) of(event string) []authlog.Entry {
 		}
 	}
 	return out
+}
+
+// Remember-me for a flow with no form to put a box on.
+//
+// It travels the way returnTo does: read at the start, sealed into the state
+// cookie, read back at the callback — because the callback URL is registered
+// with the provider and fixed, so a query parameter that was there on the way
+// out is gone on the way back. Safe to seal rather than re-read for the reason
+// the tenant is: the cookie is signed, so what comes back is what went out.
+func TestRememberSurvivesTheRoundTrip(t *testing.T) {
+	t.Parallel()
+
+	f := setup(t, oauth.Profile{
+		Subject: "subject-1", EmailAddress: "ada@example.com",
+		EmailVerified: true, DisplayName: "Ada",
+	}, func(c *oauth.Config) { c.AllowProvisioning = true })
+
+	f.signIn(t, "?remember=1")
+	if f.signedIn == nil {
+		t.Fatal("the sign-in should have completed")
+	}
+	if !f.signedIn.Remember {
+		t.Error("the long-session request should have reached the ending")
+	}
+}
+
+// The two ways of not asking, and neither is a refusal.
+//
+// Unlike returnTo, this parameter cannot be abused — the worst it can ask for is
+// a session length the application configured — so an unreadable value is read
+// as false rather than answered with a text/plain dead end in front of somebody
+// who has just clicked a button.
+func TestRememberDefaultsToFalseRatherThanRefusing(t *testing.T) {
+	t.Parallel()
+
+	for _, query := range []string{"", "?remember=", "?remember=perhaps", "?remember=0"} {
+		t.Run("start"+query, func(t *testing.T) {
+			f := setup(t, oauth.Profile{
+				Subject: "subject-1", EmailAddress: "ada@example.com",
+				EmailVerified: true, DisplayName: "Ada",
+			}, func(c *oauth.Config) { c.AllowProvisioning = true })
+
+			res := f.signIn(t, query)
+			if res.StatusCode != http.StatusNoContent {
+				t.Fatalf("status %d, want the sign-in to have completed", res.StatusCode)
+			}
+			if f.signedIn == nil {
+				t.Fatal("the sign-in should have completed")
+			}
+			if f.signedIn.Remember {
+				t.Errorf("%q should not ask for a long session", query)
+			}
+		})
+	}
 }
