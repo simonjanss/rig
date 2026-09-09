@@ -69,7 +69,7 @@ type WebCORS struct {
 	// Replaces rather than extends, which is how `base_url_env` behaves: a
 	// deployment overriding a value should not have to know what it is
 	// overriding.
-	AllowedOriginsEnv string `yaml:"allowed_origins_env,omitempty" json:"allowed_origins_env,omitempty" jsonschema_description:"Environment variable holding a comma-separated origin list. Set, it replaces the baked-in list rather than adding to it. Defaults to CORS_ORIGINS."`
+	AllowedOriginsEnv string `yaml:"allowed_origins_env,omitempty" json:"allowed_origins_env,omitempty" jsonschema_description:"Environment variable holding a comma-separated origin list. Set, it replaces the baked-in cors.allowed_origins rather than adding to it. web.origin is always allowed either way. Defaults to CORS_ORIGINS."`
 
 	// MaxAge is how long a browser may cache a preflight. Default 10m, which is
 	// as long as Safari will honour.

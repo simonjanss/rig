@@ -224,7 +224,6 @@ func (p *Project) checkAuthOAuth(a Auth) diag.List {
 	}
 
 	// origin_from_host reads the tenant out of the host too, or it is deriving an
-	// origin for a tenant nothing resolved.	// origin_from_host reads the tenant out of the host too, or it is deriving an
 	// origin for a tenant nothing resolved.
 	if o.OriginFromHost && !a.Tenant.Uses(ir.TenantFromHost) {
 		diags.Add(diag.CodeConfigInvalid, p.At("auth", "oauth", "origin_from_host"),
