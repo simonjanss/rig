@@ -720,7 +720,7 @@ policy := cors.Policy{
 return api.Parts{Handler: policy.Wrap(mux)}, nil
 ```
 
-`api.TenantHeader` is there when you have an `auth:` block, and the `electric-*`
+`api.TenantHeader` is there when `tenant.from` includes `header`, and the `electric-*`
 entries when a table streams. Three entries in that literal are invisible when
 they are missing. `QUERY`: the client sends a search as `QUERY` and falls back to
 `POST` only on a 405 or a 501, and a preflight that omits a method fails as a

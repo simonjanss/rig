@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -168,16 +169,17 @@ func TestAFourHundredIsForwardedRatherThanAnswered(t *testing.T) {
 	}
 }
 
-// A policy in front of the whole API lists what a browser may read, this header
-// among the rest. The must-refetch answer names the one header a subscriber
-// needs only when nothing has said so already: replacing the list with one
-// entry would hide everything else on it.
-func TestAMustRefetchKeepsAnExposeHeaderAlreadySet(t *testing.T) {
+// A policy in front of the whole API lists what a browser may read, and it need
+// not name this header: one written before a table started streaming does not.
+// So the must-refetch answer appends rather than choosing between the two —
+// replacing the list would hide everything else on it, and standing aside for a
+// list without this header would cost the subscriber the handle it came back for.
+func TestAMustRefetchAddsToAnExposeHeaderAlreadySet(t *testing.T) {
 	t.Parallel()
 
 	p, _ := newProxy(electric.Config{URL: nowhere})
 	shape := electric.Shape{Table: "lesson", Fallback: snapshotOf("one")}
-	const already = "electric-handle, electric-offset, RateLimit-Limit"
+	const already = "RateLimit-Limit, API-Revision"
 
 	r := httptest.NewRequest(http.MethodGet, "/?offset=0_inf&handle=the-handle&live=true", nil)
 	w := httptest.NewRecorder()
@@ -186,8 +188,11 @@ func TestAMustRefetchKeepsAnExposeHeaderAlreadySet(t *testing.T) {
 	if w.Code != http.StatusConflict {
 		t.Fatalf("status = %d, want the 409 that resets a subscription", w.Code)
 	}
-	if got := w.Header().Get("Access-Control-Expose-Headers"); got != already {
-		t.Errorf("expose-headers = %q, want the list already there, %q", got, already)
+	// A browser joins the repeated values before it splits them, so both the
+	// list that was there and this one entry are readable.
+	want := []string{already, "electric-handle"}
+	if got := w.Header().Values("Access-Control-Expose-Headers"); !slices.Equal(got, want) {
+		t.Errorf("expose-headers = %q, want %q", got, want)
 	}
 
 	// And with nothing in front, the answer says the one thing a cross-origin
