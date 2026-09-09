@@ -18,7 +18,7 @@ import type { Config } from "@rig-ts/client";
 
 import { createBlogPostClient } from "./blog_post_client.gen.js";
 import { createRigAccountClient } from "./rig_account_client.gen.js";
-import { Runtime } from "@rig-ts/client";
+import { Auth, Runtime } from "@rig-ts/client";
 
 /**
  * The prefix every route sits under.
@@ -55,6 +55,16 @@ export type Client = {
      * and for the live-sync collections, which take it.
      */
     readonly runtime: Runtime;
+    /**
+     * Signing in and out, tenants, sessions, invitations and keys.
+     *
+     * rig's own endpoints rather than this schema's, which is why they are not
+     * grouped under a resource: they are the same routes with the same bodies
+     * in every project that turns authentication on, and only the profile below
+     * varies. `auth.profile` is what a sign-in page should read rather than
+     * hardcoding which providers exist.
+     */
+    readonly auth: Auth;
     /** A post, which people are told about when it goes live. */
     readonly blogPosts: BlogPostClient;
     /** One person's membership of one tenant. */
@@ -77,12 +87,21 @@ export function createClient(config: Config): Client {
             basePath: "/auth",
             accessTtlMs: 600000,
             refreshTtlMs: 43200000,
+            rememberTtlMs: 2592000000,
             rotationLeewayMs: 30000,
+            identityTtlMs: 1800000,
+            cacheTtlMs: 0,
+            tenantHeader: "X-Tenant-Id",
+            hasRegistration: false,
+            hasTenantCreation: false,
+            hasIdentitySessions: true,
+            hasApiKeys: true,
         },
     });
 
     return {
         runtime,
+        auth: new Auth(runtime),
         blogPosts: createBlogPostClient(runtime),
         rigAccounts: createRigAccountClient(runtime),
     };

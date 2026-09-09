@@ -26,6 +26,52 @@ export type AuthProfile = {
      * picking a different number.
      */
     rotationLeewayMs: number;
+
+    // The rest are optional because a client generated before this package
+    // carried them says nothing about them, and absent has to read as "this
+    // client does not know" rather than as "the project turned it off". A
+    // freshly generated client fills in every one.
+
+    /** How long a session lasts when somebody asked to stay signed in. */
+    rememberTtlMs?: number;
+    /**
+     * The lifetime of the tenant-less credential somebody holds between signing
+     * in and picking a tenant.
+     */
+    identityTtlMs?: number;
+    /**
+     * How stale an authorization answer this server caches could be. It is not
+     * a revocation delay a client can act on; it is here so that one reading a
+     * trail can say how old the answer behind an entry might have been.
+     */
+    cacheTtlMs?: number;
+
+    /**
+     * The header a sign-in names its tenant with. Absent means `X-Tenant-Id`.
+     */
+    tenantHeader?: string;
+    /**
+     * The query parameter that does the same, where a project resolves tenants
+     * that way. `Auth` does not use it — the Go client does not either, and two
+     * SDKs disagreeing about this would be worse than neither doing it.
+     */
+    tenantQuery?: string;
+
+    /** Whether `POST <basePath>/register` exists. */
+    hasRegistration?: boolean;
+    /** Whether `POST <basePath>/tenants` exists. */
+    hasTenantCreation?: boolean;
+    /** Whether the tenant-picker routes under `<basePath>/me` exist. */
+    hasIdentitySessions?: boolean;
+    /** Whether the `<basePath>/api-keys` routes exist. */
+    hasApiKeys?: boolean;
+
+    /**
+     * Provider names with a sign-in route, in the order the project listed
+     * them. What a sign-in page draws its buttons from, rather than hardcoding
+     * a name the configuration already owns.
+     */
+    oauthProviders?: readonly string[];
 };
 
 /**

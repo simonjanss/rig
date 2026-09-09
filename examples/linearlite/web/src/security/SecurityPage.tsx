@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 
-import type { AuthLogEntryView, SessionView } from "../auth/wire.js";
+import type { AuthLogEntryView, SessionView } from "@rig-ts/client";
 
-import { listAuthLog, listSessions, revokeSession } from "../auth/authApi.js";
 import { useAuth } from "../auth/AuthContext.js";
 import { client } from "../lib/client.js";
 import { useMembers } from "../lib/members.js";
@@ -13,8 +12,9 @@ import { useToasts } from "../toast/ToastContext.js";
  *
  * Both halves are rig's own endpoints over rig's own tables — `GET
  * /auth/sessions` over the refresh-token families and `GET /auth/audit` over
- * `rig_auth_log` — and neither is generated from this schema, which is why the
- * calls are hand-written in `auth/authApi.ts` beside the rest of `/auth/*`.
+ * `rig_auth_log` — and neither is generated from this schema, which is why they
+ * are reached through `client.auth` rather than through a resource: rig's own
+ * routes, covered once by the SDK instead of once per application.
  *
  * The trail is written whether or not anybody reads it: every sign-in, every
  * refusal, every lockout, every key minted, every invitation. That is the point
@@ -44,11 +44,13 @@ export function SecurityPage() {
         // Both at once: they are one question asked of two tables, and a
         // page that filled in halves would read as one of them being slow.
         Promise.all([
-            listSessions(client.runtime, asked),
-            listAuthLog(client.runtime, {
-                wide: asked,
-                ...(filter && { outcome: filter }),
-            }),
+            client.auth.sessions({ wide: asked }),
+            client.auth
+                .auditLog(
+                    { limit: 50, ...(filter && { outcome: filter }) },
+                    { wide: asked },
+                )
+                .then((p) => p.data ?? []),
         ])
             .then(([s, e]) => {
                 setSessions(s);
@@ -78,7 +80,7 @@ export function SecurityPage() {
 
     async function end(s: SessionView) {
         try {
-            await revokeSession(client.runtime, s.id, !s.current);
+            await client.auth.revokeSession(s.id, { wide: !s.current });
             push({
                 kind: "info",
                 title: s.current ? "This session is over" : "Session ended",

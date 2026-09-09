@@ -9,6 +9,7 @@ import (
 	"github.com/simonjanss/rig/internal/gen/gentest"
 	"github.com/simonjanss/rig/internal/gen/tsclient"
 	"github.com/simonjanss/rig/pkg/gen"
+	"github.com/simonjanss/rig/pkg/ir"
 )
 
 var update = flag.Bool("update", false, "rewrite the golden files")
@@ -450,5 +451,76 @@ func TestAClientForAProjectWithNoDeploymentsAsksForABaseUrl(t *testing.T) {
 	}
 	if !strings.Contains(src, "export function createClient(config: Config): Client {") {
 		t.Error("a client with no default stopped requiring a baseUrl")
+	}
+}
+
+// The gap issue #145 named: the Go client is told fourteen things about a
+// project's authentication and the TypeScript one was told four, so a sign-in
+// page in a browser — the only one of the two that draws a provider button —
+// hardcoded what the configuration already said.
+func TestTheAuthProfileCarriesEverythingTheGoClientCarries(t *testing.T) {
+	t.Parallel()
+
+	got := fileOf(t, load(t, notifyFixture), "client.gen.ts")
+
+	for _, want := range []string{
+		`basePath: "/auth",`,
+		"accessTtlMs: 600000,",
+		"refreshTtlMs: 43200000,",
+		"rememberTtlMs: 2592000000,",
+		"rotationLeewayMs: 30000,",
+		"identityTtlMs: 1800000,",
+		"cacheTtlMs: 0,",
+		`tenantHeader: "X-Tenant-Id",`,
+		"hasRegistration: false,",
+		"hasTenantCreation: false,",
+		"hasIdentitySessions: true,",
+		"hasApiKeys: true,",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("the auth profile does not carry %s", want)
+		}
+	}
+}
+
+// The half that only appears when a project asks for it. Mutating the document
+// rather than adding a fixture: the emission is what is under test, and a
+// fourth golden directory would be four more files to keep in step for one
+// block of ten lines.
+func TestTheAuthProfileCarriesTheOptionalHalf(t *testing.T) {
+	t.Parallel()
+
+	doc := gentest.LoadDocument(t, filepath.Join("testdata", notifyFixture))
+	doc.API.Auth.AllowRegistration = true
+	doc.API.Auth.AllowTenantCreation = true
+	doc.API.Auth.OAuth = &ir.AuthOAuth{
+		Providers: []ir.AuthProvider{{Name: "google"}, {Name: "github"}},
+	}
+
+	got := fileOf(t, gentest.Run(t, tsclient.New(), doc, opts()), "client.gen.ts")
+
+	for _, want := range []string{
+		"hasRegistration: true,",
+		"hasTenantCreation: true,",
+		`oauthProviders: ["google", "github"],`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("the auth profile does not carry %s", want)
+		}
+	}
+}
+
+// The counterpart to the Go client's nil Auth(): a project that mounts no
+// authentication gets no property for it, and no import either — which is what
+// keeps a client for a public API from naming a class it can never construct.
+func TestAProjectWithoutAuthGetsNoAuthSurface(t *testing.T) {
+	t.Parallel()
+
+	got := fileOf(t, load(t, fixture), "client.gen.ts")
+
+	for _, unwanted := range []string{"readonly auth:", "new Auth(", "auth: {"} {
+		if strings.Contains(got, unwanted) {
+			t.Errorf("a project with no auth block emits %q", unwanted)
+		}
 	}
 }

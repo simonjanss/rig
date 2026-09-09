@@ -4,7 +4,6 @@ import { useState } from "react";
 import { Link, useNavigate } from "react-router";
 
 import { useAuth } from "../auth/AuthContext.js";
-import { register } from "../auth/authApi.js";
 import { client } from "../lib/client.js";
 
 export function RegisterPage() {
@@ -24,7 +23,11 @@ export function RegisterPage() {
             // Registering creates the person and nothing else — no tenant, no
             // session. The picker is next, and the invitation waiting there is
             // the backend's OnRegistered hook at work.
-            const res = await register(client.runtime, email, name, password);
+            const res = await client.auth.register({
+                emailAddress: email,
+                displayName: name,
+                password,
+            });
             signedIn(res);
             void navigate("/welcome");
         } catch (err) {

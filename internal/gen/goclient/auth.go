@@ -1,8 +1,6 @@
 package goclient
 
 import (
-	"time"
-
 	"github.com/simonjanss/rig/internal/gen/genutil"
 	"github.com/simonjanss/rig/internal/gen/gobuf"
 	"github.com/simonjanss/rig/internal/naming"
@@ -39,7 +37,7 @@ func (e *emitter) authFile(auth *ir.Auth) (gen.Artifact, error) {
 	// number covering both of the reads rig caches. Zero for a project that
 	// caches neither, which is the honest answer to "how stale can this be": not
 	// at all, every request reads the row.
-	b.L("CacheTTL: %s,", genutil.GoDuration(b, cacheBackstop(e.doc)))
+	b.L("CacheTTL: %s,", genutil.GoDuration(b, genutil.CacheBackstop(e.doc)))
 	b.NL()
 
 	if auth.Tenant.Uses(ir.TenantFromHeader) && auth.Tenant.Header != "" {
@@ -97,20 +95,4 @@ func (e *emitter) permissionConstants(b *gobuf.Buf) {
 	}
 	b.L(")")
 	b.NL()
-}
-
-// cacheBackstop is how long a lost invalidation could go unnoticed, which is the
-// only thing about rig's own caching a client has any business being told.
-//
-// It cannot act on it — the number describes the server's memory, not the
-// client's — and it is in the profile so that somebody reading the generated
-// document can say how quickly a revocation takes effect in the worst case. In
-// the ordinary case the answer is "at once": the invalidation is published on
-// the transaction that revoked something.
-func cacheBackstop(doc *ir.Document) ir.Duration {
-	c := doc.API.Cache
-	if c == nil || !c.Enabled {
-		return 0
-	}
-	return ir.Duration(float64(time.Second) * c.TTLSeconds)
 }

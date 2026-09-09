@@ -4,7 +4,6 @@ import { useState } from "react";
 import { Link, useNavigate } from "react-router";
 
 import { useAuth } from "../auth/AuthContext.js";
-import { login } from "../auth/authApi.js";
 import { client } from "../lib/client.js";
 
 export function LoginPage() {
@@ -20,7 +19,11 @@ export function LoginPage() {
         setBusy(true);
         setError(null);
         try {
-            const res = await login(client.runtime, email, password);
+            const res = await client.auth.signIn({
+                emailAddress: email,
+                password,
+                client: "web",
+            });
             signedIn(res);
             void navigate(res.accessToken ? "/" : "/welcome");
         } catch (err) {
@@ -35,9 +38,16 @@ export function LoginPage() {
             <form className="auth-card" onSubmit={submit}>
                 <h1>LinearLite</h1>
                 <p className="auth-sub">
-                    The full-stack rig example. Sign in, or{" "}
-                    <Link to="/register">create an account</Link> — new accounts
-                    are invited straight into the demo workspace.
+                    The full-stack rig example. Sign in
+                    {client.auth.profile.hasRegistration === false ? (
+                        "."
+                    ) : (
+                        <>
+                            , or <Link to="/register">create an account</Link> —
+                            new accounts are invited straight into the demo
+                            workspace.
+                        </>
+                    )}
                 </p>
                 <label>
                     Email

@@ -3,7 +3,6 @@ import type { FormEvent } from "react";
 import { useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router";
 
-import { confirmPasswordReset } from "../auth/authApi.js";
 import { client } from "../lib/client.js";
 
 /**
@@ -32,7 +31,7 @@ export function ResetPasswordPage() {
         setBusy(true);
         setError(null);
         try {
-            await confirmPasswordReset(client.runtime, token, password);
+            await client.auth.confirmPasswordReset(token, password);
             setDone(true);
         } catch (err) {
             setError(err instanceof Error ? err.message : String(err));

@@ -38,7 +38,42 @@ export { staticToken, apiKey, isReauthorizer } from "./credential.js";
 export type { Bindable, Credential, Reauthorizer } from "./credential.js";
 
 export { Session, NoSessionError } from "./session.js";
-export type { TokenPair } from "./session.js";
+
+// rig's own authentication endpoints, and the shapes they send and receive.
+//
+// Hand-written rather than generated, and in this package rather than in a
+// project's client, for the reason the routes themselves are: they are the same
+// thirty routes with the same bodies in every application that turns
+// authentication on. Only the profile varies, and that is what the generated
+// `createClient` fills in.
+//
+// The wire types exported here are the ones `Auth`'s own signatures name. The
+// rest — the envelope a collection arrives in, and the bodies built out of
+// scalar arguments, such as the one `refresh` sends — stay internal, because a
+// caller who never writes one down cannot be broken by it changing.
+export { Auth } from "./auth.js";
+export type { AuditQuery } from "./auth.js";
+export type {
+    AcceptRequest,
+    AccountView,
+    APIKeyView,
+    AuthLogEntryView,
+    AuthPage,
+    ChangePasswordRequest,
+    CreateKeyRequest,
+    CreateKeyResponse,
+    CreateTenantRequest,
+    InvitationToMeView,
+    InvitationView,
+    LoginRequest,
+    Pagination,
+    ProvisionRequest,
+    RegisterRequest,
+    SessionView,
+    SignInResponse,
+    TenantView,
+    TokenPair,
+} from "./authwire.js";
 
 export { send, sendContent, sendNoContent, sendOptional } from "./transport.js";
 export type { CallOptions } from "./transport.js";

@@ -1,27 +1,9 @@
+import type { TokenPair } from "./authwire.js";
 import type { Credential, Reauthorizer } from "./credential.js";
 import type { Runtime } from "./runtime.js";
 
+import { DEFAULT_AUTH_BASE_PATH, refreshOp } from "./refresh.js";
 import { send } from "./transport.js";
-
-/**
- * The pair a sign-in returns, in the shape the wire uses.
- *
- * The names are the server's, verbatim — a client that renamed them would be a
- * second description of the same exchange, and this is a value programs store
- * between runs.
- */
-export type TokenPair = {
-    accessToken?: string;
-    refreshToken?: string;
-    /** RFC 3339, or absent from a server that did not say. */
-    expiresAt?: string;
-    /**
-     * When the session itself ends. A client needs both: one says when to
-     * refresh, the other says when to stop trying.
-     */
-    refreshExpiresAt?: string;
-    sessionId?: string;
-};
 
 /** Thrown when a session has nothing left to present. */
 export class NoSessionError extends Error {
@@ -55,6 +37,13 @@ export class Session implements Reauthorizer, Credential {
      */
     private inFlight: Promise<boolean> | undefined;
 
+    /**
+     * Counts how many people this session has belonged to, so that a call one
+     * of them started cannot land on the next — a refresh from here, and a
+     * sign-out or a reissued pair from {@link Auth}. See {@link Session.reset}.
+     */
+    private epoch = 0;
+
     /** Called when a new pair is issued — a place to persist it. */
     onTokens: ((tokens: TokenPair) => void) | undefined;
 
@@ -70,6 +59,21 @@ export class Session implements Reauthorizer, Credential {
     /** Identifies the session, for showing it in a list and revoking it. */
     get sessionId(): string {
         return this.tokens.sessionId ?? "";
+    }
+
+    /**
+     * How many people this session has belonged to, which is the counter
+     * {@link Session.reset} advances.
+     *
+     * Readable because object identity is not enough to tell one occupant from
+     * the next: a sign-in re-seats this object rather than replacing it, so a
+     * caller holding it across an awaited call needs this to know whether the
+     * session it comes back to is still the one it left. {@link Auth} reads it
+     * for exactly that, and the private counter behind
+     * {@link Session.exchange} is the same number.
+     */
+    get generation(): number {
+        return this.epoch;
     }
 
     /**
@@ -93,6 +97,28 @@ export class Session implements Reauthorizer, Credential {
                   }
                 : pair;
         this.onTokens?.(this.tokens);
+    }
+
+    /**
+     * Takes a pair that belongs to somebody else: a sign-in, not a refresh.
+     *
+     * The counterpart to {@link Session.replace}, and not interchangeable with
+     * it. `replace` keeps a refresh token the answer did not carry, because it
+     * is the same person continuing. This keeps nothing, because inheriting the
+     * previous person's refresh token would let the client refresh back into
+     * them.
+     *
+     * The object survives rather than being thrown away, which is what lets a
+     * caller hold one — and keep the `onTokens` they attached to it — across a
+     * sign-out and the sign-in after it. An exchange already in flight is
+     * discarded when it answers, for the same reason: the pair it is about to
+     * receive belongs to whoever was here before.
+     */
+    reset(tokens: TokenPair): void {
+        this.epoch++;
+        this.inFlight = undefined;
+        this.tokens = tokens;
+        this.onTokens?.(tokens);
     }
 
     /** Receives the client this session refreshes through. */
@@ -166,30 +192,30 @@ export class Session implements Reauthorizer, Credential {
             return false;
         }
 
-        const basePath = rt.api.auth?.basePath ?? "/auth";
+        const basePath = rt.api.auth?.basePath ?? DEFAULT_AUTH_BASE_PATH;
+
+        // Whose tokens these are. A sign-in arriving mid-exchange moves the
+        // session on, and the pair this call is about to receive then belongs
+        // to whoever was here before — see reset.
+        const epoch = this.epoch;
+
         this.inFlight = (async () => {
             const pair = await send<TokenPair>(
                 rt,
-                {
-                    name: "authRefresh",
-                    method: "POST",
-                    root: true,
-                    path: `${basePath}/refresh`,
-                    // The refresh token in the body is the credential here, and
-                    // the access token being replaced is the one thing that must
-                    // not be presented — it is the value that just failed.
-                    body: { refreshToken },
-                },
+                refreshOp(basePath, refreshToken),
                 {
                     anonymous: true,
                     ...(signal !== undefined ? { signal } : {}),
                 },
             );
             if (pair === undefined) return false;
+            if (epoch !== this.epoch) return false;
             this.replace(pair);
             return true;
         })().finally(() => {
-            this.inFlight = undefined;
+            // Only if nobody has reset in the meantime: that already cleared
+            // this, and a later exchange may have installed its own.
+            if (epoch === this.epoch) this.inFlight = undefined;
         });
 
         return await this.inFlight;

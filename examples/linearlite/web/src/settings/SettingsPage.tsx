@@ -5,18 +5,8 @@ import type {
     APIKeyView,
     CreateKeyResponse,
     InvitationView,
-} from "../auth/wire.js";
+} from "@rig-ts/client";
 
-import {
-    changePassword,
-    createApiKey,
-    inviteTeammate,
-    listApiKeys,
-    listInvitations,
-    revokeApiKey,
-    revokeInvitation,
-} from "../auth/authApi.js";
-import { adoptPair } from "../auth/AuthContext.js";
 import { client } from "../lib/client.js";
 import { NotificationSettings } from "../notifications/NotificationSettings.js";
 import { useToasts } from "../toast/ToastContext.js";
@@ -43,13 +33,15 @@ export function SettingsPage() {
     const { push } = useToasts();
 
     const refresh = () => {
-        listApiKeys(client.runtime)
+        client.auth
+            .apiKeys()
             .then(setKeys)
             .catch(() => undefined);
         // Silently on a refusal: listing who has been invited and not yet
         // arrived needs account.provision, so a member sees no such list and
         // that is the answer rather than an error to report.
-        listInvitations(client.runtime)
+        client.auth
+            .invitations()
             .then(setPending)
             .catch(() => setPending([]));
     };
@@ -58,10 +50,11 @@ export function SettingsPage() {
     async function mint() {
         setBusy(true);
         try {
-            const res = await createApiKey(client.runtime, name, [
-                "todo.read",
-                "todo.write",
-            ]);
+            const res = await client.auth.createApiKey({
+                name,
+                scopes: ["todo.read", "todo.write"],
+                kind: "Personal",
+            });
             setMinted(res);
             refresh();
         } catch (err) {
@@ -76,7 +69,7 @@ export function SettingsPage() {
     }
 
     async function revoke(id: string) {
-        await revokeApiKey(client.runtime, id);
+        await client.auth.revokeApiKey(id);
         refresh();
     }
 
@@ -87,12 +80,12 @@ export function SettingsPage() {
             // A display name has to be something, and the local part is the
             // best guess an invitation form has. The person renames themselves
             // when they arrive.
-            const acct = await inviteTeammate(
-                client.runtime,
-                address,
-                address.split("@")[0] || address,
-                "Basic",
-            );
+            const acct = await client.auth.provision({
+                emailAddress: address,
+                displayName: address.split("@")[0] || address,
+                role: "Basic",
+                invite: true,
+            });
             setInvitee("");
             refresh();
             push({
@@ -113,7 +106,7 @@ export function SettingsPage() {
 
     async function withdraw(i: InvitationView) {
         try {
-            await revokeInvitation(client.runtime, i.id);
+            await client.auth.revokeInvitation(i.id);
             push({
                 kind: "info",
                 title: `Withdrew ${i.emailAddress}`,
@@ -133,9 +126,12 @@ export function SettingsPage() {
         setChanging(true);
         try {
             // The pair that comes back is the session this tab is holding,
-            // reissued. Adopting it is what keeps this tab signed in while the
-            // others are not — see adoptPair.
-            adoptPair(await changePassword(client.runtime, current, next));
+            // reissued, and the client adopts it: that is what keeps this tab
+            // signed in while every other one is not.
+            await client.auth.changePassword({
+                currentPassword: current,
+                newPassword: next,
+            });
             setCurrent("");
             setNext("");
             push({

@@ -46,7 +46,7 @@ import {
 } from "./notification_setting_client.gen.js";
 import { createTodoAttachmentClient } from "./todo_attachment_client.gen.js";
 import { createTodoClient } from "./todo_client.gen.js";
-import { Runtime } from "@rig-ts/client";
+import { Auth, Runtime } from "@rig-ts/client";
 
 /**
  * The prefix every route sits under.
@@ -111,6 +111,16 @@ export type Client = {
      */
     readonly runtime: Runtime;
     /**
+     * Signing in and out, tenants, sessions, invitations and keys.
+     *
+     * rig's own endpoints rather than this schema's, which is why they are not
+     * grouped under a resource: they are the same routes with the same bodies
+     * in every project that turns authentication on, and only the profile below
+     * varies. `auth.profile` is what a sign-in page should read rather than
+     * hardcoding which providers exist.
+     */
+    readonly auth: Auth;
+    /**
      * One person inside one tenant. The person is the identity; this is who
      * they are here.
      */
@@ -165,12 +175,21 @@ export function createClient(config: ClientConfig = {}): Client {
             basePath: "/auth",
             accessTtlMs: 600000,
             refreshTtlMs: 43200000,
+            rememberTtlMs: 2592000000,
             rotationLeewayMs: 30000,
+            identityTtlMs: 1800000,
+            cacheTtlMs: 0,
+            tenantHeader: "X-Tenant-Id",
+            hasRegistration: true,
+            hasTenantCreation: true,
+            hasIdentitySessions: true,
+            hasApiKeys: true,
         },
     });
 
     return {
         runtime,
+        auth: new Auth(runtime),
         accounts: createAccountClient(runtime),
         notifications: createNotificationClient(runtime),
         notificationDeliveries: createNotificationDeliveryClient(runtime),
