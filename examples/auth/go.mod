@@ -9,7 +9,7 @@ require (
 	github.com/simonjanss/rig/examples/idp v0.0.0
 	github.com/simonjanss/rig/migrate v0.0.0
 	github.com/simonjanss/rig/rigclient v0.0.0
-	github.com/simonjanss/rig/runtime v0.5.0
+	github.com/simonjanss/rig/runtime v0.5.1
 )
 
 require golang.org/x/net v0.57.0 // indirect
