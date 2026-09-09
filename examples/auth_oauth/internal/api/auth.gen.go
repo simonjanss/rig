@@ -195,7 +195,9 @@ type OAuthHooks struct {
 	// the consent screen, an expired state cookie, an address the provider has not
 	// verified — so a front end can be sent to its own sign-in page with a code
 	// it has copy for. Never render Failure.ProviderError: it is text anybody can
-	// write. Nil keeps the default.
+	// write. Never render Failure.Error() on reason internal either: that one is a
+	// seal or a store failure, and rig's own default answers "something went
+	// wrong" rather than show it. Nil keeps the default.
 	OnError func(w http.ResponseWriter, r *http.Request, f *oauth.Failure)
 
 	// BaseURL is this application's own origin, and takes precedence over

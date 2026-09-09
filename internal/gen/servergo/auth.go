@@ -396,7 +396,10 @@ func (e *authEmitter) oauthHooks(b *gobuf.Buf) {
 		"the consent screen, an expired state cookie, an address the provider has " +
 		"not verified — so a front end can be sent to its own sign-in page with a " +
 		"code it has copy for. Never render Failure.ProviderError: it is text " +
-		"anybody can write. Nil keeps the default.")
+		"anybody can write. Never render Failure.Error() on reason internal " +
+		"either: that one is a seal or a store failure, and rig's own default " +
+		"answers \"something went wrong\" rather than show it. Nil keeps the " +
+		"default.")
 	b.L("OnError func(w %s.ResponseWriter, r *%s.Request, f *%s.Failure)", httpPkg, httpPkg, oauthPkg)
 	b.NL()
 

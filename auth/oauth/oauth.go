@@ -516,8 +516,19 @@ func (h *Handler) identity(ctx context.Context, p Provider, profile Profile) (*L
 // The order matters: the entry is written before [Config.OnError] is given the
 // response, so a hook that redirects cannot cost the audit trail an entry.
 func (h *Handler) fail(w http.ResponseWriter, r *http.Request, f *Failure) {
+	// The provider's own spelling, because that is what the Succeeded entry
+	// records and what every entry before this function existed recorded.
+	// [Failure.Provider] is lowercased for an application to switch on, and the
+	// two spellings in one column would be one provider an operator has to
+	// remember to query twice. A request naming a provider rig does not have
+	// keeps what it was given, which is nothing.
+	provider := f.Provider
+	if p, ok := h.providers[f.Provider]; ok {
+		provider = p.Name
+	}
+
 	detail := map[string]any{
-		"provider": f.Provider,
+		"provider": provider,
 		"reason":   string(f.Reason),
 		// The message rig would have answered with, which for an internal
 		// failure is the part that never reaches the client and so the only

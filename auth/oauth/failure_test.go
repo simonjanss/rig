@@ -215,17 +215,24 @@ func TestARefusedSignInSaysWhichRefusalItWas(t *testing.T) {
 		profile oauth.Profile
 		known   bool
 		want    oauth.Reason
+		// wantEmail is what the hook should be handed, which is not always what
+		// the provider said: an address is lowercased everywhere else in this
+		// package, and a hook holding the provider's casing would be holding a
+		// different string for the same person.
+		wantEmail string
 	}{
 		{
-			name:    "nobody has this address and provisioning is off",
-			profile: oauth.Profile{Subject: "new", EmailAddress: "nobody@example.com", EmailVerified: true},
-			want:    oauth.ReasonNoAccount,
+			name:      "nobody has this address and provisioning is off",
+			profile:   oauth.Profile{Subject: "new", EmailAddress: "nobody@example.com", EmailVerified: true},
+			want:      oauth.ReasonNoAccount,
+			wantEmail: "nobody@example.com",
 		},
 		{
-			name:    "somebody has it and the provider has not verified it",
-			profile: oauth.Profile{Subject: "attacker", EmailAddress: "sam@example.com"},
-			known:   true,
-			want:    oauth.ReasonUnverifiedAddress,
+			name:      "somebody has it and the provider has not verified it",
+			profile:   oauth.Profile{Subject: "attacker", EmailAddress: "Sam@Example.com"},
+			known:     true,
+			want:      oauth.ReasonUnverifiedAddress,
+			wantEmail: "sam@example.com",
 		},
 		{
 			name:    "the provider shared no address at all",
@@ -239,7 +246,7 @@ func TestARefusedSignInSaysWhichRefusalItWas(t *testing.T) {
 			var got caught
 			f := setup(t, tc.profile, func(c *oauth.Config) { c.OnError = got.hook })
 			if tc.known {
-				f.store.put(f.tenant, tc.profile.EmailAddress)
+				f.store.put(f.tenant, strings.ToLower(tc.profile.EmailAddress))
 			}
 
 			res := f.signIn(t, "")
@@ -251,8 +258,8 @@ func TestARefusedSignInSaysWhichRefusalItWas(t *testing.T) {
 			if got.failure.Reason != tc.want {
 				t.Errorf("reason = %q, want %q", got.failure.Reason, tc.want)
 			}
-			if got.failure.EmailAddress != tc.profile.EmailAddress {
-				t.Errorf("email = %q, want %q", got.failure.EmailAddress, tc.profile.EmailAddress)
+			if got.failure.EmailAddress != tc.wantEmail {
+				t.Errorf("email = %q, want %q", got.failure.EmailAddress, tc.wantEmail)
 			}
 			if f.signedIn != nil {
 				t.Error("the sign-in should not have completed")
@@ -269,7 +276,7 @@ func TestAnEndingThatRefusesIsRecordedBesideTheProvidersAnswer(t *testing.T) {
 	log := &recorder{}
 	var got caught
 	f := setup(t, oauth.Profile{
-		Subject: "s", EmailAddress: "sam@example.com", EmailVerified: true,
+		Subject: "s", EmailAddress: "Sam@Example.com", EmailVerified: true,
 	}, func(c *oauth.Config) {
 		c.AllowProvisioning = true
 		c.Log = log
@@ -288,6 +295,9 @@ func TestAnEndingThatRefusesIsRecordedBesideTheProvidersAnswer(t *testing.T) {
 	if rigerr.CodeOf(got.failure) != rigerr.CodeForbidden {
 		t.Errorf("code = %q, want the ending's own", rigerr.CodeOf(got.failure))
 	}
+	if got.failure.EmailAddress != "sam@example.com" {
+		t.Errorf("the hook was handed %q, want it lowercased", got.failure.EmailAddress)
+	}
 
 	entries := log.of(authlog.EventOAuthSignIn)
 	if len(entries) != 2 {
@@ -296,6 +306,19 @@ func TestAnEndingThatRefusesIsRecordedBesideTheProvidersAnswer(t *testing.T) {
 	if entries[0].Outcome != authlog.Succeeded || entries[1].Outcome != authlog.Failed {
 		t.Errorf("outcomes = %q then %q, want a success then a failure",
 			entries[0].Outcome, entries[1].Outcome)
+	}
+	// And they name the same provider the same way. Failure.Provider is
+	// lowercased for an application to switch on, and reading it straight into
+	// the entry would put two spellings of Google in one column — one an
+	// operator querying the trail has to remember to ask for twice.
+	if got, want := entries[1].Detail["provider"], entries[0].Detail["provider"]; got != want {
+		t.Errorf("the failure names the provider %q and the success %q", got, want)
+	}
+	if got := entries[1].Detail["provider"]; got != oauth.ProviderGoogle {
+		t.Errorf("provider = %v, want the provider's own spelling %q", got, oauth.ProviderGoogle)
+	}
+	if got := entries[1].EmailAddress; got != "sam@example.com" {
+		t.Errorf("email = %q, want it lowercased", got)
 	}
 }
 
@@ -309,6 +332,12 @@ func TestEveryRefusalIsWrittenToTheAuthenticationLog(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		want oauth.Reason
+		// wantProvider is the spelling the entry records, which is the
+		// provider's own and not the route's — the whole trail is queried by
+		// this column, and one provider under two spellings is one an operator
+		// has to ask for twice. Empty for a provider rig does not have, since
+		// there is nothing to spell.
+		wantProvider string
 		// drive returns the response, having done whatever it takes to fail.
 		drive func(t *testing.T, f *fixture) *http.Response
 	}{
@@ -320,22 +349,25 @@ func TestEveryRefusalIsWrittenToTheAuthenticationLog(t *testing.T) {
 			},
 		},
 		{
-			name: "a returnTo that is not allowed",
-			want: oauth.ReasonReturnTo,
+			name:         "a returnTo that is not allowed",
+			want:         oauth.ReasonReturnTo,
+			wantProvider: oauth.ProviderGoogle,
 			drive: func(t *testing.T, f *fixture) *http.Response {
 				return get(t, f.srv.URL+"/auth/oauth/google/start?returnTo=https%3A%2F%2Felsewhere.example")
 			},
 		},
 		{
-			name: "a callback with no cookie",
-			want: oauth.ReasonState,
+			name:         "a callback with no cookie",
+			want:         oauth.ReasonState,
+			wantProvider: oauth.ProviderGoogle,
 			drive: func(t *testing.T, f *fixture) *http.Response {
 				return get(t, f.srv.URL+"/auth/oauth/google/callback?code=c&state=invented")
 			},
 		},
 		{
-			name: "a cancel at the consent screen",
-			want: oauth.ReasonCancelled,
+			name:         "a cancel at the consent screen",
+			want:         oauth.ReasonCancelled,
+			wantProvider: oauth.ProviderGoogle,
 			drive: func(t *testing.T, f *fixture) *http.Response {
 				return get(t, f.srv.URL+"/auth/oauth/google/callback?error=access_denied")
 			},
@@ -360,6 +392,9 @@ func TestEveryRefusalIsWrittenToTheAuthenticationLog(t *testing.T) {
 			}
 			if e.Detail["reason"] != string(tc.want) {
 				t.Errorf("reason = %v, want %q", e.Detail["reason"], tc.want)
+			}
+			if e.Detail["provider"] != tc.wantProvider {
+				t.Errorf("provider = %v, want %q", e.Detail["provider"], tc.wantProvider)
 			}
 			if e.Detail["error"] == nil {
 				t.Error("no error detail: the message is the only thing that says which branch")

@@ -238,7 +238,10 @@ func (h *Handler) callback(w http.ResponseWriter, r *http.Request) {
 		// it. A Store refusing is not one of the four, and is internal.
 		f := failure(err, ReasonInternal)
 		f.Provider, f.TenantID, f.ReturnTo = name, tenantID, state.ReturnTo
-		f.EmailAddress = profile.EmailAddress
+		// Lowercased, because that is how the log counts an address and how
+		// identity looked this one up — a hook handed the provider's own casing
+		// would be holding a different string for the same person.
+		f.EmailAddress = strings.ToLower(profile.EmailAddress)
 		h.fail(w, r, f)
 		return
 	}
@@ -246,9 +249,8 @@ func (h *Handler) callback(w http.ResponseWriter, r *http.Request) {
 	// Written before OnSignIn rather than after, so a sign-in whose last step
 	// fails still records that a provider authenticated somebody. The cost is
 	// that a refusal inside OnSignIn — a tenant they turn out not to belong to —
-	// reads as OAuthSignIn/Succeeded followed by LoginFailed/Failed. Those two
-	// are not in conflict: the first says Google answered, the second says a
-	// session was not issued.
+	// reads as OAuthSignIn/Succeeded followed by the OAuthSignIn/Failed that
+	// fail writes, which the branch below says more about.
 	done := authlog.Entry{
 		Event: authlog.EventOAuthSignIn, Outcome: authlog.Succeeded,
 		EmailAddress: strings.ToLower(profile.EmailAddress),
@@ -269,7 +271,7 @@ func (h *Handler) callback(w http.ResponseWriter, r *http.Request) {
 		// second says a session was not issued.
 		f := failure(err, ReasonEnding)
 		f.Provider, f.TenantID, f.ReturnTo = name, tenantID, state.ReturnTo
-		f.EmailAddress = profile.EmailAddress
+		f.EmailAddress = strings.ToLower(profile.EmailAddress)
 		h.fail(w, r, f)
 	}
 }

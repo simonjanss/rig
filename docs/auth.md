@@ -580,12 +580,18 @@ rewords a sentence.
 | `ending` | `OnSignIn` refused — a tenant they do not belong to | no |
 | `internal` | a failure on this side | yes |
 
-Two rules:
+Three rules:
 
 **Never render `f.ProviderError`.** It is the provider's raw error value off a
 query string — text anybody can write — and putting it in a redirect to your own
 origin reflects a stranger's input into your application. It is on the `Failure`
 for a log line. `Reason` is already the answer, from a set rig chose.
+
+**`f.Error()` is not safe to show on `internal`.** Every other reason carries a
+message written for the person who tried to sign in, but an `internal` one
+carries a seal or a store failure — which is why rig's own default answers
+`something went wrong` there instead of showing it. A hook that renders the
+message has to make the same exception, or `Reason` is the only thing it renders.
 
 **`f.ReturnTo` is where they were going**, so a failure can send somebody back to
 the page that started the sign-in rather than to a sign-in page's default. It

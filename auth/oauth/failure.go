@@ -127,8 +127,13 @@ type Failure struct {
 
 	// Err is the error this is answered with when there is no hook, and the
 	// place a cause underneath it survives: the provider's own refusal on
-	// [ReasonExchange], the store's error on [ReasonInternal]. Its message is
-	// written for the person who tried to sign in.
+	// [ReasonExchange], the store's error on [ReasonInternal].
+	//
+	// Its message is written for the person who tried to sign in, **except on
+	// [ReasonInternal]**, where it is a seal or a store failure and rig's own
+	// default answers "something went wrong" instead of showing it. A hook that
+	// renders this message has to do the same, or it publishes on a sign-in page
+	// the one thing rig refuses to.
 	Err error
 }
 
