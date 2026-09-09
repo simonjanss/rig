@@ -4,7 +4,7 @@ go 1.26.6
 
 require (
 	github.com/google/uuid v1.6.0
-	github.com/simonjanss/rig/runtime v0.5.0
+	github.com/simonjanss/rig/runtime v0.5.1
 	golang.org/x/crypto v0.54.0
 	golang.org/x/net v0.57.0
 )
