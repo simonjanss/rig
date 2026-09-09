@@ -113,6 +113,13 @@ type Store interface {
 	//
 	// Already verified is left alone rather than restamped: the question is
 	// whether the address was ever proved, and the first answer is the true one.
+	//
+	// Called on every provider sign-in that carries a verified address, not
+	// only the first, so it has to be idempotent: an implementation upserts on
+	// (provider, subject) rather than inserting. Every sign-in rather than the
+	// first because a link made before rig recorded the evidence has no other
+	// occasion to be stamped, and because the address the provider reports is
+	// worth keeping current.
 	LinkIdentity(ctx context.Context, in LinkInput) (*Link, error)
 
 	// ProvisionIdentity creates the person and links them in one step.
@@ -510,6 +517,11 @@ func (h *Handler) resolve(ctx context.Context, tenantID uuid.UUID, p Provider, p
 //
 // The second return says the person did not exist until now, which is what
 // [SignIn.NewIdentity] reports.
+//
+// Every path through it that ends in a verified address writes the link, the
+// repeat sign-in included. Recording the evidence is not a thing the first
+// sign-in does and the rest skip, because a link older than the recording would
+// then have no occasion to catch up.
 func (h *Handler) identity(ctx context.Context, p Provider, profile Profile) (*Link, bool, error) {
 	// The subject, always. An address is a display detail here.
 	link, err := h.cfg.Store.FindLink(ctx, p.Name, profile.Subject)
@@ -517,7 +529,30 @@ func (h *Handler) identity(ctx context.Context, p Provider, profile Profile) (*L
 		return nil, false, err
 	}
 	if link != nil {
-		return link, false, nil
+		if !profile.EmailVerified {
+			// Nothing to record, and nothing to refuse either: the link is what
+			// authorises this sign-in, and it was made on evidence. A provider
+			// that has stopped asserting the address — GitHub, for somebody who
+			// removed the verified one — does not undo that.
+			return link, false, nil
+		}
+		// Recorded again, because the first time is not the only time it is
+		// true. LinkIdentity is what stamps the identity's address verified,
+		// and a link made before rig recorded that evidence would otherwise
+		// never be stamped at all: this branch is the only one a repeat sign-in
+		// takes, so the person it was meant to help — signed up with a
+		// password, never confirmed, linked a provider — would stay refused by
+		// RequireVerifiedEmail forever, on a column rather than on anything
+		// they did.
+		//
+		// The upsert is the same one a first link runs, on the same conflict
+		// target, so it lands on the row already here rather than a second one.
+		// Stamping only when the address is already unstamped is the store's,
+		// which is what keeps this from moving a timestamp on every sign-in.
+		link, err = h.cfg.Store.LinkIdentity(ctx, LinkInput{
+			IdentityID: link.IdentityID, Provider: p.Name, Profile: profile,
+		})
+		return link, false, err
 	}
 
 	email := strings.ToLower(strings.TrimSpace(profile.EmailAddress))

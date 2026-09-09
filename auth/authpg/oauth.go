@@ -91,6 +91,12 @@ func (s *OAuthStore) FindIdentityByEmail(ctx context.Context, lowercased string)
 // up with a password and later signed in with Google unverified, on a column
 // rather than on anything they did.
 //
+// It runs on every provider sign-in that carries a verified address rather than
+// only the first, so the upsert is doing real work here: it lands on the row
+// already present, moves updated_at, and refreshes the address the provider
+// reports. The stamp is the part that has to be conditional, and the CTE below
+// is where that condition lives.
+//
 // One statement rather than a transaction of its own, because
 // [OAuthStore.ProvisionIdentity] calls this from inside one. Postgres runs a
 // data-modifying CTE exactly once whether or not anything selects from it, so

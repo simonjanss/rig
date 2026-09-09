@@ -462,6 +462,13 @@ and `require_verified_email` applies to a provider sign-in exactly as it applies
 to a login. An address the provider has *not* verified is not recorded as
 anything, which is the same rule from the other side.
 
+It is recorded on **every** sign-in that carries a verified address, not only
+the one that made the link. That is what a link made before rig recorded any of
+this depends on: a repeat sign-in matches on the subject and never takes the
+linking branch, so a first-link-only stamp would leave everybody already using a
+provider unverified, and `require_verified_email` would start refusing them the
+day it was turned on.
+
 **Both doors are shut by default.** A provider will authenticate anybody with a
 Google account. An open sign-in endpoint on a business application is a way for
 a stranger to appear inside a customer's tenant — rarely what anyone wants and

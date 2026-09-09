@@ -114,6 +114,9 @@ type store struct {
 
 	provisions int
 	joins      int
+	// linked counts calls to LinkIdentity rather than rows, because a repeat
+	// sign-in runs the upsert again and the row count would not move.
+	linked int
 }
 
 func newStore() *store {
@@ -123,13 +126,7 @@ func newStore() *store {
 func (s *store) FindLink(_ context.Context, provider, subject string) (*oauth.Link, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-
-	for _, l := range s.links {
-		if l.Provider == provider && l.Subject == subject {
-			return l, nil
-		}
-	}
-	return nil, nil
+	return s.link(provider, subject), nil
 }
 
 func (s *store) FindIdentityByEmail(_ context.Context, lowercased string) (uuid.UUID, error) {
@@ -138,22 +135,41 @@ func (s *store) FindIdentityByEmail(_ context.Context, lowercased string) (uuid.
 	return s.identities[lowercased], nil
 }
 
+// LinkIdentity upserts, because the real one does: the conflict target is
+// (provider, subject), which the foundation makes unique, and a repeat sign-in
+// runs this again rather than only the first one. A fake that appended would
+// hold two rows the schema forbids.
 func (s *store) LinkIdentity(_ context.Context, in oauth.LinkInput) (*oauth.Link, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	l := &oauth.Link{
-		ID: uuid.New(), IdentityID: in.IdentityID,
-		Provider: in.Provider, Subject: in.Profile.Subject,
-		EmailAddress: in.Profile.EmailAddress,
+	l := s.link(in.Provider, in.Profile.Subject)
+	if l == nil {
+		l = &oauth.Link{
+			ID: uuid.New(), IdentityID: in.IdentityID,
+			Provider: in.Provider, Subject: in.Profile.Subject,
+		}
+		s.links = append(s.links, l)
 	}
-	s.links = append(s.links, l)
+	s.linked++
+	l.EmailAddress = in.Profile.EmailAddress
 	// The contract [oauth.Store.LinkIdentity] states. Already verified is left
 	// alone, because when an address was proved is a fact about the address.
 	if in.Profile.EmailVerified {
-		s.verified[in.IdentityID] = true
+		s.verified[l.IdentityID] = true
 	}
 	return l, nil
+}
+
+// link is the lookup both FindLink and the upsert above need. The caller holds
+// the lock.
+func (s *store) link(provider, subject string) *oauth.Link {
+	for _, l := range s.links {
+		if l.Provider == provider && l.Subject == subject {
+			return l
+		}
+	}
+	return nil
 }
 
 func (s *store) ProvisionIdentity(ctx context.Context, in oauth.ProvisionInput) (*oauth.Link, error) {
@@ -425,6 +441,73 @@ func TestLinkingRecordsThatTheAddressWasVerified(t *testing.T) {
 	}
 	if !f.store.verified[identityID] {
 		t.Error("a verified provider address should have been recorded as verifying the identity")
+	}
+}
+
+// A link made before rig recorded the evidence, stamped on the next sign-in.
+//
+// This is the population the whole change is for, and the one a first-link-only
+// stamp misses: they signed up with a password, never confirmed the address,
+// linked a provider back when linking wrote nothing down, and have been signing
+// in with that provider ever since. A repeat sign-in matches on the subject and
+// never reaches the linking branch, so without this their identity keeps its
+// null — and RequireVerifiedEmail, which now applies to a provider sign-in,
+// refuses them on both paths with no way to ask for a verification mail.
+func TestASignInStampsALinkMadeBeforeTheEvidenceWasRecorded(t *testing.T) {
+	t.Parallel()
+
+	f := setup(t, oauth.Profile{
+		Subject: "provider-subject-1", EmailAddress: "sam@example.com", EmailVerified: true,
+	}, nil)
+
+	// The old row: a link, and an identity nothing ever marked verified.
+	identityID, _ := f.store.put(f.tenant, "sam@example.com")
+	f.store.links = append(f.store.links, &oauth.Link{
+		ID: uuid.New(), IdentityID: identityID,
+		Provider: oauth.ProviderGoogle, Subject: "provider-subject-1",
+		EmailAddress: "sam@example.com",
+	})
+
+	f.signIn(t, "")
+	if f.signedIn == nil {
+		t.Fatal("the sign-in should have completed")
+	}
+	if !f.store.verified[identityID] {
+		t.Error("the provider vouched for the address again; the sign-in should have recorded it")
+	}
+	if len(f.store.links) != 1 {
+		t.Errorf("%d links, want the existing one updated rather than a second", len(f.store.links))
+	}
+}
+
+// And a provider that has stopped vouching does not undo the link.
+//
+// The link is what authorises a repeat sign-in — it was made on evidence, and
+// GitHub reporting no verified address today says nothing about the day it was
+// made. So this writes nothing and refuses nothing.
+func TestARepeatSignInWithAnUnverifiedAddressRecordsNothing(t *testing.T) {
+	t.Parallel()
+
+	f := setup(t, oauth.Profile{
+		Subject: "provider-subject-1", EmailAddress: "sam@example.com",
+	}, nil)
+
+	identityID, _ := f.store.put(f.tenant, "sam@example.com")
+	f.store.links = append(f.store.links, &oauth.Link{
+		ID: uuid.New(), IdentityID: identityID,
+		Provider: oauth.ProviderGoogle, Subject: "provider-subject-1",
+		EmailAddress: "sam@example.com",
+	})
+
+	f.signIn(t, "")
+	if f.signedIn == nil {
+		t.Fatal("the existing link is what admits them, and it still does")
+	}
+	if f.store.verified[identityID] {
+		t.Error("an unverified address is not evidence and must not be recorded as any")
+	}
+	if f.store.linked != 0 {
+		t.Errorf("%d writes, want none — there is nothing to record", f.store.linked)
 	}
 }
 
