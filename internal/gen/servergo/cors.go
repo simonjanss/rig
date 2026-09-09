@@ -35,10 +35,13 @@ func (e *emitter) corsFile() (gen.Artifact, error) {
 	corsPkg := b.Import(corsModule)
 
 	b.Comment("AllowedOriginsEnv is where a deployment names the origins that may " +
-		"call this API, as a comma-separated list.\n\n" +
-		"Set, it **replaces** what rig.yaml said rather than adding to it — the " +
-		"way the origin's own variable lets a deployment win. A deployment " +
-		"overriding a list should not have to know what was in it.")
+		"call this API besides the front end's own, as a comma-separated list.\n\n" +
+		"Set, it **replaces** `web.cors.allowed_origins` rather than adding to " +
+		"it — the way the origin's own variable lets a deployment win. A " +
+		"deployment overriding a list should not have to know what was in it. " +
+		"What it does not replace is [WebOrigin], which was never in that list: " +
+		"a deployment repointing an administrative origin is not asking to lock " +
+		"its own front end out.")
 	b.L("const AllowedOriginsEnv = %s", gobuf.Quote(w.CORS.AllowedOriginsEnv))
 	b.NL()
 
@@ -48,32 +51,80 @@ func (e *emitter) corsFile() (gen.Artifact, error) {
 	return artifact("cors.gen.go", b)
 }
 
-// allowedOriginsFunc emits the resolution: the environment, or the file.
+// hasOAuthHooks reports whether the auth emitter gave this package an OAuthHooks
+// to link to. A `web:` block does not imply an `auth:` one — a single-page
+// application in front of an API that answers bearer tokens it got elsewhere is
+// a project with origins and no providers — and a godoc link to a type this
+// project has no reason to own is a dangling one.
+func (e *emitter) hasOAuthHooks() bool {
+	return e.hasAuth() && e.doc.API.Auth.OAuth != nil
+}
+
+// originAdvice is what to add to a failed [WebOrigin] here, and is empty when
+// there is nothing to add: a project whose origin is a literal cannot reach the
+// error at all, and one that named a variable beside it falls back to the
+// literal rather than failing.
+//
+// It exists because the variable is the wrong thing to be looking at. The list
+// is built in Mount, before build has been called and therefore before there
+// are any hooks to read an origin from, so a deployment that answers this
+// question in Go answers it through Parts.CORS or not at all — and the error it
+// gets otherwise names an environment variable it deliberately left unset,
+// which is the one place it will not find the answer.
+func (e *emitter) originAdvice() string {
+	w := e.doc.API.Web
+	if w.OriginEnv == "" || w.Origin != "" {
+		return ""
+	}
+	if !e.hasOAuthHooks() {
+		return ". The cross-origin policy is what asked for it, and it is built in " +
+			"Mount before this application's own wiring runs: Parts.CORS is how a " +
+			"deployment answers this question in Go instead"
+	}
+	return ". Not here, though: the cross-origin policy is built in Mount, before " +
+		"this application's own wiring runs, so Hooks.OAuth.WebOrigin has not " +
+		"been read yet. Set Parts.CORS to answer the cross-origin half in Go"
+}
+
+// allowedOriginsFunc emits the resolution: the front end's own origin, and then
+// either the environment or the file for whoever else may call.
 func (e *emitter) allowedOriginsFunc(b *gobuf.Buf, corsPkg string) {
 	w := e.doc.API.Web
 
-	b.Comment("AllowedOrigins is who may call this API from a browser.\n\n" +
+	doc := "AllowedOrigins is who may call this API from a browser.\n\n" +
 		"The front end's own origin is always one of them, which is why this can " +
 		"fail: it comes from [WebOrigin], and a deployment that named only a " +
 		"variable and set nothing has no front end. Anything in " +
 		"`web.cors.allowed_origins` joins it — an administrative front end, a " +
 		"preview deployment per branch.\n\n" +
-		"[AllowedOriginsEnv] replaces the whole list when it is set. What this " +
-		"cannot see is [OAuthHooks.WebOrigin]: a deployment that supplies its " +
-		"origin in Go rather than in the environment has to set [Parts.CORS] as " +
-		"well, or this refuses while naming a variable that deployment was never " +
-		"going to use.")
+		"[AllowedOriginsEnv] replaces that second list when it is set, and only " +
+		"that one: the front end's own origin is not something a deployment " +
+		"naming its administrative origins meant to drop."
+	if e.hasOAuthHooks() {
+		doc += "\n\nWhat this cannot see is [OAuthHooks.WebOrigin]. This list is " +
+			"built in [Mount], before the application has been asked for a hook to " +
+			"read one from, so a deployment that supplies its origin in Go rather " +
+			"than in the environment has to set [Parts.CORS] as well. That is what " +
+			"the error says when it happens, rather than leaving somebody looking " +
+			"at a variable they were never going to set."
+	}
+	b.Comment(doc)
 
 	osPkg := b.Import("os")
 	b.L("func AllowedOrigins() ([]string, error) {")
-	b.L("if raw := %s.Getenv(AllowedOriginsEnv); raw != \"\" {", osPkg)
-	b.L("return %s.Split(raw), nil", corsPkg)
-	b.L("}")
-	b.NL()
 	b.L("origin, err := WebOrigin()")
 	b.L("if err != nil {")
-	b.L("return nil, err")
+	if advice := e.originAdvice(); advice != "" {
+		b.L("return nil, %s.Errorf(%s, err)", b.Import("fmt"), gobuf.Quote("%w"+advice))
+	} else {
+		b.L("return nil, err")
+	}
 	b.L("}")
+	b.NL()
+	b.L("if raw := %s.Getenv(AllowedOriginsEnv); raw != \"\" {", osPkg)
+	b.L("return append([]string{origin}, %s.Split(raw)...), nil", corsPkg)
+	b.L("}")
+	b.NL()
 
 	if len(w.CORS.AllowedOrigins) == 0 {
 		b.L("return []string{origin}, nil")

@@ -226,9 +226,51 @@ func TestPartsCORSIsAPointerWithThreeMeanings(t *testing.T) {
 	}
 }
 
-// The environment replaces the list rather than adding to it, and the origin
-// itself still comes from WebOrigin — so a deployment that named only a
-// variable and set nothing is refused here too.
+// The origin is the one thing this list cannot be built without, and a
+// deployment supplying it through Hooks.OAuth.WebOrigin supplies it too late:
+// Mount builds the list before it calls build, so there are no hooks to read yet.
+// Which makes the bare WebOrigin error the wrong thing to hand back — it names an
+// environment variable that deployment left unset on purpose, and says nothing
+// about Parts.CORS, which is the answer.
+func TestARefusedOriginNamesPartsCORS(t *testing.T) {
+	t.Parallel()
+
+	doc := gentest.LoadDocument(t, filepath.Join("testdata", "authwired.ir.json"))
+	w := web()
+	w.Origin, w.OriginEnv = "", "APP_ORIGIN"
+	doc.API.Web = w
+
+	got := find(t, gentest.Run(t, servergo.New(), doc, opts()), "cors.gen.go")
+	for _, want := range []string{
+		"fmt.Errorf(",
+		"Set Parts.CORS to answer the cross-origin half in Go",
+		"Hooks.OAuth.WebOrigin has not been read yet",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("cors.gen.go does not contain %q", want)
+		}
+	}
+}
+
+// A project whose origin is a literal cannot reach that error at all, so it
+// carries neither the advice nor the fmt import that comes with it. Advice on a
+// path nothing can take is a sentence somebody has to read and rule out.
+func TestAnOriginThatCannotFailCarriesNoAdvice(t *testing.T) {
+	t.Parallel()
+
+	got := find(t, withWeb(t, "authwired.ir.json"), "cors.gen.go")
+	if strings.Contains(got, "Parts.CORS to answer") {
+		t.Error("cors.gen.go advises Parts.CORS where WebOrigin cannot fail")
+	}
+	if !strings.Contains(got, "return nil, err") {
+		t.Error("cors.gen.go does not hand back the WebOrigin error plainly")
+	}
+}
+
+// The environment replaces the configured list rather than adding to it, and the
+// front end's own origin is not part of what it replaces: it still comes from
+// WebOrigin, and joins whatever the variable named. Which is also why a
+// deployment that named only a variable and set nothing is refused here too.
 func TestTheOriginListResolvesFromTheEnvironmentFirst(t *testing.T) {
 	t.Parallel()
 
@@ -236,7 +278,7 @@ func TestTheOriginListResolvesFromTheEnvironmentFirst(t *testing.T) {
 	for _, want := range []string{
 		`const AllowedOriginsEnv = "CORS_ORIGINS"`,
 		"if raw := os.Getenv(AllowedOriginsEnv); raw != \"\" {",
-		"return cors.Split(raw), nil",
+		"return append([]string{origin}, cors.Split(raw)...), nil",
 		"origin, err := WebOrigin()",
 	} {
 		if !strings.Contains(got, want) {

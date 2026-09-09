@@ -200,20 +200,50 @@ func (e *emitter) runFile() (gen.Artifact, error) {
 func (e *emitter) partsType(b *gobuf.Buf) {
 	list := e.parts()
 
+	// attach is what makes a field a lifetime: something rig starts, drains or
+	// closes around the call that returned it. A field without one is a value
+	// read on the way up and never closed — the cross-origin policy — and the
+	// paragraphs below keep the two apart, because a reader told that rig drains
+	// this field will go looking for where.
 	fields := make([]string, 0, len(list)-1)
+	values := make([]string, 0, 1)
 	for _, p := range list[1:] {
+		if p.attach == nil {
+			values = append(values, p.noun)
+			continue
+		}
 		fields = append(fields, p.noun)
 	}
 
 	doc := "Parts is what this application's own wiring built, as far as the " +
 		"process around it has to care: the routes to serve"
-	if len(fields) > 0 {
+	switch {
+	case len(fields) > 0 && len(values) > 0:
+		doc += ", " + english(fields) + " — the things whose lifetime is longer " +
+			"than a request's — and " + english(values) + ", which is read on the " +
+			"way up and never closed"
+	case len(fields) > 0:
 		doc += ", and " + english(fields) + " — the things whose lifetime is " +
 			"longer than a request's"
+	case len(values) > 0:
+		doc += ", and " + english(values) + ", which is read on the way up and " +
+			"never closed"
 	}
 	doc += ".\n\n"
 
-	if len(fields) == 0 {
+	switch {
+	case len(fields) == 0 && len(values) > 0:
+		// A project with a `web:` block and nothing whose lifetime outlasts a
+		// request: the paragraph about starting and draining has no subject, and
+		// the one worth writing is about the field that is already there.
+		doc += "Handler is required, and " + english(values) + " may be nil — " +
+			"which is what nearly every project wants, and what the field's own " +
+			"documentation is about. Nothing here is started, drained or closed " +
+			"on the other side of the one call that returns this. Turning a block " +
+			"on in rig.yaml adds something that is: a line that used to live in a " +
+			"main function with no compiler, no test and usually no symptom until " +
+			"a deploy under load."
+	case len(fields) == 0:
 		// Nothing to say about optional fields, because this project has none:
 		// the `rig init` case, where Parts is a handler and the paragraph worth
 		// writing is the one about the field a new block will add.
@@ -223,16 +253,24 @@ func (e *emitter) partsType(b *gobuf.Buf) {
 			"other side of the one call that returns this, and something that used " +
 			"to be a line in a main function with no compiler, no test and usually " +
 			"no symptom until a deploy under load."
-	} else {
-		doc += "Every field beside the handler is something rig starts, drains or " +
+	default:
+		// The nouns are lowercase phrases, so a sentence cannot open with one:
+		// naming the lifetimes explicitly, which is what a project with a
+		// non-lifetime field beside them needs, has to join the clause before it.
+		subject, rest := "Every field beside the handler", "Handler is required. The rest may"
+		if len(values) > 0 {
+			subject = "Every field above that has a lifetime"
+			rest = "Handler is required, and " + english(fields) + " may"
+		}
+		doc += subject + " is something rig starts, drains or " +
 			"closes on the other side of the one call that returns this, and each " +
 			"used to be a line in a main function — with no compiler, no test and " +
 			"usually no symptom until a deploy under load. Naming them here is what " +
 			"makes them slots to fill rather than calls to remember, and what makes " +
 			"turning a block on in rig.yaml show up as a field in the one function " +
 			"that has to know about it.\n\n" +
-			"Handler is required. The rest may be nil, because rig cannot tell a " +
-			"project that meant it from one that forgot"
+			rest + " be nil, because rig cannot tell " +
+			"a project that meant it from one that forgot"
 		if e.hasNotifications() {
 			doc += ": an engine is latency and the `dispatch-notifications` task is " +
 				"the guarantee behind it, and every project with an inbox gets a " +

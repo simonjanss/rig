@@ -12,11 +12,14 @@ import (
 )
 
 // AllowedOriginsEnv is where a deployment names the origins that may call this
-// API, as a comma-separated list.
+// API besides the front end's own, as a comma-separated list.
 //
-// Set, it **replaces** what rig.yaml said rather than adding to it — the way
-// the origin's own variable lets a deployment win. A deployment overriding a
-// list should not have to know what was in it.
+// Set, it **replaces** `web.cors.allowed_origins` rather than adding to it —
+// the way the origin's own variable lets a deployment win. A deployment
+// overriding a list should not have to know what was in it. What it does not
+// replace is [WebOrigin], which was never in that list: a deployment
+// repointing an administrative origin is not asking to lock its own front end
+// out.
 const AllowedOriginsEnv = "CORS_ORIGINS"
 
 // AllowedOrigins is who may call this API from a browser.
@@ -26,19 +29,26 @@ const AllowedOriginsEnv = "CORS_ORIGINS"
 // and set nothing has no front end. Anything in `web.cors.allowed_origins`
 // joins it — an administrative front end, a preview deployment per branch.
 //
-// [AllowedOriginsEnv] replaces the whole list when it is set. What this cannot
-// see is [OAuthHooks.WebOrigin]: a deployment that supplies its origin in Go
-// rather than in the environment has to set [Parts.CORS] as well, or this
-// refuses while naming a variable that deployment was never going to use.
+// [AllowedOriginsEnv] replaces that second list when it is set, and only that
+// one: the front end's own origin is not something a deployment naming its
+// administrative origins meant to drop.
+//
+// What this cannot see is [OAuthHooks.WebOrigin]. This list is built in
+// [Mount], before the application has been asked for a hook to read one from,
+// so a deployment that supplies its origin in Go rather than in the
+// environment has to set [Parts.CORS] as well. That is what the error says
+// when it happens, rather than leaving somebody looking at a variable they
+// were never going to set.
 func AllowedOrigins() ([]string, error) {
-	if raw := os.Getenv(AllowedOriginsEnv); raw != "" {
-		return cors.Split(raw), nil
-	}
-
 	origin, err := WebOrigin()
 	if err != nil {
 		return nil, err
 	}
+
+	if raw := os.Getenv(AllowedOriginsEnv); raw != "" {
+		return append([]string{origin}, cors.Split(raw)...), nil
+	}
+
 	return append([]string{origin}, "https://admin.example.com", "https://*.example.com"), nil
 }
 

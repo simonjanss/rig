@@ -258,7 +258,7 @@ web:
 | `origin_env` | The variable the origin comes from. Set beside `origin`, the variable wins and the file is the default. One of the two is required (RIG3012). |
 | `callback_path` | The route on the front end that receives a finished provider sign-in. Default `/auth/callback`. It is used twice — the redirect's destination and the handoff cookie's `Path` — which is why it is one string here rather than one at each end. |
 | `cors.allowed_origins` | Origins besides `origin` that may call this API. Each is scheme and host, optionally with one leading `*.` label, so `https://*.example.com` matches a single subdomain. A bare `*` is refused: this API answers bearer credentials, and admitting every origin on the internet is a policy worth writing out. |
-| `cors.allowed_origins_env` | A comma-separated list that **replaces** the one above rather than adding to it, the way `base_url_env` lets a deployment win. Default `CORS_ORIGINS`. |
+| `cors.allowed_origins_env` | A comma-separated list that **replaces** the one above rather than adding to it, the way `base_url_env` lets a deployment win. It replaces that list only: `origin` is always allowed, and is not something a deployment renaming its administrative origins meant to drop. Default `CORS_ORIGINS`. |
 | `cors.max_age` | How long a browser may cache a preflight. Default `10m`, which is the longest Safari honours — a larger number is one no browser reads. |
 
 **Top-level rather than under `auth:`.** Two different things want this one fact
