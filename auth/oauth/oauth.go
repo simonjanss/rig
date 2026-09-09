@@ -180,6 +180,32 @@ type Config struct {
 	// knows.
 	OnSignIn func(w http.ResponseWriter, r *http.Request, in SignIn) error
 
+	// OnError renders a failure, and it exists because these two routes are the
+	// only ones rig serves that a person reaches with their address bar.
+	//
+	// Everything else here is called by script, which can read a status and a
+	// body and decide what to do about it. A browser mid-navigation cannot: it
+	// renders whatever came back as a document, so the default below — a bare
+	// text/plain page on the API's own origin — is a dead end with no way back
+	// to the application. An application serving a front end sends a redirect
+	// to its own sign-in page instead, carrying copy it wrote for
+	// [Failure.Reason].
+	//
+	// It takes a [*Failure] rather than an error, which is where it parts
+	// company with
+	// [github.com/simonjanss/rig/auth/authhttp.Config.OnError]: there is always
+	// one to hand, and handing back a bare error every implementation would
+	// open with an errors.As is a cost with no buyer. A Failure is still an
+	// error, so passing it to an error writer works.
+	//
+	// It owns the response. Nothing is written after it returns, and nothing was
+	// written before — except the authentication-log entry, which is written
+	// either way and before this is called, so a hook cannot lose the record
+	// that a sign-in was attempted and refused.
+	//
+	// Nil writes the failure as text/plain with the status the error carries.
+	OnError func(w http.ResponseWriter, r *http.Request, f *Failure)
+
 	// AllowedReturnTo are the origins a sign-in may redirect to when it
 	// finishes. A path on this origin is always allowed; anything else has to
 	// be listed, because an unchecked returnTo is an open redirect and an open
@@ -367,7 +393,10 @@ func (h *Handler) redirectURI(r *http.Request, p Provider) string {
 // is the state [account.Service.SignInIdentity] takes as its input.
 func (h *Handler) resolve(ctx context.Context, tenantID uuid.UUID, p Provider, profile Profile) (SignIn, error) {
 	if profile.Subject == "" {
-		return SignIn{}, rigerr.Internal(nil, "%s returned no subject", p.Name)
+		return SignIn{}, &Failure{
+			Reason: ReasonInternal,
+			Err:    rigerr.Internal(nil, "%s returned no subject", p.Name),
+		}
 	}
 
 	link, created, err := h.identity(ctx, p, profile)
@@ -396,7 +425,10 @@ func (h *Handler) resolve(ctx context.Context, tenantID uuid.UUID, p Provider, p
 	// and an unchecked one would let anybody with a Google account appear inside
 	// a customer's tenant.
 	if !h.cfg.AllowProvisioning {
-		return SignIn{}, rigerr.Forbidden("there is no account for this address")
+		return SignIn{}, &Failure{
+			Reason: ReasonNoAccount,
+			Err:    rigerr.Forbidden("there is no account for this address"),
+		}
 	}
 
 	accountID, err = h.cfg.Store.JoinTenant(ctx, JoinInput{
@@ -427,8 +459,11 @@ func (h *Handler) identity(ctx context.Context, p Provider, profile Profile) (*L
 
 	email := strings.ToLower(strings.TrimSpace(profile.EmailAddress))
 	if email == "" {
-		return nil, false, rigerr.BadRequest(
-			"%s did not share an email address, so there is no account to sign in to", p.Name)
+		return nil, false, &Failure{
+			Reason: ReasonNoAddress,
+			Err: rigerr.BadRequest(
+				"%s did not share an email address, so there is no account to sign in to", p.Name),
+		}
 	}
 
 	identityID, err := h.cfg.Store.FindIdentityByEmail(ctx, email)
@@ -439,8 +474,11 @@ func (h *Handler) identity(ctx context.Context, p Provider, profile Profile) (*L
 		// The check the whole package turns on. Anybody can register any
 		// address at some provider; only a verified one is evidence.
 		if !profile.EmailVerified {
-			return nil, false, rigerr.Forbidden(
-				"%s has not verified this address, so it cannot be linked to an existing account", p.Name)
+			return nil, false, &Failure{
+				Reason: ReasonUnverifiedAddress,
+				Err: rigerr.Forbidden(
+					"%s has not verified this address, so it cannot be linked to an existing account", p.Name),
+			}
 		}
 		link, err := h.cfg.Store.LinkIdentity(ctx, LinkInput{
 			IdentityID: identityID, Provider: p.Name, Profile: profile,
@@ -454,7 +492,10 @@ func (h *Handler) identity(ctx context.Context, p Provider, profile Profile) (*L
 	// that switch a sign-in with no named tenant reaches, since there is no
 	// tenant for the other half to be about.
 	if !h.cfg.AllowProvisioning {
-		return nil, false, rigerr.Forbidden("there is no account for this address")
+		return nil, false, &Failure{
+			Reason: ReasonNoAccount,
+			Err:    rigerr.Forbidden("there is no account for this address"),
+		}
 	}
 	link, err = h.cfg.Store.ProvisionIdentity(ctx, ProvisionInput{Provider: p.Name, Profile: profile})
 	if err != nil {
@@ -463,12 +504,69 @@ func (h *Handler) identity(ctx context.Context, p Provider, profile Profile) (*L
 	return link, true, nil
 }
 
-func (h *Handler) fail(w http.ResponseWriter, r *http.Request, err error) {
-	code := rigerr.CodeOf(err)
-	message := err.Error()
+// fail records a refused sign-in and answers it.
+//
+// The recording is here rather than at the sixteen places that call it, and that
+// is the whole reason this function takes a [*Failure]. Two of those places used
+// to write an entry and fourteen did not, so an expired state cookie or a
+// refused code exchange left no evidence anywhere that anybody had tried — the
+// plain-text page was the only record. Logging is no longer something a branch
+// remembers to do, so a branch added later cannot forget it.
+//
+// The order matters: the entry is written before [Config.OnError] is given the
+// response, so a hook that redirects cannot cost the audit trail an entry.
+func (h *Handler) fail(w http.ResponseWriter, r *http.Request, f *Failure) {
+	// The provider's own spelling, because that is what the Succeeded entry
+	// records and what every entry before this function existed recorded.
+	// [Failure.Provider] is lowercased for an application to switch on, and the
+	// two spellings in one column would be one provider an operator has to
+	// remember to query twice. A request naming a provider rig does not have
+	// keeps what it was given, which is nothing.
+	provider := f.Provider
+	if p, ok := h.providers[f.Provider]; ok {
+		provider = p.Name
+	}
+
+	detail := map[string]any{
+		"provider": provider,
+		"reason":   string(f.Reason),
+		// The message rig would have answered with, which for an internal
+		// failure is the part that never reaches the client and so the only
+		// place it is written down at all.
+		"error": f.Error(),
+	}
+	// The provider's own word for it, kept here and nowhere else: it is
+	// attacker-controlled text, and a log line is the one place that is safe.
+	if f.ProviderError != "" {
+		detail["provider_error"] = f.ProviderError
+	}
+
+	entry := authlog.Entry{
+		Event: authlog.EventOAuthSignIn, Outcome: authlog.Failed,
+		EmailAddress: strings.ToLower(f.EmailAddress),
+		IPAddress:    remoteAddr(r), UserAgent: r.UserAgent(),
+		Detail: detail,
+	}
+	// Only when there was one. A pointer to the nil UUID is not "no tenant", it
+	// is a tenant that does not exist, and it would go in the column. A copy,
+	// because the hook below is handed this Failure and what was recorded should
+	// not depend on what it does with it.
+	if f.TenantID != uuid.Nil {
+		tenantID := f.TenantID
+		entry.TenantID = &tenantID
+	}
+	h.write(r.Context(), entry)
+
+	if h.cfg.OnError != nil {
+		h.cfg.OnError(w, r, f)
+		return
+	}
+
+	code := rigerr.CodeOf(f)
+	message := f.Error()
 
 	var typed *rigerr.Error
-	if errors.As(err, &typed) {
+	if errors.As(f.Err, &typed) {
 		message = typed.Message
 	}
 	if code == rigerr.CodeInternal {

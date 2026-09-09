@@ -385,6 +385,24 @@ func (e *authEmitter) oauthHooks(b *gobuf.Buf) {
 	b.L("OnSignIn func(w %s.ResponseWriter, r *%s.Request, in %s.SignIn) error", httpPkg, httpPkg, oauthPkg)
 	b.NL()
 
+	b.Comment("OnError renders a provider sign-in that did not finish, and it is a " +
+		"different question from the API's own error shape.\n\n" +
+		"The two provider routes are the only ones here a person reaches with " +
+		"their address bar. Every other route is called by script, which can read " +
+		"a status and a body; a browser mid-navigation renders whatever came back " +
+		"as a document, so rig's default is a bare text/plain page on this API's " +
+		"origin with no way back to the application.\n\n" +
+		"The oauth.Failure it gets says which of the ways this was — cancelled at " +
+		"the consent screen, an expired state cookie, an address the provider has " +
+		"not verified — so a front end can be sent to its own sign-in page with a " +
+		"code it has copy for. Never render Failure.ProviderError: it is text " +
+		"anybody can write. Never render Failure.Error() on reason internal " +
+		"either: that one is a seal or a store failure, and rig's own default " +
+		"answers \"something went wrong\" rather than show it. Nil keeps the " +
+		"default.")
+	b.L("OnError func(w %s.ResponseWriter, r *%s.Request, f *%s.Failure)", httpPkg, httpPkg, oauthPkg)
+	b.NL()
+
 	if hasOrigin {
 		b.Comment("Origin overrides the configured origin for one request, for an " +
 			"application served at several. Setting auth.oauth.origin_from_host in " +
@@ -896,6 +914,7 @@ func (e *authEmitter) oauthConfig(b *gobuf.Buf, fail string) {
 		b.L("Insecure: true,")
 	}
 	b.L("OnSignIn: h.OAuth.OnSignIn,")
+	b.L("OnError: h.OAuth.OnError,")
 	b.L("}")
 	b.L("}")
 	b.NL()

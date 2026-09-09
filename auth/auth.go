@@ -330,6 +330,25 @@ type OAuth struct {
 	// the way a login does — an identity token and the tenant list, so the
 	// picker can take over.
 	OnSignIn func(w http.ResponseWriter, r *http.Request, in oauth.SignIn) error
+
+	// OnError renders a provider sign-in that did not finish, and it is a
+	// different question from [Config.OnError] rather than a duplicate of it.
+	//
+	// That one is the shape your API answers failures in, and it answers them in
+	// JSON, which is right for every route a script calls. These two are the
+	// routes a person reaches with their address bar, so what a hook here
+	// replaces is not an envelope but a dead end: rig's default is a bare
+	// text/plain page on the API's own origin, and an error envelope rendered
+	// into an address bar is no more readable than one. That is why
+	// [Config.OnError] is not used for this and why setting one does not set the
+	// other.
+	//
+	// What it gets is an [oauth.Failure], which says which of the ways this was
+	// — cancelled at the consent screen, an expired state cookie, an address the
+	// provider has not verified — so an application can redirect to its own
+	// sign-in page carrying a code it has copy for, rather than infer one from a
+	// status. Nil keeps the default.
+	OnError func(w http.ResponseWriter, r *http.Request, f *oauth.Failure)
 }
 
 // MailOptions is the mail queue's configuration.
@@ -634,6 +653,10 @@ func New(cfg Config) (*Auth, error) {
 			// A provider sign-in ends in a session, which is the same session
 			// everything else issues.
 			OnSignIn: signIn,
+
+			// And a provider sign-in that does not is the one failure in this
+			// package a browser sees as a document rather than as a body.
+			OnError: cfg.OAuth.OnError,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("auth: oauth: %w", err)

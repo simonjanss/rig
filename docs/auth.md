@@ -536,8 +536,82 @@ there, and it is the half onboarding usually means.
 has to be in `AllowedReturnTo`. An unchecked `returnTo` is an open redirect, and an
 open redirect on a sign-in endpoint is how a phishing link gets to wear your domain.
 
-Cancelling at the provider comes back as `?error=…` and is answered 400 with an
-`OAuthSignIn` / `Failed` log entry — not a 500, because nobody's server failed.
+#### How it fails is yours too
+
+Cancelling at the provider comes back as `?error=…` and is answered 400 — not a
+500, because nobody's server failed. Every refusal writes an `OAuthSignIn` /
+`Failed` entry, whichever of them it is.
+
+But a 400 is a **document** here, not a body. These two routes are the only ones
+rig serves that somebody reaches with their address bar, and the default answer
+is a bare `text/plain` page on the API's own origin:
+
+```
+Google did not complete the sign-in: access_denied
+```
+
+That is a dead end. `OnError` replaces it:
+
+```go
+OnError: func(w http.ResponseWriter, r *http.Request, f *oauth.Failure) {
+    http.Redirect(w, r, "/login?error="+string(f.Reason), http.StatusSeeOther)
+},
+```
+
+`f.Reason` is the point. Nine of these failures are a 400, so a status cannot
+tell them apart and neither can `rigerr.CodeOf` — and deciding between them by
+matching the prose of rig's messages is a test that passes until somebody
+rewords a sentence.
+
+| `Reason` | what happened | worth suggesting a retry? |
+|---|---|---|
+| `cancelled` | pressed cancel at the consent screen | it is not a failure; say so |
+| `provider_refused` | the provider reported anything else | yes |
+| `unknown_provider` | no such provider in this deployment | no |
+| `tenant` | your `Tenant` resolver refused | no |
+| `return_to` | a `returnTo` that is not allowed | no — a caller's mistake |
+| `state` | the state cookie was missing, expired, or another sign-in's | yes, and it works |
+| `no_code` | a callback with no authorization code | yes |
+| `exchange` | the provider refused the code — often a wrong secret | yes |
+| `profile` | no profile came back, or one rig could not read | yes |
+| `no_address` | the provider shared no email address | no |
+| `unverified_address` | the provider has not verified the address | no |
+| `no_account` | nobody here has this address, and provisioning is off | no |
+| `ending` | `OnSignIn` refused — a tenant they do not belong to | no |
+| `internal` | a failure on this side | yes |
+
+Three rules:
+
+**Never render `f.ProviderError`.** It is the provider's raw error value off a
+query string — text anybody can write — and putting it in a redirect to your own
+origin reflects a stranger's input into your application. It is on the `Failure`
+for a log line. `Reason` is already the answer, from a set rig chose.
+
+**`f.Error()` is not safe to show on `internal`.** Every other reason carries a
+message written for the person who tried to sign in, but an `internal` one
+carries a seal or a store failure — which is why rig's own default answers
+`something went wrong` there instead of showing it. A hook that renders the
+message has to make the same exception, or `Reason` is the only thing it renders.
+
+**`f.ReturnTo` is where they were going**, so a failure can send somebody back to
+the page that started the sign-in rather than to a sign-in page's default. It
+lives in the sealed state cookie, so it is empty for `unknown_provider`, for
+`state`, and for every failure at the start.
+
+A `Failure` is an error, and it wraps the one rig would have answered with — so
+`rigerr.CodeOf(f)`, an `errors.As` for a `*rigerr.Error` and
+`httpx.WriteError(w, "", f)` all behave exactly as they would without the hook.
+An API that wants these routes answering in its own envelope passes its error
+writer and gets it.
+
+The hook does not cost the audit trail anything: the entry is written before it
+is called, so a redirect cannot lose the record that a sign-in was attempted and
+refused.
+
+`auth.Config.OnError` is deliberately **not** used for this. That one is the shape
+your API answers failures in, and it answers them in JSON — which is no more
+readable in an address bar than the plain page it would replace. Two questions,
+two fields.
 
 ### Acting as somebody else
 
@@ -771,7 +845,12 @@ transaction rather than after it.
 
 Every sign-in, failure, lockout, logout, refresh, replay, key use, impersonation,
 invitation and tenant switch is a row in `rig_auth_log` — twenty-two events,
-written by the foundation as they happen. Two endpoints read them, and which one
+written by the foundation as they happen. **Every** way a provider sign-in can be
+refused is one of them, including the ones nobody is watching for: an expired
+state cookie, a code exchange the provider would not honour, a callback naming a
+provider this deployment does not have. `detail.reason` is the
+[`oauth.Failure` reason](#how-it-fails-is-yours-too), and `detail.error` is the
+message rig answered with. Two endpoints read them, and which one
 you get depends on what you ask for:
 
 ```
@@ -1069,6 +1148,13 @@ front, err := api.New(pool, api.Hooks{
     // variables itself, which is the ordinary deployment.
     OAuth: api.OAuthHooks{
         OnSignIn: nil,
+
+        // And how one fails, for the same browser. Nil answers a bare
+        // text/plain page on this API's origin, which is a dead end for
+        // somebody mid-navigation. f.Reason says which of the ways it was.
+        OnError: func(w http.ResponseWriter, r *http.Request, f *oauth.Failure) {
+            http.Redirect(w, r, "/login?error="+string(f.Reason), http.StatusSeeOther)
+        },
 
         // The three values a file cannot hold. Each prefers what you set and
         // reads the variable rig.yaml names when you set nothing, so a project
