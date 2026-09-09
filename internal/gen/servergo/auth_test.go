@@ -30,15 +30,17 @@ func authOpts() gen.Options {
 // file rather than against everything server-go writes: a route added to an
 // unrelated resource is not a change to how a token is configured.
 //
-// web.gen.go joins it when there is one, because the front end's origin is the
-// other half of how a provider sign-in ends and the two files have to agree
-// about the callback path.
+// web.gen.go and cors.gen.go join it when there is a `web:` block, because the
+// front end's origin is the other half of how a provider sign-in ends: the two
+// files have to agree about the callback path, and the third is the same origin
+// read again for a preflight.
 func authArtifact(t *testing.T, artifacts []gen.Artifact) []gen.Artifact {
 	t.Helper()
 
 	var out []gen.Artifact
 	for _, a := range artifacts {
-		if a.Path == "auth.gen.go" || a.Path == "web.gen.go" {
+		switch a.Path {
+		case "auth.gen.go", "web.gen.go", "cors.gen.go":
 			out = append(out, a)
 		}
 	}

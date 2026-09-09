@@ -184,6 +184,17 @@ func (g *Generator) Generate(_ context.Context, doc *ir.Document, opts gen.Optio
 		artifacts = append(artifacts, web)
 	}
 
+	// And the policy a browser on that origin is answered under, which is the
+	// same block read a second time — the origins from configuration, the
+	// header lists from the document.
+	if e.hasWeb() {
+		policy, err := e.corsFile()
+		if err != nil {
+			return nil, err
+		}
+		artifacts = append(artifacts, policy)
+	}
+
 	// The migration wiring, for a project whose modules carry their own schema.
 	// A project that vendored the foundation gets no file: its migrations are
 	// already files in its own directory, and this is the only thing in the API

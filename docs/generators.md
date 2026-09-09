@@ -49,6 +49,13 @@ API's own. With providers configured it also selects the sign-in ending that
 redirects to the front end — see
 [auth.md](auth.md#a-front-end-on-another-origin).
 
+It writes a `cors.gen.go` beside it, and the generated `mountWith` wraps the
+handler in what that returns. The policy's header lists are built from the
+document rather than from configuration, because every entry in them is a fact
+about what this API reads and answers with — `QUERY` when a route uses it, the
+`electric-*` headers when a table streams, the project's own tenant and revision
+header names. See [clients.md](clients.md#cross-origin).
+
 `files:` writes a `files.gen.go` beside them with two constructors in it.
 `NewFilesWithStore` takes the store, so a project can be run and tested against
 `blob.NewMemory()` whatever its configuration says; `NewFiles` builds the one
