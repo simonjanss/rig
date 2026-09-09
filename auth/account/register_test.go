@@ -113,3 +113,22 @@ func TestRegisterWithoutAHookStillWorks(t *testing.T) {
 		t.Fatal("expected an identity session")
 	}
 }
+
+// RequireVerifiedEmail refuses a sign-in until the address is confirmed, and
+// registration is the one place that cannot be held to it: the address is one
+// request old and the mail that confirms it has not been opened yet.
+//
+// The identity token registration hands back has never been gated either, which
+// is what makes this consistent rather than an exception — accepting an
+// invitation and creating a tenant both work unverified, and always have.
+func TestRegisterIsNotHeldToTheVerifiedEmailGate(t *testing.T) {
+	f := setupWith(t, func(cfg *account.Config) { cfg.RequireVerifiedEmail = true })
+
+	res, err := register(f, "new@example.com")
+	if err != nil {
+		t.Fatalf("registering should not be refused for an unconfirmed address: %v", err)
+	}
+	if res.Identity.Token == "" {
+		t.Error("no identity token, so there is nothing to reach the picker with")
+	}
+}

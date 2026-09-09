@@ -100,7 +100,18 @@ type Store interface {
 	// one beside them.
 	FindIdentityByEmail(ctx context.Context, lowercased string) (uuid.UUID, error)
 
-	// LinkIdentity records the connection.
+	// LinkIdentity records the connection, and records the evidence for it.
+	//
+	// A link is only ever offered on an address the provider says is verified —
+	// [Handler.identity] refuses otherwise — so an implementation must also
+	// mark the identity's address verified when [Profile.EmailVerified] and it
+	// is not already marked. That is the same evidence ProvisionIdentity acts
+	// on, and writing one without the other leaves somebody who signed up with
+	// a password and later signed in with Google unverified on the strength of
+	// a column rather than of anything they did.
+	//
+	// Already verified is left alone rather than restamped: the question is
+	// whether the address was ever proved, and the first answer is the true one.
 	LinkIdentity(ctx context.Context, in LinkInput) (*Link, error)
 
 	// ProvisionIdentity creates the person and links them in one step.

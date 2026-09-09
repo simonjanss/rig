@@ -106,13 +106,18 @@ type store struct {
 	// per tenant, which is the point: one address is one person.
 	identities  map[string]uuid.UUID
 	memberships []membership
+	// verified is what the real store keeps in rig_identity.email_verified_at,
+	// modelled here because LinkIdentity owes it: a link is only ever offered on
+	// an address the provider verified, and recording the link without the
+	// evidence is what left a password registrant unverified forever.
+	verified map[uuid.UUID]bool
 
 	provisions int
 	joins      int
 }
 
 func newStore() *store {
-	return &store{identities: map[string]uuid.UUID{}}
+	return &store{identities: map[string]uuid.UUID{}, verified: map[uuid.UUID]bool{}}
 }
 
 func (s *store) FindLink(_ context.Context, provider, subject string) (*oauth.Link, error) {
@@ -143,6 +148,11 @@ func (s *store) LinkIdentity(_ context.Context, in oauth.LinkInput) (*oauth.Link
 		EmailAddress: in.Profile.EmailAddress,
 	}
 	s.links = append(s.links, l)
+	// The contract [oauth.Store.LinkIdentity] states. Already verified is left
+	// alone, because when an address was proved is a fact about the address.
+	if in.Profile.EmailVerified {
+		s.verified[in.IdentityID] = true
+	}
 	return l, nil
 }
 
@@ -368,6 +378,31 @@ func TestAVerifiedAddressLinksAnExistingAccount(t *testing.T) {
 	}
 	if f.signedIn.New {
 		t.Error("nothing was created")
+	}
+}
+
+// The evidence a link is made on is recorded, not just acted on.
+//
+// A link to somebody who already exists is only ever offered on an address the
+// provider says is verified — that claim is the whole reason it is allowed — so
+// a store that writes the link and drops the claim leaves the person unverified
+// on a column rather than on anything they did. That is what kept
+// RequireVerifiedEmail off this path until it was fixed.
+func TestLinkingRecordsThatTheAddressWasVerified(t *testing.T) {
+	t.Parallel()
+
+	f := setup(t, oauth.Profile{
+		Subject: "provider-subject-1", EmailAddress: "sam@example.com", EmailVerified: true,
+	}, nil)
+
+	identityID, _ := f.store.put(f.tenant, "sam@example.com")
+
+	f.signIn(t, "")
+	if f.signedIn == nil {
+		t.Fatal("the sign-in should have completed")
+	}
+	if !f.store.verified[identityID] {
+		t.Error("a verified provider address should have been recorded as verifying the identity")
 	}
 }
 

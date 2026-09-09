@@ -412,6 +412,14 @@ whoever registers your address anywhere owns your account here. GitHub does not
 report verification on `/user`, so its provider fetches `/user/emails` and reads the
 primary address's flag.
 
+Because it is evidence, it is **recorded**: linking a verified provider address
+marks the identity's address verified, the same way provisioning through a
+provider does. So somebody who signed up with a password, never opened the
+confirmation mail, and later signed in with Google is verified from then on —
+and `require_verified_email` applies to a provider sign-in exactly as it applies
+to a login. An address the provider has *not* verified is not recorded as
+anything, which is the same rule from the other side.
+
 **`AllowProvisioning` is off by default.** A provider will authenticate anybody with
 a Google account. An open sign-in endpoint on a business application is a way for a
 stranger to appear inside a customer's tenant — rarely what anyone wants and never
@@ -1098,6 +1106,10 @@ auth:
   # something probeable.
   allow_registration: false
   allow_tenant_creation: false
+  # Refuses a sign-in — a password or a provider, the same rule for both — until
+  # the address has been confirmed. Registration itself is never refused by it:
+  # the address is one request old at that point. See Signing in with a provider
+  # for what counts as confirming one.
   require_verified_email: false
 
   # Only the numbers. Which event each limit counts is rig's — see Rate limits.

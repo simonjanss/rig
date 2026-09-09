@@ -1074,6 +1074,82 @@ func TestOAuthIdentitiesOverRealSQL(t *testing.T) {
 	}
 }
 
+// What LinkIdentity records besides the link, and it can only be checked here:
+// the in-memory oauth store models rig_identity_oauth and not rig_identity, so
+// a column it never writes is a column nothing there can notice.
+//
+// The gap this closes: a person registers with a password, never opens the
+// confirmation mail, and later signs in with Google. Google says the address is
+// verified — which is the only reason the link is allowed at all — and before
+// this the identity kept its null. With require_verified_email set they were
+// then refused a sign-in on a column rig failed to update.
+func TestLinkingAVerifiedAddressMarksTheIdentityVerified(t *testing.T) {
+	h := setup(t)
+	ctx := context.Background()
+	store := h.stores.OAuth()
+
+	verifiedAt := func(id uuid.UUID) *time.Time {
+		t.Helper()
+		var at *time.Time
+		if err := h.pool.QueryRow(ctx,
+			`SELECT email_verified_at FROM rig_identity WHERE id = $1`, id).Scan(&at); err != nil {
+			t.Fatal(err)
+		}
+		return at
+	}
+
+	// The harness inserts its person with no email_verified_at, which is what
+	// somebody who registered and never confirmed looks like.
+	if verifiedAt(h.identity) != nil {
+		t.Fatal("the fixture person should start unverified")
+	}
+
+	// An unverified profile never reaches LinkIdentity through the handler —
+	// [oauth.Handler.identity] refuses first — but the store must not stamp on
+	// one either, or the check above it is the only thing standing between an
+	// address anybody can register and an account it can take over.
+	if _, err := store.LinkIdentity(ctx, oauth.LinkInput{
+		IdentityID: h.identity, Provider: oauth.ProviderGoogle,
+		Profile: oauth.Profile{
+			Subject: "unverified-" + uuid.NewString(), EmailAddress: h.email,
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if verifiedAt(h.identity) != nil {
+		t.Fatal("an unverified provider address is not evidence and must not be recorded as any")
+	}
+
+	if _, err := store.LinkIdentity(ctx, oauth.LinkInput{
+		IdentityID: h.identity, Provider: oauth.ProviderGoogle,
+		Profile: oauth.Profile{
+			Subject: "google-" + uuid.NewString(), EmailAddress: h.email,
+			EmailVerified: true, DisplayName: "Sam",
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	first := verifiedAt(h.identity)
+	if first == nil {
+		t.Fatal("a verified provider address should have been recorded as verifying the identity")
+	}
+
+	// And the second sign-in does not move it. When the address was proved is a
+	// fact about the address, not about the last time somebody signed in.
+	if _, err := store.LinkIdentity(ctx, oauth.LinkInput{
+		IdentityID: h.identity, Provider: oauth.ProviderGoogle,
+		Profile: oauth.Profile{
+			Subject: "google-" + uuid.NewString(), EmailAddress: h.email,
+			EmailVerified: true, DisplayName: "Sam",
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if second := verifiedAt(h.identity); second == nil || !second.Equal(*first) {
+		t.Errorf("email_verified_at moved from %v to %v", first, second)
+	}
+}
+
 // One person in two tenants, against the real schema.
 //
 // The in-memory suite proves the rules; what can only be wrong here is the SQL —

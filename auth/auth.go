@@ -172,7 +172,12 @@ type Config struct {
 	// to one dispatch interval late.
 	Mail MailOptions
 
-	// RequireVerifiedEmail refuses a login until the address is verified.
+	// RequireVerifiedEmail refuses a sign-in until the address is verified —
+	// a password and a provider alike, since linking a provider account
+	// requires a verified address and records it as one.
+	//
+	// It does not refuse a registration. The address is one request old there
+	// and the mail that would confirm it has not been opened.
 	RequireVerifiedEmail bool
 
 	// Grants answers what an account may do. Nil means nobody holds anything,

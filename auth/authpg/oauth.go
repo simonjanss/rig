@@ -83,6 +83,28 @@ func (s *OAuthStore) FindIdentityByEmail(ctx context.Context, lowercased string)
 // The conflict target is (provider, subject), which the foundation makes
 // unique. Two sign-ins racing on a first link both insert; the second updates
 // the address instead of failing, and both end up with the same row.
+//
+// It also stamps email_verified_at, because the link is only ever offered on an
+// address the provider has verified — [oauth.Handler.identity] refuses
+// otherwise — and that is the same evidence [OAuthStore.ProvisionIdentity] acts
+// on. Recording the link and not the evidence is what left somebody who signed
+// up with a password and later signed in with Google unverified, on a column
+// rather than on anything they did.
+//
+// One statement rather than a transaction of its own, because
+// [OAuthStore.ProvisionIdentity] calls this from inside one. Postgres runs a
+// data-modifying CTE exactly once whether or not anything selects from it, so
+// the update happens even though only the insert is read back. Three details
+// the shape depends on: the update reads identity_id back out of the insert
+// rather than trusting the input, so a conflicting upsert stamps whoever
+// actually owns the link; `email_verified_at IS NULL` means an address verified
+// long ago keeps its original timestamp instead of having it moved by every
+// sign-in; and the flag is a parameter rather than a branch in Go so that the
+// unverified case is still one round trip.
+//
+// `deleted_at IS NULL` because the input carries an identifier a caller chose.
+// Every other read here filters it, and a soft-deleted person is not somebody
+// to record anything new about.
 func (s *OAuthStore) LinkIdentity(ctx context.Context, in oauth.LinkInput) (*oauth.Link, error) {
 	id, err := uuid.NewV7()
 	if err != nil {
@@ -92,15 +114,24 @@ func (s *OAuthStore) LinkIdentity(ctx context.Context, in oauth.LinkInput) (*oau
 	now := s.now()
 	var out oauth.Link
 	err = dbx.ConnFor(ctx, s.db).QueryRow(ctx, `
-		INSERT INTO rig_identity_oauth
-			(id, identity_id, provider, subject, email_address, created_at)
-		VALUES ($1, $2, $3, $4, $5, $6)
-		ON CONFLICT (provider, subject) DO UPDATE SET
-			email_address = excluded.email_address,
-			updated_at    = $6
-		RETURNING `+linkColumns,
+		WITH link AS (
+			INSERT INTO rig_identity_oauth
+				(id, identity_id, provider, subject, email_address, created_at)
+			VALUES ($1, $2, $3, $4, $5, $6)
+			ON CONFLICT (provider, subject) DO UPDATE SET
+				email_address = excluded.email_address,
+				updated_at    = $6
+			RETURNING `+linkColumns+`
+		), verified AS (
+			UPDATE rig_identity SET email_verified_at = $6, updated_at = $6
+			WHERE id = (SELECT identity_id FROM link)
+			  AND $7::boolean
+			  AND email_verified_at IS NULL
+			  AND deleted_at IS NULL
+		)
+		SELECT `+linkColumns+` FROM link`,
 		id, in.IdentityID, in.Provider, in.Profile.Subject,
-		strings.ToLower(in.Profile.EmailAddress), now).
+		strings.ToLower(in.Profile.EmailAddress), now, in.Profile.EmailVerified).
 		Scan(&out.ID, &out.IdentityID, &out.Provider, &out.Subject, &out.EmailAddress)
 	if err != nil {
 		return nil, fmt.Errorf("authpg: link identity: %w", err)

@@ -29,6 +29,15 @@ func (f *fixture) signInIdentity(in account.SignInIdentityInput) (account.SignIn
 
 // second gives the fixture's person an account in another tenant, and hands
 // back the tenant and the account.
+// markVerified confirms the fixture person's address, the way clicking the link
+// in a verification mail would.
+func (f *fixture) markVerified(t *testing.T) {
+	t.Helper()
+	if err := f.store.MarkIdentityVerified(t.Context(), f.ident.ID, f.clock.now()); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func (f *fixture) second(t *testing.T, name string) (uuid.UUID, *account.Account) {
 	t.Helper()
 
@@ -221,21 +230,33 @@ func TestSignInIdentityRefusesADisabledAccountAndAServiceAccount(t *testing.T) {
 	}
 }
 
-// RequireVerifiedEmail stays on the password path deliberately, and this is what
-// pins it: the provider vouched for the address, and the column rig would check
-// is one LinkIdentity never sets.
-func TestSignInIdentitySkipsTheVerifiedEmailGate(t *testing.T) {
+// RequireVerifiedEmail is one rule for both paths, and this is what pins it.
+//
+// It used to be the password path's alone, because oauth's LinkIdentity took a
+// verified address as evidence and never wrote it down — so refusing here would
+// have refused somebody on a column rather than on anything they did. It
+// records it now, so the exception has nothing left to protect.
+func TestSignInIdentityAppliesTheVerifiedEmailGate(t *testing.T) {
 	t.Parallel()
 
 	f := setupWith(t, func(c *account.Config) { c.RequireVerifiedEmail = true })
 
-	// The password path refuses the same person, which is the other half of the
-	// claim: the gate is still on, it just is not this method's.
 	if _, err := f.signIn(goodPassword); rigerr.CodeOf(err) != rigerr.CodeForbidden {
 		t.Fatalf("Login err = %v, want the verified-email refusal", err)
 	}
-	if _, err := f.signInIdentity(account.SignInIdentityInput{}); err != nil {
-		t.Fatalf("a provider sign-in should not be held to it: %v", err)
+	_, err := f.signInIdentity(account.SignInIdentityInput{Method: "Google"})
+	if rigerr.CodeOf(err) != rigerr.CodeForbidden {
+		t.Fatalf("err = %v, want the same refusal a login gives", err)
+	}
+	if e, ok := f.log.last(authlog.EventLoginFailed); !ok || e.Detail["reason"] != "email not verified" {
+		t.Errorf("entry = %v, want the reason recorded", e.Detail)
+	}
+
+	// And the refusal is about the column rather than about the method: verify
+	// the address and the same provider sign-in goes through.
+	f.markVerified(t)
+	if _, err := f.signInIdentity(account.SignInIdentityInput{Method: "Google"}); err != nil {
+		t.Fatalf("a verified address should sign in: %v", err)
 	}
 }
 
