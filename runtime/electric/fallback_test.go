@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -165,6 +166,41 @@ func TestAFourHundredIsForwardedRatherThanAnswered(t *testing.T) {
 	res := serve(t, p, electric.Shape{Table: "lesson", Fallback: snapshotOf("one")}, "")
 	if res.StatusCode != http.StatusForbidden {
 		t.Errorf("status = %d, want the refusal forwarded", res.StatusCode)
+	}
+}
+
+// A policy in front of the whole API lists what a browser may read, and it need
+// not name this header: one written before a table started streaming does not.
+// So the must-refetch answer appends rather than choosing between the two —
+// replacing the list would hide everything else on it, and standing aside for a
+// list without this header would cost the subscriber the handle it came back for.
+func TestAMustRefetchAddsToAnExposeHeaderAlreadySet(t *testing.T) {
+	t.Parallel()
+
+	p, _ := newProxy(electric.Config{URL: nowhere})
+	shape := electric.Shape{Table: "lesson", Fallback: snapshotOf("one")}
+	const already = "RateLimit-Limit, API-Revision"
+
+	r := httptest.NewRequest(http.MethodGet, "/?offset=0_inf&handle=the-handle&live=true", nil)
+	w := httptest.NewRecorder()
+	w.Header().Set("Access-Control-Expose-Headers", already)
+	p.Serve(w, r, shape)
+	if w.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want the 409 that resets a subscription", w.Code)
+	}
+	// A browser joins the repeated values before it splits them, so both the
+	// list that was there and this one entry are readable.
+	want := []string{already, "electric-handle"}
+	if got := w.Header().Values("Access-Control-Expose-Headers"); !slices.Equal(got, want) {
+		t.Errorf("expose-headers = %q, want %q", got, want)
+	}
+
+	// And with nothing in front, the answer says the one thing a cross-origin
+	// subscriber has to be able to read.
+	w = httptest.NewRecorder()
+	p.Serve(w, r, shape)
+	if got := w.Header().Get("Access-Control-Expose-Headers"); got != "electric-handle" {
+		t.Errorf("expose-headers = %q, want electric-handle", got)
 	}
 }
 

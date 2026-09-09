@@ -230,8 +230,14 @@ func writeMustRefetch(w http.ResponseWriter) {
 	h.Set("electric-handle", nextFallbackHandle())
 	// The one header a cross-origin subscriber has to be able to read here, and
 	// the sync service's own responses are what usually say so. This response
-	// never went near it.
-	h.Set("Access-Control-Expose-Headers", "electric-handle")
+	// never went near it. Added rather than set, because either half alone is
+	// wrong: a policy wrapped around the whole API has a list of its own, and
+	// replacing it would hide everything else on it — while a policy written
+	// before a table started streaming need not name this header at all, and
+	// standing aside for it would cost the subscriber the handle it came back
+	// for. A browser joins repeated values before splitting them, so appending
+	// is both.
+	h.Add("Access-Control-Expose-Headers", "electric-handle")
 	h.Set("Cache-Control", "no-store")
 	// So a network tab can tell this from the sync service's own 409, which is
 	// the same status for a different reason.
