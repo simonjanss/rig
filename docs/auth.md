@@ -583,7 +583,7 @@ Set-Cookie: rig_handoff=<base64url JSON>; Path=/auth/callback; Domain=example.co
 
 The value decodes to `authwire.Handoff` — a `SignInResponse` **without** the
 tenant list, because a cookie holds about four kilobytes and a tenant list has no
-bound. `identityToken` fetches the list from `GET /auth/tenants`, which is the
+bound. `identityToken` fetches the list from `GET /auth/me/tenants`, which is the
 call the picker makes anyway. The token pair is absent entirely for somebody who
 belongs to no tenant yet, exactly as it is in the JSON body.
 
@@ -615,31 +615,35 @@ So the landing page has one job and two branches: a cookie to take, or an
 and they cover the refusals raised *before* any ending runs as well — a cancelled
 consent screen, an address no account has. Your own `OnError` still wins.
 
-What the page does: read the cookie, delete it, and start a session from it. The
-shape is `Handoff` from `@rig-ts/client`, so the types are the server's rather
-than a restatement of them:
+What the page does is one call each way:
 
 ```ts
-import { Session, type Handoff } from "@rig-ts/client";
+import { handoffError, takeHandoff } from "@rig-ts/client";
 
-const handoff: Handoff = JSON.parse(atob(readCookie("rig_handoff")));
-const session = new Session(handoff);   // NOT session.replace(handoff)
+const handoff = takeHandoff();
+if (handoff) session.reset(handoff);
+else showError(handoffError());
 ```
 
-A handoff is a **new** person's tokens, so it starts a session rather than
-replacing one: `session.replace` keeps the previous refresh token.
+`takeHandoff` reads the cookie, deletes it, and gives back a
+[`Handoff`](clients.md#finishing-a-provider-sign-in-in-the-browser). It is one
+shot — the cookie goes whether or not it decoded, because a value nothing could
+read is still a credential sitting in the browser for the rest of its minute.
 
-Two things to get right when you write that by hand.
+`session.reset`, or `new Session(handoff)` for a session object you do not
+already have. Not `session.replace`: a handoff is a **new** person's tokens, and
+`replace` keeps a refresh token the answer did not carry — right for a refresh,
+and here it would leave the client able to refresh back into whoever was signed
+in before.
 
-**Delete it on the right domain.** A cookie set with a `Domain` is only removed
-by a `Set-Cookie` carrying the same `Domain` — a bare `Max-Age=0` creates and
-expires a *different*, host-only cookie and leaves the real one alive. So the
-deletion has to name `Domain=example.com` as well as trying the host-only form.
-Getting this wrong passes every test on `localhost`, where there is no domain,
-and fails only where there are two subdomains, which is only ever a deployment.
-
-**Delete it whether or not it decoded.** A value you could not read is still a
-credential sitting in the browser for its full minute.
+The reason that is in the SDK rather than in your callback page is the deletion.
+A cookie set with a `Domain` is only removed by a `Set-Cookie` carrying the
+**same** `Domain`: a bare `Max-Age=0` creates and expires a *different*,
+host-only cookie and leaves the real one alive and readable. That mistake passes
+every test on `localhost`, where the server sets no domain at all, and fails
+only where there are two subdomains — which is only ever a deployment. Only the
+server knows which `Domain` it chose, so `takeHandoff` names the host-only form
+and every suffix down to two labels.
 
 Two things stay yours. The origin can come from Go instead of the file, with
 `Hooks.OAuth.WebOrigin` — and a deployment that does that answers the rest of its

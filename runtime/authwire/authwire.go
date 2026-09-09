@@ -107,7 +107,7 @@ const HandoffCookie = "rig_handoff"
 // The list is left out because a cookie is limited to about four kilobytes and a
 // person in thirty tenants would silently exceed it — a sign-in that fails with
 // nothing in any log. [Handoff.IdentityToken] fetches the same list from
-// GET <base>/tenants, which is the call the picker makes anyway.
+// GET <base>/me/tenants, which is the call the picker makes anyway.
 //
 // The value is base64url of this shape's JSON. It is a contract with the code
 // that reads the cookie, which is why it is named here: a browser front end
