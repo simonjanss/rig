@@ -793,27 +793,55 @@ would have sent, and an `int8` to a `number` rather than a BigInt.
 ### Finishing a provider sign-in in the browser
 
 A project with a [`web:` block](rig-yaml.md#web) ends a provider sign-in by
-redirecting to the front end with the tokens in a one-minute cookie named
-`rig_handoff`, base64url of JSON. The shape inside it is `Handoff`, exported
-here, so the landing page reads the server's own type rather than a restatement
-of it:
+redirecting to the front end with the tokens in a one-minute cookie. The landing
+page has one job and two outcomes:
 
 ```ts
-import { Session, type Handoff } from "@rig-ts/client";
+import { handoffError, takeHandoff } from "@rig-ts/client";
 
-const handoff: Handoff = JSON.parse(atob(readCookie("rig_handoff")));
-const session = new Session(handoff);
+const handoff = takeHandoff();
+if (handoff) {
+    session.reset(handoff);           // or new Session(handoff)
+    navigate(returnTo ?? "/");
+} else {
+    const why = handoffError();       // "cancelled", "no_account", …
+    showSignInPage(why);
+}
 ```
 
-`new Session`, not `session.replace(handoff)` — a handoff is a new person's
-tokens, and `replace` keeps the previous refresh token. It is a `TokenPair` plus
-`identityToken` and `identityExpiresAt`, with the pair absent for somebody who
-belongs to no tenant yet; the tenant list is deliberately not in it, because a
-cookie holds about four kilobytes and a tenant list has no bound.
+`takeHandoff` reads the cookie, **deletes it**, and returns a `Handoff`: a
+`TokenPair` plus `identityToken` and `identityExpiresAt`, with the pair absent
+for somebody who belongs to no tenant yet. The tenant list is deliberately not
+in it — a cookie holds about four kilobytes and a tenant list has no bound — so
+`identityToken` fetches it from `auth.tenants()`, which is the call a picker
+makes anyway.
 
-Delete the cookie once you have read it, on the same `Domain` the server set —
-[auth.md](auth.md#a-front-end-on-another-origin) has the whole contract,
-including why a bare `Max-Age=0` leaves it alive.
+It is one shot. The cookie goes whether or not it decoded, because a value
+nothing could read is still a credential sitting in the browser for the rest of
+its minute, and a second call returns `null`. Off a browser it returns `null`
+without touching anything.
+
+`session.reset`, **not** `session.replace`. A handoff is a new person's tokens;
+`replace` keeps a refresh token the answer did not carry, which is right for a
+refresh and here would leave the client able to refresh back into whoever was
+signed in before.
+
+`handoffError()` reads the `?error=` a failed callback carries, from the server's
+own closed set of reasons — `cancelled` is worth different copy from
+`internal`, and a status cannot tell them apart because nine of them are a 400.
+[auth.md](auth.md#how-it-fails-is-yours-too) lists all fourteen.
+
+**Why this is in the SDK rather than in your page**: the deletion. A cookie set
+with a `Domain` is only removed by a `Set-Cookie` carrying the same `Domain` — a
+bare `Max-Age=0` creates and expires a *different*, host-only cookie and leaves
+the real one alive. That passes every test on `localhost`, where the server sets
+no domain, and fails only where there are two subdomains. Only the server knows
+which `Domain` it chose, so `takeHandoff` names the host-only form and every
+suffix down to two labels.
+
+`CookieJar` is the seam for a test, because `document.cookie` is a prototype
+accessor with nothing for a spy to stand in for; `hostname`, `path` and `secure`
+default to the page's own.
 
 ### Cross-origin
 

@@ -39,6 +39,13 @@ export type { Bindable, Credential, Reauthorizer } from "./credential.js";
 
 export { Session, NoSessionError } from "./session.js";
 
+// The other end of the handoff cookie a browser provider sign-in leaves. In
+// this package rather than generated for the reason `Auth` is: the cookie is
+// rig's own, so its name, its encoding and — the part every project gets wrong
+// — its deletion are the same in every application.
+export { takeHandoff, handoffError, HANDOFF_COOKIE } from "./handoff.js";
+export type { CookieJar, HandoffOptions, HandoffReason } from "./handoff.js";
+
 // rig's own authentication endpoints, and the shapes they send and receive.
 //
 // Hand-written rather than generated, and in this package rather than in a
