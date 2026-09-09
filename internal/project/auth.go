@@ -179,7 +179,8 @@ func (p *Project) checkAuthOAuth(a Auth) diag.List {
 	if len(o.Providers) == 0 {
 		// Nothing is mounted, so nothing here can be wrong — except a block that
 		// was configured for providers nobody listed.
-		if o.BaseURL != "" || o.AllowProvisioning || len(o.AllowedReturnTo) > 0 {
+		if o.BaseURL != "" || o.AllowProvisioning || o.AllowJoining != nil ||
+			len(o.AllowedReturnTo) > 0 {
 			diags.Add(diag.CodeConfigInvalid, p.At("auth", "oauth", "providers"),
 				"auth.oauth is configured but lists no providers, so no provider routes are mounted")
 		}
@@ -268,6 +269,15 @@ func (t AuthTenant) Uses(source ir.AuthTenantSource) bool {
 // It returns nil for a project with no authentication, which is what tells a
 // generator there is nothing to describe. Every value is already resolved, so
 // this is a translation and not a second place where defaults are decided.
+// joining is allow_joining with its default applied: unset follows
+// allow_provisioning, which is what one key meant when it gated both doors.
+func (o AuthOAuth) joining() bool {
+	if o.AllowJoining != nil {
+		return *o.AllowJoining
+	}
+	return o.AllowProvisioning
+}
+
 func (a Auth) IR() *ir.Auth {
 	if !a.Enabled {
 		return nil
@@ -319,8 +329,13 @@ func (a Auth) IR() *ir.Auth {
 			SigningKeyEnv:     a.OAuth.SigningKeyEnv,
 			StateTTL:          a.OAuth.StateTTL.IR(),
 			AllowProvisioning: a.OAuth.AllowProvisioning,
-			AllowedReturnTo:   slices.Clone(a.OAuth.AllowedReturnTo),
-			Insecure:          a.OAuth.Insecure,
+			// Resolved here rather than carried as a pointer, because the IR's
+			// rule is that a zero in it means somebody wrote a zero: a consumer
+			// reading the document should not have to know what rig/auth would
+			// have picked.
+			AllowJoining:    a.OAuth.joining(),
+			AllowedReturnTo: slices.Clone(a.OAuth.AllowedReturnTo),
+			Insecure:        a.OAuth.Insecure,
 		}
 		for _, pr := range a.OAuth.Providers {
 			out.OAuth.Providers = append(out.OAuth.Providers, ir.AuthProvider{

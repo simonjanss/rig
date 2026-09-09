@@ -415,8 +415,14 @@ here:
 
 **Do they belong here?** Asked only when something named a tenant. Then it is
 answered per tenant from `FindAccount`, and answered **no** unless
-`AllowProvisioning` is on and `JoinTenant` accepts them — which must honour the
+`AllowJoining` is on and `JoinTenant` accepts them — which must honour the
 tenant's allowed email domains.
+
+The two questions refuse differently, and the difference matters to whoever
+reads it: `no_account` is "we have never heard of you", `no_tenant_access` is
+"we know you, you are not in this one" — which is the same sentence
+`POST /auth/login` answers with, and the only one of the two a person can act
+on.
 
 When nothing named one, the callback has nothing to answer it with and does not
 try: it hands on a sign-in with the first question answered and `tenantID` nil,
@@ -445,17 +451,32 @@ and `require_verified_email` applies to a provider sign-in exactly as it applies
 to a login. An address the provider has *not* verified is not recorded as
 anything, which is the same rule from the other side.
 
-**`AllowProvisioning` is off by default.** A provider will authenticate anybody with
-a Google account. An open sign-in endpoint on a business application is a way for a
-stranger to appear inside a customer's tenant — rarely what anyone wants and never
-what they expect. One switch gates both doors: creating the identity, and joining
-the tenant.
+**Both doors are shut by default.** A provider will authenticate anybody with a
+Google account. An open sign-in endpoint on a business application is a way for
+a stranger to appear inside a customer's tenant — rarely what anyone wants and
+never what they expect. There are two doors and a key for each:
+`allow_provisioning` creates the identity, `allow_joining` puts them in the
+tenant a sign-in named.
+
+`allow_joining` is unset by default and then follows `allow_provisioning`, which
+is what one key meant when it gated both. Set them apart when the answers
+differ, and the ordinary case is `allow_provisioning: true` with
+`allow_joining: false` — "a provider may create a person, but only an invitation
+may put them in a tenant". That is worth reaching for wherever the tenant comes
+from a **request** rather than from a host: `/start` is an anonymous browser
+GET, so a crafted link can name any tenant, and the join is the half of the
+sign-in that would act on it. An identity on its own reaches nothing.
+
+The reverse is ordinary too — `allow_joining: true` with provisioning off — for
+a deployment whose people come from a directory elsewhere: admit them to the
+tenant the host named, and never invent one.
 
 The second door only exists when a tenant was named. So for a deployment that
-settles the tenant after the callback, this is the switch on "may a stranger
-become somebody here at all" — with it off, a provider sign-in works only for an
-address that already has an identity, and joining a tenant is the picker's job
-rather than the callback's.
+settles the tenant after the callback, `allow_provisioning` is the whole switch:
+"may a stranger become somebody here at all". With it off, a provider sign-in
+works only for an address that already has an identity, and joining a tenant is
+the picker's job rather than the callback's — `allow_joining` is not consulted
+at all.
 
 #### The tenant is decided before the redirect, when it can be
 
@@ -726,6 +747,7 @@ rewords a sentence.
 | `no_address` | the provider shared no email address | no |
 | `unverified_address` | the provider has not verified the address | no |
 | `no_account` | nobody here has this address, and provisioning is off | no |
+| `no_tenant_access` | this application knows them; they are not in the tenant this sign-in named, and joining is off | no, but they can ask for an invitation |
 | `ending` | `OnSignIn` refused — a tenant they do not belong to | no |
 | `internal` | a failure on this side | yes |
 
@@ -1170,7 +1192,9 @@ auth:
     origin_from_host: false            # or derive it per request, see below
     signing_key_env: OAUTH_SIGNING_KEY # >= 32 bytes, the same in every replica
     state_ttl: 10m
-    allow_provisioning: false
+    allow_provisioning: false          # may a provider create a person
+    # allow_joining: false             # may it put one in the tenant a sign-in
+                                       # named. Unset follows allow_provisioning
     allowed_return_to: [https://app.example.com]  # origins, never paths
     insecure: false                    # never set this in a deployment
     providers:

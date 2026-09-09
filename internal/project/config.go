@@ -324,6 +324,20 @@ type AuthOAuth struct {
 	// already has an account.
 	AllowProvisioning bool `yaml:"allow_provisioning,omitempty" json:"allow_provisioning,omitempty" jsonschema_description:"Create an account the first time somebody signs in with a provider. Off means a provider sign-in only works for an address that already has one."`
 
+	// AllowJoining creates an account in the tenant a sign-in named, for
+	// somebody who is not in it yet. Unset follows allow_provisioning, which is
+	// what one key did when it gated both doors.
+	//
+	// Separate because the two are separate decisions and a deployment can want
+	// opposite answers. "A provider may create a person, but only an invitation
+	// may put them in a tenant" is the ordinary one: where the tenant comes
+	// from a request, the join is the half a crafted /start link would abuse,
+	// and an identity on its own reaches nothing.
+	//
+	// Read only by a sign-in that named a tenant. Where none was named, joining
+	// is the picker's job rather than the callback's.
+	AllowJoining *bool `yaml:"allow_joining,omitempty" json:"allow_joining,omitempty" jsonschema_description:"Create an account in the tenant a sign-in named, for somebody not in it yet. Unset follows allow_provisioning. Set it false to let a provider create a person but never put one in a tenant."`
+
 	// AllowedReturnTo bounds where a finished sign-in may land. An open redirect
 	// is the classic mistake here.
 	//

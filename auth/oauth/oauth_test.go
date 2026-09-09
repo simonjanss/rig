@@ -216,12 +216,34 @@ type fixture struct {
 	store    *store
 	tenant   uuid.UUID
 	signedIn *oauth.SignIn
+	// failed is the last refusal, captured so a test can assert which one it
+	// was rather than reading the prose of the page — which is a test that
+	// passes until somebody rewords a sentence, and the reason Reason exists.
+	failed *oauth.Failure
+}
+
+// capturing records the refusal on the fixture, for a test that is about which
+// one it was. It is opt-in rather than always on, because the default rendering
+// is itself under test — an internal failure must not describe itself to the
+// caller — and a hook that replaced it everywhere would take that with it.
+func (f *fixture) capturing(c *oauth.Config) {
+	c.OnError = func(w http.ResponseWriter, _ *http.Request, fail *oauth.Failure) {
+		f.failed = fail
+		w.WriteHeader(rigerr.CodeOf(fail).HTTPStatus())
+	}
 }
 
 func setup(t *testing.T, profile oauth.Profile, tweak func(*oauth.Config)) *fixture {
 	t.Helper()
+	return setupInto(t, &fixture{}, profile, tweak)
+}
 
-	f := &fixture{provider: newFakeProvider(t, profile), store: newStore(), tenant: uuid.New()}
+// setupInto fills in a fixture the caller already holds, so that a tweak can
+// close over it — which [fixture.capturing] has to.
+func setupInto(t *testing.T, f *fixture, profile oauth.Profile, tweak func(*oauth.Config)) *fixture {
+	t.Helper()
+
+	f.provider, f.store, f.tenant = newFakeProvider(t, profile), newStore(), uuid.New()
 
 	cfg := oauth.Config{
 		Store:      f.store,
@@ -448,9 +470,10 @@ func TestAKnownPersonJoiningAnotherTenant(t *testing.T) {
 func TestAKnownPersonCannotJoinWithoutProvisioning(t *testing.T) {
 	t.Parallel()
 
-	f := setup(t, oauth.Profile{
+	f := &fixture{}
+	f = setupInto(t, f, oauth.Profile{
 		Subject: "provider-subject-1", EmailAddress: "sam@example.com", EmailVerified: true,
-	}, nil)
+	}, f.capturing)
 
 	f.store.put(uuid.New(), "sam@example.com")
 
@@ -463,6 +486,115 @@ func TestAKnownPersonCannotJoinWithoutProvisioning(t *testing.T) {
 	}
 	if f.store.joins != 0 {
 		t.Error("nothing should have joined this tenant")
+	}
+	// And it says which refusal it was. "We have never heard of you" is a
+	// different answer from "you are not in this tenant", and a person can only
+	// act on the second one — by asking somebody for an invitation.
+	if f.failed == nil || f.failed.Reason != oauth.ReasonNoTenantAccess {
+		t.Errorf("reason = %v, want %v", f.failed, oauth.ReasonNoTenantAccess)
+	}
+	if f.failed.Error() != "Forbidden: you do not have access to this tenant" {
+		t.Errorf("message = %q, want the one a password login gives", f.failed.Error())
+	}
+}
+
+// Nobody at all gets the other refusal, and this is the pair that makes the
+// split worth having: one sentence used to answer both.
+func TestATotalStrangerIsRefusedAsAStranger(t *testing.T) {
+	t.Parallel()
+
+	f := &fixture{}
+	f = setupInto(t, f, oauth.Profile{
+		Subject: "nobody-1", EmailAddress: "nobody@example.com", EmailVerified: true,
+	}, f.capturing)
+
+	f.signIn(t, "")
+	if f.failed == nil || f.failed.Reason != oauth.ReasonNoAccount {
+		t.Errorf("reason = %v, want %v", f.failed, oauth.ReasonNoAccount)
+	}
+}
+
+// The two doors, gated separately.
+//
+// A deployment can want a provider to be able to create a person and never to
+// put one in a tenant — with a tenant read from a request, the join is the half
+// a crafted /start link would abuse, and the person on their own reaches
+// nothing. One switch could not say it.
+func TestJoiningCanBeRefusedWhileProvisioningIsOn(t *testing.T) {
+	t.Parallel()
+
+	f := &fixture{}
+	f = setupInto(t, f, oauth.Profile{
+		Subject: "somebody-new", EmailAddress: "new@example.com", EmailVerified: true,
+	}, func(c *oauth.Config) {
+		c.AllowProvisioning = true
+		c.AllowJoining = new(bool)
+		f.capturing(c)
+	})
+
+	f.signIn(t, "")
+
+	if f.store.provisions != 1 {
+		t.Errorf("%d people created, want 1 — the first door is open", f.store.provisions)
+	}
+	if f.store.joins != 0 {
+		t.Errorf("%d tenants joined, want 0 — the second is not", f.store.joins)
+	}
+	if f.signedIn != nil {
+		t.Error("the sign-in named a tenant they cannot be in, so it should not have completed")
+	}
+	if f.failed == nil || f.failed.Reason != oauth.ReasonNoTenantAccess {
+		t.Errorf("reason = %v, want %v", f.failed, oauth.ReasonNoTenantAccess)
+	}
+}
+
+// And the other way round, which is just as ordinary: a deployment whose people
+// come from a directory elsewhere admits them to the tenant the host named and
+// never invents one.
+func TestJoiningCanBeAllowedWhileProvisioningIsOff(t *testing.T) {
+	t.Parallel()
+
+	joining := true
+	f := setup(t, oauth.Profile{
+		Subject: "provider-subject-1", EmailAddress: "sam@example.com", EmailVerified: true,
+	}, func(c *oauth.Config) { c.AllowJoining = &joining })
+
+	f.store.put(uuid.New(), "sam@example.com")
+
+	f.signIn(t, "")
+	if f.signedIn == nil {
+		t.Fatal("somebody who already exists should have been admitted")
+	}
+	if f.store.joins != 1 {
+		t.Errorf("%d tenants joined, want 1", f.store.joins)
+	}
+	if f.store.provisions != 0 {
+		t.Errorf("%d people created, want 0 — that door is shut", f.store.provisions)
+	}
+}
+
+// Nil is what one switch meant, in both directions. This is the test that says
+// the default did not move.
+func TestAllowJoiningFollowsAllowProvisioningWhenUnset(t *testing.T) {
+	t.Parallel()
+
+	for _, on := range []bool{false, true} {
+		t.Run(map[bool]string{false: "off", true: "on"}[on], func(t *testing.T) {
+			f := setup(t, oauth.Profile{
+				Subject: "provider-subject-1", EmailAddress: "sam@example.com", EmailVerified: true,
+			}, func(c *oauth.Config) { c.AllowProvisioning = on })
+
+			f.store.put(uuid.New(), "sam@example.com")
+			f.signIn(t, "")
+
+			want := 0
+			if on {
+				want = 1
+			}
+			if f.store.joins != want {
+				t.Errorf("%d tenants joined, want %d", f.store.joins, want)
+			}
+		})
 	}
 }
 

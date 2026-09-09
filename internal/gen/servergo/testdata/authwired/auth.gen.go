@@ -502,6 +502,10 @@ func Config(pool *pgxpool.Pool, h Hooks) (auth.Config, error) {
 		if err != nil {
 			return auth.Config{}, err
 		}
+		// allow_joining, set apart from allow_provisioning: one of the two doors a
+		// provider sign-in opens is shut, and nil here would mean the other one's
+		// answer.
+		allowJoining := false
 		cfg.OAuth = auth.OAuth{
 			Providers: configured,
 			BaseURL:   base,
@@ -513,6 +517,7 @@ func Config(pool *pgxpool.Pool, h Hooks) (auth.Config, error) {
 			SigningKey:        key,
 			StateTTL:          8 * time.Minute,
 			AllowProvisioning: true,
+			AllowJoining:      &allowJoining,
 			AllowedReturnTo:   append([]string{"https://app.example.com", "https://beta.example.com"}, h.OAuth.ReturnTo...),
 			OnSignIn:          h.OAuth.OnSignIn,
 			OnError:           h.OAuth.OnError,

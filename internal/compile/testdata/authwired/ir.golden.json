@@ -1612,6 +1612,7 @@
         "signing_key_env": "OAUTH_SIGNING_KEY",
         "state_ttl": "8m",
         "allow_provisioning": true,
+        "allow_joining": false,
         "allowed_return_to": [
           "https://app.example.com",
           "https://beta.example.com"

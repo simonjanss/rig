@@ -949,6 +949,16 @@ func (e *authEmitter) oauthConfig(b *gobuf.Buf, fail string) {
 	b.L("if err != nil {")
 	b.L("%serr", fail)
 	b.L("}")
+	if o.AllowJoining != o.AllowProvisioning {
+		// A pointer, because nil means "follow AllowProvisioning" — so the
+		// field is written only when this project said otherwise, and a
+		// variable is what makes it addressable.
+		b.Comment("allow_joining, set apart from allow_provisioning: one of the " +
+			"two doors a provider sign-in opens is shut, and nil here would mean " +
+			"the other one's answer.")
+		b.L("allowJoining := %t", o.AllowJoining)
+	}
+
 	b.L("cfg.OAuth = %s.OAuth{", authPkg)
 	b.L("Providers: configured,")
 	b.L("BaseURL: base,")
@@ -966,6 +976,14 @@ func (e *authEmitter) oauthConfig(b *gobuf.Buf, fail string) {
 	b.L("SigningKey: key,")
 	b.L("StateTTL: %s,", genutil.GoDuration(b, o.StateTTL))
 	b.L("AllowProvisioning: %t,", o.AllowProvisioning)
+	if o.AllowJoining != o.AllowProvisioning {
+		// Only when the two disagree. The field is a pointer whose nil means
+		// "follow AllowProvisioning", so writing it every time would turn every
+		// project's generated file into one that pins a default it never asked
+		// for — and it takes an addressable value, which is what the variable
+		// above the literal is for.
+		b.L("AllowJoining: &allowJoining,")
+	}
 	b.P("AllowedReturnTo: append([]string{")
 	for i, r := range o.AllowedReturnTo {
 		if i > 0 {

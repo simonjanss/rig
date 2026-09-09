@@ -198,6 +198,10 @@
           "type": "boolean",
           "description": "Create an account the first time somebody signs in with a provider. Off means a provider sign-in only works for an address that already has one."
         },
+        "allow_joining": {
+          "type": "boolean",
+          "description": "Create an account in the tenant a sign-in named, for somebody not in it yet. Unset follows allow_provisioning. Set it false to let a provider create a person but never put one in a tenant."
+        },
         "allowed_return_to": {
           "items": {
             "type": "string"
@@ -975,7 +979,7 @@
         },
         "allowed_origins_env": {
           "type": "string",
-          "description": "Environment variable holding a comma-separated origin list. Set, it replaces the baked-in list rather than adding to it. Defaults to CORS_ORIGINS."
+          "description": "Environment variable holding a comma-separated origin list. Set, it replaces the baked-in cors.allowed_origins rather than adding to it. web.origin is always allowed either way. Defaults to CORS_ORIGINS."
         },
         "max_age": {
           "$ref": "#/$defs/Duration",

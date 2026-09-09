@@ -14,8 +14,9 @@
 // And who somebody is, is a separate question from whether they belong here. The
 // first is global — one provider link, one identity, however many tenants — and
 // the second is per tenant and answered no by default. A provider will
-// authenticate anybody with a Google account, so joining a tenant is gated by
-// [Config.AllowProvisioning] and by the tenant's own list of allowed domains.
+// authenticate anybody with a Google account, so becoming somebody here is
+// gated by [Config.AllowProvisioning], joining a tenant a sign-in named by
+// [Config.AllowJoining], and both by the tenant's own list of allowed domains.
 package oauth
 
 import (
@@ -223,18 +224,39 @@ type Config struct {
 	// redirect on a sign-in endpoint wears your domain in a phishing link.
 	AllowedReturnTo []string
 
-	// AllowProvisioning creates an account for somebody with no existing one.
+	// AllowProvisioning creates a person this application has never seen.
 	//
 	// Off by default. An open sign-in endpoint on a business application is a
 	// way for anybody with a Google account to appear inside a customer's
 	// tenant, which is rarely what anyone wants and never what they expect.
 	//
-	// It gates two doors: creating the person, and joining them to a tenant. The
-	// second only exists when a tenant was named — a sign-in that named none has
-	// no tenant to join and settles that question later — so for a deployment
-	// that leaves [Config.Tenant] nil, this is the switch on "may a stranger
+	// It is the first of two doors, and it is the only one a sign-in that named
+	// no tenant ever reaches — there is nowhere to join, and that question is
+	// settled later from the person's own memberships. So for a deployment that
+	// leaves [Config.Tenant] nil, this is the whole switch: "may a stranger
 	// become somebody here at all".
+	//
+	// [Config.AllowJoining] is the second door, and follows this one unless it
+	// is set.
 	AllowProvisioning bool
+
+	// AllowJoining creates an account in the tenant a sign-in named, for
+	// somebody who is not in it yet. Nil follows [Config.AllowProvisioning],
+	// which is what one switch did when it gated both doors.
+	//
+	// It is separate because the two doors are separate decisions, and a
+	// deployment can want opposite answers to them. "A provider may create a
+	// person, but only an invitation may put them in a tenant" is the ordinary
+	// one — with a tenant read from a request, the join is what a crafted
+	// /start link would abuse, and the person on its own reaches nothing. The
+	// reverse is ordinary too: a host-per-tenant deployment whose people come
+	// from a directory elsewhere may want to admit them to the tenant the host
+	// named and never invent one.
+	//
+	// It only ever applies to a sign-in that named a tenant. Where none was
+	// named, joining is the picker's job rather than the callback's, and this
+	// field is not consulted.
+	AllowJoining *bool
 
 	Log authlog.Log
 
@@ -309,6 +331,10 @@ type Handler struct {
 	base      string
 	providers map[string]Provider
 	now       func() time.Time
+	// joining is [Config.AllowJoining] with its default applied, resolved once
+	// in [New] rather than at every callback — the same thing New does for the
+	// log, the state TTL and the clock.
+	joining bool
 }
 
 // New builds a handler.
@@ -341,11 +367,17 @@ func New(cfg Config) (*Handler, error) {
 		base = "/auth/oauth"
 	}
 
+	joining := cfg.AllowProvisioning
+	if cfg.AllowJoining != nil {
+		joining = *cfg.AllowJoining
+	}
+
 	h := &Handler{
 		cfg:       cfg,
 		base:      strings.TrimRight(base, "/"),
 		providers: make(map[string]Provider, len(cfg.Providers)),
 		now:       cfg.Now,
+		joining:   joining,
 	}
 	for _, p := range cfg.Providers {
 		if p.Name == "" {
@@ -405,6 +437,11 @@ func (h *Handler) redirectURI(r *http.Request, p Provider) string {
 // they belong to this tenant — answered from rig_account, and answered no unless
 // provisioning is on and the tenant's domains say otherwise.
 //
+// Each question has a door of its own — [Config.AllowProvisioning] for the
+// first, [Config.AllowJoining] for the second — and they refuse differently,
+// because "we have never heard of you" and "you are not in this tenant" are
+// different answers.
+//
 // The second question is only asked when a tenant was named. Otherwise it is not
 // this handler's to answer and there is nowhere for the answer to come from: the
 // only thing that could name a tenant at the callback is the sealed cookie, and
@@ -444,10 +481,16 @@ func (h *Handler) resolve(ctx context.Context, tenantID uuid.UUID, p Provider, p
 	// They are somebody, but not somebody here. Joining a tenant is a decision,
 	// and an unchecked one would let anybody with a Google account appear inside
 	// a customer's tenant.
-	if !h.cfg.AllowProvisioning {
+	//
+	// The refusal is the one a password login gives for this exact situation,
+	// word for word. It used to be the sentence the identity lookup uses for
+	// somebody nobody has ever heard of, so one message answered two different
+	// facts — and left the person who was told it unable to tell whether to
+	// register or to ask somebody for an invitation.
+	if !h.joining {
 		return SignIn{}, &Failure{
-			Reason: ReasonNoAccount,
-			Err:    rigerr.Forbidden("there is no account for this address"),
+			Reason: ReasonNoTenantAccess,
+			Err:    rigerr.Forbidden("you do not have access to this tenant"),
 		}
 	}
 
