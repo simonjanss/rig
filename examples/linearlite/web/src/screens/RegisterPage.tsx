@@ -20,9 +20,11 @@ export function RegisterPage() {
         setBusy(true);
         setError(null);
         try {
-            // Registering creates the person and nothing else — no tenant, no
-            // session. The picker is next, and the invitation waiting there is
-            // the backend's OnRegistered hook at work.
+            // Registering answers with wherever the backend's OnRegistered hook
+            // left them. Here that hook provisions into the demo workspace, so
+            // what comes back is a session for it and /welcome falls straight
+            // through to the board. With no hook there would be no session, and
+            // /welcome is the picker that state needs.
             const res = await client.auth.register({
                 emailAddress: email,
                 displayName: name,
