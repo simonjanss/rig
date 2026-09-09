@@ -47,12 +47,15 @@ import (
 	"github.com/simonjanss/rig/auth"
 	"github.com/simonjanss/rig/auth/account"
 	"github.com/simonjanss/rig/auth/apikey"
+	"github.com/simonjanss/rig/auth/oauth"
+	"github.com/simonjanss/rig/auth/session"
 	"github.com/simonjanss/rig/examples/auth/internal/api"
 	"github.com/simonjanss/rig/examples/auth/internal/store"
 	"github.com/simonjanss/rig/examples/auth/services/authz"
 	"github.com/simonjanss/rig/examples/auth/services/note"
 	"github.com/simonjanss/rig/examples/auth/services/outbox"
 	"github.com/simonjanss/rig/examples/auth/web"
+	"github.com/simonjanss/rig/examples/idp"
 	"github.com/simonjanss/rig/migrate"
 	"github.com/simonjanss/rig/notify"
 	"github.com/simonjanss/rig/runtime/rigerr"
@@ -69,6 +72,20 @@ var migrations embed.FS
 // offset-less input string all do. Pinning it means a daily total is the same
 // daily total on every machine that runs this.
 const localDSN = "postgres://rig:rig@localhost:55442/rig?sslmode=disable&TimeZone=UTC"
+
+// baseURL is the origin a provider redirects back to.
+//
+// The callback URL is built from it and compared exactly by whoever registered
+// it, so it is one value with one source. $BASE_URL first, because a test serves
+// on a port the kernel picked and has to be able to say so; rig.yaml's own
+// literal otherwise.
+func baseURL() string {
+	// The error is "neither rig.yaml nor the environment named an origin", and
+	// rig.yaml names one — so it cannot fire here, and a project that relied on
+	// base_url_env alone would want to report it rather than default.
+	u, _ := api.BaseURL()
+	return u
+}
 
 func main() {
 	api.Main(serve.Config{
@@ -148,7 +165,7 @@ func main() {
 		},
 		Migrate: migrate.Require(migrations, migrate.Options{}),
 	}, func(ctx context.Context, app *serve.App) (api.Parts, error) {
-		mux, front, engine, err := newAPI(ctx, app.Pool, app.Logger)
+		mux, front, engine, err := newAPI(ctx, app.Pool, baseURL(), app.Logger)
 		if err != nil {
 			return api.Parts{}, err
 		}
@@ -179,7 +196,7 @@ func main() {
 // file has a constructor both callers share instead of building services inside
 // the mount closure.
 func dispatchNotifications(ctx context.Context, pool *pgxpool.Pool) error {
-	_, _, engine, err := newAPI(ctx, pool, slog.Default())
+	_, _, engine, err := newAPI(ctx, pool, baseURL(), slog.Default())
 	if err != nil {
 		return err
 	}
@@ -199,7 +216,9 @@ func dispatchNotifications(ctx context.Context, pool *pgxpool.Pool) error {
 // the wiring — that the generated handlers and the auth endpoints agree about
 // who the caller is — and a test that assembled its own would be testing
 // something else.
-func newAPI(ctx context.Context, pool *pgxpool.Pool, log *slog.Logger) (http.Handler, *auth.Auth, *notify.Engine, error) {
+func newAPI(
+	ctx context.Context, pool *pgxpool.Pool, base string, log *slog.Logger,
+) (http.Handler, *auth.Auth, *notify.Engine, error) {
 	repos := store.New(pool, store.Config{})
 
 	// The inbox, and the two halves of it that have to be built in this order.
@@ -228,6 +247,36 @@ func newAPI(ctx context.Context, pool *pgxpool.Pool, log *slog.Logger) (http.Han
 		notify.ChannelEmail: mail.NotificationSender(),
 	}, log)
 
+	// What this run offers to sign in with. rig builds the providers rig.yaml
+	// names from the environment variables it names too; the stand-in is this
+	// example's own and appears only when no real credentials were set, so the
+	// button works the moment the repository is cloned.
+	//
+	// The prop is shared with examples/auth_oauth rather than copied — one OAuth
+	// server, so the two demonstrations cannot drift into exercising different
+	// flows. It is not a mock: single-use authorization codes, PKCE verified at
+	// the token endpoint, and a consent screen that lets you choose whether it
+	// says the address is verified.
+	live, err := api.ConfiguredProviders(api.OAuthHooks{})
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	var (
+		demo  *idp.Server
+		extra []oauth.Provider
+	)
+	if len(live) == 0 {
+		demo = idp.New(base)
+		extra = []oauth.Provider{demo.Provider()}
+		live = extra
+	}
+
+	// Declared before New because the sign-in hook closes over it: finishing a
+	// sign-in means asking the account service where this person goes, and what
+	// holds that service is what New returns. The closure only runs on a
+	// request, long after this line.
+	var front *auth.Auth
+
 	// The one read the `cache:` block in rig.yaml deliberately does not cover.
 	//
 	// rig caches what it owns end to end — it makes the read and it makes every
@@ -255,7 +304,7 @@ func newAPI(ctx context.Context, pool *pgxpool.Pool, log *slog.Logger) (http.Han
 	// sources, the token lifetimes and the rotation leeway, the password policy,
 	// the rate limits, and that registration and tenant creation are both open.
 	// What is left here is the part that is code.
-	front, err := api.New(pool, api.Hooks{
+	front, err = api.New(pool, api.Hooks{
 		// The same logger the Server below gets: an auth route answers on the
 		// same mux and in the same shape, so the cause of a 500 from signing in
 		// should not be the one line that goes somewhere else.
@@ -319,6 +368,56 @@ func newAPI(ctx context.Context, pool *pgxpool.Pool, log *slog.Logger) (http.Han
 		// own package, so an authentication failure goes through the same error
 		// mapper as everything else and a 401 from the sign-in endpoint is shaped
 		// like a 401 from anywhere else.
+
+		// Everything about the provider flow is in rig.yaml — the callback
+		// origin, the state cookie, which of the two doors is open. What is left
+		// is the one decision rig will not make for a browser: how a sign-in
+		// ends.
+		OAuth: api.OAuthHooks{
+			// The origin rig.yaml resolved, handed back so a test on an
+			// ephemeral port builds a callback URL that points at itself.
+			BaseURL: base,
+			// The stand-in, when no real credentials were configured.
+			Extra: extra,
+			// Where a finished sign-in may land. The page it comes back to is
+			// this origin, which is already allowed as a path — this is here for
+			// the ephemeral-port case, where the configured literal is not the
+			// origin actually being served.
+			ReturnTo: []string{base},
+
+			// The default ending answers with JSON, which is right for a program
+			// and useless to a browser mid-redirect: it renders as a document on
+			// the API's own origin with no way back. So this example writes its
+			// own, and the interesting part is what it does *not* do.
+			//
+			// examples/auth_oauth's hook issues a session straight from
+			// in.TenantID and in.AccountID. It can, because `from: [host]` means
+			// a tenant was always named. Here nothing named one, both fields are
+			// uuid.Nil, and issuing from them would put a session in a tenant
+			// that does not exist. SignInIdentity is what answers instead — the
+			// same last step a password login runs — and it may well answer
+			// "nowhere yet", which is the state the picker draws.
+			OnSignIn: func(w http.ResponseWriter, r *http.Request, in oauth.SignIn) error {
+				res, err := front.Parts().Accounts.SignInIdentity(r.Context(),
+					account.SignInIdentityInput{
+						IdentityID: in.Link.IdentityID,
+						// Nil unless something named one, which nothing here
+						// does — see the oauth block in rig.yaml.
+						TenantID: in.TenantID,
+						// From `?remember=1` on the start link, carried across
+						// the round trip in the signed state cookie.
+						Remember:  in.Remember,
+						Client:    session.ClientWeb,
+						IPAddress: r.RemoteAddr,
+						UserAgent: r.UserAgent(),
+						Method:    in.Provider,
+					})
+				if err != nil {
+					return err
+				}
+				return web.FinishProviderSignIn(w, r, res, in.Provider)
+			},
+		},
 	})
 	if err != nil {
 		return nil, nil, nil, err
@@ -378,11 +477,17 @@ func newAPI(ctx context.Context, pool *pgxpool.Pool, log *slog.Logger) (http.Han
 	// second way in: every button it has makes an HTTP request to this same mux,
 	// with a real Authorization header — including creating a tenant, which used
 	// to be the one thing it reached past the API for.
-	ui, err := web.New(mux, pool, mail, grants)
+	ui, err := web.New(mux, pool, mail, grants, front.Providers())
 	if err != nil {
 		return nil, nil, nil, err
 	}
 	ui.Mount(mux)
+
+	// The stand-in provider, on this application's own mux. A real deployment
+	// mounts nothing here: the provider is somebody else's server.
+	if demo != nil {
+		demo.Mount(mux)
+	}
 
 	// A bare / goes to the interface, so `go run .` and a browser is the whole
 	// getting-started path.

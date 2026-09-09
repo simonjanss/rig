@@ -513,6 +513,9 @@ gives](#somebody-who-already-has-an-account): the tenant they were last in, or
 their oldest, or a 200 with an identity token and an empty `tenants` and the
 picker taking over.
 
+`examples/auth` is this, in a browser: a provider button that names nothing, and
+the page it comes back to drawing the picker.
+
 The three answers a deployment used to have to pick between, all of them wrong,
 are worth naming because a project pinned to an older release is probably using
 one:
@@ -1496,13 +1499,17 @@ rotation leeway a consumed token never leaves — rather than adjusting it quiet
 
 ## See also
 
-- `examples/auth` — every flow above except the provider sign-in, driven from a
-  browser, with a transcript panel showing the actual requests.
-- `examples/auth_oauth` — the provider sign-in, and the deployment shape it needs: a
-  tenant per subdomain, so the host names the tenant a sign-in is for. It works
-  with no credentials at all, because `services/idp` is a stand-in provider the
-  example serves itself — and not a mock: single-use authorization codes, PKCE
-  verified at the token endpoint, and a consent screen that lets you choose
+- `examples/auth` — every flow above, driven from a browser, with a transcript
+  panel showing the actual requests. Including the provider sign-in **with no
+  tenant named anywhere**: one button on one page, and the picker taking over
+  afterwards, which is the state described under [When nobody knows the tenant
+  yet](#when-nobody-knows-the-tenant-yet).
+- `examples/auth_oauth` — the same sign-in with the other answer: a tenant per
+  subdomain, so the host names the tenant before the redirect. Between them the
+  two cover both, which is the only choice a deployment actually has.
+- `examples/idp` — the stand-in provider both of them serve, which is why either
+  works with no credentials at all. Not a mock: single-use authorization codes,
+  PKCE verified at the token endpoint, and a consent screen that lets you choose
   whether it says the address is verified, so both branches of that check are
   reachable from a browser. Setting `GOOGLE_CLIENT_ID` and
   `GOOGLE_CLIENT_SECRET` replaces it with nothing else changing.

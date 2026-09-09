@@ -34,9 +34,11 @@ auth:
   allow_registration: true
   allow_tenant_creation: true
 
-  # A browser following a provider link cannot set a header, and the tenant has
-  # to be known before the redirect, so this example reads the query string
-  # first and the header after. A real deployment answers with the host —
+  # A request with neither names no tenant, and `uuid.Nil` is an ordinary answer
+  # rather than a missing one: a sign-in that names none is settled afterwards
+  # from the person's own memberships. That is what the provider button below
+  # demonstrates, and what a deployment with more than one tenant and no host to
+  # read one from has to do. A real deployment answers with the host —
   # acme.example.com — which is `from: [host]`; see examples/auth_oauth.
   tenant:
     from: [query, header]
@@ -48,6 +50,46 @@ auth:
   # the default because how long a trail has to survive is a compliance question
   # and not rig's to answer.
   log_retention: 90d
+
+  # Sign in with a provider, with no tenant named anywhere.
+  #
+  # examples/auth_oauth is the other shape — a host per tenant, so the tenant is
+  # known before the redirect and sealed into the state cookie. This is the one
+  # where nobody knows it yet: one button on one page, `Config.Tenant` answering
+  # uuid.Nil, and the picker taking over afterwards. A stranger who signs in
+  # here gets an identity, a provider link, an account nowhere, and a 200 with
+  # an empty `tenants` — which is a state a front end has to draw, and `web/`
+  # draws it.
+  #
+  # No credentials are configured, so ConfiguredProviders finds none and main.go
+  # supplies the stand-in from examples/idp through OAuthHooks.Extra. Set
+  # GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET and the real button appears beside
+  # it. `google` is listed so the block validates and the routes mount.
+  oauth:
+    base_url: http://localhost:8082
+    # A test runs on a port the kernel picked, and the callback URL is built
+    # from this — so it has to be sayable from outside the file.
+    base_url_env: BASE_URL
+    # Plain HTTP on a laptop, so the __Host- prefixed state cookie a browser
+    # would insist on is unavailable. Never anywhere real.
+    insecure: true
+    allowed_return_to: [http://localhost:8082]
+
+    # A provider may create a person here, and may never put one in a tenant.
+    #
+    # Both keys are load-bearing and the second one especially. `tenant.from`
+    # above includes `query`, so the generated resolver reads `?tenant=` — and
+    # `/start` is an anonymous browser GET, which means a crafted
+    # `/auth/oauth/demo/start?tenant=<somebody's tenant>` link would otherwise
+    # join whoever clicked it to a tenant they never chose. With joining off it
+    # cannot: the callback resolves the identity and refuses with
+    # `no_tenant_access`. An ordinary sign-in names no tenant at all and is
+    # unaffected, because joining is not a question a deferred sign-in asks.
+    allow_provisioning: true
+    allow_joining: false
+
+    providers:
+      - name: google
 
 # Verifying a session and verifying an API key are the two reads rig makes on
 # behalf of every caller, and this is what stops them being a row read each.

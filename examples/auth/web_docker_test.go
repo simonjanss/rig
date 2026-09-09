@@ -14,6 +14,7 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -385,7 +386,13 @@ func newBrowser(t *testing.T) *browser {
 	// The same function main uses, so what the test drives is what runs.
 	srv := httptest.NewUnstartedServer(nil)
 
-	handler, front, _, err := newAPI(context.Background(), pool, slog.Default())
+	// The origin this run answers at, read off the listener before the server
+	// starts — which is the whole reason newAPI takes it rather than reading the
+	// environment. A provider compares the callback URL exactly, and the one
+	// rig.yaml names is a port nothing here is listening on.
+	origin := "http://" + srv.Listener.Addr().String()
+
+	handler, front, _, err := newAPI(context.Background(), pool, origin, slog.Default())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -510,6 +517,283 @@ func stripTags(s string) string {
 
 // The four-step flow, through the interface: create an account, look at where you
 // could go, join or make a tenant, and be in it.
+// Signing in with a provider when nothing anywhere names a tenant.
+//
+// This is the half examples/auth_oauth cannot show. That one is `from: [host]`,
+// so every sign-in in it names a real tenant before the redirect — which is what
+// makes it the check that the default did not move, and what makes it the wrong
+// place for this. Here nobody knows the tenant: `/start` is an anonymous browser
+// GET, the resolver answers uuid.Nil, and where somebody goes is settled after
+// the callback from their own memberships, exactly as a password login settles
+// it.
+//
+// The interesting half is the page that comes back. A 200 with an identity
+// token, an empty tenant list and no session is a state a front end has to draw,
+// and until there was a provider button nothing landed anybody in it.
+func TestSigningInWithAProvider(t *testing.T) {
+	t.Run("the page offers a button and names no tenant", func(t *testing.T) {
+		ui := newBrowser(t)
+		page := ui.get(t, "/ui")
+
+		if !strings.Contains(page, "/auth/oauth/demo/start") {
+			t.Fatalf("expected a provider button:\n%s", excerpt(page))
+		}
+		if strings.Contains(page, "tenant=") {
+			t.Error("the button must not name a tenant; that is the whole point")
+		}
+	})
+
+	t.Run("a stranger lands in the picker", func(t *testing.T) {
+		ui := newBrowser(t)
+
+		stranger := "ada-" + uuid.NewString()[:8] + "@example.com"
+		page := ui.signInWithProvider(t, consent{
+			subject: "subject-" + uuid.NewString()[:8],
+			email:   stranger,
+			name:    "Ada",
+			// The provider vouches for the address.
+			verified: true,
+		})
+
+		// A person, a provider link, and an account nowhere. Not a refusal.
+		if !strings.Contains(page, "signed in with Demo") {
+			t.Fatalf("expected the sign-in to have completed:\n%s", excerpt(page))
+		}
+		if !strings.Contains(page, "Where do you want to be?") {
+			t.Fatalf("expected the picker:\n%s", excerpt(page))
+		}
+		if !strings.Contains(page, "Nobody has invited you anywhere") {
+			t.Errorf("a brand new person has no invitations:\n%s", excerpt(page))
+		}
+
+		var accounts int
+		if err := ui.pool.QueryRow(context.Background(), `
+			SELECT count(*) FROM rig_account a
+			JOIN rig_identity i ON i.id = a.identity_id
+			WHERE lower(i.email_address) = lower($1)`, stranger).Scan(&accounts); err != nil {
+			t.Fatal(err)
+		}
+		if accounts != 0 {
+			t.Errorf("%d accounts, want 0 — nothing named a tenant to make one in", accounts)
+		}
+
+		// And the picker's exit works from here, which is what makes the state a
+		// state rather than a dead end.
+		out := ui.post(t, "/ui/tenants", url.Values{"tenantName": {"Adas"}})
+		if strings.Contains(out, "Where do you want to be?") {
+			t.Errorf("making a tenant should leave the picker:\n%s", excerpt(out))
+		}
+		if !strings.Contains(out, "Adas") || !strings.Contains(out, "Owner") {
+			t.Errorf("the new tenant should be the current tab:\n%s", excerpt(out))
+		}
+	})
+
+	// The second sign-in, which is where #142's most-recently-used rule shows
+	// itself: no tenant is named, and they land back in the one they were in
+	// rather than in the picker again.
+	t.Run("signing in again lands where they were", func(t *testing.T) {
+		ui := newBrowser(t)
+
+		address := "grace-" + uuid.NewString()[:8] + "@example.com"
+		subject := "subject-" + uuid.NewString()[:8]
+		ui.signInWithProvider(t, consent{
+			subject: subject, email: address, name: "Grace", verified: true,
+		})
+		ui.post(t, "/ui/tenants", url.Values{"tenantName": {"Graces"}})
+		ui.post(t, "/ui/logout", url.Values{})
+
+		page := ui.signInWithProvider(t, consent{
+			subject: subject, email: address, name: "Grace", verified: true,
+		})
+		if strings.Contains(page, "Where do you want to be?") {
+			t.Fatalf("they belong somewhere now; the picker is the wrong answer:\n%s", excerpt(page))
+		}
+		if !strings.Contains(page, "Graces") {
+			t.Errorf("expected to land back in the tenant they made:\n%s", excerpt(page))
+		}
+	})
+
+	// Somebody who signed up with a password, never confirmed, and now arrives
+	// through a provider. Two things have to be true: the two accounts are one
+	// person, and the address counts as confirmed from here on — the provider
+	// checked it, and that is the same evidence a link is allowed on.
+	t.Run("a password account is linked, and its address is now verified", func(t *testing.T) {
+		ui := newBrowser(t)
+
+		address := "linus-" + uuid.NewString()[:8] + "@example.com"
+		ui.post(t, "/ui/register", url.Values{
+			"name": {"Linus"}, "email": {address},
+			"password": {"linus picked this one"},
+		})
+		ui.post(t, "/ui/logout", url.Values{})
+
+		var before *time.Time
+		if err := ui.pool.QueryRow(context.Background(),
+			`SELECT email_verified_at FROM rig_identity WHERE lower(email_address) = lower($1)`,
+			address).Scan(&before); err != nil {
+			t.Fatal(err)
+		}
+		if before != nil {
+			t.Fatal("a self-registered person starts unconfirmed")
+		}
+
+		ui.signInWithProvider(t, consent{
+			subject: "subject-" + uuid.NewString()[:8],
+			email:   address, name: "Linus", verified: true,
+		})
+
+		var identities int
+		if err := ui.pool.QueryRow(context.Background(),
+			`SELECT count(*) FROM rig_identity WHERE lower(email_address) = lower($1)`,
+			address).Scan(&identities); err != nil {
+			t.Fatal(err)
+		}
+		if identities != 1 {
+			t.Errorf("%d identities, want 1 — the provider should reach the person who exists", identities)
+		}
+
+		var after *time.Time
+		if err := ui.pool.QueryRow(context.Background(),
+			`SELECT email_verified_at FROM rig_identity WHERE lower(email_address) = lower($1)`,
+			address).Scan(&after); err != nil {
+			t.Fatal(err)
+		}
+		if after == nil {
+			t.Error("linking a verified provider address should record it as verifying the identity")
+		}
+	})
+
+	// The check the whole OAuth package turns on, on the deferred path.
+	t.Run("an unverified address will not link an existing account", func(t *testing.T) {
+		ui := newBrowser(t)
+
+		address := "mallory-" + uuid.NewString()[:8] + "@example.com"
+		ui.post(t, "/ui/register", url.Values{
+			"name": {"Mallory"}, "email": {address},
+			"password": {"mallory picked this one"},
+		})
+		ui.post(t, "/ui/logout", url.Values{})
+
+		page := ui.signInWithProvider(t, consent{
+			subject: "an-attacker-" + uuid.NewString()[:8],
+			email:   address, name: "Not Mallory",
+			// The provider will not vouch for it.
+			verified: false,
+		})
+		if strings.Contains(page, "signed in with Demo") {
+			t.Fatalf("an unverified address must not reach an account that exists:\n%s", excerpt(page))
+		}
+
+		var links int
+		if err := ui.pool.QueryRow(context.Background(), `
+			SELECT count(*) FROM rig_identity_oauth o
+			JOIN rig_identity i ON i.id = o.identity_id
+			WHERE lower(i.email_address) = lower($1)`, address).Scan(&links); err != nil {
+			t.Fatal(err)
+		}
+		if links != 0 {
+			t.Errorf("%d links, want 0", links)
+		}
+	})
+
+	// allow_joining is off here, and this is why: `tenant.from` includes `query`,
+	// so a crafted start link can name any tenant. Without the second switch the
+	// callback would make whoever clicked it an account there.
+	t.Run("a crafted link cannot join somebody to a tenant", func(t *testing.T) {
+		ui := newBrowser(t)
+
+		// A tenant that exists and has nothing to do with the visitor.
+		owner := newBrowser(t)
+		owner.signInWithProvider(t, consent{
+			subject: "subject-" + uuid.NewString()[:8],
+			email:   "owner-" + uuid.NewString()[:8] + "@example.com",
+			name:    "Owner", verified: true,
+		})
+		owner.post(t, "/ui/tenants", url.Values{"tenantName": {"Private"}})
+
+		var victimTenant uuid.UUID
+		if err := owner.pool.QueryRow(context.Background(),
+			`SELECT id FROM rig_tenant WHERE name = 'Private' ORDER BY created_at DESC LIMIT 1`).
+			Scan(&victimTenant); err != nil {
+			t.Fatal(err)
+		}
+
+		stranger := "eve-" + uuid.NewString()[:8] + "@example.com"
+		ui.signInWithProviderAt(t, "/auth/oauth/demo/start?returnTo=/ui&tenant="+victimTenant.String(),
+			consent{
+				subject: "subject-" + uuid.NewString()[:8],
+				email:   stranger, name: "Eve", verified: true,
+			})
+
+		var accounts int
+		if err := ui.pool.QueryRow(context.Background(), `
+			SELECT count(*) FROM rig_account a
+			JOIN rig_identity i ON i.id = a.identity_id
+			WHERE lower(i.email_address) = lower($1) AND a.tenant_id = $2`,
+			stranger, victimTenant).Scan(&accounts); err != nil {
+			t.Fatal(err)
+		}
+		if accounts != 0 {
+			t.Errorf("%d accounts in a tenant nobody chose, want 0", accounts)
+		}
+	})
+}
+
+// consent is what the stand-in provider will say about somebody. The last field
+// is the one a real provider does not let you choose, and the one the whole
+// linking rule turns on.
+type consent struct {
+	subject, email, name string
+	verified             bool
+}
+
+// signInWithProvider drives the round trip the way a browser does: follow the
+// button, approve at the consent screen, come back, and land on whatever the
+// application rendered.
+//
+// Nothing here names a tenant, which is the assertion.
+func (b *browser) signInWithProvider(t *testing.T, in consent) string {
+	t.Helper()
+	return b.signInWithProviderAt(t, "/auth/oauth/demo/start?returnTo=/ui", in)
+}
+
+// signInWithProviderAt is the same round trip from a start link the caller
+// wrote, for the test that crafts one.
+func (b *browser) signInWithProviderAt(t *testing.T, start string, in consent) string {
+	t.Helper()
+
+	page := b.get(t, start)
+
+	form := url.Values{}
+	for _, name := range []string{"redirect_uri", "state", "code_challenge"} {
+		v, ok := hiddenValue(page, name)
+		if !ok {
+			t.Fatalf("no %s on the consent screen:\n%s", name, excerpt(page))
+		}
+		form.Set(name, v)
+	}
+	form.Set("subject", in.subject)
+	form.Set("email", in.email)
+	form.Set("name", in.name)
+	if in.verified {
+		form.Set("verified", "on")
+	}
+	return b.post(t, "/idp/approve", form)
+}
+
+var hiddenPattern = regexp.MustCompile(
+	`<input type="hidden" name="([a-z_]+)" value="([^"]*)"`)
+
+// hiddenValue reads one hidden input out of a form.
+func hiddenValue(page, name string) (string, bool) {
+	for _, m := range hiddenPattern.FindAllStringSubmatch(page, -1) {
+		if m[1] == name {
+			return m[2], true
+		}
+	}
+	return "", false
+}
+
 func TestTheFlowThroughThePicker(t *testing.T) {
 	t.Run("registering lands in the picker", func(t *testing.T) {
 		ui := newBrowser(t)

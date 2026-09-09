@@ -4,6 +4,8 @@ go 1.26.6
 
 replace github.com/simonjanss/rig/auth => ../../auth
 
+replace github.com/simonjanss/rig/examples/idp => ../idp
+
 replace github.com/simonjanss/rig/migrate => ../../migrate
 
 replace github.com/simonjanss/rig/runtime => ../../runtime
@@ -12,6 +14,7 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.10.0
 	github.com/simonjanss/rig/auth v0.0.0
+	github.com/simonjanss/rig/examples/idp v0.0.0
 	github.com/simonjanss/rig/migrate v0.0.0
 	github.com/simonjanss/rig/runtime v0.5.0
 	golang.org/x/oauth2 v0.36.0

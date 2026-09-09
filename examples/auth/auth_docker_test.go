@@ -313,7 +313,7 @@ func newServer(t *testing.T) *server {
 	// The same function main uses, so what the test drives is what runs.
 	srv := httptest.NewUnstartedServer(nil)
 
-	handler, front, _, err := newAPI(context.Background(), pool, slog.Default())
+	handler, front, _, err := newAPI(context.Background(), pool, baseURL(), slog.Default())
 	if err != nil {
 		t.Fatal(err)
 	}

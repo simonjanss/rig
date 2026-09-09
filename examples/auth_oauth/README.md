@@ -46,9 +46,8 @@ properly. Both are built and run on every `make check`.
 
 ## Why this is its own example
 
-`examples/auth` covers the rest of authentication: sessions, refresh rotation,
-invitations, API keys, permissions, the log. It does not cover this one, because a
-provider sign-in is as much about deployment shape as about authentication.
+There are two shapes a provider sign-in can have, and the difference is where
+the tenant comes from. Both are demonstrated; this is one of them.
 
 A sign-in that *joins* somebody to a tenant has to know which tenant that is
 before the redirect. And the callback URL is registered with the provider and
@@ -62,11 +61,19 @@ So rig resolves the tenant once, at the start, and seals it into the signed stat
 cookie. A subdomain per tenant is what makes that natural, and it is what this
 example is: three hosts, three tenants, and nothing on the page that names one.
 
-The other shape — one host, and the tenant settled after the callback from the
-person's own memberships — needs no host and no list of tenants on the page
-either, and `examples/auth` is where it belongs. This example stays about the
-half that a deployment shape decides, because that is the half nothing else
-demonstrates.
+**The other shape is `examples/auth`.** One host, no tenant named anywhere, and
+the question settled after the callback from the person's own memberships — the
+way `POST /auth/login` has always settled it. A stranger who signs in there gets
+an identity and an account nowhere, and lands in the tenant picker. Neither
+example is the general case: a deployment has a host to read or it does not, and
+the two halves are what those two answers look like.
+
+This one stays the check that a named tenant still behaves: every sign-in below
+names one, so nothing here can quietly start deferring.
+
+Both use the same stand-in provider, `examples/idp`, which is a module rather
+than a package inside either — one OAuth server, so two demonstrations cannot
+drift into exercising different flows.
 
 ## What to try
 
@@ -112,7 +119,7 @@ none of it is in this directory.
 
 The one thing the provider's side constrains: a redirect URI is registered
 exactly, and few providers accept a wildcard. Every origin `Origin` can return has
-to be registered — which `services/idp` enforces too, because a stand-in that
+to be registered — which `examples/idp` enforces too, because a stand-in that
 skipped it would be teaching the wrong lesson. A deployment with more subdomains
 than a console can hold keeps the callback on one canonical host instead, and has
 `OnSignIn` — the one hook this example keeps in Go — hand the finished session on
@@ -211,7 +218,7 @@ only way to see the refusal.
 
 ## What is a prop
 
-`services/idp` is a provider this example serves itself, so the flow works without
+`examples/idp` is a provider this example serves itself, so the flow works without
 registering an application with anybody. It is not a mock: it hands back a
 single-use authorization code and verifies the PKCE challenge before exchanging
 it, so the path exercised is rig's real one. Nothing in `auth/oauth` knows it is

@@ -64,6 +64,7 @@ What it demonstrates, in the order it is worth clicking:
 | **Read the auth log** | Every attempt, rotation, invitation and lockout, newest first. |
 | **Rotate the tokens** | The pair is consumed and replaced; replaying the old refresh token revokes the family. |
 | **Try six wrong passwords** | The seventh is a 429 with `Retry-After`, counted in the database. |
+| **Sign in with a provider** | Nothing on the page names a tenant. A new address lands *in the picker*: an identity, a provider link, and an account nowhere. |
 
 The panels are honest about failure, which is the part worth watching: an Admin
 without `apikey.manage` sees *Refused: 403 — this action requires the
@@ -85,6 +86,45 @@ The key is printed once, because only its hash is stored.
 There is still no *registration* endpoint — whether anybody may sign themselves
 up is a product decision the foundation does not make for you. What it does give
 you is provisioning, below.
+
+### The provider button, and why there is no tenant on it
+
+`/start` is an anonymous browser GET: no session, no token, and nobody having
+proved they own an address. So there is nobody to have tenants yet, and asking
+which one they meant is asking a question the visitor cannot answer. The
+resolver answers `uuid.Nil`, the callback settles who they are, and where they
+go comes from their own memberships — the same three answers `POST /auth/login`
+gives after a password: the tenant they were last in, their oldest, or nowhere
+yet and here is the picker.
+
+The provider is a stand-in from [`examples/idp`](../idp), served by this
+application, so the button works with nothing registered anywhere. Its consent
+screen lets you choose what it claims about you, which is how both branches of
+the linking rule are reachable: sign in with the address you registered with and
+the two accounts become one — **if** it says the address is verified. Turn that
+off and watch it refuse, which is the check the whole OAuth package turns on.
+Linking also records the verification, so a password account that never
+confirmed its address is confirmed from then on.
+
+Two keys in `rig.yaml` are worth reading together:
+
+```yaml
+    allow_provisioning: true
+    allow_joining: false
+```
+
+The second one is load-bearing here, and the reason is this example's
+`tenant.from: [query, header]`. The generated resolver reads `?tenant=`, and
+`/start` is a link anybody can write — so
+`/auth/oauth/demo/start?tenant=<somebody-else's-tenant>` would otherwise make
+whoever clicked it an account somewhere they never chose. With joining off it
+cannot: the callback resolves the identity and refuses with `no_tenant_access`.
+An ordinary sign-in names no tenant and is unaffected. `examples/auth_oauth`
+leaves both on, because there the tenant comes from the host and a link cannot
+lie about it.
+
+Set `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` and a real Google button
+appears with nothing else changing.
 
 ## The flow
 
@@ -463,8 +503,9 @@ listed domain counts, because somebody who allows `example.com` means the compan
 and `mail.example.com` is the company.
 
 It is enforced wherever an account comes into existence, not just at this
-endpoint: **a first sign-in through an OAuth provider honours it too** — see
-[`examples/auth_oauth`](../auth_oauth). That one matters more than it looks — a provider will authenticate anybody with a Google account, so "sign
+endpoint: **a first sign-in through an OAuth provider honours it too** — which
+the provider button on this page reaches, and
+[`examples/auth_oauth`](../auth_oauth) reaches from the other direction. That one matters more than it looks — a provider will authenticate anybody with a Google account, so "sign
 in with Google" plus provisioning is an open door until something says which
 addresses belong here.
 
@@ -510,13 +551,12 @@ about the address and not about whether this particular guess was right.
   in memory so the invitation flow can be demonstrated without a mail server.
   A live invitation is a credential for as long as it lives, so a real
   `Notifier` sends it and keeps nothing.
-- **Signing in with a provider is a different example.** It is one block —
-  `auth.oauth.providers` in rig.yaml — but a provider
-  sign-in has to know the tenant *before* the redirect, and the callback URL is
-  registered with the provider and fixed, so only the host can carry it. That
-  makes it a demonstration about deployment shape rather than about
-  authentication, and it lives in [`examples/auth_oauth`](../auth_oauth), which serves a
-  tenant per subdomain.
+- **Half of the provider sign-in is a different example.** The button here names
+  no tenant, which is one of the two shapes: the callback resolves who somebody
+  is, and where they go is settled from their own memberships. The other shape —
+  a tenant per subdomain, so the host names it before the redirect and the state
+  cookie carries it — is [`examples/auth_oauth`](../auth_oauth). A deployment has
+  a host to read or it does not; there is no third answer.
 - **`permission:` in a table's YAML is not enforced yet.** The key is read into
   the IR and no generator consumes it, so the check has to be a hook today. That
   is why the one above is a hook rather than a line of configuration.
