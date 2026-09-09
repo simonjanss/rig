@@ -515,8 +515,6 @@ func stripTags(s string) string {
 	return tagPattern.ReplaceAllString(blockPattern.ReplaceAllString(s, " "), " ")
 }
 
-// The four-step flow, through the interface: create an account, look at where you
-// could go, join or make a tenant, and be in it.
 // Signing in with a provider when nothing anywhere names a tenant.
 //
 // This is the half examples/auth_oauth cannot show. That one is `from: [host]`,
@@ -794,6 +792,8 @@ func hiddenValue(page, name string) (string, bool) {
 	return "", false
 }
 
+// The four-step flow, through the interface: create an account, look at where you
+// could go, join or make a tenant, and be in it.
 func TestTheFlowThroughThePicker(t *testing.T) {
 	t.Run("registering lands in the picker", func(t *testing.T) {
 		ui := newBrowser(t)

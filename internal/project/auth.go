@@ -264,11 +264,6 @@ func (t AuthTenant) Uses(source ir.AuthTenantSource) bool {
 	return slices.Contains(t.From, string(source))
 }
 
-// IR projects the configuration into the document's own shape.
-//
-// It returns nil for a project with no authentication, which is what tells a
-// generator there is nothing to describe. Every value is already resolved, so
-// this is a translation and not a second place where defaults are decided.
 // joining is allow_joining with its default applied: unset follows
 // allow_provisioning, which is what one key meant when it gated both doors.
 func (o AuthOAuth) joining() bool {
@@ -278,6 +273,11 @@ func (o AuthOAuth) joining() bool {
 	return o.AllowProvisioning
 }
 
+// IR projects the configuration into the document's own shape.
+//
+// It returns nil for a project with no authentication, which is what tells a
+// generator there is nothing to describe. Every value is already resolved, so
+// this is a translation and not a second place where defaults are decided.
 func (a Auth) IR() *ir.Auth {
 	if !a.Enabled {
 		return nil

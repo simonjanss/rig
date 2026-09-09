@@ -27,8 +27,6 @@ func (f *fixture) signInIdentity(in account.SignInIdentityInput) (account.SignIn
 	return f.svc.SignInIdentity(context.Background(), in)
 }
 
-// second gives the fixture's person an account in another tenant, and hands
-// back the tenant and the account.
 // markVerified confirms the fixture person's address, the way clicking the link
 // in a verification mail would.
 func (f *fixture) markVerified(t *testing.T) {
@@ -38,6 +36,8 @@ func (f *fixture) markVerified(t *testing.T) {
 	}
 }
 
+// second gives the fixture's person an account in another tenant, and hands
+// back the tenant and the account.
 func (f *fixture) second(t *testing.T, name string) (uuid.UUID, *account.Account) {
 	t.Helper()
 

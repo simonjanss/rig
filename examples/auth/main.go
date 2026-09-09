@@ -268,7 +268,6 @@ func newAPI(
 	if len(live) == 0 {
 		demo = idp.New(base)
 		extra = []oauth.Provider{demo.Provider()}
-		live = extra
 	}
 
 	// Declared before New because the sign-in hook closes over it: finishing a
