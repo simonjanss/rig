@@ -143,6 +143,9 @@ func (d *Document) Hash() (string, error) {
 	// revision is the question "how old is the oldest caller still calling",
 	// and a deployment appearing must not make every client look stale.
 	unstamped.API.Servers = nil
+	// And neither is where its front end is: the same argument, and the same
+	// risk of a client looking stale because somebody moved a static host.
+	unstamped.API.Web = nil
 	unstamped.Schema.Replication = nil
 	if slices.ContainsFunc(unstamped.Schema.Tables, func(t Table) bool {
 		return t.Unlogged || len(t.Publications) > 0 || t.ReplicaIdentity != ""

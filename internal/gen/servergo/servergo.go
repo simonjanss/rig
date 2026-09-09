@@ -173,6 +173,17 @@ func (g *Generator) Generate(_ context.Context, doc *ir.Document, opts gen.Optio
 		artifacts = append(artifacts, auth)
 	}
 
+	// Where the browser front end is, when it is not this API. Emitted whether
+	// or not there is an auth block, because the other half of this fact is
+	// cross-origin and a project can have a front end and no sign-in at all.
+	if e.hasWeb() {
+		web, err := e.webFile()
+		if err != nil {
+			return nil, err
+		}
+		artifacts = append(artifacts, web)
+	}
+
 	// The migration wiring, for a project whose modules carry their own schema.
 	// A project that vendored the foundation gets no file: its migrations are
 	// already files in its own directory, and this is the only thing in the API

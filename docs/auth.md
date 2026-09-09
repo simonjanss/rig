@@ -496,9 +496,22 @@ Google and Microsoft also refuse plain `http` for anything but `localhost` and
 — which makes https the only shape a tenant-per-host deployment can use with them.
 `examples/auth_oauth` documents both ways round it for local work.
 
-#### How it ends is yours
+#### How it ends
 
-`OnSignIn` is required; `New` refuses without it.
+There are two built-in endings and an escape hatch. `oauth.New` still requires
+an `OnSignIn` — it decides nothing — but through `auth.New` you get one of these
+unless you write your own.
+
+**Without a `web:` block** it is `authhttp.Handler.SignIn`, which answers with
+the same **body** a password login does: the token pair, the identity token and
+the tenant list. Right for curl, for a native client, and for a front end served
+from this same origin.
+
+**With one** it is `authhttp.Handler.SignInToBrowser`, which leaves the tokens in
+a short-lived cookie and redirects to the front end. That is the [next
+section](#a-front-end-on-another-origin).
+
+**Your own `OnSignIn`** replaces whichever of those applied.
 
 ```go
 OnSignIn: func(w http.ResponseWriter, r *http.Request, in oauth.SignIn) error {
@@ -510,9 +523,7 @@ OnSignIn: func(w http.ResponseWriter, r *http.Request, in oauth.SignIn) error {
 }
 ```
 
-It writes the response: set a cookie, redirect with a token, render a page. rig does
-not choose, because the choice depends on whether the client is a browser, a
-single-page application or a native app catching a deep link.
+It writes the response: set a cookie, redirect with a token, render a page.
 
 **Whatever it does, it has to handle `TenantID` being nil.** That is a sign-in
 whose tenant was not knowable before the redirect, and calling `Sessions.Issue`
@@ -521,20 +532,121 @@ exist. The work of handling it is
 `account.Service.SignInIdentity` — pass it `in.Link.IdentityID` and `in.TenantID`
 and it answers all three cases, which is what the default does.
 
-Through `auth.New` it defaults to `authhttp.Handler.SignIn`, which answers with
-the same **body** a password login does — the token pair, the identity token and
-the tenant list — so a provider sign-in and a password sign-in are identical
-downstream, including for somebody who has nowhere to land yet.
-
 `New` is true for somebody joining their **second** tenant as well as their first:
 the account is new either way, which is what onboarding is about. It is therefore
 always false when no tenant was named, because there was no tenant to make an
 account in — `NewIdentity` is the half of the question that still has an answer
 there, and it is the half onboarding usually means.
 
-`returnTo` is bounded. A relative path on this origin always passes; anything else
-has to be in `AllowedReturnTo`. An unchecked `returnTo` is an open redirect, and an
-open redirect on a sign-in endpoint is how a phishing link gets to wear your domain.
+`returnTo` is bounded. A relative path always passes; anything else has to be an
+origin in `allowed_return_to`. An unchecked `returnTo` is an open redirect, and
+an open redirect on a sign-in endpoint is how a phishing link gets to wear your
+domain.
+
+`allowed_return_to` holds **origins** — `https://app.example.com`, scheme and
+host and nothing after. Not paths: a relative path is never matched against the
+list, so an entry that is one does nothing at all, and neither does one with a
+trailing slash. Both are refused when the file loads rather than accepted and
+quietly ignored.
+
+Which origin a *relative* path resolves against is the ending's decision. The
+JSON ending hands it back untouched and the client decides. The browser ending
+resolves it against `web.origin`, because that is the origin the person is
+looking at.
+
+#### A front end on another origin
+
+The ordinary deployment: the API on `api.example.com`, a single-page application
+on `app.example.com`. `SignIn`'s JSON body is useless there — the browser has
+just followed a redirect from the provider, so whatever comes back is rendered as
+a document, and a page of JSON is a dead end.
+
+Name the front end and you get the other ending:
+
+```yaml
+web:
+  origin: https://app.example.com   # or origin_env: APP_ORIGIN
+  callback_path: /auth/callback     # the default
+```
+
+`web:` is top-level rather than under `auth:` because it is a deployment fact,
+like `servers:`, and because the cross-origin half of it is wanted by projects
+with no provider sign-in at all.
+
+A finished sign-in then answers **303** to
+`https://app.example.com/auth/callback` with one cookie:
+
+```
+Set-Cookie: rig_handoff=<base64url JSON>; Path=/auth/callback; Domain=example.com;
+            Max-Age=60; Secure; SameSite=Lax
+```
+
+The value decodes to `authwire.Handoff` — a `SignInResponse` **without** the
+tenant list, because a cookie holds about four kilobytes and a tenant list has no
+bound. `identityToken` fetches the list from `GET /auth/tenants`, which is the
+call the picker makes anyway. The token pair is absent entirely for somebody who
+belongs to no tenant yet, exactly as it is in the JSON body.
+
+It is deliberately **not** `HttpOnly`: a script on the landing page is the only
+thing that can act on these tokens. What stands in for `HttpOnly` is the minute
+it lives and the single path it is sent to.
+
+`Domain` comes from the public suffix list — the registrable domain the two
+hosts share, so `api.example.com` and `app.example.com` give `example.com`, and
+`api.example.co.uk` and `app.example.co.uk` give `example.co.uk` rather than the
+`co.uk` a label-counting guess would produce. Two hosts sharing no registrable
+domain is refused: **RIG3013** when both are written in `rig.yaml`, and at
+startup otherwise. That refusal is the point — a browser drops a cookie whose
+`Domain` it does not accept without telling anybody, so the alternative is a
+deployment that boots and loses every sign-in.
+
+One host serving both — `localhost:8080` and `localhost:3000` in development —
+gets a host-only cookie, which is correct: cookies ignore the port.
+
+A **failure** goes to the same destination with no cookie and a reason on the
+query string:
+
+```
+303 https://app.example.com/auth/callback?error=cancelled
+```
+
+So the landing page has one job and two branches: a cookie to take, or an
+`error` to show. The values are the `Reason` table [below](#how-it-fails-is-yours-too),
+and they cover the refusals raised *before* any ending runs as well — a cancelled
+consent screen, an address no account has. Your own `OnError` still wins.
+
+What the page does: read the cookie, delete it, and start a session from it. The
+shape is `Handoff` from `@rig-ts/client`, so the types are the server's rather
+than a restatement of them:
+
+```ts
+import { Session, type Handoff } from "@rig-ts/client";
+
+const handoff: Handoff = JSON.parse(atob(readCookie("rig_handoff")));
+const session = new Session(handoff);   // NOT session.replace(handoff)
+```
+
+A handoff is a **new** person's tokens, so it starts a session rather than
+replacing one: `session.replace` keeps the previous refresh token.
+
+Two things to get right when you write that by hand.
+
+**Delete it on the right domain.** A cookie set with a `Domain` is only removed
+by a `Set-Cookie` carrying the same `Domain` — a bare `Max-Age=0` creates and
+expires a *different*, host-only cookie and leaves the real one alive. So the
+deletion has to name `Domain=example.com` as well as trying the host-only form.
+Getting this wrong passes every test on `localhost`, where there is no domain,
+and fails only where there are two subdomains, which is only ever a deployment.
+
+**Delete it whether or not it decoded.** A value you could not read is still a
+credential sitting in the browser for its full minute.
+
+Two things stay yours. The origin can come from Go instead of the file, with
+`Hooks.OAuth.WebOrigin` — and a deployment that does that answers the rest of its
+cross-origin configuration in Go too, since `WebOrigin()` reads the environment
+and knows nothing about what a caller passed. And setting your own `OnSignIn`
+beside `web:` replaces the ending while keeping the failure redirect, because a
+consent screen somebody cancelled never reaches an ending at all.
 
 #### How it fails is yours too
 
@@ -1018,7 +1130,7 @@ auth:
     signing_key_env: OAUTH_SIGNING_KEY # >= 32 bytes, the same in every replica
     state_ttl: 10m
     allow_provisioning: false
-    allowed_return_to: [https://app.example.com]
+    allowed_return_to: [https://app.example.com]  # origins, never paths
     insecure: false                    # never set this in a deployment
     providers:
       - name: google                   # GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET
@@ -1033,6 +1145,19 @@ A client secret is never in the file. The configuration names the environment
 variable and the generated code reads it, which is also what lets one binary
 offer Google in a deployment and nothing at all on a laptop: a provider whose
 pair is absent is skipped rather than mounted broken, unless it says `required`.
+
+Beside `auth:` rather than inside it, when the front end is served somewhere
+other than this API:
+
+```yaml
+web:
+  origin: https://app.example.com   # or origin_env: APP_ORIGIN
+  callback_path: /auth/callback
+```
+
+That is what selects the browser ending — see [A front end on another
+origin](#a-front-end-on-another-origin) — and it is top-level because a project
+with a separate front end and no provider sign-in still has the fact.
 
 **And the environment is a fallback, not the only way in.** Three of these
 values are things a deployment supplies rather than states — the origin, the
@@ -1138,15 +1263,16 @@ front, err := api.New(pool, api.Hooks{
         return err
     },
 
-    // How a provider sign-in ends, for a browser that wants a cookie and a
-    // redirect rather than JSON. Nil issues the same session a password login
-    // does.
-    //
-    // The three values beside it are the ones rig.yaml can only name a variable
-    // for. Written out like this they are read where every other read in a main
-    // function already is; left out entirely, the generated code reads the same
-    // variables itself, which is the ordinary deployment.
+    // How a provider sign-in ends and how it fails, plus the values rig.yaml
+    // can only name a variable for. Written out like this they are read where
+    // every other read in a main function already is; left out entirely, the
+    // generated code reads the same variables itself, which is the ordinary
+    // deployment.
     OAuth: api.OAuthHooks{
+        // Nil takes one of the two built-in endings: the JSON body a login
+        // answers with, or — with a `web:` block — a cookie and a redirect to
+        // the front end. Setting one replaces the ending and keeps the failure
+        // redirect below.
         OnSignIn: nil,
 
         // And how one fails, for the same browser. Nil answers a bare
@@ -1156,14 +1282,18 @@ front, err := api.New(pool, api.Hooks{
             http.Redirect(w, r, "/login?error="+string(f.Reason), http.StatusSeeOther)
         },
 
-        // The three values a file cannot hold. Each prefers what you set and
-        // reads the variable rig.yaml names when you set nothing, so a project
-        // that writes none of them behaves exactly as it did before they
-        // existed. Fill one in when the value lives where the environment
-        // cannot reach it — a secret manager, a mounted file, or a test on an
-        // ephemeral port whose address does not exist until it is listening.
+        // The values a file cannot hold. Each prefers what you set and reads
+        // the variable rig.yaml names when you set nothing, so a project that
+        // writes none of them behaves exactly as it did before they existed.
+        // Fill one in when the value lives where the environment cannot reach
+        // it — a secret manager, a mounted file, or a test on an ephemeral port
+        // whose address does not exist until it is listening.
         BaseURL:    cfg.OAuthBaseURL,
         SigningKey: cfg.OAuthSigningKey,
+        // Present only for a project with a `web:` block, and answering this
+        // here means answering the rest of the cross-origin configuration here
+        // too: WebOrigin() reads the environment and cannot see this field.
+        WebOrigin: cfg.AppOrigin,
         Credentials: api.OAuthCredentials{
             Google: api.OAuthClient{ID: cfg.GoogleID, Secret: cfg.GoogleSecret},
         },

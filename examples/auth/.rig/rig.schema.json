@@ -203,7 +203,7 @@
             "type": "string"
           },
           "type": "array",
-          "description": "Origins or paths a finished sign-in may return to. Anything else is refused, which is what stops an open redirect."
+          "description": "Origins a finished sign-in may return to, each scheme://host with nothing after the host. Anything else is refused, which is what stops an open redirect. A relative path is always allowed and is never matched against this list, so listing one does nothing."
         },
         "insecure": {
           "type": "boolean",
@@ -941,6 +941,49 @@
       },
       "additionalProperties": false,
       "type": "object"
+    },
+    "Web": {
+      "properties": {
+        "origin": {
+          "type": "string",
+          "description": "Where the browser front end is served, for example https://app.example.com. Scheme and host only. Either this or origin_env is required."
+        },
+        "origin_env": {
+          "type": "string",
+          "description": "Environment variable holding the front end's origin, for a deployment where it differs per environment. Set beside origin, the variable wins and origin is the default."
+        },
+        "callback_path": {
+          "type": "string",
+          "description": "Path on the front end that receives a finished provider sign-in. Defaults to /auth/callback."
+        },
+        "cors": {
+          "$ref": "#/$defs/WebCORS",
+          "description": "What a browser's preflight is answered with. The origin above is always allowed; this is for the rest."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
+    },
+    "WebCORS": {
+      "properties": {
+        "allowed_origins": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "description": "Origins besides web.origin that may call this API. Each is scheme://host, optionally with one leading *. label. A bare * is refused."
+        },
+        "allowed_origins_env": {
+          "type": "string",
+          "description": "Environment variable holding a comma-separated origin list. Set, it replaces the baked-in list rather than adding to it. Defaults to CORS_ORIGINS."
+        },
+        "max_age": {
+          "$ref": "#/$defs/Duration",
+          "description": "How long a browser may cache a preflight. Defaults to 10m, which is the longest Safari honours."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
     }
   },
   "properties": {
@@ -963,6 +1006,10 @@
     "servers": {
       "$ref": "#/$defs/Servers",
       "description": "The deployments this API answers on. Every SDK generator and the OpenAPI document read them, so the document and the clients cannot disagree about where the API is."
+    },
+    "web": {
+      "$ref": "#/$defs/Web",
+      "description": "Where this API's browser front end is served, when it is not this API. It is what a finished provider sign-in redirects to and what a preflight is answered for."
     },
     "database": {
       "$ref": "#/$defs/Database",

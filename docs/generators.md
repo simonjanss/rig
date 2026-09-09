@@ -41,6 +41,14 @@ beside the routes, a span per handler, and a span per repository call and per
 hook. Without each block, not one line about it is emitted, which is what keeps
 the corresponding module out of the application's `go.mod`.
 
+`web:` writes a `web.gen.go`, whether or not there is an `auth:` block: a
+project with its front end on another origin has that fact whether it signs
+anybody in or not. It holds `WebOriginEnv`, `WebCallbackPath` and `WebOrigin()`,
+which resolve one origin the same three-branch way `BaseURL()` resolves the
+API's own. With providers configured it also selects the sign-in ending that
+redirects to the front end — see
+[auth.md](auth.md#a-front-end-on-another-origin).
+
 `files:` writes a `files.gen.go` beside them with two constructors in it.
 `NewFilesWithStore` takes the store, so a project can be run and tested against
 `blob.NewMemory()` whatever its configuration says; `NewFiles` builds the one

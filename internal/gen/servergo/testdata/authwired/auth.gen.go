@@ -24,6 +24,7 @@ import (
 	"github.com/simonjanss/rig/auth"
 	"github.com/simonjanss/rig/auth/account"
 	"github.com/simonjanss/rig/auth/authhttp"
+	"github.com/simonjanss/rig/auth/handoff"
 	"github.com/simonjanss/rig/auth/oauth"
 	"github.com/simonjanss/rig/auth/password"
 	"github.com/simonjanss/rig/auth/session"
@@ -243,6 +244,18 @@ type OAuthHooks struct {
 	// neither. What it is still for is the origin rig/auth requires to exist at
 	// all, and the one a request that names no host falls back to.
 	BaseURL string
+
+	// WebOrigin is where this application's browser front end is served, and takes
+	// precedence over everything the `web:` block said about one.
+	//
+	// Empty asks [WebOrigin], which is the ordinary case. This is for the origin
+	// that arrives some other way — a test serving the front end on an ephemeral
+	// port, most often.
+	//
+	// An origin supplied here is invisible to anything that reads the environment
+	// instead, so a deployment that answers this question in Go answers the rest
+	// of its cross-origin configuration in Go too.
+	WebOrigin string
 
 	// SigningKey signs the cookie that carries the state and the PKCE verifier
 	// across a sign-in's round trip. At least 32 bytes, and the same bytes in
@@ -477,6 +490,14 @@ func Config(pool *pgxpool.Pool, h Hooks) (auth.Config, error) {
 		case !strings.HasPrefix(base, "http://") && !strings.HasPrefix(base, "https://"):
 			return auth.Config{}, errors.New("api: Hooks.OAuth.BaseURL must be an absolute origin, for example https://app.example.com: a provider compares the callback URL built from it exactly")
 		}
+		// And where the front end is, resolved the same way: the field first, then the
+		// `web:` block and the environment.
+		web := strings.TrimRight(h.OAuth.WebOrigin, "/")
+		if web == "" {
+			if web, err = WebOrigin(); err != nil {
+				return auth.Config{}, err
+			}
+		}
 		key, err := signingKey(h.OAuth)
 		if err != nil {
 			return auth.Config{}, err
@@ -495,6 +516,13 @@ func Config(pool *pgxpool.Pool, h Hooks) (auth.Config, error) {
 			AllowedReturnTo:   append([]string{"https://app.example.com", "https://beta.example.com"}, h.OAuth.ReturnTo...),
 			OnSignIn:          h.OAuth.OnSignIn,
 			OnError:           h.OAuth.OnError,
+			// Where the front end is. It selects the ending that leaves the tokens in a
+			// cookie and redirects there, and the failure redirect that goes with it —
+			// one callback route on the front end, two outcomes.
+			//
+			// Hooks.OAuth.OnSignIn replaces the ending and keeps the rest, because a
+			// consent screen somebody cancelled never reaches an ending at all.
+			Browser: &handoff.Config{Origin: web, CallbackPath: WebCallbackPath},
 		}
 	}
 

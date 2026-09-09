@@ -174,6 +174,32 @@ var (
 			"there is no half-configured state that builds — the router would import a "+
 			"package nothing writes.")
 
+	CodeWebWithoutOrigin = newCode("RIG3012", SeverityError,
+		"A `web:` block names no origin.",
+		"The block exists to say one thing — where the browser front end is served — "+
+			"and `origin` or `origin_env` is that thing. Without either there is "+
+			"nothing to redirect a finished sign-in to and nothing to answer a "+
+			"preflight for, so every generator that reads the block would emit code "+
+			"with a hole in it. Write `origin: https://app.example.com` for a front "+
+			"end that is the same everywhere, or `origin_env: APP_ORIGIN` for one that "+
+			"is not. Both is fine: the file's value is the default and the variable "+
+			"wins, the way `auth.oauth.base_url` already behaves.")
+
+	CodeWebUnreachableCookie = newCode("RIG3013", SeverityError,
+		"The front end and the API share no registrable domain, so no cookie set by "+
+			"one can be read by the other.",
+		"A provider sign-in for a browser ends by leaving its tokens in a cookie the "+
+			"front end reads. A browser only keeps a `Set-Cookie` whose `Domain` is a "+
+			"registrable domain of the host that sent it — api.example.com may write "+
+			"one for example.com, and may not write one for other.com — and it drops "+
+			"the rest without telling anybody. So `web.origin` and "+
+			"`auth.oauth.base_url` have to sit under one domain. This is reported here, "+
+			"where both values are visible, rather than at the sign-in that would "+
+			"otherwise fail with nothing written anywhere. Only when both are literal: "+
+			"an origin that arrives from the environment is checked when the process "+
+			"starts instead. A deployment that genuinely cannot share a domain writes "+
+			"its own `Hooks.OAuth.OnSignIn` and hands the tokens over some other way.")
+
 	CodeUnmentionedColumn = newCode("RIG3100", SeverityWarning,
 		"A column exists in the database but is not mentioned in the table configuration.",
 		"Run `rig sync` to add it, then replace the placeholder comment.")

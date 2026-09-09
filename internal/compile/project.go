@@ -45,6 +45,9 @@ type ProjectOptions struct {
 	// Servers are the deployments this API is served on, in the order the
 	// project named them, or nil for a project that has named none.
 	Servers []ir.Server
+	// Web is where the browser front end is served, or nil for a project whose
+	// front end is this API's own origin — or which has none.
+	Web *ir.Web
 	// OpenAPI is where the generated document is served from — the package it is
 	// embedded in — or nil for a project that keeps it a file.
 	//
@@ -87,6 +90,7 @@ func Project(schema ir.Schema, opt ProjectOptions) (ir.API, diag.List) {
 		Tracing:        opt.Tracing,
 		Monitoring:     opt.Monitoring,
 		Servers:        opt.Servers,
+		Web:            opt.Web,
 
 		// Who keeps rig's own migrations. Carried from here to the generators
 		// untouched: it is a fact about the project, not about the schema.

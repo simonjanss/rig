@@ -73,6 +73,18 @@ const (
 	// is the only place it can come from and defaulting the name costs nothing.
 	DefaultSigningKeyEnv = "OAUTH_SIGNING_KEY"
 
+	// DefaultCallbackPath is the route on the front end that receives a
+	// finished provider sign-in.
+	DefaultCallbackPath = "/auth/callback"
+	// DefaultCORSOriginsEnv is where a deployment overrides the allowed origin
+	// list. Defaulted, unlike the signing key's variable, because the value is
+	// not a secret and a project that never sets it loses nothing.
+	DefaultCORSOriginsEnv = "CORS_ORIGINS"
+	// DefaultCORSMaxAge is how long a browser may cache a preflight. Ten
+	// minutes because that is the longest Safari honours, so a larger number
+	// would be a value rig let somebody write and no browser read.
+	DefaultCORSMaxAge = 10 * time.Minute
+
 	// DefaultFilesBackend is memory, which is not durable. A project that means
 	// to keep its uploads has to say so, and a default of s3 would need a bucket
 	// nobody configured.
@@ -267,6 +279,27 @@ func (p *Project) applyDefaults() {
 		c.Servers[i].URL = strings.TrimSpace(c.Servers[i].URL)
 		if len(c.Servers[i].URL) > 1 {
 			c.Servers[i].URL = strings.TrimRight(c.Servers[i].URL, "/")
+		}
+	}
+
+	if c.ConfiguredWeb() {
+		// The same trailing-slash normalisation the server URLs get, and for a
+		// worse reason: this origin is compared against an Origin header, which
+		// never has one, so a slash here is an origin that silently matches
+		// nothing.
+		c.Web.Origin = strings.TrimSpace(c.Web.Origin)
+		if len(c.Web.Origin) > 1 {
+			c.Web.Origin = strings.TrimRight(c.Web.Origin, "/")
+		}
+		setDefault(&c.Web.CallbackPath, DefaultCallbackPath)
+		setDefault(&c.Web.CORS.AllowedOriginsEnv, DefaultCORSOriginsEnv)
+		setDuration(&c.Web.CORS.MaxAge, DefaultCORSMaxAge)
+		for i := range c.Web.CORS.AllowedOrigins {
+			origin := strings.TrimSpace(c.Web.CORS.AllowedOrigins[i])
+			if len(origin) > 1 {
+				origin = strings.TrimRight(origin, "/")
+			}
+			c.Web.CORS.AllowedOrigins[i] = origin
 		}
 	}
 
@@ -576,6 +609,7 @@ func (p *Project) check() diag.List {
 	}
 
 	diags.Append(p.checkServers())
+	diags.Append(p.checkWeb())
 	diags.Append(p.checkDeprecatedServerOptions())
 	diags.Append(p.checkAuth())
 	diags.Append(p.checkFiles())

@@ -94,6 +94,35 @@ type SignInResponse struct {
 	Tenants []TenantView `json:"tenants"`
 }
 
+// HandoffCookie is where a browser sign-in leaves its tokens.
+//
+// A provider sign-in that ends in a redirect cannot answer with a body, so the
+// tokens travel in a short-lived cookie the landing page reads and deletes. The
+// name is here rather than in the handler that writes it because both ends need
+// it and only one of them is Go — see [Handoff].
+const HandoffCookie = "rig_handoff"
+
+// Handoff is what that cookie holds: a [SignInResponse] without the tenants.
+//
+// The list is left out because a cookie is limited to about four kilobytes and a
+// person in thirty tenants would silently exceed it — a sign-in that fails with
+// nothing in any log. [Handoff.IdentityToken] fetches the same list from
+// GET <base>/tenants, which is the call the picker makes anyway.
+//
+// The value is base64url of this shape's JSON. It is a contract with the code
+// that reads the cookie, which is why it is named here: a browser front end
+// mirrors this and nothing on either side would fail to compile if the two
+// drifted.
+type Handoff struct {
+	TokenPair
+
+	// IdentityToken and IdentityExpiresAt are as [SignInResponse] has them, and
+	// they are the only members always present: somebody who belongs to no
+	// tenant yet arrives with these and no pair.
+	IdentityToken     string    `json:"identityToken"`
+	IdentityExpiresAt time.Time `json:"identityExpiresAt"`
+}
+
 // LoginRequest is the body of POST <base>/login.
 type LoginRequest struct {
 	EmailAddress string `json:"emailAddress"`

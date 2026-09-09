@@ -535,6 +535,24 @@ func signInOf(res account.SignInResult) authwire.SignInResponse {
 	return out
 }
 
+// handoffOf is [signInOf] without the tenant list, for the ending that has to
+// fit its answer in a cookie.
+//
+// The list is the only thing left out, and it is the only thing that has no
+// bound: a person in one tenant and a person in fifty get the same identity
+// token, and the second one would push the cookie past what a browser keeps.
+// The token fetches the list, which is the call a picker makes anyway.
+func handoffOf(res account.SignInResult) authwire.Handoff {
+	out := authwire.Handoff{
+		IdentityToken:     res.Identity.Token,
+		IdentityExpiresAt: res.Identity.ExpiresAt,
+	}
+	if res.Session != nil {
+		out.TokenPair = pairOf(*res.Session)
+	}
+	return out
+}
+
 func pairOf(p session.Pair) authwire.TokenPair {
 	return authwire.TokenPair{
 		AccessToken:      p.Access.Token,

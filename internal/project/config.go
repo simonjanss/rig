@@ -34,6 +34,7 @@ type Config struct {
 	Layout     Layout      `yaml:"layout,omitempty" json:"layout,omitempty" jsonschema_description:"Where table configuration and generated code live."`
 	API        API         `yaml:"api,omitempty" json:"api,omitempty" jsonschema_description:"Shape of the generated HTTP API."`
 	Servers    Servers     `yaml:"servers,omitempty" json:"servers,omitempty" jsonschema_description:"The deployments this API answers on. Every SDK generator and the OpenAPI document read them, so the document and the clients cannot disagree about where the API is."`
+	Web        Web         `yaml:"web,omitempty" json:"web,omitempty" jsonschema_description:"Where this API's browser front end is served, when it is not this API. It is what a finished provider sign-in redirects to and what a preflight is answered for."`
 	Database   Database    `yaml:"database,omitempty" json:"database,omitempty" jsonschema_description:"Where to run migrations and read the schema from."`
 	Migrations Migrations  `yaml:"migrations,omitempty" json:"migrations,omitempty" jsonschema_description:"Migration file location."`
 	Auth       Auth        `yaml:"auth,omitempty" json:"auth,omitempty" jsonschema_description:"How the authentication foundation's tables are treated."`
@@ -325,7 +326,12 @@ type AuthOAuth struct {
 
 	// AllowedReturnTo bounds where a finished sign-in may land. An open redirect
 	// is the classic mistake here.
-	AllowedReturnTo []string `yaml:"allowed_return_to,omitempty" json:"allowed_return_to,omitempty" jsonschema_description:"Origins or paths a finished sign-in may return to. Anything else is refused, which is what stops an open redirect."`
+	//
+	// Origins, each scheme://host with nothing after the host — not paths. A
+	// relative path is always allowed and is never matched against this list, so
+	// an entry that is one does nothing at all, and neither does one with a
+	// trailing slash. Both are refused rather than accepted and ignored.
+	AllowedReturnTo []string `yaml:"allowed_return_to,omitempty" json:"allowed_return_to,omitempty" jsonschema_description:"Origins a finished sign-in may return to, each scheme://host with nothing after the host. Anything else is refused, which is what stops an open redirect. A relative path is always allowed and is never matched against this list, so listing one does nothing."`
 
 	// Insecure allows the state cookie over plain HTTP, for local development
 	// where a browser would refuse the __Host- prefixed one. Never anywhere real.

@@ -102,6 +102,19 @@ type API struct {
 	// first entry — so nothing between here and an emitter sorts it.
 	Servers []Server `json:"servers,omitempty"`
 
+	// Web is where this API's browser front end is served, or nil for a project
+	// that has no such thing.
+	//
+	// A deployment fact like [API.Servers], and here for the same reason: two
+	// generators read it and neither owns it. The server generator turns it into
+	// the origin a provider sign-in redirects to and the origins a preflight is
+	// answered for — one fact, two answers that must not disagree.
+	//
+	// Nil is the switch. No web block means no cross-origin code emitted at all,
+	// which is the state every project that serves its front end from the same
+	// origin should stay in.
+	Web *Web `json:"web,omitempty"`
+
 	// Tracing is the spans this API's generated code opens, or nil for a
 	// project that asked for none.
 	//
@@ -217,6 +230,58 @@ type Server struct {
 	// it, so the first one" before this is written, so three generators do not
 	// each implement the same rule.
 	Default bool `json:"default,omitempty"`
+}
+
+// Web is a browser front end served somewhere other than this API.
+//
+// It exists because the two are separate deployments in any project worth the
+// name — the API on api.example.com, the application on app.example.com — and
+// three things follow from that one fact: which origin a finished sign-in
+// redirects to, where a relative returnTo resolves, and which origins a
+// preflight is answered for. A project naming the answer once is the point.
+type Web struct {
+	// Origin is where the front end is served, as scheme://host[:port] with
+	// nothing after the host. Empty when OriginEnv carries it instead.
+	Origin string `json:"origin,omitempty"`
+
+	// OriginEnv is the environment variable the origin comes from, for the
+	// deployment that has a different front end per environment. Empty when the
+	// origin is written in the file.
+	//
+	// Both may be set: the file's value is the default and the variable wins,
+	// which is how [Auth.OAuth]'s base URL already behaves.
+	OriginEnv string `json:"originEnv,omitempty"`
+
+	// CallbackPath is the path on Origin that receives a finished sign-in.
+	// Always set; the project fills in the default.
+	CallbackPath string `json:"callbackPath"`
+
+	// CORS is what a preflight from that front end is answered with.
+	CORS WebCORS `json:"cors"`
+}
+
+// WebCORS is the cross-origin policy's project-specific half.
+//
+// Only the origins and the lifetime are here. What a preflight may ask for —
+// the methods, the request headers, the exposed response headers — is derivable
+// from the rest of this document and is worked out by the generator, because
+// getting it out of a project's own list is how a header the sync cursor needs
+// ends up missing and the subscription stops after one response.
+type WebCORS struct {
+	// AllowedOrigins are origins beyond [Web.Origin] that may call this API — an
+	// administrative front end, most often. Each is scheme://host[:port], or one
+	// leading *. label for a wildcard.
+	AllowedOrigins []string `json:"allowedOrigins,omitempty"`
+
+	// AllowedOriginsEnv is the environment variable that replaces the list
+	// above, as a comma-separated string. Always set; the project fills in the
+	// default.
+	AllowedOriginsEnv string `json:"allowedOriginsEnv"`
+
+	// MaxAgeSeconds is how long a browser may cache a preflight. Seconds rather
+	// than a duration because that is what the header carries and what every
+	// generator would otherwise convert.
+	MaxAgeSeconds int64 `json:"maxAgeSeconds"`
 }
 
 // Permission is one thing a caller may be allowed to do.

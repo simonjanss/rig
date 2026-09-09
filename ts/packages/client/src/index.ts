@@ -63,6 +63,7 @@ export type {
     CreateKeyRequest,
     CreateKeyResponse,
     CreateTenantRequest,
+    Handoff,
     InvitationToMeView,
     InvitationView,
     LoginRequest,
