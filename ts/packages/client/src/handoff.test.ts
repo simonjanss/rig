@@ -160,7 +160,7 @@ describe("takeHandoff", () => {
         expect(plain.j.writes.every((w) => !w.includes("Secure"))).toBe(true);
     });
 
-    it("returns null and writes nothing back when there is no cookie", () => {
+    it("returns null when there is no cookie", () => {
         const j = jar();
         expect(takeHandoff({ jar: j, hostname: "app.example.com" })).toBeNull();
     });

@@ -813,8 +813,10 @@ if (handoff) {
 `TokenPair` plus `identityToken` and `identityExpiresAt`, with the pair absent
 for somebody who belongs to no tenant yet. The tenant list is deliberately not
 in it — a cookie holds about four kilobytes and a tenant list has no bound — so
-`identityToken` fetches it from `auth.tenants()`, which is the call a picker
-makes anyway.
+`identityToken` fetches it from `auth.myTenants(identityToken)`, which is the
+call a picker makes anyway. Not `auth.tenants()`, which is mounted inside a
+tenant and goes out on the session credential — the one thing a handoff with no
+pair does not have.
 
 It is one shot. The cookie goes whether or not it decoded, because a value
 nothing could read is still a credential sitting in the browser for the rest of

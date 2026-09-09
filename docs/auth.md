@@ -583,7 +583,7 @@ Set-Cookie: rig_handoff=<base64url JSON>; Path=/auth/callback; Domain=example.co
 
 The value decodes to `authwire.Handoff` — a `SignInResponse` **without** the
 tenant list, because a cookie holds about four kilobytes and a tenant list has no
-bound. `identityToken` fetches the list from `GET /auth/tenants`, which is the
+bound. `identityToken` fetches the list from `GET /auth/me/tenants`, which is the
 call the picker makes anyway. The token pair is absent entirely for somebody who
 belongs to no tenant yet, exactly as it is in the JSON body.
 

@@ -121,7 +121,7 @@ export type SignInResponse = TokenPair & {
  *
  * The list is left out because a cookie is limited to about four kilobytes and a
  * person in thirty tenants would silently exceed it. `identityToken` fetches the
- * same list from `GET <base>/tenants`, which is the call the picker makes
+ * same list from `GET <base>/me/tenants`, which is the call the picker makes
  * anyway.
  *
  * The cookie's value is base64url of this shape's JSON. `takeHandoff` reads it.
