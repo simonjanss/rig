@@ -273,12 +273,20 @@ deployment fact several generators read and none owns.
 starts, so it can see its own environment. A server URL is a constant compiled
 into somebody else's program, which cannot.
 
-What it does today: `server-go` writes `web.gen.go` — `WebOriginEnv`,
-`WebCallbackPath`, `WebOrigin()` — and, for a project with providers, selects the
-provider sign-in ending that leaves the tokens in a cookie and redirects to the
-front end rather than answering JSON. See
-[auth.md](auth.md#a-front-end-on-another-origin) for the cookie's contract and
-for what the landing page does with it.
+What it does: `server-go` writes `web.gen.go` — `WebOriginEnv`,
+`WebCallbackPath`, `WebOrigin()` — and a `cors.gen.go` holding
+`AllowedOriginsEnv`, `AllowedOrigins()` and `CORS(origins)`, which the generated
+`mountWith` wraps the whole handler in. For a project with providers it also
+selects the sign-in ending that leaves the tokens in a cookie and redirects to
+the front end rather than answering JSON.
+
+The policy's methods and headers are **not** here to configure. They follow from
+what this API's own endpoints read and answer with, which the document already
+describes, so `cors` holds the origins and the lifetime and the generator works
+out the rest — see [clients.md](clients.md#cross-origin) for what ends up in it
+and which three entries are invisible when they are missing.
+[auth.md](auth.md#a-front-end-on-another-origin) has the handoff cookie's
+contract and what the landing page does with it.
 
 One relationship with another block is checked when the file loads: if
 `web.origin` and `auth.oauth.base_url` are both written out and their hosts share

@@ -132,6 +132,36 @@ func (e *emitter) parts() []part {
 		})
 	}
 
+	if e.hasWeb() {
+		list = append(list, part{
+			field: "CORS",
+			noun:  "the cross-origin policy",
+			typ:   func(b *gobuf.Buf) string { return "*" + b.Import(corsModule) + ".Policy" },
+			doc: "CORS is the policy the whole handler is wrapped in, or nil for " +
+				"the one [CORS] builds from the `web:` block.\n\n" +
+				"Nil is the answer nearly every project wants, and it is why this " +
+				"field's zero value does something rather than nothing: the lists a " +
+				"preflight is answered with follow from what this API reads and " +
+				"answers with, so rig knows them and a main function would be " +
+				"copying them.\n\n" +
+				"There are two reasons to fill it in. A policy with " +
+				"[github.com/simonjanss/rig/runtime/cors.Policy.AllowOrigin] set is " +
+				"the dynamic case — origins that are rows rather than " +
+				"configuration — and the way to write it is to start from the " +
+				"generated one:\n\n" +
+				"\torigins, err := api.AllowedOrigins()\n" +
+				"\tp := api.CORS(origins)\n" +
+				"\tp.AllowOrigin = func(origin string) bool { return tenants.Has(origin) }\n" +
+				"\tparts.CORS = &p\n\n" +
+				"And an empty &cors.Policy{} means none: this application wrapped " +
+				"its own, or answers no browser. That is different from nil, which " +
+				"is the whole reason this is a pointer.",
+			// No attach and no missing: it is not started, and nil is a real
+			// answer rather than a mistake. The wrap is the last thing
+			// mountWith does, after every attach above it.
+		})
+	}
+
 	return list
 }
 
@@ -377,6 +407,10 @@ func (e *emitter) mountFunc(b *gobuf.Buf) {
 
 	if e.servesOpenAPI() {
 		e.openAPIAnnounce(b)
+	}
+
+	if e.hasWeb() {
+		e.corsWrap(b)
 	}
 
 	b.L("return parts.Handler, nil")

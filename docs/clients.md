@@ -820,52 +820,90 @@ including why a bare `Max-Age=0` leaves it alive.
 rig serves the shape routes from the same mux as the rest of the API, and
 same-origin is what everything above assumes.
 
-A front end on a different origin needs the API to answer CORS, and
-`rig/runtime/cors` is what answers it. A `Policy` names the origins that may call
-and what the exchange may use, and wraps the handler your build function
-returns — the whole handler, because which origins may read this API is a
-decision about the API, and a policy with a route left out is a hole only a
-browser finds. rig's probes are answered outside whatever you return, so a
-readiness check every second does not pay for it.
+A front end on a different origin needs the API to answer CORS. Name it and rig
+answers it:
 
-```go
-policy := cors.Policy{
-    AllowedOrigins: []string{"https://app.example.com"},
-    AllowedMethods: []string{"GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "QUERY", "OPTIONS"},
-    AllowedHeaders: []string{
-        "Authorization", "Content-Type", "Accept", "Idempotency-Key", "If-None-Match",
-        api.TenantHeader, api.RevisionHeader, api.RequestIDHeader,
-    },
-    ExposedHeaders: []string{
-        api.RevisionHeader, "Retry-After", "RateLimit-Limit", "RateLimit-Remaining", "RateLimit-Reset",
-        "Idempotency-Replayed", "ETag",
-        "electric-handle", "electric-offset", "electric-schema", "electric-cursor",
-        "electric-up-to-date", "electric-has-data",
-    },
-    MaxAge: 10 * time.Minute,
-}
-return api.Parts{Handler: policy.Wrap(mux)}, nil
+```yaml
+web:
+  origin: https://app.example.com   # or origin_env: APP_ORIGIN
+
+  cors:
+    allowed_origins: [https://admin.example.com]   # besides the one above
+    allowed_origins_env: CORS_ORIGINS              # replaces the list, if set
+    max_age: 10m
 ```
 
-`api.TenantHeader` is there when `tenant.from` includes `header`, and the `electric-*`
-entries when a table streams. Three entries in that literal are invisible when
-they are missing. `QUERY`: the client sends a search as `QUERY` and falls back to
-`POST` only on a 405 or a 501, and a preflight that omits a method fails as a
-*network* error, so there is no status for the fallback to read — search fails
-with nothing in any log. `Idempotency-Key`: the client sets it on every unsafe
-method, so leaving it out fails the preflight on every `POST`. And the
-`electric-*` headers: the sync protocol's cursor travels in them, and until they
-are exposed the browser hides it from the client and the subscription ends after
-one response, which looks like a stream that stopped rather than like a
-configuration problem.
+That writes a `cors.gen.go` holding `AllowedOrigins()` and `CORS(origins)`, and
+the generated `mountWith` wraps the handler your build function returns in it —
+the whole handler, because which origins may read this API is a decision about
+the API and a policy with a route left out is a hole only a browser finds. rig's
+probes are answered outside it, so a readiness check every second does not pay
+for it. One `INFO` line at startup says which origins, beside the one about the
+OpenAPI document.
 
-There is no `Access-Control-Allow-Credentials`, and the policy will not write one:
-the credential is a bearer token in a header, so no cookie ever crosses an
-origin. `AllowedOrigins` understands one wildcard form, `https://*.example.com`,
-for a tenant per subdomain; `AllowOrigin` is asked for the origins a table knows
-and a file cannot. The shape proxy does not forward the sync service's own
-`access-control-*` headers — which origins may read this API is this server's
-answer, and two values in one header is a response a browser refuses.
+**The lists are generated rather than configured**, and that is the point. Every
+entry in them is a fact about what this API reads and answers with, which the
+document already describes — so `web.cors` holds the origins and the lifetime,
+and nothing else. Three entries are invisible when they are missing, and rig
+knows all three:
+
+- **`QUERY`** in the methods, when any route uses it. The client sends a search
+  as `QUERY` and falls back to `POST` only on a 405 or a 501 — and a preflight
+  that omits a method fails as a *network* error, so there is no status for the
+  fallback to read and search fails with nothing in any log.
+- **`Idempotency-Key`** in the request headers. Both SDKs set it on every unsafe
+  method, so leaving it out fails the preflight on every `POST` rather than on
+  the retried ones.
+- **The `electric-*` headers** in the exposed list, when a table streams. The
+  sync protocol's cursor travels in them, and a browser hides a response header
+  from script until it is exposed — so the subscription ends after one response,
+  which looks like a stream that stopped rather than like a configuration
+  problem.
+
+The rest follows the same rule: `TenantHeader`, `RevisionHeader` and
+`RequestIDHeader` are named as constants rather than as values, so renaming one
+in rig.yaml moves the policy with it; `Retry-After` and `RateLimit-*` are exposed
+because a 429 without them is a 429 with no schedule attached; `Range`,
+`Content-Range`, `Accept-Ranges` and `Content-Disposition` appear with
+[`files:`](rig-yaml.md#files), and `ETag` with files or a served OpenAPI
+document.
+
+There is no `Access-Control-Allow-Credentials`, and the policy will not write
+one: the credential is a bearer token in a header, so no cookie ever crosses an
+origin. `allowed_origins` understands one wildcard form,
+`https://*.example.com`, for a tenant per subdomain. The shape proxy does not
+forward the sync service's own `access-control-*` headers — which origins may
+read this API is this server's answer, and two values in one header is a response
+a browser refuses.
+
+**When the origins are rows rather than configuration**, start from the generated
+policy and add the predicate:
+
+```go
+origins, err := api.AllowedOrigins()
+if err != nil {
+    return api.Parts{}, err
+}
+p := api.CORS(origins)
+p.AllowOrigin = func(origin string) bool { return tenants.Has(origin) }
+
+return api.Parts{Handler: mux, CORS: &p}, nil
+```
+
+`Parts.CORS` is a pointer because it has three meanings. Nil is the generated
+policy, which is what nearly every project wants. A policy is that policy. And an
+empty `&cors.Policy{}` is *none* — this application wrapped its own, or answers no
+browser.
+
+One pairing to know about: `AllowedOrigins()` reads the environment and rig.yaml
+and cannot see `Hooks.OAuth.WebOrigin`. A deployment that supplies its front
+end's origin in Go rather than in the environment supplies `Parts.CORS` too, or
+`AllowedOrigins()` refuses at startup while naming a variable that deployment was
+never going to set.
+
+**Without a `web:` block, nothing above is emitted** — no `cors.gen.go`, no
+import of `rig/runtime/cors`, no wrapper. `cors.Policy` is still there to use by
+hand for a project that would rather write the lists itself.
 
 ## Testing against a generated client
 
