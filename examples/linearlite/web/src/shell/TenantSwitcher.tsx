@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 
-import type { TenantView } from "../auth/wire.js";
+import type { TenantView } from "@rig-ts/client";
 
-import { createTenant, listTenants, switchTenant } from "../auth/authApi.js";
 import {
     enterTenant,
     enterTenantFromSignIn,
@@ -38,7 +37,8 @@ export function TenantSwitcher() {
     const [name, setName] = useState("");
 
     const refresh = useCallback(() => {
-        listTenants(client.runtime)
+        client.auth
+            .tenants()
             .then(setTenants)
             .catch(() => undefined);
     }, []);
@@ -65,7 +65,8 @@ export function TenantSwitcher() {
         }
         setMoving(to.tenantId);
         try {
-            enterTenant(await switchTenant(client.runtime, to.tenantId), to);
+            await client.auth.switchTenant(to.tenantId);
+            enterTenant(to);
         } catch (err) {
             setMoving(null);
             push({
@@ -86,7 +87,7 @@ export function TenantSwitcher() {
             // the same credential the picker uses before there is a session at
             // all.
             enterTenantFromSignIn(
-                await createTenant(client.runtime, identityToken, wanted),
+                await client.auth.createTenant(identityToken, { name: wanted }),
             );
         } catch (err) {
             setMoving(null);

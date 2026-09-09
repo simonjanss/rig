@@ -128,6 +128,14 @@ rate limit keyed on one is a rate limit an attacker walks around.
 `none` means no `Authorization` header — the request body carries its own proof, or
 there is nothing to prove yet.
 
+Both SDKs cover this whole surface, so a path per call site is not the intended
+way to reach it in either language: `client.Auth` in Go
+([clients.md](clients.md#asking-for-the-whole-tenant)), `client.auth` in
+TypeScript ([clients.md](clients.md#signing-in)). Each method already knows
+which credential its route takes and that the route sits beside the API's base
+path rather than inside it, which are the two things a caller cannot see from
+the table below.
+
 ### Signing in and out
 
 | | credential | notes |
@@ -333,6 +341,12 @@ GET /auth/oauth/google/callback?code=…&state=…
 
 They sit **under the auth base**, so a custom `BasePath` moves them with everything
 else: `/api/auth` puts them at `/api/auth/oauth/{provider}/start`.
+
+A TypeScript front end gets the provider list from
+`client.auth.profile.oauthProviders` and the URL from
+`client.auth.oauthStartUrl("google", {returnTo: "/dashboard"})`, rather than
+writing either down: which providers exist is configuration, and a page that
+hardcodes one is a page that has to be edited to add a second.
 
 Built in: `oauth.Google(id, secret)`, `oauth.Microsoft(id, secret, tenant)`,
 `oauth.GitHub(id, secret)`. The redirect URI is **built, not configured** — derived
@@ -792,7 +806,8 @@ This is the one `/auth/*` endpoint that pages. The rest answer `{"data": […]}`
 because a tenant's keys, invitations and tenants are a handful of rows; a trail is
 millions, so it answers `{"data": […], "pagination": {…}}` with the same three
 members and the same bounds every generated list uses. The generated Go client
-walks it with `Auth.AuditLogAll`.
+walks it with `Auth.AuditLogAll` — or `client.auth.auditLogAll(…)` from a
+browser, which is the same walk.
 
 ### What it does not show
 

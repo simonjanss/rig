@@ -261,3 +261,23 @@ func ExpandLayout(namer *naming.Namer, res *ir.Resource, tmpl string) string {
 		"{tables}", naming.Snake(namer.Plural(table)),
 	).Replace(tmpl)
 }
+
+// CacheBackstop is how long a lost invalidation could go unnoticed, which is the
+// only thing about rig's own caching a client has any business being told.
+//
+// It cannot act on it — the number describes the server's memory, not the
+// client's — and it is in the profile so that somebody reading the generated
+// document can say how quickly a revocation takes effect in the worst case. In
+// the ordinary case the answer is "at once": the invalidation is published on
+// the transaction that revoked something.
+//
+// Here rather than in one client generator because both of them put it in the
+// profile they emit, and two derivations of one number is how the Go and
+// TypeScript SDKs come to describe the same server differently.
+func CacheBackstop(doc *ir.Document) ir.Duration {
+	c := doc.API.Cache
+	if c == nil || !c.Enabled {
+		return 0
+	}
+	return ir.Duration(float64(time.Second) * c.TTLSeconds)
+}

@@ -370,6 +370,17 @@ on its query, which is the same request written the other way.
 first failure — which arrives as the second value of the last pair, so a loop that
 ignores it is a loop that silently stops early.
 
+The TypeScript client says the same thing, on the same routes, with the widening
+as a call option rather than a functional one:
+
+```ts
+await client.auth.sessions({ wide: true }); // needs session.read.all
+
+for await (const entry of client.auth.auditLogAll({}, { wide: true })) {
+    // A failure is thrown where this loop stands, rather than ending it quietly.
+}
+```
+
 ## Sending files
 
 These methods appear on a generated client once your project has a file column.
@@ -545,6 +556,97 @@ const client = createClient({ baseUrl: "" });
 const page = await client.todos.list({ limit: 20 });
 const todo = await client.todos.create({ title: "write it down" });
 ```
+
+### Signing in
+
+`client.auth` is the same surface as Go's `client.Auth`, over the same routes.
+It is there for a project with an `auth:` block and absent for one without, so
+reaching for it in a client that has none is a type error rather than a 404.
+
+```ts
+await client.auth.signIn({
+    emailAddress: "someone@example.com",
+    password,
+    client: "web",
+});
+
+// Everything afterwards carries the session, including the live-sync streams.
+const page = await client.todos.list({ limit: 20 });
+
+await client.auth.logout();
+```
+
+Signing in installs the credential and signing out forgets it, so an application
+does not manage tokens itself. What it does manage is a `Session` of its own
+when it wants the pair to survive a reload:
+
+```ts
+const session = new Session(load()?.tokens ?? {});
+session.onTokens = (tokens) => save(tokens);
+
+const client = createClient({ baseUrl: "", credential: session });
+```
+
+That object survives a sign-out and the sign-in after it — `logout` empties it
+rather than detaching it — so `onTokens` keeps persisting without being
+reattached. The cost is that the first call after signing out fails locally with
+a `NoSessionError` instead of going out bare for a 401, which is the same answer
+without the round trip.
+
+Because the object is reused, each of these calls only acts on the credential it
+went out with. Firing `logout()` without awaiting it is fine: if somebody signs
+in before the answer arrives, the answer is dropped rather than emptying the
+session that sign-in installed. A pair from a password change or a tenant switch
+is treated the same way.
+
+Five of these routes take the *identity* token rather than the session, and take
+it as an argument, because they are the phase before there is a session to take
+one from: the tenant picker somebody lands in when they belong to several
+workspaces, or none yet. They are `myTenants`, `myInvitations`,
+`acceptMyInvitation`, `endIdentitySession` and `createTenant`.
+
+```ts
+const res = await client.auth.signIn({ emailAddress, password, client: "web" });
+if (!res.accessToken) {
+    // No session: they belong to no tenant yet.
+    const waiting = await client.auth.myInvitations(res.identityToken);
+    await client.auth.acceptMyInvitation(res.identityToken, waiting[0].id);
+}
+```
+
+Every route is under the profile's own base path, and every one says so once —
+`Op.root` means "relative to the server", not "relative to the auth mount
+point", and `client.auth` is what holds that difference so a call site does not
+have to.
+
+#### Drawing a sign-in page from the document
+
+`client.auth.profile` carries what `rig.yaml` said, so a page does not hardcode
+facts the configuration already owns — which provider buttons exist, and whether
+registration and tenant creation are open at all.
+
+```tsx
+{client.auth.profile.oauthProviders?.map((name) => (
+    <a key={name} href={client.auth.oauthStartUrl(name, { returnTo: "/" })}>
+        Continue with {name}
+    </a>
+))}
+
+{client.auth.profile.hasRegistration !== false && <Link to="/register">…</Link>}
+```
+
+`oauthStartUrl` is a URL and not a navigation: this package touches no DOM, so a
+caller assigns it. There is no counterpart for the callback, which answers with
+whatever the project's own `OnSignIn` writes.
+
+A route the project does not mount is refused before the request goes out,
+naming the setting that would open it — `register` without
+`auth.allow_registration`, `createTenant` without `auth.allow_tenant_creation`.
+
+> The wire shapes are `runtime/authwire`'s, hand-written on both ends rather
+> than generated, because these are rig's own routes: the same thirty in every
+> project that turns authentication on, with only the profile varying. See
+> [auth.md](auth.md#endpoints-and-what-each-accepts) for what each one accepts.
 
 ### When a call is refused
 
@@ -820,8 +922,8 @@ leaving the stream alone.
 
 A project with `presence: {enabled: true}` gets a third package,
 `@rig-ts/presence`. It is not a generated one — no generator writes it — and it
-mirrors the hand-written `/presence` routes the way `web/src/auth` mirrors
-`/auth/*` in every rig front end.
+mirrors the hand-written `/presence` routes the way `client.auth` covers
+`/auth/*`.
 
 ```tsx
 import { createPresence } from "@rig-ts/presence";

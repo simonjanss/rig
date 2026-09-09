@@ -26,6 +26,12 @@ func (e *emitter) clientFile() (gen.Artifact, error) {
 	runtime := b.Import(e.cfg.ClientImport, "Runtime")
 	config := b.ImportType(e.cfg.ClientImport, "Config")
 
+	// A value import, not a type one: the client constructs it.
+	var authType string
+	if e.doc.API.Auth != nil {
+		authType = b.Import(e.cfg.ClientImport, "Auth")
+	}
+
 	b.Comment("The prefix every route sits under.\n\n" +
 		"The document's, not a setting: a client that could be pointed at a " +
 		"different one would be a client for a different API.")
@@ -58,6 +64,15 @@ func (e *emitter) clientFile() (gen.Artifact, error) {
 	b.Comment("The transport underneath, for a request this client has no method " +
 		"for — and for the live-sync collections, which take it.")
 	b.L("readonly runtime: %s;", runtime)
+	if e.doc.API.Auth != nil {
+		b.Comment("Signing in and out, tenants, sessions, invitations and keys.\n\n" +
+			"rig's own endpoints rather than this schema's, which is why they are " +
+			"not grouped under a resource: they are the same routes with the same " +
+			"bodies in every project that turns authentication on, and only the " +
+			"profile below varies. `auth.profile` is what a sign-in page should " +
+			"read rather than hardcoding which providers exist.")
+		b.L("readonly auth: %s;", authType)
+	}
 	for _, res := range resources {
 		b.Comment(describe(e.resourceDoc(res), res.Name+"."))
 		b.L("readonly %s: %s;", clientProperty(res), e.ref(b, res.Name+"Client"))
@@ -97,14 +112,7 @@ func (e *emitter) clientFile() (gen.Artifact, error) {
 	b.L("revision,")
 	b.L("revisionHeader,")
 	if profile := e.doc.API.Auth; profile != nil {
-		b.L("auth: {")
-		b.Indent()
-		b.L("basePath: %s,", tsbuf.Quote(profile.BasePath))
-		b.L("accessTtlMs: %d,", profile.Session.AccessTTL.Duration().Milliseconds())
-		b.L("refreshTtlMs: %d,", profile.Session.RefreshTTL.Duration().Milliseconds())
-		b.L("rotationLeewayMs: %d,", profile.Session.RotationLeeway.Duration().Milliseconds())
-		b.Outdent()
-		b.L("},")
+		e.authProfile(b, profile)
 	}
 	b.Outdent()
 	b.L("});")
@@ -112,6 +120,9 @@ func (e *emitter) clientFile() (gen.Artifact, error) {
 	b.L("return {")
 	b.Indent()
 	b.L("runtime,")
+	if e.doc.API.Auth != nil {
+		b.L("auth: new %s(runtime),", authType)
+	}
 	for _, res := range resources {
 		b.L("%s: %s(runtime),", clientProperty(res),
 			e.refValue(b, "create"+res.Name+"Client"))
@@ -122,6 +133,60 @@ func (e *emitter) clientFile() (gen.Artifact, error) {
 	b.L("}")
 
 	return e.close(b)
+}
+
+// authProfile emits what the document says about authentication.
+//
+// The counterpart to [github.com/simonjanss/rig/internal/gen/goclient]'s
+// AuthProfile, field for field. The two SDKs are told the same things about the
+// same server, which is the point: a sign-in page in a browser needs the
+// provider list and the registration flag rather more than a Go program does,
+// and it was the one that had neither.
+func (e *emitter) authProfile(b *tsbuf.Buf, profile *ir.Auth) {
+	b.L("auth: {")
+	b.Indent()
+	b.L("basePath: %s,", tsbuf.Quote(profile.BasePath))
+	b.L("accessTtlMs: %d,", profile.Session.AccessTTL.Duration().Milliseconds())
+	b.L("refreshTtlMs: %d,", profile.Session.RefreshTTL.Duration().Milliseconds())
+	b.L("rememberTtlMs: %d,", profile.Session.RememberTTL.Duration().Milliseconds())
+	b.L("rotationLeewayMs: %d,", profile.Session.RotationLeeway.Duration().Milliseconds())
+	b.L("identityTtlMs: %d,", profile.Session.IdentityTTL.Duration().Milliseconds())
+
+	// The `cache:` block rather than anything under `auth:`, and zero for a
+	// project that caches neither read — which is the honest answer to "how
+	// stale can this be": not at all.
+	b.L("cacheTtlMs: %d,", genutil.CacheBackstop(e.doc).Duration().Milliseconds())
+
+	if profile.Tenant.Uses(ir.TenantFromHeader) && profile.Tenant.Header != "" {
+		b.L("tenantHeader: %s,", tsbuf.Quote(profile.Tenant.Header))
+	}
+	if profile.Tenant.Uses(ir.TenantFromQuery) && profile.Tenant.Query != "" {
+		b.L("tenantQuery: %s,", tsbuf.Quote(profile.Tenant.Query))
+	}
+
+	// Which routes exist follows from the configuration, the same way the
+	// server's own mounting does. A client that asked for one that is not there
+	// would get a 404 saying only that the URL is wrong.
+	b.L("hasRegistration: %t,", profile.AllowRegistration)
+	b.L("hasTenantCreation: %t,", profile.AllowTenantCreation)
+
+	// Hardcoded for the same reason the Go client hardcodes them: the server
+	// mounts these on wiring in main.go — a non-nil identity manager and apikey
+	// manager — that the document does not carry. auth.New always supplies
+	// both, so this is true of every server rig generates.
+	b.L("hasIdentitySessions: true,")
+	b.L("hasApiKeys: true,")
+
+	if profile.OAuth != nil && len(profile.OAuth.Providers) > 0 {
+		names := make([]string, 0, len(profile.OAuth.Providers))
+		for _, p := range profile.OAuth.Providers {
+			names = append(names, tsbuf.Quote(p.Name))
+		}
+		b.L("oauthProviders: [%s],", strings.Join(names, ", "))
+	}
+
+	b.Outdent()
+	b.L("},")
 }
 
 // revision is the date the API surface last changed, or the document's version

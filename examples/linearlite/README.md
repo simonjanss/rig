@@ -120,10 +120,14 @@ Two boundaries are worth reading before copying anything:
   final, is called on the one that is kept. It works in `pnpm build` and is dead
   under `pnpm dev`, which is the worst way round for a bug to be.
 
-The `/auth/*` calls are hand-written in `web/src/auth/` — deliberately, since
-those routes belong to rig and not to this schema, the generated client does
-not cover them; the wire shapes are mirrored from `runtime/authwire`. The
-`/_demo/*` calls in `web/src/outbox/outboxApi.ts` and `web/src/sync/syncApi.ts`
+The `/auth/*` calls go through `client.auth`. Those routes belong to rig rather
+than to this schema, so they are not generated per project — they are the same
+routes in every application that turns authentication on, hand-written once in
+`@rig-ts/client` the way `rigclient.Auth` is on the Go side. What is left in
+`web/src/auth/` is the part no SDK can own: which tenant this application is
+showing, and where the identity token lives between signing in and picking one.
+
+The `/_demo/*` calls in `web/src/outbox/outboxApi.ts` and `web/src/sync/syncApi.ts`
 are hand-written for a different reason: none is about a table. The outbox is a
 ring buffer in the server's memory, the tour is a fact about how the binary was
 started, and the sync switch operates a container — so generating a client, a

@@ -3,7 +3,6 @@ import type { FormEvent } from "react";
 import { useState } from "react";
 import { Link } from "react-router";
 
-import { requestPasswordReset } from "../auth/authApi.js";
 import { client } from "../lib/client.js";
 
 /**
@@ -27,7 +26,7 @@ export function ForgotPasswordPage() {
         e.preventDefault();
         setBusy(true);
         try {
-            await requestPasswordReset(client.runtime, email);
+            await client.auth.requestPasswordReset(email);
         } catch {
             // Swallowed on purpose, and not merely unhandled: the screen says
             // the same thing either way, so there is nothing to report — see

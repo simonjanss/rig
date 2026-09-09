@@ -3,14 +3,9 @@ import type { FormEvent } from "react";
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router";
 
-import type { InvitationToMe } from "../auth/wire.js";
+import type { InvitationToMeView } from "@rig-ts/client";
 
 import { useAuth } from "../auth/AuthContext.js";
-import {
-    acceptInvitation,
-    createTenant,
-    myInvitations,
-} from "../auth/authApi.js";
 import { client } from "../lib/client.js";
 
 /**
@@ -23,7 +18,7 @@ import { client } from "../lib/client.js";
 export function TenantPickerPage() {
     const { identityToken, signedIn, signOut } = useAuth();
     const navigate = useNavigate();
-    const [invitations, setInvitations] = useState<InvitationToMe[] | null>(
+    const [invitations, setInvitations] = useState<InvitationToMeView[] | null>(
         null,
     );
     const [name, setName] = useState("");
@@ -32,7 +27,8 @@ export function TenantPickerPage() {
 
     useEffect(() => {
         if (!identityToken) return;
-        myInvitations(client.runtime, identityToken)
+        client.auth
+            .myInvitations(identityToken)
             .then(setInvitations)
             .catch((err: unknown) =>
                 setError(err instanceof Error ? err.message : String(err)),
@@ -46,11 +42,9 @@ export function TenantPickerPage() {
         setBusy(true);
         setError(null);
         try {
-            const res = await acceptInvitation(
-                client.runtime,
-                identityToken,
-                id,
-            );
+            // The picker's route, which names the invitation by identifier —
+            // not the one that redeems an emailed token.
+            const res = await client.auth.acceptMyInvitation(identityToken, id);
             signedIn(res);
             void navigate("/");
         } catch (err) {
@@ -65,7 +59,7 @@ export function TenantPickerPage() {
         setBusy(true);
         setError(null);
         try {
-            const res = await createTenant(client.runtime, identityToken, name);
+            const res = await client.auth.createTenant(identityToken, { name });
             signedIn(res);
             void navigate("/");
         } catch (err) {

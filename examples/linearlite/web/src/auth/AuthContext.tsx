@@ -2,29 +2,12 @@ import type { ReactNode } from "react";
 
 import { createContext, useCallback, useContext, useState } from "react";
 
-import type { TokenPair } from "@rig-ts/client";
+import type { SignInResponse, TenantView } from "@rig-ts/client";
 
-import type { SignInResponse, TenantView } from "./wire.js";
 import type { StoredTenant } from "../lib/storage.js";
 
 import { client, session } from "../lib/client.js";
 import { clear, load, update } from "../lib/storage.js";
-import { logout as apiLogout } from "./authApi.js";
-
-/** The pair alone, out of a response that carries more. */
-function pairOf(res: SignInResponse): TokenPair {
-    return {
-        ...(res.accessToken !== undefined && { accessToken: res.accessToken }),
-        ...(res.refreshToken !== undefined && {
-            refreshToken: res.refreshToken,
-        }),
-        ...(res.expiresAt !== undefined && { expiresAt: res.expiresAt }),
-        ...(res.refreshExpiresAt !== undefined && {
-            refreshExpiresAt: res.refreshExpiresAt,
-        }),
-        ...(res.sessionId !== undefined && { sessionId: res.sessionId }),
-    };
-}
 
 /**
  * The three states a visitor can be in, derived from what survived in storage:
@@ -81,7 +64,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 accountId: current.accountId,
                 role: current.role,
             };
-            session.replace(pairOf(res));
+            // The credential is already installed: client.auth.signIn and its
+            // siblings do that. What is left is what no SDK can know — which
+            // tenant this application should show.
             update((s) => {
                 s.tenant = tenant;
                 s.identity = {
@@ -115,10 +100,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const signOut = useCallback(() => {
         // Best effort: the point is the local state, and a server that cannot
-        // be reached must not trap somebody signed in.
-        void apiLogout(client.runtime).catch(() => undefined);
+        // be reached must not trap somebody signed in. A call that lands
+        // forgets the credential itself; this clears it either way.
+        void client.auth.logout().catch(() => undefined);
         clear();
-        session.replace({});
+        // reset rather than replace: replace keeps a refresh token the argument
+        // did not carry, which for an empty pair means signing out leaves a
+        // working one behind.
+        session.reset({});
         setState({ phase: "anonymous", identityToken: null, tenant: null });
     }, []);
 
@@ -136,33 +125,17 @@ export function useAuth(): AuthState {
 }
 
 /**
- * Take a fresh pair for a session already in progress.
- *
- * Two endpoints answer with one: changing a password, which revokes every
- * session the identity had and hands back a replacement for the one that
- * asked, and switching tenant. It has to reach both the credential in memory
- * and storage — a pair that only reached memory is a sign-out on the next
- * reload.
- */
-export function adoptPair(pair: TokenPair): void {
-    session.replace(pair);
-    update((s) => {
-        s.tokens = pair;
-    });
-}
-
-/**
  * Enter the tenant a sign-in answered with, which is what creating one is.
  *
  * A new workspace comes back as a whole SignInResponse rather than a pair,
- * because the account in it did not exist a moment ago either. The pair is
- * picked out of it rather than the response being stored as one: it carries an
- * identity token too, and that does not belong in the session's slot.
+ * because the account in it did not exist a moment ago either. Which of the
+ * tenants it names is the current one is the only part left to read: the
+ * credential inside it was installed by the call that returned it.
  */
 export function enterTenantFromSignIn(res: SignInResponse): void {
     const current = res.tenants.find((t) => t.current) ?? res.tenants[0];
     if (!current) return;
-    enterTenant(pairOf(res), current);
+    enterTenant(current);
 }
 
 /**
@@ -170,13 +143,13 @@ export function enterTenantFromSignIn(res: SignInResponse): void {
  * are cached by runtime and not by credential, and a reload is the one
  * discard-everything the cache cannot get wrong.
  *
- * The pair is all the endpoint answers with — a switch produces a new session
- * for the same person somewhere else, not a new sign-in — so the tenant that
- * was asked for is what names it here.
+ * It takes the tenant and not the pair. A switch answers with a pair and
+ * nothing else — a new session for the same person somewhere else — and
+ * `client.auth.switchTenant` has already handed it to the credential, and the
+ * credential to storage. What the endpoint cannot say is which tenant was
+ * asked for, which is what this is.
  */
-export function enterTenant(pair: TokenPair, tenant: TenantView): void {
-    if (!pair.accessToken) return;
-    adoptPair(pair);
+export function enterTenant(tenant: TenantView): void {
     update((s) => {
         s.tenant = {
             tenantId: tenant.tenantId,
