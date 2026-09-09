@@ -826,6 +826,25 @@ describe("provider sign-in", () => {
         );
     });
 
+    it("carries the remember-me box this flow has nowhere to draw", () => {
+        const { auth } = harness([], profile);
+
+        expect(auth.oauthStartUrl("google", { remember: true })).toBe(
+            "https://api.example.com/auth/oauth/google/start?remember=1",
+        );
+        expect(auth.oauthStartUrl("google", { remember: false })).toBe(
+            "https://api.example.com/auth/oauth/google/start?remember=0",
+        );
+        expect(
+            auth.oauthStartUrl("google", {
+                returnTo: "/board",
+                remember: true,
+            }),
+        ).toBe(
+            "https://api.example.com/auth/oauth/google/start?returnTo=%2Fboard&remember=1",
+        );
+    });
+
     it("moves with the base path", () => {
         const { auth } = harness([], { ...profile, basePath: "/identity" });
 

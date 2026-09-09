@@ -143,15 +143,31 @@ export class Auth {
      * with `oauth.allowed_return_to`: an open redirect is the classic mistake
      * here, so a value it does not allow is refused rather than followed.
      *
+     * `remember` is the checkbox this flow has nowhere to draw. A provider
+     * sign-in is a link out and a redirect back, with no form in between, so
+     * the request is made here and carried across the round trip in the signed
+     * state cookie. It needs no allow-list, because the two lengths it chooses
+     * between are both ones the server configured.
+     *
      * There is no counterpart for the callback. It answers with whatever the
      * project's own `OnSignIn` writes, which this package cannot type.
      */
-    oauthStartUrl(provider: string, opts: { returnTo?: string } = {}): string {
+    oauthStartUrl(
+        provider: string,
+        opts: { returnTo?: string; remember?: boolean } = {},
+    ): string {
         const path = this.path(`/oauth/${pathValue(provider)}/start`);
-        const query =
-            opts.returnTo === undefined
-                ? ""
-                : `?${new URLSearchParams({ returnTo: opts.returnTo })}`;
+        const params = new URLSearchParams();
+        if (opts.returnTo !== undefined) {
+            params.set("returnTo", opts.returnTo);
+        }
+        if (opts.remember !== undefined) {
+            // Spelled out rather than String(boolean), because the server reads
+            // it with Go's ParseBool and an unreadable value is false — a
+            // silent short session rather than an error anybody would see.
+            params.set("remember", opts.remember ? "1" : "0");
+        }
+        const query = params.size === 0 ? "" : `?${params}`;
         return `${this.rt.origin}${path}${query}`;
     }
 

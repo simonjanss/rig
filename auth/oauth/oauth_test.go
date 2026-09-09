@@ -1358,3 +1358,57 @@ func (r *recorder) of(event string) []authlog.Entry {
 	}
 	return out
 }
+
+// Remember-me for a flow with no form to put a box on.
+//
+// It travels the way returnTo does: read at the start, sealed into the state
+// cookie, read back at the callback — because the callback URL is registered
+// with the provider and fixed, so a query parameter that was there on the way
+// out is gone on the way back. Safe to seal rather than re-read for the reason
+// the tenant is: the cookie is signed, so what comes back is what went out.
+func TestRememberSurvivesTheRoundTrip(t *testing.T) {
+	t.Parallel()
+
+	f := setup(t, oauth.Profile{
+		Subject: "subject-1", EmailAddress: "ada@example.com",
+		EmailVerified: true, DisplayName: "Ada",
+	}, func(c *oauth.Config) { c.AllowProvisioning = true })
+
+	f.signIn(t, "?remember=1")
+	if f.signedIn == nil {
+		t.Fatal("the sign-in should have completed")
+	}
+	if !f.signedIn.Remember {
+		t.Error("the long-session request should have reached the ending")
+	}
+}
+
+// The two ways of not asking, and neither is a refusal.
+//
+// Unlike returnTo, this parameter cannot be abused — the worst it can ask for is
+// a session length the application configured — so an unreadable value is read
+// as false rather than answered with a text/plain dead end in front of somebody
+// who has just clicked a button.
+func TestRememberDefaultsToFalseRatherThanRefusing(t *testing.T) {
+	t.Parallel()
+
+	for _, query := range []string{"", "?remember=", "?remember=perhaps", "?remember=0"} {
+		t.Run("start"+query, func(t *testing.T) {
+			f := setup(t, oauth.Profile{
+				Subject: "subject-1", EmailAddress: "ada@example.com",
+				EmailVerified: true, DisplayName: "Ada",
+			}, func(c *oauth.Config) { c.AllowProvisioning = true })
+
+			res := f.signIn(t, query)
+			if res.StatusCode != http.StatusNoContent {
+				t.Fatalf("status %d, want the sign-in to have completed", res.StatusCode)
+			}
+			if f.signedIn == nil {
+				t.Fatal("the sign-in should have completed")
+			}
+			if f.signedIn.Remember {
+				t.Errorf("%q should not ask for a long session", query)
+			}
+		})
+	}
+}

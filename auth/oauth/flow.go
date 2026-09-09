@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -53,8 +54,18 @@ type pending struct {
 	// StateTTL, and a cookie sealed by an older binary has to keep opening on a
 	// newer one. [Handler.callback] reads an empty string as nil for the same
 	// reason, from the other side.
-	Tenant  string `json:"t"`
-	Expires int64  `json:"e"`
+	Tenant string `json:"t"`
+	// Remember is the long-session request, carried for the reason the tenant
+	// is: the callback URL is fixed, so a query parameter that was there on the
+	// way out is gone on the way back.
+	//
+	// With omitempty, where [pending.Tenant] deliberately has none — and the
+	// difference is worth knowing before copying either. That field's hazard was
+	// about changing an existing one whose meaning was moving; this is a new
+	// bool, and a cookie sealed before it existed opens with it false, which is
+	// exactly what a sign-in that predates the feature asked for.
+	Remember bool  `json:"m,omitempty"`
+	Expires  int64 `json:"e"`
 }
 
 // start sends somebody to the provider.
@@ -90,6 +101,14 @@ func (h *Handler) start(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// The remember-me box, for a flow that has no form to put one on. Unlike
+	// returnTo it needs no allow-list and gets no refusal: an unchecked returnTo
+	// is an open redirect, and the worst this can ask for is a session length
+	// the application already configured in RememberTTL. Absent, empty and
+	// unreadable all mean false — the alternative is a text/plain dead end in
+	// front of somebody who just clicked a button, over a checkbox.
+	remember, _ := strconv.ParseBool(r.URL.Query().Get("remember"))
+
 	state, err := randomString()
 	if err != nil {
 		h.fail(w, r, &Failure{
@@ -102,7 +121,7 @@ func (h *Handler) start(w http.ResponseWriter, r *http.Request) {
 
 	value, err := h.seal(pending{
 		State: state, Verifier: verifier, Provider: name,
-		ReturnTo: returnTo, Tenant: tenantID.String(),
+		ReturnTo: returnTo, Tenant: tenantID.String(), Remember: remember,
 		Expires: h.now().Add(h.cfg.StateTTL).Unix(),
 	})
 	if err != nil {
@@ -264,7 +283,7 @@ func (h *Handler) callback(w http.ResponseWriter, r *http.Request) {
 	}
 	h.write(r.Context(), done)
 
-	in.ReturnTo = state.ReturnTo
+	in.ReturnTo, in.Remember = state.ReturnTo, state.Remember
 	if err := h.cfg.OnSignIn(w, r, in); err != nil {
 		// The Succeeded entry above stays beside the Failed one this writes, and
 		// the two are not in conflict: the first says the provider answered, the

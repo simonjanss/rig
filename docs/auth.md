@@ -348,7 +348,7 @@ the hot path.
 Two routes, mounted only when `auth.Config.OAuth.Providers` is non-empty.
 
 ```
-GET /auth/oauth/google/start?returnTo=/dashboard
+GET /auth/oauth/google/start?returnTo=/dashboard&remember=1
 → 302 to Google
 
 GET /auth/oauth/google/callback?code=…&state=…
@@ -358,11 +358,20 @@ GET /auth/oauth/google/callback?code=…&state=…
 They sit **under the auth base**, so a custom `BasePath` moves them with everything
 else: `/api/auth` puts them at `/api/auth/oauth/{provider}/start`.
 
+`remember=1` is the "stay signed in" box a provider sign-in has nowhere to draw:
+`/start` is a link, the callback is a redirect, and there is no form in between.
+It buys what it buys a password login — `session.remember_ttl` instead of
+`session.refresh_ttl` — and needs no allow-list, because both of those are
+lengths you configured. Absent, empty, or unreadable all mean no; unlike
+`returnTo`, a value that cannot be read is not refused, because a `text/plain`
+dead end in front of somebody who has just clicked a button is a bad trade for a
+checkbox.
+
 A TypeScript front end gets the provider list from
 `client.auth.profile.oauthProviders` and the URL from
-`client.auth.oauthStartUrl("google", {returnTo: "/dashboard"})`, rather than
-writing either down: which providers exist is configuration, and a page that
-hardcodes one is a page that has to be edited to add a second.
+`client.auth.oauthStartUrl("google", {returnTo: "/dashboard", remember: true})`,
+rather than writing either down: which providers exist is configuration, and a
+page that hardcodes one is a page that has to be edited to add a second.
 
 Built in: `oauth.Google(id, secret)`, `oauth.Microsoft(id, secret, tenant)`,
 `oauth.GitHub(id, secret)`. The redirect URI is **built, not configured** — derived
@@ -376,7 +385,7 @@ exactly.
 HMAC-signed cookie:
 
 ```
-__Host-rig_oauth   {state, verifier, provider, returnTo, expires}
+__Host-rig_oauth   {state, verifier, provider, tenant, returnTo, remember, expires}
 ```
 
 The `__Host-` prefix is a browser-enforced promise: secure, path-scoped to `/`, and

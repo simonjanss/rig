@@ -289,6 +289,15 @@ type SignIn struct {
 	// ReturnTo is where the caller asked to be sent afterwards, already
 	// checked against the allow-list. Empty when none was asked for.
 	ReturnTo string
+	// Remember is the long-session request, from `?remember=` on the start
+	// route and carried across the round trip in the sealed cookie. Feed it to
+	// SignInIdentityInput.Remember, which the default ending does.
+	//
+	// It has no switch of its own, and does not need one: the two lengths it
+	// chooses between are RefreshTTL and RememberTTL, both of which the
+	// application configured. A deployment that does not want long provider
+	// sessions sets them equal and this becomes a no-op.
+	Remember bool
 }
 
 // DefaultStateTTL bounds a sign-in round trip.
