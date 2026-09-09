@@ -221,16 +221,14 @@ belongs nowhere, and accepting an invitation requires being signed in.
 An application that wants every newcomer to land somewhere answers step 2
 itself: `OnRegistered` (under [What you decide](#what-you-decide)) runs inside
 the registration transaction, and its ordinary body is `accounts.Provision`
-with `Invite` set — so the picker the stranger lands in already lists an
-invitation to a starter tenant. The transaction is the point: a hook error
-rolls the whole sign-up back, so there is never an account that half-joined.
+into a starter tenant — usually with `Invite` set, which adds the verification
+link. The transaction is the point: a hook error rolls the whole sign-up back,
+so there is never an account that half-joined.
 
-**The answer follows what the hook did rather than assuming it.** With `Invite`
-set the response is the one above: an invitation is not a membership, so
-`tenants` is empty and there is no session. A hook that provisions *without*
-`Invite` puts somebody in a real tenant, and then step 1 answers the way a login
-does — the tenant list, the one they landed in marked `current`, and a session
-for it:
+**The answer follows what the hook did rather than assuming it.** A hook that
+provisions puts somebody in a real tenant, and then step 1 answers the way a
+login does — the tenant list, the one they landed in marked `current`, and a
+session for it:
 
 ```
 1  POST /auth/register            {emailAddress, displayName, password}
@@ -240,6 +238,19 @@ for it:
 
 Anything else would tell a newcomer they belong nowhere and make them sign in
 again to find the tenant they had just been put in.
+
+**`Invite` does not change that, and the name is the trap.** `Provision` creates
+a live account whether or not it is set; what `Invite` adds is the verification
+link, so somebody brought in by an administrator can confirm the address and set
+a password. It is not a pending membership and there is no row that says
+"invited". So a hook that provisions *with* `Invite` answers exactly as one
+without it does — the difference is a mail, and `GET /auth/me/invitations` lists
+the link rather than a door they are waiting outside.
+
+If what you want is a newcomer who belongs nowhere until they act, do not
+provision them in the hook at all: leave `OnRegistered` nil, and let them accept
+an invitation somebody else left or create a tenant of their own. That is the
+sequence at the top of this section, and it is what happens with no hook.
 
 Accepting sends the invitation's **identifier**, not the token that was emailed.
 Being signed in as the person invited is the *stronger* claim of the two: a token
@@ -1318,12 +1329,13 @@ front, err := api.New(pool, api.Hooks{
 
     // What happens to a stranger who just signed themselves up, inside the
     // transaction that created them — an error rolls the sign-up back. The
-    // ordinary body is Provision with Invite set, so the picker they land in
-    // already has an invitation to a starter tenant waiting. Present only when
-    // allow_registration is set; nil registers the person and nothing else.
+    // ordinary body is Provision into a starter tenant. Present only when
+    // allow_registration is set; nil registers the person and nothing else,
+    // which is what leaves them in the picker.
     //
-    // Leave out Invite and it is a real account rather than an invitation, and
-    // the registration answers with the tenant and a session for it.
+    // Provision creates a live account, so the registration answers with that
+    // tenant and a session for it. Invite adds the verification link; it is not
+    // a pending membership.
     OnRegistered: func(ctx context.Context, accounts *account.Service, in account.Registered) error {
         _, err := accounts.Provision(ctx, account.ProvisionInput{
             TenantID:     starterTenant,

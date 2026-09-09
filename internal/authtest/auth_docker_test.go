@@ -1682,9 +1682,13 @@ func TestLeavingThePicker(t *testing.T) {
 }
 
 // OnRegistered runs inside the transaction that creates a self-registered
-// identity. The canonical body — Provision with Invite — leaves an invitation
-// waiting in the picker the newcomer lands in, and a hook error takes the whole
-// sign-up with it, which only real SQL can prove.
+// identity, and a hook error takes the whole sign-up with it — which only real
+// SQL can prove.
+//
+// The two bodies below answer the same, and that is the point worth pinning.
+// Provision creates a live account whether or not Invite is set; Invite adds
+// the verification link. So both come back with the tenant and a session for
+// it, and the only difference is a mail.
 func TestOnRegisteredOverRealSQL(t *testing.T) {
 	h := setup(t)
 
@@ -1694,7 +1698,7 @@ func TestOnRegisteredOverRealSQL(t *testing.T) {
 			`{"emailAddress":"`+address+`","displayName":"Newcomer","password":"`+goodPassword+`"}`)
 	}
 
-	t.Run("the hook leaves an invitation the picker can accept", func(t *testing.T) {
+	t.Run("the hook leaves a verification link, and an account to use", func(t *testing.T) {
 		h.onRegistered = func(ctx context.Context, accounts *account.Service, in account.Registered) error {
 			_, err := accounts.Provision(ctx, account.ProvisionInput{
 				TenantID:     h.tenant,
@@ -1713,8 +1717,21 @@ func TestOnRegisteredOverRealSQL(t *testing.T) {
 		}
 		var signedUp struct {
 			IdentityToken string `json:"identityToken"`
+			AccessToken   string `json:"accessToken"`
+			Tenants       []struct {
+				TenantID uuid.UUID `json:"tenantId"`
+			} `json:"tenants"`
 		}
 		res.decode(t, &signedUp)
+
+		// Invite is a mail rather than a pending membership, so the answer says
+		// where the hook actually put them.
+		if signedUp.AccessToken == "" {
+			t.Errorf("no session, though Provision made a live account: %s", res.body)
+		}
+		if len(signedUp.Tenants) != 1 || signedUp.Tenants[0].TenantID != h.tenant {
+			t.Errorf("tenants = %s, want the starter tenant", res.body)
+		}
 
 		listed := h.do(t, "GET", "/auth/me/invitations", signedUp.IdentityToken, "")
 		var page struct {

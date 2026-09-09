@@ -66,9 +66,14 @@ func TestOnRegisteredErrorFailsTheSignUp(t *testing.T) {
 	// come back as the hook's own error rather than something laundered.
 }
 
+// The canonical body: provision the newcomer into a starter tenant, with the
+// verification link that lets them confirm the address.
+//
+// What it does *not* do is leave them outside. Provision creates a live account
+// whether or not Invite is set — the link is a mail, not a pending membership —
+// so the registration answers with that tenant and a session for it, exactly as
+// it does without Invite. The name is the only thing that suggests otherwise.
 func TestOnRegisteredCanLeaveAnInvitationWaiting(t *testing.T) {
-	// The canonical body: provision the newcomer into a starter tenant with an
-	// invitation, so the picker they land in has somewhere to go.
 	tenant := uuid.New()
 	f := setupWith(t, func(cfg *account.Config) {
 		cfg.OnRegistered = func(ctx context.Context, accounts *account.Service, in account.Registered) error {
@@ -97,6 +102,14 @@ func TestOnRegisteredCanLeaveAnInvitationWaiting(t *testing.T) {
 	}
 	if invitations[0].TenantID != tenant {
 		t.Errorf("invitation is for %s, not the starter tenant", invitations[0].TenantID)
+	}
+
+	// And they are already in it, which is what Provision did.
+	if res.Session == nil || res.TenantID != tenant {
+		t.Errorf("session = %v in %s, want one in the starter tenant", res.Session, res.TenantID)
+	}
+	if len(res.Tenants) != 1 || res.Tenants[0].TenantID != tenant {
+		t.Errorf("tenants = %v, want the starter tenant", res.Tenants)
 	}
 }
 

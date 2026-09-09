@@ -51,20 +51,24 @@ type Registered struct {
 // and sets no password. This is a stranger signing themselves up, so there is no
 // caller to check and nowhere to put them yet.
 //
-// Ordinarily what comes back is an identity session — the tenant-less
-// credential — and an empty tenant list, because the next thing that happens is
-// a tenant picker: they look at the invitations waiting for them and either
-// accept one or make a tenant of their own. [Config.OnRegistered] with Invite
-// set, which is its documented body, keeps that answer: an invitation is not a
-// membership.
+// With no [Config.OnRegistered], what comes back is an identity session — the
+// tenant-less credential — and an empty tenant list, because the next thing
+// that happens is a tenant picker: they look at the invitations waiting for
+// them and either accept one or make a tenant of their own.
 //
-// A hook that provisions *without* Invite is a different matter, and the answer
-// follows it rather than assuming it. The last step is the same
-// [Service.SignInIdentity] a login and a provider sign-in run, so somebody the
-// hook put in a real tenant comes back with the tenant list, the one they
-// landed in marked, and a session for it — rather than with an empty list
+// With one, the answer follows what it did rather than assuming it. The last
+// step is the same [Service.SignInIdentity] a login and a provider sign-in run,
+// so somebody the hook put in a tenant comes back with the tenant list, the one
+// they landed in marked, and a session for it — rather than with an empty list
 // saying they belong nowhere and a second sign-in to find the tenant they were
 // just put in.
+//
+// That includes the hook's documented body, [Service.Provision] with Invite
+// set, and the name is the reason it is worth saying: Provision creates a live
+// account either way. Invite adds the verification link so the newcomer can
+// confirm the address; it is not a pending membership, and there is no row that
+// says "invited". An application that wants somebody to belong nowhere until
+// they act leaves the hook nil.
 //
 // It runs after the transaction commits, deliberately: it answers with what the
 // hook actually did rather than with an assumption about it, and a session
