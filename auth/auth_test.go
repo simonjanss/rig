@@ -5,6 +5,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -13,7 +14,9 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/simonjanss/rig/auth"
+	"github.com/simonjanss/rig/auth/handoff"
 	"github.com/simonjanss/rig/auth/oauth"
+	"github.com/simonjanss/rig/runtime/authwire"
 	"github.com/simonjanss/rig/runtime/rigerr"
 	"github.com/simonjanss/rig/runtime/throttle"
 )
@@ -342,5 +345,182 @@ func TestTheProviderRoutesGetTheirOwnErrorHook(t *testing.T) {
 	}
 	if to := res.Header().Get("Location"); to != "/login?error=cancelled" {
 		t.Errorf("location = %q, want the sign-in page", to)
+	}
+}
+
+// The failure half of the browser ending, end to end through Mount: a consent
+// screen somebody cancelled is the commonest thing a person actually sees, and
+// without a web origin it is a text/plain page on the API's own host.
+func TestAWebOriginRedirectsARefusalToTheFrontEnd(t *testing.T) {
+	t.Parallel()
+
+	front, err := auth.New(auth.Config{
+		Pool: unconnected(t),
+		OAuth: auth.OAuth{
+			Providers:  []oauth.Provider{oauth.Google("id", "secret")},
+			BaseURL:    "https://api.example.com",
+			SigningKey: bytes.Repeat([]byte("k"), 32),
+			Browser:    &handoff.Config{Origin: "https://app.example.com"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	mux := http.NewServeMux()
+	front.Mount(mux)
+
+	res := httptest.NewRecorder()
+	mux.ServeHTTP(res, httptest.NewRequest(http.MethodGet,
+		"http://api.example.com/auth/oauth/google/callback?error=access_denied", nil))
+
+	if res.Code != http.StatusSeeOther {
+		t.Fatalf("status = %d, want a 303 to the front end: %s", res.Code, res.Body)
+	}
+	// The reason rather than a status code, from the closed set an application
+	// switches on: "you cancelled" is different copy from "something went
+	// wrong", and nine of these are a 400.
+	want := "https://app.example.com/auth/callback?error=cancelled"
+	if to := res.Header().Get("Location"); to != want {
+		t.Errorf("location = %q, want %q", to, want)
+	}
+	// The state cookie is cleared, which is oauth's own doing. What must not be
+	// there is a handoff: there are no tokens to hand over.
+	for _, set := range res.Header().Values("Set-Cookie") {
+		if strings.HasPrefix(set, authwire.HandoffCookie+"=") &&
+			!strings.Contains(set, "Max-Age=0") {
+			t.Errorf("a refused sign-in left a handoff: %s", set)
+		}
+	}
+}
+
+// The two hooks are independent. An application that wrote its own ending has
+// answered where a *successful* sign-in goes, and has said nothing about a
+// consent screen somebody cancelled — which never reaches an ending at all.
+func TestAnOwnEndingKeepsTheFrontEndsFailureRedirect(t *testing.T) {
+	t.Parallel()
+
+	front, err := auth.New(auth.Config{
+		Pool: unconnected(t),
+		OAuth: auth.OAuth{
+			Providers:  []oauth.Provider{oauth.Google("id", "secret")},
+			BaseURL:    "https://api.example.com",
+			SigningKey: bytes.Repeat([]byte("k"), 32),
+			Browser:    &handoff.Config{Origin: "https://app.example.com"},
+			OnSignIn: func(http.ResponseWriter, *http.Request, oauth.SignIn) error {
+				t.Error("the ending ran for a sign-in that never got that far")
+				return nil
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	mux := http.NewServeMux()
+	front.Mount(mux)
+
+	res := httptest.NewRecorder()
+	mux.ServeHTTP(res, httptest.NewRequest(http.MethodGet,
+		"http://api.example.com/auth/oauth/google/callback?error=access_denied", nil))
+
+	want := "https://app.example.com/auth/callback?error=cancelled"
+	if to := res.Header().Get("Location"); to != want {
+		t.Errorf("location = %q, want %q", to, want)
+	}
+}
+
+// And an OnError of its own wins over both, because that is the hook whose
+// whole subject is this.
+func TestAnOwnErrorHookWinsOverTheFrontEnd(t *testing.T) {
+	t.Parallel()
+
+	front, err := auth.New(auth.Config{
+		Pool: unconnected(t),
+		OAuth: auth.OAuth{
+			Providers:  []oauth.Provider{oauth.Google("id", "secret")},
+			BaseURL:    "https://api.example.com",
+			SigningKey: bytes.Repeat([]byte("k"), 32),
+			Browser:    &handoff.Config{Origin: "https://app.example.com"},
+			OnError: func(w http.ResponseWriter, r *http.Request, f *oauth.Failure) {
+				http.Redirect(w, r, "/login?why="+string(f.Reason), http.StatusSeeOther)
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	mux := http.NewServeMux()
+	front.Mount(mux)
+
+	res := httptest.NewRecorder()
+	mux.ServeHTTP(res, httptest.NewRequest(http.MethodGet,
+		"http://api.example.com/auth/oauth/google/callback?error=access_denied", nil))
+
+	if to := res.Header().Get("Location"); to != "/login?why=cancelled" {
+		t.Errorf("location = %q, want the hook's own", to)
+	}
+}
+
+// Two hosts sharing no registrable domain is a deployment where no cookie
+// written here can be read there. It refuses to start, because the alternative
+// is a process that boots and loses every sign-in with nothing in any log.
+func TestNewRefusesAFrontEndTheCookieCannotReach(t *testing.T) {
+	t.Parallel()
+
+	_, err := auth.New(auth.Config{
+		Pool: unconnected(t),
+		OAuth: auth.OAuth{
+			Providers:  []oauth.Provider{oauth.Google("id", "secret")},
+			BaseURL:    "https://api.example.com",
+			SigningKey: bytes.Repeat([]byte("k"), 32),
+			Browser:    &handoff.Config{Origin: "https://app.other.com"},
+		},
+	})
+	if err == nil {
+		t.Fatal("New accepted a front end on an unrelated domain")
+	}
+	for _, want := range []string{"api.example.com", "app.other.com"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("refusal %q does not name %s", err, want)
+		}
+	}
+}
+
+// The front end's origin is where every redirect lands, so it is an allowed
+// destination whether or not the project listed it — and a relative returnTo
+// resolves there rather than against this API.
+func TestTheWebOriginIsAnAllowedReturnTo(t *testing.T) {
+	t.Parallel()
+
+	front, err := auth.New(auth.Config{
+		Pool: unconnected(t),
+		OAuth: auth.OAuth{
+			Providers:  []oauth.Provider{oauth.Google("id", "secret")},
+			BaseURL:    "https://api.example.com",
+			SigningKey: bytes.Repeat([]byte("k"), 32),
+			Browser:    &handoff.Config{Origin: "https://app.example.com"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	mux := http.NewServeMux()
+	front.Mount(mux)
+
+	// A start that names the front end absolutely is accepted rather than
+	// refused as an open redirect, which is what listing it does.
+	res := httptest.NewRecorder()
+	mux.ServeHTTP(res, httptest.NewRequest(http.MethodGet,
+		"http://api.example.com/auth/oauth/google/start?returnTo="+
+			url.QueryEscape("https://app.example.com/welcome"), nil))
+
+	if res.Code != http.StatusFound && res.Code != http.StatusSeeOther {
+		t.Fatalf("status = %d, want a redirect to the provider: %s", res.Code, res.Body)
+	}
+	if to := res.Header().Get("Location"); !strings.Contains(to, "accounts.google.com") {
+		t.Errorf("location = %q, want the provider's", to)
 	}
 }

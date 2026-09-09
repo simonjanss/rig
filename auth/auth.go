@@ -42,6 +42,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/netip"
+	"slices"
 	"strings"
 	"time"
 
@@ -52,6 +53,7 @@ import (
 	"github.com/simonjanss/rig/auth/apikey"
 	"github.com/simonjanss/rig/auth/authhttp"
 	"github.com/simonjanss/rig/auth/authpg"
+	"github.com/simonjanss/rig/auth/handoff"
 	"github.com/simonjanss/rig/auth/oauth"
 	"github.com/simonjanss/rig/auth/password"
 	"github.com/simonjanss/rig/auth/session"
@@ -307,21 +309,49 @@ type OAuth struct {
 	// that already has an account.
 	AllowProvisioning bool
 
-	// AllowedReturnTo are the paths a sign-in may return to. An open redirect
-	// is the classic mistake here.
+	// AllowedReturnTo are the origins a sign-in may return to, each as
+	// scheme://host with nothing after the host. An open redirect is the
+	// classic mistake here.
+	//
+	// A relative path is always allowed and is never matched against this list,
+	// so listing one does nothing. Which origin such a path resolves against is
+	// the ending's decision: the JSON one hands it back untouched, and the
+	// browser one resolves it against [OAuth.Browser]'s origin — which is also
+	// added to this list for you, since that is where its redirects land.
 	AllowedReturnTo []string
 
 	// Insecure allows the state cookie over plain HTTP, for local development
 	// where a browser would refuse the __Host- prefixed one. Never anywhere real.
 	Insecure bool
 
-	// OnSignIn finishes a provider sign-in. Nil issues a session and answers
-	// with the same body a login does, which is [authhttp.Handler.SignIn].
+	// Browser says where the front end is, and selecting it is what makes a
+	// sign-in end in a cookie and a redirect rather than in a JSON body. Nil
+	// keeps the JSON ending.
 	//
-	// A browser flow usually wants a cookie and a redirect instead, and that is
-	// the sort of decision this package cannot make: it depends on whether the
-	// client is a single-page application, a server-rendered one, or a mobile
-	// app catching a deep link.
+	// Setting [OAuth.OnSignIn] as well replaces the ending and keeps the rest:
+	// the failure redirect and the allowed return-to entry still come from
+	// here, because a sign-in cancelled at the consent screen never reaches an
+	// ending and is rig's to answer either way.
+	//
+	// [handoff.Config.APIHost] is filled in from BaseURL when it is empty,
+	// because the two hosts have to be compared before anything can be written
+	// and only one of them is named here.
+	Browser *handoff.Config
+
+	// OnSignIn finishes a provider sign-in, and it is the escape hatch rather
+	// than the only way: nil selects one of two built-in endings.
+	//
+	// Without [OAuth.Browser] that is [authhttp.Handler.SignIn], which issues a
+	// session and answers with the same body a login does — right for curl and
+	// for a native client, and nothing a browser that has just followed a
+	// redirect can act on. With one it is
+	// [authhttp.Handler.SignInToBrowser], which leaves the tokens in a
+	// short-lived cookie and redirects to the front end.
+	//
+	// Setting this beside a Browser is not a conflict and this wins. They are
+	// two questions — where the front end is, which CORS wants to know as well,
+	// and how a sign-in ends — and an application that answers the second one
+	// itself still has the first one worth answering.
 	//
 	// Whichever it is, it has to handle a sign-in with no tenant to land in:
 	// [oauth.SignIn.TenantID] is uuid.Nil whenever [Config.Tenant] answered Nil
@@ -623,6 +653,46 @@ func New(cfg Config) (*Auth, error) {
 
 	if len(cfg.OAuth.Providers) > 0 {
 		signIn := cfg.OAuth.OnSignIn
+		onError := cfg.OAuth.OnError
+		allowedReturnTo := cfg.OAuth.AllowedReturnTo
+
+		if cfg.OAuth.Browser != nil {
+			// A front end somewhere other than this API. One handoff answers
+			// both outcomes, which is what lets the front end have a single
+			// callback route: a cookie and a destination, or the same
+			// destination with a reason on it.
+			browser := *cfg.OAuth.Browser
+			if browser.APIHost == "" {
+				browser.APIHost = cfg.OAuth.BaseURL
+			}
+			to, err := handoff.New(browser)
+			if err != nil {
+				return nil, fmt.Errorf("auth: oauth: %w", err)
+			}
+
+			// The two hooks are filled in independently, because they answer
+			// different questions and an application may well have written one
+			// of them. A project with its own OnSignIn still gets the failure
+			// redirect: a cancelled consent screen is raised before any ending
+			// runs, so leaving it to the application would leave it as
+			// text/plain on the API's own host — the commonest thing a person
+			// actually sees, and the one rig should not have made them handle.
+			if signIn == nil {
+				signIn = endpoints.SignInToBrowser(to)
+			}
+			if onError == nil {
+				onError = func(w http.ResponseWriter, r *http.Request, f *oauth.Failure) {
+					to.Fail(w, r, f.ReturnTo, string(f.Reason))
+				}
+			}
+			// Every redirect either hook writes lands on the front end, so the
+			// origin is allowed whether the project remembered to list it or
+			// not. Appended rather than assumed: a project may list others.
+			if !slices.Contains(allowedReturnTo, to.Origin()) {
+				allowedReturnTo = append(allowedReturnTo, to.Origin())
+			}
+		}
+
 		if signIn == nil {
 			// The same session every other endpoint issues, answered in the same
 			// shape a login is — including when there is no tenant to land in,
@@ -644,7 +714,7 @@ func New(cfg Config) (*Auth, error) {
 			SigningKey:        cfg.OAuth.SigningKey,
 			StateTTL:          cfg.OAuth.StateTTL,
 			Tenant:            tenant,
-			AllowedReturnTo:   cfg.OAuth.AllowedReturnTo,
+			AllowedReturnTo:   allowedReturnTo,
 			AllowProvisioning: cfg.OAuth.AllowProvisioning,
 			Insecure:          cfg.OAuth.Insecure,
 			Log:               stores.Log,
@@ -656,7 +726,7 @@ func New(cfg Config) (*Auth, error) {
 
 			// And a provider sign-in that does not is the one failure in this
 			// package a browser sees as a document rather than as a body.
-			OnError: cfg.OAuth.OnError,
+			OnError: onError,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("auth: oauth: %w", err)

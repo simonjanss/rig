@@ -97,7 +97,11 @@ type fixture struct {
 	log        *recorder
 }
 
-func setup(t *testing.T) *fixture {
+// option changes the handler's configuration before it is built, for the few
+// tests whose subject is a field rather than a route.
+type option func(*authhttp.Config)
+
+func setup(t *testing.T, opts ...option) *fixture {
 	t.Helper()
 
 	c := &clock{at: time.Date(2026, 3, 1, 12, 0, 0, 0, time.UTC)}
@@ -141,7 +145,7 @@ func setup(t *testing.T) *fixture {
 		sessions: sessions, identities: identities, log: log,
 	}
 
-	f.handler, err = authhttp.New(authhttp.Config{
+	cfg := authhttp.Config{
 		Accounts:   accounts,
 		Sessions:   sessions,
 		Identities: identities,
@@ -152,7 +156,12 @@ func setup(t *testing.T) *fixture {
 			g := f.grants[accountID]
 			return g.roles, g.permissions, nil
 		},
-	})
+	}
+	for _, opt := range opts {
+		opt(&cfg)
+	}
+
+	f.handler, err = authhttp.New(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}

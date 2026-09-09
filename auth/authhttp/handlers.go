@@ -14,6 +14,7 @@ import (
 	"github.com/simonjanss/rig/auth/account"
 	"github.com/simonjanss/rig/auth/apikey"
 	"github.com/simonjanss/rig/auth/authlog"
+	"github.com/simonjanss/rig/auth/handoff"
 	"github.com/simonjanss/rig/auth/oauth"
 	"github.com/simonjanss/rig/auth/session"
 	"github.com/simonjanss/rig/runtime/authwire"
@@ -202,7 +203,65 @@ func (h *Handler) resendVerification(w http.ResponseWriter, r *http.Request) {
 // [Config.Sessions] directly. Through [github.com/simonjanss/rig/auth.New] those
 // are the same one.
 func (h *Handler) SignIn(w http.ResponseWriter, r *http.Request, in oauth.SignIn) error {
-	res, err := h.cfg.Accounts.SignInIdentity(r.Context(), account.SignInIdentityInput{
+	res, err := h.signInIdentity(r, in)
+	if err != nil {
+		return err
+	}
+	httpx.WriteJSON(w, http.StatusOK, signInOf(res))
+	return nil
+}
+
+// SignInToBrowser finishes a provider sign-in for a front end that is not this
+// API, by leaving the tokens in a cookie and redirecting to it.
+//
+// It is the other built-in ending, and it is what a single-page application
+// actually needs: [Handler.SignIn]'s body is right for curl and useless to a
+// browser that has just followed a redirect, which can neither read it nor do
+// anything with what it says. [github.com/simonjanss/rig/auth.New] selects this
+// one when a project names a web origin and writes no
+// [github.com/simonjanss/rig/auth/oauth.Config.OnSignIn] of its own.
+//
+// The last step is the same
+// [github.com/simonjanss/rig/auth/account.Service.SignInIdentity] the JSON
+// ending runs — deliberately, and through the same unexported constructor, so
+// that the two endings cannot drift into disagreeing about what a provider
+// sign-in is. Only the answer differs.
+//
+// A refusal is returned rather than redirected here, even though the redirect
+// is what the browser needs. Returning it reaches
+// [github.com/simonjanss/rig/auth/oauth.Config.OnError] through the same path
+// every other failure in the flow takes — and that path writes the
+// OAuthSignIn/Failed entry first. Rendering the redirect here instead would
+// answer the person correctly and cost the audit trail the one record that a
+// provider authenticated somebody this application then turned away.
+// auth.New wires that hook to [handoff.Handoff.Fail].
+func (h *Handler) SignInToBrowser(
+	to *handoff.Handoff,
+) func(w http.ResponseWriter, r *http.Request, in oauth.SignIn) error {
+	return func(w http.ResponseWriter, r *http.Request, in oauth.SignIn) error {
+		res, err := h.signInIdentity(r, in)
+		if err != nil {
+			return err
+		}
+		// Nothing is written until the cookie is built, so a handoff too big
+		// for one is an error with no response behind it — which is what lets
+		// it take the same route as the refusal above.
+		return to.Write(w, r, handoffOf(res), in.ReturnTo)
+	}
+}
+
+// signInIdentity is everything both endings do before they answer.
+//
+// It is a method rather than a helper on the input because of [Config.OnError]'s
+// neighbour, [Config.TrustedProxies]: the address a sign-in is recorded against
+// comes from h.addrString, and a hand-written OnSignIn cannot reach it. A
+// project that wrote its own ending to get a cookie therefore recorded its load
+// balancer's address in the authentication trail — which is the regression
+// having a second built-in ending removes rather than documents.
+func (h *Handler) signInIdentity(
+	r *http.Request, in oauth.SignIn,
+) (account.SignInResult, error) {
+	return h.cfg.Accounts.SignInIdentity(r.Context(), account.SignInIdentityInput{
 		IdentityID: in.Link.IdentityID,
 		// Nil when the sign-in named no tenant, which is exactly what
 		// SignInIdentity reads as "wherever they belong".
@@ -215,11 +274,6 @@ func (h *Handler) SignIn(w http.ResponseWriter, r *http.Request, in oauth.SignIn
 		UserAgent: r.UserAgent(),
 		Method:    in.Provider,
 	})
-	if err != nil {
-		return err
-	}
-	httpx.WriteJSON(w, http.StatusOK, signInOf(res))
-	return nil
 }
 
 func (h *Handler) listSessions(w http.ResponseWriter, r *http.Request) {

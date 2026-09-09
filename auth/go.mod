@@ -5,12 +5,13 @@ go 1.26.6
 require (
 	github.com/google/uuid v1.6.0
 	github.com/simonjanss/rig/runtime v0.5.0
-	golang.org/x/crypto v0.50.0
+	golang.org/x/crypto v0.54.0
+	golang.org/x/net v0.57.0
 )
 
 require (
 	github.com/jackc/puddle/v2 v2.2.2 // indirect
-	golang.org/x/sync v0.20.0 // indirect
+	golang.org/x/sync v0.22.0 // indirect
 )
 
 require (
@@ -18,6 +19,6 @@ require (
 	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect
 	github.com/jackc/pgx/v5 v5.10.0
 	golang.org/x/oauth2 v0.36.0
-	golang.org/x/sys v0.43.0 // indirect
-	golang.org/x/text v0.36.0 // indirect
+	golang.org/x/sys v0.47.0 // indirect
+	golang.org/x/text v0.40.0 // indirect
 )

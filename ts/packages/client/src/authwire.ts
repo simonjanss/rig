@@ -115,6 +115,26 @@ export type SignInResponse = TokenPair & {
     tenants: TenantView[];
 };
 
+/**
+ * What the handoff cookie a browser sign-in leaves holds: a
+ * {@link SignInResponse} without the tenants.
+ *
+ * The list is left out because a cookie is limited to about four kilobytes and a
+ * person in thirty tenants would silently exceed it. `identityToken` fetches the
+ * same list from `GET <base>/tenants`, which is the call the picker makes
+ * anyway.
+ *
+ * The cookie's value is base64url of this shape's JSON. `takeHandoff` reads it.
+ */
+export type Handoff = TokenPair & {
+    /**
+     * Always present, even for somebody who belongs to no tenant yet — they
+     * arrive with this and no pair.
+     */
+    identityToken: string;
+    identityExpiresAt: string;
+};
+
 /** The body of `POST <base>/login`. */
 export type LoginRequest = {
     emailAddress: string;
