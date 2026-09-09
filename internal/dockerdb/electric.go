@@ -2,6 +2,7 @@ package dockerdb
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -81,6 +82,9 @@ type Electric struct {
 	cfg     ElectricConfig
 	runtime Runtime
 	port    int
+	// retryDelay is create's wait between attempts, open for the same reason
+	// [DB.retryDelay] is.
+	retryDelay func(attempt int) time.Duration
 }
 
 // StartElectric brings the sync service up and waits until it reports its
@@ -163,9 +167,7 @@ func (e *Electric) mismatch(s *containerState) string {
 func (e *Electric) create(ctx context.Context) error {
 	e.logf("creating container %s (%s)\n", e.cfg.Name, e.cfg.Image)
 
-	_, err := e.runtime.Run(ctx,
-		"run", "--detach",
-		"--name", e.cfg.Name,
+	err := creator{rt: e.runtime, log: e.cfg.Log, delay: e.retryDelay}.create(ctx, e.cfg.Name,
 		"--publish", Publish("127.0.0.1", e.cfg.Port, ElectricSyncPort),
 		// The service reaches Postgres through the host: the database publishes
 		// on a host port, and naming the host is what works on every engine
@@ -198,6 +200,14 @@ func (e *Electric) create(ctx context.Context) error {
 		e.cfg.Image,
 	)
 	if err != nil {
+		// The port is worth naming for the same reason [DB.create] names the
+		// database's: a configured one is somebody's to move, and one the
+		// engine chose under isolation is not.
+		if e.cfg.Port != 0 && errors.Is(err, ErrPortInUse) {
+			return fmt.Errorf("cannot start the sync-service container on port %d: "+
+				"something else is holding it, and database.electric.port in rig.yaml is where to move it: %w",
+				e.cfg.Port, err)
+		}
 		return fmt.Errorf("cannot start the sync-service container: %w", err)
 	}
 	return nil

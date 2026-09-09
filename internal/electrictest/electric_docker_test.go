@@ -18,6 +18,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"os/exec"
 	"runtime"
 	"strings"
@@ -109,8 +110,15 @@ func start() (*pgxpool.Pool, string, error) {
 
 	// The sync service reaches Postgres over the container network, so it needs
 	// the host's address rather than the loopback the test uses.
-	out, err := exec.Command("docker", "run", "--detach",
-		"--name", sync,
+	//
+	// Through dockerdb.Create rather than exec.Command, for the retry: under
+	// isolation this publish is the engine's port to choose, and it sometimes
+	// chooses one the kernel has already given away.
+	//
+	// On the database's engine, which is the one this suite is already talking
+	// to: asking for a second would probe for it again and could answer podman
+	// where everything else here says docker.
+	if err := dockerdb.Create(ctx, db.Runtime(), os.Stderr, sync,
 		"--publish", dockerdb.Publish("127.0.0.1", syncPort, 3000),
 		"--add-host", "host.docker.internal:host-gateway",
 		// The port the database really publishes, which under isolation is not
@@ -119,9 +127,8 @@ func start() (*pgxpool.Pool, string, error) {
 		"--env", fmt.Sprintf("DATABASE_URL=postgresql://rig:rig@host.docker.internal:%d/rig?sslmode=disable", db.Port()),
 		"--env", "ELECTRIC_INSECURE=true",
 		"electricsql/electric:1.6.9",
-	).CombinedOutput()
-	if err != nil {
-		return nil, "", fmt.Errorf("start the sync service: %w\n%s", err, out)
+	); err != nil {
+		return nil, "", fmt.Errorf("start the sync service: %w", err)
 	}
 
 	published, err := dockerdb.PortOf(ctx, "docker", sync)

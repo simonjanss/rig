@@ -25,6 +25,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"os/exec"
 	"strings"
 	"testing"
@@ -227,17 +228,17 @@ func TestTheSyncServiceRunsAsTheLeastPrivilegedRole(t *testing.T) {
 	// there first is the only arrangement that answers both.
 
 	// Step four: the sync service, as the role rather than as the superuser.
-	out, err := exec.Command("docker", "run", "--detach",
-		"--name", sync,
+	// Through dockerdb.Create for the retry it brings, on the database's own
+	// engine, as in the suite next door.
+	if err := dockerdb.Create(ctx, db.Runtime(), os.Stderr, sync,
 		"--publish", dockerdb.Publish("127.0.0.1", roleSyncPort, 3000),
 		"--add-host", "host.docker.internal:host-gateway",
 		"--env", "DATABASE_URL="+dsn,
 		"--env", "ELECTRIC_INSECURE=true",
 		"--env", "ELECTRIC_MANUAL_TABLE_PUBLISHING=true",
 		"electricsql/electric:1.6.9",
-	).CombinedOutput()
-	if err != nil {
-		t.Fatalf("start the sync service: %v\n%s", err, out)
+	); err != nil {
+		t.Fatalf("start the sync service: %v", err)
 	}
 
 	published, err := dockerdb.PortOf(ctx, "docker", sync)

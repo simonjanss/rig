@@ -17,6 +17,12 @@ package dockerdb
 // isolate.go, where a port from this list becomes a request rather than a
 // requirement.
 //
+// They also do nothing about a process that is not rig's. The whole block sits
+// inside the ephemeral range Linux hands to outbound connections (32768–60999),
+// so a number here can be taken before a suite asks for it — which is why
+// create.go retries a container the engine could not publish, on this path as
+// much as on the isolated one.
+//
 // The examples are the exception and are listed rather than used: each one's
 // port lives in its own rig.yaml and main.go, in a module that cannot import
 // this one. They are named here so the numbers are still allocated from one

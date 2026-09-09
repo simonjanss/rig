@@ -191,16 +191,37 @@ func startMinIO() (string, error) {
 	// reason, and a lifecycle rule left behind would make one fail for one.
 	_ = exec.Command(bin, "rm", "-f", "-v", name).Run()
 
-	out, err := exec.Command(bin, "run", "--detach",
-		"--name", name,
-		"--publish", publish(minioPort, 9000),
-		"--env", "MINIO_ROOT_USER="+minioUser,
-		"--env", "MINIO_ROOT_PASSWORD="+minioSecret,
-		minioImage,
-		"server", "/data",
-	).CombinedOutput()
-	if err != nil {
-		return "", fmt.Errorf("start the object store: %w\n%s", err, out)
+	// Retried, because under isolation the port above is the engine's to pick
+	// and it picks without asking the kernel — see internal/dockerdb/create.go,
+	// which is the original this borrows along with the two ideas at the top of
+	// the file. A run that reached the network leaves the name taken, so each
+	// attempt removes it first.
+	const attempts = 5
+	var runErr error
+	for attempt := range attempts {
+		var out []byte
+		out, runErr = exec.Command(bin, "run", "--detach",
+			"--name", name,
+			"--publish", publish(minioPort, 9000),
+			"--env", "MINIO_ROOT_USER="+minioUser,
+			"--env", "MINIO_ROOT_PASSWORD="+minioSecret,
+			minioImage,
+			"server", "/data",
+		).CombinedOutput()
+		if runErr == nil {
+			break
+		}
+		runErr = fmt.Errorf("%w\n%s", runErr, out)
+		if !portInUse(string(out)) {
+			return "", fmt.Errorf("start the object store: %w", runErr)
+		}
+		_ = exec.Command(bin, "rm", "-f", "-v", name).Run()
+		if attempt < attempts-1 {
+			time.Sleep(time.Duration(250<<min(attempt, 3)) * time.Millisecond)
+		}
+	}
+	if runErr != nil {
+		return "", fmt.Errorf("start the object store, after %d attempts: %w", attempts, runErr)
 	}
 
 	port, err := publishedPort(bin, name)
@@ -225,6 +246,26 @@ func runtimeBin() (string, error) {
 		}
 	}
 	return "", fmt.Errorf("no container engine found; this suite needs docker or podman")
+}
+
+// portInUse reports whether the engine's output is it refusing to publish
+// because it could not have the host port. The list is dockerdb's, kept short:
+// what matters is that the wording differs per engine and a substring is the
+// only thing there is to match on.
+func portInUse(out string) bool {
+	msg := strings.ToLower(out)
+	for _, s := range []string{
+		"address already in use",
+		"address in use",
+		"port is already allocated",
+		"ports are not available",
+		"failed to bind port",
+	} {
+		if strings.Contains(msg, s) {
+			return true
+		}
+	}
+	return false
 }
 
 // qualify keeps this checkout's container away from another checkout's, by
