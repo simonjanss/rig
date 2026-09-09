@@ -305,8 +305,9 @@ The routes read no claims and check no permission. What the document says is wha
 every generated client was built against, and a specification nobody may fetch is
 one nobody can use. To gate it, leave `serve` off and mount
 [`runtime/apidoc`](services.md#serving-the-openapi-document) yourself behind
-whatever you gate the rest with — that is also where the CORS header goes if a
-viewer on another origin has to read it.
+whatever you gate the rest with. A viewer on another origin is a different
+question, answered for the whole API rather than for these two routes — see
+[Cross-origin](clients.md#cross-origin).
 
 Both routes carry an `ETag` over the document's content and answer `304` to a
 matching `If-None-Match`, so polling for a change costs a request and no body.

@@ -857,10 +857,11 @@ func (p *Proxy) Serve(w http.ResponseWriter, r *http.Request, s Shape) {
 	defer res.Body.Close()
 
 	// The electric-* headers carry the cursor the client needs to resume, so
-	// dropping them would end the subscription after one response.
+	// dropping them would end the subscription after one response. The
+	// Access-Control-* ones are the exception the other way: see isCORSHeader.
 	out := w.Header()
 	for name, values := range res.Header {
-		if isHopHeader(name) {
+		if isHopHeader(name) || isCORSHeader(name) {
 			continue
 		}
 		for _, v := range values {
@@ -1205,3 +1206,19 @@ func (p *Proxy) request(ctx context.Context, r *http.Request, s Shape) (*http.Re
 }
 
 func isHopHeader(name string) bool { return hopHeaders[http.CanonicalHeaderKey(name)] }
+
+// isCORSHeader reports an Access-Control-* header, which is the sync service's
+// answer to a question that was asked of this server.
+//
+// The sync service puts access-control-allow-origin on every response — the
+// caller's Origin echoed back, or * when there was none, and this proxy sends
+// it none — and forwarding that would make two statements about who may read
+// this API: the sync service's "anybody", and whatever this server's own policy
+// says. Beside a policy that names the front end, a shape response would carry
+// two values in one header, which a browser refuses outright; with no policy at
+// all, the shape routes alone would be readable from any origin while the rest
+// of the API is not. Which origins may read this API is decided once, in front
+// of the whole handler, and nothing upstream gets a vote.
+func isCORSHeader(name string) bool {
+	return strings.HasPrefix(http.CanonicalHeaderKey(name), "Access-Control-")
+}

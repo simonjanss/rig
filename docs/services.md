@@ -268,8 +268,10 @@ INFO serving the OpenAPI document at="[/api/v1/openapi.json /api/v1/openapi.yaml
 ```
 
 `rig/runtime/apidoc` is what does the serving, and it is directly usable: leave
-`serve` off and mount it yourself when the routes need a credential, a CORS
-header, or a path of their own.
+`serve` off and mount it yourself when the routes need a credential or a path of
+their own. A CORS header is not a reason to: which origins may read this API is a
+question about the whole API, and `rig/runtime/cors` answers it on the handler —
+see [Cross-origin](clients.md#cross-origin).
 
 ```go
 //go:embed docs/openapi.gen.json docs/openapi.gen.yaml

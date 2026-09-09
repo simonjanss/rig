@@ -371,12 +371,18 @@ func TestAURLIsRequired(t *testing.T) {
 // TE is the case worth having. Go canonicalizes it to "Te" in the header map, so
 // a set keyed by the spelling in the RFC would let it through and nothing else
 // would notice.
+//
+// The sync service's Access-Control-* headers stop here too, for a different
+// reason: which origins may read this API is this server's decision, made once
+// in front of the whole handler, and forwarding the sync service's "anybody"
+// beside it would put two values in one header — which a browser refuses.
 func TestHopHeadersAreNotForwardedAndTheCursorIs(t *testing.T) {
 	t.Parallel()
 
 	hop := []string{
 		"Connection", "Proxy-Connection", "Keep-Alive", "TE",
 		"Upgrade", "Proxy-Authenticate", "Proxy-Authorization",
+		"Access-Control-Allow-Origin", "Access-Control-Expose-Headers",
 	}
 	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		for _, h := range hop {
@@ -396,7 +402,7 @@ func TestHopHeadersAreNotForwardedAndTheCursorIs(t *testing.T) {
 
 	for _, h := range hop {
 		if got := res.Header.Get(h); got != "" {
-			t.Errorf("%s = %q, want it dropped: it is per-connection", h, got)
+			t.Errorf("%s = %q, want it dropped: it is the sync service's business, not the subscriber's", h, got)
 		}
 	}
 	if got := res.Header.Get("electric-handle"); got != "the-handle" {

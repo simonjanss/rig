@@ -230,8 +230,13 @@ func writeMustRefetch(w http.ResponseWriter) {
 	h.Set("electric-handle", nextFallbackHandle())
 	// The one header a cross-origin subscriber has to be able to read here, and
 	// the sync service's own responses are what usually say so. This response
-	// never went near it.
-	h.Set("Access-Control-Expose-Headers", "electric-handle")
+	// never went near it. Only when nothing in front of this proxy has answered
+	// already: a policy wrapped around the whole API lists this header among
+	// the others it exposes, and replacing its list with one entry would hide
+	// everything else on it.
+	if h.Get("Access-Control-Expose-Headers") == "" {
+		h.Set("Access-Control-Expose-Headers", "electric-handle")
+	}
 	h.Set("Cache-Control", "no-store")
 	// So a network tab can tell this from the sync service's own 409, which is
 	// the same status for a different reason.

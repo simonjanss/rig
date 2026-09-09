@@ -693,18 +693,52 @@ would have sent, and an `int8` to a `number` rather than a BigInt.
 rig serves the shape routes from the same mux as the rest of the API, and
 same-origin is what everything above assumes.
 
-A front end on a different origin needs two things from whatever sits in front
-of the server. `Authorization` is not a CORS-safelisted header, so a stream's GET
-becomes a preflighted request that has to be allowed. And the sync protocol's
-cursor travels in response headers, so those have to be exposed:
+A front end on a different origin needs the API to answer CORS, and
+`rig/runtime/cors` is what answers it. A `Policy` names the origins that may call
+and what the exchange may use, and wraps the handler your build function
+returns — the whole handler, because which origins may read this API is a
+decision about the API, and a policy with a route left out is a hole only a
+browser finds. rig's probes are answered outside whatever you return, so a
+readiness check every second does not pay for it.
 
-```
-Access-Control-Expose-Headers: electric-handle, electric-offset, electric-schema, electric-cursor
+```go
+policy := cors.Policy{
+    AllowedOrigins: []string{"https://app.example.com"},
+    AllowedMethods: []string{"GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "QUERY", "OPTIONS"},
+    AllowedHeaders: []string{
+        "Authorization", "Content-Type", "Accept", "Idempotency-Key", "If-None-Match",
+        api.TenantHeader, api.RevisionHeader, api.RequestIDHeader,
+    },
+    ExposedHeaders: []string{
+        api.RevisionHeader, "Retry-After", "RateLimit-Limit", "RateLimit-Remaining", "RateLimit-Reset",
+        "Idempotency-Replayed", "ETag",
+        "electric-handle", "electric-offset", "electric-schema", "electric-cursor",
+        "electric-up-to-date", "electric-has-data",
+    },
+    MaxAge: 10 * time.Minute,
+}
+return api.Parts{Handler: policy.Wrap(mux)}, nil
 ```
 
-Without the second one the browser hides the cursor from the client and the
-subscription ends after one response, which looks like a stream that stopped
-rather than like a configuration problem. rig adds no CORS headers of its own.
+`api.TenantHeader` is there when you have an `auth:` block, and the `electric-*`
+entries when a table streams. Three entries in that literal are invisible when
+they are missing. `QUERY`: the client sends a search as `QUERY` and falls back to
+`POST` only on a 405 or a 501, and a preflight that omits a method fails as a
+*network* error, so there is no status for the fallback to read — search fails
+with nothing in any log. `Idempotency-Key`: the client sets it on every unsafe
+method, so leaving it out fails the preflight on every `POST`. And the
+`electric-*` headers: the sync protocol's cursor travels in them, and until they
+are exposed the browser hides it from the client and the subscription ends after
+one response, which looks like a stream that stopped rather than like a
+configuration problem.
+
+There is no `Access-Control-Allow-Credentials`, and the policy will not write one:
+the credential is a bearer token in a header, so no cookie ever crosses an
+origin. `AllowedOrigins` understands one wildcard form, `https://*.example.com`,
+for a tenant per subdomain; `AllowOrigin` is asked for the origins a table knows
+and a file cannot. The shape proxy does not forward the sync service's own
+`access-control-*` headers — which origins may read this API is this server's
+answer, and two values in one header is a response a browser refuses.
 
 ## Testing against a generated client
 

@@ -168,6 +168,37 @@ func TestAFourHundredIsForwardedRatherThanAnswered(t *testing.T) {
 	}
 }
 
+// A policy in front of the whole API lists what a browser may read, this header
+// among the rest. The must-refetch answer names the one header a subscriber
+// needs only when nothing has said so already: replacing the list with one
+// entry would hide everything else on it.
+func TestAMustRefetchKeepsAnExposeHeaderAlreadySet(t *testing.T) {
+	t.Parallel()
+
+	p, _ := newProxy(electric.Config{URL: nowhere})
+	shape := electric.Shape{Table: "lesson", Fallback: snapshotOf("one")}
+	const already = "electric-handle, electric-offset, RateLimit-Limit"
+
+	r := httptest.NewRequest(http.MethodGet, "/?offset=0_inf&handle=the-handle&live=true", nil)
+	w := httptest.NewRecorder()
+	w.Header().Set("Access-Control-Expose-Headers", already)
+	p.Serve(w, r, shape)
+	if w.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want the 409 that resets a subscription", w.Code)
+	}
+	if got := w.Header().Get("Access-Control-Expose-Headers"); got != already {
+		t.Errorf("expose-headers = %q, want the list already there, %q", got, already)
+	}
+
+	// And with nothing in front, the answer says the one thing a cross-origin
+	// subscriber has to be able to read.
+	w = httptest.NewRecorder()
+	p.Serve(w, r, shape)
+	if got := w.Header().Get("Access-Control-Expose-Headers"); got != "electric-handle" {
+		t.Errorf("expose-headers = %q, want electric-handle", got)
+	}
+}
+
 // A live poll asks what changed. A snapshot is not a smaller answer to that
 // question; it is a different question answered, with no way to tell. So the
 // subscriber is asked to start again instead — a read from the beginning is a

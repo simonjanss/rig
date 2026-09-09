@@ -30,7 +30,7 @@
 // No CORS header, deliberately. A viewer served from another origin needs one,
 // and which origins may read this API is a decision about the whole API rather
 // than about these two routes — so it belongs in a wrapper around the mux,
-// where it applies to everything.
+// where it applies to everything, which is what rig/runtime/cors is.
 package apidoc
 
 import (
