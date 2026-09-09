@@ -3,6 +3,7 @@ package dockerdb
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"slices"
@@ -97,6 +98,10 @@ type DB struct {
 	// port unless there was none to configure. Resolved before anything tries to
 	// connect, because under isolation it is the only way to.
 	port int
+	// retryDelay is how long create waits between attempts. nil is the real
+	// backoff; the package's own tests set it to zero, because they script a
+	// lost port race and would otherwise sleep through every one of them.
+	retryDelay func(attempt int) time.Duration
 	// fresh records that Start created the container rather than reusing one.
 	// The data is on a tmpfs, so fresh means empty — and it means anything that
 	// followed this database, a sync service's replication slot most of all, is
@@ -363,8 +368,6 @@ func (d *DB) create(ctx context.Context) error {
 	d.logf("creating container %s (%s) on port %s\n", d.cfg.Name, d.cfg.Image, d.cfg.portDescription())
 
 	args := []string{
-		"run", "--detach",
-		"--name", d.cfg.Name,
 		"--publish", d.cfg.publish(),
 		"--env", "POSTGRES_DB=" + d.cfg.Database,
 		"--env", "POSTGRES_USER=" + d.cfg.User,
@@ -382,8 +385,15 @@ func (d *DB) create(ctx context.Context) error {
 		args = append(args, "-c", setting)
 	}
 
-	_, err := d.runtime.Run(ctx, args...)
-	if err != nil {
+	if err := (creator{rt: d.runtime, log: d.cfg.Log, delay: d.retryDelay}).create(ctx, d.cfg.Name, args...); err != nil {
+		// A configured port is the only case somebody can do something about:
+		// under isolation the number was the engine's own choice and naming it
+		// would send a person looking for a setting that does not exist.
+		if d.cfg.Port != 0 && errors.Is(err, ErrPortInUse) {
+			return fmt.Errorf("cannot start the database container on port %d: "+
+				"something else is holding it, and database.port in rig.yaml is where to move it: %w",
+				d.cfg.Port, err)
+		}
 		return fmt.Errorf("cannot start the database container: %w", err)
 	}
 	return nil

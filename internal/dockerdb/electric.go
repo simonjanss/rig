@@ -81,6 +81,9 @@ type Electric struct {
 	cfg     ElectricConfig
 	runtime Runtime
 	port    int
+	// retryDelay is create's wait between attempts, open for the same reason
+	// [DB.retryDelay] is.
+	retryDelay func(attempt int) time.Duration
 }
 
 // StartElectric brings the sync service up and waits until it reports its
@@ -163,9 +166,7 @@ func (e *Electric) mismatch(s *containerState) string {
 func (e *Electric) create(ctx context.Context) error {
 	e.logf("creating container %s (%s)\n", e.cfg.Name, e.cfg.Image)
 
-	_, err := e.runtime.Run(ctx,
-		"run", "--detach",
-		"--name", e.cfg.Name,
+	err := creator{rt: e.runtime, log: e.cfg.Log, delay: e.retryDelay}.create(ctx, e.cfg.Name,
 		"--publish", Publish("127.0.0.1", e.cfg.Port, ElectricSyncPort),
 		// The service reaches Postgres through the host: the database publishes
 		// on a host port, and naming the host is what works on every engine
