@@ -184,30 +184,71 @@ func (e *authEmitter) baseURLFunc(b *gobuf.Buf) {
 		"whole answer: [Hooks.OAuth] carries a BaseURL of its own, and [Config] " +
 		"prefers it without asking here at all. This is what a project that " +
 		"supplied none gets."
-	b.Comment(doc)
 
-	b.L("func BaseURL() (string, error) {")
+	originFunc(b, originSpec{
+		Name:     "BaseURL",
+		EnvConst: "BaseURLEnv",
+		Env:      o.BaseURLEnv,
+		Literal:  o.BaseURL,
+		Doc:      doc,
+		Package:  e.cfg.Package,
+		Unset: fmt.Sprintf(
+			"%s must name this application's own origin: a provider compares the "+
+				"callback URL built from it exactly, and Hooks.OAuth.BaseURL is the "+
+				"other way to supply it", o.BaseURLEnv),
+	})
+}
+
+// originSpec is one origin the generated package resolves at startup.
+//
+// Two of them now — the API's own and the front end's — and they answer the
+// same three-branch question: a literal, a variable, or both with the variable
+// winning. Emitted from one place because the third branch is the one worth not
+// writing twice: a variable naming nothing has to fail with a message that names
+// the variable, and doing that per emitter is how one of them ends up returning
+// the empty string instead.
+type originSpec struct {
+	// Name is the function's name, and EnvConst the constant it reads.
+	Name, EnvConst string
+	// Env is the variable's own name, empty when the origin is only a literal.
+	Env string
+	// Literal is the origin written in rig.yaml, empty when only a variable
+	// names one.
+	Literal string
+	// Doc is the function's comment, which is the part that is genuinely
+	// per-origin.
+	Doc string
+	// Package prefixes the refusal, so a message in a log says which package
+	// refused.
+	Package string
+	// Unset is the refusal for a variable that names nothing. Read only when
+	// Env is set and Literal is not, which is the one branch that can fail.
+	Unset string
+}
+
+func originFunc(b *gobuf.Buf, spec originSpec) {
+	b.Comment(spec.Doc)
+
+	b.L("func %s() (string, error) {", spec.Name)
 	switch {
-	case o.BaseURLEnv != "" && o.BaseURL != "":
+	case spec.Env != "" && spec.Literal != "":
 		strPkg := b.Import("strings")
 		cmpPkg := b.Import("cmp")
 		osPkg := b.Import("os")
-		b.L("return %s.TrimRight(%s.Or(%s.Getenv(BaseURLEnv), %s), \"/\"), nil",
-			strPkg, cmpPkg, osPkg, gobuf.Quote(o.BaseURL))
-	case o.BaseURLEnv != "":
+		b.L("return %s.TrimRight(%s.Or(%s.Getenv(%s), %s), \"/\"), nil",
+			strPkg, cmpPkg, osPkg, spec.EnvConst, gobuf.Quote(spec.Literal))
+	case spec.Env != "":
 		strPkg := b.Import("strings")
 		osPkg := b.Import("os")
 		errsPkg := b.Import("errors")
-		b.L("raw := %s.Getenv(BaseURLEnv)", osPkg)
+		b.L("raw := %s.Getenv(%s)", osPkg, spec.EnvConst)
 		b.L("if raw == \"\" {")
-		b.L("return \"\", %s.New(%s)", errsPkg, gobuf.Quote(e.failure(fmt.Sprintf(
-			"%s must name this application's own origin: a provider compares the "+
-				"callback URL built from it exactly, and Hooks.OAuth.BaseURL is the "+
-				"other way to supply it", o.BaseURLEnv))))
+		b.L("return \"\", %s.New(%s)", errsPkg,
+			gobuf.Quote(spec.Package+": "+spec.Unset))
 		b.L("}")
 		b.L("return %s.TrimRight(raw, \"/\"), nil", strPkg)
 	default:
-		b.L("return %s, nil", gobuf.Quote(o.BaseURL))
+		b.L("return %s, nil", gobuf.Quote(spec.Literal))
 	}
 	b.L("}")
 	b.NL()
@@ -433,6 +474,20 @@ func (e *authEmitter) oauthHooks(b *gobuf.Buf) {
 	b.Comment(baseDoc)
 	b.L("BaseURL string")
 	b.NL()
+
+	if e.doc.API.Web != nil {
+		b.Comment("WebOrigin is where this application's browser front end is " +
+			"served, and takes precedence over everything the `web:` block said " +
+			"about one.\n\n" +
+			"Empty asks [WebOrigin], which is the ordinary case. This is for the " +
+			"origin that arrives some other way — a test serving the front end on " +
+			"an ephemeral port, most often.\n\n" +
+			"An origin supplied here is invisible to anything that reads the " +
+			"environment instead, so a deployment that answers this question in Go " +
+			"answers the rest of its cross-origin configuration in Go too.")
+		b.L("WebOrigin string")
+		b.NL()
+	}
 
 	keyDoc := "SigningKey signs the cookie that carries the state and the PKCE " +
 		"verifier across a sign-in's round trip. At least 32 bytes, and the same " +
@@ -879,6 +934,17 @@ func (e *authEmitter) oauthConfig(b *gobuf.Buf, fail string) {
 			"https://app.example.com: a provider compares the callback URL built "+
 			"from it exactly")))
 	b.L("}")
+	if e.doc.API.Web != nil {
+		b.Comment("And where the front end is, resolved the same way: the field " +
+			"first, then the `web:` block and the environment.")
+		b.L("web := %s.TrimRight(h.OAuth.WebOrigin, \"/\")", strPkg)
+		b.L("if web == \"\" {")
+		b.L("if web, err = WebOrigin(); err != nil {")
+		b.L("%serr", fail)
+		b.L("}")
+		b.L("}")
+	}
+
 	b.L("key, err := signingKey(h.OAuth)")
 	b.L("if err != nil {")
 	b.L("%serr", fail)
@@ -915,6 +981,17 @@ func (e *authEmitter) oauthConfig(b *gobuf.Buf, fail string) {
 	}
 	b.L("OnSignIn: h.OAuth.OnSignIn,")
 	b.L("OnError: h.OAuth.OnError,")
+
+	if e.doc.API.Web != nil {
+		b.Comment("Where the front end is. It selects the ending that leaves the " +
+			"tokens in a cookie and redirects there, and the failure redirect that " +
+			"goes with it — one callback route on the front end, two outcomes.\n\n" +
+			"Hooks.OAuth.OnSignIn replaces the ending and keeps the rest, because a " +
+			"consent screen somebody cancelled never reaches an ending at all.")
+		b.L("Browser: &%s.Config{Origin: web, CallbackPath: WebCallbackPath},",
+			b.Import(authModule+"/handoff"))
+	}
+
 	b.L("}")
 	b.L("}")
 	b.NL()

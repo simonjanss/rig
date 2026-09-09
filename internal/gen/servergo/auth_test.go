@@ -29,16 +29,23 @@ func authOpts() gen.Options {
 // The goldens below are about the auth block, so they are compared against that
 // file rather than against everything server-go writes: a route added to an
 // unrelated resource is not a change to how a token is configured.
+//
+// web.gen.go joins it when there is one, because the front end's origin is the
+// other half of how a provider sign-in ends and the two files have to agree
+// about the callback path.
 func authArtifact(t *testing.T, artifacts []gen.Artifact) []gen.Artifact {
 	t.Helper()
 
+	var out []gen.Artifact
 	for _, a := range artifacts {
-		if a.Path == "auth.gen.go" {
-			return []gen.Artifact{a}
+		if a.Path == "auth.gen.go" || a.Path == "web.gen.go" {
+			out = append(out, a)
 		}
 	}
-	t.Fatal("no auth.gen.go was generated")
-	return nil
+	if len(out) == 0 {
+		t.Fatal("no auth.gen.go was generated")
+	}
+	return out
 }
 
 // TestAuthGolden covers the configuration with everything turned on: three
@@ -67,8 +74,11 @@ func TestAuthGoldenDefaults(t *testing.T) {
 	doc.API.Auth = defaultAuth(t)
 	// The cache is a block of its own, and this fixture is "configure nothing" —
 	// so it goes too, or the golden would be showing one thing that was
-	// configured next to everything that was not.
+	// configured next to everything that was not. The web block goes for the
+	// same reason: two words of auth configuration say nothing about a front
+	// end somewhere else.
 	doc.API.Cache = nil
+	doc.API.Web = nil
 
 	artifacts := gentest.Run(t, servergo.New(), doc, authOpts())
 
@@ -137,6 +147,9 @@ func TestTheConfiguredValuesReachTheOutput(t *testing.T) {
 		// The host source, which is the one that carries real code.
 		"SELECT id FROM rig_tenant WHERE lower(slug) = $1",
 		`os.Getenv(DefaultSlugEnv)`,
+		// And the front end, whose origin the ending redirects to and whose
+		// callback path the cookie is scoped to.
+		"Browser: &handoff.Config{Origin: web, CallbackPath: WebCallbackPath}",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("the generated wiring does not contain %q", want)
@@ -522,6 +535,7 @@ func TestAProjectCanWriteTheOAuthHooksLiteral(t *testing.T) {
 			"// What docs/auth.md shows a main function writing.\n" +
 			"var _ = Hooks{OAuth: OAuthHooks{\n" +
 			"\tBaseURL:    \"https://app.example.com\",\n" +
+			"\tWebOrigin:  \"https://console.example.com\",\n" +
 			"\tSigningKey: make([]byte, 32),\n" +
 			"\tCredentials: OAuthCredentials{\n" +
 			"\t\tGoogle:    OAuthClient{ID: \"id\", Secret: \"secret\"},\n" +

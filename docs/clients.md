@@ -790,6 +790,31 @@ The values agree even where the keys do not. `@rig-ts/electric` corrects what
 Postgres prints so a `timestamptz` decodes to the same RFC 3339 string the API
 would have sent, and an `int8` to a `number` rather than a BigInt.
 
+### Finishing a provider sign-in in the browser
+
+A project with a [`web:` block](rig-yaml.md#web) ends a provider sign-in by
+redirecting to the front end with the tokens in a one-minute cookie named
+`rig_handoff`, base64url of JSON. The shape inside it is `Handoff`, exported
+here, so the landing page reads the server's own type rather than a restatement
+of it:
+
+```ts
+import { Session, type Handoff } from "@rig-ts/client";
+
+const handoff: Handoff = JSON.parse(atob(readCookie("rig_handoff")));
+const session = new Session(handoff);
+```
+
+`new Session`, not `session.replace(handoff)` — a handoff is a new person's
+tokens, and `replace` keeps the previous refresh token. It is a `TokenPair` plus
+`identityToken` and `identityExpiresAt`, with the pair absent for somebody who
+belongs to no tenant yet; the tenant list is deliberately not in it, because a
+cookie holds about four kilobytes and a tenant list has no bound.
+
+Delete the cookie once you have read it, on the same `Domain` the server set —
+[auth.md](auth.md#a-front-end-on-another-origin) has the whole contract,
+including why a bare `Max-Age=0` leaves it alive.
+
 ### Cross-origin
 
 rig serves the shape routes from the same mux as the rest of the API, and

@@ -1660,6 +1660,19 @@
         "url": "https://staging.eu.example.com"
       }
     ],
+    "web": {
+      "origin": "https://console.example.com",
+      "originEnv": "APP_ORIGIN",
+      "callbackPath": "/auth/finish",
+      "cors": {
+        "allowedOrigins": [
+          "https://admin.example.com",
+          "https://*.example.com"
+        ],
+        "allowedOriginsEnv": "CORS_ORIGINS",
+        "maxAgeSeconds": 300
+      }
+    },
     "permissions": [
       {
         "key": "todo.delete",

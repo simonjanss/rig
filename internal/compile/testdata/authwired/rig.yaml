@@ -17,6 +17,18 @@ servers:
   - name: staging_eu
     url: https://staging.eu.example.com
 
+# A browser front end on a different host of the same registrable domain, which
+# is the deployment the handoff cookie exists for: both origin and origin_env are
+# set, so the golden proves the environment wins and the file is the default, and
+# the callback path is not the default so the golden proves it is read.
+web:
+  origin: https://console.example.com
+  origin_env: APP_ORIGIN
+  callback_path: /auth/finish
+  cors:
+    allowed_origins: [https://admin.example.com, "https://*.example.com"]
+    max_age: 5m
+
 # Everything the auth block can say, so the compiled document carries every field
 # and the generator's golden output exercises every branch. A real project sets a
 # handful of these and inherits the rest.

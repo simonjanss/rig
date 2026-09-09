@@ -207,7 +207,24 @@ func (p *Project) checkAuthOAuth(a Auth) diag.List {
 		}
 	}
 
+	// Validated at last, having been documented three different ways and
+	// checked nowhere. An entry with a trailing slash, a path, or no scheme can
+	// never match what checkReturnTo compares it against, so it is dead
+	// configuration that reads as a working allow-list.
+	for i, entry := range o.AllowedReturnTo {
+		at := p.At("auth", "oauth", "allowed_return_to", itoa(i))
+		if strings.HasPrefix(entry, "/") {
+			diags.Add(diag.CodeConfigInvalid, at,
+				"allowed_return_to entry %q is a path, and a relative returnTo is "+
+					"always allowed without being listed — so this entry does "+
+					"nothing. This list is origins: `https://app.example.com`", entry)
+			continue
+		}
+		diags.Append(checkExactOrigin(entry, "allowed_return_to entry", at))
+	}
+
 	// origin_from_host reads the tenant out of the host too, or it is deriving an
+	// origin for a tenant nothing resolved.	// origin_from_host reads the tenant out of the host too, or it is deriving an
 	// origin for a tenant nothing resolved.
 	if o.OriginFromHost && !a.Tenant.Uses(ir.TenantFromHost) {
 		diags.Add(diag.CodeConfigInvalid, p.At("auth", "oauth", "origin_from_host"),

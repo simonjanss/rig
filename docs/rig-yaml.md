@@ -235,6 +235,60 @@ block exists to prevent.
 
 ---
 
+## `web`
+
+Where this API's **browser front end** is served, when that is not this API. Off
+by default; the block's presence is the switch.
+
+```yaml
+web:
+  origin: https://app.example.com   # or origin_env, or both
+  origin_env: APP_ORIGIN
+  callback_path: /auth/callback
+
+  cors:
+    allowed_origins: [https://admin.example.com, "https://*.example.com"]
+    allowed_origins_env: CORS_ORIGINS
+    max_age: 10m
+```
+
+| Key | |
+|---|---|
+| `origin` | Where the front end is served. Scheme and host only — an `Origin` header never carries a path, and this is compared against one exactly, so a trailing slash is trimmed and anything after the host is refused. |
+| `origin_env` | The variable the origin comes from. Set beside `origin`, the variable wins and the file is the default. One of the two is required (RIG3012). |
+| `callback_path` | The route on the front end that receives a finished provider sign-in. Default `/auth/callback`. It is used twice — the redirect's destination and the handoff cookie's `Path` — which is why it is one string here rather than one at each end. |
+| `cors.allowed_origins` | Origins besides `origin` that may call this API. Each is scheme and host, optionally with one leading `*.` label, so `https://*.example.com` matches a single subdomain. A bare `*` is refused: this API answers bearer credentials, and admitting every origin on the internet is a policy worth writing out. |
+| `cors.allowed_origins_env` | A comma-separated list that **replaces** the one above rather than adding to it, the way `base_url_env` lets a deployment win. Default `CORS_ORIGINS`. |
+| `cors.max_age` | How long a browser may cache a preflight. Default `10m`, which is the longest Safari honours — a larger number is one no browser reads. |
+
+**Top-level rather than under `auth:`.** Two different things want this one fact
+and only one of them is authentication: a finished provider sign-in has to
+redirect somewhere, and a cross-origin request has to be answered for some
+origin. A project serving a single-page application with no provider sign-in at
+all still has the second question. [`servers`](#servers) is the precedent — a
+deployment fact several generators read and none owns.
+
+**`origin_env` exists here and `servers[].url_env` does not**, for the reason
+`auth.oauth.base_url_env` exists: this value is read by *this* server as it
+starts, so it can see its own environment. A server URL is a constant compiled
+into somebody else's program, which cannot.
+
+What it does today: `server-go` writes `web.gen.go` — `WebOriginEnv`,
+`WebCallbackPath`, `WebOrigin()` — and, for a project with providers, selects the
+provider sign-in ending that leaves the tokens in a cookie and redirects to the
+front end rather than answering JSON. See
+[auth.md](auth.md#a-front-end-on-another-origin) for the cookie's contract and
+for what the landing page does with it.
+
+One relationship with another block is checked when the file loads: if
+`web.origin` and `auth.oauth.base_url` are both written out and their hosts share
+no registrable domain, that is **RIG3013**. No cookie set by one host can be read
+by the other, and a browser drops such a cookie without a word — so it is refused
+here, where both values are visible, rather than at the sign-in that would
+otherwise fail silently.
+
+---
+
 ## `database`
 
 Where rig runs your migrations and reads your schema from.
