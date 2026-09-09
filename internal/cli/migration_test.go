@@ -28,10 +28,24 @@ import (
 // commit.gpgsign for the same reason as the identity: it comes from the
 // machine's configuration, it is not this suite's business, and a signature it
 // cannot produce fails the commit rather than the assertion.
+//
+// gc.auto and maintenance.auto because git runs maintenance after a commit and
+// detaches to do it, so it outlives the command that started it. In a temporary
+// directory that is a race with the cleanup: `t.TempDir` fails the test when it
+// cannot remove what it made, and what arrives is
+//
+//	TempDir RemoveAll cleanup: unlinkat …/.git/objects/pack: directory not empty
+//
+// under a subtest that passed. Turning maintenance off is the only way to know
+// nothing is still writing in there when the test returns.
 func gitIn(t *testing.T, root string, args ...string) {
 	t.Helper()
 
-	cmd := exec.Command("git", append([]string{"-c", "commit.gpgsign=false"}, args...)...)
+	cmd := exec.Command("git", append([]string{
+		"-c", "commit.gpgsign=false",
+		"-c", "gc.auto=0",
+		"-c", "maintenance.auto=false",
+	}, args...)...)
 	cmd.Dir = root
 	cmd.Env = append(withoutGitEnv(os.Environ()),
 		"GIT_AUTHOR_NAME=rig", "GIT_AUTHOR_EMAIL=rig@example.com",
