@@ -467,9 +467,10 @@ type EmailCodeOptions struct {
 	Length int
 	// TTL is how long a code lasts, and defaults to ten minutes.
 	TTL time.Duration
-	// MaxAttempts is how many wrong guesses kill a code, and defaults to five.
-	// It is a ceiling on one code rather than a rate limit on an address, and
-	// the two are not substitutes.
+	// MaxAttempts is how many wrong guesses kill a code, and defaults to three
+	// — deliberately below the five wrong sign-ins that lock an address, so
+	// that mistyping a code is recoverable. It is a ceiling on one code rather
+	// than a rate limit on an address, and the two are not substitutes.
 	MaxAttempts int
 
 	// AllowProvisioning sends a code to an address rig has never seen, creating

@@ -2,11 +2,13 @@ package account_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/google/uuid"
 
 	"github.com/simonjanss/rig/auth/account"
+	"github.com/simonjanss/rig/auth/session"
 	"github.com/simonjanss/rig/runtime/rigerr"
 )
 
@@ -23,26 +25,41 @@ func (f *fixture) join(t *testing.T, tenantID uuid.UUID) *account.Account {
 	return a
 }
 
-// The whole reason for the split: one address, one password, two tenants.
-func TestOnePasswordSignsInToEveryTenant(t *testing.T) {
+// signInTo signs the fixture's person in to a named tenant, with a code.
+func (f *fixture) signInTo(tenantID uuid.UUID) (*session.Pair, error) {
+	code, err := f.askForCode()
+	if err != nil {
+		return nil, err
+	}
+	res, err := f.svc.VerifyEmailCode(context.Background(), account.VerifyEmailCodeInput{
+		TenantID: tenantID, EmailAddress: "sam@example.com", Code: code,
+		Client: session.ClientWeb, IPAddress: "203.0.113.10",
+	})
+	if err != nil {
+		return nil, err
+	}
+	if res.Session == nil {
+		return nil, errors.New("no session for the tenant that was named")
+	}
+	return res.Session, nil
+}
+
+// The whole reason for the split: one address, one person, two tenants.
+func TestOneAddressSignsInToEveryTenant(t *testing.T) {
 	t.Parallel()
 
 	f := setup(t)
 	other := uuid.New()
 	elsewhere := f.join(t, other)
 
-	here, err := f.login(goodPassword)
+	here, err := f.login()
 	if err != nil {
 		t.Fatal(err)
 	}
-	thereRes, err := f.svc.Login(context.Background(), account.LoginInput{
-		TenantID: other, EmailAddress: "sam@example.com", Password: goodPassword,
-		IPAddress: "203.0.113.10",
-	})
+	there, err := f.signInTo(other)
 	if err != nil {
-		t.Fatalf("the same password should sign in to the other tenant: %v", err)
+		t.Fatalf("the same address should sign in to the other tenant: %v", err)
 	}
-	there := thereRes.Session
 
 	// Two different sessions, each belonging to the account in its own tenant.
 	// The person is one person; the claims are not.
@@ -63,102 +80,82 @@ func TestOnePasswordSignsInToEveryTenant(t *testing.T) {
 	}
 }
 
-// Somebody real, in the wrong place. It has to be told apart from a wrong
-// password — they proved who they are, so 403 gives nothing away — and it must
-// not be told apart before the password is checked.
+// Somebody real, in the wrong place. It has to be told apart from a wrong code
+// — they proved who they are, so 403 gives nothing away — and it must not be
+// told apart before the code is compared.
 func TestSigningInToATenantYouDoNotBelongToIsRefused(t *testing.T) {
 	t.Parallel()
 
 	f := setup(t)
 	stranger := uuid.New()
 
-	_, err := f.svc.Login(context.Background(), account.LoginInput{
-		TenantID: stranger, EmailAddress: "sam@example.com", Password: goodPassword,
-		IPAddress: "203.0.113.10",
-	})
-	if !rigerr.Is(err, rigerr.CodeForbidden) {
-		t.Errorf("err = %v, want 403", err)
+	code, err := f.askForCode()
+	if err != nil {
+		t.Fatal(err)
 	}
 
-	// The wrong password against the same tenant is still 401, so the response
-	// cannot be used to find out which tenants somebody belongs to without
-	// already knowing their password.
-	_, err = f.svc.Login(context.Background(), account.LoginInput{
-		TenantID: stranger, EmailAddress: "sam@example.com", Password: "not the password",
+	// The wrong code against that tenant is 401, so the response cannot be used
+	// to find out which tenants somebody belongs to without already holding
+	// their code. Checked first, because the right one consumes.
+	_, err = f.svc.VerifyEmailCode(context.Background(), account.VerifyEmailCodeInput{
+		TenantID: stranger, EmailAddress: "sam@example.com", Code: wrongCode(code),
 		IPAddress: "203.0.113.10",
 	})
 	if !rigerr.Is(err, rigerr.CodeUnauthorized) {
 		t.Errorf("err = %v, want 401", err)
 	}
-}
 
-// One password covers every tenant, so changing it has to end the sessions in
-// tenants the request was not made from. Anything less leaves a thief signed in
-// to the tenant the person was not looking at.
-func TestChangingAPasswordEndsSessionsInEveryTenant(t *testing.T) {
-	t.Parallel()
-
-	f := setup(t)
-	other := uuid.New()
-	f.join(t, other)
-
-	elsewhereRes, err := f.svc.Login(context.Background(), account.LoginInput{
-		TenantID: other, EmailAddress: "sam@example.com", Password: goodPassword,
-		IPAddress: "203.0.113.10",
-	})
-	elsewhere := elsewhereRes.Session
+	code, err = f.askForCode()
 	if err != nil {
 		t.Fatal(err)
 	}
-
-	if _, err := f.svc.ChangePassword(context.Background(), account.ChangePasswordInput{
-		TenantID:        f.tenant,
-		AccountID:       f.acct.ID,
-		CurrentPassword: goodPassword,
-		NewPassword:     "an entirely different passphrase",
-	}); err != nil {
-		t.Fatal(err)
-	}
-
-	if _, err := f.sessions.Verify(context.Background(), elsewhere.Access.Token); err == nil {
-		t.Error("the session in the other tenant should have been revoked too")
+	_, err = f.svc.VerifyEmailCode(context.Background(), account.VerifyEmailCodeInput{
+		TenantID: stranger, EmailAddress: "sam@example.com", Code: code,
+		IPAddress: "203.0.113.10",
+	})
+	if !rigerr.Is(err, rigerr.CodeForbidden) {
+		t.Errorf("err = %v, want 403", err)
 	}
 }
 
-// A reset is the same rule, reached the other way: the link is about the person,
-// so it cannot leave one of their tenants signed in.
-func TestAResetEndsSessionsInEveryTenant(t *testing.T) {
+// A person is global and their sessions are not, so "sign me out everywhere"
+// has to reach the tenants the request was not made from.
+//
+// It used to be reached by changing a password, which was the only thing that
+// could mean it. There is no credential to change, so the operation is exported
+// and the decision to use it is the application's.
+func TestRevokeEverySessionReachesEveryTenant(t *testing.T) {
 	t.Parallel()
 
 	f := setup(t)
-	other := uuid.New()
-	f.join(t, other)
-
-	elsewhereRes, err := f.svc.Login(context.Background(), account.LoginInput{
-		TenantID: other, EmailAddress: "sam@example.com", Password: goodPassword,
-		IPAddress: "203.0.113.10",
-	})
-	elsewhere := elsewhereRes.Session
-	if err != nil {
-		t.Fatal(err)
-	}
-
 	ctx := context.Background()
-	if err := f.svc.RequestPasswordReset(ctx, f.tenant, "sam@example.com", ""); err != nil {
+	other := uuid.New()
+	f.join(t, other)
+
+	here, err := f.login()
+	if err != nil {
 		t.Fatal(err)
 	}
-	if err := f.svc.ConfirmPasswordReset(ctx, f.notify.reset, "a brand new passphrase", ""); err != nil {
+	elsewhere, err := f.signInTo(other)
+	if err != nil {
 		t.Fatal(err)
 	}
 
+	if err := f.svc.RevokeEverySession(ctx, f.ident.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := f.sessions.Verify(ctx, here.Access.Token); err == nil {
+		t.Error("the session here should have been revoked")
+	}
 	if _, err := f.sessions.Verify(ctx, elsewhere.Access.Token); err == nil {
 		t.Error("the session in the other tenant should have been revoked too")
 	}
 }
 
 // Somebody who works at two of your customers is one person. Provisioning them
-// into a second tenant must reuse the identity, or they end up with two
-// passwords and no idea which is which.
+// into a second tenant must reuse the identity, or they end up with two of
+// everything and no idea which is which.
 func TestProvisioningReusesAnExistingPerson(t *testing.T) {
 	t.Parallel()
 
@@ -175,13 +172,10 @@ func TestProvisioningReusesAnExistingPerson(t *testing.T) {
 		t.Fatal("the new account should belong to the person who already had that address")
 	}
 
-	// And the password they already have works in the new tenant immediately,
-	// without anything being set for it.
-	if _, err := f.svc.Login(context.Background(), account.LoginInput{
-		TenantID: other, EmailAddress: "sam@example.com", Password: goodPassword,
-		IPAddress: "203.0.113.10",
-	}); err != nil {
-		t.Errorf("their existing password should work in the new tenant: %v", err)
+	// And they can sign in to the new tenant immediately, with nothing set up
+	// for it: the address is the person, and the person is already here.
+	if _, err := f.signInTo(other); err != nil {
+		t.Errorf("they should be able to sign in to the new tenant: %v", err)
 	}
 }
 
@@ -245,8 +239,14 @@ func TestADisabledIdentityCannotSignInAnywhere(t *testing.T) {
 	f.store.PutIdentity(f.ident)
 
 	for _, tenantID := range []uuid.UUID{f.tenant, other} {
-		_, err := f.svc.Login(context.Background(), account.LoginInput{
-			TenantID: tenantID, EmailAddress: "sam@example.com", Password: goodPassword,
+		// Asking for the code still works — the endpoint answers the same for
+		// everybody — and typing it back is where the refusal lands.
+		code, err := f.askForCode()
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = f.svc.VerifyEmailCode(context.Background(), account.VerifyEmailCodeInput{
+			TenantID: tenantID, EmailAddress: "sam@example.com", Code: code,
 			IPAddress: "203.0.113.10",
 		})
 		if !rigerr.Is(err, rigerr.CodeForbidden) {

@@ -752,6 +752,25 @@ func (s *MemoryStore) CountVerifications() int {
 	return len(s.verifications)
 }
 
+// Forget removes an account outright.
+//
+// The real store soft-deletes, and what every caller here checks is whether the
+// account is still found — which is the same question either way. It stands in
+// for the ways an account can stop existing: somebody removed from a tenant, or
+// a tenant closed.
+func (s *MemoryStore) Forget(accountID uuid.UUID) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	delete(s.accounts, accountID)
+	for i, id := range s.accountOrder {
+		if id == accountID {
+			s.accountOrder = append(s.accountOrder[:i], s.accountOrder[i+1:]...)
+			break
+		}
+	}
+}
+
 // DeactivateIdentity switches somebody off, for the test that says a deactivated
 // person is not mailed a working link.
 func (s *MemoryStore) DeactivateIdentity(id uuid.UUID) {

@@ -290,17 +290,17 @@ func TestFiltersNarrow(t *testing.T) {
 
 	f.record(authlog.Entry{
 		TenantID: &f.tenant, AccountID: &mine,
-		Event: authlog.EventPasswordChanged, Outcome: authlog.Succeeded,
+		Event: authlog.EventEmailVerified, Outcome: authlog.Succeeded,
 	})
 
-	res := f.do(t, "GET", "/auth/audit?event="+authlog.EventPasswordChanged, p.AccessToken, "")
+	res := f.do(t, "GET", "/auth/audit?event="+authlog.EventEmailVerified, p.AccessToken, "")
 	var page auditPage
 	res.decode(t, &page)
 
 	if len(page.Data) != 1 {
 		t.Fatalf("got %d entries for one event, want 1", len(page.Data))
 	}
-	if page.Data[0].Event != authlog.EventPasswordChanged {
+	if page.Data[0].Event != authlog.EventEmailVerified {
 		t.Errorf("event = %s", page.Data[0].Event)
 	}
 

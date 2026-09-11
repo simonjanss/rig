@@ -238,13 +238,13 @@ type AuthEmailCode struct {
 	Length int `yaml:"length,omitempty" json:"length,omitempty" jsonschema:"minimum=6,maximum=10" jsonschema_description:"How many digits a sign-in code has. Defaults to 6. Fewer is guessable whatever the attempt ceiling; more is a token, which belongs in a link."`
 	// TTL is how long a code lasts. Default 10m.
 	TTL Duration `yaml:"ttl,omitempty" json:"ttl,omitempty" jsonschema_description:"How long a sign-in code lasts, for example 10m. Defaults to 10m."`
-	// MaxAttempts is how many wrong guesses kill a code. Default 5.
+	// MaxAttempts is how many wrong guesses kill a code. Default 3.
 	//
 	// A ceiling on one code, not a rate limit on an address, and the two are not
 	// substitutes: a limit counts failures over a rolling window, so a fresh
 	// code would arrive with the old code's failures still against it and five
 	// mistypes would lock the address rather than killing one code.
-	MaxAttempts int `yaml:"max_attempts,omitempty" json:"max_attempts,omitempty" jsonschema:"minimum=1" jsonschema_description:"How many wrong guesses kill one code. Defaults to 5. This is a ceiling on the code, not a rate limit on the address."`
+	MaxAttempts int `yaml:"max_attempts,omitempty" json:"max_attempts,omitempty" jsonschema:"minimum=1" jsonschema_description:"How many wrong guesses kill one code. Defaults to 3, deliberately well below the five wrong sign-ins that lock an address, so a clumsy attempt is recoverable. This is a ceiling on the code, not a rate limit on the address."`
 
 	// AllowProvisioning sends a code to an address rig has never seen, creating
 	// the person when the code is asked for.

@@ -44,15 +44,15 @@ func (n *scriptedNotifier) answer(token string) error {
 	return n.answers[n.calls-1]
 }
 
-func (n *scriptedNotifier) SendPasswordReset(_ context.Context, _ *account.Identity, token string) error {
-	return n.answer(token)
+func (n *scriptedNotifier) SendEmailCode(_ context.Context, _ *account.Identity, code string) error {
+	return n.answer(code)
 }
 
 func (n *scriptedNotifier) SendEmailVerification(_ context.Context, _ *account.Identity, token string) error {
 	return n.answer(token)
 }
 
-func (n *scriptedNotifier) SendInvitation(_ context.Context, _ *account.Identity, _ *account.Account, token string) error {
+func (n *scriptedNotifier) SendInvitation(_ context.Context, _ *account.Identity, _ *account.Invitation, token string) error {
 	return n.answer(token)
 }
 
@@ -158,7 +158,9 @@ func (q *queued) states(t *testing.T) map[account.DeliveryState]int {
 func TestEveryAttemptCarriesAFreshTokenAndOnlyTheNewestWorks(t *testing.T) {
 	q := setupQueued(t, errors.New("503 from the provider"), nil)
 
-	if err := q.svc.RequestPasswordReset(context.Background(), q.tenant, q.ident.EmailAddress, "203.0.113.5"); err != nil {
+	if err := q.svc.RequestEmailCode(context.Background(), account.RequestEmailCodeInput{
+		TenantID: q.tenant, EmailAddress: q.ident.EmailAddress, IPAddress: "203.0.113.5",
+	}); err != nil {
 		t.Fatal(err)
 	}
 	// Nothing has been sent, and the request did not fail on the way out.
@@ -179,15 +181,15 @@ func TestEveryAttemptCarriesAFreshTokenAndOnlyTheNewestWorks(t *testing.T) {
 			"link the rotate had already killed")
 	}
 
-	// The old one is dead and the new one works, in that order — confirming the
-	// second before the first would consume the link and prove nothing.
-	err := q.svc.ConfirmPasswordReset(context.Background(), first, "a whole new password", "203.0.113.5")
+	// The old one is dead and the new one works, in that order — verifying the
+	// second before the first would consume the code and prove nothing.
+	_, err := q.verify(first)
 	if err == nil {
-		t.Error("the token from the first attempt still redeems, so a retry leaves " +
-			"two live reset links for one request")
+		t.Error("the code from the first attempt still works, so a retry leaves " +
+			"two live codes for one request")
 	}
-	if err := q.svc.ConfirmPasswordReset(context.Background(), second, "a whole new password", "203.0.113.5"); err != nil {
-		t.Errorf("the token from the last attempt does not redeem: %v", err)
+	if _, err := q.verify(second); err != nil {
+		t.Errorf("the code from the last attempt does not work: %v", err)
 	}
 }
 
@@ -201,7 +203,9 @@ func TestEveryAttemptCarriesAFreshTokenAndOnlyTheNewestWorks(t *testing.T) {
 func TestRetryingWritesNoExtraLinks(t *testing.T) {
 	q := setupQueued(t, errors.New("still down"))
 
-	if err := q.svc.RequestPasswordReset(context.Background(), q.tenant, q.ident.EmailAddress, "203.0.113.5"); err != nil {
+	if err := q.svc.RequestEmailCode(context.Background(), account.RequestEmailCodeInput{
+		TenantID: q.tenant, EmailAddress: q.ident.EmailAddress, IPAddress: "203.0.113.5",
+	}); err != nil {
 		t.Fatal(err)
 	}
 	before := q.store.CountVerifications()
@@ -225,7 +229,9 @@ func TestRetryingWritesNoExtraLinks(t *testing.T) {
 func TestAFailedSendLeavesTheRowForTheNextPass(t *testing.T) {
 	q := setupQueued(t, errors.New("503 from the provider"))
 
-	if err := q.svc.RequestPasswordReset(context.Background(), q.tenant, q.ident.EmailAddress, "203.0.113.5"); err != nil {
+	if err := q.svc.RequestEmailCode(context.Background(), account.RequestEmailCodeInput{
+		TenantID: q.tenant, EmailAddress: q.ident.EmailAddress, IPAddress: "203.0.113.5",
+	}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -251,7 +257,9 @@ func TestMaxAttemptsStopsAMailNobodyCanDeliver(t *testing.T) {
 	q := setupQueuedWith(t, func(cfg *account.Config) { cfg.Mail.MaxAttempts = 3 },
 		errors.New("no such mailbox"))
 
-	if err := q.svc.RequestPasswordReset(context.Background(), q.tenant, q.ident.EmailAddress, "203.0.113.5"); err != nil {
+	if err := q.svc.RequestEmailCode(context.Background(), account.RequestEmailCodeInput{
+		TenantID: q.tenant, EmailAddress: q.ident.EmailAddress, IPAddress: "203.0.113.5",
+	}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -274,7 +282,9 @@ func TestMaxAttemptsStopsAMailNobodyCanDeliver(t *testing.T) {
 func TestAPermanentRefusalStopsOnTheFirstAttempt(t *testing.T) {
 	q := setupQueued(t, account.PermanentMailError(errors.New("no mailbox by that name")))
 
-	if err := q.svc.RequestPasswordReset(context.Background(), q.tenant, q.ident.EmailAddress, "203.0.113.5"); err != nil {
+	if err := q.svc.RequestEmailCode(context.Background(), account.RequestEmailCodeInput{
+		TenantID: q.tenant, EmailAddress: q.ident.EmailAddress, IPAddress: "203.0.113.5",
+	}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -295,7 +305,9 @@ func TestAPermanentRefusalStopsOnTheFirstAttempt(t *testing.T) {
 func TestALinkWithdrawnBeforeItWentOutIsNeverSent(t *testing.T) {
 	q := setupQueued(t)
 
-	if err := q.svc.RequestPasswordReset(context.Background(), q.tenant, q.ident.EmailAddress, "203.0.113.5"); err != nil {
+	if err := q.svc.RequestEmailCode(context.Background(), account.RequestEmailCodeInput{
+		TenantID: q.tenant, EmailAddress: q.ident.EmailAddress, IPAddress: "203.0.113.5",
+	}); err != nil {
 		t.Fatal(err)
 	}
 	// Withdrawn between being queued and being sent.
@@ -320,7 +332,9 @@ func TestALinkWithdrawnBeforeItWentOutIsNeverSent(t *testing.T) {
 func TestALinkConsumedBeforeItWentOutIsNeverSent(t *testing.T) {
 	q := setupQueued(t)
 
-	if err := q.svc.RequestPasswordReset(context.Background(), q.tenant, q.ident.EmailAddress, "203.0.113.5"); err != nil {
+	if err := q.svc.RequestEmailCode(context.Background(), account.RequestEmailCodeInput{
+		TenantID: q.tenant, EmailAddress: q.ident.EmailAddress, IPAddress: "203.0.113.5",
+	}); err != nil {
 		t.Fatal(err)
 	}
 	link := q.outbox.Deliveries()[0]
@@ -341,7 +355,9 @@ func TestALinkConsumedBeforeItWentOutIsNeverSent(t *testing.T) {
 func TestADeactivatedPersonIsNotMailed(t *testing.T) {
 	q := setupQueued(t)
 
-	if err := q.svc.RequestPasswordReset(context.Background(), q.tenant, q.ident.EmailAddress, "203.0.113.5"); err != nil {
+	if err := q.svc.RequestEmailCode(context.Background(), account.RequestEmailCodeInput{
+		TenantID: q.tenant, EmailAddress: q.ident.EmailAddress, IPAddress: "203.0.113.5",
+	}); err != nil {
 		t.Fatal(err)
 	}
 	q.store.DeactivateIdentity(q.ident.ID)
@@ -368,7 +384,9 @@ func TestAPassWithNothingToDoIsAPass(t *testing.T) {
 func TestADrainedServiceClaimsNothing(t *testing.T) {
 	q := setupQueued(t)
 
-	if err := q.svc.RequestPasswordReset(context.Background(), q.tenant, q.ident.EmailAddress, "203.0.113.5"); err != nil {
+	if err := q.svc.RequestEmailCode(context.Background(), account.RequestEmailCodeInput{
+		TenantID: q.tenant, EmailAddress: q.ident.EmailAddress, IPAddress: "203.0.113.5",
+	}); err != nil {
 		t.Fatal(err)
 	}
 	q.svc.StopClaimingMail()

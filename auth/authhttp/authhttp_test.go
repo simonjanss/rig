@@ -17,13 +17,11 @@ import (
 	"github.com/simonjanss/rig/auth/apikey"
 	"github.com/simonjanss/rig/auth/authhttp"
 	"github.com/simonjanss/rig/auth/authlog"
-	"github.com/simonjanss/rig/auth/password"
 	"github.com/simonjanss/rig/auth/session"
+	"github.com/simonjanss/rig/runtime/authwire"
 	"github.com/simonjanss/rig/runtime/tenancy"
 	"github.com/simonjanss/rig/runtime/throttle"
 )
-
-const goodPassword = "correct horse battery staple"
 
 type clock struct{ at time.Time }
 
@@ -64,14 +62,14 @@ func (r *recorder) last(event string) (authlog.Entry, bool) {
 	return authlog.Entry{}, false
 }
 
-type notifier struct{ reset, verify, invite string }
+type notifier struct{ code, verify, invite string }
 
-func (n *notifier) SendPasswordReset(_ context.Context, _ *account.Identity, token string) error {
-	n.reset = token
+func (n *notifier) SendEmailCode(_ context.Context, _ *account.Identity, code string) error {
+	n.code = code
 	return nil
 }
 
-func (n *notifier) SendInvitation(_ context.Context, _ *account.Identity, _ *account.Account, token string) error {
+func (n *notifier) SendInvitation(_ context.Context, _ *account.Identity, _ *account.Invitation, token string) error {
 	n.invite = token
 	return nil
 }
@@ -107,6 +105,9 @@ func setup(t *testing.T, opts ...option) *fixture {
 	c := &clock{at: time.Date(2026, 3, 1, 12, 0, 0, 0, time.UTC)}
 	log := &recorder{counter: throttle.NewMemory(), trail: authlog.NewMemory()}
 	store := account.NewMemoryStore()
+	// The store's clock is the fixture's, so that a code minted against a
+	// frozen clock has not already expired against the wall.
+	store.Now = c.now
 	notify := &notifier{}
 
 	// One store for both credentials, the way the Postgres one is.
@@ -128,9 +129,9 @@ func setup(t *testing.T, opts ...option) *fixture {
 		Store:      store,
 		Sessions:   sessions,
 		Identities: identities,
-		Hasher:     password.New(password.Params{Memory: 8 * 1024, Iterations: 1, Parallelism: 1}),
 		Log:        log,
 		Notifier:   notify,
+		EmailCode:  account.EmailCodeOptions{Enabled: true},
 		Limiter:    throttle.New(log.counter).WithClock(c.now),
 		Now:        c.now,
 		Sleep:      func(context.Context, time.Duration) {},
@@ -152,6 +153,9 @@ func setup(t *testing.T, opts ...option) *fixture {
 		APIKeys:    keys,
 		AuditLog:   log.trail,
 		Tenant:     func(*http.Request) (uuid.UUID, error) { return f.tenant, nil },
+		// The routes under test include the sign-in, so the fixture has the
+		// flow on. A test whose subject is the gate turns it off in an option.
+		AllowEmailCode: true,
 		Grants: func(_ context.Context, _, accountID uuid.UUID) (roles, permissions []string, err error) {
 			g := f.grants[accountID]
 			return g.roles, g.permissions, nil
@@ -179,9 +183,6 @@ func setup(t *testing.T, opts ...option) *fixture {
 		ID: uuid.New(), TenantID: f.tenant, DisplayName: "Sam", IsActive: true,
 	}
 	store.PutPerson(f.identity, f.account)
-	if err := accounts.SetPassword(context.Background(), f.identity.ID, goodPassword); err != nil {
-		t.Fatal(err)
-	}
 	return f
 }
 
@@ -231,18 +232,36 @@ type pair struct {
 	SessionID        uuid.UUID `json:"sessionId"`
 }
 
+// login is the whole flow over HTTP: ask for a code, read it out of the
+// notifier, and type it back.
 func (f *fixture) login(t *testing.T) pair {
 	t.Helper()
 
-	res := f.do(t, "POST", "/auth/login", "",
-		`{"emailAddress":"sam@example.com","password":"`+goodPassword+`"}`)
+	res := f.codeSignIn(t)
 	if res.status != http.StatusOK {
-		t.Fatalf("login: status %d\n%s", res.status, res.body)
+		t.Fatalf("sign-in: status %d\n%s", res.status, res.body)
 	}
 
 	var p pair
 	res.decode(t, &p)
 	return p
+}
+
+// codeSignIn is login without insisting it worked, for the tests whose subject
+// is the refusal.
+func (f *fixture) codeSignIn(t *testing.T) response {
+	t.Helper()
+
+	f.notify.code = ""
+	if res := f.do(t, "POST", "/auth/email-code", "",
+		`{"emailAddress":"sam@example.com"}`); res.status != http.StatusNoContent {
+		t.Fatalf("asking for a code: status %d\n%s", res.status, res.body)
+	}
+	if f.notify.code == "" {
+		t.Fatal("no code was mailed")
+	}
+	return f.do(t, "POST", "/auth/email-code/verify", "",
+		`{"emailAddress":"sam@example.com","code":"`+f.notify.code+`"}`)
 }
 
 func TestLogin(t *testing.T) {
@@ -261,26 +280,67 @@ func TestLogin(t *testing.T) {
 	}
 }
 
-func TestLoginRefused(t *testing.T) {
+func TestSignInRefused(t *testing.T) {
 	t.Parallel()
 
 	f := setup(t)
+	// A live code to be wrong about, so that "wrong code" is a guess rather
+	// than a malformed request — the two are charged differently.
+	if res := f.do(t, "POST", "/auth/email-code", "",
+		`{"emailAddress":"sam@example.com"}`); res.status != http.StatusNoContent {
+		t.Fatalf("asking for a code: status %d", res.status)
+	}
 
 	for _, tc := range []struct {
 		name string
 		body string
 		want int
 	}{
-		{"wrong password", `{"emailAddress":"sam@example.com","password":"nope"}`, http.StatusUnauthorized},
-		{"unknown address", `{"emailAddress":"nobody@example.com","password":"` + goodPassword + `"}`, http.StatusUnauthorized},
+		{"wrong code", `{"emailAddress":"sam@example.com","code":"000000"}`, http.StatusUnauthorized},
+		{"unknown address", `{"emailAddress":"nobody@example.com","code":"000000"}`, http.StatusUnauthorized},
 		{"empty body", ``, http.StatusBadRequest},
 		{"unknown field", `{"email":"sam@example.com"}`, http.StatusBadRequest},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if res := f.do(t, "POST", "/auth/login", "", tc.body); res.status != tc.want {
+			if res := f.do(t, "POST", "/auth/email-code/verify", "", tc.body); res.status != tc.want {
 				t.Errorf("status = %d, want %d\n%s", res.status, tc.want, res.body)
 			}
 		})
+	}
+}
+
+// Off means the routes do not exist, rather than answering 403 to something
+// that is there — which is the difference #165 was filed about.
+func TestTheCodeRoutesAreAbsentWhenTheFlowIsOff(t *testing.T) {
+	t.Parallel()
+
+	f := setup(t, func(c *authhttp.Config) { c.AllowEmailCode = false })
+
+	for _, path := range []string{"/auth/email-code", "/auth/email-code/verify"} {
+		if res := f.do(t, "POST", path, "", `{"emailAddress":"sam@example.com"}`); res.status != http.StatusNotFound {
+			t.Errorf("%s: status = %d, want 404", path, res.status)
+		}
+	}
+}
+
+// And there is nothing left of the password surface. It was not only unused: a
+// reset route is a way to acquire a credential the deployment decided not to
+// have, for anybody who can receive at the address.
+func TestThePasswordRoutesAreGone(t *testing.T) {
+	t.Parallel()
+
+	f := setup(t)
+
+	for _, path := range []string{
+		"/auth/login",
+		"/auth/register",
+		"/auth/password/reset",
+		"/auth/password/reset/confirm",
+		"/auth/password/change",
+	} {
+		if res := f.do(t, "POST", path, "", `{}`); res.status != http.StatusNotFound {
+			t.Errorf("%s: status = %d, want 404", path, res.status)
+		}
 	}
 }
 
@@ -390,16 +450,17 @@ func TestLogout(t *testing.T) {
 }
 
 // Whether an address is registered is not the caller's business, and any
-// difference in status is the enumeration this endpoint is used for.
-func TestPasswordResetAnswersTheSameEitherWay(t *testing.T) {
+// difference in status or body is the enumeration this endpoint would otherwise
+// be used for.
+func TestAskingForACodeAnswersTheSameEitherWay(t *testing.T) {
 	t.Parallel()
 
 	f := setup(t)
 
-	known := f.do(t, "POST", "/auth/password/reset", "", `{"emailAddress":"sam@example.com"}`)
-	unknown := f.do(t, "POST", "/auth/password/reset", "", `{"emailAddress":"nobody@example.com"}`)
+	known := f.do(t, "POST", "/auth/email-code", "", `{"emailAddress":"sam@example.com"}`)
+	unknown := f.do(t, "POST", "/auth/email-code", "", `{"emailAddress":"nobody@example.com"}`)
 
-	if known.status != http.StatusAccepted || unknown.status != http.StatusAccepted {
+	if known.status != http.StatusNoContent || unknown.status != http.StatusNoContent {
 		t.Errorf("statuses differ: %d and %d", known.status, unknown.status)
 	}
 	if !bytes.Equal(known.body, unknown.body) {
@@ -407,64 +468,49 @@ func TestPasswordResetAnswersTheSameEitherWay(t *testing.T) {
 	}
 }
 
-func TestPasswordResetFlow(t *testing.T) {
+// The response is the same body every sign-in answers, which is what lets the
+// picker and every client work unchanged.
+func TestTheCodeFlowOverHTTP(t *testing.T) {
 	t.Parallel()
 
 	f := setup(t)
-	old := f.login(t)
 
-	if res := f.do(t, "POST", "/auth/password/reset", "", `{"emailAddress":"sam@example.com"}`); res.status != http.StatusAccepted {
+	if res := f.do(t, "POST", "/auth/email-code", "",
+		`{"emailAddress":"sam@example.com"}`); res.status != http.StatusNoContent {
 		t.Fatalf("status %d", res.status)
 	}
-	if f.notify.reset == "" {
-		t.Fatal("a link should have been sent")
+	if f.notify.code == "" {
+		t.Fatal("a code should have been sent")
 	}
 
-	const newPassword = "an entirely different passphrase"
-	res := f.do(t, "POST", "/auth/password/reset/confirm", "",
-		`{"token":"`+f.notify.reset+`","newPassword":"`+newPassword+`"}`)
-	if res.status != http.StatusNoContent {
-		t.Fatalf("status %d\n%s", res.status, res.body)
-	}
-
-	// Everything from before the reset is dead.
-	req := httptest.NewRequest(http.MethodGet, "/anything", nil)
-	req.Header.Set("Authorization", "Bearer "+old.AccessToken)
-	if _, err := f.handler.Claims(req); err == nil {
-		t.Error("the sessions from before the reset should be gone")
-	}
-
-	if res := f.do(t, "POST", "/auth/login", "",
-		`{"emailAddress":"sam@example.com","password":"`+newPassword+`"}`); res.status != http.StatusOK {
-		t.Errorf("the new password should work, got %d", res.status)
-	}
-}
-
-func TestChangePasswordReturnsAFreshSession(t *testing.T) {
-	t.Parallel()
-
-	f := setup(t)
-	old := f.login(t)
-
-	res := f.do(t, "POST", "/auth/password/change", old.AccessToken,
-		`{"currentPassword":"`+goodPassword+`","newPassword":"an entirely different passphrase"}`)
+	res := f.do(t, "POST", "/auth/email-code/verify", "",
+		`{"emailAddress":"sam@example.com","code":"`+f.notify.code+`"}`)
 	if res.status != http.StatusOK {
 		t.Fatalf("status %d\n%s", res.status, res.body)
 	}
 
-	var fresh pair
-	res.decode(t, &fresh)
-
-	// The caller keeps working; everything else does not.
-	req := httptest.NewRequest(http.MethodGet, "/anything", nil)
-	req.Header.Set("Authorization", "Bearer "+fresh.AccessToken)
-	if _, err := f.handler.Claims(req); err != nil {
-		t.Errorf("the caller should be handed a working session: %v", err)
+	var out authwire.SignInResponse
+	res.decode(t, &out)
+	switch {
+	case out.AccessToken == "":
+		t.Error("no session, though they belong to a tenant")
+	case out.IdentityToken == "":
+		t.Error("the identity token is issued alongside, for the picker")
+	case len(out.Tenants) != 1 || !out.Tenants[0].Current:
+		t.Errorf("tenants = %+v, want the one they landed in marked", out.Tenants)
 	}
 
-	req.Header.Set("Authorization", "Bearer "+old.AccessToken)
-	if _, err := f.handler.Claims(req); err == nil {
-		t.Error("the old session should be gone")
+	// And it is a session: it resolves to claims.
+	req := httptest.NewRequest(http.MethodGet, "/anything", nil)
+	req.Header.Set("Authorization", "Bearer "+out.AccessToken)
+	if _, err := f.handler.Claims(req); err != nil {
+		t.Errorf("the session should work: %v", err)
+	}
+
+	// The code is spent.
+	if again := f.do(t, "POST", "/auth/email-code/verify", "",
+		`{"emailAddress":"sam@example.com","code":"`+f.notify.code+`"}`); again.status != http.StatusUnauthorized {
+		t.Errorf("status = %d, want a consumed code refused", again.status)
 	}
 }
 
@@ -716,8 +762,8 @@ func TestForwardedHeadersAreNotBelievedByDefault(t *testing.T) {
 	f := setup(t)
 
 	for range 5 {
-		req, _ := http.NewRequest("POST", f.srv.URL+"/auth/login",
-			bytes.NewBufferString(`{"emailAddress":"sam@example.com","password":"nope"}`))
+		req, _ := http.NewRequest("POST", f.srv.URL+"/auth/email-code/verify",
+			bytes.NewBufferString(`{"emailAddress":"sam@example.com","code":"000000"}`))
 		req.Header.Set("Content-Type", "application/json")
 		// A different claimed address every time. It must not buy new budget.
 		req.Header.Set("X-Forwarded-For", uuid.New().String())
@@ -728,28 +774,28 @@ func TestForwardedHeadersAreNotBelievedByDefault(t *testing.T) {
 		res.Body.Close()
 	}
 
-	res := f.do(t, "POST", "/auth/login", "",
-		`{"emailAddress":"sam@example.com","password":"nope"}`)
+	res := f.do(t, "POST", "/auth/email-code/verify", "",
+		`{"emailAddress":"sam@example.com","code":"000000"}`)
 	if res.status != http.StatusTooManyRequests {
 		t.Errorf("status = %d, want 429: the header should have bought nothing", res.status)
 	}
 }
 
-func TestLoginLockoutOverHTTP(t *testing.T) {
+func TestSignInLockoutOverHTTP(t *testing.T) {
 	t.Parallel()
 
 	f := setup(t)
 
 	for i := range 5 {
-		res := f.do(t, "POST", "/auth/login", "",
-			`{"emailAddress":"sam@example.com","password":"nope"}`)
+		res := f.do(t, "POST", "/auth/email-code/verify", "",
+			`{"emailAddress":"sam@example.com","code":"000000"}`)
 		if res.status != http.StatusUnauthorized {
 			t.Fatalf("attempt %d: status %d", i+1, res.status)
 		}
 	}
 
-	res := f.do(t, "POST", "/auth/login", "",
-		`{"emailAddress":"sam@example.com","password":"`+goodPassword+`"}`)
+	res := f.do(t, "POST", "/auth/email-code/verify", "",
+		`{"emailAddress":"sam@example.com","code":"000000"}`)
 	if res.status != http.StatusTooManyRequests {
 		t.Fatalf("status = %d, want 429\n%s", res.status, res.body)
 	}
@@ -825,9 +871,11 @@ func mustAccounts(t *testing.T, f *fixture) *account.Service {
 
 	svc, err := account.New(account.Config{
 		Store: f.store, Sessions: f.sessions, Identities: f.identities,
-		Limiter: throttle.New(throttle.NewMemory()).WithClock(f.clock.now),
-		Now:     f.clock.now,
-		Sleep:   func(context.Context, time.Duration) {},
+		Notifier:  f.notify,
+		EmailCode: account.EmailCodeOptions{Enabled: true},
+		Limiter:   throttle.New(throttle.NewMemory()).WithClock(f.clock.now),
+		Now:       f.clock.now,
+		Sleep:     func(context.Context, time.Duration) {},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -877,6 +925,9 @@ func (f *fixture) serve(t *testing.T, cfg authhttp.Config) *httptest.Server {
 	if cfg.Tenant == nil {
 		cfg.Tenant = func(*http.Request) (uuid.UUID, error) { return f.tenant, nil }
 	}
+	// The sign-in is a route, so a server built to test something else still
+	// needs a way in. A test whose subject is the gate sets it false itself.
+	cfg.AllowEmailCode = true
 
 	handler, err := authhttp.New(cfg)
 	if err != nil {
@@ -897,6 +948,13 @@ func TestTheEmailVerificationFlow(t *testing.T) {
 
 	f := setup(t)
 	p := f.login(t)
+
+	// Signing in with a code confirms the address, so a resend for somebody who
+	// just did is a no-op. What this flow is for is an address that was not
+	// confirmed that way — one a provider vouched for, or one somebody changed
+	// — so the stamp comes off first.
+	f.identity.EmailVerifiedAt = nil
+	f.store.PutIdentity(f.identity)
 
 	if res := f.do(t, "POST", "/auth/email/verify/resend", p.AccessToken, ""); res.status != http.StatusAccepted {
 		t.Fatalf("resend: status %d\n%s", res.status, res.body)
@@ -957,8 +1015,13 @@ func TestAForwardedAddressIsBelievedOnlyFromAProxyTheApplicationNamed(t *testing
 	login := func(forwarded string) string {
 		t.Helper()
 
-		req, err := http.NewRequest("POST", srv.URL+"/auth/login",
-			bytes.NewBufferString(`{"emailAddress":"sam@example.com","password":"`+goodPassword+`"}`))
+		if res := request(t, srv, "POST", "/auth/email-code", "",
+			`{"emailAddress":"sam@example.com"}`); res.status != http.StatusNoContent {
+			t.Fatalf("asking for a code: status %d", res.status)
+		}
+
+		req, err := http.NewRequest("POST", srv.URL+"/auth/email-code/verify",
+			bytes.NewBufferString(`{"emailAddress":"sam@example.com","code":"`+f.notify.code+`"}`))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -973,7 +1036,7 @@ func TestAForwardedAddressIsBelievedOnlyFromAProxyTheApplicationNamed(t *testing
 		}
 		defer res.Body.Close()
 		if res.StatusCode != http.StatusOK {
-			t.Fatalf("login: status %d", res.StatusCode)
+			t.Fatalf("sign-in: status %d", res.StatusCode)
 		}
 
 		var p pair
@@ -1026,19 +1089,24 @@ func TestAForwardedAddressIsBelievedOnlyFromAProxyTheApplicationNamed(t *testing
 func TestTheClientKindIsWhateverTheCallerDeclared(t *testing.T) {
 	t.Parallel()
 
-	for body, want := range map[string]string{
-		`{"emailAddress":"sam@example.com","password":"` + goodPassword + `","client":"mobile"}`:  "Mobile",
-		`{"emailAddress":"sam@example.com","password":"` + goodPassword + `","client":"MACHINE"}`: "Machine",
-		`{"emailAddress":"sam@example.com","password":"` + goodPassword + `"}`:                    "Web",
+	for declared, want := range map[string]string{
+		`,"client":"mobile"`:  "Mobile",
+		`,"client":"MACHINE"`: "Machine",
+		``:                    "Web",
 		// Anything unrecognised is a browser, not an error: the field is a hint
 		// for a human reading a session list, not a security boundary.
-		`{"emailAddress":"sam@example.com","password":"` + goodPassword + `","client":"toaster"}`: "Web",
+		`,"client":"toaster"`: "Web",
 	} {
 		f := setup(t)
+		if res := f.do(t, "POST", "/auth/email-code", "",
+			`{"emailAddress":"sam@example.com"}`); res.status != http.StatusNoContent {
+			t.Fatalf("asking for a code: status %d", res.status)
+		}
 
-		res := f.do(t, "POST", "/auth/login", "", body)
+		body := `{"emailAddress":"sam@example.com","code":"` + f.notify.code + `"` + declared + `}`
+		res := f.do(t, "POST", "/auth/email-code/verify", "", body)
 		if res.status != http.StatusOK {
-			t.Fatalf("login: status %d\n%s", res.status, res.body)
+			t.Fatalf("sign-in: status %d\n%s", res.status, res.body)
 		}
 		var p pair
 		res.decode(t, &p)
@@ -1056,8 +1124,8 @@ func TestTheClientKindIsWhateverTheCallerDeclared(t *testing.T) {
 	}
 }
 
-// A misspelled field silently ignored is a password change that quietly did
-// not change the password.
+// A misspelled field silently ignored is a request that quietly did something
+// other than what it said.
 func TestABodyTheEndpointDoesNotUnderstandIsRefused(t *testing.T) {
 	t.Parallel()
 
@@ -1066,9 +1134,9 @@ func TestABodyTheEndpointDoesNotUnderstandIsRefused(t *testing.T) {
 	for name, body := range map[string]string{
 		"empty":         "",
 		"not json":      "{",
-		"unknown field": `{"emailAddress":"sam@example.com","passwrd":"x"}`,
+		"unknown field": `{"emailAddress":"sam@example.com","cod":"000000"}`,
 	} {
-		res := f.do(t, "POST", "/auth/login", "", body)
+		res := f.do(t, "POST", "/auth/email-code/verify", "", body)
 		if res.status != http.StatusBadRequest {
 			t.Errorf("%s: status = %d, want 400\n%s", name, res.status, res.body)
 		}
@@ -1154,8 +1222,8 @@ func TestOnErrorTakesOverTheResponse(t *testing.T) {
 		},
 	})
 
-	res := request(t, srv, "POST", "/auth/login", "",
-		`{"emailAddress":"sam@example.com","password":"nope"}`)
+	res := request(t, srv, "POST", "/auth/email-code/verify", "",
+		`{"emailAddress":"sam@example.com","code":"000000"}`)
 	if res.status != http.StatusTeapot {
 		t.Errorf("status = %d, want the mapper's own\n%s", res.status, res.body)
 	}
@@ -1170,11 +1238,11 @@ func TestTheBasePathIsConfigurable(t *testing.T) {
 	// The trailing slash is trimmed, or every route would carry a double one.
 	srv := f.serve(t, authhttp.Config{BasePath: "/api/v1/identity/"})
 
-	if res := request(t, srv, "POST", "/api/v1/identity/login", "",
-		`{"emailAddress":"sam@example.com","password":"`+goodPassword+`"}`); res.status != http.StatusOK {
+	if res := request(t, srv, "POST", "/api/v1/identity/email-code", "",
+		`{"emailAddress":"sam@example.com"}`); res.status != http.StatusNoContent {
 		t.Errorf("status = %d, want the routes under the configured prefix\n%s", res.status, res.body)
 	}
-	if res := request(t, srv, "POST", "/auth/login", "", `{}`); res.status != http.StatusNotFound {
+	if res := request(t, srv, "POST", "/auth/email-code", "", `{}`); res.status != http.StatusNotFound {
 		t.Errorf("status = %d, want 404: the default prefix should be gone", res.status)
 	}
 }

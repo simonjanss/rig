@@ -47,7 +47,7 @@ func decodeSignIn(t *testing.T, w *httptest.ResponseRecorder) authwire.SignInRes
 // The sign-in a header-based deployment could not have. The tenant was not
 // known before the redirect and is not knowable at the callback, so it is
 // answered here from the person's own memberships — which is what a password
-// login has always done.
+// code sign-in has always done.
 func TestTheDefaultProviderSignInAnswersLikeALogin(t *testing.T) {
 	t.Parallel()
 

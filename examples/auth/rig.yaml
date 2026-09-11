@@ -28,10 +28,19 @@ servers:
 auth:
   enabled: true
 
-  # Anybody may sign themselves up, because this example's answer to "who may
-  # create a tenant" is also anybody. A product with an invite-only front door
-  # leaves both of these off and the routes do not exist.
-  allow_registration: true
+  # The way in, and the only one that does not need a Google account: rig mails
+  # a six-digit code to the address and you type it back. `allow_provisioning`
+  # is what makes it open rather than invite-only — a code goes to an address
+  # nothing here has ever seen, and the person is created when it is asked for.
+  # A product with an invite-only front door leaves that off, and then a code
+  # only reaches somebody who has already been invited.
+  email_code:
+    enabled: true
+    allow_provisioning: true
+
+  # Anybody may make a tenant, because this example's answer to "who may sign
+  # up" is also anybody. A product that invites its way in leaves this off and
+  # the route does not exist.
   allow_tenant_creation: true
 
   # A request with neither names no tenant, and `uuid.Nil` is an ordinary answer

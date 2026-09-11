@@ -1571,10 +1571,12 @@
         "rotation_leeway": "45s",
         "identity_ttl": "20m"
       },
-      "password": {
-        "min_length": 14,
-        "max_length": 512,
-        "breach_check": true
+      "email_code": {
+        "enabled": true,
+        "length": 8,
+        "ttl": "15m",
+        "max_attempts": 3,
+        "allow_provisioning": true
       },
       "limits": {
         "login_by_email": {
@@ -1585,8 +1587,12 @@
           "max": 40,
           "window": "15m"
         },
-        "password_reset": {
+        "email_code_request": {
           "max": 2,
+          "window": "1h"
+        },
+        "email_code_ip": {
+          "max": 12,
           "window": "1h"
         },
         "verification_resend": {
@@ -1600,9 +1606,12 @@
         "api_key_failures": {
           "max": 20,
           "window": "1m"
+        },
+        "invitation_preview": {
+          "max": 30,
+          "window": "1h"
         }
       },
-      "allow_registration": true,
       "allow_tenant_creation": true,
       "require_verified_email": true,
       "trusted_proxies": [

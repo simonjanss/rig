@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/simonjanss/rig/auth"
+	"github.com/simonjanss/rig/auth/account"
 	"github.com/simonjanss/rig/auth/handoff"
 	"github.com/simonjanss/rig/auth/oauth"
 	"github.com/simonjanss/rig/runtime/authwire"
@@ -136,7 +137,11 @@ func TestPruningWithNoWindowDoesNothing(t *testing.T) {
 func TestMountRegistersTheEndpoints(t *testing.T) {
 	t.Parallel()
 
-	front, err := auth.New(auth.Config{Pool: unconnected(t)})
+	front, err := auth.New(auth.Config{
+		Pool:      unconnected(t),
+		Notifier:  noopNotifier{},
+		EmailCode: auth.EmailCodeOptions{Enabled: true},
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -145,7 +150,10 @@ func TestMountRegistersTheEndpoints(t *testing.T) {
 	front.Mount(mux)
 
 	for _, route := range []struct{ method, path string }{
-		{http.MethodPost, "/auth/login"},
+		{http.MethodPost, "/auth/email-code"},
+		{http.MethodPost, "/auth/email-code/verify"},
+		{http.MethodGet, "/auth/invitations/preview"},
+		{http.MethodPost, "/auth/invitations"},
 		{http.MethodPost, "/auth/logout"},
 		{http.MethodPost, "/auth/refresh"},
 		{http.MethodGet, "/auth/sessions"},
@@ -155,6 +163,19 @@ func TestMountRegistersTheEndpoints(t *testing.T) {
 			t.Errorf("%s %s is not routed", route.method, route.path)
 		}
 	}
+}
+
+// noopNotifier is a Notifier that exists and does nothing, for the tests that
+// only need auth.New to agree to build: the code flow refuses a NoNotifier,
+// deliberately, because a code nobody receives is a door nobody can open.
+type noopNotifier struct{}
+
+func (noopNotifier) SendEmailCode(context.Context, *account.Identity, string) error { return nil }
+func (noopNotifier) SendEmailVerification(context.Context, *account.Identity, string) error {
+	return nil
+}
+func (noopNotifier) SendInvitation(context.Context, *account.Identity, *account.Invitation, string) error {
+	return nil
 }
 
 // A base path is a single field, because a project that already publishes /api
@@ -170,10 +191,10 @@ func TestTheBasePathMoves(t *testing.T) {
 	mux := http.NewServeMux()
 	front.Mount(mux)
 
-	if _, pattern := mux.Handler(httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", nil)); pattern == "" {
-		t.Error("the moved login route is not routed")
+	if _, pattern := mux.Handler(httptest.NewRequest(http.MethodPost, "/api/v1/auth/logout", nil)); pattern == "" {
+		t.Error("the moved logout route is not routed")
 	}
-	if _, pattern := mux.Handler(httptest.NewRequest(http.MethodPost, "/auth/login", nil)); pattern != "" {
+	if _, pattern := mux.Handler(httptest.NewRequest(http.MethodPost, "/auth/logout", nil)); pattern != "" {
 		t.Error("the default path should not also be routed")
 	}
 }
@@ -194,10 +215,10 @@ func TestTenantFromHeader(t *testing.T) {
 		t.Errorf("tenant = %s, want %s", got, want)
 	}
 
-	// Absent means unspecified, not wrong. Only login and a password reset ask,
+	// Absent means unspecified, not wrong. Only a sign-in and a code request ask,
 	// and login signs somebody in to one of their own tenants when nothing
 	// named one — which is what a single sign-in page needs, because a visitor
-	// cannot say which tenants an address belongs to before the password has
+	// cannot say which tenants an address belongs to before the code has
 	// been checked.
 	req = httptest.NewRequest(http.MethodPost, "/auth/login", nil)
 	id, err := auth.TenantFromHeader(req)
@@ -243,15 +264,17 @@ func unconnected(t *testing.T) *pgxpool.Pool {
 func TestTheBasePathMovesEveryRouteTogether(t *testing.T) {
 	t.Parallel()
 
-	for _, tc := range []struct{ base, login, provider string }{
-		{"", "/auth/login", "/auth/oauth/google/start"},
-		{"/api/auth", "/api/auth/login", "/api/auth/oauth/google/start"},
+	for _, tc := range []struct{ base, signIn, provider string }{
+		{"", "/auth/email-code", "/auth/oauth/google/start"},
+		{"/api/auth", "/api/auth/email-code", "/api/auth/oauth/google/start"},
 		// A trailing slash is somebody's copy-paste, not a different intent.
-		{"/api/auth/", "/api/auth/login", "/api/auth/oauth/google/start"},
+		{"/api/auth/", "/api/auth/email-code", "/api/auth/oauth/google/start"},
 	} {
 		front, err := auth.New(auth.Config{
-			Pool:     &pgxpool.Pool{},
-			BasePath: tc.base,
+			Pool:      &pgxpool.Pool{},
+			BasePath:  tc.base,
+			Notifier:  noopNotifier{},
+			EmailCode: auth.EmailCodeOptions{Enabled: true},
 			OAuth: auth.OAuth{
 				Providers:  []oauth.Provider{oauth.Google("id", "secret")},
 				BaseURL:    "https://app.example.com",
@@ -266,7 +289,7 @@ func TestTheBasePathMovesEveryRouteTogether(t *testing.T) {
 		front.Mount(mux)
 
 		for _, want := range []struct{ method, path string }{
-			{http.MethodPost, tc.login},
+			{http.MethodPost, tc.signIn},
 			{http.MethodGet, tc.provider},
 		} {
 			req := httptest.NewRequest(want.method, "http://example.com"+want.path, nil)
@@ -279,7 +302,7 @@ func TestTheBasePathMovesEveryRouteTogether(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet,
 			"http://example.com"+strings.TrimRight(cmpOr(tc.base, "/auth"), "/")+"/google/start", nil)
 		if _, pattern := mux.Handler(req); pattern != "" {
-			t.Errorf("base %q: a provider route sits beside login, at %s", tc.base, pattern)
+			t.Errorf("base %q: a provider route sits beside the sign-in, at %s", tc.base, pattern)
 		}
 	}
 }

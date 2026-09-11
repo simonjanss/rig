@@ -4218,10 +4218,12 @@
         "rotation_leeway": "30s",
         "identity_ttl": "30m"
       },
-      "password": {
-        "min_length": 12,
-        "max_length": 1024,
-        "breach_check": false
+      "email_code": {
+        "enabled": false,
+        "length": 0,
+        "ttl": "0s",
+        "max_attempts": 0,
+        "allow_provisioning": false
       },
       "limits": {
         "login_by_email": {
@@ -4232,8 +4234,12 @@
           "max": 50,
           "window": "15m"
         },
-        "password_reset": {
+        "email_code_request": {
           "max": 5,
+          "window": "1h"
+        },
+        "email_code_ip": {
+          "max": 20,
           "window": "1h"
         },
         "verification_resend": {
@@ -4247,9 +4253,12 @@
         "api_key_failures": {
           "max": 20,
           "window": "1m"
+        },
+        "invitation_preview": {
+          "max": 60,
+          "window": "1h"
         }
       },
-      "allow_registration": false,
       "allow_tenant_creation": false,
       "require_verified_email": false
     },

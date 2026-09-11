@@ -57,8 +57,11 @@ export type AuthProfile = {
      */
     tenantQuery?: string;
 
-    /** Whether `POST <basePath>/register` exists. */
-    hasRegistration?: boolean;
+    /**
+     * Whether `POST <basePath>/email-code` and `.../verify` exist — that is,
+     * whether this deployment signs anybody in with a mailed code.
+     */
+    hasEmailCode?: boolean;
     /** Whether `POST <basePath>/tenants` exists. */
     hasTenantCreation?: boolean;
     /** Whether the tenant-picker routes under `<basePath>/me` exist. */

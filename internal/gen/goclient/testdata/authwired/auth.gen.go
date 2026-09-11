@@ -27,7 +27,7 @@ var AuthProfile = rigclient.AuthProfile{
 
 	TenantHeader: "X-Tenant-Id",
 
-	HasRegistration:     true,
+	HasEmailCode:        true,
 	HasTenantCreation:   true,
 	HasIdentitySessions: true,
 	HasAPIKeys:          true,

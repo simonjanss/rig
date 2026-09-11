@@ -29,10 +29,19 @@ const (
 	// another device, short enough that a live credential is not sitting in a
 	// mailbox all afternoon.
 	DefaultEmailCodeTTL = 10 * time.Minute
-	// DefaultEmailCodeMaxAttempts is five. With six digits that leaves a one in
-	// two hundred thousand chance of guessing a particular code, and it is
-	// forgiving enough for somebody mistyping on a phone.
-	DefaultEmailCodeMaxAttempts = 5
+	// DefaultEmailCodeMaxAttempts is three, and it is deliberately well below
+	// the five wrong sign-ins that lock an address.
+	//
+	// If the two matched, somebody who mistyped a code three or four times
+	// would kill the code *and* lock themselves out of the address for fifteen
+	// minutes — so the ordinary clumsy failure would be unrecoverable rather
+	// than "that one is dead, ask for another". Three tries on a code you can
+	// re-read from the mail in front of you is enough, and it leaves room
+	// underneath the lockout for the second code to work.
+	//
+	// With six digits it is also a one in a third of a million chance of
+	// guessing a particular code.
+	DefaultEmailCodeMaxAttempts = 3
 
 	// MinEmailCodeLength is the shortest code this package will mint. Below it
 	// no attempt ceiling makes a code safe: four digits with five attempts is
