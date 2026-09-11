@@ -24,11 +24,14 @@ func (e *emitter) handlerFile(res *ir.Resource) (gen.Artifact, error) {
 }
 
 // registerResource mounts every one of a resource's routes.
+//
+// Through a Router rather than onto the mux, because Register hands it one that
+// wraps each route in a span. The mux satisfies it, so a caller that has
+// nothing to interpose is unaffected.
 func (e *emitter) registerResource(b *gobuf.Buf, res *ir.Resource) {
-	httpPkg := b.Import("net/http")
-
 	b.Comment("register" + res.Name + " mounts " + res.Name + "'s routes.")
-	b.L("func register%s(mux *%s.ServeMux, s Server, svc %sService) {", res.Name, httpPkg, res.Name)
+	b.L("func register%s(mux %s.Router, s Server, svc %sService) {",
+		res.Name, b.Import(runtimeModule+"/httpx"), res.Name)
 
 	for i := range res.Endpoints {
 		ep := &res.Endpoints[i]
@@ -66,8 +69,6 @@ func (e *emitter) handler(b *gobuf.Buf, res *ir.Resource, ep *ir.Endpoint) {
 	b.L("rec := %s.Wrap(w)", b.Import(runtimeModule+"/reqlog"))
 	b.L("w = rec")
 	b.NL()
-
-	e.span(b, ep)
 
 	prepare := "prepare"
 	if ep.Public {

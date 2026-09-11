@@ -104,7 +104,7 @@ func (e *emitter) openAPIMount(b *gobuf.Buf) {
 		"built against, and a specification nobody may fetch is one nobody can " +
 		"use. To gate it, turn `api.openapi.serve` off and mount " +
 		"[github.com/simonjanss/rig/runtime/apidoc.Handler] in main.go instead.")
-	b.L("%s().Mount(mux)", openAPIDocsVar)
+	b.L("%s().Mount(routes)", openAPIDocsVar)
 }
 
 // openAPIAnnounce is the line Mount writes.

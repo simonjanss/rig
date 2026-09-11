@@ -9,7 +9,6 @@ import (
 	"net/http"
 
 	"github.com/simonjanss/rig/examples/linearlite/internal/generated/model"
-	"github.com/simonjanss/rig/observe"
 	"github.com/simonjanss/rig/runtime/httpx"
 	"github.com/simonjanss/rig/runtime/idempotency"
 	"github.com/simonjanss/rig/runtime/reqlog"
@@ -17,7 +16,7 @@ import (
 )
 
 // registerNotificationDevice mounts NotificationDevice's routes.
-func registerNotificationDevice(mux *http.ServeMux, s Server, svc NotificationDeviceService) {
+func registerNotificationDevice(mux httpx.Router, s Server, svc NotificationDeviceService) {
 	mux.HandleFunc("GET /api/v1/notification-devices", handleListNotificationDevices(s, svc))
 	mux.HandleFunc("POST /api/v1/notification-devices", handleCreateNotificationDevice(s, svc))
 	mux.HandleFunc("DELETE /api/v1/notification-devices/{id}", handleDeleteNotificationDevice(s, svc))
@@ -31,9 +30,6 @@ func handleListNotificationDevices(s Server, svc NotificationDeviceService) http
 	return func(w http.ResponseWriter, r *http.Request) {
 		rec := reqlog.Wrap(w)
 		w = rec
-
-		r, span := observe.Server(r, "GET /api/v1/notification-devices", rec.Status)
-		defer span.End()
 
 		ctx, claims, rc, ok := prepare(s, w, r)
 		defer logRequest(s, r, rec, rc)
@@ -89,9 +85,6 @@ func handleCreateNotificationDevice(s Server, svc NotificationDeviceService) htt
 		rec := reqlog.Wrap(w)
 		w = rec
 
-		r, span := observe.Server(r, "POST /api/v1/notification-devices", rec.Status)
-		defer span.End()
-
 		ctx, claims, rc, ok := prepare(s, w, r)
 		defer logRequest(s, r, rec, rc)
 		if !ok {
@@ -141,9 +134,6 @@ func handleDeleteNotificationDevice(s Server, svc NotificationDeviceService) htt
 		rec := reqlog.Wrap(w)
 		w = rec
 
-		r, span := observe.Server(r, "DELETE /api/v1/notification-devices/{id}", rec.Status)
-		defer span.End()
-
 		ctx, claims, rc, ok := prepare(s, w, r)
 		defer logRequest(s, r, rec, rc)
 		if !ok {
@@ -180,9 +170,6 @@ func handleGetNotificationDevice(s Server, svc NotificationDeviceService) http.H
 	return func(w http.ResponseWriter, r *http.Request) {
 		rec := reqlog.Wrap(w)
 		w = rec
-
-		r, span := observe.Server(r, "GET /api/v1/notification-devices/{id}", rec.Status)
-		defer span.End()
 
 		ctx, claims, rc, ok := prepare(s, w, r)
 		defer logRequest(s, r, rec, rc)

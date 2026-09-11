@@ -210,7 +210,7 @@ func (e *emitter) shapesMount(b *gobuf.Buf) {
 
 	for _, res := range shapes {
 		for _, sh := range e.shapesFor(res) {
-			b.L("mux.HandleFunc(%s, handle%sShape(h.Server, h.Shapes))",
+			b.L("routes.HandleFunc(%s, handle%sShape(h.Server, h.Shapes))",
 				gobuf.Quote("GET "+sh.path), sh.name)
 		}
 	}

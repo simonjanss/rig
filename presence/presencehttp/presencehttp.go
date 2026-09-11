@@ -100,7 +100,7 @@ func New(svc *presence.Service, opt Options) *Handler {
 	return h
 }
 
-// Mount registers the three routes on a mux.
+// Mount registers the three routes on a router.
 //
 //	PUT    /presence   one heartbeat: where this tab is, and that it is still there
 //	DELETE /presence   leave now rather than waiting out the TTL
@@ -108,7 +108,7 @@ func New(svc *presence.Service, opt Options) *Handler {
 //
 // It takes a mux rather than making one, because these routes belong on the same
 // server as the rest of the API.
-func (h *Handler) Mount(mux *http.ServeMux) {
+func (h *Handler) Mount(mux httpx.Router) {
 	mux.HandleFunc("PUT "+h.basePath, h.with(h.beat))
 	mux.HandleFunc("DELETE "+h.basePath, h.with(h.leave))
 	mux.HandleFunc("GET "+h.basePath, h.with(h.here))

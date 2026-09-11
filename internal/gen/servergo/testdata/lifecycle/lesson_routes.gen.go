@@ -16,7 +16,7 @@ import (
 )
 
 // registerLesson mounts Lesson's routes.
-func registerLesson(mux *http.ServeMux, s Server, svc LessonService) {
+func registerLesson(mux httpx.Router, s Server, svc LessonService) {
 	mux.HandleFunc("GET /api/v1/lessons", handleListLessons(s, svc))
 	mux.HandleFunc("POST /api/v1/lessons", handleCreateLesson(s, svc))
 	mux.HandleFunc("QUERY /api/v1/lessons", handleSearchLessons(s, svc))

@@ -58,6 +58,7 @@ import (
 	"github.com/simonjanss/rig/auth/password"
 	"github.com/simonjanss/rig/auth/session"
 	"github.com/simonjanss/rig/runtime/cache"
+	"github.com/simonjanss/rig/runtime/httpx"
 	"github.com/simonjanss/rig/runtime/rigerr"
 	"github.com/simonjanss/rig/runtime/tenancy"
 	"github.com/simonjanss/rig/runtime/throttle"
@@ -797,16 +798,18 @@ func (a *Auth) Close(ctx context.Context) error {
 	return a.cache.Close(ctx)
 }
 
-// Mount registers the endpoints on a mux.
+// Mount registers the endpoints on a router.
 //
-// It takes the same mux the generated API is registered on, so that one server
-// answers both and the paths cannot collide silently: /auth is separate from the
-// API's base path, and Go's router refuses a duplicate pattern.
+// It takes the same one the generated API is registered through, so that one
+// server answers both and the paths cannot collide silently: /auth is separate
+// from the API's base path, and Go's router refuses a duplicate pattern. A
+// [net/http.ServeMux] satisfies it, and a generated server passes something
+// that wraps each route in a span before handing it on.
 //
 // Setting api.Server.Auth calls this for you, which is the ordinary way. Call it
 // directly only when the API layer is not rig's — mounting these endpoints beside
 // a hand-written router, for instance.
-func (a *Auth) Mount(mux *http.ServeMux) {
+func (a *Auth) Mount(mux httpx.Router) {
 	a.endpoints.Mount(mux)
 	if a.oauth != nil {
 		a.oauth.Mount(mux)

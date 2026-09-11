@@ -7,14 +7,13 @@ package api
 import (
 	"net/http"
 
-	"github.com/simonjanss/rig/observe"
 	"github.com/simonjanss/rig/runtime/httpx"
 	"github.com/simonjanss/rig/runtime/reqlog"
 	"github.com/simonjanss/rig/runtime/tenancy"
 )
 
 // registerAccount mounts Account's routes.
-func registerAccount(mux *http.ServeMux, s Server, svc AccountService) {
+func registerAccount(mux httpx.Router, s Server, svc AccountService) {
 	mux.HandleFunc("GET /api/v1/accounts", handleListAccounts(s, svc))
 	mux.HandleFunc("QUERY /api/v1/accounts", handleSearchAccounts(s, svc))
 	mux.HandleFunc("POST /api/v1/accounts/_search", handleSearchAccounts(s, svc))
@@ -29,9 +28,6 @@ func handleListAccounts(s Server, svc AccountService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		rec := reqlog.Wrap(w)
 		w = rec
-
-		r, span := observe.Server(r, "GET /api/v1/accounts", rec.Status)
-		defer span.End()
 
 		ctx, claims, rc, ok := prepare(s, w, r)
 		defer logRequest(s, r, rec, rc)
@@ -76,9 +72,6 @@ func handleSearchAccounts(s Server, svc AccountService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		rec := reqlog.Wrap(w)
 		w = rec
-
-		r, span := observe.Server(r, "QUERY /api/v1/accounts", rec.Status)
-		defer span.End()
 
 		ctx, claims, rc, ok := prepare(s, w, r)
 		defer logRequest(s, r, rec, rc)
@@ -135,9 +128,6 @@ func handleListDeletedAccounts(s Server, svc AccountService) http.HandlerFunc {
 		rec := reqlog.Wrap(w)
 		w = rec
 
-		r, span := observe.Server(r, "GET /api/v1/accounts/_deleted", rec.Status)
-		defer span.End()
-
 		ctx, claims, rc, ok := prepare(s, w, r)
 		defer logRequest(s, r, rec, rc)
 		if !ok {
@@ -181,9 +171,6 @@ func handleGetAccount(s Server, svc AccountService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		rec := reqlog.Wrap(w)
 		w = rec
-
-		r, span := observe.Server(r, "GET /api/v1/accounts/{id}", rec.Status)
-		defer span.End()
 
 		ctx, claims, rc, ok := prepare(s, w, r)
 		defer logRequest(s, r, rec, rc)

@@ -125,8 +125,8 @@ func (e *emitter) serverDefaults(b *gobuf.Buf) {
 	if e.tracing() {
 		b.Comment("Where this project's spans go, for the two questions the shared " +
 			"plumbing asks: what to label a request nobody labelled, and which span " +
-			"to redden when one fails. The per-route span is opened by the handler " +
-			"itself.")
+			"to redden when one fails. The span itself is opened by the router " +
+			"Register registers every route through.")
 		b.L("h.Server.Tracer = %s.APITracer{}", b.Import(observeModule))
 	}
 	if e.throttleEnabled() {
@@ -308,9 +308,25 @@ func (e *emitter) registerFunc(b *gobuf.Buf) {
 	b.L("mux := %s.NewServeMux()", httpPkg)
 	b.NL()
 
+	b.Comment("Every route below is registered through this rather than on the " +
+		"mux directly, so that one span per request covers all of them: the " +
+		"resource routes this document describes, and equally the ones rig " +
+		"mounts for you — authentication, the inbox, presence, the live-sync " +
+		"shapes, the OpenAPI document.\n\n" +
+		"Each span is named by the pattern it was registered under, so a trace " +
+		"reads \"GET /api/v1/todos/{id}\" rather than one name per identifier " +
+		"anybody ever fetched. That name is known here and nowhere else, which " +
+		"is why this is a router and not a handler wrapped around the mux.\n\n" +
+		"Without a Server.Tracer it is the mux, so a project that set no " +
+		"`tracing:` pays nothing for the line. What comes back from Register is " +
+		"the mux either way — a route added to it afterwards is the caller's " +
+		"own, answers exactly as it did before, and is not traced.")
+	b.L("routes := %s.Tracing(mux, h.Server.Tracer)", b.Import(runtimeModule+"/apibase"))
+	b.NL()
+
 	for _, res := range e.resources() {
 		b.L("if h.%s != nil {", res.Name)
-		b.L("register%s(mux, h.Server, h.%s)", res.Name, res.Name)
+		b.L("register%s(routes, h.Server, h.%s)", res.Name, res.Name)
 		b.L("}")
 	}
 
@@ -331,7 +347,7 @@ func (e *emitter) registerFunc(b *gobuf.Buf) {
 			"routes do not go through resolve, so the context is built here.")
 		b.L("fail(h.Server, w, r, requestContext(h.Server, r), err)")
 		b.L("},")
-		b.L("}).Mount(mux)")
+		b.L("}).Mount(routes)")
 		b.L("}")
 	}
 
@@ -350,7 +366,7 @@ func (e *emitter) registerFunc(b *gobuf.Buf) {
 		b.L("Fail: func(w %s.ResponseWriter, r *%s.Request, err error) {", httpPkg, httpPkg)
 		b.L("fail(h.Server, w, r, requestContext(h.Server, r), err)")
 		b.L("},")
-		b.L("}).Mount(mux)")
+		b.L("}).Mount(routes)")
 		b.L("}")
 	}
 
@@ -367,7 +383,7 @@ func (e *emitter) registerFunc(b *gobuf.Buf) {
 		"panic naming the auth route rather than the resource one — and the " +
 		"resource routes are the ones this project owns.")
 	b.L("if h.Server.Auth != nil {")
-	b.L("h.Server.Auth.Mount(mux)")
+	b.L("h.Server.Auth.Mount(routes)")
 	b.L("}")
 
 	b.NL()

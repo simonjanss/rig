@@ -46,13 +46,14 @@ func requestSpan(ctx context.Context) *Span {
 //
 // The route is the matched pattern, not the path: "GET /api/v1/todos/{id}"
 // rather than one span name per identifier anybody ever fetched. That is why
-// this is called from inside the generated handler rather than from a
-// middleware in front of the mux — net/http sets the pattern on the request the
-// mux dispatches, and a wrapper outside has a request that has matched nothing.
+// the caller is the router a generated server registers its routes through
+// rather than a middleware in front of the mux — the pattern is in hand where a
+// route is registered, and net/http fills it in on a request only as it
+// dispatches, so a wrapper outside has one that has matched nothing.
 //
 // status is how the span learns what was answered, and it is a function rather
 // than the response writer so that this package does not depend on rig/runtime.
-// The generated server passes the Status method of the recorder it already
+// The generated server passes the Status method of the recorder that router
 // wraps every response in. Nil is allowed and means the attribute is left off.
 //
 // The returned request carries the span. Everything after this — the claims,

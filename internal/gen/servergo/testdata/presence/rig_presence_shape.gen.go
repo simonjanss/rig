@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/simonjanss/rig/runtime/electric"
 	"github.com/simonjanss/rig/runtime/httpx"
+	"github.com/simonjanss/rig/runtime/reqlog"
 	"github.com/simonjanss/rig/runtime/rigerr"
 	"github.com/simonjanss/rig/runtime/tenancy"
 )
@@ -70,7 +71,11 @@ type RigPresenceScope func(ctx context.Context, r *http.Request, claims tenancy.
 // handleRigPresenceShape serves GET /api/v1/rig_presence/_stream.
 func handleRigPresenceShape(s Server, sh Shapes) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		rec := reqlog.Wrap(w)
+		w = rec
+
 		ctx, claims, rc, ok := prepare(s, w, r)
+		defer logRequest(s, r, rec, rc)
 		if !ok {
 			return
 		}

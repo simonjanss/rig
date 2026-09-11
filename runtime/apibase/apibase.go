@@ -344,8 +344,9 @@ type Authenticator interface {
 	// Claims identifies the caller behind a request.
 	Claims(*http.Request) (tenancy.Claims, error)
 	// Mount registers the authentication routes — signing in, refreshing, keys
-	// — on the same mux the resource routes are on.
-	Mount(*http.ServeMux)
+	// — through the same router the resource routes went through, so they land
+	// on one mux and are traced on the same terms.
+	Mount(httpx.Router)
 }
 
 // Server is the behavior every handler shares.
@@ -487,6 +488,12 @@ type Server struct {
 
 	// Tracer is where this API's spans come from. Nil is a project that does not
 	// trace, and then none of its methods is called.
+	//
+	// [Tracing] is what opens the request span from it, and a generated Register
+	// registers every route through that — so setting this by hand on a server
+	// built by hand traces nothing on its own. What it does reach either way is
+	// the request identifier, which falls back to the trace, and [LogFailure],
+	// which reddens the span a refusal happened in.
 	Tracer Tracer
 
 	// Throttle is the rate limiter, or nil for a project with no `throttle:`

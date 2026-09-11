@@ -16,7 +16,7 @@ import (
 )
 
 // registerFixture mounts Fixture's routes.
-func registerFixture(mux *http.ServeMux, s Server, svc FixtureService) {
+func registerFixture(mux httpx.Router, s Server, svc FixtureService) {
 	mux.HandleFunc("GET /api/v1/fixtures", handleListFixtures(s, svc))
 	mux.HandleFunc("POST /api/v1/fixtures", handleCreateFixture(s, svc))
 	mux.HandleFunc("QUERY /api/v1/fixtures", handleSearchFixtures(s, svc))

@@ -85,7 +85,7 @@ func New(svc *notify.Service, opt Options) *Handler {
 	return h
 }
 
-// Mount registers the five routes on a mux.
+// Mount registers the five routes on a router.
 //
 // Every one of them goes through [httpx.Caller.Wrap], which is what makes
 // "narrows to the caller" structural rather than something five handlers each
@@ -96,7 +96,7 @@ func New(svc *notify.Service, opt Options) *Handler {
 //	POST   /notifications/{id}/_read      mark one read
 //	POST   /notifications/_read-all       mark the page's worth read
 //	DELETE /notifications/{id}            remove one from the inbox
-func (h *Handler) Mount(mux *http.ServeMux) {
+func (h *Handler) Mount(mux httpx.Router) {
 	mux.HandleFunc("GET "+h.basePath, h.caller.Wrap(h.list))
 	mux.HandleFunc("GET "+h.basePath+"/_unread-count", h.caller.Wrap(h.unreadCount))
 	mux.HandleFunc("POST "+h.basePath+"/_read-all", h.caller.Wrap(h.readAll))

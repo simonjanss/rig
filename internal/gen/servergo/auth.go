@@ -363,16 +363,8 @@ func (e *authEmitter) hooks(b *gobuf.Buf) {
 		"Logger is: this configuration is built first, and what it produces is " +
 		"what Server.Auth is then set to. Set both or neither — a project whose " +
 		"resource routes label a request one way and whose sign-in labels it " +
-		"another has two answers to the question the label exists to settle.\n\n" +
-		"The trace is the one answer these routes cannot give. They are rig's " +
-		"own: mounted by Auth.Mount rather than emitted per endpoint, so no span " +
-		"is opened over them and there is nothing to fall back to. What a caller " +
-		"that sent no header gets here is a fresh identifier — the same string " +
-		"as the requestId in the error body and the request_id on the line, " +
-		"which is what the label is for — where a resource route in the same " +
-		"traced project would have answered with its trace id. A client that " +
-		"wants its sign-in correlated with the rest of its requests sends the " +
-		"header, which is the case this field exists to make work.")
+		"another has two answers to the question the label exists to settle." +
+		traceFallbackNote(e.traced()))
 	b.L("RequestID func(*%s.Request) string", httpPkg)
 	b.NL()
 
@@ -876,12 +868,17 @@ func (e *authEmitter) configFunc(b *gobuf.Buf) {
 			"identifier nothing validated.\n\n"
 	}
 
+	tracer := ""
+	if e.traced() {
+		tracer = ", Tracer: " + b.Import(observeModule) + ".APITracer{}"
+	}
+
 	b.Comment(shared +
 		"RequestIDHeader is on it because it is what decides which header is " +
 		"read, and a Server without it reads the default one — which is the " +
 		"right header in most projects and the wrong one in exactly the projects " +
-		"that said so in rig.yaml.")
-	b.L("srv := Server{Logger: h.Logger, RequestID: h.RequestID, RequestIDHeader: RequestIDHeader}")
+		"that said so in rig.yaml." + tracerNote(e.traced()))
+	b.L("srv := Server{Logger: h.Logger, RequestID: h.RequestID, RequestIDHeader: RequestIDHeader%s}", tracer)
 	b.NL()
 
 	if e.oauth() != nil {
@@ -896,10 +893,7 @@ func (e *authEmitter) configFunc(b *gobuf.Buf) {
 		"Through requestContext rather than a literal of its own, for the same " +
 		"reason one step out: a literal here is a second place deciding what a " +
 		"request looks like, and the two had already drifted — this one named no " +
-		"caller, no client revision, and a request identifier nothing validated. " +
-		"What it still cannot reach is the trace fallback, because these routes " +
-		"carry no span, so a request nobody named is named here instead of by " +
-		"its trace; [Hooks.RequestID] says what that costs.")
+		"caller, no client revision, and a request identifier nothing validated.")
 	b.L("if cfg.OnError == nil {")
 	b.L("cfg.OnError = func(w %s.ResponseWriter, r *%s.Request, err error) {", httpPkg, httpPkg)
 	b.L("fail(srv, w, r, requestContext(srv, r), err)")
@@ -1519,4 +1513,45 @@ func (e *authEmitter) providersFunc(b *gobuf.Buf) {
 	b.L("return append(out, h.Extra...), nil")
 	b.L("}")
 	b.NL()
+}
+
+// traceFallbackNote is the paragraph [Hooks.RequestID] carries in a project
+// that traces, and nothing at all in one that does not.
+//
+// Conditional for the reason [tracerNote] is: what it describes is the Tracer
+// that only a traced project's shared Server literal carries, and a project
+// with no `tracing:` would otherwise be told its sign-in is wrapped by a span
+// nothing opens.
+func traceFallbackNote(tracing bool) string {
+	if !tracing {
+		return ""
+	}
+	return "\n\nNil answers the same way here as anywhere else, including the " +
+		"fallback to this request's trace: these routes are wrapped by the same " +
+		"span as every other route on the mux, so a sign-in that nobody " +
+		"labelled is labelled by its trace and lines up with whatever the " +
+		"client did next."
+}
+
+// tracerNote is the sentence the shared Server literal carries when it has a
+// Tracer on it, and nothing at all when it does not.
+//
+// Separate from the Tracer field itself so that the two cannot disagree: a
+// project with no `tracing:` gets neither, and there is no branch that emits
+// the field and forgets the sentence.
+func tracerNote(tracing bool) string {
+	if !tracing {
+		return ""
+	}
+	return "\n\nTracer is on it so that these routes answer the question a " +
+		"resource route answers: a request that arrived with no identifier of " +
+		"its own is labelled by its trace, and a failure reddens the span it " +
+		"happened in. The span itself is opened around the whole mux by " +
+		"Register — this is only where to send what happens inside it."
+}
+
+// traced reports whether this document asked for spans. The same question
+// [emitter.tracing] answers, from the emitter that emits this file.
+func (e *authEmitter) traced() bool {
+	return e.doc.API.Tracing != nil && e.doc.API.Tracing.Enabled
 }

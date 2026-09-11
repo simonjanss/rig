@@ -49,28 +49,52 @@ func TestWithoutTheBlockNothingNamesObserve(t *testing.T) {
 	}
 }
 
-// The span is opened inside the handler and ended by a defer. Both halves
-// matter: inside, because the route is only known once the mux has dispatched,
-// and deferred, because a handler has a dozen ways out and none of them should
-// have to remember.
-func TestTheRequestSpanIsNamedByTheRouteAndDeferred(t *testing.T) {
+// Nothing registers on the mux directly. A span opened inside each generated
+// handler covered only the routes a generator wrote and left the mounted ones —
+// auth, the shapes, the OpenAPI document — with no span at all; a route
+// registered through the router gets one whoever registered it.
+func TestEveryRouteIsRegisteredThroughTheTracingRouter(t *testing.T) {
+	t.Parallel()
+
+	src := artifactNamed(t, gentest.Run(t, servergo.New(), traced(t), opts()), "server.gen.go")
+
+	body, ok := between(src, "func Register(", "\n}")
+	if !ok {
+		t.Fatal("no Register function")
+	}
+
+	if !strings.Contains(body, "routes := apibase.Tracing(mux, h.Server.Tracer)") {
+		t.Errorf("Register builds no tracing router, so nothing opens a span:\n%s", body)
+	}
+
+	for _, want := range []string{
+		"registerLesson(routes,",
+		"routes.HandleFunc(\"GET /api/v1/lesson/_stream\"",
+		"h.Server.Auth.Mount(routes)",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("not registered through the router, so it is untraced:\n%s", want)
+		}
+	}
+
+	// And the mux itself is what comes back, so a caller can still mount its
+	// own catch-all on it — which is the thing a handler wrapped around the mux
+	// would have taken for itself.
+	if !strings.Contains(body, "return mux") {
+		t.Error("Register no longer returns the mux it registered on")
+	}
+}
+
+// A generated handler names no tracing library of its own. Since the wrapper
+// took the job over, a route file that still imported rig/observe would be a
+// second span nested inside the first on exactly the routes a generator wrote.
+func TestAHandlerOpensNoSpanOfItsOwn(t *testing.T) {
 	t.Parallel()
 
 	src := artifactNamed(t, gentest.Run(t, servergo.New(), traced(t), opts()), "lesson_routes.gen.go")
 
-	if !strings.Contains(src, `observe.Server(r, "DELETE /api/v1/lessons/{id}", rec.Status)`) {
-		t.Errorf("the read handler does not open a span named by its route:\n%s", src)
-	}
-	if !strings.Contains(src, "defer span.End()") {
-		t.Error("the span is not ended by a defer")
-	}
-
-	// Before prepare, so a caller refused by a pre-hook, by the revision check
-	// or by a permission is inside the span rather than invisible to it.
-	span := strings.Index(src, "observe.Server(r,")
-	prepare := strings.Index(src, "prepare(s, w, r)")
-	if span < 0 || prepare < 0 || span > prepare {
-		t.Error("the span is opened after prepare, so a refusal happens outside it")
+	if strings.Contains(src, "observe.") {
+		t.Errorf("a generated handler still opens its own span:\n%s", src)
 	}
 }
 

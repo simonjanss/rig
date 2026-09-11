@@ -9,7 +9,6 @@ import (
 	"net/http"
 
 	"github.com/simonjanss/rig/examples/linearlite/internal/generated/model"
-	"github.com/simonjanss/rig/observe"
 	"github.com/simonjanss/rig/runtime/httpx"
 	"github.com/simonjanss/rig/runtime/idempotency"
 	"github.com/simonjanss/rig/runtime/reqlog"
@@ -17,7 +16,7 @@ import (
 )
 
 // registerNotificationSetting mounts NotificationSetting's routes.
-func registerNotificationSetting(mux *http.ServeMux, s Server, svc NotificationSettingService) {
+func registerNotificationSetting(mux httpx.Router, s Server, svc NotificationSettingService) {
 	mux.HandleFunc("GET /api/v1/notification-settings", handleListNotificationSettings(s, svc))
 	mux.HandleFunc("POST /api/v1/notification-settings", handleCreateNotificationSetting(s, svc))
 	mux.HandleFunc("DELETE /api/v1/notification-settings/{id}", handleDeleteNotificationSetting(s, svc))
@@ -32,9 +31,6 @@ func handleListNotificationSettings(s Server, svc NotificationSettingService) ht
 	return func(w http.ResponseWriter, r *http.Request) {
 		rec := reqlog.Wrap(w)
 		w = rec
-
-		r, span := observe.Server(r, "GET /api/v1/notification-settings", rec.Status)
-		defer span.End()
 
 		ctx, claims, rc, ok := prepare(s, w, r)
 		defer logRequest(s, r, rec, rc)
@@ -90,9 +86,6 @@ func handleCreateNotificationSetting(s Server, svc NotificationSettingService) h
 		rec := reqlog.Wrap(w)
 		w = rec
 
-		r, span := observe.Server(r, "POST /api/v1/notification-settings", rec.Status)
-		defer span.End()
-
 		ctx, claims, rc, ok := prepare(s, w, r)
 		defer logRequest(s, r, rec, rc)
 		if !ok {
@@ -142,9 +135,6 @@ func handleDeleteNotificationSetting(s Server, svc NotificationSettingService) h
 		rec := reqlog.Wrap(w)
 		w = rec
 
-		r, span := observe.Server(r, "DELETE /api/v1/notification-settings/{id}", rec.Status)
-		defer span.End()
-
 		ctx, claims, rc, ok := prepare(s, w, r)
 		defer logRequest(s, r, rec, rc)
 		if !ok {
@@ -181,9 +171,6 @@ func handleGetNotificationSetting(s Server, svc NotificationSettingService) http
 	return func(w http.ResponseWriter, r *http.Request) {
 		rec := reqlog.Wrap(w)
 		w = rec
-
-		r, span := observe.Server(r, "GET /api/v1/notification-settings/{id}", rec.Status)
-		defer span.End()
 
 		ctx, claims, rc, ok := prepare(s, w, r)
 		defer logRequest(s, r, rec, rc)
@@ -238,9 +225,6 @@ func handleUpdateNotificationSetting(s Server, svc NotificationSettingService) h
 	return func(w http.ResponseWriter, r *http.Request) {
 		rec := reqlog.Wrap(w)
 		w = rec
-
-		r, span := observe.Server(r, "PATCH /api/v1/notification-settings/{id}", rec.Status)
-		defer span.End()
 
 		ctx, claims, rc, ok := prepare(s, w, r)
 		defer logRequest(s, r, rec, rc)

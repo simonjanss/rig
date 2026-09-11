@@ -19,7 +19,7 @@ import (
 )
 
 // registerTodoAttachment mounts TodoAttachment's routes.
-func registerTodoAttachment(mux *http.ServeMux, s Server, svc TodoAttachmentService) {
+func registerTodoAttachment(mux httpx.Router, s Server, svc TodoAttachmentService) {
 	mux.HandleFunc("GET /api/v1/todo-attachments", handleListTodoAttachments(s, svc))
 	mux.HandleFunc("POST /api/v1/todo-attachments", handleCreateTodoAttachment(s, svc))
 	mux.HandleFunc("QUERY /api/v1/todo-attachments", handleSearchTodoAttachments(s, svc))

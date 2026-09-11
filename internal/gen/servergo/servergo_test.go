@@ -235,7 +235,7 @@ func TestAuthWiresClaimsAndMountsItsRoutes(t *testing.T) {
 	}
 	for _, want := range []string{
 		"h.Server.GetClaims = h.Server.Auth.Claims",
-		"h.Server.Auth.Mount(mux)",
+		"h.Server.Auth.Mount(routes)",
 		// Two answers to "who is calling" is a startup panic, not a precedence
 		// rule: whichever lost would go on looking wired.
 		`panic("api.Register: set Server.Auth or Server.GetClaims, not both")`,
@@ -1146,7 +1146,7 @@ func TestTheOpenAPIRoutesAreMounted(t *testing.T) {
 		`var openAPIDocs = sync.OnceValue(func() *apidoc.Handler {`,
 		`resolved, err := apidoc.New(docs.Document, apidoc.Options{ ` +
 			`JSONPath: OpenAPIJSONPath, YAMLPath: OpenAPIYAMLPath, })`,
-		`openAPIDocs().Mount(mux)`,
+		`openAPIDocs().Mount(routes)`,
 	} {
 		if !strings.Contains(src, want) {
 			t.Errorf("missing:\n%s", want)

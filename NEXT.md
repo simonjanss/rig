@@ -3070,12 +3070,31 @@ closure and leaves the shape alone.
 
 ### Honest gaps
 
-- **The `auth:` routes and the inbox routes are not traced.** They are mounted
+- ~~**The `auth:` routes and the inbox routes are not traced.** They are mounted
   rather than generated, so no span is opened for them; they still log, and a
   failure there still carries a request id. Fixing it means a wrapper that can
   ask the mux which pattern matched — `mux.Handler(r)` can, since 1.22 — and
   `Register` returns a `*http.ServeMux` by contract, so the wrapper would have
-  to go inside. Named, not built.
+  to go inside. Named, not built.~~ Built, but not as named. The wrapper around
+  the mux is the wrong shape: `Register` documents that what it returns is still
+  a mux you can `Handle` on, and `examples/linearlite` does exactly that with a
+  `"/"` for its front end — so a wrapper that has already taken `"/"` for itself
+  turns every such project into a startup panic. It found that out by panicking.
+
+  What replaced it is `apibase.Tracing`, an `httpx.Router` that wraps each
+  handler as it is registered. The pattern is in hand there and nowhere else, so
+  there is no second match per request and no catch-all; the mux is untouched
+  and `Register` still returns it. It cost widening `Mount` from
+  `*http.ServeMux` to `httpx.Router` in authhttp, oauth, notifyhttp,
+  presencehttp and apidoc, and on `apibase.Authenticator` with it — `Router`
+  lives in `runtime/httpx` because every one of them already imports it.
+
+  It took over from the per-handler span rather than joining it, or the
+  generated routes would carry two. One thing fell out of it: the auth wiring's
+  shared `Server` literal needed a `Tracer` of its own, because it is built
+  before `Register` fills that field in — without one a sign-in had a span and
+  still could not be labelled by it. What is not covered is a request the mux
+  matched nothing for, which was true before as well.
 - **A method's span is not marked failed.** The stage that refused is, and so is
   the statement that failed, but the enclosing `repository.Team.Create` stays
   green with a red child. Recording it would mean a named return and a closure

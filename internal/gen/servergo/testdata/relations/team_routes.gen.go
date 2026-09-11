@@ -16,7 +16,7 @@ import (
 )
 
 // registerTeam mounts Team's routes.
-func registerTeam(mux *http.ServeMux, s Server, svc TeamService) {
+func registerTeam(mux httpx.Router, s Server, svc TeamService) {
 	mux.HandleFunc("GET /api/v1/teams", handleListTeams(s, svc))
 	mux.HandleFunc("POST /api/v1/teams", handleCreateTeam(s, svc))
 	mux.HandleFunc("QUERY /api/v1/teams", handleSearchTeams(s, svc))

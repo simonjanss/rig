@@ -258,7 +258,17 @@ func (e *emitter) shapeHandler(b *gobuf.Buf, res *ir.Resource, sh shape) {
 	b.Comment("handle" + sh.name + "Shape serves GET " + sh.path + ".")
 	b.L("func handle%sShape(s Server, sh Shapes) %s.HandlerFunc {", sh.name, httpPkg)
 	b.L("return func(w %s.ResponseWriter, r *%s.Request) {", httpPkg, httpPkg)
+
+	// The same pair every other route writes, and for the same reason: a
+	// refusal here used to reach the log and a subscription that worked reached
+	// nothing at all, so the longest-lived request this server answers was the
+	// one request line nobody could find.
+	b.L("rec := %s.Wrap(w)", b.Import(runtimeModule+"/reqlog"))
+	b.L("w = rec")
+	b.NL()
+
 	b.L("ctx, claims, rc, ok := prepare(s, w, r)")
+	b.L("defer logRequest(s, r, rec, rc)")
 	b.L("if !ok { return }")
 	b.NL()
 

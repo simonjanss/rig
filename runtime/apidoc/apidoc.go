@@ -201,6 +201,17 @@ func (h *Handler) Paths() []string {
 	return out
 }
 
+// Router is where a route is registered. A [net/http.ServeMux] satisfies it,
+// and so does the tracing router a generated server mounts through.
+//
+// Declared here rather than imported to keep this package's dependencies the
+// ones serving a static document needs, which is currently nothing outside the
+// standard library. [github.com/simonjanss/rig/runtime/httpx] declares the same
+// two methods, and reaches runtime/throttle and the Postgres driver behind it.
+type Router interface {
+	Handle(pattern string, handler http.Handler)
+}
+
 // Mount registers a GET route per rendering found.
 //
 // One route per document rather than one route that content-negotiates. A
@@ -208,10 +219,12 @@ func (h *Handler) Paths() []string {
 // viewer, by a code generator, by curl — and two URLs are two things a person
 // can paste.
 //
-// Nothing here is traced, logged or throttled, and that is not arranged: rig
-// opens its spans and writes its request lines inside each generated handler,
-// so anything that is not one is already outside both.
-func (h *Handler) Mount(mux *http.ServeMux) {
+// Nothing here is logged or throttled, and that is not arranged: rig writes its
+// request lines inside each generated handler, and a specification anybody may
+// fetch has no caller to count against. A span it does get, because a generated
+// Register registers these through the same router as everything else —
+// fetching the document is a request to this server like any other.
+func (h *Handler) Mount(mux Router) {
 	if h == nil {
 		return
 	}

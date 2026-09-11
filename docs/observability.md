@@ -389,13 +389,16 @@ rather than "however long the process ran". A span that succeeded has no
   red; a 404 or a 422 does not, for the same reason those are debug lines and
   not error lines.
 
-The liveness and readiness probes are not traced, the same as they are not
-logged.
+"One span per request" means every route `Register` mounts, not only the ones
+generated from your tables: the `auth:` block's routes, the inbox under
+`/notifications`, presence, the live-sync shapes and the OpenAPI document are
+mounted for you and are traced on the same terms. A route you mount yourself on
+the mux `Register` returns is yours — it answers exactly as it did before, and
+it is not traced, because rig does not know the pattern you registered it under.
 
-**Not traced yet:** the `auth:` block's routes and the hand-written inbox routes
-under `/notifications`. They log, and their failures carry a request id, but
-they are mounted rather than generated and no span is opened for them — so they
-do not appear on the monitoring page either.
+The liveness and readiness probes are not traced, the same as they are not
+logged. They are answered before the mux, outside everything. Neither is the
+monitoring page: looking at the page does not appear on the page.
 
 ## The monitoring page
 
@@ -780,15 +783,6 @@ cannot be turned on without it. For a project that traces nothing, what you get
 is stderr — or wherever you pointed `serve.Config.Logger` — with one `request_id`
 per line, and whatever your deployment does with stderr.
 
-**The authentication routes are the one place the trace fallback does not
-reach.** `/auth/*` is mounted by `Auth.Mount` rather than emitted per endpoint,
-so no span is opened over it: a sign-in gets a fresh identifier where a resource
-route in the same project would have got the trace id. It is still labelled, and
-the `requestId` in the body is still the `request_id` on the line — what is lost
-is only the join into a collector. The caller's own header does reach these
-routes, and that is the case worth having: a client that wants its sign-in
-correlated with the rest of its requests sends one.
-
 Set `RequestID` only to answer the question differently — an identifier from the
 rest of your system, including a trace id from an OpenTelemetry setup that is
 entirely your own. rig needs no dependency for that. If you do set it, set
@@ -895,10 +889,10 @@ Give it the same logger as `Server.Logger`. Nothing enforces that they match, an
 a 500 from signing in going somewhere else is exactly the kind of thing you find
 out at the wrong moment.
 
-These routes are labelled like every other one — a sign-in that sent no header
-gets a fresh identifier, in the error body and on the line — with the single
-caveat in *Correlating a log line with a trace*: no span is opened over them, so
-the identifier is never a trace id.
+These routes are labelled like every other one, and traced like every other one:
+a sign-in that sent no header of its own is labelled by its trace, so the
+`requestId` in the error body, the `request_id` on the line and the trace in
+your collector are the same string.
 
 ## What rig does not do here
 
@@ -907,10 +901,12 @@ the identifier is never a trace id.
   carry durations — the monitoring page reads them off the last few hundred
   requests — which is where most of the questions a histogram answers can be
   asked instead, one request at a time.
-- **No middleware of somebody else's.** rig opens the request span itself rather
-  than wrapping the mux in `otelhttp`, because the route is only known once the
-  mux has dispatched — outside it, every span would be named by path. If you
-  want otelhttp anyway, `Register` returns an `*http.ServeMux` you can wrap.
+- **No middleware of somebody else's.** rig opens the request span as each route
+  is registered rather than handing the mux to `otelhttp`, because that is where
+  the route is known: a wrapper in front of the mux has a request that has
+  matched nothing, and every span would be named by path. If you want otelhttp
+  anyway, `Register` returns an `*http.ServeMux` you can wrap — leave `tracing:`
+  off, or you will have two spans per request.
 - **No log shipping.** `slog` writes where you point it. A collector, a
   retention period and somewhere to search from are the deployment's, not rig's.
   The sink above is not a counter-example: it is a bounded file with one
