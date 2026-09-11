@@ -860,6 +860,18 @@ func (e *authEmitter) configFunc(b *gobuf.Buf) {
 	b.L("}")
 	b.NL()
 
+	b.Comment("The server the two error writers below report through.\n\n" +
+		"One literal, shared, because it is the answer to \"what does a request " +
+		"look like\" and a second copy of it is a second answer: the one this " +
+		"replaced named no caller, no client revision, and a request identifier " +
+		"nothing validated.\n\n" +
+		"RequestIDHeader is on it because it is what decides which header is " +
+		"read, and a Server without it reads the default one — which is the " +
+		"right header in most projects and the wrong one in exactly the projects " +
+		"that said so in rig.yaml.")
+	b.L("srv := Server{Logger: h.Logger, RequestID: h.RequestID, RequestIDHeader: RequestIDHeader}")
+	b.NL()
+
 	if e.oauth() != nil {
 		e.oauthConfig(b, fail)
 	}
@@ -875,13 +887,8 @@ func (e *authEmitter) configFunc(b *gobuf.Buf) {
 		"caller, no client revision, and a request identifier nothing validated. " +
 		"What it still cannot reach is the trace fallback, because these routes " +
 		"carry no span, so a request nobody named is named here instead of by " +
-		"its trace; [Hooks.RequestID] says what that costs.\n\n" +
-		"RequestIDHeader is on the literal because it is what decides which " +
-		"header is read, and a Server without it reads the default one — which " +
-		"is the right header in most projects and the wrong one in exactly the " +
-		"projects that said so in rig.yaml.")
+		"its trace; [Hooks.RequestID] says what that costs.")
 	b.L("if cfg.OnError == nil {")
-	b.L("srv := Server{Logger: h.Logger, RequestID: h.RequestID, RequestIDHeader: RequestIDHeader}")
 	b.L("cfg.OnError = func(w %s.ResponseWriter, r *%s.Request, err error) {", httpPkg, httpPkg)
 	b.L("fail(srv, w, r, requestContext(srv, r), err)")
 	b.L("}")
@@ -999,6 +1006,17 @@ func (e *authEmitter) oauthConfig(b *gobuf.Buf, fail string) {
 	}
 	b.L("OnSignIn: h.OAuth.OnSignIn,")
 	b.L("OnError: h.OAuth.OnError,")
+
+	b.Comment("And the same error writer every other route in this server uses, " +
+		"so a refused provider sign-in is classified, answered and logged the way " +
+		"a refused login is. These two routes used to write no line at any level: " +
+		"a failed sign-in existed in the authentication log and nowhere else.\n\n" +
+		"Behind Hooks.OAuth.OnError, and behind the front-end redirect below when " +
+		"there is one, because those answer what a person sees and this answers " +
+		"where the line goes.")
+	b.L("Fail: func(w %s.ResponseWriter, r *%s.Request, err error) {", httpPkg, httpPkg)
+	b.L("fail(srv, w, r, requestContext(srv, r), err)")
+	b.L("},")
 
 	if e.doc.API.Web != nil {
 		b.Comment("Where the front end is. It selects the ending that leaves the " +

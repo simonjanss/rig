@@ -2,7 +2,7 @@ openapi: 3.1.0
 info:
     title: fantasyfootball
     description: The fantasyfootball HTTP API.
-    version: "2026-08-30"
+    version: "2026-09-11"
 servers:
     - url: /
       description: 'This server. Set servers: in rig.yaml to name the deployment instead.'
@@ -1037,6 +1037,7 @@ components:
                 - TooLarge
                 - UnsupportedMediaType
                 - UpgradeRequired
+                - Unavailable
                 - Internal
             description: Machine-readable reason a request failed.
             x-enum-varnames:
@@ -1050,6 +1051,7 @@ components:
                 - TooLarge
                 - UnsupportedMediaType
                 - UpgradeRequired
+                - Unavailable
                 - Internal
         Fixture:
             type: object

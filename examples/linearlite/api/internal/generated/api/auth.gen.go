@@ -208,6 +208,19 @@ func Config(pool *pgxpool.Pool, h Hooks) (auth.Config, error) {
 		Now:              h.Now,
 	}
 
+	// The server the two error writers below report through.
+	//
+	// One literal, shared, because it is the answer to "what does a request look
+	// like" and a second copy of it is a second answer: the one this replaced
+	// named no caller, no client revision, and a request identifier nothing
+	// validated.
+	//
+	// RequestIDHeader is on it because it is what decides which header is read,
+	// and a Server without it reads the default one — which is the right header
+	// in most projects and the wrong one in exactly the projects that said so in
+	// rig.yaml.
+	srv := Server{Logger: h.Logger, RequestID: h.RequestID, RequestIDHeader: RequestIDHeader}
+
 	// So an authentication failure looks like every other failure this API
 	// returns, and is recorded the same way. Through fail rather than straight to
 	// the mapper, because the line that says why a 500 happened is written there
@@ -221,13 +234,7 @@ func Config(pool *pgxpool.Pool, h Hooks) (auth.Config, error) {
 	// cannot reach is the trace fallback, because these routes carry no span, so a
 	// request nobody named is named here instead of by its trace;
 	// [Hooks.RequestID] says what that costs.
-	//
-	// RequestIDHeader is on the literal because it is what decides which header is
-	// read, and a Server without it reads the default one — which is the right
-	// header in most projects and the wrong one in exactly the projects that said
-	// so in rig.yaml.
 	if cfg.OnError == nil {
-		srv := Server{Logger: h.Logger, RequestID: h.RequestID, RequestIDHeader: RequestIDHeader}
 		cfg.OnError = func(w http.ResponseWriter, r *http.Request, err error) {
 			fail(srv, w, r, requestContext(srv, r), err)
 		}

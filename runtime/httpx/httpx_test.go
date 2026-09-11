@@ -1,7 +1,9 @@
 package httpx_test
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -292,5 +294,101 @@ func TestCallerDefaultsItsErrorWriter(t *testing.T) {
 	}
 	if rec.Code != http.StatusForbidden {
 		t.Errorf("status = %d", rec.Code)
+	}
+}
+
+// An abandoned request is answered with nothing at all.
+//
+// Not an empty 500: writing a status is what made a closed tab and a broken
+// server the same event to anything reading the response afterwards, and the
+// body would be going into a socket that is already closed.
+func TestAnAbandonedRequestIsAnsweredWithNothing(t *testing.T) {
+	t.Parallel()
+
+	rec := httptest.NewRecorder()
+	httpx.WriteError(rec, "req-7", rigerr.Internal(context.Canceled, "listing todos"))
+
+	if rec.Body.Len() != 0 {
+		t.Errorf("wrote %q into a socket nobody is reading", rec.Body.String())
+	}
+	if got := rec.Header().Get("Content-Type"); got != "" {
+		t.Errorf("Content-Type = %q, want none", got)
+	}
+	// The recorder's zero value. Nothing called WriteHeader, which is the point:
+	// the handler's own defer ends the request with whatever it has.
+	if rec.Code != http.StatusOK {
+		t.Errorf("wrote status %d, want to have written none", rec.Code)
+	}
+}
+
+// A timeout is the opposite: there is a caller waiting, so it is answered — and
+// answered 503, which tells it to retry, rather than 500, which does not.
+func TestATimeoutIsStillAnswered(t *testing.T) {
+	t.Parallel()
+
+	rec := httptest.NewRecorder()
+	httpx.WriteError(rec, "req-7", fmt.Errorf("query todos: %w", context.DeadlineExceeded))
+
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Errorf("status = %d, want 503", rec.Code)
+	}
+
+	var body httpx.Error
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Code != rigerr.CodeUnavailable {
+		t.Errorf("code = %q, want Unavailable", body.Code)
+	}
+	if body.RequestID != "req-7" {
+		t.Errorf("requestId = %q, want req-7", body.RequestID)
+	}
+}
+
+// A body over the limit is refused as too large, not reported as malformed.
+//
+// It was the second of those for as long as the bound was an io.LimitReader:
+// the body was truncated rather than refused, the decoder saw a document that
+// stopped in the middle, and the caller was told its request was the wrong
+// shape. It was the right shape and too big — which is the one thing it can act
+// on, and the reason rigerr.CodeTooLarge exists at all.
+func TestABodyOverTheLimitIsTooLargeRatherThanMalformed(t *testing.T) {
+	t.Parallel()
+
+	into := struct {
+		Note string `json:"note"`
+	}{}
+	huge := `{"note":"` + strings.Repeat("x", 4096) + `"}`
+
+	r := httptest.NewRequest(http.MethodPost, "/notes", strings.NewReader(huge))
+	err := httpx.Decode(r, 512, &into)
+
+	if got := rigerr.CodeOf(err); got != rigerr.CodeTooLarge {
+		t.Fatalf("CodeOf = %q, want TooLarge (%v)", got, err)
+	}
+	// The limit is in the message, because "send fewer bytes" is not advice
+	// anybody can take without the number.
+	if !strings.Contains(err.Error(), "512") {
+		t.Errorf("the message should name the limit, got %q", err)
+	}
+}
+
+// A body at exactly the limit is read whole. The boundary is worth pinning:
+// reading only up to the limit would make a complete document indistinguishable
+// from one byte of a longer one.
+func TestABodyAtExactlyTheLimitIsRead(t *testing.T) {
+	t.Parallel()
+
+	into := struct {
+		Note string `json:"note"`
+	}{}
+	body := `{"note":"hello"}`
+
+	r := httptest.NewRequest(http.MethodPost, "/notes", strings.NewReader(body))
+	if err := httpx.Decode(r, int64(len(body)), &into); err != nil {
+		t.Fatalf("a body of exactly the limit should decode: %v", err)
+	}
+	if into.Note != "hello" {
+		t.Errorf("note = %q, want hello", into.Note)
 	}
 }

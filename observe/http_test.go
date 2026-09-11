@@ -1,7 +1,9 @@
 package observe_test
 
 import (
+	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -210,5 +212,39 @@ func TestTraceIDIsEmptyWithoutASpan(t *testing.T) {
 	r := httptest.NewRequest(http.MethodGet, "/api/v1/todos", nil)
 	if got := observe.TraceID(r); got != "" {
 		t.Errorf("TraceID is %q on an untraced request", got)
+	}
+}
+
+// A cancelled caller is not a failure here either, whatever status it arrives
+// with. The generated server does not call Fail at all in that case, but this is
+// exported and reachable on its own — and record, on the repository-layer path,
+// has always taken this arm. One fact should not get two answers depending on
+// which road it came in by.
+func TestFailDoesNotBlameACancelledCaller(t *testing.T) {
+	path := spanFile(t)
+	p := setup(t, observe.Config{ServiceName: "todo", File: path})
+
+	status := 0
+	r := httptest.NewRequest(http.MethodGet, "/api/v1/todos", nil)
+	r, span := observe.Server(r, "GET /api/v1/todos", answered(&status))
+	observe.Fail(r.Context(), http.StatusInternalServerError,
+		fmt.Errorf("listing todos: %w", context.Canceled))
+	span.End()
+
+	flush(t, p)
+
+	spans := readSpans(t, path)
+	if len(spans) != 1 {
+		t.Fatalf("want one span, got %d", len(spans))
+	}
+	if spans[0].Status == "error" {
+		t.Error("a cancelled caller was reported as a server failure")
+	}
+	// And no description either, because that is only written for a status this
+	// deliberately did not set. RecordError still put the reason on the span as
+	// an event, which is what a span that stops halfway is read by — the span
+	// file records the status and not the events.
+	if spans[0].Error != "" {
+		t.Errorf("status description is %q, want none", spans[0].Error)
 	}
 }

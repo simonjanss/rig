@@ -47,6 +47,7 @@ var ErrorCodes = []ErrorCode{
 	{"TooLarge", 413, "The request body is larger than this endpoint accepts."},
 	{"UnsupportedMediaType", 415, "The body's content type is not one this endpoint accepts."},
 	{"UpgradeRequired", 426, "The client was built against an API revision this server no longer serves."},
+	{"Unavailable", 503, "Something the server depends on did not answer in time. Retry."},
 	{"Internal", 500, "Something went wrong on the server."},
 }
 

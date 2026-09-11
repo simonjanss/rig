@@ -73,13 +73,59 @@ func Decode(r *http.Request, limit int64, into any) error {
 	if limit <= 0 {
 		limit = MaxBodyBytes
 	}
-	dec := json.NewDecoder(io.LimitReader(r.Body, limit))
+	dec := json.NewDecoder(Bounded(r.Body, limit))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(into); err != nil {
+		if errors.Is(err, ErrTooLarge) {
+			return rigerr.TooLarge("the request body is larger than the %d bytes this endpoint accepts", limit)
+		}
 		if errors.Is(err, io.EOF) {
 			return rigerr.BadRequest("the request body is empty")
 		}
 		return rigerr.BadRequest("the request body is not the shape this route takes: %s", err)
 	}
 	return nil
+}
+
+// ErrTooLarge is what a [Bounded] reader fails with past its limit. It is
+// matched with [errors.Is] rather than returned to a caller, which reads it back
+// off the decoder that was reading through one.
+var ErrTooLarge = errors.New("the request body is over the limit")
+
+// Bounded is [io.LimitReader] that refuses rather than truncates.
+//
+// The difference is the whole point. A LimitReader stops early and says nothing,
+// so a body one byte over the limit reaches the JSON decoder as a document that
+// ends in the middle — and the caller is told its request was malformed, which
+// is both untrue and unactionable. This one fails with [ErrTooLarge] instead, so
+// the answer is a 413 naming the limit.
+//
+// Not [net/http.MaxBytesReader], which does the same job and better — it also
+// stops the connection being held open by a client still sending. That one needs
+// the [net/http.ResponseWriter], and neither [Decode] nor the decoders in
+// runtime/apibase has one to give it. Changing their signatures would reach every
+// generated server.
+func Bounded(r io.Reader, limit int64) io.Reader { return &bounded{r: r, left: limit} }
+
+type bounded struct {
+	r    io.Reader
+	left int64
+}
+
+func (b *bounded) Read(p []byte) (int, error) {
+	if b.left <= 0 {
+		return 0, ErrTooLarge
+	}
+	// One past the limit, so that a body of exactly the limit is read whole and
+	// the next read is what fails. Reading only up to the limit would leave a
+	// decoder that had consumed a complete document unable to tell the two apart.
+	if int64(len(p)) > b.left+1 {
+		p = p[:b.left+1]
+	}
+	n, err := b.r.Read(p)
+	b.left -= int64(n)
+	if b.left < 0 {
+		return n, ErrTooLarge
+	}
+	return n, err
 }

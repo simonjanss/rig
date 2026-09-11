@@ -80,9 +80,24 @@ func AnswerFor(w http.ResponseWriter, err error) Answer {
 	return Answer{Code: code, Status: code.HTTPStatus(), Message: message, Fields: fields}
 }
 
-// WriteError writes err as an [Error]. Pass an empty requestID where there is
-// none to read.
+// WriteError writes err as an [Error], or writes nothing at all when the caller
+// has gone. Pass an empty requestID where there is none to read.
+//
+// [rigerr.Aborted] is answered with silence because there is nobody to answer.
+// The body would go into a socket that is already closed, and the status it set
+// would make an abandoned request indistinguishable from a failed one for
+// anything reading the response after the fact.
+//
+// This is not the only copy of that rule, and cannot be: the generated
+// DefaultErrorMapper reaches [AnswerFor] directly rather than coming through
+// here, so runtime/apibase's own Fail carries it too. Here it covers the routes
+// rig mounts itself — the inbox, presence, and the authentication routes — which
+// answer through [Fail] and have no generated mapper.
 func WriteError(w http.ResponseWriter, requestID string, err error) {
+	if rigerr.Aborted(err) {
+		return
+	}
+
 	answer := AnswerFor(w, err)
 	WriteJSON(w, answer.Status, Error{
 		Code:      answer.Code,

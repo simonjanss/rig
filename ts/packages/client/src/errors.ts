@@ -107,6 +107,7 @@ export const ErrorCode = {
     TooLarge: "TooLarge",
     UnsupportedMediaType: "UnsupportedMediaType",
     UpgradeRequired: "UpgradeRequired",
+    Unavailable: "Unavailable",
     Internal: "Internal",
 } as const;
 
@@ -191,6 +192,9 @@ export const isUnsupportedMediaType = (err: unknown) =>
 /** True when the client is older than the API surface still supports. */
 export const isUpgradeRequired = (err: unknown) =>
     codeOf(err) === ErrorCode.UpgradeRequired;
+/** True when something the server depends on did not answer. Worth retrying. */
+export const isUnavailable = (err: unknown) =>
+    codeOf(err) === ErrorCode.Unavailable;
 
 /**
  * Reads a refusal back as the shape of the body that caused it.

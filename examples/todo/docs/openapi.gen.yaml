@@ -5,7 +5,7 @@ info:
         The todo HTTP API.
 
         The notification inbox endpoints are served by a hand-written module and are not described here.
-    version: "2026-08-31"
+    version: "2026-09-11"
 servers:
     - url: http://localhost:8080
       description: This example, running on your machine.
@@ -1756,6 +1756,7 @@ components:
                 - TooLarge
                 - UnsupportedMediaType
                 - UpgradeRequired
+                - Unavailable
                 - Internal
             description: Machine-readable reason a request failed.
             x-enum-varnames:
@@ -1769,6 +1770,7 @@ components:
                 - TooLarge
                 - UnsupportedMediaType
                 - UpgradeRequired
+                - Unavailable
                 - Internal
         Pagination:
             type: object

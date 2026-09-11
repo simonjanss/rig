@@ -555,3 +555,98 @@ func stateFrom(t *testing.T, res *http.Response) string {
 	}
 	return state
 }
+
+// The error writer is what gets a refused provider sign-in into the log.
+//
+// These two routes were the only ones rig serves that wrote no line at any
+// level: the default answered plain text and returned, so a failed sign-in
+// existed in the authentication log and nowhere else. A generated server hands
+// this the same closure every other route reports through.
+func TestTheErrorWriterAnswersWhenThereIsNoHook(t *testing.T) {
+	t.Parallel()
+
+	var got error
+	calls := 0
+	f := setup(t, oauth.Profile{Subject: "s"}, func(c *oauth.Config) {
+		c.Fail = func(w http.ResponseWriter, _ *http.Request, err error) {
+			calls++
+			got = err
+			w.WriteHeader(http.StatusTeapot)
+		}
+	})
+
+	res := get(t, f.srv.URL+"/auth/oauth/google/callback?error=access_denied")
+	defer res.Body.Close()
+
+	if calls != 1 {
+		t.Fatalf("%d calls to Fail, want 1", calls)
+	}
+	// It owns the response, exactly as OnError does.
+	if res.StatusCode != http.StatusTeapot {
+		t.Errorf("status = %d, want the writer's 418", res.StatusCode)
+	}
+
+	// What it is handed is the Failure, as an error — so the code and the reason
+	// both survive, and a writer that only knows about errors loses nothing.
+	if code := rigerr.CodeOf(got); code != rigerr.CodeBadRequest {
+		t.Errorf("code = %q, want BadRequest", code)
+	}
+	var failure *oauth.Failure
+	if !errors.As(got, &failure) {
+		t.Fatalf("Fail was handed %T, want something carrying a *oauth.Failure", got)
+	}
+	if failure.Reason != oauth.ReasonCancelled {
+		t.Errorf("reason = %q, want %q", failure.Reason, oauth.ReasonCancelled)
+	}
+}
+
+// OnError wins, because the two answer different questions: what a person
+// mid-navigation is shown, and where the line about it goes. A project that
+// wrote the first meant it, and a generated server sets the second for every
+// project whether or not it wrote one.
+func TestAHookWinsOverTheErrorWriter(t *testing.T) {
+	t.Parallel()
+
+	var got caught
+	wrote := 0
+	f := setup(t, oauth.Profile{Subject: "s"}, func(c *oauth.Config) {
+		c.OnError = got.hook
+		c.Fail = func(http.ResponseWriter, *http.Request, error) { wrote++ }
+	})
+
+	res := get(t, f.srv.URL+"/auth/oauth/google/callback?error=access_denied")
+	defer res.Body.Close()
+
+	if got.calls != 1 {
+		t.Errorf("%d calls to OnError, want 1", got.calls)
+	}
+	if wrote != 0 {
+		t.Errorf("%d calls to Fail, want none — OnError owns the response", wrote)
+	}
+}
+
+// The audit entry is written before either of them, so no hook can cost the log
+// the record that a sign-in was attempted and refused. The error writer is the
+// newer of the two paths and has to hold the same order.
+func TestTheErrorWriterStillGetsTheAuditEntryFirst(t *testing.T) {
+	t.Parallel()
+
+	log := &recorder{}
+	entries := -1
+	f := setup(t, oauth.Profile{Subject: "s"}, func(c *oauth.Config) {
+		c.Log = log
+		c.Fail = func(http.ResponseWriter, *http.Request, error) {
+			// Counted inside the hook, so what is asserted is what had been
+			// written by the time the response was decided — not what was there
+			// once the request finished, which would pass either way.
+			entries = len(log.of(authlog.EventOAuthSignIn))
+		}
+	})
+
+	res := get(t, f.srv.URL+"/auth/oauth/google/callback?error=access_denied")
+	defer res.Body.Close()
+
+	if entries != 1 {
+		t.Errorf("%d entries written before Fail ran, want 1", entries)
+	}
+}
