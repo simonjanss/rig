@@ -58,6 +58,7 @@ import (
 	"github.com/simonjanss/rig/examples/idp"
 	"github.com/simonjanss/rig/migrate"
 	"github.com/simonjanss/rig/notify"
+	"github.com/simonjanss/rig/runtime/dbx"
 	"github.com/simonjanss/rig/runtime/rigerr"
 	"github.com/simonjanss/rig/runtime/serve"
 )
@@ -373,9 +374,21 @@ func newAPI(
 		// so seeding it was the inviting handler's job. Accepting is called by
 		// rig's own handler now — a person following a link from their mail —
 		// and there is no application code in that request but this.
+		//
+		// dbx.Tx and not the pool, which is the whole reason the hook takes a
+		// context. The account row is in an open transaction and no other
+		// connection can see it, so a grant written on the pool fails on the
+		// foreign key — which is what happened the first time this was written.
 		OnJoined: func(ctx context.Context, in account.Joined) error {
-			return authz.GrantLevel(ctx, pool, in.TenantID, in.AccountID,
-				string(in.Role), append(api.PermissionKeys(), authz.AuthKeys()...), grants)
+			tx, ok := dbx.Tx(ctx)
+			if !ok {
+				return errors.New("OnJoined expected a transaction")
+			}
+			all := append(api.PermissionKeys(), authz.AuthKeys()...)
+			if err := authz.SeedRoles(ctx, tx, in.TenantID, all, grants); err != nil {
+				return err
+			}
+			return authz.AttachRole(ctx, tx, in.TenantID, in.AccountID, string(in.Role), grants)
 		},
 
 		// OnError is left out on purpose: the wiring is generated into this API's
@@ -550,7 +563,15 @@ func pruneAuthLog(ctx context.Context, pool *pgxpool.Pool) error {
 	// Unwrapped, and not because it would be wrong: a cache nobody serves holds
 	// nothing. A task that runs once and exits has no second request to answer
 	// from memory, so there is nothing here for one to do.
-	front, err := api.New(pool, api.Hooks{Grants: authz.Grants(pool)})
+	// A Notifier even though nothing here sends: the generated Config refuses
+	// to build the foundation without one while auth.email_code is on, and it
+	// is right to — a deployment that forgot it would mint codes into a void
+	// and nobody could sign in. A task builds the same object graph the server
+	// does, and its outbox is simply never read.
+	front, err := api.New(pool, api.Hooks{
+		Notifier: outbox.New(1),
+		Grants:   authz.Grants(pool),
+	})
 	if err != nil {
 		return err
 	}
@@ -569,7 +590,15 @@ func pruneAuthLog(ctx context.Context, pool *pgxpool.Pool) error {
 // not a shortcut around anything — it is the same rate limits and the same
 // auth_log entries the endpoints go through.
 func accountService(pool *pgxpool.Pool) (*account.Service, error) {
-	front, err := api.New(pool, api.Hooks{Grants: authz.Grants(pool)})
+	// A Notifier even though nothing here sends: the generated Config refuses
+	// to build the foundation without one while auth.email_code is on, and it
+	// is right to — a deployment that forgot it would mint codes into a void
+	// and nobody could sign in. A task builds the same object graph the server
+	// does, and its outbox is simply never read.
+	front, err := api.New(pool, api.Hooks{
+		Notifier: outbox.New(1),
+		Grants:   authz.Grants(pool),
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -776,7 +805,15 @@ func seedIntegration(ctx context.Context, pool *pgxpool.Pool, tenantID, byAccoun
 		return nil
 	}
 
-	front, err := api.New(pool, api.Hooks{Grants: authz.Grants(pool)})
+	// A Notifier even though nothing here sends: the generated Config refuses
+	// to build the foundation without one while auth.email_code is on, and it
+	// is right to — a deployment that forgot it would mint codes into a void
+	// and nobody could sign in. A task builds the same object graph the server
+	// does, and its outbox is simply never read.
+	front, err := api.New(pool, api.Hooks{
+		Notifier: outbox.New(1),
+		Grants:   authz.Grants(pool),
+	})
 	if err != nil {
 		return err
 	}

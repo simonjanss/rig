@@ -43,6 +43,14 @@ auth:
   # the route does not exist.
   allow_tenant_creation: true
 
+  # Five codes an hour per address is the default and the right number for a
+  # product: nobody signs in to the same account five times in an hour. This is
+  # a demonstration, and clicking through it is exactly that — so the one limit
+  # a walk-through spends is raised here, and only here. The per-source half
+  # and every other limit keep their defaults.
+  limits:
+    email_code_request: {max: 200, window: 1h}
+
   # A request with neither names no tenant, and `uuid.Nil` is an ordinary answer
   # rather than a missing one: a sign-in that names none is settled afterwards
   # from the person's own memberships. That is what the provider button below

@@ -47,22 +47,41 @@ func TestASignInCodeThroughTheOutbox(t *testing.T) {
 		}
 	}
 
-	// One code, not two. The answers were identical; what differs is that only
-	// one of them had anywhere to send mail — which is the whole shape of the
-	// endpoint's refusal to confirm an address. This example leaves
-	// allow_provisioning off, so an address nobody has is an address nothing is
-	// created for.
+	// Two codes, and that is the point rather than a leak. This example sets
+	// allow_provisioning, so an address rig has never seen gets a person and a
+	// code of its own — and the caller cannot tell the two cases apart, because
+	// both answered 204 and neither mail went to them.
 	var code string
+	var reached int
 	for _, m := range api.outbox(t, reader) {
-		switch {
-		case m.Kind == outbox.KindEmailCode && m.To == app.SeedEmail:
+		if m.Kind != outbox.KindEmailCode {
+			continue
+		}
+		switch m.To {
+		case app.SeedEmail:
 			code = m.Token
-		case m.To == nobody:
-			t.Error("an address with no account must not produce mail")
+			reached++
+		case nobody:
+			reached++
 		}
 	}
 	if code == "" {
 		t.Fatal("the code should be in the outbox")
+	}
+	if reached != 2 {
+		t.Errorf("%d codes went out, want one per address", reached)
+	}
+
+	// The person the second one created, which is what allow_provisioning
+	// means: asking for a code is how somebody arrives here.
+	var made int
+	if err := api.pool.QueryRow(context.Background(),
+		`SELECT count(*) FROM rig_identity WHERE lower(email_address) = lower($1)`,
+		nobody).Scan(&made); err != nil {
+		t.Fatal(err)
+	}
+	if made != 1 {
+		t.Errorf("%d identities for the new address, want 1", made)
 	}
 
 	if res := api.do(t, request{

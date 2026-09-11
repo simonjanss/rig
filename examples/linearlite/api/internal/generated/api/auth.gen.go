@@ -275,7 +275,7 @@ func limits() throttle.Defaults {
 	d := throttle.Standard()
 	d.LoginByEmail.Max, d.LoginByEmail.Window = 5, 15*time.Minute
 	d.LoginByIP.Max, d.LoginByIP.Window = 50, 15*time.Minute
-	d.EmailCodeRequest.Max, d.EmailCodeRequest.Window = 5, time.Hour
+	d.EmailCodeRequest.Max, d.EmailCodeRequest.Window = 200, time.Hour
 	d.EmailCodeByIP.Max, d.EmailCodeByIP.Window = 100, time.Hour
 	d.VerificationResend.Max, d.VerificationResend.Window = 5, time.Hour
 	d.Refresh.Max, d.Refresh.Window = 60, time.Minute

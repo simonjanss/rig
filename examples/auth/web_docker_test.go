@@ -101,8 +101,11 @@ func TestTheInterface(t *testing.T) {
 		if !strings.Contains(page, "note written with your session") {
 			t.Fatalf("expected the flash:\n%s", excerpt(page))
 		}
-		if !strings.Contains(page, "by Ada") {
-			t.Error("the note should be attributed to the person who wrote it")
+		// The local part, because that is all anybody knows about somebody who
+		// has typed nothing but an address. Naming yourself is a later edit,
+		// not part of getting in.
+		if !strings.Contains(page, "by "+strings.SplitN(owner, "@", 2)[0]) {
+			t.Errorf("the note should be attributed to the person who wrote it:\n%s", excerpt(page))
 		}
 	})
 
@@ -229,13 +232,19 @@ func TestTheInterface(t *testing.T) {
 			t.Errorf("the owner holds authlog.read.all and was refused:\n%s", panel)
 		}
 
+		// A code request names no tenant — it happens before anybody knows
+		// which one — so it is not in a panel scoped to this tenant, and that
+		// is the scoping working rather than a gap. What is here is everything
+		// that happened once there was a tenant to happen in.
 		for _, want := range []string{
-			"EmailCodeRequested", "LoginSucceeded",
 			"AccountProvisioned", "InvitationSent", "InvitationRevoked",
 		} {
 			if !strings.Contains(panel, want) {
 				t.Errorf("the auth log should show %q", want)
 			}
+		}
+		if strings.Contains(panel, "EmailCodeRequested") {
+			t.Error("a tenant-less request should not be readable through a tenant's trail")
 		}
 	})
 
@@ -249,7 +258,7 @@ func TestTheInterface(t *testing.T) {
 		if !strings.Contains(looked, tenant) {
 			t.Errorf("the preview should name the tenant:\n%s", excerpt(looked))
 		}
-		if !strings.Contains(looked, "Ada") {
+		if !strings.Contains(looked, strings.SplitN(owner, "@", 2)[0]) {
 			t.Errorf("the preview should name who invited them:\n%s", excerpt(looked))
 		}
 		// Masked, because holding a forwarded link does not prove you are its
