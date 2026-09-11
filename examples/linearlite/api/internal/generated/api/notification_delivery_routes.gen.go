@@ -7,14 +7,13 @@ package api
 import (
 	"net/http"
 
-	"github.com/simonjanss/rig/observe"
 	"github.com/simonjanss/rig/runtime/httpx"
 	"github.com/simonjanss/rig/runtime/reqlog"
 	"github.com/simonjanss/rig/runtime/tenancy"
 )
 
 // registerNotificationDelivery mounts NotificationDelivery's routes.
-func registerNotificationDelivery(mux *http.ServeMux, s Server, svc NotificationDeliveryService) {
+func registerNotificationDelivery(mux httpx.Router, s Server, svc NotificationDeliveryService) {
 	mux.HandleFunc("GET /api/v1/notification-deliveries", handleListNotificationDeliveries(s, svc))
 	mux.HandleFunc("GET /api/v1/notification-deliveries/{id}", handleGetNotificationDelivery(s, svc))
 }
@@ -26,9 +25,6 @@ func handleListNotificationDeliveries(s Server, svc NotificationDeliveryService)
 	return func(w http.ResponseWriter, r *http.Request) {
 		rec := reqlog.Wrap(w)
 		w = rec
-
-		r, span := observe.Server(r, "GET /api/v1/notification-deliveries", rec.Status)
-		defer span.End()
 
 		ctx, claims, rc, ok := prepare(s, w, r)
 		defer logRequest(s, r, rec, rc)
@@ -74,9 +70,6 @@ func handleGetNotificationDelivery(s Server, svc NotificationDeliveryService) ht
 	return func(w http.ResponseWriter, r *http.Request) {
 		rec := reqlog.Wrap(w)
 		w = rec
-
-		r, span := observe.Server(r, "GET /api/v1/notification-deliveries/{id}", rec.Status)
-		defer span.End()
 
 		ctx, claims, rc, ok := prepare(s, w, r)
 		defer logRequest(s, r, rec, rc)

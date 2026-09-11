@@ -3,7 +3,6 @@ package servergo
 import (
 	"github.com/simonjanss/rig/internal/gen/gobuf"
 	"github.com/simonjanss/rig/pkg/gen"
-	"github.com/simonjanss/rig/pkg/ir"
 )
 
 // observeModule is where the OpenTelemetry wiring lives. It is named only from
@@ -24,33 +23,6 @@ const (
 // tracing reports whether this document asked for spans.
 func (e *emitter) tracing() bool {
 	return e.doc.API.Tracing != nil && e.doc.API.Tracing.Enabled
-}
-
-// span opens one request's span, at the top of the handler.
-//
-// Before prepare, so that everything answering early — a pre-hook that writes a
-// response, a caller too old to be served, a refused permission — is inside the
-// span rather than invisible to it. That is the same argument the deferred
-// request line makes one line further down.
-//
-// The span is named by the route and not by the path: the pattern is what the
-// duplicate-route diagnostic already proves unique, and a name per identifier
-// that ever appeared in a URL is the thing that makes a trace unusable. It is
-// also why this is written here rather than as a wrapper around the mux —
-// net/http knows which pattern matched only once it has dispatched, so a
-// middleware in front has a request that has matched nothing.
-//
-// The status reaches the span through the recorder wrapped a line above, as a
-// method value: observe takes a func() int rather than the writer so that it
-// does not depend on rig/runtime.
-func (e *emitter) span(b *gobuf.Buf, ep *ir.Endpoint) {
-	if !e.tracing() {
-		return
-	}
-
-	b.L("r, span := %s.Server(r, %s, rec.Status)", b.Import(observeModule), gobuf.Quote(ep.Pattern))
-	b.L("defer span.End()")
-	b.NL()
 }
 
 // tracingFile emits the one thing a main function needs to start tracing.

@@ -719,3 +719,35 @@ func TestTheSharedServerCommentCountsTheWriters(t *testing.T) {
 		t.Error("the comment counts two writers where only one is generated")
 	}
 }
+
+// The authentication routes are wrapped by the same span as every other route
+// on the mux, so what they owe is somewhere to send what happens inside it: a
+// request nobody labelled is labelled by its trace, and a failure reddens the
+// span it happened in. Both come off Server.Tracer, and the literal these
+// routes report through is built before Register fills that field in — so it
+// has to carry its own.
+func TestTracedAuthRoutesReportThroughTheSameTracer(t *testing.T) {
+	t.Parallel()
+
+	doc := gentest.LoadDocument(t, filepath.Join("testdata", authFixture))
+	doc.API.Tracing = &ir.Tracing{Enabled: true, ServiceName: "authwired"}
+
+	src := artifactNamed(t, gentest.Run(t, servergo.New(), doc, authOpts()), "auth.gen.go")
+
+	if !strings.Contains(src, "Tracer: observe.APITracer{}") {
+		t.Errorf("the shared server has no tracer, so a sign-in is labelled by nothing:\n%s", src)
+	}
+}
+
+// And the other half: a project that asked for no spans names no tracing
+// library here either, which is what keeps otel out of its go.mod.
+func TestUntracedAuthRoutesNameNoTracer(t *testing.T) {
+	t.Parallel()
+
+	doc := gentest.LoadDocument(t, filepath.Join("testdata", authFixture))
+	src := artifactNamed(t, gentest.Run(t, servergo.New(), doc, authOpts()), "auth.gen.go")
+
+	if strings.Contains(src, "observe") {
+		t.Errorf("an untraced project names rig/observe in its auth wiring:\n%s", src)
+	}
+}

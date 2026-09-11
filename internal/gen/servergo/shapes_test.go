@@ -635,7 +635,7 @@ func TestADerivedShapeInheritsTheLiveScope(t *testing.T) {
 	// Before the routes are mounted, because a handler is given the struct as
 	// it stands and cannot be told about a scope later.
 	fallback := strings.Index(body, "h.Shapes.LessonDeleted =")
-	mount := strings.Index(body, `mux.HandleFunc("GET /api/v1/lesson/_stream"`)
+	mount := strings.Index(body, `routes.HandleFunc("GET /api/v1/lesson/_stream"`)
 	if fallback < 0 || mount < 0 || fallback > mount {
 		t.Error("the fallback should be wired before the routes are mounted")
 	}
@@ -766,7 +766,7 @@ func TestTheGeneratedShapeRoutesMountOnARealMux(t *testing.T) {
 // this finds is the shapes.
 func mountedShapes(body string) []string {
 	var out []string
-	for _, m := range regexp.MustCompile(`mux\.HandleFunc\("([^"]+)"`).FindAllStringSubmatch(body, -1) {
+	for _, m := range regexp.MustCompile(`routes\.HandleFunc\("([^"]+)"`).FindAllStringSubmatch(body, -1) {
 		out = append(out, m[1])
 	}
 	return out

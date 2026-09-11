@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/simonjanss/rig/runtime/electric"
 	"github.com/simonjanss/rig/runtime/httpx"
+	"github.com/simonjanss/rig/runtime/reqlog"
 	"github.com/simonjanss/rig/runtime/rigerr"
 	"github.com/simonjanss/rig/runtime/tenancy"
 )
@@ -46,7 +47,11 @@ type TodoScope func(ctx context.Context, r *http.Request, claims tenancy.Claims,
 // handleTodoShape serves GET /api/v1/todo/_stream.
 func handleTodoShape(s Server, sh Shapes) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		rec := reqlog.Wrap(w)
+		w = rec
+
 		ctx, claims, rc, ok := prepare(s, w, r)
+		defer logRequest(s, r, rec, rc)
 		if !ok {
 			return
 		}
@@ -122,7 +127,11 @@ type TodoDeletedScope func(ctx context.Context, r *http.Request, claims tenancy.
 // handleTodoDeletedShape serves GET /api/v1/todo/_deleted/_stream.
 func handleTodoDeletedShape(s Server, sh Shapes) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		rec := reqlog.Wrap(w)
+		w = rec
+
 		ctx, claims, rc, ok := prepare(s, w, r)
+		defer logRequest(s, r, rec, rc)
 		if !ok {
 			return
 		}
@@ -202,7 +211,11 @@ type TodoVersionsScope func(ctx context.Context, r *http.Request, claims tenancy
 // handleTodoVersionsShape serves GET /api/v1/todo/{id}/_versions/_stream.
 func handleTodoVersionsShape(s Server, sh Shapes) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		rec := reqlog.Wrap(w)
+		w = rec
+
 		ctx, claims, rc, ok := prepare(s, w, r)
+		defer logRequest(s, r, rec, rc)
 		if !ok {
 			return
 		}

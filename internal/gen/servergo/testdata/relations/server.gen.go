@@ -132,21 +132,38 @@ func Register(h Handlers) *http.ServeMux {
 
 	mux := http.NewServeMux()
 
+	// Every route below is registered through this rather than on the mux
+	// directly, so that one span per request covers all of them: the resource
+	// routes this document describes, and equally the ones rig mounts for you —
+	// authentication, the inbox, presence, the live-sync shapes, the OpenAPI
+	// document.
+	//
+	// Each span is named by the pattern it was registered under, so a trace reads
+	// "GET /api/v1/todos/{id}" rather than one name per identifier anybody ever
+	// fetched. That name is known here and nowhere else, which is why this is a
+	// router and not a handler wrapped around the mux.
+	//
+	// Without a Server.Tracer it is the mux, so a project that set no `tracing:`
+	// pays nothing for the line. What comes back from Register is the mux either
+	// way — a route added to it afterwards is the caller's own, answers exactly
+	// as it did before, and is not traced.
+	routes := apibase.Tracing(mux, h.Server.Tracer)
+
 	if h.Fixture != nil {
-		registerFixture(mux, h.Server, h.Fixture)
+		registerFixture(routes, h.Server, h.Fixture)
 	}
 	if h.Player != nil {
-		registerPlayer(mux, h.Server, h.Player)
+		registerPlayer(routes, h.Server, h.Player)
 	}
 	if h.Team != nil {
-		registerTeam(mux, h.Server, h.Team)
+		registerTeam(routes, h.Server, h.Team)
 	}
 
 	// After the resources, so a pattern collision between the two is a panic
 	// naming the auth route rather than the resource one — and the resource
 	// routes are the ones this project owns.
 	if h.Server.Auth != nil {
-		h.Server.Auth.Mount(mux)
+		h.Server.Auth.Mount(routes)
 	}
 
 	return mux

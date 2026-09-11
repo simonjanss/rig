@@ -178,11 +178,28 @@ func Register(h Handlers) *http.ServeMux {
 
 	mux := http.NewServeMux()
 
+	// Every route below is registered through this rather than on the mux
+	// directly, so that one span per request covers all of them: the resource
+	// routes this document describes, and equally the ones rig mounts for you —
+	// authentication, the inbox, presence, the live-sync shapes, the OpenAPI
+	// document.
+	//
+	// Each span is named by the pattern it was registered under, so a trace reads
+	// "GET /api/v1/todos/{id}" rather than one name per identifier anybody ever
+	// fetched. That name is known here and nowhere else, which is why this is a
+	// router and not a handler wrapped around the mux.
+	//
+	// Without a Server.Tracer it is the mux, so a project that set no `tracing:`
+	// pays nothing for the line. What comes back from Register is the mux either
+	// way — a route added to it afterwards is the caller's own, answers exactly
+	// as it did before, and is not traced.
+	routes := apibase.Tracing(mux, h.Server.Tracer)
+
 	if h.Todo != nil {
-		registerTodo(mux, h.Server, h.Todo)
+		registerTodo(routes, h.Server, h.Todo)
 	}
 	if h.TodoAttachment != nil {
-		registerTodoAttachment(mux, h.Server, h.TodoAttachment)
+		registerTodoAttachment(routes, h.Server, h.TodoAttachment)
 	}
 
 	// The inbox, on the same mux. Hand-written rather than generated, because the
@@ -200,7 +217,7 @@ func Register(h Handlers) *http.ServeMux {
 				// through resolve, so the context is built here.
 				fail(h.Server, w, r, requestContext(h.Server, r), err)
 			},
-		}).Mount(mux)
+		}).Mount(routes)
 	}
 
 	// The live-sync shapes, on the same mux as everything else. Nil mounts
@@ -219,11 +236,11 @@ func Register(h Handlers) *http.ServeMux {
 			h.Shapes.TodoVersions = versionsFromLiveTodo(h.Shapes.Todo)
 		}
 
-		mux.HandleFunc("GET /api/v1/rig_notification_recipient/_stream", handleNotificationRecipientShape(h.Server, h.Shapes))
-		mux.HandleFunc("GET /api/v1/rig_notification_recipient/_deleted/_stream", handleNotificationRecipientDeletedShape(h.Server, h.Shapes))
-		mux.HandleFunc("GET /api/v1/todo/_stream", handleTodoShape(h.Server, h.Shapes))
-		mux.HandleFunc("GET /api/v1/todo/_deleted/_stream", handleTodoDeletedShape(h.Server, h.Shapes))
-		mux.HandleFunc("GET /api/v1/todo/{id}/_versions/_stream", handleTodoVersionsShape(h.Server, h.Shapes))
+		routes.HandleFunc("GET /api/v1/rig_notification_recipient/_stream", handleNotificationRecipientShape(h.Server, h.Shapes))
+		routes.HandleFunc("GET /api/v1/rig_notification_recipient/_deleted/_stream", handleNotificationRecipientDeletedShape(h.Server, h.Shapes))
+		routes.HandleFunc("GET /api/v1/todo/_stream", handleTodoShape(h.Server, h.Shapes))
+		routes.HandleFunc("GET /api/v1/todo/_deleted/_stream", handleTodoDeletedShape(h.Server, h.Shapes))
+		routes.HandleFunc("GET /api/v1/todo/{id}/_versions/_stream", handleTodoVersionsShape(h.Server, h.Shapes))
 
 		// And the ending, which is the whole of what there is to register: nothing is
 		// started, unlike the sweeper and the engine beside it, because a shape route
@@ -252,13 +269,13 @@ func Register(h Handlers) *http.ServeMux {
 	// specification nobody may fetch is one nobody can use. To gate it, turn
 	// `api.openapi.serve` off and mount
 	// [github.com/simonjanss/rig/runtime/apidoc.Handler] in main.go instead.
-	openAPIDocs().Mount(mux)
+	openAPIDocs().Mount(routes)
 
 	// After the resources, so a pattern collision between the two is a panic
 	// naming the auth route rather than the resource one — and the resource
 	// routes are the ones this project owns.
 	if h.Server.Auth != nil {
-		h.Server.Auth.Mount(mux)
+		h.Server.Auth.Mount(routes)
 	}
 
 	return mux

@@ -7,14 +7,13 @@ package api
 import (
 	"net/http"
 
-	"github.com/simonjanss/rig/observe"
 	"github.com/simonjanss/rig/runtime/httpx"
 	"github.com/simonjanss/rig/runtime/reqlog"
 	"github.com/simonjanss/rig/runtime/tenancy"
 )
 
 // registerNotificationRecipient mounts NotificationRecipient's routes.
-func registerNotificationRecipient(mux *http.ServeMux, s Server, svc NotificationRecipientService) {
+func registerNotificationRecipient(mux httpx.Router, s Server, svc NotificationRecipientService) {
 	mux.HandleFunc("GET /api/v1/notification-recipients", handleListNotificationRecipients(s, svc))
 	mux.HandleFunc("QUERY /api/v1/notification-recipients", handleSearchNotificationRecipients(s, svc))
 	mux.HandleFunc("POST /api/v1/notification-recipients/_search", handleSearchNotificationRecipients(s, svc))
@@ -30,9 +29,6 @@ func handleListNotificationRecipients(s Server, svc NotificationRecipientService
 	return func(w http.ResponseWriter, r *http.Request) {
 		rec := reqlog.Wrap(w)
 		w = rec
-
-		r, span := observe.Server(r, "GET /api/v1/notification-recipients", rec.Status)
-		defer span.End()
 
 		ctx, claims, rc, ok := prepare(s, w, r)
 		defer logRequest(s, r, rec, rc)
@@ -88,9 +84,6 @@ func handleSearchNotificationRecipients(s Server, svc NotificationRecipientServi
 	return func(w http.ResponseWriter, r *http.Request) {
 		rec := reqlog.Wrap(w)
 		w = rec
-
-		r, span := observe.Server(r, "QUERY /api/v1/notification-recipients", rec.Status)
-		defer span.End()
 
 		ctx, claims, rc, ok := prepare(s, w, r)
 		defer logRequest(s, r, rec, rc)
@@ -158,9 +151,6 @@ func handleListDeletedNotificationRecipients(s Server, svc NotificationRecipient
 		rec := reqlog.Wrap(w)
 		w = rec
 
-		r, span := observe.Server(r, "GET /api/v1/notification-recipients/_deleted", rec.Status)
-		defer span.End()
-
 		ctx, claims, rc, ok := prepare(s, w, r)
 		defer logRequest(s, r, rec, rc)
 		if !ok {
@@ -219,9 +209,6 @@ func handleDeleteNotificationRecipient(s Server, svc NotificationRecipientServic
 		rec := reqlog.Wrap(w)
 		w = rec
 
-		r, span := observe.Server(r, "DELETE /api/v1/notification-recipients/{id}", rec.Status)
-		defer span.End()
-
 		ctx, claims, rc, ok := prepare(s, w, r)
 		defer logRequest(s, r, rec, rc)
 		if !ok {
@@ -259,9 +246,6 @@ func handleGetNotificationRecipient(s Server, svc NotificationRecipientService) 
 	return func(w http.ResponseWriter, r *http.Request) {
 		rec := reqlog.Wrap(w)
 		w = rec
-
-		r, span := observe.Server(r, "GET /api/v1/notification-recipients/{id}", rec.Status)
-		defer span.End()
 
 		ctx, claims, rc, ok := prepare(s, w, r)
 		defer logRequest(s, r, rec, rc)

@@ -16,7 +16,7 @@ import (
 )
 
 // registerPlayer mounts Player's routes.
-func registerPlayer(mux *http.ServeMux, s Server, svc PlayerService) {
+func registerPlayer(mux httpx.Router, s Server, svc PlayerService) {
 	mux.HandleFunc("GET /api/v1/players", handleListPlayers(s, svc))
 	mux.HandleFunc("POST /api/v1/players", handleCreatePlayer(s, svc))
 	mux.HandleFunc("QUERY /api/v1/players", handleSearchPlayers(s, svc))

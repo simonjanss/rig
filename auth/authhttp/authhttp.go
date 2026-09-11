@@ -239,7 +239,7 @@ func New(cfg Config) (*Handler, error) {
 }
 
 // Mount registers every route.
-func (h *Handler) Mount(mux *http.ServeMux) {
+func (h *Handler) Mount(mux httpx.Router) {
 	route := func(pattern string, fn http.HandlerFunc) {
 		method, path, _ := strings.Cut(pattern, " ")
 		mux.HandleFunc(method+" "+h.base+path, fn)

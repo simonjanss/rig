@@ -145,11 +145,28 @@ func Register(h Handlers) *http.ServeMux {
 
 	mux := http.NewServeMux()
 
+	// Every route below is registered through this rather than on the mux
+	// directly, so that one span per request covers all of them: the resource
+	// routes this document describes, and equally the ones rig mounts for you —
+	// authentication, the inbox, presence, the live-sync shapes, the OpenAPI
+	// document.
+	//
+	// Each span is named by the pattern it was registered under, so a trace reads
+	// "GET /api/v1/todos/{id}" rather than one name per identifier anybody ever
+	// fetched. That name is known here and nowhere else, which is why this is a
+	// router and not a handler wrapped around the mux.
+	//
+	// Without a Server.Tracer it is the mux, so a project that set no `tracing:`
+	// pays nothing for the line. What comes back from Register is the mux either
+	// way — a route added to it afterwards is the caller's own, answers exactly
+	// as it did before, and is not traced.
+	routes := apibase.Tracing(mux, h.Server.Tracer)
+
 	if h.RigAccount != nil {
-		registerRigAccount(mux, h.Server, h.RigAccount)
+		registerRigAccount(routes, h.Server, h.RigAccount)
 	}
 	if h.RigTenant != nil {
-		registerRigTenant(mux, h.Server, h.RigTenant)
+		registerRigTenant(routes, h.Server, h.RigTenant)
 	}
 
 	// Presence, on the same mux, and hand-written for the reason the inbox is: the
@@ -165,14 +182,14 @@ func Register(h Handlers) *http.ServeMux {
 			Fail: func(w http.ResponseWriter, r *http.Request, err error) {
 				fail(h.Server, w, r, requestContext(h.Server, r), err)
 			},
-		}).Mount(mux)
+		}).Mount(routes)
 	}
 
 	// The live-sync shapes, on the same mux as everything else. Nil mounts
 	// nothing: the routes are absent rather than answering, which is what a
 	// project that has not built a front end for them yet wants.
 	if h.Shapes.Proxy != nil {
-		mux.HandleFunc("GET /api/v1/rig_presence/_stream", handleRigPresenceShape(h.Server, h.Shapes))
+		routes.HandleFunc("GET /api/v1/rig_presence/_stream", handleRigPresenceShape(h.Server, h.Shapes))
 
 		// And the ending, which is the whole of what there is to register: nothing is
 		// started, unlike the sweeper and the engine beside it, because a shape route
@@ -194,7 +211,7 @@ func Register(h Handlers) *http.ServeMux {
 	// naming the auth route rather than the resource one — and the resource
 	// routes are the ones this project owns.
 	if h.Server.Auth != nil {
-		h.Server.Auth.Mount(mux)
+		h.Server.Auth.Mount(routes)
 	}
 
 	return mux

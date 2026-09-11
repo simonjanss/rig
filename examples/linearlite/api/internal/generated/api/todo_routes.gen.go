@@ -9,7 +9,6 @@ import (
 	"net/http"
 
 	"github.com/simonjanss/rig/examples/linearlite/internal/generated/model"
-	"github.com/simonjanss/rig/observe"
 	"github.com/simonjanss/rig/runtime/httpx"
 	"github.com/simonjanss/rig/runtime/idempotency"
 	"github.com/simonjanss/rig/runtime/reqlog"
@@ -17,7 +16,7 @@ import (
 )
 
 // registerTodo mounts Todo's routes.
-func registerTodo(mux *http.ServeMux, s Server, svc TodoService) {
+func registerTodo(mux httpx.Router, s Server, svc TodoService) {
 	mux.HandleFunc("GET /api/v1/todos", handleListTodos(s, svc))
 	mux.HandleFunc("POST /api/v1/todos", handleCreateTodo(s, svc))
 	mux.HandleFunc("QUERY /api/v1/todos", handleSearchTodos(s, svc))
@@ -39,9 +38,6 @@ func handleListTodos(s Server, svc TodoService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		rec := reqlog.Wrap(w)
 		w = rec
-
-		r, span := observe.Server(r, "GET /api/v1/todos", rec.Status)
-		defer span.End()
 
 		ctx, claims, rc, ok := prepare(s, w, r)
 		defer logRequest(s, r, rec, rc)
@@ -86,9 +82,6 @@ func handleCreateTodo(s Server, svc TodoService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		rec := reqlog.Wrap(w)
 		w = rec
-
-		r, span := observe.Server(r, "POST /api/v1/todos", rec.Status)
-		defer span.End()
 
 		ctx, claims, rc, ok := prepare(s, w, r)
 		defer logRequest(s, r, rec, rc)
@@ -137,9 +130,6 @@ func handleSearchTodos(s Server, svc TodoService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		rec := reqlog.Wrap(w)
 		w = rec
-
-		r, span := observe.Server(r, "QUERY /api/v1/todos", rec.Status)
-		defer span.End()
 
 		ctx, claims, rc, ok := prepare(s, w, r)
 		defer logRequest(s, r, rec, rc)
@@ -196,9 +186,6 @@ func handleListDeletedTodos(s Server, svc TodoService) http.HandlerFunc {
 		rec := reqlog.Wrap(w)
 		w = rec
 
-		r, span := observe.Server(r, "GET /api/v1/todos/_deleted", rec.Status)
-		defer span.End()
-
 		ctx, claims, rc, ok := prepare(s, w, r)
 		defer logRequest(s, r, rec, rc)
 		if !ok {
@@ -246,9 +233,6 @@ func handleDeleteTodo(s Server, svc TodoService) http.HandlerFunc {
 		rec := reqlog.Wrap(w)
 		w = rec
 
-		r, span := observe.Server(r, "DELETE /api/v1/todos/{id}", rec.Status)
-		defer span.End()
-
 		ctx, claims, rc, ok := prepare(s, w, r)
 		defer logRequest(s, r, rec, rc)
 		if !ok {
@@ -285,9 +269,6 @@ func handleGetTodo(s Server, svc TodoService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		rec := reqlog.Wrap(w)
 		w = rec
-
-		r, span := observe.Server(r, "GET /api/v1/todos/{id}", rec.Status)
-		defer span.End()
 
 		ctx, claims, rc, ok := prepare(s, w, r)
 		defer logRequest(s, r, rec, rc)
@@ -329,9 +310,6 @@ func handleUpdateTodo(s Server, svc TodoService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		rec := reqlog.Wrap(w)
 		w = rec
-
-		r, span := observe.Server(r, "PATCH /api/v1/todos/{id}", rec.Status)
-		defer span.End()
 
 		ctx, claims, rc, ok := prepare(s, w, r)
 		defer logRequest(s, r, rec, rc)
@@ -397,9 +375,6 @@ func handleClaimTodo(s Server, svc TodoService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		rec := reqlog.Wrap(w)
 		w = rec
-
-		r, span := observe.Server(r, "POST /api/v1/todos/{id}/_claim", rec.Status)
-		defer span.End()
 
 		ctx, claims, rc, ok := prepare(s, w, r)
 		defer logRequest(s, r, rec, rc)
@@ -474,9 +449,6 @@ func handleRestoreTodo(s Server, svc TodoService) http.HandlerFunc {
 		rec := reqlog.Wrap(w)
 		w = rec
 
-		r, span := observe.Server(r, "POST /api/v1/todos/{id}/_restore", rec.Status)
-		defer span.End()
-
 		ctx, claims, rc, ok := prepare(s, w, r)
 		defer logRequest(s, r, rec, rc)
 		if !ok {
@@ -531,9 +503,6 @@ func handleRevertTodo(s Server, svc TodoService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		rec := reqlog.Wrap(w)
 		w = rec
-
-		r, span := observe.Server(r, "POST /api/v1/todos/{id}/_revert", rec.Status)
-		defer span.End()
 
 		ctx, claims, rc, ok := prepare(s, w, r)
 		defer logRequest(s, r, rec, rc)
@@ -597,9 +566,6 @@ func handleVersionsOfTodo(s Server, svc TodoService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		rec := reqlog.Wrap(w)
 		w = rec
-
-		r, span := observe.Server(r, "GET /api/v1/todos/{id}/_versions", rec.Status)
-		defer span.End()
 
 		ctx, claims, rc, ok := prepare(s, w, r)
 		defer logRequest(s, r, rec, rc)

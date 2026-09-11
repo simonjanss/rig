@@ -16,7 +16,7 @@ import (
 )
 
 // registerNote mounts Note's routes.
-func registerNote(mux *http.ServeMux, s Server, svc NoteService) {
+func registerNote(mux httpx.Router, s Server, svc NoteService) {
 	mux.HandleFunc("GET /api/v1/notes", handleListNotes(s, svc))
 	mux.HandleFunc("POST /api/v1/notes", handleCreateNote(s, svc))
 	mux.HandleFunc("QUERY /api/v1/notes", handleSearchNotes(s, svc))

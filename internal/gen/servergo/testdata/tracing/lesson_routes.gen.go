@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"rigtest/model"
 
-	"github.com/simonjanss/rig/observe"
 	"github.com/simonjanss/rig/runtime/httpx"
 	"github.com/simonjanss/rig/runtime/idempotency"
 	"github.com/simonjanss/rig/runtime/reqlog"
@@ -17,7 +16,7 @@ import (
 )
 
 // registerLesson mounts Lesson's routes.
-func registerLesson(mux *http.ServeMux, s Server, svc LessonService) {
+func registerLesson(mux httpx.Router, s Server, svc LessonService) {
 	mux.HandleFunc("GET /api/v1/lessons", handleListLessons(s, svc))
 	mux.HandleFunc("POST /api/v1/lessons", handleCreateLesson(s, svc))
 	mux.HandleFunc("QUERY /api/v1/lessons", handleSearchLessons(s, svc))
@@ -39,9 +38,6 @@ func handleListLessons(s Server, svc LessonService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		rec := reqlog.Wrap(w)
 		w = rec
-
-		r, span := observe.Server(r, "GET /api/v1/lessons", rec.Status)
-		defer span.End()
 
 		ctx, claims, rc, ok := prepare(s, w, r)
 		defer logRequest(s, r, rec, rc)
@@ -86,9 +82,6 @@ func handleCreateLesson(s Server, svc LessonService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		rec := reqlog.Wrap(w)
 		w = rec
-
-		r, span := observe.Server(r, "POST /api/v1/lessons", rec.Status)
-		defer span.End()
 
 		ctx, claims, rc, ok := prepare(s, w, r)
 		defer logRequest(s, r, rec, rc)
@@ -137,9 +130,6 @@ func handleSearchLessons(s Server, svc LessonService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		rec := reqlog.Wrap(w)
 		w = rec
-
-		r, span := observe.Server(r, "QUERY /api/v1/lessons", rec.Status)
-		defer span.End()
 
 		ctx, claims, rc, ok := prepare(s, w, r)
 		defer logRequest(s, r, rec, rc)
@@ -196,9 +186,6 @@ func handleListDeletedLessons(s Server, svc LessonService) http.HandlerFunc {
 		rec := reqlog.Wrap(w)
 		w = rec
 
-		r, span := observe.Server(r, "GET /api/v1/lessons/_deleted", rec.Status)
-		defer span.End()
-
 		ctx, claims, rc, ok := prepare(s, w, r)
 		defer logRequest(s, r, rec, rc)
 		if !ok {
@@ -246,9 +233,6 @@ func handleDeleteLesson(s Server, svc LessonService) http.HandlerFunc {
 		rec := reqlog.Wrap(w)
 		w = rec
 
-		r, span := observe.Server(r, "DELETE /api/v1/lessons/{id}", rec.Status)
-		defer span.End()
-
 		ctx, claims, rc, ok := prepare(s, w, r)
 		defer logRequest(s, r, rec, rc)
 		if !ok {
@@ -285,9 +269,6 @@ func handleGetLesson(s Server, svc LessonService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		rec := reqlog.Wrap(w)
 		w = rec
-
-		r, span := observe.Server(r, "GET /api/v1/lessons/{id}", rec.Status)
-		defer span.End()
 
 		ctx, claims, rc, ok := prepare(s, w, r)
 		defer logRequest(s, r, rec, rc)
@@ -329,9 +310,6 @@ func handleUpdateLesson(s Server, svc LessonService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		rec := reqlog.Wrap(w)
 		w = rec
-
-		r, span := observe.Server(r, "PATCH /api/v1/lessons/{id}", rec.Status)
-		defer span.End()
 
 		ctx, claims, rc, ok := prepare(s, w, r)
 		defer logRequest(s, r, rec, rc)
@@ -388,9 +366,6 @@ func handlePublishLesson(s Server, svc LessonService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		rec := reqlog.Wrap(w)
 		w = rec
-
-		r, span := observe.Server(r, "POST /api/v1/lessons/{id}/_publish", rec.Status)
-		defer span.End()
 
 		ctx, claims, rc, ok := prepare(s, w, r)
 		defer logRequest(s, r, rec, rc)
@@ -465,9 +440,6 @@ func handleRestoreLesson(s Server, svc LessonService) http.HandlerFunc {
 		rec := reqlog.Wrap(w)
 		w = rec
 
-		r, span := observe.Server(r, "POST /api/v1/lessons/{id}/_restore", rec.Status)
-		defer span.End()
-
 		ctx, claims, rc, ok := prepare(s, w, r)
 		defer logRequest(s, r, rec, rc)
 		if !ok {
@@ -522,9 +494,6 @@ func handleRevertLesson(s Server, svc LessonService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		rec := reqlog.Wrap(w)
 		w = rec
-
-		r, span := observe.Server(r, "POST /api/v1/lessons/{id}/_revert", rec.Status)
-		defer span.End()
 
 		ctx, claims, rc, ok := prepare(s, w, r)
 		defer logRequest(s, r, rec, rc)
@@ -588,9 +557,6 @@ func handleVersionsOfLesson(s Server, svc LessonService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		rec := reqlog.Wrap(w)
 		w = rec
-
-		r, span := observe.Server(r, "GET /api/v1/lessons/{id}/_versions", rec.Status)
-		defer span.End()
 
 		ctx, claims, rc, ok := prepare(s, w, r)
 		defer logRequest(s, r, rec, rc)

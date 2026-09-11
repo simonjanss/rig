@@ -16,7 +16,7 @@ import (
 )
 
 // registerRigAccount mounts RigAccount's routes.
-func registerRigAccount(mux *http.ServeMux, s Server, svc RigAccountService) {
+func registerRigAccount(mux httpx.Router, s Server, svc RigAccountService) {
 	mux.HandleFunc("GET /api/v1/rig-accounts", handleListRigAccounts(s, svc))
 	mux.HandleFunc("POST /api/v1/rig-accounts", handleCreateRigAccount(s, svc))
 	mux.HandleFunc("QUERY /api/v1/rig-accounts", handleSearchRigAccounts(s, svc))

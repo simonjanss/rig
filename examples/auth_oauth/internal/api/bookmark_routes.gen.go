@@ -15,7 +15,7 @@ import (
 )
 
 // registerBookmark mounts Bookmark's routes.
-func registerBookmark(mux *http.ServeMux, s Server, svc BookmarkService) {
+func registerBookmark(mux httpx.Router, s Server, svc BookmarkService) {
 	mux.HandleFunc("GET /api/v1/bookmarks", handleListBookmarks(s, svc))
 	mux.HandleFunc("POST /api/v1/bookmarks", handleCreateBookmark(s, svc))
 	mux.HandleFunc("QUERY /api/v1/bookmarks", handleSearchBookmarks(s, svc))

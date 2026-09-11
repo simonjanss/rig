@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/simonjanss/rig/runtime/electric"
+	"github.com/simonjanss/rig/runtime/reqlog"
 	"github.com/simonjanss/rig/runtime/rigerr"
 	"github.com/simonjanss/rig/runtime/tenancy"
 )
@@ -47,7 +48,11 @@ type NotificationRecipientScope func(ctx context.Context, r *http.Request, claim
 // /api/v1/rig_notification_recipient/_stream.
 func handleNotificationRecipientShape(s Server, sh Shapes) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		rec := reqlog.Wrap(w)
+		w = rec
+
 		ctx, claims, rc, ok := prepare(s, w, r)
+		defer logRequest(s, r, rec, rc)
 		if !ok {
 			return
 		}
@@ -134,7 +139,11 @@ type NotificationRecipientDeletedScope func(ctx context.Context, r *http.Request
 // /api/v1/rig_notification_recipient/_deleted/_stream.
 func handleNotificationRecipientDeletedShape(s Server, sh Shapes) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		rec := reqlog.Wrap(w)
+		w = rec
+
 		ctx, claims, rc, ok := prepare(s, w, r)
+		defer logRequest(s, r, rec, rc)
 		if !ok {
 			return
 		}

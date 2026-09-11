@@ -18,6 +18,7 @@ import (
 	"github.com/simonjanss/rig/auth/authhttp"
 	"github.com/simonjanss/rig/auth/password"
 	"github.com/simonjanss/rig/auth/session"
+	"github.com/simonjanss/rig/observe"
 	"github.com/simonjanss/rig/runtime/serve"
 	"github.com/simonjanss/rig/runtime/throttle"
 )
@@ -105,15 +106,10 @@ type Hooks struct {
 	// routes label a request one way and whose sign-in labels it another has two
 	// answers to the question the label exists to settle.
 	//
-	// The trace is the one answer these routes cannot give. They are rig's own:
-	// mounted by Auth.Mount rather than emitted per endpoint, so no span is opened
-	// over them and there is nothing to fall back to. What a caller that sent no
-	// header gets here is a fresh identifier — the same string as the requestId
-	// in the error body and the request_id on the line, which is what the label is
-	// for — where a resource route in the same traced project would have
-	// answered with its trace id. A client that wants its sign-in correlated with
-	// the rest of its requests sends the header, which is the case this field
-	// exists to make work.
+	// Nil answers the same way here as anywhere else, including the fallback to
+	// this request's trace: these routes are wrapped by the same span as every
+	// other route on the mux, so a sign-in that nobody labelled is labelled by its
+	// trace and lines up with whatever the client did next.
 	RequestID func(*http.Request) string
 
 	// Logger records why an authentication request failed. Nil uses
@@ -218,7 +214,13 @@ func Config(pool *pgxpool.Pool, h Hooks) (auth.Config, error) {
 	// and a Server without it reads the default one — which is the right header
 	// in most projects and the wrong one in exactly the projects that said so in
 	// rig.yaml.
-	srv := Server{Logger: h.Logger, RequestID: h.RequestID, RequestIDHeader: RequestIDHeader}
+	//
+	// Tracer is on it so that these routes answer the question a resource route
+	// answers: a request that arrived with no identifier of its own is labelled by
+	// its trace, and a failure reddens the span it happened in. The span itself is
+	// opened around the whole mux by Register — this is only where to send what
+	// happens inside it.
+	srv := Server{Logger: h.Logger, RequestID: h.RequestID, RequestIDHeader: RequestIDHeader, Tracer: observe.APITracer{}}
 
 	// So an authentication failure looks like every other failure this API
 	// returns, and is recorded the same way. Through fail rather than straight to
@@ -229,10 +231,7 @@ func Config(pool *pgxpool.Pool, h Hooks) (auth.Config, error) {
 	// Through requestContext rather than a literal of its own, for the same reason
 	// one step out: a literal here is a second place deciding what a request looks
 	// like, and the two had already drifted — this one named no caller, no
-	// client revision, and a request identifier nothing validated. What it still
-	// cannot reach is the trace fallback, because these routes carry no span, so a
-	// request nobody named is named here instead of by its trace;
-	// [Hooks.RequestID] says what that costs.
+	// client revision, and a request identifier nothing validated.
 	if cfg.OnError == nil {
 		cfg.OnError = func(w http.ResponseWriter, r *http.Request, err error) {
 			fail(srv, w, r, requestContext(srv, r), err)

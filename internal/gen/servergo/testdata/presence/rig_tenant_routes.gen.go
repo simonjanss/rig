@@ -16,7 +16,7 @@ import (
 )
 
 // registerRigTenant mounts RigTenant's routes.
-func registerRigTenant(mux *http.ServeMux, s Server, svc RigTenantService) {
+func registerRigTenant(mux httpx.Router, s Server, svc RigTenantService) {
 	mux.HandleFunc("GET /api/v1/rig-tenants", handleListRigTenants(s, svc))
 	mux.HandleFunc("POST /api/v1/rig-tenants", handleCreateRigTenant(s, svc))
 	mux.HandleFunc("QUERY /api/v1/rig-tenants", handleSearchRigTenants(s, svc))

@@ -9,14 +9,13 @@ import (
 	"net/http"
 
 	"github.com/simonjanss/rig/examples/fantasyfootball/internal/model"
-	"github.com/simonjanss/rig/observe"
 	"github.com/simonjanss/rig/runtime/httpx"
 	"github.com/simonjanss/rig/runtime/idempotency"
 	"github.com/simonjanss/rig/runtime/reqlog"
 )
 
 // registerFixture mounts Fixture's routes.
-func registerFixture(mux *http.ServeMux, s Server, svc FixtureService) {
+func registerFixture(mux httpx.Router, s Server, svc FixtureService) {
 	mux.HandleFunc("GET /api/v1/fixtures", handleListFixtures(s, svc))
 	mux.HandleFunc("POST /api/v1/fixtures", handleCreateFixture(s, svc))
 	mux.HandleFunc("QUERY /api/v1/fixtures", handleSearchFixtures(s, svc))
@@ -33,9 +32,6 @@ func handleListFixtures(s Server, svc FixtureService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		rec := reqlog.Wrap(w)
 		w = rec
-
-		r, span := observe.Server(r, "GET /api/v1/fixtures", rec.Status)
-		defer span.End()
 
 		ctx, claims, rc, ok := prepare(s, w, r)
 		defer logRequest(s, r, rec, rc)
@@ -75,9 +71,6 @@ func handleCreateFixture(s Server, svc FixtureService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		rec := reqlog.Wrap(w)
 		w = rec
-
-		r, span := observe.Server(r, "POST /api/v1/fixtures", rec.Status)
-		defer span.End()
 
 		ctx, claims, rc, ok := prepare(s, w, r)
 		defer logRequest(s, r, rec, rc)
@@ -121,9 +114,6 @@ func handleSearchFixtures(s Server, svc FixtureService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		rec := reqlog.Wrap(w)
 		w = rec
-
-		r, span := observe.Server(r, "QUERY /api/v1/fixtures", rec.Status)
-		defer span.End()
 
 		ctx, claims, rc, ok := prepare(s, w, r)
 		defer logRequest(s, r, rec, rc)
@@ -170,9 +160,6 @@ func handleDeleteFixture(s Server, svc FixtureService) http.HandlerFunc {
 		rec := reqlog.Wrap(w)
 		w = rec
 
-		r, span := observe.Server(r, "DELETE /api/v1/fixtures/{id}", rec.Status)
-		defer span.End()
-
 		ctx, claims, rc, ok := prepare(s, w, r)
 		defer logRequest(s, r, rec, rc)
 		if !ok {
@@ -204,9 +191,6 @@ func handleGetFixture(s Server, svc FixtureService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		rec := reqlog.Wrap(w)
 		w = rec
-
-		r, span := observe.Server(r, "GET /api/v1/fixtures/{id}", rec.Status)
-		defer span.End()
 
 		ctx, claims, rc, ok := prepare(s, w, r)
 		defer logRequest(s, r, rec, rc)
@@ -243,9 +227,6 @@ func handleUpdateFixture(s Server, svc FixtureService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		rec := reqlog.Wrap(w)
 		w = rec
-
-		r, span := observe.Server(r, "PATCH /api/v1/fixtures/{id}", rec.Status)
-		defer span.End()
 
 		ctx, claims, rc, ok := prepare(s, w, r)
 		defer logRequest(s, r, rec, rc)

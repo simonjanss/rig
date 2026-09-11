@@ -419,8 +419,20 @@ func New(cfg Config) (*Handler, error) {
 	return h, nil
 }
 
+// Router is where a route is registered. A [net/http.ServeMux] satisfies it,
+// and so does the tracing router a generated server mounts through.
+//
+// Declared here rather than imported for the reason the error writer below
+// reaches rigerr rather than httpx: httpx reaches runtime/throttle and the
+// Postgres driver behind it, and an application that mounts these two routes —
+// or, like `examples/idp`, only names this package's provider types — should
+// not be linking that for one method name.
+type Router interface {
+	HandleFunc(pattern string, handler func(http.ResponseWriter, *http.Request))
+}
+
 // Mount registers the routes.
-func (h *Handler) Mount(mux *http.ServeMux) {
+func (h *Handler) Mount(mux Router) {
 	mux.HandleFunc("GET "+h.base+"/{provider}/start", h.start)
 	mux.HandleFunc("GET "+h.base+"/{provider}/callback", h.callback)
 }

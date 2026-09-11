@@ -294,8 +294,10 @@ func TestTheCallersRequestIDIsBounded(t *testing.T) {
 	}
 
 	// Untraced, so nothing hands the plumbing a trace to fall back to and the
-	// caller's own is the only identifier there is.
-	if strings.Contains(src, "h.Server.Tracer") {
+	// caller's own is the only identifier there is. The field is still read —
+	// Register hands it to apibase.Tracing, which answers a nil one with the mux
+	// itself — so what must be absent is the assignment and not the name.
+	if strings.Contains(src, "h.Server.Tracer =") {
 		t.Errorf("an untraced project should wire no tracer:\n%s", src)
 	}
 }

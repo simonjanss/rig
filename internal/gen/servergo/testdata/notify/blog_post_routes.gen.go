@@ -16,7 +16,7 @@ import (
 )
 
 // registerBlogPost mounts BlogPost's routes.
-func registerBlogPost(mux *http.ServeMux, s Server, svc BlogPostService) {
+func registerBlogPost(mux httpx.Router, s Server, svc BlogPostService) {
 	mux.HandleFunc("GET /api/v1/blog-posts", handleListBlogPosts(s, svc))
 	mux.HandleFunc("POST /api/v1/blog-posts", handleCreateBlogPost(s, svc))
 	mux.HandleFunc("QUERY /api/v1/blog-posts", handleSearchBlogPosts(s, svc))

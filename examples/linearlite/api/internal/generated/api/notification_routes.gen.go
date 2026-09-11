@@ -7,14 +7,13 @@ package api
 import (
 	"net/http"
 
-	"github.com/simonjanss/rig/observe"
 	"github.com/simonjanss/rig/runtime/httpx"
 	"github.com/simonjanss/rig/runtime/reqlog"
 	"github.com/simonjanss/rig/runtime/tenancy"
 )
 
 // registerNotification mounts Notification's routes.
-func registerNotification(mux *http.ServeMux, s Server, svc NotificationService) {
+func registerNotification(mux httpx.Router, s Server, svc NotificationService) {
 	mux.HandleFunc("GET /api/v1/notifications", handleListNotifications(s, svc))
 	mux.HandleFunc("GET /api/v1/notifications/{id}", handleGetNotification(s, svc))
 }
@@ -26,9 +25,6 @@ func handleListNotifications(s Server, svc NotificationService) http.HandlerFunc
 	return func(w http.ResponseWriter, r *http.Request) {
 		rec := reqlog.Wrap(w)
 		w = rec
-
-		r, span := observe.Server(r, "GET /api/v1/notifications", rec.Status)
-		defer span.End()
 
 		ctx, claims, rc, ok := prepare(s, w, r)
 		defer logRequest(s, r, rec, rc)
@@ -73,9 +69,6 @@ func handleGetNotification(s Server, svc NotificationService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		rec := reqlog.Wrap(w)
 		w = rec
-
-		r, span := observe.Server(r, "GET /api/v1/notifications/{id}", rec.Status)
-		defer span.End()
 
 		ctx, claims, rc, ok := prepare(s, w, r)
 		defer logRequest(s, r, rec, rc)

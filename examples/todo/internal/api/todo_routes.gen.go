@@ -19,7 +19,7 @@ import (
 )
 
 // registerTodo mounts Todo's routes.
-func registerTodo(mux *http.ServeMux, s Server, svc TodoService) {
+func registerTodo(mux httpx.Router, s Server, svc TodoService) {
 	mux.HandleFunc("GET /api/v1/todos", handleListTodos(s, svc))
 	mux.HandleFunc("POST /api/v1/todos", handleCreateTodo(s, svc))
 	mux.HandleFunc("QUERY /api/v1/todos", handleSearchTodos(s, svc))
