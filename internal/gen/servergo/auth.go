@@ -860,11 +860,23 @@ func (e *authEmitter) configFunc(b *gobuf.Buf) {
 	b.L("}")
 	b.NL()
 
-	b.Comment("The server the two error writers below report through.\n\n" +
-		"One literal, shared, because it is the answer to \"what does a request " +
-		"look like\" and a second copy of it is a second answer: the one this " +
-		"replaced named no caller, no client revision, and a request identifier " +
-		"nothing validated.\n\n" +
+	// One error writer without providers, two with: the provider routes get one
+	// of their own. The comment says which, because a comment that says "the two"
+	// above one of them is a reader counting to find out it was wrong.
+	shared := "The server the error writer below reports through.\n\n" +
+		"A literal rather than the fields it is built from, because it is the " +
+		"answer to \"what does a request look like\" and the one this replaced " +
+		"named no caller, no client revision, and a request identifier nothing " +
+		"validated.\n\n"
+	if e.oauth() != nil {
+		shared = "The server the two error writers below report through.\n\n" +
+			"One literal, shared, because it is the answer to \"what does a " +
+			"request look like\" and a second copy of it is a second answer: the " +
+			"one this replaced named no caller, no client revision, and a request " +
+			"identifier nothing validated.\n\n"
+	}
+
+	b.Comment(shared +
 		"RequestIDHeader is on it because it is what decides which header is " +
 		"read, and a Server without it reads the default one — which is the " +
 		"right header in most projects and the wrong one in exactly the projects " +

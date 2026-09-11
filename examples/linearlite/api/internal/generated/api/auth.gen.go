@@ -208,12 +208,11 @@ func Config(pool *pgxpool.Pool, h Hooks) (auth.Config, error) {
 		Now:              h.Now,
 	}
 
-	// The server the two error writers below report through.
+	// The server the error writer below reports through.
 	//
-	// One literal, shared, because it is the answer to "what does a request look
-	// like" and a second copy of it is a second answer: the one this replaced
-	// named no caller, no client revision, and a request identifier nothing
-	// validated.
+	// A literal rather than the fields it is built from, because it is the answer
+	// to "what does a request look like" and the one this replaced named no
+	// caller, no client revision, and a request identifier nothing validated.
 	//
 	// RequestIDHeader is on it because it is what decides which header is read,
 	// and a Server without it reads the default one — which is the right header

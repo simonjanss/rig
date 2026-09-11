@@ -689,3 +689,33 @@ func TestTheProviderRoutesFailThroughThisPackageToo(t *testing.T) {
 		t.Errorf("%d Server literals, want exactly 1 shared by both error writers", n)
 	}
 }
+
+// And the comment above the shared Server counts what is actually there.
+//
+// One writer without providers, two with. It is a generated comment, so the
+// wrong number is not a sentence somebody skims past once — it is in every
+// project that configured no providers, above a block with one writer in it,
+// and a reader who counts finds out the comment was wrong rather than that they
+// miscounted.
+func TestTheSharedServerCommentCountsTheWriters(t *testing.T) {
+	t.Parallel()
+
+	doc := gentest.LoadDocument(t, filepath.Join("testdata", authFixture))
+	withProviders := find(t, gentest.Run(t, servergo.New(), doc, authOpts()), "auth.gen.go")
+
+	if !strings.Contains(withProviders, "// The server the two error writers below report through.") {
+		t.Error("with providers there are two writers, and the comment should say so")
+	}
+
+	doc = gentest.LoadDocument(t, filepath.Join("testdata", authFixture))
+	doc.API.Auth = defaultAuth(t)
+	doc.API.Web = nil
+	without := find(t, gentest.Run(t, servergo.New(), doc, authOpts()), "auth.gen.go")
+
+	if !strings.Contains(without, "// The server the error writer below reports through.") {
+		t.Error("without providers there is one writer, and the comment should say so")
+	}
+	if strings.Contains(without, "two error writers") {
+		t.Error("the comment counts two writers where only one is generated")
+	}
+}
