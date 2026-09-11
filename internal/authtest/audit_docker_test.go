@@ -121,8 +121,8 @@ func TestTheTenantlessRowsAreInvisibleOverRealSQL(t *testing.T) {
 	// A sign-in that named no tenant, against an address nobody has: exactly
 	// what the rate limiter needs and what nobody may read.
 	stranger := "nobody-" + uuid.NewString()[:8] + "@example.com"
-	res := h.doUnscoped(t, "POST", "/auth/login", "",
-		fmt.Sprintf(`{"emailAddress":%q,"password":"whatever"}`, stranger))
+	res := h.doUnscoped(t, "POST", "/auth/email-code/verify", "",
+		fmt.Sprintf(`{"emailAddress":%q,"code":"000000"}`, stranger))
 	if res.status == http.StatusOK {
 		t.Fatal("signing in as a stranger should not work")
 	}

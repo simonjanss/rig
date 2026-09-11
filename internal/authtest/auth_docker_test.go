@@ -42,7 +42,6 @@ import (
 	"github.com/simonjanss/rig/auth/authlog"
 	"github.com/simonjanss/rig/auth/authpg"
 	"github.com/simonjanss/rig/auth/oauth"
-	"github.com/simonjanss/rig/auth/password"
 	"github.com/simonjanss/rig/auth/session"
 	"github.com/simonjanss/rig/internal/dockerdb"
 	"github.com/simonjanss/rig/internal/scaffold"
@@ -55,7 +54,6 @@ import (
 const (
 	containerName = "rigAuth-db"
 	containerPort = dockerdb.PortAuth
-	goodPassword  = "correct horse battery staple"
 )
 
 // harness is one test's world: a schema, a server, and a tenant of its own.
@@ -165,15 +163,26 @@ func startDatabase() (*pgxpool.Pool, error) {
 }
 
 type notifier struct {
-	mu                     sync.Mutex
-	reset, confirm, invite string
+	mu                    sync.Mutex
+	code, confirm, invite string
+	// codes is every code handed over, for the tests about superseding: the old
+	// one and the new one have to be different values, not just different rows.
+	codes []string
 }
 
-func (n *notifier) SendPasswordReset(_ context.Context, _ *account.Identity, token string) error {
+func (n *notifier) SendEmailCode(_ context.Context, _ *account.Identity, code string) error {
 	n.mu.Lock()
 	defer n.mu.Unlock()
-	n.reset = token
+	n.code = code
+	n.codes = append(n.codes, code)
 	return nil
+}
+
+// mailed is the newest code, read under the lock the dispatcher writes under.
+func (n *notifier) mailed() string {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	return n.code
 }
 
 func (n *notifier) SendEmailVerification(_ context.Context, _ *account.Identity, token string) error {
@@ -183,17 +192,11 @@ func (n *notifier) SendEmailVerification(_ context.Context, _ *account.Identity,
 	return nil
 }
 
-func (n *notifier) SendInvitation(_ context.Context, _ *account.Identity, _ *account.Account, token string) error {
+func (n *notifier) SendInvitation(_ context.Context, _ *account.Identity, _ *account.Invitation, token string) error {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	n.invite = token
 	return nil
-}
-
-func (n *notifier) resetToken() string {
-	n.mu.Lock()
-	defer n.mu.Unlock()
-	return n.reset
 }
 
 func setup(t *testing.T) *harness {
@@ -266,9 +269,9 @@ func setup(t *testing.T) *harness {
 			Store:        h.stores.Accounts,
 			Sessions:     sessions,
 			Identities:   identities,
-			Hasher:       password.New(password.Params{Memory: 8 * 1024, Iterations: 1, Parallelism: 1}),
 			Log:          h.stores.Log,
 			Notifier:     h.notify,
+			EmailCode:    account.EmailCodeOptions{Enabled: true, AllowProvisioning: true},
 			Limiter:      limiter,
 			Tenants:      opts,
 			OnRegistered: h.onRegistered,
@@ -284,6 +287,7 @@ func setup(t *testing.T) *harness {
 	h.mount = func(accounts *account.Service) {
 		handler, err := authhttp.New(authhttp.Config{
 			Accounts: accounts, Sessions: sessions, APIKeys: keys,
+			AllowEmailCode: true,
 			// The store that has been writing since M4, handed over as a reader.
 			AuditLog: h.stores.Log,
 			// Header first, falling back to the harness's own tenant. Most tests do
@@ -296,9 +300,7 @@ func setup(t *testing.T) *harness {
 				return h.tenant, nil
 			},
 			Identities: identities,
-			// The suite drives registration directly, so the route has to exist.
-			AllowRegistration: true,
-			// And the other picker exit. The auth package writes the tenant and the
+			// The other picker exit. The auth package writes the tenant and the
 			// first account itself; a suite that wants to see the route work only has
 			// to say the route exists.
 			AllowTenantCreation: true,
@@ -340,9 +342,6 @@ func setup(t *testing.T) *harness {
 	}
 
 	accounts := h.build(h.tenants)
-	if err := accounts.SetPassword(ctx, h.identity, goodPassword); err != nil {
-		t.Fatal(err)
-	}
 	h.mount(accounts)
 	h.sessions = sessions
 
@@ -424,18 +423,61 @@ type pair struct {
 	SessionID    uuid.UUID `json:"sessionId"`
 }
 
+// login is the whole flow over the real tables: ask for a code, read it out of
+// the notifier, and type it back.
 func (h *harness) login(t *testing.T) pair {
 	t.Helper()
 
-	res := h.do(t, "POST", "/auth/login", "",
-		fmt.Sprintf(`{"emailAddress":%q,"password":%q}`, h.email, goodPassword))
+	res := h.verify(t, h.email, h.askForCode(t, h.email))
 	if res.status != http.StatusOK {
-		t.Fatalf("login: status %d\n%s", res.status, res.body)
+		t.Fatalf("sign in: status %d\n%s", res.status, res.body)
 	}
 
 	var p pair
 	res.decode(t, &p)
 	return p
+}
+
+// askForCode asks for one and reads it out of the notifier, which is the only
+// place the plaintext is: the table holds a hash.
+func (h *harness) askForCode(t *testing.T, email string) string {
+	t.Helper()
+
+	if res := h.do(t, "POST", "/auth/email-code", "",
+		fmt.Sprintf(`{"emailAddress":%q}`, email)); res.status != http.StatusNoContent {
+		t.Fatalf("asking for a code for %s: status %d\n%s", email, res.status, res.body)
+	}
+	code := h.notify.mailed()
+	if code == "" {
+		t.Fatalf("no code was mailed to %s", email)
+	}
+	return code
+}
+
+// signUp is a stranger arriving: an address nothing has seen, a code, and the
+// response. Provisioning is on in this harness, so the first request creates
+// the person.
+func (h *harness) signUp(t *testing.T, address string) response {
+	t.Helper()
+
+	if res := h.doUnscoped(t, "POST", "/auth/email-code", "",
+		`{"emailAddress":"`+address+`"}`); res.status != http.StatusNoContent {
+		t.Fatalf("asking for a code for %s: %d %s", address, res.status, res.body)
+	}
+	code := h.notify.mailed()
+	if code == "" {
+		t.Fatalf("no code was mailed to %s", address)
+	}
+	return h.doUnscoped(t, "POST", "/auth/email-code/verify", "",
+		`{"emailAddress":"`+address+`","code":"`+code+`"}`)
+}
+
+// verify types a code back without insisting it worked.
+func (h *harness) verify(t *testing.T, email, code string) response {
+	t.Helper()
+
+	return h.do(t, "POST", "/auth/email-code/verify", "",
+		fmt.Sprintf(`{"emailAddress":%q,"code":%q}`, email, code))
 }
 
 // authenticated reports whether a token still resolves.
@@ -594,15 +636,13 @@ func TestLockoutOverRealSQL(t *testing.T) {
 	h := setup(t)
 
 	for i := range 5 {
-		res := h.do(t, "POST", "/auth/login", "",
-			fmt.Sprintf(`{"emailAddress":%q,"password":"nope"}`, h.email))
+		res := h.verify(t, h.email, "000000")
 		if res.status != http.StatusUnauthorized {
 			t.Fatalf("attempt %d: status %d\n%s", i+1, res.status, res.body)
 		}
 	}
 
-	res := h.do(t, "POST", "/auth/login", "",
-		fmt.Sprintf(`{"emailAddress":%q,"password":%q}`, h.email, goodPassword))
+	res := h.verify(t, h.email, "000000")
 	if res.status != http.StatusTooManyRequests {
 		t.Fatalf("status = %d, want 429\n%s", res.status, res.body)
 	}
@@ -620,14 +660,12 @@ func TestASuccessClearsTheWindowOverRealSQL(t *testing.T) {
 	h := setup(t)
 
 	for range 4 {
-		h.do(t, "POST", "/auth/login", "",
-			fmt.Sprintf(`{"emailAddress":%q,"password":"nope"}`, h.email))
+		h.verify(t, h.email, "000000")
 	}
 	h.login(t)
 
 	for i := range 4 {
-		res := h.do(t, "POST", "/auth/login", "",
-			fmt.Sprintf(`{"emailAddress":%q,"password":"nope"}`, h.email))
+		res := h.verify(t, h.email, "000000")
 		if res.status != http.StatusUnauthorized {
 			t.Fatalf("attempt %d: status = %d, want 401 — the success cleared the earlier failures",
 				i+1, res.status)
@@ -635,47 +673,149 @@ func TestASuccessClearsTheWindowOverRealSQL(t *testing.T) {
 	}
 }
 
-func TestPasswordResetOverRealSQL(t *testing.T) {
+// The whole code flow over the real tables: the row, the hash, the single use,
+// and the attempt counter that a rate limit cannot express.
+func TestTheEmailCodeOverRealSQL(t *testing.T) {
 	h := setup(t)
-	old := h.login(t)
 
-	if res := h.do(t, "POST", "/auth/password/reset", "",
-		fmt.Sprintf(`{"emailAddress":%q}`, h.email)); res.status != http.StatusAccepted {
+	code := h.askForCode(t, h.email)
+	if len(code) != account.DefaultEmailCodeLength {
+		t.Fatalf("code = %q, want %d digits", code, account.DefaultEmailCodeLength)
+	}
+
+	// Only the hash is stored, which is what makes a dump of this table not a
+	// dump of everybody's account.
+	var stored []byte
+	if err := h.pool.QueryRow(context.Background(), `
+		SELECT token_hash FROM rig_identity_verification
+		 WHERE identity_id = $1 AND kind = 'EmailCode' AND consumed_at IS NULL
+		 ORDER BY created_at DESC LIMIT 1`, h.identity).Scan(&stored); err != nil {
+		t.Fatal(err)
+	}
+	if string(stored) == code {
+		t.Error("the code itself is in the table")
+	}
+
+	res := h.verify(t, h.email, code)
+	if res.status != http.StatusOK {
 		t.Fatalf("status %d\n%s", res.status, res.body)
 	}
-	token := h.notify.resetToken()
-	if token == "" {
-		t.Fatal("a link should have been sent")
+	var p pair
+	res.decode(t, &p)
+	if !h.authenticated(t, p.AccessToken) {
+		t.Error("the session should work")
 	}
 
-	const newPassword = "an entirely different passphrase"
-	res := h.do(t, "POST", "/auth/password/reset/confirm", "",
-		fmt.Sprintf(`{"token":%q,"newPassword":%q}`, token, newPassword))
-	if res.status != http.StatusNoContent {
-		t.Fatalf("status %d\n%s", res.status, res.body)
-	}
-
-	if h.authenticated(t, old.AccessToken) {
-		t.Error("the sessions from before the reset should be gone")
-	}
-	if res := h.do(t, "POST", "/auth/login", "",
-		fmt.Sprintf(`{"emailAddress":%q,"password":%q}`, h.email, newPassword)); res.status != http.StatusOK {
-		t.Errorf("the new password should work: %d\n%s", res.status, res.body)
-	}
-
-	// The link is spent, and the row says so.
-	if res := h.do(t, "POST", "/auth/password/reset/confirm", "",
-		fmt.Sprintf(`{"token":%q,"newPassword":"yet another passphrase"}`, token)); res.status == http.StatusNoContent {
-		t.Error("a consumed link should not work twice")
+	// Spent, and the row says so.
+	if res := h.verify(t, h.email, code); res.status == http.StatusOK {
+		t.Error("a consumed code should not work twice")
 	}
 	var consumed int
 	if err := h.pool.QueryRow(context.Background(),
-		`SELECT count(*) FROM rig_identity_verification WHERE identity_id = $1 AND consumed_at IS NOT NULL`,
+		`SELECT count(*) FROM rig_identity_verification
+		  WHERE identity_id = $1 AND kind = 'EmailCode' AND consumed_at IS NOT NULL`,
 		h.identity).Scan(&consumed); err != nil {
 		t.Fatal(err)
 	}
 	if consumed != 1 {
-		t.Errorf("%d links consumed, want 1", consumed)
+		t.Errorf("%d codes consumed, want 1", consumed)
+	}
+}
+
+// The ceiling, over the statement that enforces it.
+//
+// A rate limit counts failures over a rolling window and cannot kill one
+// secret; this is one UPDATE per guess, and the revocation is in the same
+// statement so a code that has just run out is dead by the time the row is
+// unlocked.
+func TestACodeDiesOfGuessingOverRealSQL(t *testing.T) {
+	h := setup(t)
+	code := h.askForCode(t, h.email)
+
+	for i := range account.DefaultEmailCodeMaxAttempts {
+		if res := h.verify(t, h.email, "000000"); res.status != http.StatusUnauthorized {
+			t.Fatalf("guess %d: status %d\n%s", i+1, res.status, res.body)
+		}
+	}
+
+	if res := h.verify(t, h.email, code); res.status == http.StatusOK {
+		t.Fatal("the burned code should stay dead")
+	}
+
+	// Revoked rather than consumed, so the trail tells "guessed at" apart from
+	// "used" — and nothing else in the codebase has to learn a third state.
+	var attempts int
+	var revoked *time.Time
+	if err := h.pool.QueryRow(context.Background(), `
+		SELECT attempts, revoked_at FROM rig_identity_verification
+		 WHERE identity_id = $1 AND kind = 'EmailCode'
+		 ORDER BY created_at DESC LIMIT 1`, h.identity).Scan(&attempts, &revoked); err != nil {
+		t.Fatal(err)
+	}
+	if attempts != account.DefaultEmailCodeMaxAttempts {
+		t.Errorf("attempts = %d, want %d", attempts, account.DefaultEmailCodeMaxAttempts)
+	}
+	if revoked == nil {
+		t.Error("the row should be revoked once the ceiling was reached")
+	}
+}
+
+// One live code per person, which is what makes "the newest one works" true
+// rather than probable — and what keeps the table from filling up.
+func TestAskingAgainSupersedesTheCodeOverRealSQL(t *testing.T) {
+	h := setup(t)
+
+	first := h.askForCode(t, h.email)
+	second := h.askForCode(t, h.email)
+	if first == second {
+		t.Fatal("two requests should not draw the same code")
+	}
+
+	if res := h.verify(t, h.email, first); res.status == http.StatusOK {
+		t.Error("the superseded code should be refused")
+	}
+	if res := h.verify(t, h.email, second); res.status != http.StatusOK {
+		t.Errorf("the newest code should work: %d\n%s", res.status, res.body)
+	}
+
+	var live int
+	if err := h.pool.QueryRow(context.Background(), `
+		SELECT count(*) FROM rig_identity_verification
+		 WHERE identity_id = $1 AND kind = 'EmailCode'
+		   AND consumed_at IS NULL AND revoked_at IS NULL`,
+		h.identity).Scan(&live); err != nil {
+		t.Fatal(err)
+	}
+	if live != 0 {
+		t.Errorf("%d live codes after signing in, want 0", live)
+	}
+}
+
+// The password surface is gone, not merely unmounted somewhere: every one of
+// these used to answer.
+func TestThePasswordRoutesAreGoneOverRealSQL(t *testing.T) {
+	h := setup(t)
+
+	for _, path := range []string{
+		"/auth/login",
+		"/auth/register",
+		"/auth/password/reset",
+		"/auth/password/reset/confirm",
+		"/auth/password/change",
+	} {
+		if res := h.do(t, "POST", path, "", `{}`); res.status != http.StatusNotFound {
+			t.Errorf("%s: status = %d, want 404", path, res.status)
+		}
+	}
+
+	// And the table they wrote to is not there either.
+	var exists bool
+	if err := h.pool.QueryRow(context.Background(),
+		`SELECT to_regclass('rig_identity_credential') IS NOT NULL`).Scan(&exists); err != nil {
+		t.Fatal(err)
+	}
+	if exists {
+		t.Error("rig_identity_credential should not exist")
 	}
 }
 
@@ -1189,19 +1329,13 @@ func TestOnePersonInTwoTenantsOverRealSQL(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	here, err := h.accounts.Login(ctx, account.LoginInput{
-		TenantID: h.tenant, EmailAddress: h.email, Password: goodPassword,
-		IPAddress: "203.0.113.10",
-	})
+	here, err := h.signInTo(ctx, h.tenant)
 	if err != nil {
 		t.Fatal(err)
 	}
-	there, err := h.accounts.Login(ctx, account.LoginInput{
-		TenantID: second, EmailAddress: h.email, Password: goodPassword,
-		IPAddress: "203.0.113.10",
-	})
+	there, err := h.signInTo(ctx, second)
 	if err != nil {
-		t.Fatalf("the same password should sign in to the second tenant: %v", err)
+		t.Fatalf("the same address should sign in to the second tenant: %v", err)
 	}
 
 	// Each session belongs to the account in its own tenant.
@@ -1226,17 +1360,31 @@ func TestOnePersonInTwoTenantsOverRealSQL(t *testing.T) {
 		t.Error("joining the same tenant twice should be refused by the database")
 	}
 
-	// And changing the password ends both sessions, which is the query with no
-	// tenant predicate doing its job.
-	if _, err := h.accounts.ChangePassword(ctx, account.ChangePasswordInput{
-		TenantID: h.tenant, AccountID: h.account,
-		CurrentPassword: goodPassword, NewPassword: "a completely different passphrase",
-	}); err != nil {
+	// And "sign me out everywhere" ends both, which is the query with no tenant
+	// predicate doing its job.
+	if err := h.accounts.RevokeEverySession(ctx, h.identity); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := h.sessions.Verify(ctx, there.Session.Access.Token); err == nil {
 		t.Error("the session in the other tenant should have been revoked too")
 	}
+	if _, err := h.sessions.Verify(ctx, here.Session.Access.Token); err == nil {
+		t.Error("the session in this tenant should have been revoked too")
+	}
+}
+
+// signInTo runs the whole code flow against the service, for the tests that are
+// about SQL rather than about HTTP.
+func (h *harness) signInTo(ctx context.Context, tenantID uuid.UUID) (account.SignInResult, error) {
+	if err := h.accounts.RequestEmailCode(ctx, account.RequestEmailCodeInput{
+		TenantID: tenantID, EmailAddress: h.email, IPAddress: "203.0.113.10",
+	}); err != nil {
+		return account.SignInResult{}, err
+	}
+	return h.accounts.VerifyEmailCode(ctx, account.VerifyEmailCodeInput{
+		TenantID: tenantID, EmailAddress: h.email, Code: h.notify.mailed(),
+		IPAddress: "203.0.113.10",
+	})
 }
 
 // A response built in memory is UTC too, which is the half a scan cannot settle.
@@ -1250,10 +1398,7 @@ func TestAConstructedInstantIsUTC(t *testing.T) {
 	ctx := context.Background()
 
 	// A session, straight from the manager.
-	pair, err := h.accounts.Login(ctx, account.LoginInput{
-		TenantID: h.tenant, EmailAddress: h.email, Password: goodPassword,
-		IPAddress: "203.0.113.10",
-	})
+	pair, err := h.signInTo(ctx, h.tenant)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1419,12 +1564,11 @@ func TestASessionPayloadRoundTripsThroughPostgres(t *testing.T) {
 func TestSigningInWithNoTenant(t *testing.T) {
 	h := setup(t)
 
-	// Somebody real, with a password and no account anywhere.
+	// Somebody real, with no account anywhere.
 	stranger := "wanderer-" + uuid.New().String()[:8] + "@example.com"
-	res := h.doUnscoped(t, "POST", "/auth/register", "",
-		`{"emailAddress":"`+stranger+`","displayName":"Wanderer","password":"`+goodPassword+`"}`)
-	if res.status != http.StatusCreated {
-		t.Fatalf("register: %d %s", res.status, res.body)
+	res := h.signUp(t, stranger)
+	if res.status != http.StatusOK {
+		t.Fatalf("sign in: %d %s", res.status, res.body)
 	}
 
 	var signedUp struct {
@@ -1435,7 +1579,7 @@ func TestSigningInWithNoTenant(t *testing.T) {
 	res.decode(t, &signedUp)
 
 	if signedUp.IdentityToken == "" {
-		t.Fatal("registering should hand back the tenant-less credential")
+		t.Fatal("signing in should hand back the tenant-less credential")
 	}
 	if signedUp.AccessToken != "" {
 		t.Error("there is no tenant, so there should be no tenant session")
@@ -1448,10 +1592,9 @@ func TestSigningInWithNoTenant(t *testing.T) {
 	}
 
 	t.Run("signing in again answers the same way", func(t *testing.T) {
-		res := h.doUnscoped(t, "POST", "/auth/login", "",
-			`{"emailAddress":"`+stranger+`","password":"`+goodPassword+`"}`)
+		res := h.signUp(t, stranger)
 		if res.status != http.StatusOK {
-			t.Fatalf("login with no tenant: %d %s, want 200", res.status, res.body)
+			t.Fatalf("sign in with no tenant: %d %s, want 200", res.status, res.body)
 		}
 		var out struct {
 			AccessToken   string `json:"accessToken"`
@@ -1553,8 +1696,7 @@ func TestLeavingThePicker(t *testing.T) {
 	newcomer := func(t *testing.T) (token, address string) {
 		t.Helper()
 		address = "newcomer-" + uuid.New().String()[:8] + "@example.com"
-		res := h.doUnscoped(t, "POST", "/auth/register", "",
-			`{"emailAddress":"`+address+`","displayName":"Newcomer","password":"`+goodPassword+`"}`)
+		res := h.signUp(t, address)
 		if res.status != http.StatusCreated {
 			t.Fatalf("register: %d %s", res.status, res.body)
 		}
@@ -1681,30 +1823,28 @@ func TestLeavingThePicker(t *testing.T) {
 	})
 }
 
-// OnRegistered runs inside the transaction that creates a self-registered
-// identity, and a hook error takes the whole sign-up with it — which only real
-// SQL can prove.
+// OnRegistered runs inside the transaction that creates somebody rig has never
+// seen, and a hook error takes the whole thing with it — which only real SQL
+// can prove.
 //
-// The two bodies below answer the same, and that is the point worth pinning.
-// Provision creates a live account whether or not Invite is set; Invite adds
-// the verification link. So both come back with the tenant and a session for
-// it, and the only difference is a mail.
+// The two bodies below answer *differently*, and that is the point worth
+// pinning: it is what a flag on one function could never express. Invite leaves
+// them outside with a door to knock on; Provision puts them in the tenant. The
+// first used to be indistinguishable from the second.
 func TestOnRegisteredOverRealSQL(t *testing.T) {
 	h := setup(t)
 
 	register := func(t *testing.T, address string) response {
 		t.Helper()
-		return h.doUnscoped(t, "POST", "/auth/register", "",
-			`{"emailAddress":"`+address+`","displayName":"Newcomer","password":"`+goodPassword+`"}`)
+		return h.signUp(t, address)
 	}
 
-	t.Run("the hook leaves a verification link, and an account to use", func(t *testing.T) {
+	t.Run("a hook that invites leaves them outside with a door", func(t *testing.T) {
 		h.onRegistered = func(ctx context.Context, accounts *account.Service, in account.Registered) error {
-			_, err := accounts.Provision(ctx, account.ProvisionInput{
+			_, err := accounts.Invite(ctx, account.InviteInput{
 				TenantID:     h.tenant,
 				EmailAddress: in.EmailAddress,
 				DisplayName:  in.DisplayName,
-				Invite:       true,
 			})
 			return err
 		}
@@ -1712,8 +1852,8 @@ func TestOnRegisteredOverRealSQL(t *testing.T) {
 
 		address := "starter-" + uuid.New().String()[:8] + "@example.com"
 		res := register(t, address)
-		if res.status != http.StatusCreated {
-			t.Fatalf("register: %d %s", res.status, res.body)
+		if res.status != http.StatusOK {
+			t.Fatalf("sign in: %d %s", res.status, res.body)
 		}
 		var signedUp struct {
 			IdentityToken string `json:"identityToken"`
@@ -1724,13 +1864,19 @@ func TestOnRegisteredOverRealSQL(t *testing.T) {
 		}
 		res.decode(t, &signedUp)
 
-		// Invite is a mail rather than a pending membership, so the answer says
-		// where the hook actually put them.
-		if signedUp.AccessToken == "" {
-			t.Errorf("no session, though Provision made a live account: %s", res.body)
+		// Invited is not a member. The answer says so, and so does the table.
+		if signedUp.AccessToken != "" || len(signedUp.Tenants) != 0 {
+			t.Errorf("they were invited, not admitted: %s", res.body)
 		}
-		if len(signedUp.Tenants) != 1 || signedUp.Tenants[0].TenantID != h.tenant {
-			t.Errorf("tenants = %s, want the starter tenant", res.body)
+		var members int
+		if err := h.pool.QueryRow(context.Background(), `
+			SELECT count(*) FROM rig_account
+			 WHERE tenant_id = $1 AND lower(email_address) = lower($2)
+			   AND deleted_at IS NULL`, h.tenant, address).Scan(&members); err != nil {
+			t.Fatal(err)
+		}
+		if members != 0 {
+			t.Errorf("%d accounts before accepting, want 0", members)
 		}
 
 		listed := h.do(t, "GET", "/auth/me/invitations", signedUp.IdentityToken, "")
@@ -1757,6 +1903,17 @@ func TestOnRegisteredOverRealSQL(t *testing.T) {
 		if out.AccessToken == "" {
 			t.Fatal("accepting the seeded invitation should hand back a tenant session")
 		}
+
+		// And now there is one, which is what accepting created.
+		if err := h.pool.QueryRow(context.Background(), `
+			SELECT count(*) FROM rig_account
+			 WHERE tenant_id = $1 AND lower(email_address) = lower($2)
+			   AND deleted_at IS NULL`, h.tenant, address).Scan(&members); err != nil {
+			t.Fatal(err)
+		}
+		if members != 1 {
+			t.Errorf("%d accounts after accepting, want 1", members)
+		}
 	})
 
 	t.Run("a hook that joins them for real answers with the tenant", func(t *testing.T) {
@@ -1776,8 +1933,8 @@ func TestOnRegisteredOverRealSQL(t *testing.T) {
 
 		address := "landed-" + uuid.New().String()[:8] + "@example.com"
 		res := register(t, address)
-		if res.status != http.StatusCreated {
-			t.Fatalf("register: %d %s", res.status, res.body)
+		if res.status != http.StatusOK {
+			t.Fatalf("sign in: %d %s", res.status, res.body)
 		}
 		var out struct {
 			AccessToken   string `json:"accessToken"`
@@ -1801,7 +1958,7 @@ func TestOnRegisteredOverRealSQL(t *testing.T) {
 
 		// And the session works, which is the whole point of being handed one.
 		if got := h.do(t, "GET", "/auth/tenants", out.AccessToken, ""); got.status != http.StatusOK {
-			t.Fatalf("the session the registration issued: %d %s", got.status, got.body)
+			t.Fatalf("the session the sign-in issued: %d %s", got.status, got.body)
 		}
 	})
 
@@ -1811,12 +1968,15 @@ func TestOnRegisteredOverRealSQL(t *testing.T) {
 		}
 		h.mount(h.build(h.tenants))
 
+		// The hook runs when the code is asked for, so that is the request that
+		// fails — and asking is what signUp does first.
 		address := "refused-" + uuid.New().String()[:8] + "@example.com"
-		if res := register(t, address); res.status != http.StatusInternalServerError {
-			t.Fatalf("a refused registration: %d %s, want 500", res.status, res.body)
+		if res := h.doUnscoped(t, "POST", "/auth/email-code", "",
+			`{"emailAddress":"`+address+`"}`); res.status != http.StatusInternalServerError {
+			t.Fatalf("a refused sign-up: %d %s, want 500", res.status, res.body)
 		}
 
-		// The rollback is the claim: no identity, no credential, nothing.
+		// The rollback is the claim: no identity, nothing.
 		var n int
 		if err := h.pool.QueryRow(context.Background(),
 			`SELECT count(*) FROM rig_identity WHERE lower(email_address) = lower($1)`,
@@ -1831,8 +1991,8 @@ func TestOnRegisteredOverRealSQL(t *testing.T) {
 		// conflict with a half-made account.
 		h.onRegistered = nil
 		h.mount(h.build(h.tenants))
-		if res := register(t, address); res.status != http.StatusCreated {
-			t.Fatalf("retry after the rollback: %d %s, want 201", res.status, res.body)
+		if res := register(t, address); res.status != http.StatusOK {
+			t.Fatalf("retry after the rollback: %d %s, want 200", res.status, res.body)
 		}
 	})
 }
@@ -1983,8 +2143,7 @@ func TestTheTenantHooks(t *testing.T) {
 
 	newcomer := func(t *testing.T, at string) string {
 		t.Helper()
-		res := h.doUnscoped(t, "POST", "/auth/register", "",
-			`{"emailAddress":"`+at+`","displayName":"Somebody","password":"`+goodPassword+`"}`)
+		res := h.signUp(t, at)
 		if res.status != http.StatusCreated {
 			t.Fatalf("register: %d %s", res.status, res.body)
 		}
