@@ -364,6 +364,56 @@ func Aborted(err error) bool { return errors.Is(err, context.Canceled) }
 // one than 500 to a client deciding whether to retry.
 func TimedOut(err error) bool { return errors.Is(err, context.DeadlineExceeded) }
 
+// Answer is what an error means on the wire, before anything is encoded.
+//
+// Separate from any envelope so that callers with different ones — the generated
+// server, whose field names go through `api.json_case`, httpx's JSON envelope,
+// and the text/plain page a provider callback answers with — can share the
+// decision without sharing the shape. That is the whole seam between the two:
+// the classification is one implementation, the encoding is several.
+type Answer struct {
+	// Code and Status are the same fact twice, because a caller assembling a
+	// response wants both and deriving one from the other at four call sites is
+	// how they drift.
+	Code   Code
+	Status int
+	// Message is already redacted.
+	Message string
+	// Fields is nil unless the failure carried per-field detail.
+	Fields any
+}
+
+// AnswerFor classifies err: the code it carries, the status that code is
+// answered with, the message a client may be shown, and the per-field detail if
+// there is any.
+//
+// The one thing a caller must not have to remember: **an internal failure's
+// detail never reaches the client**. It is exactly the kind of thing that leaks
+// a table name, a constraint, or a connection string, so the message becomes a
+// fixed sentence and the request id becomes the only way to find out more.
+//
+// It is here rather than beside the HTTP envelope because it needs nothing from
+// net/http, and a package that only wants to classify an error should not have
+// to take a dependency on everything answering one implies. httpx.AnswerFor is
+// this plus the one header a 429 has to leave with, and is what a route that has
+// a ResponseWriter in hand should call.
+func AnswerFor(err error) Answer {
+	code := CodeOf(err)
+
+	message := err.Error()
+	var typed *Error
+	if errors.As(err, &typed) {
+		message = typed.Message
+	}
+	if code == CodeInternal {
+		message = "something went wrong"
+	}
+
+	fields, _ := FieldsOf(err)
+
+	return Answer{Code: code, Status: code.HTTPStatus(), Message: message, Fields: fields}
+}
+
 // FieldsOf returns the per-field detail an error carries, if it carries any.
 func FieldsOf(err error) (any, bool) {
 	var r FieldReporter

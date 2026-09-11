@@ -1,7 +1,6 @@
 package httpx
 
 import (
-	"errors"
 	"net/http"
 
 	"github.com/simonjanss/rig/runtime/rigerr"
@@ -32,52 +31,31 @@ type Error struct {
 	Fields any `json:"fields,omitempty"`
 }
 
-// Answer is what an error means on the wire, before anything is encoded.
+// Answer is [rigerr.Answer], the classification every envelope rig writes shares.
 //
-// Separate from [Error] so a caller with an envelope of its own — the generated
-// server, whose field names go through `api.json_case` — can share the decision
-// without sharing the shape. That is the whole seam between the two: the
-// classification is one implementation, the encoding is two.
-type Answer struct {
-	// Code and Status are the same fact twice, because a caller assembling a
-	// response wants both and deriving one from the other at four call sites is
-	// how they drift.
-	Code   rigerr.Code
-	Status int
-	// Message is already redacted.
-	Message string
-	// Fields is nil unless the failure carried per-field detail.
-	Fields any
-}
+// An alias rather than a type of its own: the decision is one implementation and
+// naming it twice is how two of them start. It lives in rigerr because it needs
+// nothing from net/http, which is what lets a package that only wants to
+// classify an error — auth/oauth, answering text/plain — reach it without taking
+// on everything this one depends on.
+type Answer = rigerr.Answer
 
 // AnswerFor classifies err, and sets on w any header the error carries.
 //
-// Two things it does that a caller must not have to remember. **An internal
-// failure's detail never reaches the client**: it is exactly the kind of thing
-// that leaks a table name, a constraint, or a connection string, so the message
-// becomes a fixed sentence and the request id becomes the only way to find out
-// more. And **a 429 leaves with its Retry-After**, because a client told to slow
-// down without being told for how long has nothing to do but guess, and clients
-// that guess retry immediately.
+// The classification is [rigerr.AnswerFor]'s, including the part a caller must
+// not have to remember: **an internal failure's detail never reaches the
+// client**. What is added here is the header, and there is one — **a 429 leaves
+// with its Retry-After**, because a client told to slow down without being told
+// for how long has nothing to do but guess, and clients that guess retry
+// immediately.
+//
+// So this is the call to make from a route that has a [net/http.ResponseWriter]
+// in hand, and [rigerr.AnswerFor] the one to make from anywhere that does not.
 func AnswerFor(w http.ResponseWriter, err error) Answer {
-	code := rigerr.CodeOf(err)
-
-	message := err.Error()
-	var typed *rigerr.Error
-	if errors.As(err, &typed) {
-		message = typed.Message
-	}
-	if code == rigerr.CodeInternal {
-		message = "something went wrong"
-	}
-
 	if refusal, ok := throttle.RefusalOf(err); ok {
 		refusal.Decision().SetHeaders(w.Header())
 	}
-
-	fields, _ := rigerr.FieldsOf(err)
-
-	return Answer{Code: code, Status: code.HTTPStatus(), Message: message, Fields: fields}
+	return rigerr.AnswerFor(err)
 }
 
 // WriteError writes err as an [Error], or writes nothing at all when the caller

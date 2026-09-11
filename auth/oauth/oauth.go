@@ -30,7 +30,6 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/simonjanss/rig/auth/authlog"
-	"github.com/simonjanss/rig/runtime/httpx"
 	"github.com/simonjanss/rig/runtime/rigerr"
 )
 
@@ -693,11 +692,18 @@ func (h *Handler) fail(w http.ResponseWriter, r *http.Request, f *Failure) {
 		return
 	}
 
-	// The classification is [httpx.AnswerFor]'s, which is the same call the
-	// generated mapper and every other mounted route make. It used to be a third
-	// hand-written copy of it, and a hand-written copy of this exact mapper has
-	// already drifted once — authhttp's dropped the per-field detail for long
-	// enough that a client could not highlight the field somebody got wrong.
+	// The classification is [rigerr.AnswerFor]'s, which is what the generated
+	// mapper and every other mounted route reach too — httpx.AnswerFor is this
+	// plus a Retry-After header, and a provider callback never carries one. It
+	// used to be a third hand-written copy of it, and a hand-written copy of this
+	// exact mapper has already drifted once: authhttp's dropped the per-field
+	// detail for long enough that a client could not highlight the field somebody
+	// got wrong.
+	//
+	// Through rigerr rather than httpx so that this package keeps the dependencies
+	// of an OAuth handler. httpx reaches runtime/throttle for that one header, and
+	// through it the Postgres driver — which an application that mounts these two
+	// routes and nothing else should not be linking.
 	//
 	// The envelope is still text/plain, which is the part that is not shared and
 	// should not be: these two routes are the only ones rig serves that a person
@@ -705,7 +711,7 @@ func (h *Handler) fail(w http.ResponseWriter, r *http.Request, f *Failure) {
 	// comes back as a document. A JSON envelope is a worse dead end than a
 	// sentence. An application with a front end sends a redirect instead, through
 	// [Config.OnError].
-	answer := httpx.AnswerFor(w, f)
+	answer := rigerr.AnswerFor(f)
 	http.Error(w, answer.Message, answer.Status)
 }
 

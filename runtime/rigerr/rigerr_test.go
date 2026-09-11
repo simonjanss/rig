@@ -273,3 +273,31 @@ func TestAnAbandonedRequestHasNoCodeOfItsOwn(t *testing.T) {
 		t.Error("Aborted is the predicate that carries this, not a code")
 	}
 }
+
+// The classification lives here rather than beside the HTTP envelope, so that a
+// package answering something other than JSON — auth/oauth, which answers the
+// text/plain page a browser mid-navigation renders — can share it without
+// taking on what answering an HTTP request implies.
+//
+// The redaction is the part that must not be re-implemented: an internal
+// message names the table, the constraint or the connection string that failed.
+func TestAnswerForRedactsAnInternalFailure(t *testing.T) {
+	t.Parallel()
+
+	internal := rigerr.Internal(errors.New(`relation "todos" does not exist`), "listing todos")
+	got := rigerr.AnswerFor(internal)
+
+	if got.Message != "something went wrong" {
+		t.Errorf("message = %q; an internal failure's detail must not reach a client", got.Message)
+	}
+	if got.Code != rigerr.CodeInternal || got.Status != http.StatusInternalServerError {
+		t.Errorf("code/status = %q/%d, want Internal/500", got.Code, got.Status)
+	}
+
+	// Everything else keeps the sentence the handler wrote, which is the whole
+	// point of writing one.
+	refused := rigerr.NotFound("no todo with id %d", 7)
+	if got := rigerr.AnswerFor(refused); got.Message != "no todo with id 7" {
+		t.Errorf("message = %q, want the handler's", got.Message)
+	}
+}
